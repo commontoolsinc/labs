@@ -56,6 +56,39 @@ const labelAtPath = (
   return match?.label;
 };
 
+const mergeLabelValues = (...sources: Array<readonly unknown[] | undefined>) => {
+  const merged = [...new Set(
+    sources.flatMap((source) => source ? [...source] : []),
+  )];
+  return merged.length > 0 ? merged : undefined;
+};
+
+const collectConsumedInputLabel = (
+  tx: IExtendedStorageTransaction,
+): IFCLabel => {
+  const reads = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
+    !isInternalVerifierRead(read.meta)
+  );
+  const labels = reads.map((read) =>
+    labelAtPath(
+      storedMetadataFor(tx, read.space, read.id, read.type),
+      canonicalizeLogicalPath(read.path),
+    )
+  ).filter((label): label is IFCLabel => label !== undefined);
+
+  return {
+    classification: mergeLabelValues(
+      ...labels.map((label) => label.classification),
+    ),
+    confidentiality: mergeLabelValues(
+      ...labels.map((label) => label.confidentiality),
+    ),
+    integrity: mergeLabelValues(
+      ...labels.map((label) => label.integrity),
+    ),
+  };
+};
+
 const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -229,6 +262,29 @@ const verifyInputRequirements = (
   return undefined;
 };
 
+const derivePersistedLabel = (
+  schema: JSONSchema,
+  schemaLabel: IFCLabel,
+  consumedInputLabel: IFCLabel,
+): IFCLabel => {
+  const ifc = isRecord(schema) ? schema.ifc : undefined;
+  return {
+    classification: mergeLabelValues(
+      schemaLabel.classification,
+      consumedInputLabel.classification,
+    ),
+    confidentiality: mergeLabelValues(
+      schemaLabel.confidentiality,
+      consumedInputLabel.confidentiality,
+    ),
+    integrity: mergeLabelValues(
+      schemaLabel.integrity,
+      consumedInputLabel.integrity,
+      Array.isArray(ifc?.addIntegrity) ? ifc.addIntegrity : undefined,
+    ),
+  };
+};
+
 const ensureSchemaDocument = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -327,6 +383,7 @@ export const prepareBoundaryCommit = (
       toDeepFrozenSchema(mergedSchema, true) as JSONSchema,
       true,
     );
+    const consumedInputLabel = collectConsumedInputLabel(tx);
 
     ensureSchemaDocument(
       tx,
@@ -341,7 +398,11 @@ export const prepareBoundaryCommit = (
         version: 1,
         entries: walkIfcSchema(mergedSchema).map((entry) => ({
           path: entry.path,
-          label: entry.label,
+          label: derivePersistedLabel(
+            entry.schema,
+            entry.label,
+            consumedInputLabel,
+          ),
         })),
       },
     };

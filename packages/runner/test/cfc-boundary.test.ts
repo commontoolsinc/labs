@@ -1086,6 +1086,119 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("propagates consumed labels and addIntegrity into persisted output metadata", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-propagation-input",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: sourceId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: {
+                classification: ["secret"],
+                integrity: ["source-integrity"],
+              },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-propagation-input",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      expect(source.get()).toEqual({ secret: "seed" });
+      tx.markCfcRelevant("stored-input-metadata");
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-propagation-output",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                integrity: ["target-integrity"],
+                addIntegrity: ["derived-integrity"],
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      output.set({ value: "result" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: {
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  classification?: string[];
+                  integrity?: string[];
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const persisted = replica.getDocument(parseLink(output.getAsLink()).id!);
+      expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["value"],
+        label: {
+          classification: ["secret"],
+          integrity: [
+            "target-integrity",
+            "source-integrity",
+            "derived-integrity",
+          ],
+        },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects relevant direct writes that lack schema policy inputs", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

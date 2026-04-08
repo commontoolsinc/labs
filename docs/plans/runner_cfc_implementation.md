@@ -604,10 +604,10 @@ Tasks:
 - [x] Until stable implementation identities and trust snapshots land, treat
       trust-sensitive claims such as `writeAuthorizedBy` as non-enforceable:
       allow diagnostics in `observe`, but hard-reject them in enforcing modes
-- [ ] Compute output label maps from `writes`
+- [x] Compute output label maps from `writes`
 - [ ] Persist only concrete evidence in stored metadata; derived trust closure
       remains runtime-only
-- [ ] In phase 1, allow a conservative all-consumed-reads-to-all-targets
+- [x] In phase 1, allow a conservative all-consumed-reads-to-all-targets
       influence model over `potentialWrites ∪ writes`
 - [ ] Use `potentialWrites ∪ writes` for target-side enforcement and use
       `writes` only for persisted output metadata
