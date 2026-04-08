@@ -14,18 +14,9 @@ if (!isDeno()) {
 // issue the nice diagnostic message.
 const crypto = await import("node:crypto");
 
-export function sha256Deno(payload: Uint8Array): Uint8Array {
-  // `node:crypto digest()` returns a `Buffer` (a `Uint8Array` subclass);
-  // normalize it to plain `Uint8Array`, so downstream equality checks work
-  // correctly.
-  const buf = crypto.createHash("sha256").update(payload).digest();
-  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-}
-
-export function createHasherDeno(): IncrementalHasher {
-  return new DenoHasher();
-}
-
+/**
+ * Deno-specific incremental hasher.
+ */
 class DenoHasher implements IncrementalHasher {
   #hasher = crypto.createHash("sha256");
 
@@ -54,4 +45,22 @@ class DenoHasher implements IncrementalHasher {
       }
     }
   }
+}
+
+/**
+ * Performs a hash on a single array.
+ */
+export function sha256Deno(payload: Uint8Array): Uint8Array {
+  // `node:crypto digest()` returns a `Buffer` (a `Uint8Array` subclass);
+  // normalize it to plain `Uint8Array`, so downstream equality checks work
+  // correctly.
+  const buf = crypto.createHash("sha256").update(payload).digest();
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}
+
+/**
+ * Creates an incremental hasher.
+ */
+export function createHasherDeno(): IncrementalHasher {
+  return new DenoHasher();
 }
