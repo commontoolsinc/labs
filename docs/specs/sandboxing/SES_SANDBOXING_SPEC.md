@@ -267,19 +267,22 @@ export const badLift = lift(makeCallback());
 export const badHandler = handler((() => (event, state) => state)());
 ```
 
-In canonical emitted form, trusted builder callbacks should be normalized and
-hardened to a single shape such as:
+In canonical emitted form, trusted builders should remain builder-shaped. Their
+callbacks may be left inline when already direct, or hoisted to a hardened
+binding when that makes verification simpler. For example:
 
 ```javascript
-const myLift = __cfHardenFn(function (input) {
+const __cfModuleCallback_1 = __cfHardenFn(function (input) {
   return transform(input);
 });
+const myLift = lift(inputSchema, outputSchema, __cfModuleCallback_1);
 ```
 
 The trusted verifier must confirm both:
 
-- the outer wrapper is the expected canonical wrapper
-- the wrapped callback is syntactically a direct `function` expression, not an
+- the outer trusted-builder call is one of the expected canonical builder forms
+- any hoisted callback wrapper is the expected canonical hardening wrapper
+- the callback itself is syntactically direct (`function` or arrow), not an
   arbitrary expression that merely evaluates to a function
 
 #### 4.2.2 Direct Top-Level Functions
@@ -460,7 +463,9 @@ The compiler/transformer is not in the TCB. It may assist by:
 
 - inserting stable sentinel comments before each top-level item
 - rewriting trusted builders and data initializers into a small canonical
-  wrapper language such as `__cfHardenFn(...)` and `__cfHelpers.__cf_data(...)`
+  grammar: direct top-level functions become `__cfHardenFn(...)`, trusted
+  builders become canonical builder calls with direct or hoisted callbacks, and
+  data initializers become `__cfHelpers.__cf_data(...)`
 - rewriting candidate plain-data initializers into
   `freezeVerifiedPlainData(...)`
 - hoisting inline callbacks to make direct-callback verification easier
@@ -1730,8 +1735,10 @@ The transformer should help the runtime verifier without becoming trusted.
 Examples:
 
 - insert stable sentinel comments before each top-level item
-- normalize trusted builders into canonical forms such as
+- normalize direct top-level functions into canonical forms such as
   `__cfHardenFn(function ...)`
+- normalize trusted builders into canonical builder calls such as
+  `lift(inputSchema, outputSchema, fn)`
 - normalize data bindings into canonical forms such as
   `__cfHelpers.__cf_data(expr)`
 - rewrite module-safe-data candidates into `freezeVerifiedPlainData(...)` within the
