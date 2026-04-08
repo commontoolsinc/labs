@@ -1307,6 +1307,9 @@ export class Scheduler {
     eventLink: NormalizedFullLink,
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
+    // Internal-only commit callback. This can run after failed commits, so it
+    // must not perform external side effects. Use the post-commit outbox for
+    // success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {

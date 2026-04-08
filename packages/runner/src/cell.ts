@@ -733,6 +733,11 @@ export class CellImpl<T extends FabricValue>
 
   set(
     newValue: AnyCellWrapping<T> | T,
+    /**
+     * Internal-only commit callback. This may run after failed commits, so it
+     * must remain non-effectful. Use the post-commit outbox for external side
+     * effects that must happen only after success.
+     */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
@@ -809,10 +814,20 @@ export class CellImpl<T extends FabricValue>
   send(
     ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
+        /**
+         * Internal-only commit callback. This may run after failed commits, so
+         * it must remain non-effectful. Use the post-commit outbox for
+         * external side effects that must happen only after success.
+         */
         (tx: IExtendedStorageTransaction) => void,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
+        /**
+         * Internal-only commit callback. This may run after failed commits,
+         * so it must remain non-effectful. Use the post-commit outbox for
+         * external side effects that must happen only after success.
+         */
         (tx: IExtendedStorageTransaction) => void,
       ]
   ): void {

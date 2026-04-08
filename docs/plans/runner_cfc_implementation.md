@@ -648,7 +648,7 @@ Tasks:
       outbox
 - [ ] Migrate stream sends, queued events, and other runner-managed side
       effects to the outbox
-- [ ] Add JSDoc on internal commit-callback / `onCommit` hooks explaining that
+- [x] Add JSDoc on internal commit-callback / `onCommit` hooks explaining that
       they are internal-only, may run after failed commits, and must not
       perform external side effects; effectful work must use the outbox
 - [ ] Keep retries fresh: new tx, new prepare, new trust snapshot
@@ -663,7 +663,7 @@ Acceptance:
       uniformly gated
 - [ ] Retried handler emits side effects once, after the winning commit
 - [ ] Non-effectful commit callbacks used for diagnostics still work
-- [ ] Internal callback docs make the non-effectful restriction explicit
+- [x] Internal callback docs make the non-effectful restriction explicit
 
 ### 8. Implementation Identity and Trust
 

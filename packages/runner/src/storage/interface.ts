@@ -634,6 +634,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * The callback receives the transaction as a parameter and is called
    * regardless of whether the commit succeeded or failed.
    *
+   * Internal-only hook. Callbacks may run after failed commits and therefore
+   * must not perform external side effects or release external requests. Use
+   * the CFC post-commit outbox for effectful work that should happen only after
+   * a successful commit.
+   *
    * Note: Callbacks are called synchronously after commit completes.
    * If a callback throws, the error is logged but doesn't affect other callbacks.
    *
