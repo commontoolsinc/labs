@@ -1,5 +1,6 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
   MemorySpace,
@@ -16,6 +17,7 @@ import {
   internalVerifierRead,
   isInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
+import { getValueAtPath } from "../path-utils.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import type { CfcMetadata, IFCLabel, WritePolicyInput } from "./types.ts";
@@ -61,6 +63,26 @@ const mergeLabelValues = (...sources: Array<readonly unknown[] | undefined>) => 
     sources.flatMap((source) => source ? [...source] : []),
   )];
   return merged.length > 0 ? merged : undefined;
+};
+
+const claimPathToLogicalPath = (
+  claim: unknown,
+): string[] | undefined => {
+  if (
+    Array.isArray(claim) &&
+    claim.every((segment) => typeof segment === "string")
+  ) {
+    return canonicalizeLogicalPath(claim);
+  }
+  if (typeof claim === "string") {
+    if (claim.startsWith("/")) {
+      return canonicalizeLogicalPath(
+        claim.split("/").filter((segment) => segment.length > 0),
+      );
+    }
+    return canonicalizeLogicalPath([claim]);
+  }
+  return undefined;
 };
 
 const collectConsumedInputLabel = (
@@ -132,7 +154,9 @@ const valueWriteTargets = (
   >();
   const log = tx.getReactivityLog?.();
   const seenWriteSpaces = new Set<MemorySpace>(
-    (log?.writes ?? []).map((write) => write.space),
+    [...(log?.writes ?? []), ...(log?.potentialWrites ?? [])].map((write) =>
+      write.space
+    ),
   );
   for (const space of seenWriteSpaces) {
     for (const write of tx.getWriteDetails?.(space) ?? []) {
@@ -199,7 +223,6 @@ const unsupportedTrustSensitiveReason = (
   }
   const unsupportedKeys = [
     "writeAuthorizedBy",
-    "exactCopyOf",
     "projection",
     "collection",
   ] as const;
@@ -210,6 +233,68 @@ const unsupportedTrustSensitiveReason = (
     }
   }
   return undefined;
+};
+
+const exactCopySourcePath = (
+  schema: JSONSchema,
+): string[] | undefined => {
+  if (!isRecord(schema) || !isRecord(schema.ifc)) {
+    return undefined;
+  }
+  return claimPathToLogicalPath(schema.ifc.exactCopyOf);
+};
+
+const writeValueForTarget = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    type: MediaType;
+    path: readonly string[];
+  },
+): FabricValue => {
+  const writeDetails = [...(tx.getWriteDetails?.(target.space) ?? [])];
+  let matchingWrite:
+    | {
+      address: {
+        id: URI;
+        type: MediaType;
+        path: readonly string[];
+      };
+      value?: FabricValue;
+    }
+    | undefined;
+  let matchingWritePath: string[] | undefined;
+  for (const write of writeDetails) {
+    if (write.address.id !== target.id || write.address.type !== target.type) {
+      continue;
+    }
+    const writePath = canonicalizeLogicalPath(write.address.path);
+    const targetPath = canonicalizeLogicalPath(target.path);
+    if (writePath.length > targetPath.length) {
+      continue;
+    }
+    if (!writePath.every((segment, index) => segment === targetPath[index])) {
+      continue;
+    }
+    if (
+      matchingWrite === undefined ||
+      (matchingWritePath?.length ?? -1) < writePath.length
+    ) {
+      matchingWrite = write;
+      matchingWritePath = writePath;
+    }
+  }
+
+  const value = matchingWrite?.value;
+  if (value === undefined || matchingWritePath === undefined) {
+    return undefined;
+  }
+  const targetPath = canonicalizeLogicalPath(target.path);
+  if (matchingWritePath.length === targetPath.length) {
+    return value;
+  }
+  return getValueAtPath(value, targetPath.slice(matchingWritePath.length));
 };
 
 const verifyInputRequirements = (
@@ -262,24 +347,63 @@ const verifyInputRequirements = (
   return undefined;
 };
 
+const verifyExactCopyRequirements = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    type: MediaType;
+  },
+  schema: JSONSchema,
+): string | undefined => {
+  for (const entry of walkIfcSchema(schema)) {
+    const sourcePath = exactCopySourcePath(entry.schema);
+    if (sourcePath === undefined) {
+      continue;
+    }
+    const targetValue = writeValueForTarget(tx, {
+      ...target,
+      path: entry.path,
+    });
+    const sourceValue = writeValueForTarget(tx, {
+      ...target,
+      path: sourcePath,
+    });
+
+    if (!deepEqual(sourceValue, targetValue)) {
+      return `exactCopyOf failed at /${entry.path.join("/")}`;
+    }
+  }
+  return undefined;
+};
+
 const derivePersistedLabel = (
   schema: JSONSchema,
   schemaLabel: IFCLabel,
   consumedInputLabel: IFCLabel,
+  sourceEntryLabels?: Map<string, IFCLabel>,
 ): IFCLabel => {
   const ifc = isRecord(schema) ? schema.ifc : undefined;
+  const copiedInputLabel = sourceEntryLabels && exactCopySourcePath(schema)
+    ? sourceEntryLabels.get(
+      canonicalizeLogicalPath(exactCopySourcePath(schema)!).join("\u0000"),
+    )
+    : undefined;
   return {
     classification: mergeLabelValues(
       schemaLabel.classification,
       consumedInputLabel.classification,
+      copiedInputLabel?.classification,
     ),
     confidentiality: mergeLabelValues(
       schemaLabel.confidentiality,
       consumedInputLabel.confidentiality,
+      copiedInputLabel?.confidentiality,
     ),
     integrity: mergeLabelValues(
       schemaLabel.integrity,
       consumedInputLabel.integrity,
+      copiedInputLabel?.integrity,
       Array.isArray(ifc?.addIntegrity) ? ifc.addIntegrity : undefined,
     ),
   };
@@ -364,6 +488,16 @@ export const prepareBoundaryCommit = (
       continue;
     }
 
+    const exactCopyFailure = verifyExactCopyRequirements(tx, {
+      space,
+      id,
+      type,
+    }, frozen);
+    if (exactCopyFailure) {
+      reasons.push(exactCopyFailure);
+      continue;
+    }
+
     const existing = storedMetadataFor(tx, space, id, type);
     let mergedSchema = frozen;
     if (existing !== undefined) {
@@ -384,6 +518,13 @@ export const prepareBoundaryCommit = (
       true,
     );
     const consumedInputLabel = collectConsumedInputLabel(tx);
+    const mergedSchemaEntries = walkIfcSchema(mergedSchema);
+    const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
+      mergedSchemaEntries.map((entry) => [
+        canonicalizeLogicalPath(entry.path).join("\u0000"),
+        entry.label,
+      ]),
+    );
 
     ensureSchemaDocument(
       tx,
@@ -396,12 +537,13 @@ export const prepareBoundaryCommit = (
       schemaHash: schemaAndHash.hashString,
       labelMap: {
         version: 1,
-        entries: walkIfcSchema(mergedSchema).map((entry) => ({
+        entries: mergedSchemaEntries.map((entry) => ({
           path: entry.path,
           label: derivePersistedLabel(
             entry.schema,
             entry.label,
             consumedInputLabel,
+            mergedSchemaEntryLabels,
           ),
         })),
       },
