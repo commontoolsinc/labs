@@ -9,6 +9,7 @@ export {
   injectCfDataHelper,
   injectCfHelpers,
   Pipeline,
+  sourceDisablesCfTransform,
   sourceUsesCfDirective,
   transformCfDirective,
   Transformer,

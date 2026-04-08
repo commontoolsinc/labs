@@ -9,10 +9,10 @@
  * type argument: `Cell.of<MyType[]>([])`.
  */
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { detectCallKind } from "../ast/call-kind.ts";
 
-export class EmptyArrayOfValidationTransformer extends Transformer {
+export class EmptyArrayOfValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
 

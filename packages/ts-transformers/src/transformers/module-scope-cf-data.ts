@@ -5,18 +5,14 @@ import {
 } from "@commonfabric/utils/sandbox-contract";
 import {
   CF_DATA_HELPER_IDENTIFIER,
+  HelpersOnlyTransformer,
   TransformationContext,
-  Transformer,
 } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
 const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set"]);
 
-export class ModuleScopeCfDataTransformer extends Transformer {
-  override filter(_context: TransformationContext): boolean {
-    return true;
-  }
-
+export class ModuleScopeCfDataTransformer extends HelpersOnlyTransformer {
   override transform(context: TransformationContext): ts.SourceFile {
     const { factory, sourceFile } = context;
     const localCallableBindings = collectTopLevelCallableBindings(sourceFile);

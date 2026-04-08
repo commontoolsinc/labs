@@ -1,5 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertNotMatch,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { transformFiles } from "./utils.ts";
 
 const fixture = `
@@ -17,22 +22,36 @@ export { configSchema };
 `;
 
 describe("CommonFabricTransformerPipeline", () => {
-  it("Filters transformations if <cts-enabled /> not provided", async () => {
-    const disabled = await transformFiles({
-      "/main.ts": fixture,
+  it("transforms by default and supports cf-disable-transform opt-out", async () => {
+    const source = `
+import { computed } from "commonfabric";
+
+const value = computed(() => 1);
+export { value };
+`;
+
+    const enabledByDefault = await transformFiles({
+      "/main.ts": source,
     });
-    assert(
-      !/import \{\s*__cfHelpers\s*\} from "commonfabric";/
-        .test(disabled["/main.ts"]!),
-      "no replacements without <cts-enable />",
+    assertStringIncludes(
+      enabledByDefault["/main.ts"]!,
+      "const value = __cfHelpers.derive(",
     );
-    const enabled = await transformFiles({
-      "/main.ts": `/// <cts-enable />\n` + fixture,
+
+    const disabled = await transformFiles({
+      "/main.ts": `/// <cf-disable-transform />\n${source}`,
     });
-    assert(
-      /import \{\s*__cfHelpers\s*\} from "commonfabric";/
-        .test(enabled["/main.ts"]!),
-      "no replacements without <cts-enable />",
+
+    assertStringIncludes(disabled["/main.ts"]!, "computed(() => 1)");
+    assertNotMatch(disabled["/main.ts"]!, /__cfHelpers\.derive/);
+
+    const legacyEnabled = await transformFiles({
+      "/main.ts": `/// <cts-enable />\n${source}`,
+    });
+
+    assertStringIncludes(
+      legacyEnabled["/main.ts"]!,
+      "const value = __cfHelpers.derive(",
     );
   });
 
@@ -159,9 +178,9 @@ export default function probe() {
     );
   });
 
-  it("injects __cfDataHelper on demand for non-CTS top-level snapshots", async () => {
+  it("skips snapshot wrapping when cf-disable-transform is present", async () => {
     const output = await transformFiles({
-      "/main.ts": `
+      "/main.ts": `/// <cf-disable-transform />
 function pow(x: number): number {
   return x * x;
 }
@@ -174,12 +193,10 @@ export default pow(5);
 
     assertStringIncludes(
       main,
-      'import { __cf_data as __cfDataHelper } from "commonfabric";',
+      "export default pow(5);",
     );
-    assertStringIncludes(
-      main,
-      "export default __cfDataHelper(pow(5));",
-    );
+    assertNotMatch(main, /__cfHelpers\.__cf_data/);
+    assertNotMatch(main, /__cfDataHelper/);
   });
 });
 

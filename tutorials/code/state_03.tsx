@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { type Cell, cell, handler, lift, pattern, UI } from "commonfabric";
 
 const calcAC = (dex: number): number => 20 + Math.floor((dex - 10) / 2);

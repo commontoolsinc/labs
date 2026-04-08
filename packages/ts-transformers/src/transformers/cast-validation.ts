@@ -7,7 +7,7 @@
  * - `as Cell<...>` and other cell-like types: WARNING - prefer proper type annotations
  */
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 
 /**
  * Cell-like types that should trigger a warning when cast to.
@@ -30,7 +30,7 @@ const CELL_LIKE_TYPE_NAMES = new Set([
  */
 const FORBIDDEN_CAST_TYPE_NAMES = new Set(["OpaqueRef"]);
 
-export class CastValidationTransformer extends Transformer {
+export class CastValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const visit = (node: ts.Node): ts.Node => {
       // Check for type assertions (both `as X` and `<X>` syntax)

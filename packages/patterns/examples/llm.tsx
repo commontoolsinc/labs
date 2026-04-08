@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   BuiltInLLMContent,
   Default,

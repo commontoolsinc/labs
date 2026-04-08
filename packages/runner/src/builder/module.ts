@@ -344,7 +344,7 @@ function handlerInternal<E, T>(
     } else {
       throw new Error(
         "Handler requires schemas or CTS transformer\n" +
-          "help: enable CTS with /// <cts-enable /> for automatic schema inference, or provide explicit schemas",
+          "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> for automatic schema inference, or provide explicit schemas",
       );
     }
   }
@@ -516,7 +516,7 @@ export function action(_event: () => void): Stream<void>;
 export function action<T>(_event: (event: T) => void): Stream<T>;
 export function action<T>(_event: (event?: T) => void): Stream<T> {
   throw new Error(
-    "action() must be used with CTS enabled - add /// <cts-enable /> to your file",
+    "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
   );
 }
 

@@ -37,7 +37,6 @@ Test files end in `.test.tsx` and are run with `deno task cf test`.
 ## Quick Example
 
 ```tsx
-/// <cts-enable />
 import { action, computed, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 

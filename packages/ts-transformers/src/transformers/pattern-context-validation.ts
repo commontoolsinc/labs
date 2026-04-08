@@ -36,7 +36,7 @@
  *   callback: ERROR (use a nested computed()/derive())
  */
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {
   classifyArrayMethodCallSite,
   detectCallKind,
@@ -60,7 +60,8 @@ import {
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
 
-export class PatternContextValidationTransformer extends Transformer {
+export class PatternContextValidationTransformer
+  extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
     const analyze = context.getDataFlowAnalyzer();

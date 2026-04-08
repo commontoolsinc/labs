@@ -25,24 +25,22 @@ If this document conflicts with code or passing tests, code/tests win.
 
 ## 2. Activation And Entry Conditions
 
-### 2.1 `/// <cts-enable />` pre-transform
+### 2.1 Default-on pre-transform
 
 Before AST transforms, `transformCfDirective()`:
 
-1. Requires the first source line to match `/// <cts-enable />`.
-2. Rewrites source by injecting:
+1. Scans the first non-empty source line for transform directives.
+2. Unless that line is `/// <cf-disable-transform />`, injects:
    - `import * as __cfHelpers from "commonfabric";`
    - helper `h(...)` forwarding to `__cfHelpers.h`.
 3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
+4. Strips either legacy `/// <cts-enable />` or opt-out
+   `/// <cf-disable-transform />` from the source before later stages.
 
-If `/// <cts-enable />` is absent, no helper import is injected and most
-transformers effectively no-op.
+Legacy compatibility note:
 
-Current rollout note:
-
-- This directive is still the active rollout gate in the implementation.
-- The branch is being hardened as the candidate default compiler path, but the
-  default-on flip itself is intentionally not part of the current PR.
+- `/// <cts-enable />` is still accepted as a legacy no-op enable marker.
+- `/// <cf-disable-transform />` is the explicit opt-out.
 
 ### 2.2 Pipeline object
 

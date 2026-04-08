@@ -144,9 +144,12 @@ export class CFHelpers {
   }
 }
 
-// Replace a `/// <cts-enable />` directive line with an
-// internal import statement for use by the AST transformer
-// to provide access to helpers like `derive`, etc.
+const CTS_ENABLE_DIRECTIVE_RE = /^\/\/\/\s*<cts-enable\s*\/>/m;
+const CF_DISABLE_TRANSFORM_DIRECTIVE_RE =
+  /^\/\/\/\s*<cf-disable-transform\s*\/>/m;
+
+// Rewrite a leading transform directive line, or inject helpers by default,
+// so the AST transformer pipeline has access to helpers like `derive`.
 // This operates on strings, and to be used outside of
 // the TypeScript transformer pipeline, since symbol binding
 // occurs before transformers run.
@@ -167,14 +170,29 @@ export function transformCfDirective(
   checkCFHelperVar(source);
 
   const lines = source.split("\n");
-  if (!lines[0] || !sourceUsesCfDirective(source)) {
+  const firstContentLineIndex = findFirstContentLineIndex(lines);
+  if (firstContentLineIndex === null) {
     return source;
   }
-  return [
-    HELPERS_STMT,
-    ...lines.slice(1),
-    HELPERS_USED_STMT,
-  ].join("\n");
+
+  if (sourceDisablesCfTransform(source)) {
+    return [
+      ...lines.slice(0, firstContentLineIndex),
+      "",
+      ...lines.slice(firstContentLineIndex + 1),
+    ].join("\n");
+  }
+
+  if (sourceUsesCfDirective(source)) {
+    return [
+      ...lines.slice(0, firstContentLineIndex),
+      HELPERS_STMT,
+      ...lines.slice(firstContentLineIndex + 1),
+      HELPERS_USED_STMT,
+    ].join("\n");
+  }
+
+  return injectCfHelpers(source);
 }
 
 export function injectCfHelpers(source: string): string {
@@ -198,11 +216,33 @@ export function injectCfDataHelper(source: string): string {
 
 export function sourceUsesCfDirective(source: string): boolean {
   const lines = source.split("\n");
-  return !!lines[0] && isCTSEnabled(lines[0]);
+  const firstContentLineIndex = findFirstContentLineIndex(lines);
+  return firstContentLineIndex !== null &&
+    isCTSEnabled(lines[firstContentLineIndex]!);
+}
+
+export function sourceDisablesCfTransform(source: string): boolean {
+  const lines = source.split("\n");
+  const firstContentLineIndex = findFirstContentLineIndex(lines);
+  return firstContentLineIndex !== null &&
+    isCFTransformDisabled(lines[firstContentLineIndex]!);
 }
 
 function isCTSEnabled(line: string) {
-  return /^\/\/\/\s*<cts-enable\s*\/>/m.test(line);
+  return CTS_ENABLE_DIRECTIVE_RE.test(line);
+}
+
+function isCFTransformDisabled(line: string) {
+  return CF_DISABLE_TRANSFORM_DIRECTIVE_RE.test(line);
+}
+
+function findFirstContentLineIndex(lines: readonly string[]): number | null {
+  for (const [index, line] of lines.entries()) {
+    if (line.trim().length > 0) {
+      return index;
+    }
+  }
+  return null;
 }
 
 // Throws if `__cfHelpers` was found as an Identifier

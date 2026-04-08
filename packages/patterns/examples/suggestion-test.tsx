@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, NAME, pattern, UI, Writable } from "commonfabric";
 import Suggestion from "../system/suggestion.tsx";
 import Summary from "../suggestable/summary.tsx";

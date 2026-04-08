@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   Default,
@@ -55,7 +54,7 @@ export const Counter = pattern<PatternState>((state) => {
           dec to {previous(state.value)}
         </cf-button>
         <span id="counter-result">
-          {/* <cts-enable /> transforms pure functions (like nth) into the `derive(c, nth)` equivalent */}
+          {/* CTS transforms pure functions (like nth) into the `derive(c, nth)` equivalent */}
           Counter is the {nth(state.value)} number
         </span>
         <cf-button onClick={increment({ value: state.value })}>

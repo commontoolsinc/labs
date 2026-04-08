@@ -1,6 +1,6 @@
 import {
-  injectCfDataHelper,
   injectCfHelpers,
+  sourceDisablesCfTransform,
   sourceUsesCfDirective,
   transformCfDirective,
 } from "@commonfabric/ts-transformers";
@@ -16,16 +16,12 @@ export function pretransformProgram(
   return program;
 }
 
-// For each source file in the program, replace
-// a `/// <cts-enable />` directive line with an
-// internal import statement for use by the AST transformer
-// to provide access to helpers like `derive`, etc.
+// For each source file in the program, inject the internal helper import used
+// by the AST transformer unless the file explicitly opts out with
+// `/// <cf-disable-transform />`.
 export function transformInjectHelperModule(
   program: RuntimeProgram,
 ): RuntimeProgram {
-  const propagateHelpers = program.files.some((source) =>
-    sourceUsesCfDirective(source.contents)
-  );
   return {
     main: program.main,
     files: program.files.map((source) => ({
@@ -33,13 +29,11 @@ export function transformInjectHelperModule(
       contents: source.name.endsWith(".d.ts")
         ? source.contents
         : normalizeMixedModuleImports(
-          propagateHelpers
-            ? sourceUsesCfDirective(source.contents)
-              ? transformCfDirective(source.contents)
-              : injectCfHelpers(source.contents)
-            : sourceNeedsTopLevelSnapshotHelpers(source.contents)
-            ? injectCfDataHelper(source.contents)
-            : transformCfDirective(source.contents),
+          sourceDisablesCfTransform(source.contents)
+            ? transformCfDirective(source.contents)
+            : sourceUsesCfDirective(source.contents)
+            ? transformCfDirective(source.contents)
+            : injectCfHelpers(source.contents),
         ),
     })),
     mainExport: program.mainExport,
@@ -76,70 +70,6 @@ export function transformProgramWithPrefix(
 
 function prefix(filename: string, id: string): string {
   return `/${id}${filename}`;
-}
-
-function sourceNeedsTopLevelSnapshotHelpers(source: string): boolean {
-  const sourceFile = ts.createSourceFile(
-    "source.tsx",
-    source,
-    ts.ScriptTarget.ES2023,
-    true,
-    ts.ScriptKind.TSX,
-  );
-
-  for (const statement of sourceFile.statements) {
-    if (ts.isVariableStatement(statement)) {
-      if (!(statement.declarationList.flags & ts.NodeFlags.Const)) {
-        continue;
-      }
-      for (const declaration of statement.declarationList.declarations) {
-        if (
-          declaration.initializer &&
-          isTopLevelCallExpression(declaration.initializer)
-        ) {
-          return true;
-        }
-      }
-      continue;
-    }
-
-    if (
-      ts.isExportAssignment(statement) &&
-      isTopLevelCallExpression(statement.expression)
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isTopLevelCallExpression(expression: ts.Expression): boolean {
-  const expr = unwrapExpression(expression);
-  return ts.isCallExpression(expr);
-}
-
-function unwrapExpression(expression: ts.Expression): ts.Expression {
-  let current = expression;
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current) || ts.isSatisfiesExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    return current;
-  }
 }
 
 function normalizeMixedModuleImports(source: string): string {

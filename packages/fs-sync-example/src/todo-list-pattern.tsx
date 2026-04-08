@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * UI pattern for the todo list.
  *

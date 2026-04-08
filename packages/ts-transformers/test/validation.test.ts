@@ -47,6 +47,21 @@ function assertHasErrorType(
   );
 }
 
+Deno.test("CTS validation skips files with cf-disable-transform", async () => {
+  const source = `/// <cf-disable-transform />
+import { Cell } from "commonfabric";
+
+const value = Cell.of([]);
+const casted = {} as Cell<number>;
+`;
+
+  const { diagnostics } = await validateSource(source, {
+    types: COMMONFABRIC_TYPES,
+  });
+
+  assertEquals(diagnostics.length, 0);
+});
+
 Deno.test("Cast Validation", async (t) => {
   await t.step("errors on double cast 'as unknown as'", async () => {
     const source = `

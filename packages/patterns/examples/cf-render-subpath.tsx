@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test pattern for cf-render subpath behavior.
  *
