@@ -206,13 +206,13 @@ to keep that boundary clear:
 
 ### 5. Land The UI Helper Vertical Slice
 
-- [ ] Export the closed helper set:
+- [x] Export the closed helper set:
       `UiAction`, `UiPromptSlot`, `UiDisclosure`
-- [ ] Rewrite recognized helper elements to intrinsic tags using `as` or the
+- [x] Rewrite recognized helper elements to intrinsic tags using `as` or the
       helper default
-- [ ] Strip helper-only props from the residual prop bag
-- [ ] Re-emit semantic props as `data-ui-*` attributes on the rewritten node
-- [ ] Attach node-local `cfcUiContract` hints only when the relevant helper
+- [x] Strip helper-only props from the residual prop bag
+- [x] Re-emit semantic props as `data-ui-*` attributes on the rewritten node
+- [x] Attach node-local `cfcUiContract` hints only when the relevant helper
       props are compile-time string literals
 - [ ] Synthesize `[UI]` member schemas from returned JSX trees
 - [ ] Copy node-local UI contract hints onto the synthesized schema as

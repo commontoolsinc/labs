@@ -11,6 +11,13 @@ export type TransformMode = "transform" | "error";
 export interface SchemaHint {
   /** Override for array items schema (e.g., false for items: false) */
   readonly items?: unknown;
+  readonly cfcUiContract?: {
+    readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+    readonly action?: string;
+    readonly surface?: string;
+    readonly role?: string;
+    readonly kind?: string;
+  };
 }
 
 export type ReactiveCapability =

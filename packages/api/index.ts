@@ -2102,6 +2102,29 @@ export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
 export declare const nonPrivateRandom: NonPrivateRandomFunction;
 export declare const safeDateNow: SafeDateNowFunction;
 
+export interface UiActionProps {
+  readonly as?: string;
+  readonly action: string;
+  readonly children?: RenderNode;
+}
+
+export interface UiPromptSlotProps {
+  readonly as?: string;
+  readonly surface: string;
+  readonly role: string;
+  readonly children?: RenderNode;
+}
+
+export interface UiDisclosureProps {
+  readonly as?: string;
+  readonly kind: string;
+  readonly children?: RenderNode;
+}
+
+export declare function UiAction(props: UiActionProps): JSXElement;
+export declare function UiPromptSlot(props: UiPromptSlotProps): JSXElement;
+export declare function UiDisclosure(props: UiDisclosureProps): JSXElement;
+
 /**
  * Get the entity ID from a cell or value.
  * Returns { "/": "id-string" } format if the value has an entity ID, undefined otherwise.
