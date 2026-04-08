@@ -609,7 +609,7 @@ Tasks:
       remains runtime-only
 - [x] In phase 1, allow a conservative all-consumed-reads-to-all-targets
       influence model over `potentialWrites ∪ writes`
-- [ ] Use `potentialWrites ∪ writes` for target-side enforcement and use
+- [x] Use `potentialWrites ∪ writes` for target-side enforcement and use
       `writes` only for persisted output metadata
 - [x] If a target entity has no stored `schemaHash`, seed it from the first
       canonical `SchemaAndHash` and persist or reuse `cid:<hash>`; if merge
