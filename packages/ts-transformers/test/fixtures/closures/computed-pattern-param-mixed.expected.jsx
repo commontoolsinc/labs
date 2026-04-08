@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: computed-pattern-param-mixed
 // Verifies: computed() capturing a mix of cells, pattern params, and plain locals
 //   computed(() => (value.get() + config.base + offset) * config.multiplier + threshold.get()) → derive(..., { value, config: { base, multiplier }, offset, threshold }, ...)

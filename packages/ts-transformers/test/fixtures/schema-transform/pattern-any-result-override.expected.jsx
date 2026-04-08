@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { computed, pattern, UI, VNode, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // Simulates `any` leaking through a generic function (like generateObject)
 declare function fetchAny(): any;
 // FIXTURE: pattern-any-result-override

@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  __ct_data,
+  __cf_data,
   computed,
   Default,
   handler,
@@ -29,7 +29,7 @@ import {
 } from "../../auth/auth-ui-helpers.tsx";
 
 // Scope mapping for Google APIs
-const SCOPE_MAP = __ct_data(
+const SCOPE_MAP = __cf_data(
   {
     gmail: "https://www.googleapis.com/auth/gmail.readonly",
     gmailSend: "https://www.googleapis.com/auth/gmail.send",
@@ -42,7 +42,7 @@ const SCOPE_MAP = __ct_data(
   } as const,
 );
 
-const SCOPE_DESCRIPTIONS = __ct_data(
+const SCOPE_DESCRIPTIONS = __cf_data(
   {
     gmail: "Gmail (read emails)",
     gmailSend: "Gmail (send emails)",
@@ -56,7 +56,7 @@ const SCOPE_DESCRIPTIONS = __ct_data(
 );
 
 // Short names for scope summary display in previewUI
-const SCOPE_SHORT_NAMES: Record<string, string> = __ct_data({
+const SCOPE_SHORT_NAMES: Record<string, string> = __cf_data({
   "https://www.googleapis.com/auth/gmail.readonly": "Gmail",
   "https://www.googleapis.com/auth/gmail.send": "Gmail Send",
   "https://www.googleapis.com/auth/gmail.modify": "Gmail",
@@ -68,7 +68,7 @@ const SCOPE_SHORT_NAMES: Record<string, string> = __ct_data({
 });
 
 // Short names for scope keys (for configured scopes summary)
-const SCOPE_KEY_SHORT_NAMES: Record<string, string> = __ct_data({
+const SCOPE_KEY_SHORT_NAMES: Record<string, string> = __cf_data({
   gmail: "Gmail",
   gmailSend: "Gmail",
   gmailModify: "Gmail",

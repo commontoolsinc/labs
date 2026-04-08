@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { Cell, handler, ifElse, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     id: number;
     name: string;

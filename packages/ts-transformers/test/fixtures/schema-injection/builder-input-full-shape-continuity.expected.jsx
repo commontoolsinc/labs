@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { lift, pattern, type Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: builder-input-full-shape-continuity
 // Verifies: builder input schemas stay conservative/full-shape when the authored contract
 // does not justify path shrinking.
@@ -133,7 +133,7 @@ const wildcardLift = lift({
     Object.keys(input.get());
     return foo;
 });
-export default __cfHelpers.__ct_data({
+export default __cfHelpers.__cf_data({
     liftWrapped,
     patternFullShape,
     patternExplicit,

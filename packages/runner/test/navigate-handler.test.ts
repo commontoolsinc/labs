@@ -22,14 +22,14 @@ Deno.test("handler can update local state and still navigate", async () => {
   const tx: IExtendedStorageTransaction = runtime.edit();
 
   try {
-    const { commontools } = createTrustedBuilder(runtime);
+    const { commonfabric } = createTrustedBuilder(runtime);
     const {
       NAME,
       Writable,
       handler,
       navigateTo,
       pattern,
-    } = commontools;
+    } = commonfabric;
 
     const Target = pattern(() => ({
       [NAME]: "📝 New Note",
@@ -103,14 +103,14 @@ Deno.test(
     const tx: IExtendedStorageTransaction = runtime.edit();
 
     try {
-      const { commontools } = createTrustedBuilder(runtime);
+      const { commonfabric } = createTrustedBuilder(runtime);
       const {
         NAME,
         Writable,
         handler,
         navigateTo,
         pattern,
-      } = commontools;
+      } = commonfabric;
 
       const Target = pattern(() => ({
         [NAME]: "📝 New Note",

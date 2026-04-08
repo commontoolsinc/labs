@@ -21,7 +21,7 @@
  * ```
  */
 
-import { __ct_data, type Opaque } from "commonfabric";
+import { __cf_data, type Opaque } from "commonfabric";
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import AirtableAuth from "../airtable-auth.tsx";
@@ -49,7 +49,7 @@ export type ScopeKey =
   | "webhook:manage";
 
 /** Human-readable scope descriptions */
-const AIRTABLE_SCOPE_DESCRIPTIONS = __ct_data(
+const AIRTABLE_SCOPE_DESCRIPTIONS = __cf_data(
   {
     "data.records:read": "Read records",
     "data.records:write": "Write records",
@@ -64,7 +64,7 @@ export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> =
   AIRTABLE_SCOPE_DESCRIPTIONS;
 
 /** Unified scope registry for the auth manager factory */
-const SCOPES: AuthManagerDescriptor["scopes"] = __ct_data(
+const SCOPES: AuthManagerDescriptor["scopes"] = __cf_data(
   Object.fromEntries(
     Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
       key,
@@ -73,7 +73,7 @@ const SCOPES: AuthManagerDescriptor["scopes"] = __ct_data(
   ),
 );
 
-const AirtableAuthManagerDescriptor: AuthManagerDescriptor = __ct_data({
+const AirtableAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
   name: "airtable",
   displayName: "Airtable",
   brandColor: "#18BFFF",

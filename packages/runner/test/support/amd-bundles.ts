@@ -26,14 +26,14 @@ export function withFactoryGuards(bundle: string): string {
 export function bundleWithGuardedFactory(body: string): string {
   return `
 ((runtimeDeps = {}) => {
-  const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};
-  const { define, require } = (${LOADER_SOURCE})(__ctAmdHooks);
+  const __cfAmdHooks = runtimeDeps.__cfAmdHooks ?? {};
+  const { define, require } = (${LOADER_SOURCE})(__cfAmdHooks);
   for (const [name, dep] of Object.entries(runtimeDeps)) {
-    if (name === "__ctAmdHooks") continue;
+    if (name === "__cfAmdHooks") continue;
     define(name, ["exports"], exports => Object.assign(exports, dep));
   }
   const console = globalThis.console;
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
 ${FACTORY_SHADOW_GUARDS}
 ${body}
@@ -57,10 +57,10 @@ ${body}
 export function bundleWithHookedLoader(body: string): string {
   return `
 ((runtimeDeps = {}) => {
-  const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};
-  const { define, require } = (${LOADER_SOURCE})(__ctAmdHooks);
+  const __cfAmdHooks = runtimeDeps.__cfAmdHooks ?? {};
+  const { define, require } = (${LOADER_SOURCE})(__cfAmdHooks);
   for (const [name, dep] of Object.entries(runtimeDeps)) {
-    if (name === "__ctAmdHooks") continue;
+    if (name === "__cfAmdHooks") continue;
     define(name, ["exports"], exports => Object.assign(exports, dep));
   }
 ${body}

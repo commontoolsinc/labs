@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: derive-template-literal
 // Verifies: a captured cell used inside a template literal expression is extracted
 //   derive(value, fn) → derive(schema, schema, { value, prefix }, fn)

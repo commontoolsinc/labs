@@ -118,7 +118,7 @@ Deno.test("SES runtime matches legacy pattern outputs for hoisted lift and local
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            "import { lift, pattern } from 'commontools';",
+            "import { lift, pattern } from 'commonfabric';",
             "import { bias } from './math.ts';",
             "const project = lift((value: number) => value * 2 + bias);",
             "export default pattern<{ value: number }>(({ value }) => ({ total: project(value) }));",
@@ -139,7 +139,7 @@ Deno.test("SES runtime matches legacy pattern behavior for hoisted handler and i
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            "import { Cell, computed, derive, handler, lift, pattern } from 'commontools';",
+            "import { Cell, computed, derive, handler, lift, pattern } from 'commonfabric';",
             "const scale = 2;",
             "const double = lift((value: number) => value * scale);",
             "const increment = handler((event: { amount?: number } | undefined, context: { value: Cell<number> }) => {",
@@ -198,7 +198,7 @@ Deno.test("SES runtime preserves mapped hoisted handler failures against legacy 
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            "import { Cell, handler, pattern } from 'commontools';",
+            "import { Cell, handler, pattern } from 'commonfabric';",
             "const explode = handler((_event: unknown, context: { value: Cell<number> }) => {",
             "  throw new Error(`boom:${context.value.get() ?? 0}`);",
             "});",

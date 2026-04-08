@@ -26,7 +26,7 @@
  * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
-import { __ct_data, type Opaque } from "commonfabric";
+import { __cf_data, type Opaque } from "commonfabric";
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import GoogleAuth from "../google-auth.tsx";
@@ -57,13 +57,13 @@ const GOOGLE_SCOPE_MAP_VALUES = {
 export type ScopeKey = keyof typeof GOOGLE_SCOPE_MAP_VALUES;
 
 /** Scope mapping for Google APIs - friendly names to URLs */
-const GOOGLE_SCOPE_MAP: Record<ScopeKey, string> = __ct_data(
+const GOOGLE_SCOPE_MAP: Record<ScopeKey, string> = __cf_data(
   GOOGLE_SCOPE_MAP_VALUES,
 );
 export const SCOPE_MAP = GOOGLE_SCOPE_MAP;
 
 /** Human-readable scope descriptions */
-const GOOGLE_SCOPE_DESCRIPTIONS = __ct_data(
+const GOOGLE_SCOPE_DESCRIPTIONS = __cf_data(
   {
     gmail: "Gmail (read emails)",
     gmailSend: "Gmail (send emails)",
@@ -81,7 +81,7 @@ export const SCOPE_DESCRIPTIONS = GOOGLE_SCOPE_DESCRIPTIONS;
 export type AccountType = "default" | "personal" | "work";
 
 /** Unified scope registry for the auth manager factory */
-const SCOPES: AuthManagerDescriptor["scopes"] = __ct_data(
+const SCOPES: AuthManagerDescriptor["scopes"] = __cf_data(
   Object.fromEntries(
     Object.entries(SCOPE_MAP).map(([key, url]) => [
       key,
@@ -90,7 +90,7 @@ const SCOPES: AuthManagerDescriptor["scopes"] = __ct_data(
   ),
 );
 
-const GoogleAuthManagerDescriptor: AuthManagerDescriptor = __ct_data({
+const GoogleAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
   name: "google",
   displayName: "Google",
   brandColor: "#4285f4",

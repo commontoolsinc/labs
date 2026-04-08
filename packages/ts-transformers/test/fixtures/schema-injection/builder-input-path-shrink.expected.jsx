@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { action, derive, handler, lift, pattern, type Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,
 // including explicit type arguments and interprocedural helper calls.
@@ -28,7 +28,7 @@ const liftOptional = lift({
     foo: string | undefined;
     bar: string;
 }>) => input.key("foo").get());
-const deriveInput = __cfHelpers.__ct_data({} as Writable<{
+const deriveInput = __cfHelpers.__cf_data({} as Writable<{
     foo: string;
     bar: string;
 }>);
@@ -189,7 +189,7 @@ const actionPattern = pattern((input: Writable<{
 } as const satisfies __cfHelpers.JSONSchema, {
     asStream: true
 } as const satisfies __cfHelpers.JSONSchema);
-export default __cfHelpers.__ct_data({
+export default __cfHelpers.__cf_data({
     liftOptional,
     deriveObserved,
     deriveExplicit,

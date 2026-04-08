@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * BUG REPRO: .map() after || [] or ?? [] fallback is not transformed to mapWithPattern
  *
@@ -49,7 +49,7 @@ import * as __ctHelpers from "commontools";
  *
  * This requires making the property non-optional in the interface.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 interface Reaction {
     emoji: string;
     userNames: string[];
@@ -71,10 +71,10 @@ export default pattern((__cf_pattern_input) => {
     const messages = __cf_pattern_input.key("messages");
     return {
         [UI]: (<div>
-        {messages.mapWithPattern(__ctHelpers.pattern(__cf_pattern_input => {
+        {messages.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const msg = __cf_pattern_input.key("element");
                 // Method 1: computed variable with fallback - FAILS
-                const messageReactions = __ctHelpers.derive({
+                const messageReactions = __cfHelpers.derive({
                     type: "object",
                     properties: {
                         msg: {
@@ -120,7 +120,7 @@ export default pattern((__cf_pattern_input) => {
                             required: ["emoji", "userNames"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/Reaction"
@@ -142,14 +142,14 @@ export default pattern((__cf_pattern_input) => {
                             required: ["emoji", "userNames"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, { msg: msg }, ({ msg }) => (msg && msg.reactions) || []);
+                } as const satisfies __cfHelpers.JSONSchema, { msg: msg }, ({ msg }) => (msg && msg.reactions) || []);
                 return (<div>
               <p>{msg.key("content")}</p>
               <div>
                 {/* BUG: This .map() is NOT transformed to mapWithPattern.
                         The derive result doesn't pass the OpaqueRef type check.
                         Accessing msg.id causes runtime error. */}
-                {messageReactions.mapWithPattern(__ctHelpers.pattern(__cf_pattern_input => {
+                {messageReactions.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                         const reaction = __cf_pattern_input.key("element");
                         const msg = __cf_pattern_input.key("params", "msg");
                         return (<button type="button" data-msg-id={msg.key("id")}>
@@ -195,7 +195,7 @@ export default pattern((__cf_pattern_input) => {
                                 required: ["emoji", "userNames"]
                             }
                         }
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{
                                 $ref: "https://commonfabric.org/schemas/vnode.json"
                             }, {
@@ -215,7 +215,7 @@ export default pattern((__cf_pattern_input) => {
                                 required: ["$UI"]
                             }
                         }
-                    } as const satisfies __ctHelpers.JSONSchema), {
+                    } as const satisfies __cfHelpers.JSONSchema), {
                         msg: {
                             id: msg.key("id")
                         }
@@ -268,7 +268,7 @@ export default pattern((__cf_pattern_input) => {
                         required: ["emoji", "userNames"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -288,7 +288,7 @@ export default pattern((__cf_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
       </div>),
     };
 }, {
@@ -340,7 +340,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["emoji", "userNames"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -369,7 +369,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 /**
  * NOTE: The following inline patterns also fail for the same reason:
  *
@@ -380,5 +380,5 @@ export default pattern((__cf_pattern_input) => {
  * {msg.reactions.map((r) => ...)}  // WORKS - direct OpaqueRef property
  */
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

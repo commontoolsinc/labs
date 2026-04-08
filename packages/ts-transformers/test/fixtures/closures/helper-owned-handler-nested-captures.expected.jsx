@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned handler with nested callback captures
  *
@@ -24,7 +24,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { action, Default, pattern, Stream, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Default<string, "">>, savedContent: Writable<Default<string, "">>, onSaveFile: Stream<{
     fileId: string;
     content: string;

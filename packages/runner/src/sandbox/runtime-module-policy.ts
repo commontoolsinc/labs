@@ -1,26 +1,12 @@
 export type RuntimeModuleIdentifier =
   | "commonfabric"
   | "commonfabric/schema"
-  | "commontools"
-  | "commontools/schema"
-  | "turndown"
-  | "@commontools/html"
-  | "@commontools/builder"
-  | "@commontools/runner";
+  | "turndown";
 
 export const RuntimeModuleIdentifiers = [
   "commonfabric",
   "commonfabric/schema",
-  "commontools",
-  "commontools/schema",
   "turndown",
-  // backwards compat
-  "@commontools/html",
-  // backwards compat
-  "@commontools/builder",
-  // backwards compat, for supporting { type Cell } from "@commontools/runner"
-  // from older patterns
-  "@commontools/runner",
 ] as const satisfies readonly RuntimeModuleIdentifier[];
 
 const RuntimeModuleIdentifierSet = new Set<string>(RuntimeModuleIdentifiers);

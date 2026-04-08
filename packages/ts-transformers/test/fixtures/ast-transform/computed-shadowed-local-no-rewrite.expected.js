@@ -6,10 +6,10 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: computed-shadowed-local-no-rewrite
 // Verifies: shadowed local helpers named `computed` are not rewritten.
 function computed<T>(fn: () => T): T {

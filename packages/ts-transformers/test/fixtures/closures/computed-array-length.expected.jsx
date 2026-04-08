@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression test for array.length access inside computed().
  *
@@ -20,7 +20,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { computed, NAME, pattern, UI, wish } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Charm {
     id: string;
     name: string;

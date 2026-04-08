@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE must account for local initializer dependencies
  *
@@ -18,7 +18,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Entry {
     id: string;
     name: string;

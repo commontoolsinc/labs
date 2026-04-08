@@ -1,7 +1,7 @@
 export const SHADOWED_FACTORY_BINDINGS = [
   "define",
   "runtimeDeps",
-  "__ctAmdHooks",
+  "__cfAmdHooks",
 ] as const;
 
 export const TRUSTED_BUILDERS = Object.freeze(
@@ -24,7 +24,7 @@ export function isTrustedBuilder(name: string): name is TrustedBuilderName {
 export const TRUSTED_DATA_HELPERS = Object.freeze(
   [
     "schema",
-    "__ct_data",
+    "__cf_data",
     "nonPrivateRandom",
     "safeDateNow",
   ] as const,

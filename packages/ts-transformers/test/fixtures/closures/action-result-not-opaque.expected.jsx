@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * action() results used as event handlers in JSX. action() is an
  * opaque origin but handler results are typically used directly
@@ -15,7 +15,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { action, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     label: string;
 }

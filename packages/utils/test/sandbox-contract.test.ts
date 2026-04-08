@@ -34,7 +34,7 @@ describe("sandbox-contract", () => {
   it("exports the shared trusted data helper names", () => {
     expect([...TRUSTED_DATA_HELPERS]).toEqual([
       "schema",
-      "__ct_data",
+      "__cf_data",
       "nonPrivateRandom",
       "safeDateNow",
     ]);
@@ -48,7 +48,7 @@ describe("sandbox-contract", () => {
   });
 
   it("matches trusted data helpers through a predicate helper", () => {
-    expect(isTrustedDataHelper("__ct_data")).toBe(true);
+    expect(isTrustedDataHelper("__cf_data")).toBe(true);
     expect(isTrustedDataHelper("unsafeHelper")).toBe(false);
   });
 });

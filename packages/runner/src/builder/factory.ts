@@ -85,7 +85,6 @@ export interface CreateBuilderOptions {
  */
 export const createBuilder = (options: CreateBuilderOptions = {}): {
   commonfabric: BuilderFunctionsAndConstants;
-  commontools: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
   const trustValue = <T>(value: T): T => {
@@ -133,7 +132,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     }
   };
 
-  const commontools = {
+  const commonfabric = {
     // Pattern creation
     pattern: trustedPattern,
     patternTool: trustedPatternTool,
@@ -197,7 +196,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // Schema utilities
     schema: runtimeSchema,
     toSchema,
-    __ct_data: freezeVerifiedPlainData,
+    __cf_data: freezeVerifiedPlainData,
     AuthSchema,
     WebhookConfigSchema,
 
@@ -213,13 +212,12 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricEpochDays,
     FabricHash,
   } as BuilderFunctionsAndConstants & {
-    __ctHelpers?: BuilderFunctionsAndConstants;
+    __cfHelpers?: BuilderFunctionsAndConstants;
   };
-  commontools.__ctHelpers = commontools;
+  commonfabric.__cfHelpers = commonfabric;
 
   return {
-    commonfabric: commontools,
-    commontools,
+    commonfabric,
     exportsCallback,
   };
 };

@@ -132,7 +132,7 @@ type CalculatorRequest = {
       const typeNode = ts.factory.createTypeLiteralNode([
         ts.factory.createPropertySignature(
           undefined,
-          ts.factory.createIdentifier("__ct_reserved"),
+          ts.factory.createIdentifier("__cf_reserved"),
           undefined,
           ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
         ),
@@ -145,9 +145,9 @@ type CalculatorRequest = {
 
       expect(schema.type).toBe("object");
       expect(schema.properties).toEqual({
-        __ct_reserved: { type: "number" },
+        __cf_reserved: { type: "number" },
       });
-      expect(schema.required).toEqual(["__ct_reserved"]);
+      expect(schema.required).toEqual(["__cf_reserved"]);
     });
 
     it("preserves anyOf for synthetic union containing unknown", async () => {

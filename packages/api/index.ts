@@ -2023,7 +2023,7 @@ export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
 // The actual implementation is done by the TypeScript transformer
 export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
 /** Internal compiler-emitted helper for top-level data materialization. */
-export type CtDataFunction = <T>(value: T) => T;
+export type CfDataFunction = <T>(value: T) => T;
 
 // Pattern environment types
 export interface PatternEnvironment {
@@ -2088,9 +2088,9 @@ export declare const getEntityId: GetEntityIdFunction;
 
 export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
-export declare const __ct_data: CtDataFunction;
-export declare const __ctHelpers: any;
-export declare namespace __ctHelpers {
+export declare const __cf_data: CfDataFunction;
+export declare const __cfHelpers: any;
+export declare namespace __cfHelpers {
   export type JSONSchema = JSONSchemaObj | boolean;
 }
 

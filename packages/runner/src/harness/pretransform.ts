@@ -1,6 +1,6 @@
 import {
   injectCfHelpers,
-  injectCtDataHelper,
+  injectCfDataHelper,
   sourceUsesCfDirective,
   transformCfDirective,
 } from "@commonfabric/ts-transformers";
@@ -38,7 +38,7 @@ export function transformInjectHelperModule(
               ? transformCfDirective(source.contents)
               : injectCfHelpers(source.contents)
             : sourceNeedsTopLevelSnapshotHelpers(source.contents)
-            ? injectCtDataHelper(source.contents)
+            ? injectCfDataHelper(source.contents)
             : transformCfDirective(source.contents),
         ),
     })),

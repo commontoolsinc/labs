@@ -130,13 +130,13 @@ describe("preflightCompiledBundle()", () => {
 
   it("accepts regex literals inside compiled module factories", () => {
     const bundle = bundleWithCanonicalLoader(`
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function clean(content) {
       return content.replace(/\\n+/g, " ").trim();
     }
-    exports.default = (0, commontools_1.lift)(clean);
+    exports.default = (0, commonfabric_1.lift)(clean);
   });
   return require("main");
 `);

@@ -22,7 +22,7 @@ describe("CommonFabricTransformerPipeline", () => {
       "/main.ts": fixture,
     });
     assert(
-      !/import \{\s*__ctHelpers\s+as\s+__cfHelpers\s*\} from "commonfabric";/
+      !/import \{\s*__cfHelpers\s*\} from "commonfabric";/
         .test(disabled["/main.ts"]!),
       "no replacements without <cts-enable />",
     );
@@ -30,13 +30,13 @@ describe("CommonFabricTransformerPipeline", () => {
       "/main.ts": `/// <cts-enable />\n` + fixture,
     });
     assert(
-      /import \{\s*__ctHelpers\s+as\s+__cfHelpers\s*\} from "commonfabric";/
+      /import \{\s*__cfHelpers\s*\} from "commonfabric";/
         .test(enabled["/main.ts"]!),
       "no replacements without <cts-enable />",
     );
   });
 
-  it("wraps top-level data candidates with __cfHelpers.__ct_data", async () => {
+  it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {
     const source = `/// <cts-enable />
 import { lift, schema } from "commonfabric";
 
@@ -67,38 +67,38 @@ export { model, lookup, days, matcher, scopes, years, tags, proxied, passthrough
 
     assertStringIncludes(
       main,
-      'const model = __cfHelpers.__ct_data(schema({ type: "string" } as const));',
+      'const model = __cfHelpers.__cf_data(schema({ type: "string" } as const));',
     );
     assertStringIncludes(
       main,
-      'const lookup = __cfHelpers.__ct_data((() => ({ open: "Open" }))());',
+      'const lookup = __cfHelpers.__cf_data((() => ({ open: "Open" }))());',
     );
     assertStringIncludes(
       main,
-      "const days = __cfHelpers.__ct_data(Array.from({ length: 3 }, (_, index) => String(index + 1)));",
+      "const days = __cfHelpers.__cf_data(Array.from({ length: 3 }, (_, index) => String(index + 1)));",
     );
     assertStringIncludes(
       main,
-      "const matcher = __cfHelpers.__ct_data(/^[a-z]+$/);",
+      "const matcher = __cfHelpers.__cf_data(/^[a-z]+$/);",
     );
     assertStringIncludes(
       main,
-      "const scopes = __cfHelpers.__ct_data(Object.fromEntries(",
+      "const scopes = __cfHelpers.__cf_data(Object.fromEntries(",
     );
     assertStringIncludes(
       main,
-      "const years = __cfHelpers.__ct_data(buildYears());",
+      "const years = __cfHelpers.__cf_data(buildYears());",
     );
     assertStringIncludes(
       main,
-      'const tags = __cfHelpers.__ct_data(new Set(["a", "b"]));',
+      'const tags = __cfHelpers.__cf_data(new Set(["a", "b"]));',
     );
     assert(
-      !main.includes('__cfHelpers.__ct_data(new Proxy({ open: "Open" }, {}));'),
+      !main.includes('__cfHelpers.__cf_data(new Proxy({ open: "Open" }, {}));'),
       "Proxy snapshots stay unsupported until Proxy is re-enabled in SES compartments",
     );
     assert(
-      !main.includes("__cfHelpers.__ct_data(lift("),
+      !main.includes("__cfHelpers.__cf_data(lift("),
       "top-level builder calls should not be wrapped",
     );
   });
@@ -124,7 +124,7 @@ export default function next(value: number) {
     assertStringIncludes(main, "__cfHardenFn(next);");
   });
 
-  it("wraps explicit snapshot helpers with __cfHelpers.__ct_data", async () => {
+  it("wraps explicit snapshot helpers with __cfHelpers.__cf_data", async () => {
     const source = `/// <cts-enable />
 import { nonPrivateRandom, safeDateNow } from "commonfabric";
 
@@ -143,11 +143,11 @@ export default function probe() {
 
     assertStringIncludes(
       main,
-      "const startedAt = __cfHelpers.__ct_data(safeDateNow());",
+      "const startedAt = __cfHelpers.__cf_data(safeDateNow());",
     );
     assertStringIncludes(
       main,
-      "const seed = __cfHelpers.__ct_data(nonPrivateRandom());",
+      "const seed = __cfHelpers.__cf_data(nonPrivateRandom());",
     );
     assert(
       !main.includes("__cfHelpers.safeDateNow"),
@@ -174,7 +174,7 @@ export default pow(5);
 
     assertStringIncludes(
       main,
-      'import { __ct_data as __cfDataHelper } from "commonfabric";',
+      'import { __cf_data as __cfDataHelper } from "commonfabric";',
     );
     assertStringIncludes(
       main,

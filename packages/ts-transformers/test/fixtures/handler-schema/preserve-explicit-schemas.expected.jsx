@@ -6,20 +6,20 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { handler } from "commonfabric";
 import "commonfabric/schema";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
-const eventSchema = __cfHelpers.__ct_data({
+const __cfAmdHooks = undefined;
+const eventSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         message: { type: "string" },
     },
     required: ["message"],
 } as const);
-const stateSchema = __cfHelpers.__ct_data({
+const stateSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         log: { type: "array", items: { type: "string" } },

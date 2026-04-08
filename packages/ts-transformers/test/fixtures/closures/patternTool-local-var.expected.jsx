@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
     language: string;
     content: string;
@@ -67,7 +67,7 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
         return genResult.result;
     });
 });
-const content = __cfHelpers.__ct_data(Writable.of("Hello world", {
+const content = __cfHelpers.__cf_data(Writable.of("Hello world", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema));
 type Output = {

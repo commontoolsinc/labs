@@ -18,7 +18,7 @@ const defaultPatternProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "import { handler, pattern } from 'commontools';",
+        "import { handler, pattern } from 'commonfabric';",
         "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
         "  ({ piece }, { allPieces }) => {",
         "    allPieces.push(piece);",
@@ -40,7 +40,7 @@ const persistedPieceProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "import { pattern } from 'commontools';",
+        "import { pattern } from 'commonfabric';",
         "export default pattern<{ value: number }>(({ value }) => ({ value }));",
       ].join("\n"),
     },
@@ -73,8 +73,8 @@ describe("PieceManager default pattern persistence", () => {
   });
 
   it("reads persisted allPieces without restarting the default pattern", async () => {
-    const { commontools } = createBuilder();
-    const { handler, pattern } = commontools;
+    const { commonfabric } = createBuilder();
+    const { handler, pattern } = commonfabric;
 
     const addPiece = handler<
       { piece: Cell<unknown> },

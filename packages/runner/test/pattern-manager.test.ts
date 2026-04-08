@@ -253,7 +253,7 @@ describe("PatternManager.compileOrGetPattern", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            "import { Default, pattern } from 'commontools';",
+            "import { Default, pattern } from 'commonfabric';",
             "export default pattern<{ values: Default<number[], []> }>(({ values }) => ({",
             "  doubled: values.map((value) => ({ next: value })),",
             "}));",

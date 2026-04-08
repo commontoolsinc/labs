@@ -286,7 +286,7 @@ Deno.test(
   "Pipeline regression: imported pattern factory calls with local cells stay structural",
   async () => {
     const source = `/// <cts-enable />
-import { Writable, pattern, type PatternFactory } from "commontools";
+import { Writable, pattern, type PatternFactory } from "commonfabric";
 
 declare const Child: PatternFactory<{ value: number }, { value: number }>;
 
@@ -307,7 +307,7 @@ export default pattern(() => {
     assertStringIncludes(output, "const child = Child({ value });");
     assertStringIncludes(output, 'childValue: child.key("value")');
     assert(
-      !/__ctHelpers\.derive\([\s\S]{0,240}Child\(\{ value \}\)\)/.test(output),
+      !/__cfHelpers\.derive\([\s\S]{0,240}Child\(\{ value \}\)\)/.test(output),
       "expected pattern factory invocation to stay structural instead of being wrapped in derive",
     );
   },
@@ -317,7 +317,7 @@ Deno.test(
   "Pipeline regression: opaque-returning factory helpers with local cells stay structural",
   async () => {
     const source = `/// <cts-enable />
-import { pattern, Writable } from "commontools";
+import { pattern, Writable } from "commonfabric";
 
 function createAuthManager(input: { accountType: string }) {
   return pattern<{ accountType: string }, {
@@ -349,7 +349,7 @@ export default pattern(() => {
     assertStringIncludes(output, "const authManager = createAuthManager({");
     assertStringIncludes(output, "accountType: selectedAccountType,");
     assert(
-      !/__ctHelpers\.derive\([\s\S]{0,280}createAuthManager\(\{[\s\S]{0,120}accountType: selectedAccountType[\s\S]{0,120}\}\)\)/
+      !/__cfHelpers\.derive\([\s\S]{0,280}createAuthManager\(\{[\s\S]{0,120}accountType: selectedAccountType[\s\S]{0,120}\}\)\)/
         .test(
           output,
         ),

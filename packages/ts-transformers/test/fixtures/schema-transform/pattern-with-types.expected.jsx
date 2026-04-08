@@ -6,12 +6,12 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { Cell, Default, handler, NAME, pattern, toSchema, UI, } from "commonfabric";
 import "commonfabric/schema";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     text: Default<string, "">;
 }
@@ -28,7 +28,7 @@ type InputEventType = {
         message: string;
     };
 };
-const inputSchema = __cfHelpers.__ct_data({
+const inputSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         title: {
@@ -57,7 +57,7 @@ const inputSchema = __cfHelpers.__ct_data({
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-const outputSchema = __cfHelpers.__ct_data({
+const outputSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         items_count: {

@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * Edge case: derive with a .map() result as input, NO captures in derive callback,
  * and NO explicit type annotation on the callback parameter.
@@ -23,7 +23,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Cell, derive, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     id: number;
     value: string;

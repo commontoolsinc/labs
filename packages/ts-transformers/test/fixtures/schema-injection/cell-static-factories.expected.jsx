@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { Cell, OpaqueCell, Stream } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: cell-static-factories
 // Verifies: static cell factories inject schemas from explicit, inferred, and contextual types
 //   Cell.of<string>("hello") → Cell.of<string>("hello", { type: "string" })

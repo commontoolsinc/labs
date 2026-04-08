@@ -132,7 +132,7 @@ describe("Engine.compile()", () => {
         {
           name: "/main.tsx",
           contents: [
-            'import { handler, type Writable } from "commontools";',
+            'import { handler, type Writable } from "commonfabric";',
             "const trigger = handler<unknown, { value: Writable<number> }>(",
             "  async (_event, state) => {",
             "    state.value.set(await process(state.value.get()));",
@@ -225,7 +225,7 @@ describe("Engine.compile()", () => {
     await expect(engine.compile(program)).rejects.toThrow();
   });
 
-  it("emits __ct_data for CTS top-level data and evaluates it at runtime", async () => {
+  it("emits __cf_data for CTS top-level data and evaluates it at runtime", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -242,7 +242,7 @@ describe("Engine.compile()", () => {
 
     const { jsScript, id } = await engine.compile(program);
 
-    expect(jsScript.js).toContain("__ct_data");
+    expect(jsScript.js).toContain("__cf_data");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBe("Open");
@@ -256,7 +256,7 @@ describe("Engine.compile()", () => {
           name: "/main.ts",
           contents: [
             "/// <cts-enable />",
-            'import { nonPrivateRandom, safeDateNow } from "commontools";',
+            'import { nonPrivateRandom, safeDateNow } from "commonfabric";',
             "const startedAt = safeDateNow();",
             "const seed = nonPrivateRandom();",
             "export default function probe() {",
@@ -275,8 +275,8 @@ describe("Engine.compile()", () => {
     const { jsScript, id } = await engine.compile(program);
     expect(jsScript.js).toContain("safeDateNow");
     expect(jsScript.js).toContain("nonPrivateRandom");
-    expect(jsScript.js).not.toContain("__ctHelpers.safeDateNow");
-    expect(jsScript.js).not.toContain("__ctHelpers.nonPrivateRandom");
+    expect(jsScript.js).not.toContain("__cfHelpers.safeDateNow");
+    expect(jsScript.js).not.toContain("__cfHelpers.nonPrivateRandom");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     const result = main?.default();
@@ -449,7 +449,7 @@ ${FACTORY_SHADOW_GUARDS}
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            "import { pattern, lift } from 'commontools';",
+            "import { pattern, lift } from 'commonfabric';",
             "const doubled = lift((value: number) => value * 2);",
             "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
           ].join("\n"),
@@ -495,7 +495,7 @@ ${FACTORY_SHADOW_GUARDS}
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            "import { pattern, lift } from 'commontools';",
+            "import { pattern, lift } from 'commonfabric';",
             "const doubled = lift((value: number) => value * 2);",
             "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
           ].join("\n"),
@@ -573,7 +573,7 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/main.ts",
           contents: [
-            'import { schema } from "commontools";',
+            'import { schema } from "commonfabric";',
             "const model = schema({",
             '  type: "object",',
             '  properties: { count: { type: "number" } },',
@@ -598,17 +598,17 @@ ${FACTORY_SHADOW_GUARDS}
     });
   });
 
-  it("allows explicit __ct_data() snapshots without CTS", async () => {
+  it("allows explicit __cf_data() snapshots without CTS", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
         {
           name: "/main.ts",
           contents: [
-            'import { __ct_data, nonPrivateRandom, safeDateNow } from "commontools";',
+            'import { __cf_data, nonPrivateRandom, safeDateNow } from "commonfabric";',
             "const startedAt = safeDateNow();",
             "const seed = nonPrivateRandom();",
-            "const snapshot = __ct_data({ startedAt, seed });",
+            "const snapshot = __cf_data({ startedAt, seed });",
             "export default snapshot;",
           ].join("\n"),
         },
@@ -622,7 +622,7 @@ ${FACTORY_SHADOW_GUARDS}
     expect(typeof main?.default?.seed).toBe("number");
   });
 
-  it("rejects raw mutable top-level exports without __ct_data()", async () => {
+  it("rejects raw mutable top-level exports without __cf_data()", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -640,7 +640,7 @@ ${FACTORY_SHADOW_GUARDS}
     await expect(engine.compile(program)).rejects.toThrow();
   });
 
-  it("rejects raw top-level helper calls without __ct_data()", async () => {
+  it("rejects raw top-level helper calls without __cf_data()", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -657,7 +657,7 @@ ${FACTORY_SHADOW_GUARDS}
     };
 
     await expect(engine.compile(program)).rejects.toThrow(
-      "Top-level call results must be wrapped in __ct_data() in SES mode",
+      "Top-level call results must be wrapped in __cf_data() in SES mode",
     );
   });
 
@@ -684,13 +684,13 @@ ${FACTORY_SHADOW_GUARDS}
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data)(");
+    expect(jsScript.js).toContain("__cf_data)(");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBe(25);
   });
 
-  it("compiles mixed CTS and non-CTS files with snapshot helpers through __ctHelpers", async () => {
+  it("compiles mixed CTS and non-CTS files with snapshot helpers through __cfHelpers", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -698,7 +698,7 @@ ${FACTORY_SHADOW_GUARDS}
           name: "/helpers.ts",
           contents: [
             "/// <cts-enable />",
-            'import { lift } from "commontools";',
+            'import { lift } from "commonfabric";',
             "export const increment = lift((value: number) => value + 1);",
           ].join("\n"),
         },
@@ -722,7 +722,7 @@ ${FACTORY_SHADOW_GUARDS}
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ctHelpers.__ct_data(");
+    expect(jsScript.js).toContain("__cfHelpers.__cf_data(");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBe(25);
@@ -735,7 +735,7 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/main.ts",
           contents: [
-            'import { handler } from "commontools";',
+            'import { handler } from "commonfabric";',
             "export default handler((_event: { count: number }, state: { count: number }) => {",
             "  state.count = state.count + 1;",
             "});",
@@ -844,7 +844,7 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { pattern, schema } from "commontools";',
+            'import { pattern, schema } from "commonfabric";',
             "const model = schema({",
             '  type: "object",',
             '  properties: { count: { type: "number" } },',
@@ -872,7 +872,7 @@ describe("Engine in SES mode", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            'import { lift } from "commontools";',
+            'import { lift } from "commonfabric";',
             'const labels = (() => ({ open: "Open" }))();',
             "export default lift(() => labels.open);",
           ].join("\n"),
@@ -881,7 +881,7 @@ describe("Engine in SES mode", () => {
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data");
+    expect(jsScript.js).toContain("__cf_data");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBeDefined();
@@ -895,7 +895,7 @@ describe("Engine in SES mode", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            'import { lift } from "commontools";',
+            'import { lift } from "commonfabric";',
             "const lookup = {",
             '  get open() { return "Open"; },',
             "};",
@@ -906,7 +906,7 @@ describe("Engine in SES mode", () => {
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data");
+    expect(jsScript.js).toContain("__cf_data");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBeDefined();
@@ -920,7 +920,7 @@ describe("Engine in SES mode", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            'import { lift } from "commontools";',
+            'import { lift } from "commonfabric";',
             'const lookup = new Proxy({ open: "Open" }, {',
             "  get(target, key) {",
             '    return key === "open" ? "Open" : Reflect.get(target, key);',
@@ -933,7 +933,7 @@ describe("Engine in SES mode", () => {
     };
 
     await expect(engine.compile(program)).rejects.toThrow(
-      /Mutable top-level data must be wrapped in __ct_data|Only verified plain data|Only trusted builder calls/,
+      /Mutable top-level data must be wrapped in __cf_data|Only verified plain data|Only trusted builder calls/,
     );
   });
 
@@ -945,7 +945,7 @@ describe("Engine in SES mode", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            'import { lift } from "commontools";',
+            'import { lift } from "commonfabric";',
             "const lookup = (() => {",
             '  const tag = Symbol("open");',
             '  return { [tag]: "Open" };',
@@ -957,7 +957,7 @@ describe("Engine in SES mode", () => {
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data");
+    expect(jsScript.js).toContain("__cf_data");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBeDefined();
@@ -971,7 +971,7 @@ describe("Engine in SES mode", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            'import { pattern } from "commontools";',
+            'import { pattern } from "commonfabric";',
             "export default pattern(() => ({",
             "  ui: <>Hello</>,",
             "}));",
@@ -982,7 +982,7 @@ describe("Engine in SES mode", () => {
 
     const { jsScript, id } = await engine.compile(program);
 
-    expect(jsScript.js).toContain("__ctHelpers.h.fragment");
+    expect(jsScript.js).toContain("__cfHelpers.h.fragment");
     expect(jsScript.js).not.toContain(".fragment =");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
@@ -997,7 +997,7 @@ describe("Engine in SES mode", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            'import { safeDateNow } from "commontools";',
+            'import { safeDateNow } from "commonfabric";',
             "function buildYears() {",
             "  const currentYear = new Date(safeDateNow()).getFullYear();",
             "  const years: string[] = [];",
@@ -1014,7 +1014,7 @@ describe("Engine in SES mode", () => {
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data(buildYears())");
+    expect(jsScript.js).toContain("__cf_data(buildYears())");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toHaveLength(3);
@@ -1040,7 +1040,7 @@ describe("Engine in SES mode", () => {
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data(Object.fromEntries(");
+    expect(jsScript.js).toContain("__cf_data(Object.fromEntries(");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toEqual({
@@ -1064,7 +1064,7 @@ describe("Engine in SES mode", () => {
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data(/^[a-z]+$/)");
+    expect(jsScript.js).toContain("__cf_data(/^[a-z]+$/)");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBeInstanceOf(RegExp);
@@ -1125,10 +1125,10 @@ describe("Engine in SES mode", () => {
 
     const { jsScript, id } = await engine.compile(program);
     expect(jsScript.js).toMatch(
-      /exports\.TEMPLATE_REGISTRY = (?:commonfabric|commontools)_\d+\.__ctHelpers\.__ct_data\(\{/,
+      /exports\.TEMPLATE_REGISTRY = commonfabric_\d+\.__cfHelpers\.__cf_data\(\{/,
     );
     expect(jsScript.js).toMatch(
-      /exports\.INTERNAL_MODULE_TYPES = (?:commonfabric|commontools)_\d+\.__ctHelpers\.__ct_data\(new Set\(\["type-picker"\]\)\);/,
+      /exports\.INTERNAL_MODULE_TYPES = commonfabric_\d+\.__cfHelpers\.__cf_data\(new Set\(\["type-picker"\]\)\);/,
     );
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
@@ -1200,7 +1200,7 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { patternTool } from "commontools";',
+            'import { patternTool } from "commonfabric";',
             "export default patternTool(() => ({ ok: true }));",
           ].join("\n"),
         },
@@ -1219,7 +1219,7 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { lift, schema } from "commontools";',
+            'import { lift, schema } from "commonfabric";',
             "const state = schema({",
             '  type: "object",',
             '  properties: { count: { type: "number" } },',
@@ -1243,7 +1243,7 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { lift, schema } from "commontools";',
+            'import { lift, schema } from "commonfabric";',
             "const state = schema({",
             '  type: "object",',
             '  properties: { count: { type: "number" } },',
@@ -1267,7 +1267,7 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { toSchema } from "commontools";',
+            'import { toSchema } from "commonfabric";',
             "export default toSchema<{ count: number }>({",
             "  default: { count: 0 },",
             "});",
@@ -1333,7 +1333,7 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { lift } from "commontools";',
+            'import { lift } from "commonfabric";',
             "export default lift(function step() {",
             "  const self = step as typeof step & { count?: number };",
             "  self.count = (self.count ?? 0) + 1;",

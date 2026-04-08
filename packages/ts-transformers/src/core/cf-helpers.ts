@@ -2,18 +2,17 @@ import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
 
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
-export const CT_HELPERS_IDENTIFIER = "__ctHelpers";
-export const CT_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
-const CT_DATA_HELPER_KEEP_IDENTIFIER = "__cfDataHelperKeep";
+export const CF_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
+const CF_DATA_HELPER_KEEP_IDENTIFIER = "__cfDataHelperKeep";
 
 const CF_HELPERS_SPECIFIER = "commonfabric";
 
 const HELPERS_STMT =
-  `import { ${CT_HELPERS_IDENTIFIER} as ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
-const CT_DATA_HELPER_STMT =
-  `import { __ct_data as ${CT_DATA_HELPER_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
-const CT_DATA_HELPER_USED_STMT = `// @ts-ignore: Internals
-const ${CT_DATA_HELPER_KEEP_IDENTIFIER} = ${CT_DATA_HELPER_IDENTIFIER};
+  `import { ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
+const CF_DATA_HELPER_STMT =
+  `import { __cf_data as ${CF_DATA_HELPER_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
+const CF_DATA_HELPER_USED_STMT = `// @ts-ignore: Internals
+const ${CF_DATA_HELPER_KEEP_IDENTIFIER} = ${CF_DATA_HELPER_IDENTIFIER};
 `;
 
 const HELPERS_USED_STMT = `// @ts-ignore: Internals
@@ -36,7 +35,7 @@ export class CFHelpers {
         this.#helperIdent = helperSymbol;
       }
 
-      const dataHelperSymbol = getCTDataHelperIdentifier(stmt);
+      const dataHelperSymbol = getCFDataHelperIdentifier(stmt);
       if (dataHelperSymbol) {
         this.#dataHelperIdent = dataHelperSymbol;
       }
@@ -187,13 +186,13 @@ export function injectCfHelpers(source: string): string {
   ].join("\n");
 }
 
-export function injectCtDataHelper(source: string): string {
-  checkReservedHelperVar(source, CT_DATA_HELPER_IDENTIFIER);
-  checkReservedHelperVar(source, CT_DATA_HELPER_KEEP_IDENTIFIER);
+export function injectCfDataHelper(source: string): string {
+  checkReservedHelperVar(source, CF_DATA_HELPER_IDENTIFIER);
+  checkReservedHelperVar(source, CF_DATA_HELPER_KEEP_IDENTIFIER);
   return [
-    CT_DATA_HELPER_STMT,
+    CF_DATA_HELPER_STMT,
     source,
-    CT_DATA_HELPER_USED_STMT,
+    CF_DATA_HELPER_USED_STMT,
   ].join("\n");
 }
 
@@ -239,20 +238,20 @@ function getCFHelpersIdentifier(
   if (!ts.isStringLiteral(moduleSpecifier)) return;
   if (moduleSpecifier.text !== CF_HELPERS_SPECIFIER) return;
 
-  // Check it imports a named `__ctHelpers` binding aliased to `__cfHelpers`.
+  // Check it imports the internal `__cfHelpers` binding from commonfabric.
   if (!importClause || !ts.isImportClause(importClause)) return;
   const { namedBindings } = importClause;
   if (!namedBindings || !ts.isNamedImports(namedBindings)) return;
   for (const element of namedBindings.elements) {
     const bindingName = element.propertyName ?? element.name;
-    if (bindingName.text === CT_HELPERS_IDENTIFIER) {
+    if (bindingName.text === CF_HELPERS_IDENTIFIER) {
       return element.name;
     }
   }
   return;
 }
 
-function getCTDataHelperIdentifier(
+function getCFDataHelperIdentifier(
   statement: ts.Statement,
 ): ts.Identifier | undefined {
   if (!ts.isImportDeclaration(statement)) return;
@@ -265,10 +264,10 @@ function getCTDataHelperIdentifier(
   const { namedBindings } = importClause;
   if (!namedBindings || !ts.isNamedImports(namedBindings)) return;
   for (const element of namedBindings.elements) {
-    if (element.name.text !== CT_DATA_HELPER_IDENTIFIER) {
+    if (element.name.text !== CF_DATA_HELPER_IDENTIFIER) {
       continue;
     }
-    if ((element.propertyName ?? element.name).text !== "__ct_data") {
+    if ((element.propertyName ?? element.name).text !== "__cf_data") {
       continue;
     }
     return element.name;

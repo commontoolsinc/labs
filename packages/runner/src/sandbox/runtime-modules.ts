@@ -22,32 +22,21 @@ export const getRuntimeModuleTypes = (() => {
     depTypes = {
       "commonfabric": builderTypes,
       "commonfabric/schema": schemaTypes,
-      "commontools": builderTypes,
-      "commontools/schema": schemaTypes,
       "turndown": await cache.getText("types/turndown.d.ts"),
-      "@commontools/html": builderTypes,
-      "@commontools/builder": builderTypes,
-      "@commontools/runner": builderTypes,
     };
     return depTypes;
   };
 })();
 
 export function getRuntimeModuleExports() {
-  const { commonfabric, commontools, exportsCallback } = createBuilder();
+  const { commonfabric, exportsCallback } = createBuilder();
   const runtimeExports = freezeSandboxValue({
     "commonfabric": commonfabric,
     // commonfabric/schema only exports types, no runtime values needed
     "commonfabric/schema": {},
-    "commontools": commontools,
-    // commontools/schema only exports types, no runtime values needed
-    "commontools/schema": {},
     // __esModule lets this load in the AMD loader
     // when finding the "default"
     "turndown": { default: turndown, __esModule: true },
-    "@commontools/html": commontools,
-    "@commontools/builder": commontools,
-    "@commontools/runner": commontools,
   });
 
   return {

@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression: .map() on a property access of a computed result inside
  * another computed() should NOT be transformed to .mapWithPattern().
@@ -17,7 +17,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     name: string;
     done: boolean;

@@ -257,7 +257,7 @@ export function evaluateCallbackSourceInSES(
 }
 
 let sesInitialized = false;
-const SES_RUNTIME_STATE = Symbol.for("@commontools/runner/ses-runtime-state");
+const SES_RUNTIME_STATE = Symbol.for("@commonfabric/runner/ses-runtime-state");
 
 function ensureSESInitialized(lockdownEnabled: boolean): void {
   if (!lockdownEnabled) {
