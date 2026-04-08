@@ -238,6 +238,92 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("invalidates prepared state when the trust snapshot changes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-trust-snapshot",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        tx,
+      );
+      cell.set({ secret: "value" });
+
+      tx.setCfcTrustSnapshot({
+        id: "snapshot-a",
+        actingPrincipal: signer.did(),
+      });
+      tx.prepareCfc();
+      tx.setCfcTrustSnapshot({
+        id: "snapshot-b",
+        actingPrincipal: signer.did(),
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("invalidated");
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "relevant transaction was not prepared",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("invalidates prepared state when the implementation identity changes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-implementation-identity",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        tx,
+      );
+      cell.set({ secret: "value" });
+
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "builtin:a",
+      });
+      tx.prepareCfc();
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "builtin:b",
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("invalidated");
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "relevant transaction was not prepared",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("commits a prepared relevant transaction when the digest is unchanged", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

@@ -712,7 +712,7 @@ Acceptance:
 - [ ] Verified compiled user-code policy identities remain blocked until v2
       carries the richer bundle/path/location/hash identity surface
 - [ ] Unsupported identity classes fail closed for trust-sensitive checks
-- [ ] Changing the trust snapshot between prepare and commit invalidates prepare
+- [x] Changing the trust snapshot between prepare and commit invalidates prepare
 - [ ] Unknown implementation identity is treated as untrusted
 
 ### 9. Flow-Precision and Structural Claims
