@@ -1206,10 +1206,20 @@ export class Scheduler {
             this.idempotencyCheckMode &&
             !this.isEffectAction.get(action)
           ) {
-            this.runIdempotencyRecheck(action, tx, log);
+            logger.timeStart("scheduler", "run", "idempotencyRecheck");
+            try {
+              this.runIdempotencyRecheck(action, tx, log);
+            } finally {
+              logger.timeEnd("scheduler", "run", "idempotencyRecheck");
+            }
           }
 
-          this.resubscribe(action, log);
+          logger.timeStart("scheduler", "run", "resubscribe");
+          try {
+            this.resubscribe(action, log);
+          } finally {
+            logger.timeEnd("scheduler", "run", "resubscribe");
+          }
           resolve(result);
         }
       };

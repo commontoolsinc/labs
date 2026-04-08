@@ -1747,16 +1747,22 @@ export class Runner {
             verifiedLoadId,
           )
           : undefined;
-        const postRun = (result: any) =>
-          this.handleJavaScriptHandlerResult(
-            tx,
-            result,
-            name,
-            frame,
-            processCell,
-            addCancel,
-            cause,
-          );
+        const postRun = (result: any) => {
+          logger.timeStart("stream", "postRun");
+          try {
+            return this.handleJavaScriptHandlerResult(
+              tx,
+              result,
+              name,
+              frame,
+              processCell,
+              addCancel,
+              cause,
+            );
+          } finally {
+            logger.timeEnd("stream", "postRun");
+          }
+        };
 
         return result instanceof Promise
           ? result.then(postRun)
@@ -1926,19 +1932,25 @@ export class Runner {
             verifiedLoadId,
           )
           : undefined;
-        const postRun = (result: any) =>
-          this.writeJavaScriptActionResult(
-            tx,
-            result,
-            name,
-            frame,
-            processCell,
-            outputs,
-            addCancel,
-            resultFor,
-            previousResultCellRef,
-            (link) => action.ignoredSchedulingWrites?.push(link),
-          );
+        const postRun = (result: any) => {
+          logger.timeStart("action", "postRun");
+          try {
+            return this.writeJavaScriptActionResult(
+              tx,
+              result,
+              name,
+              frame,
+              processCell,
+              outputs,
+              addCancel,
+              resultFor,
+              previousResultCellRef,
+              (link) => action.ignoredSchedulingWrites?.push(link),
+            );
+          } finally {
+            logger.timeEnd("action", "postRun");
+          }
+        };
 
         return result instanceof Promise
           ? result.then(postRun).catch(handleErrorOutput)
