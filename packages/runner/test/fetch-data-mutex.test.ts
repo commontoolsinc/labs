@@ -6,6 +6,10 @@ import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
 import { setPatternEnvironment } from "../src/env.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-data mutex");
@@ -111,6 +115,47 @@ describe("fetch-data mutex mechanism", () => {
     // Should have made the fetch call
     expect(fetchCalls.length).toBeGreaterThan(0);
     expect(fetchCalls[0].url).toContain("/api/test");
+  });
+
+  it("should enqueue fetchData work behind the post-commit outbox", async () => {
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxCommit = txPrototype.commit;
+    const originalWrapperCommit = wrapperPrototype.commit;
+    let committed = false;
+
+    txPrototype.commit = function (...args) {
+      committed = true;
+      return originalTxCommit.apply(this, args as never);
+    };
+    wrapperPrototype.commit = function (...args) {
+      committed = true;
+      return originalWrapperCommit.apply(this, args as never);
+    };
+
+    const resultCell = runtime.getCell(space, "pre-commit-test", undefined, tx);
+    const result = runtime.run(tx, testPattern, {
+      url: "http://mock-test-server.local/api/pre-commit",
+    }, resultCell);
+
+    try {
+      tx.commit();
+      await result.pull();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(committed).toBe(true);
+      expect(fetchCalls.length).toBeGreaterThan(0);
+      expect(fetchCalls[0].url).toContain("/api/pre-commit");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } finally {
+      txPrototype.commit = originalTxCommit;
+      wrapperPrototype.commit = originalWrapperCommit;
+    }
   });
 
   it("should handle concurrent requests with same inputs (mutex test)", async () => {

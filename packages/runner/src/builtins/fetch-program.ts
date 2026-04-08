@@ -6,7 +6,7 @@ import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
-import { computeInputHash } from "./fetch-utils.ts";
+import { computeInputHashFromValue } from "./fetch-utils.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
 
@@ -26,6 +26,24 @@ type FetchState =
 interface FetchCacheEntry {
   inputHash: string;
   state: FetchState;
+}
+
+const fetchProgramInputSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      url: { type: "string" },
+    },
+  },
+  true,
+);
+
+function snapshotFetchProgramInputs(
+  cell: Cell<{ url?: string; result?: ProgramResult }>,
+): { url?: string } {
+  const snapshot = cell.asSchema(fetchProgramInputSchema).get() ??
+    ({} as { url?: string });
+  return createFrozenRequestSnapshot({ url: snapshot.url });
 }
 
 // Full schema for cache structure to ensure proper validation when reading back
@@ -201,11 +219,9 @@ export function fetchProgram(
       cellsInitialized = true;
     }
 
-    const requestSnapshot = createFrozenRequestSnapshot(
-      inputsCell.getAsQueryResult([], tx),
-    );
+    const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
     const { url } = requestSnapshot;
-    const inputHash = computeInputHash(tx, inputsCell);
+    const inputHash = computeInputHashFromValue(requestSnapshot);
 
     if (!url) {
       // When URL is empty, clear outputs
@@ -232,17 +248,23 @@ export function fetchProgram(
         },
       });
 
-      // Start fetch asynchronously
-      myRequestId = requestId;
-      abortController = new AbortController();
-      startFetch(
-        runtime,
-        cache,
-        inputHash,
-        url,
-        requestId,
-        abortController.signal,
-      );
+      tx.enqueuePostCommitEffect({
+        id: `fetchProgram:${requestId}`,
+        kind: "fetchProgram-start",
+        flush: () => {
+          // Start fetch asynchronously only after the transaction commits.
+          myRequestId = requestId;
+          abortController = new AbortController();
+          startFetch(
+            runtime,
+            cache,
+            inputHash,
+            url,
+            requestId,
+            abortController.signal,
+          );
+        },
+      });
     } else if (state.type === "fetching") {
       // Check for timeout
       const isTimedOut = Date.now() - state.startTime > PROGRAM_REQUEST_TIMEOUT;
