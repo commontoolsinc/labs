@@ -656,5 +656,73 @@ describe("Schema - Basic Types and References", () => {
       const _assertCurrentIsNestedCell: CurrentIsCell extends true ? true
         : never = true;
     });
+
+    it("should allow cell.get().get() for nested Cell<string> values", () => {
+      const inner = runtime.getCell<string>(
+        space,
+        "nested-cell-inner-string",
+        { type: "string" } as const satisfies JSONSchema,
+        tx,
+      );
+      inner.set("hello nested cell");
+
+      const outer = runtime.getCell<{ current: Cell<string> }>(
+        space,
+        "nested-cell-outer-string",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "string",
+              asCell: true,
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      outer.set({ current: inner });
+
+      const currentCell = outer.key("current");
+      const nestedStringCell = currentCell.get();
+
+      expect(isCell(nestedStringCell)).toBe(true);
+      expect(nestedStringCell.get()).toBe("hello nested cell");
+    });
+
+    it('should honor explicit asCell: ["cell", "cell"] schema markers', () => {
+      const inner = runtime.getCell<string>(
+        space,
+        "double-ascell-inner-string",
+        { type: "string" } as const satisfies JSONSchema,
+        tx,
+      );
+      inner.set("hello double asCell");
+
+      const outer = runtime.getCell<{ current: Cell<Cell<string>> }>(
+        space,
+        "double-ascell-outer-string",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "string",
+              asCell: ["cell", "cell"],
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      outer.set({ current: inner });
+
+      const currentCell = outer.key("current");
+      const outerNestedCell = currentCell.get();
+      const innerStringCell = outerNestedCell.get();
+
+      expect(isCell(outerNestedCell)).toBe(true);
+      expect(isCell(innerStringCell)).toBe(true);
+      expect(innerStringCell.get()).toBe("hello double asCell");
+    });
   });
 });

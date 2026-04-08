@@ -560,18 +560,30 @@ class TransformObjectCreator
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(this.runtime, this.tx, link);
     } else if (isRecord(link.schema)) {
-      const { asCell: _c, asStream: _s, ...restSchema } = link.schema;
-      const cellKind = ContextualFlowControl.isAsCell(link.schema)
-        ? "cell"
-        : ContextualFlowControl.isAsStream(link.schema)
-        ? "stream"
-        : undefined;
-      if (cellKind !== undefined) {
+      const { asCell, asStream, ...restSchema } = link.schema;
+      let asCellValues = [];
+      // Support both modern and legacy versions
+      if (Array.isArray(asCell)) {
+        asCellValues = asCell;
+      } else if (asCell === true) {
+        asCellValues = ["cell"];
+      } else if (asStream === true) {
+        asCellValues = ["stream"];
+      }
+      if (asCellValues.length > 0) {
+        // We'll use the first asCell for the outermost, and pass the rest
+        // in with the schema for the created cell.
+        const cellKind = asCellValues[0];
         // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
-        // TODO(@ubik2): Figure out if we should purge asCell/asStream from restSchema children
         return createCell(
           this.runtime,
-          { ...link, schema: restSchema },
+          {
+            ...link,
+            schema: {
+              ...restSchema,
+              ...(asCellValues.length > 1) && { asCell: asCellValues.slice(1) },
+            },
+          },
           getTransactionForChildCells(this.tx),
           this.synced,
           cellKind,
