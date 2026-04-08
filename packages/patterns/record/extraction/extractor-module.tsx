@@ -1665,18 +1665,9 @@ export const ExtractorModule = pattern<
       errorDetailsExpanded,
     },
   ) => {
-    // ===== TRANSFORMER BUG WORKAROUND =====
-    // The TypeScript transformer has a bug where .map()/.filter()/.some() called on
-    // a computed variable aren't properly transformed to their reactive equivalents.
-    // See: packages/ts-transformers/test/fixtures/pending/computed-var-then-map.issue.md
-    // GitHub Issue: https://github.com/commontoolsinc/labs/issues/2442
-    //
-    // WORKAROUND: Compute ALL source-derived data in a SINGLE computed block, then
-    // expose individual values as simple property accesses. This avoids calling
-    // scanExtractableSources() 10+ times in separate computed blocks.
-    //
-    // PERFORMANCE IMPACT: Before this fix, extraction took 2+ minutes with 113% CPU
-    // due to O(n * 10) reactive operations. Now it's O(n) with a single scan.
+    // Compute all source-derived data in one pass so downstream views can read
+    // simple properties instead of re-running scanExtractableSources() in
+    // separate computed blocks. This keeps the extraction path O(n).
 
     // Single computed that derives ALL source-related data
     const sourceData = computed(() => {

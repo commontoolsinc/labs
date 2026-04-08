@@ -167,8 +167,6 @@ export default pattern<LobbyInput, LobbyOutput>(
     // Name input for new users
     const nameInput = Writable.of("");
 
-    // Note: Use direct property access to avoid transformer bug
-    // with || [] fallback (see computed-var-then-map.issue.md)
     const userCount = computed(() => users.get().length);
 
     return {

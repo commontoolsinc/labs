@@ -971,15 +971,6 @@ If you cannot read the image clearly, make your best guess based on what you can
                 </details>
               )}
 
-              {
-                /* Possibly Urgent Section
-                  WORKAROUND: Using CSS display:none instead of conditional rendering (ifElse or &&)
-                  because .map() inside conditionals doesn't get transformed to mapWithPattern,
-                  causing raw vnode JSON to render instead of actual UI elements.
-                  See: packages/ts-transformers/ISSUES_TO_FOLLOW_UP.md Issue #5
-                  Related: https://github.com/user/repo/commit/1b10bac4d (link subscription bug)
-              */
-              }
               <div
                 style={{
                   marginTop: "8px",
