@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     done: boolean;
 }
@@ -61,8 +72,8 @@ export default pattern((state) => {
         } }, ({ state }) => state.items);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const row = __ct_pattern_input.key("element");
+        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const row = __cf_pattern_input.key("element");
                 const view = { status: __cfHelpers.ifElse({
                         type: "boolean"
                     } as const satisfies __cfHelpers.JSONSchema, {
@@ -169,5 +180,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

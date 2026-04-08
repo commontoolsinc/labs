@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 type ItemTuple = [
     item: string,
     count: number
@@ -12,14 +23,14 @@ interface State {
 //   .map(([item]) => ...) → .mapWithPattern(pattern(...), {}) with key("element", "0")
 //   .map(([item, count], index) → key("element", "0"), key("element", "1"), key("index")
 // Context: Shorthand JSX usage like {item} must not cause array-destructured bindings to be captured
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     return {
         [UI]: (<div>
         {/* Array destructured parameter - without fix, 'item' would be
                 incorrectly captured in params due to shorthand usage in JSX */}
-        {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element", "0");
+        {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element", "0");
                 return (<div data-item={item}>{item}</div>);
             }, {
                 type: "object",
@@ -60,10 +71,10 @@ export default pattern((__ct_pattern_input) => {
             } as const satisfies __cfHelpers.JSONSchema), {})}
 
         {/* Multiple array destructured params */}
-        {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element", "0");
-                const count = __ct_pattern_input.key("element", "1");
-                const index = __ct_pattern_input.key("index");
+        {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element", "0");
+                const count = __cf_pattern_input.key("element", "1");
+                const index = __cf_pattern_input.key("index");
                 return (<div key={index}>
             {item}: {count}
           </div>);
@@ -160,5 +171,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

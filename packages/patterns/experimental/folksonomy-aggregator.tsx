@@ -24,6 +24,7 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -81,7 +82,7 @@ const handlePostEvent = handler<TagEvent, { events: Writable<TagEvent[]> }>(
       scope: event.scope,
       tag: event.tag,
       action: event.action,
-      timestamp: event.timestamp || Date.now(),
+      timestamp: event.timestamp || safeDateNow(),
     };
 
     // Add the new event to the list

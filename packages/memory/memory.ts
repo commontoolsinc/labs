@@ -12,8 +12,10 @@ import {
 import {
   AsyncResult,
   ConnectionError,
+  getDefaultMemoryVersion,
   MemorySession,
   MemorySpace as Subject,
+  type MemoryVersion,
   Query,
   QueryResult,
   Result,
@@ -29,9 +31,23 @@ import { type DID } from "@commonfabric/identity";
 
 /** A mounted space instance with both low-level and high-level access. */
 type MountedSpace = Space.SpaceInstance<Subject>;
+const V1_MEMORY_VERSION: MemoryVersion = "v1";
+
+const v1OnlyEntryPointMessage = (
+  entryPoint: string,
+  memoryVersion: MemoryVersion,
+) =>
+  `${entryPoint} is a legacy memory/v1 entry point and does not support memoryVersion=${memoryVersion}. Use the memory/v2 engine instead.`;
+
+const toSystemError = (message: string): SystemError => ({
+  name: "SystemError",
+  code: 500,
+  message,
+});
 
 interface Session {
   store: URL;
+  memoryVersion: MemoryVersion;
   subscribers: Set<Subscriber>;
   spaces: Map<string, MountedSpace>;
 }
@@ -46,13 +62,24 @@ export class Memory implements Session, MemorySession {
     public subscribers: Set<Subscriber> = new Set(),
     public spaces: Map<Subject, MountedSpace> = new Map(),
   ) {
+    if (options.memoryVersion === "v2") {
+      throw new globalThis.Error(
+        v1OnlyEntryPointMessage("memory.Memory", "v2"),
+      );
+    }
     this.store = options.store;
+    this.memoryVersion = options.memoryVersion ?? V1_MEMORY_VERSION;
     this.ready = Promise.resolve();
     this.#serviceDid = options.serviceDid;
   }
+  memoryVersion: MemoryVersion;
   clone() {
     return new Memory(
-      { store: this.store, serviceDid: this.serviceDid() },
+      {
+        store: this.store,
+        serviceDid: this.serviceDid(),
+        memoryVersion: this.memoryVersion,
+      },
       new Set(this.subscribers),
       new Map(this.spaces),
     );
@@ -271,15 +298,11 @@ export const mount = async (
       return { ok: space };
     } else {
       span.setAttribute("memory.mount.cache", "miss");
-
-      // Detect if store path is a file (has extension) or directory
-      const isFile = Path.extname(session.store.pathname) !== "";
-
-      // If store is a file: use it directly (e.g., /data/spaces/xyz/5/space.db)
-      // If store is a directory: create per-space files (e.g., /cache/memory/did:key:z6Mkr4....sqlite)
-      const spaceUrl = isFile
-        ? session.store
-        : new URL(`./${subject}.sqlite`, session.store);
+      const spaceUrl = resolveSpaceStoreUrl(
+        session.store,
+        subject,
+        session.memoryVersion,
+      );
 
       const result = await Space.open({
         url: spaceUrl,
@@ -299,11 +322,56 @@ export const mount = async (
 
 export interface ServiceOptions {
   serviceDid: DID;
+  memoryVersion?: MemoryVersion;
 }
 
 export interface Options extends ServiceOptions {
   store: URL;
 }
+
+const assertSafeStoreSubject = (subject: Subject): void => {
+  const value = String(subject);
+  if (
+    value.length === 0 ||
+    value.includes("\0") ||
+    value.includes("/") ||
+    value.includes("\\") ||
+    value === "." ||
+    value === ".."
+  ) {
+    throw new globalThis.Error(
+      `Invalid memory space identifier for store path: ${value}`,
+    );
+  }
+};
+
+export const resolveSpaceStoreUrl = (
+  store: URL,
+  subject: Subject,
+  memoryVersion: MemoryVersion = getDefaultMemoryVersion(),
+): URL => {
+  assertSafeStoreSubject(subject);
+  const storePath = store.protocol === "file:"
+    ? Path.fromFileUrl(store)
+    : store.pathname;
+  const isFile = Path.extname(storePath) !== "";
+
+  if (!isFile) {
+    if (memoryVersion === "v2") {
+      return new URL(`./engine-v3/${subject}.sqlite`, store);
+    }
+
+    return new URL(`./${subject}.sqlite`, store);
+  }
+
+  if (memoryVersion === "v2") {
+    const ext = Path.extname(storePath);
+    const stem = ext === "" ? storePath : storePath.slice(0, -ext.length);
+    return Path.toFileUrl(Path.join(`${stem}.engine-v3`, `${subject}.sqlite`));
+  }
+
+  return store;
+};
 
 export const open = async (
   options: Options,
@@ -311,6 +379,15 @@ export const open = async (
   return await traceAsync("memory.open", async (span) => {
     addMemoryAttributes(span, { operation: "open" });
     span.setAttribute("memory.store_url", options.store.toString());
+
+    if (options.memoryVersion === "v2") {
+      return {
+        error: Error.connection(
+          options.store,
+          toSystemError(v1OnlyEntryPointMessage("memory.open", "v2")),
+        ),
+      };
+    }
 
     try {
       if (options.store.protocol === "file:") {
@@ -340,6 +417,7 @@ export const open = async (
 export const emulate = (options: ServiceOptions) =>
   new Memory({
     ...options,
+    memoryVersion: options.memoryVersion ?? V1_MEMORY_VERSION,
     store: new URL("memory://"),
   });
 

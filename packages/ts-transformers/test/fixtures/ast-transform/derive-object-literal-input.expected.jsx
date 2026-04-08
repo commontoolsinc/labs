@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, derive, lift } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 const stage = cell<string>("initial", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
@@ -66,5 +77,4 @@ const _summary = derive({
     ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

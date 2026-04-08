@@ -7,7 +7,7 @@ interface State {
 
 // FIXTURE: map-destructured-opaque-local-capture
 // Verifies: destructured opaque locals captured by nested map callbacks stay reactive
-//   const { tasks } = section → const tasks = __ct_pattern_input.key("params", "tasks")
+//   const { tasks } = section → const tasks = __cf_pattern_input.key("params", "tasks")
 //   nested tag callback reads tasks.length through key("length"), not plain params values
 export default pattern<State>((state) => ({
   [UI]: (

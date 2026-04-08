@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: literal-widen-explicit-type-args
 // Verifies: Cell.of with explicit type arguments injects schema matching the type arg
 //   Cell.of<number>(10) → Cell.of<number>(10, { type: "number" })
@@ -17,7 +28,7 @@ export default function TestLiteralWidenExplicitTypeArgs() {
     } as const satisfies __cfHelpers.JSONSchema);
     return null;
 }
+__cfHardenFn(TestLiteralWidenExplicitTypeArgs);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

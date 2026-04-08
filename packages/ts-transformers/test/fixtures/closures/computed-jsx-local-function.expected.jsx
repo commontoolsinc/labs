@@ -1,11 +1,22 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: computed-jsx-local-function
 // Verifies: computed() with a locally-defined function inside the callback is closure-extracted
 //   computed(() => { const format = ...; return <span>{format(count)}</span> }) → derive(captureSchema, resultSchema, { count }, ({ count }) => { ... })
 //   The pattern param `count` is captured with asOpaque: true in the schema.
-export default pattern((__ct_pattern_input) => {
-    const count = __ct_pattern_input.key("count");
+export default pattern((__cf_pattern_input) => {
+    const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
         {__cfHelpers.derive({
@@ -82,5 +93,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

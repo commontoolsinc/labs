@@ -20,16 +20,27 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
+import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
 
+const createBenchArrayItems = (length: number) =>
+  Array.from({ length }, (_, i) => ({
+    id: i,
+    value: `item-${i}`,
+  }));
+
 // Setup helper to create runtime and transaction
 function setup() {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
@@ -38,12 +49,11 @@ function setup() {
 // Cleanup helper
 async function cleanup(
   runtime: Runtime,
-  storageManager: ReturnType<typeof StorageManager.emulate>,
+  _storageManager: ReturnType<typeof StorageManager.emulate>,
   tx: IExtendedStorageTransaction,
 ) {
   await tx.commit();
   await runtime.dispose();
-  await storageManager.close();
 }
 
 // =============================================================================
@@ -310,7 +320,7 @@ Deno.bench({
 Deno.bench({
   name: "Cell.set() - change: nested field modification",
   group: "change",
-  async fn() {
+  async fn(b) {
     const { runtime, storageManager, tx } = setup();
 
     const cell = runtime.getCell<any>(
@@ -328,6 +338,7 @@ Deno.bench({
     cell.set(baseObj);
 
     // Change only deeply nested field
+    b.start();
     for (let i = 0; i < 100; i++) {
       cell.set({
         ...baseObj,
@@ -337,6 +348,7 @@ Deno.bench({
         },
       });
     }
+    b.end();
 
     await cleanup(runtime, storageManager, tx);
   },
@@ -605,6 +617,60 @@ Deno.bench({
   },
 });
 
+// =============================================================================
+// ARRAY STRUCTURE BENCHMARKS
+// Test path-level array structural edits that were previously missing coverage
+// =============================================================================
+
+Deno.bench({
+  name: "Cell.set() - array: path replace truncation (100↔50 items)",
+  group: "array-structure",
+  baseline: true,
+  async fn() {
+    const { runtime, storageManager, tx } = setup();
+
+    const cell = runtime.getCell<any>(
+      space,
+      "bench-array-path-truncate",
+      undefined,
+      tx,
+    );
+
+    const full = createBenchArrayItems(100);
+    const truncated = full.slice(0, 50);
+    cell.set({ items: full });
+
+    for (let i = 0; i < 100; i++) {
+      cell.key("items").set(i % 2 === 0 ? truncated : full);
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+});
+
+Deno.bench({
+  name: "Cell.set() - array: length path write (100↔50 items)",
+  group: "array-structure",
+  async fn() {
+    const { runtime, storageManager, tx } = setup();
+
+    const cell = runtime.getCell<any>(
+      space,
+      "bench-array-length-path",
+      undefined,
+      tx,
+    );
+
+    cell.set({ items: createBenchArrayItems(100) });
+
+    for (let i = 0; i < 100; i++) {
+      cell.key("items").key("length").set(i % 2 === 0 ? 50 : 100);
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+});
+
 // NOTE: A "large (500 items)" array benchmark was removed because it took ~96s
 // per iteration. Profiling showed 95% of that time was spent in SQLite writes
 // during tx.commit() (~150-200K prepared statement executions for 50K changed
@@ -813,14 +879,16 @@ Deno.bench({
   name: "Cell.set() - single transaction, many sets",
   group: "transaction",
   baseline: true,
-  async fn() {
+  async fn(b) {
     const { runtime, storageManager, tx } = setup();
 
     const cell = runtime.getCell<any>(space, "bench-single-tx", undefined, tx);
 
+    b.start();
     for (let i = 0; i < 100; i++) {
       cell.set({ value: i, data: `test-${i}` });
     }
+    b.end();
 
     await cleanup(runtime, storageManager, tx);
   },
@@ -830,10 +898,14 @@ Deno.bench({
   name: "Cell.set() - multiple transactions, one set each",
   group: "transaction",
   async fn() {
-    const storageManager = StorageManager.emulate({ as: signer });
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: BENCH_MEMORY_VERSION,
+    });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: BENCH_MEMORY_VERSION,
     });
 
     for (let i = 0; i < 100; i++) {

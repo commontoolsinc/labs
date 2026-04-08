@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { when, pattern, UI, NAME } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     enabled: boolean;
     message: string;
@@ -9,9 +20,9 @@ interface State {
 //   when(enabled, message) → when(conditionSchema, valueSchema, resultSchema, enabled, message)
 //   pattern<State>(fn)     → pattern(fn, inputSchema, outputSchema)
 // Context: when(cond, value) returns value if cond is truthy, else cond; result schema is union type
-export default pattern((__ct_pattern_input) => {
-    const enabled = __ct_pattern_input.key("enabled");
-    const message = __ct_pattern_input.key("message");
+export default pattern((__cf_pattern_input) => {
+    const enabled = __cf_pattern_input.key("enabled");
+    const message = __cf_pattern_input.key("message");
     // when(condition, value) - returns value if condition is truthy, else condition
     const result = when({
         type: "boolean"
@@ -70,5 +81,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

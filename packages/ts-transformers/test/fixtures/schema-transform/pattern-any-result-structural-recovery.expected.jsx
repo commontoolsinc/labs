@@ -1,13 +1,24 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 declare function fetchAny(): any;
 // FIXTURE: pattern-any-result-structural-recovery
 // Verifies: inferred pattern results can still emit concrete object schemas when
 // `any` only appears in nested properties.
 //   pattern<Input>(fn) → pattern(fn, inputSchema, objectResultSchema)
 // Context: the top-level result stays structural, but `title` degrades to `true`.
-export default pattern((__ct_pattern_input) => {
-    const prompt = __ct_pattern_input.key("prompt");
+export default pattern((__cf_pattern_input) => {
+    const prompt = __cf_pattern_input.key("prompt");
     return { title: fetchAny().title, prompt };
 }, {
     type: "object",
@@ -29,5 +40,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

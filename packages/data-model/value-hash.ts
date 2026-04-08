@@ -61,6 +61,11 @@ export function setModernHashConfig(enabled?: boolean): void {
   }
 }
 
+/** Returns whether modern hashing mode is currently enabled. */
+export function getModernHashConfig(): boolean {
+  return modernHashEnabled;
+}
+
 /**
  * Restores modern hashing mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or

@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE decomposes through local aliases
  *
@@ -8,6 +16,9 @@ import * as __cfHelpers from "commonfabric";
  * derives are created.
  */
 import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Entry {
     name: string;
 }
@@ -23,8 +34,9 @@ function visibleEntries(entries: Writable<Default<Entry[], [
     const list = entries.get();
     return list.filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix));
 }
-export default pattern((__ct_pattern_input) => {
-    const entries = __ct_pattern_input.key("entries");
+__cfHardenFn(visibleEntries);
+export default pattern((__cf_pattern_input) => {
+    const entries = __cf_pattern_input.key("entries");
     const path = Writable.of<string[]>([], {
         type: "array",
         items: {
@@ -188,20 +200,67 @@ export default pattern((__ct_pattern_input) => {
                     entries: entries,
                     p: p
                 }, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
-                return visible.map((entry) => (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+                return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const entry = __cf_pattern_input.key("element");
+                    const pushPath = __cf_pattern_input.key("params", "pushPath");
+                    return (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+                        type: "object",
+                        properties: {
+                            pushPath: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["name"],
+                                asStream: true
+                            },
+                            entry: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["name"]
+                            }
+                        },
+                        required: ["pushPath", "entry"]
+                    } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, entry }) => pushPath.send({ name: entry.name }))({
+                        pushPath: pushPath,
+                        entry: {
+                            name: entry.key("name")
+                        }
+                    })}>
+              {entry.key("name")}
+            </button>);
+                }, {
                     type: "object",
                     properties: {
-                        pushPath: {
+                        element: {
+                            $ref: "#/$defs/Entry"
+                        },
+                        params: {
                             type: "object",
                             properties: {
-                                name: {
-                                    type: "string"
+                                pushPath: {
+                                    type: "object",
+                                    properties: {
+                                        name: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["name"],
+                                    asStream: true
                                 }
                             },
-                            required: ["name"],
-                            asStream: true
-                        },
-                        entry: {
+                            required: ["pushPath"]
+                        }
+                    },
+                    required: ["element", "params"],
+                    $defs: {
+                        Entry: {
                             type: "object",
                             properties: {
                                 name: {
@@ -210,16 +269,30 @@ export default pattern((__ct_pattern_input) => {
                             },
                             required: ["name"]
                         }
-                    },
-                    required: ["pushPath", "entry"]
-                } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, entry }) => pushPath.send({ name: entry.name }))({
-                    pushPath: pushPath,
-                    entry: {
-                        name: entry.name
                     }
-                })}>
-              {entry.name}
-            </button>));
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
+                            type: "object",
+                            properties: {}
+                        }],
+                    $defs: {
+                        UIRenderable: {
+                            type: "object",
+                            properties: {
+                                $UI: {
+                                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                                }
+                            },
+                            required: ["$UI"]
+                        }
+                    }
+                } as const satisfies __cfHelpers.JSONSchema), {
+                    pushPath: pushPath
+                });
             })()}
       </div>),
     };
@@ -258,5 +331,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

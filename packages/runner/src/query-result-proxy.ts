@@ -15,12 +15,44 @@ import { toURI } from "./uri-utils.ts";
 const MAX_RECURSION_DEPTH = 100;
 
 // Cache of target objects to their proxies, scoped by ReactivityLog
+type ProxyCache = {
+  byLink: Map<string, any>;
+  byValue: WeakMap<object, any>;
+};
+
 const proxyCacheByTx = new WeakMap<
   IExtendedStorageTransaction,
-  WeakMap<object, any>
+  ProxyCache
 >();
 // Default key if no tx is provided
 const defaultTx = {} as IExtendedStorageTransaction;
+
+const getProxyCache = (
+  tx: IExtendedStorageTransaction | undefined,
+): ProxyCache => {
+  const cacheIndex = tx ?? defaultTx;
+  let txCache = proxyCacheByTx.get(cacheIndex);
+  if (!txCache) {
+    txCache = {
+      byLink: new Map<string, any>(),
+      byValue: new WeakMap<object, any>(),
+    };
+    proxyCacheByTx.set(cacheIndex, txCache);
+  }
+  return txCache;
+};
+
+const proxyCacheKey = (
+  link: NormalizedFullLink,
+  writable: boolean,
+): string =>
+  JSON.stringify([
+    writable,
+    link.space,
+    link.id,
+    link.type,
+    link.path,
+  ]);
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -90,8 +122,8 @@ export function createQueryResultProxy<T>(
   }
 
   // Resolve path and follow links to actual value.
-  const txStatus = tx?.status();
-  const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
+  const readTx = tx === undefined ? runtime.edit() : runtime.readTx(tx);
+  const proxyTx = tx ?? readTx;
   link = resolveLink(runtime, readTx, link);
   const value = readTx.readValueOrThrow(link) as any;
 
@@ -138,21 +170,24 @@ export function createQueryResultProxy<T>(
     : value;
 
   // Get the appropriate cache index by log
-  const cacheIndex = tx ?? defaultTx;
-  let txCache = proxyCacheByTx.get(cacheIndex);
-  if (!txCache) {
-    txCache = new WeakMap<object, any>();
-    proxyCacheByTx.set(cacheIndex, txCache);
-  }
+  const txCache = getProxyCache(tx);
+  const cacheKey = proxyCacheKey(link, writable);
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
   // the same frozen object always maps to the same proxy instance.
-  const existingProxy = txCache?.get(value);
+  const existingProxy = txCache.byLink.get(cacheKey) ??
+    txCache.byValue.get(value);
   if (existingProxy) return existingProxy;
 
   const proxy = new Proxy(proxyTarget as object, {
     get: (target, prop, receiver) => {
+      if (Array.isArray(value) && prop === "length") {
+        const readTx = runtime.readTx(tx);
+        const current = readTx.readValueOrThrow(link) as typeof value;
+        return Array.isArray(current) ? current.length : 0;
+      }
+
       // When encountering a frozen property, we just return the value to
       // maintain proxy invariants.
       const descriptor = Object.getOwnPropertyDescriptor(target, prop);
@@ -168,9 +203,7 @@ export function createQueryResultProxy<T>(
             let index = 0;
             return {
               next() {
-                const readTx = (tx?.status().status === "ready")
-                  ? tx
-                  : runtime.edit();
+                const readTx = runtime.readTx(tx);
                 const length = readTx.readValueOrThrow({
                   ...link,
                   path: [...link.path, "length"],
@@ -179,7 +212,7 @@ export function createQueryResultProxy<T>(
                   const result = {
                     value: createQueryResultProxy(
                       runtime,
-                      tx,
+                      proxyTx,
                       {
                         ...link,
                         path: [...link.path, String(index)],
@@ -198,7 +231,7 @@ export function createQueryResultProxy<T>(
           };
         }
 
-        const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+        const readTx = runtime.readTx(tx);
         const current = readTx.readValueOrThrow(link) as typeof value;
 
         const returnValue = Reflect.get(current, prop, current);
@@ -219,9 +252,7 @@ export function createQueryResultProxy<T>(
             // This will also mark each element read in the log. Almost all
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
-            const readTx = (tx?.status().status === "ready")
-              ? tx
-              : runtime.edit();
+            const readTx = runtime.readTx(tx);
             const length = readTx.readValueOrThrow({
               ...link,
               path: [...link.path, "length"],
@@ -233,11 +264,15 @@ export function createQueryResultProxy<T>(
               );
             }
 
+            const current = readTx.readValueOrThrow(link) as typeof value;
             const copy = new Array(length);
             for (let i = 0; i < length; i++) {
+              if (!(i in current)) {
+                continue;
+              }
               copy[i] = createQueryResultProxy(
                 runtime,
-                tx,
+                proxyTx,
                 { ...link, path: [...link.path, String(i)] },
                 depth + 1,
                 writable,
@@ -269,16 +304,14 @@ export function createQueryResultProxy<T>(
               // CT-1173: Read fresh value from transaction, not stale proxy target.
               // The proxy target (value) is captured at proxy creation time and
               // becomes stale after writes. We must read current state from tx.
-              const readTx = (tx?.status().status === "ready")
-                ? tx
-                : runtime.edit();
+              const readTx = runtime.readTx(tx);
               const currentValue = readTx.readValueOrThrow(link) as any[];
               copy = [...currentValue];
             } else {
               copy = value.map((_, index) =>
                 createProxyForArrayValue(
                   runtime,
-                  tx,
+                  proxyTx,
                   index,
                   { ...link, path: [...link.path, String(index)] },
                   writable,
@@ -348,7 +381,7 @@ export function createQueryResultProxy<T>(
 
               result = createQueryResultProxy(
                 runtime,
-                tx,
+                proxyTx,
                 resultLink,
                 0,
                 writable,
@@ -361,7 +394,7 @@ export function createQueryResultProxy<T>(
 
       return createQueryResultProxy(
         runtime,
-        tx,
+        proxyTx,
         { ...link, path: [...link.path, prop] },
         depth + 1,
         writable,
@@ -395,14 +428,25 @@ export function createQueryResultProxy<T>(
       return true;
     },
     ownKeys: () => {
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link);
-      if (isRecord(current)) {
+      if (isRecord(current) || Array.isArray(current)) {
         return Reflect.ownKeys(current);
       }
       return Reflect.ownKeys(value);
     },
     getOwnPropertyDescriptor: (target, prop) => {
+      if (Array.isArray(target) && prop === "length") {
+        const readTx = runtime.readTx(tx);
+        const current = readTx.readValueOrThrow(link);
+        return {
+          configurable: false,
+          enumerable: false,
+          writable: true,
+          value: Array.isArray(current) ? current.length : 0,
+        };
+      }
+
       // For properties that exist on the original target (e.g. array `length`),
       // delegate to the target to satisfy proxy invariants for non-configurable
       // properties.
@@ -413,16 +457,16 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return Object.getOwnPropertyDescriptor(value, prop);
       }
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link) as typeof value;
-      if (isRecord(current) && prop in current) {
+      if ((isRecord(current) || Array.isArray(current)) && prop in current) {
         return {
           configurable: true,
           enumerable: true,
           writable: writable,
           value: createQueryResultProxy(
             runtime,
-            tx,
+            proxyTx,
             { ...link, path: [...link.path, prop as string] },
             depth + 1,
             writable,
@@ -435,9 +479,9 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return prop in value;
       }
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link);
-      if (isRecord(current)) {
+      if (isRecord(current) || Array.isArray(current)) {
         return prop in current;
       }
       return prop in value;
@@ -445,7 +489,8 @@ export function createQueryResultProxy<T>(
   }) as T;
 
   // Cache the proxy in the appropriate cache before returning
-  txCache.set(value, proxy);
+  txCache.byLink.set(cacheKey, proxy);
+  txCache.byValue.set(value, proxy);
   return proxy;
 }
 

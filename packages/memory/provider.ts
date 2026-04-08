@@ -68,6 +68,8 @@ const DOC_KEY_PATTERN = /([^/]+)\/([^/]+)\/(.+)/;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const SCHEMA_FLUSH_LOG_INTERVAL_MS = 60_000;
+const MEMORY_QUERY_STATS = typeof Deno !== "undefined" &&
+  Deno.env.get("CT_MEMORY_QUERY_STATS") === "1";
 
 /** Tracks schema flush statistics across all sessions. */
 const schemaFlushStats = {
@@ -316,6 +318,17 @@ class MemoryProviderSession<
   Space extends MemorySpace,
   MemoryProtocol extends Protocol<Space>,
 > implements ProviderSession<MemoryProtocol>, Subscriber {
+  #queryStats = {
+    subscribeQueries: 0,
+    subscribeQueryMs: 0,
+    oneShotQueries: 0,
+    oneShotQueryMs: 0,
+    incrementalQueries: 0,
+    incrementalQueryMs: 0,
+    flushes: 0,
+    flushMs: 0,
+    flushedCommits: 0,
+  };
   readable: ReadableStream<ProviderCommand<MemoryProtocol>>;
   writable: WritableStream<UCAN<ConsumerCommandInvocation<MemoryProtocol>>>;
   controller:
@@ -457,7 +470,40 @@ class MemoryProviderSession<
 
     return { ok: {} };
   }
+  private reportQueryStats(): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    const {
+      subscribeQueries,
+      subscribeQueryMs,
+      oneShotQueries,
+      oneShotQueryMs,
+      incrementalQueries,
+      incrementalQueryMs,
+      flushes,
+      flushMs,
+      flushedCommits,
+    } = this.#queryStats;
+    if (
+      subscribeQueries === 0 && oneShotQueries === 0 &&
+      incrementalQueries === 0 && flushes === 0
+    ) {
+      return;
+    }
+    logger.warn(
+      "query-stats",
+      () => [
+        `subscribe=${subscribeQueries}/${subscribeQueryMs.toFixed(1)}ms`,
+        `oneShot=${oneShotQueries}/${oneShotQueryMs.toFixed(1)}ms`,
+        `incremental=${incrementalQueries}/${incrementalQueryMs.toFixed(1)}ms`,
+        `flushes=${flushes}/${flushMs.toFixed(1)}ms`,
+        `flushedCommits=${flushedCommits}`,
+      ],
+    );
+  }
   dispose() {
+    this.reportQueryStats();
     if (this.schemaFlushTimer !== null) {
       clearTimeout(this.schemaFlushTimer);
       this.schemaFlushTimer = null;
@@ -599,6 +645,8 @@ class MemoryProviderSession<
             );
           }
           const gqSubMs = gqSubElapsed ?? 0;
+          this.#queryStats.subscribeQueries++;
+          this.#queryStats.subscribeQueryMs += gqSubMs;
           logger.debug(
             "graph-query-subscribe-done",
             () => [
@@ -642,6 +690,8 @@ class MemoryProviderSession<
           );
         }
         const gqMs = gqElapsed ?? 0;
+        this.#queryStats.oneShotQueries++;
+        this.#queryStats.oneShotQueryMs += gqMs;
         logger.debug(
           "graph-query-done",
           () => [
@@ -1223,6 +1273,9 @@ class MemoryProviderSession<
     const flushMs = performance.now() - t0;
     const prevFlushMs = this.lastFlushMs;
     this.lastFlushMs = flushMs;
+    this.#queryStats.flushes++;
+    this.#queryStats.flushMs += flushMs;
+    this.#queryStats.flushedCommits += commitCount;
     schemaFlushStats.record(commitCount, isConflict, flushMs);
     if (commitCount > 1) {
       logger.warn(
@@ -1363,115 +1416,124 @@ class MemoryProviderSession<
     spaceSession: SpaceSession<Space>,
     affectedDocs: Map<string, Set<SchemaPathSelector>>,
   ): { newFacts: Map<string, Revision<Fact>> } {
-    const newFacts = new Map<string, Revision<Fact>>();
-    // Note: classification is not used here since we're processing across all subscriptions
-    // TODO(ubik2,seefeld): Make this a per-session classification
-    const classification = ["public", "secret"];
+    logger.timeStart("graph-query", "incremental");
+    const t0 = performance.now();
+    try {
+      const newFacts = new Map<string, Revision<Fact>>();
+      // Note: classification is not used here since we're processing across all subscriptions
+      // TODO(ubik2,seefeld): Make this a per-session classification
+      const classification = ["public", "secret"];
 
-    // Share one ServerObjectManager across all evaluateDocumentLinks calls
-    // so SQLite reads from one doc traversal can be reused by the next.
-    const sharedManager = new ServerObjectManager(
-      spaceSession,
-      new Set<string>(classification),
-    );
-    // Share one SchemaMemo so traversal results from one doc are reused
-    // when traversing linked docs that overlap across affected documents.
-    const sharedMemo = createSchemaMemo();
+      // Share one ServerObjectManager across all evaluateDocumentLinks calls
+      // so SQLite reads from one doc traversal can be reused by the next.
+      const sharedManager = new ServerObjectManager(
+        spaceSession,
+        new Set<string>(classification),
+      );
+      // Share one SchemaMemo so traversal results from one doc are reused
+      // when traversing linked docs that overlap across affected documents.
+      const sharedMemo = createSchemaMemo();
 
-    // Purge these docs from the tracker -- we want to re-evaluate the queries
-    const staleSchemaTracker = new Map<string, Set<SchemaPathSelector>>();
-    for (const [docKey, _schemaSelectors] of affectedDocs) {
-      const existingSchemas = this.sharedSchemaTracker.get(docKey);
-      if (existingSchemas !== undefined) {
-        this.sharedSchemaTracker.delete(docKey);
-        staleSchemaTracker.set(docKey, existingSchemas);
+      // Purge these docs from the tracker -- we want to re-evaluate the queries
+      const staleSchemaTracker = new Map<string, Set<SchemaPathSelector>>();
+      for (const [docKey, _schemaSelectors] of affectedDocs) {
+        const existingSchemas = this.sharedSchemaTracker.get(docKey);
+        if (existingSchemas !== undefined) {
+          this.sharedSchemaTracker.delete(docKey);
+          staleSchemaTracker.set(docKey, existingSchemas);
+        }
       }
-    }
 
-    // Snapshot tracker keys BEFORE traversal so we can diff afterward.
-    // Use the tracker's size as a cheap proxy — we only need to find
-    // keys that were added during evaluateDocumentLinks.
-    const trackerSizeBefore = this.sharedSchemaTracker.size;
+      // Snapshot tracker keys BEFORE traversal so we can diff afterward.
+      // Use the tracker's size as a cheap proxy — we only need to find
+      // keys that were added during evaluateDocumentLinks.
+      const trackerSizeBefore = this.sharedSchemaTracker.size;
 
-    // Evaluate each affected doc with each of its schemas
-    // evaluateDocumentLinks does a full traversal and finds all linked documents
-    for (const [docKey, schemaSelectors] of affectedDocs) {
-      const address = this.parseDocKey(docKey);
-      if (address === undefined) continue;
-      for (const schemaSelector of schemaSelectors) {
-        evaluateDocumentLinks(
-          spaceSession,
-          address,
-          schemaSelector,
-          classification,
-          this.sharedSchemaTracker,
-          sharedManager,
-          sharedMemo,
-        );
+      // Evaluate each affected doc with each of its schemas
+      // evaluateDocumentLinks does a full traversal and finds all linked documents
+      for (const [docKey, schemaSelectors] of affectedDocs) {
+        const address = this.parseDocKey(docKey);
+        if (address === undefined) continue;
+        for (const schemaSelector of schemaSelectors) {
+          evaluateDocumentLinks(
+            spaceSession,
+            address,
+            schemaSelector,
+            classification,
+            this.sharedSchemaTracker,
+            sharedManager,
+            sharedMemo,
+          );
+        }
       }
-    }
 
-    logger.debug(
-      "incremental-update",
-      () => [
-        `affectedDocs=${affectedDocs.size}`,
-        `sqliteReads=${sharedManager.sqliteReads}`,
-        `sqliteMs=${sharedManager.sqliteTotalMs.toFixed(1)}`,
-        `sqliteCacheHits=${sharedManager.sqliteCacheHits}`,
-        `schemaMemo=${sharedMemo.size}`,
-      ],
-    );
+      logger.debug(
+        "incremental-update",
+        () => [
+          `affectedDocs=${affectedDocs.size}`,
+          `sqliteReads=${sharedManager.sqliteReads}`,
+          `sqliteMs=${sharedManager.sqliteTotalMs.toFixed(1)}`,
+          `sqliteCacheHits=${sharedManager.sqliteCacheHits}`,
+          `schemaMemo=${sharedMemo.size}`,
+        ],
+      );
 
-    // Use docs loaded by the manager during traversal as candidates for
-    // new facts. This avoids iterating the entire sharedSchemaTracker
-    // (which can have thousands of entries) on every commit.
-    // The manager already loaded these docs from SQLite, so we have their
-    // data without an extra read.
-    if (this.sharedSchemaTracker.size > trackerSizeBefore) {
-      for (const loaded of sharedManager.getReadDocs()) {
-        const docKey =
-          `${spaceSession.subject}/${loaded.address.id}/${loaded.address.type}`;
-        // Only include docs that weren't already in the tracker before traversal
-        if (!staleSchemaTracker.has(docKey) && loaded.value !== undefined) {
-          const details = sharedManager.getDetails(loaded.address);
-          if (details) {
-            newFacts.set(docKey, {
-              of: loaded.address.id,
-              the: loaded.address.type,
-              cause: causeFromString(details.cause),
-              is: loaded.value,
-              since: details.since,
-            });
+      // Use docs loaded by the manager during traversal as candidates for
+      // new facts. This avoids iterating the entire sharedSchemaTracker
+      // (which can have thousands of entries) on every commit.
+      // The manager already loaded these docs from SQLite, so we have their
+      // data without an extra read.
+      if (this.sharedSchemaTracker.size > trackerSizeBefore) {
+        for (const loaded of sharedManager.getReadDocs()) {
+          const docKey =
+            `${spaceSession.subject}/${loaded.address.id}/${loaded.address.type}`;
+          // Only include docs that weren't already in the tracker before traversal
+          if (!staleSchemaTracker.has(docKey) && loaded.value !== undefined) {
+            const details = sharedManager.getDetails(loaded.address);
+            if (details) {
+              newFacts.set(docKey, {
+                of: loaded.address.id,
+                the: loaded.address.type,
+                cause: causeFromString(details.cause),
+                is: loaded.value,
+                since: details.since,
+              });
+            }
           }
         }
       }
-    }
 
-    // Also include the affected (changed) docs themselves — their data
-    // may have changed even if they were already tracked.
-    // Use sharedManager.load to leverage the cache from traversal above,
-    // avoiding redundant SQLite reads vs raw selectFact.
-    for (const [docKey, _schemaSelectors] of affectedDocs) {
-      const address = this.parseDocKey(docKey);
-      if (address === undefined) continue;
-      const loaded = sharedManager.load({
-        id: address.id,
-        type: address.type,
-      });
-      if (!loaded || loaded.value === undefined) continue;
-      const details = sharedManager.getDetails(loaded.address);
-      if (!details) continue;
-      const factKey = `${spaceSession.subject}/${address.id}/${address.type}`;
-      newFacts.set(factKey, {
-        of: address.id,
-        the: address.type,
-        cause: causeFromString(details.cause),
-        is: loaded.value,
-        since: details.since,
-      });
-    }
+      // Also include the affected (changed) docs themselves — their data
+      // may have changed even if they were already tracked.
+      // Use sharedManager.load to leverage the cache from traversal above,
+      // avoiding redundant SQLite reads vs raw selectFact.
+      for (const [docKey, _schemaSelectors] of affectedDocs) {
+        const address = this.parseDocKey(docKey);
+        if (address === undefined) continue;
+        const loaded = sharedManager.load({
+          id: address.id,
+          type: address.type,
+        });
+        if (!loaded || loaded.value === undefined) continue;
+        const details = sharedManager.getDetails(loaded.address);
+        if (!details) continue;
+        const factKey = `${spaceSession.subject}/${address.id}/${address.type}`;
+        newFacts.set(factKey, {
+          of: address.id,
+          the: address.type,
+          cause: causeFromString(details.cause),
+          is: loaded.value,
+          since: details.since,
+        });
+      }
 
-    return { newFacts };
+      return { newFacts };
+    } finally {
+      logger.timeEnd("graph-query", "incremental");
+      const elapsed = performance.now() - t0;
+      this.#queryStats.incrementalQueries++;
+      this.#queryStats.incrementalQueryMs += elapsed;
+    }
   }
 
   /** Parse docKey (format "space/id/type") back to space, id, and type */
@@ -1538,6 +1600,72 @@ class MemoryProviderSession<
 
 export const close = ({ memory }: Session) => memory.close();
 
+type HttpResult<Ok, Err extends { name: string }> =
+  | { ok: Ok }
+  | { error: Err };
+
+export type JsonResponseSpec<Body = unknown, Status extends number = number> = {
+  body: Body;
+  status: Status;
+};
+
+const jsonResponseHeaders = {
+  "Content-Type": "application/json",
+} as const;
+
+export const jsonErrorBody = (
+  cause: unknown,
+  fallbackMessage = "Unable to parse request body",
+) => {
+  const error = cause as Partial<Error>;
+  return {
+    error: {
+      name: error?.name ?? "Error",
+      message: error?.message ?? fallbackMessage,
+      stack: error?.stack ?? "",
+    },
+  };
+};
+
+export const jsonResponseSpecFor = <
+  Ok,
+  Err extends { name: string },
+  OkBody,
+  ErrorBody,
+  OkStatus extends number,
+  ErrorStatus extends number,
+>(
+  result: HttpResult<Ok, Err>,
+  options: {
+    okStatus: OkStatus;
+    okBody: (ok: Ok) => OkBody;
+    errorStatus: (error: Err) => ErrorStatus;
+    errorBody: (error: Err) => ErrorBody;
+  },
+):
+  | JsonResponseSpec<OkBody, OkStatus>
+  | JsonResponseSpec<ErrorBody, ErrorStatus> => {
+  if ("ok" in result) {
+    return {
+      body: options.okBody(result.ok),
+      status: options.okStatus,
+    };
+  }
+  return {
+    body: options.errorBody(result.error),
+    status: options.errorStatus(result.error),
+  };
+};
+
+export const jsonResponse = (
+  body: unknown,
+  status: number,
+): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: jsonResponseHeaders,
+  });
+
 export const fetch = async (session: Session, request: Request) => {
   if (request.method === "PATCH") {
     return await patch(session, request);
@@ -1552,36 +1680,15 @@ export const patch = async (session: Session, request: Request) => {
   try {
     const transaction = await request.json() as Transaction;
     const result = await session.memory.transact(transaction);
-    const body = JSON.stringify(result);
-    const status = result.ok
-      ? 200
-      : result.error.name === "ConflictError"
-      ? 409
-      : 503;
-
-    return new Response(body, {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-      },
+    const response = jsonResponseSpecFor(result, {
+      okStatus: 200,
+      okBody: (ok) => ({ ok }),
+      errorBody: (error) => ({ error }),
+      errorStatus: (error) => error.name === "ConflictError" ? 409 : 503,
     });
+    return jsonResponse(response.body, response.status);
   } catch (cause) {
-    const error = cause as Partial<Error>;
-    return new Response(
-      JSON.stringify({
-        error: {
-          name: error?.name ?? "Error",
-          message: error?.message ?? "Unable to parse request body",
-          stack: error?.stack ?? "",
-        },
-      }),
-      {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    return jsonResponse(jsonErrorBody(cause), 400);
   }
 };
 
@@ -1589,31 +1696,14 @@ export const post = async (session: Session, request: Request) => {
   try {
     const selector = await request.json() as Query;
     const result = await session.memory.query(selector);
-    const body = JSON.stringify(result);
-    const status = result.ok ? 200 : 404;
-
-    return new Response(body, {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-      },
+    const response = jsonResponseSpecFor(result, {
+      okStatus: 200,
+      okBody: (ok) => ({ ok }),
+      errorBody: (error) => ({ error }),
+      errorStatus: () => 404,
     });
+    return jsonResponse(response.body, response.status);
   } catch (cause) {
-    const error = cause as Partial<Error>;
-    return new Response(
-      JSON.stringify({
-        error: {
-          name: error?.name ?? "Error",
-          message: error?.message ?? "Unable to parse request body",
-          stack: error?.stack ?? "",
-        },
-      }),
-      {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    return jsonResponse(jsonErrorBody(cause), 400);
   }
 };

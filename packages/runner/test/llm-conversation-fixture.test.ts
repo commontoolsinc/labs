@@ -22,6 +22,7 @@ import type {
   JSONSchema,
 } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
@@ -69,7 +70,7 @@ describe("conversation fixtures", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateObject, llmDialog, Cell, patternTool } = commonfabric);
   });
 

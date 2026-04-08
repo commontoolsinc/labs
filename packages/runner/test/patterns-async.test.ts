@@ -7,6 +7,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -30,7 +31,7 @@ describe("Pattern Runner - Async", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       lift,
       pattern,

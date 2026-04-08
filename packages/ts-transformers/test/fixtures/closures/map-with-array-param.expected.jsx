@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: map-with-array-param
 // Verifies: .map() on reactive array is transformed when the third parameter (array) is used
 //   .map((item, index, array) => ...) → .mapWithPattern(pattern(...), {})
@@ -14,10 +25,10 @@ export default pattern((_state) => {
     } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
-        {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
-                const array = __ct_pattern_input.key("array");
+        {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
+                const array = __cf_pattern_input.key("array");
                 return (<div>
             Item {item} at index {index} of {array.key("length")} total items
           </div>);
@@ -93,5 +104,4 @@ export default pattern((_state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

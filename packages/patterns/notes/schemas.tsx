@@ -5,7 +5,14 @@
  * This file contains types shared across note.tsx, notebook.tsx, and note-md.tsx.
  */
 
-import { type Default, NAME, type Stream, type Writable } from "commonfabric";
+import {
+  type Default,
+  NAME,
+  nonPrivateRandom,
+  safeDateNow,
+  type Stream,
+  type Writable,
+} from "commonfabric";
 
 // ===== Core Entity Types =====
 //
@@ -132,7 +139,9 @@ export interface NoteMdInput {
  * Note: crypto.randomUUID is not available in the pattern environment.
  */
 export const generateId = (): string =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+  `${safeDateNow().toString(36)}-${
+    nonPrivateRandom().toString(36).slice(2, 11)
+  }`;
 
 /**
  * Get a comparable name from a piece.

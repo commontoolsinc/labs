@@ -66,8 +66,8 @@ await commonfabric.rt.request({
 The higher-level console helpers now use the same timed diagnosis path:
 
 ```javascript
-await commontools.detectNonIdempotent(3000)
-await commontools.rt.detectNonIdempotent(3000)
+await commonfabric.detectNonIdempotent(3000)
+await commonfabric.rt.detectNonIdempotent(3000)
 ```
 
 ### 2. Idempotency Diagnosis (On-Demand)

@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface TodoItem {
     title: string;
     done: boolean;
@@ -9,11 +20,11 @@ interface TodoItem {
 //   items.map((item) => item.title) → items.mapWithPattern(pattern(...), {})
 //   items.map((item, index) => ({...})) → items.mapWithPattern(pattern(...), {}) with index param
 // Context: two .map() calls -- one returning a scalar, one returning an object with index
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     // Map on opaque ref arrays should be transformed to mapWithPattern
-    const mapped = items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const item = __ct_pattern_input.key("element");
+    const mapped = items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const item = __cf_pattern_input.key("element");
         return item.key("title");
     }, {
         type: "object",
@@ -41,9 +52,9 @@ export default pattern((__ct_pattern_input) => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema), {});
     // This should also be transformed
-    const filtered = items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const item = __ct_pattern_input.key("element");
-        const index = __ct_pattern_input.key("index");
+    const filtered = items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const item = __cf_pattern_input.key("element");
+        const index = __cf_pattern_input.key("index");
         return ({
             title: item.key("title"),
             done: item.key("done"),
@@ -147,5 +158,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

@@ -3,7 +3,6 @@ import {
   computed,
   Default,
   derive,
-  getPatternEnvironment,
   handler,
   ifElse,
   NAME,
@@ -20,8 +19,7 @@ import {
 type Secret<T> = T;
 type Confidential<T> = T;
 
-import TurndownService from "turndown";
-import { GmailClient } from "./util/gmail-client.ts";
+import { type GmailClient, gmailClient } from "./util/gmail-client.ts";
 import {
   createGoogleAuth,
   type ScopeKey,
@@ -62,23 +60,22 @@ export type Auth = {
   >;
 };
 
-// Initialize turndown service
-const turndown = new TurndownService({
-  headingStyle: "atx",
-  codeBlockStyle: "fenced",
-  emDelimiter: "*",
-});
-
-const _env = getPatternEnvironment();
-
-turndown.addRule("removeStyleTags", {
-  filter: ["style"],
-  replacement: function () {
-    return "";
-  },
-});
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+function htmlToMarkdown(htmlContent: string): string {
+  return htmlContent
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|section|article|li|tr|h[1-6])>/gi, "\n")
+    .replace(/<li>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 /** An #email */
 export type Email = {
@@ -165,7 +162,7 @@ const _updateLimit = handler<
   state.limit.set(parseInt(detail?.value ?? "100") || 0);
 });
 
-// GmailClient is now imported from ./util/gmail-client.ts
+// gmailClient is now imported from ./util/gmail-client.ts
 // This enables code reuse with gmail-agentic-search and ensures
 // consistent token refresh behavior across all Gmail patterns.
 
@@ -635,8 +632,7 @@ async function messageToEmail(
             `[messageToEmail] Converting HTML to markdown...`,
           );
           try {
-            // Convert HTML to markdown using our custom converter
-            markdownContent = turndown.turndown(htmlContent);
+            markdownContent = htmlToMarkdown(htmlContent);
             debugLog(
               debugMode,
               `[messageToEmail] Markdown conversion successful, length: ${markdownContent.length}`,
@@ -739,7 +735,7 @@ export async function process(
     return;
   }
 
-  const client = new GmailClient(auth, { debugMode });
+  const client = gmailClient(auth, { debugMode });
   const currentHistoryId = state.historyId.get();
 
   let newHistoryId: string | null = null;
@@ -976,7 +972,6 @@ export async function process(
       );
 
       try {
-        await sleep(1000);
         const fetched = await client.fetchMessagesByIds(batchIds);
         const resolveInlineImages = state.resolveInlineImages || false;
         debugLog(

@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: map-single-capture-no-name
 // Verifies: same map + length guard transforms work with _state: any parameter
 //   people.get().length > 0 && <ul>{people.map(...)}</ul> → when(..., <ul>{mapWithPattern(...)}</ul>)
@@ -45,7 +56,16 @@ export default pattern((_state: any) => {
                 people: {
                     type: "array",
                     items: {
-                        type: "unknown"
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
                     },
                     asCell: true
                 }
@@ -54,9 +74,9 @@ export default pattern((_state: any) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0), <ul>
-            {people.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const person = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
+            {people.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const person = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
                 return (<li key={index}>{person.key("name")}</li>);
             }, {
                 type: "object",
@@ -134,5 +154,4 @@ export default pattern((_state: any) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

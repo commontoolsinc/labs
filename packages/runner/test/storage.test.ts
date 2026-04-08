@@ -4,25 +4,32 @@ import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  StorageManager,
+  type StorageManagerEmulator,
+} from "@commonfabric/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("Storage", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: StorageManagerEmulator;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let testCell: Cell<any>;
   let n = 0;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: "v1",
     });
 
     tx = runtime.edit();

@@ -21,10 +21,14 @@ describe("Cell value isolation", () => {
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: "v2",
     });
     tx = runtime.edit();
   });

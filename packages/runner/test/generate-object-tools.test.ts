@@ -21,6 +21,7 @@ import {
 import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -56,7 +57,7 @@ describe("generateObject with tools", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateObject, handler, Cell, patternTool, str } =
       commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });

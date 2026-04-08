@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, pattern, handler } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // 1. Top-level
 const _topLevel = cell(10, {
     type: "number"
@@ -11,13 +22,14 @@ function regularFunction() {
     } as const satisfies __cfHelpers.JSONSchema);
     return _inFunction;
 }
+__cfHardenFn(regularFunction);
 // 3. Inside arrow function
-const arrowFunction = () => {
+const arrowFunction = __cfHardenFn(() => {
     const _inArrow = cell(30, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema);
     return _inArrow;
-};
+});
 // 4. Inside class method
 class TestClass {
     method() {
@@ -59,7 +71,7 @@ export default function TestContextVariations() {
         testHandler,
     };
 }
+__cfHardenFn(TestContextVariations);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

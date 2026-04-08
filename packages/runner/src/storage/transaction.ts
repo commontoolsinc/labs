@@ -23,6 +23,7 @@ import type {
   WriteError,
   WriterError,
 } from "./interface.ts";
+import { createReadOnlyTransactionError } from "./interface.ts";
 
 import * as Journal from "./transaction/journal.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
@@ -71,6 +72,7 @@ export type State =
 class StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
   immediate?: boolean;
+  #readOnlySource?: string;
 
   static mutate(transaction: StorageTransaction, state: State) {
     transaction.#state = state;
@@ -82,6 +84,22 @@ class StorageTransaction implements IStorageTransaction {
   #state: State;
   constructor(state: State) {
     this.#state = state;
+  }
+
+  setReadOnly(reason = "runtime.readTx()"): void {
+    this.#readOnlySource = reason;
+  }
+
+  clearReadOnly(): void {
+    this.#readOnlySource = undefined;
+  }
+
+  isReadOnly(): boolean {
+    return this.#readOnlySource !== undefined;
+  }
+
+  getReadOnlySource(): string | undefined {
+    return this.#readOnlySource;
   }
 
   get journal() {
@@ -118,6 +136,16 @@ class StorageTransaction implements IStorageTransaction {
 }
 
 const { mutate, use } = StorageTransaction;
+
+const assertWritable = (
+  transaction: StorageTransaction,
+  method: string,
+): void => {
+  const source = transaction.getReadOnlySource();
+  if (source !== undefined) {
+    throw createReadOnlyTransactionError(method, source);
+  }
+};
 
 /**
  * Returns given transaction status.
@@ -179,6 +207,7 @@ export const writer = (
   transaction: StorageTransaction,
   space: MemorySpace,
 ): Result<ITransactionWriter, WriterError> => {
+  assertWritable(transaction, "writer()");
   const { error, ok: ready } = edit(transaction);
   if (error) {
     return { error };
@@ -297,6 +326,7 @@ export const abort = (
   transaction: StorageTransaction,
   reason: unknown,
 ): Result<Unit, InactiveTransactionError> => {
+  assertWritable(transaction, "abort()");
   const { error, ok: ready } = edit(transaction);
   if (error) {
     return { error };
@@ -320,6 +350,7 @@ export const abort = (
 export const commit = async (
   transaction: StorageTransaction,
 ): Promise<Result<Unit, CommitError>> => {
+  assertWritable(transaction, "commit()");
   const { error, ok: ready } = edit(transaction);
   if (error) {
     return { error };
@@ -342,8 +373,11 @@ export const commit = async (
           `Committing ${changes.facts.length} writes to replica`,
         ]);
       }
-      const promise = hasWrites
-        ? replica!.commit(changes, transaction)
+      if (hasWrites && !replica?.commit) {
+        throw new Error("Storage replica does not support legacy commit()");
+      }
+      const promise = hasWrites && replica
+        ? replica.commit!(changes, transaction)
         : Promise.resolve({ ok: {} });
 
       mutate(transaction, {

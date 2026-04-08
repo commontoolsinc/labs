@@ -1,7 +1,7 @@
 /// <cts-enable />
 import {
   cell,
-  derive,
+  computed,
   handler,
   JSONSchema,
   NAME,
@@ -101,7 +101,7 @@ export default pattern(
         <div>
           <h3>Array Push Test</h3>
           <p>
-            Array length: {derive(my_numbers_array, (arr) => arr.get().length)}
+            Array length: {computed(() => my_numbers_array.get().length)}
           </p>
           <p>
             <ul>

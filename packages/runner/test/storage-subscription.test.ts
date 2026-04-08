@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  StorageManager,
+  StorageManagerEmulator,
+} from "@commonfabric/runner/storage/cache.deno";
 import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
@@ -50,15 +53,21 @@ class Subscription implements IStorageSubscription {
 
 describe("Storage Subscription", () => {
   let runtime: Runtime;
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: StorageManagerEmulator;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    // This suite asserts the legacy raw JSON replica shape. V2 notification
+    // coverage lives in memory-v2-subscription.test.ts.
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: "v1",
     });
 
     tx = runtime.edit();
@@ -235,7 +244,7 @@ describe("Storage Subscription", () => {
       const changes = [...revert.changes];
       expect(changes.length).toBeGreaterThan(0);
       expect([...changes]).toContainEqual({
-        address: { id: entityId, type: "application/json", path: [] },
+        address: { id: entityId, type: "application/json", path: ["version"] },
         before: { version: 2 },
         after: { version: 1 },
       });
@@ -468,11 +477,15 @@ describe("Storage Subscription", () => {
     let tx: IExtendedStorageTransaction;
 
     beforeEach(() => {
-      storageManager = StorageManager.emulate({ as: signer });
+      storageManager = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v1",
+      });
 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
+        memoryVersion: "v1",
       });
 
       tx = runtime.edit();

@@ -9,6 +9,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -85,7 +86,7 @@ describe("Cell Static Methods", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ Cell } = commonfabric);
   });
 

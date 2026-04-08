@@ -380,9 +380,9 @@ declare module "commonfabric" {
   // Augment WishFunction with schema-based overloads
   interface WishFunction {
     <S extends JSONSchema = JSONSchema>(
-      target: Opaque<import("commonfabric").WishParams>,
+      target: Opaque<WishParams>,
       schema: S,
-    ): OpaqueRef<import("commonfabric").WishState<Schema<S>>>;
+    ): OpaqueRef<WishState<Schema<S>>>;
   }
 
   // Augment IResolvable with schema-based getArgumentCell overload
@@ -397,6 +397,6 @@ declare module "commonfabric" {
     of<S extends JSONSchema>(
       value: Schema<S>,
       schema: S,
-    ): import("commonfabric").Apply<Wrap, Schema<S>>;
+    ): Apply<Wrap, Schema<S>>;
   }
 }

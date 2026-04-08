@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, Default, handler, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     text: Default<string, "">;
 }
@@ -44,14 +55,14 @@ const removeItem = handler({
 //   .map(fn) → .mapWithPattern(pattern(...), { items: items })
 //   items (from pattern destructuring) → params.items with asOpaque: true
 // Context: Captures the parent array as opaque to pass to a handler alongside the map index
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     return {
         [UI]: (<ul>
-          {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const _ = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
-                const items = __ct_pattern_input.key("params", "items");
+          {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const _ = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
+                const items = __cf_pattern_input.key("params", "items");
                 return (<li key={index}>
               <cf-button onClick={removeItem({ items, index })}>
                 Remove
@@ -173,5 +184,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

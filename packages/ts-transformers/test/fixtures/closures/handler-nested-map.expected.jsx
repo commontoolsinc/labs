@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     items: Array<{
         value: number;
@@ -38,7 +49,7 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { state }) => {
+        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => {
             const scaled = state.items.map((item) => item.value * state.multiplier);
             console.log(scaled);
         })({
@@ -102,5 +113,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

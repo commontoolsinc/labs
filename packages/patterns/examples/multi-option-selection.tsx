@@ -1,5 +1,3 @@
-/// <cts-enable />
-
 import { Default, NAME, pattern, UI, Writable } from "commonfabric";
 
 type Input = {

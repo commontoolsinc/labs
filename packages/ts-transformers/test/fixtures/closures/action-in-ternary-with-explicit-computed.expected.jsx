@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression test: action() referenced inside explicit computed() in JSX
  *
@@ -7,6 +15,9 @@ import * as __cfHelpers from "commonfabric";
  * the computed expression, so it must be captured in the derive wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Card {
     title: string;
     description: string;
@@ -19,8 +30,8 @@ interface Input {
 //   action(() => ...) → handler(...)({ isEditing })
 //   computed(() => JSX with action ref) → derive(captureSchema, ..., { card, startEditing }, fn)
 // Context: Action referenced inside computed expression must appear in the derive's capture object
-export default pattern((__ct_pattern_input) => {
-    const card = __ct_pattern_input.key("card");
+export default pattern((__cf_pattern_input) => {
+    const card = __cf_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -181,5 +192,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

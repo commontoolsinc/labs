@@ -1,6 +1,17 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, Default, handler, NAME, pattern, toSchema, UI, } from "commonfabric";
 import "commonfabric/schema";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     text: Default<string, "">;
 }
@@ -17,7 +28,7 @@ type InputEventType = {
         message: string;
     };
 };
-const inputSchema = {
+const inputSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         title: {
@@ -45,8 +56,8 @@ const inputSchema = {
             required: ["text"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema;
-const outputSchema = {
+} as const satisfies __cfHelpers.JSONSchema);
+const outputSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         items_count: {
@@ -77,7 +88,7 @@ const outputSchema = {
             required: ["text"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema;
+} as const satisfies __cfHelpers.JSONSchema);
 // Handler that logs the message event
 const addItem = handler // <
 ({
@@ -130,9 +141,9 @@ const addItem = handler // <
 //   items.map((item, index) => JSX) → items.mapWithPattern(pattern(...), {})
 //   pattern<In, Out>() → uses pre-generated inputSchema/outputSchema passed as arguments
 // Context: kitchen-sink pattern with NAME, UI, handler, array .map(), and Default<> types
-export default pattern((__ct_pattern_input) => {
-    const title = __ct_pattern_input.key("title");
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const title = __cf_pattern_input.key("title");
+    const items = __cf_pattern_input.key("items");
     const items_count = items.key("length");
     return {
         [NAME]: title,
@@ -141,9 +152,9 @@ export default pattern((__ct_pattern_input) => {
         <p>Basic pattern</p>
         <p>Items count: {items_count}</p>
         <ul>
-          {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
+          {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
                 return (<li key={index}>{item.key("text")}</li>);
             }, {
                 type: "object",
@@ -258,5 +269,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

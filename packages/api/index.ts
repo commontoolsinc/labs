@@ -2022,6 +2022,8 @@ export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
 // toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
 // The actual implementation is done by the TypeScript transformer
 export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
+/** Internal compiler-emitted helper for top-level data materialization. */
+export type CfDataFunction = <T>(value: T) => T;
 
 // Pattern environment types
 export interface PatternEnvironment {
@@ -2029,6 +2031,8 @@ export interface PatternEnvironment {
 }
 
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
+export type NonPrivateRandomFunction = () => number;
+export type SafeDateNowFunction = () => number;
 
 /**
  * Compare two cells or values for equality after resolving, i.e. after
@@ -2071,6 +2075,8 @@ export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const equals: EqualsFunction;
 export declare const byRef: ByRefFunction;
 export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
+export declare const nonPrivateRandom: NonPrivateRandomFunction;
+export declare const safeDateNow: SafeDateNowFunction;
 
 /**
  * Get the entity ID from a cell or value.
@@ -2082,6 +2088,11 @@ export declare const getEntityId: GetEntityIdFunction;
 
 export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
+export declare const __cf_data: CfDataFunction;
+export declare const __cfHelpers: any;
+export declare namespace __cfHelpers {
+  export type JSONSchema = JSONSchemaObj | boolean;
+}
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache

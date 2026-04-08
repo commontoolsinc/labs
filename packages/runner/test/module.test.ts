@@ -19,6 +19,7 @@ import {
   handler,
   lift,
   parseStackFrame,
+  resolveSourceLocationFromStack,
 } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -258,14 +259,16 @@ describe("module", () => {
   });
 
   describe("action function", () => {
-    it("throws error when called without CTS enabled", () => {
-      // action() should only be used with CTS enabled, which rewrites it to handler()
-      // When called directly at runtime (without CTS), it should throw an error
+    it("throws error when called directly without CTS transforms", () => {
+      // action() is only valid once CTS transforms rewrite it to handler().
+      // A direct runtime call should still fail and point callers at the opt-out flag.
       expect(() => {
         action<{ data: string }>(({ data }) => {
           void data;
         });
-      }).toThrow("action() must be used with CTS enabled");
+      }).toThrow(
+        "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
+      );
     });
 
     it("infers Stream<void> for zero-parameter callbacks (type test)", () => {
@@ -603,6 +606,29 @@ describe("module", () => {
       expect(parseStackFrame("Error")).toBeNull();
       expect(parseStackFrame("    at <anonymous>")).toBeNull();
       expect(parseStackFrame("")).toBeNull();
+    });
+
+    it("skips internal CTS bundle frames and synthetic 1:23 mappings", () => {
+      const stack = [
+        "Error",
+        "    at getExternalSourceLocation (bundle.js:10:5)",
+        "    at annotateFunctionDebugMetadata (bundle.js:11:5)",
+        "    at createNodeFactory (bundle.js:12:5)",
+        "    at lift (bundle.js:13:5)",
+        "    at Object.eval [as factory] (bundle.js:52:52)",
+      ].join("\n");
+
+      const result = resolveSourceLocationFromStack(
+        stack,
+        (_file, line, _col) => {
+          if (line < 52) {
+            return { source: "/main.tsx", line: 1, column: 23 };
+          }
+          return { source: "/main.tsx", line: 4, column: 26 };
+        },
+      );
+
+      expect(result.location).toBe("/main.tsx:4:26");
     });
   });
 });

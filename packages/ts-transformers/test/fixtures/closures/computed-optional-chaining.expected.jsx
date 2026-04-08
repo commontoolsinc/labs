@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Writable, computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: computed-optional-chaining
 // Verifies: computed() with optional chaining and nullish coalescing on captured cells
 //   computed(() => value.get() * (config.get()?.multiplier ?? 1)) → derive(..., { value, config }, ({ value, config }) => ...)
@@ -30,6 +41,16 @@ export default pattern(() => {
                 asCell: true
             },
             config: {
+                anyOf: [{
+                        type: "object",
+                        properties: {
+                            multiplier: {
+                                type: "number"
+                            }
+                        }
+                    }, {
+                        type: "null"
+                    }],
                 asCell: true
             }
         },
@@ -46,5 +67,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

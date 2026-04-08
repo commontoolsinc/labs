@@ -89,6 +89,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       spaceIdentity: options.spaceIdentity?.serialize(),
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
+      memoryVersion: options.memoryVersion,
       experimental: options.experimental,
       buildHash: options.buildHash,
     });

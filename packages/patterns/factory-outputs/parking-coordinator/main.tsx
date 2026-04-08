@@ -4,7 +4,9 @@ import {
   computed,
   Default,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -168,8 +170,8 @@ const formatDateDisplay = (dateStr: string): string => {
   return `${shortName} ${monthLabel} ${dayNum}`;
 };
 
-let _idCounter = 0;
-const genId = (): string => `req-${Date.now()}-${_idCounter++}`;
+const genId = (): string =>
+  `req-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 10)}`;
 
 const parsePreferences = (s: string): string[] =>
   s.split(",").map((x) => x.trim()).filter(Boolean);
@@ -248,14 +250,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
   ({ spots, people, requests }) => {
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() =>
-      toLocalDateStr(nowTimestamp.result || Date.now())
+      toLocalDateStr(nowTimestamp.result || safeDateNow())
     );
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
     // UI state
     const adminMode = Writable.of(false);
     const selectedPersonName = Writable.of("");
-    const requestDate = Writable.of(toLocalDateStr(Date.now()));
+    const requestDate = Writable.of(toLocalDateStr(safeDateNow()));
     const requestResult = Writable.of("");
 
     // Admin form state

@@ -1,9 +1,11 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import {
+  isPattern,
   Module,
   Pattern,
   Schema,
   unsafe_originalPattern,
+  unsafe_verifiedLoadId,
 } from "./builder/types.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { Cell } from "./cell.ts";
@@ -12,6 +14,7 @@ import { createRef } from "./create-ref.ts";
 import type { CompileResult } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { getTopFrame } from "./builder/pattern.ts";
 
 const logger = getLogger("pattern-manager");
 
@@ -66,6 +69,7 @@ export class PatternManager {
   private patternIdMap = new Map<string, Pattern>();
   // Map from pattern object instance to patternId
   private patternToIdMap = new WeakMap<Pattern, string>();
+  private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<string, Partial<PatternMeta>>();
 
@@ -155,6 +159,48 @@ export class PatternManager {
     return pattern;
   }
 
+  private seedVerifiedLoadIds(
+    value: unknown,
+    verifiedLoadId: string,
+    seen = new Set<unknown>(),
+  ): void {
+    if (!value || (typeof value !== "object" && typeof value !== "function")) {
+      return;
+    }
+    if (seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+
+    if (isPattern(value)) {
+      const originalPattern = this.findOriginalPattern(value);
+      if (!this.patternToVerifiedLoadId.has(originalPattern)) {
+        this.patternToVerifiedLoadId.set(originalPattern, verifiedLoadId);
+      }
+      if (
+        Object.isExtensible(value) &&
+        (value as Pattern)[unsafe_verifiedLoadId] !== verifiedLoadId
+      ) {
+        Object.defineProperty(value, unsafe_verifiedLoadId, {
+          value: verifiedLoadId,
+          configurable: true,
+        });
+      }
+    }
+
+    for (const key of Reflect.ownKeys(value as object)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
+      if (!descriptor || !("value" in descriptor)) {
+        continue;
+      }
+      this.seedVerifiedLoadIds(
+        descriptor.value,
+        verifiedLoadId,
+        seen,
+      );
+    }
+  }
+
   async loadPatternMeta(
     patternId: string,
     space: MemorySpace,
@@ -214,6 +260,12 @@ export class PatternManager {
   ): string {
     // Walk up derivation copies to original
     pattern = this.findOriginalPattern(pattern as Pattern);
+    const verifiedLoadId = getTopFrame()?.verifiedLoadId ??
+      this.patternToVerifiedLoadId.get(pattern as Pattern) ??
+      (pattern as Pattern)[unsafe_verifiedLoadId];
+    if (verifiedLoadId) {
+      this.seedVerifiedLoadIds(pattern as Pattern, verifiedLoadId);
+    }
 
     if (src && !pattern.program) {
       if (typeof src === "string") {
@@ -228,7 +280,10 @@ export class PatternManager {
 
     // If this pattern object was already registered, return its id
     const existingId = this.patternToIdMap.get(pattern);
-    if (existingId) return existingId;
+    if (existingId) {
+      this.associateVerifiedFunctions(existingId, pattern);
+      return existingId;
+    }
 
     const generatedId = src
       ? createRef({ src }, "pattern source").toString()
@@ -243,6 +298,8 @@ export class PatternManager {
       // Pattern exists - touch to mark as recently used
       this.touchPattern(generatedId);
     }
+
+    this.associateVerifiedFunctions(generatedId, pattern);
 
     return generatedId;
   }
@@ -356,7 +413,7 @@ export class PatternManager {
     { id, jsScript }: CompileResult,
     program: RuntimeProgram,
   ): Promise<Pattern> {
-    const { main } = await this.runtime.harness.evaluate(
+    const { main, loadId } = await this.runtime.harness.evaluate(
       id,
       jsScript,
       program.files,
@@ -372,6 +429,9 @@ export class PatternManager {
     }
     const pattern = main[exportName] as Pattern;
     pattern.program = program;
+    if (loadId) {
+      this.seedVerifiedLoadIds(pattern, loadId);
+    }
     return pattern;
   }
 
@@ -421,6 +481,7 @@ export class PatternManager {
           this.patternIdMap.set(patternId, pattern);
           this.evictIfNeeded();
         }
+        this.associateVerifiedFunctions(patternId, pattern);
         return pattern;
       })
       .finally(() => {
@@ -460,6 +521,7 @@ export class PatternManager {
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
     this.patternMetaCellById.set(patternId, metaCell.withTx());
+    this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
     return pattern;
   }
@@ -508,5 +570,25 @@ export class PatternManager {
       const pending = this.pendingMetaById.get(patternId) ?? {};
       this.pendingMetaById.set(patternId, { ...pending, ...fields });
     }
+  }
+
+  private associateVerifiedFunctions(
+    patternId: string,
+    value: Pattern | Module,
+  ): void {
+    const originalPattern = this.findOriginalPattern(value as Pattern) as
+      & Pattern
+      & {
+        program?: RuntimeProgram;
+      };
+    const verifiedLoadId = this.patternToVerifiedLoadId.get(originalPattern);
+    if (!originalPattern.program && !verifiedLoadId) {
+      return;
+    }
+    this.runtime.harness.associatePattern(
+      patternId,
+      value,
+      verifiedLoadId,
+    );
   }
 }

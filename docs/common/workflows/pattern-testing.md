@@ -37,7 +37,6 @@ Test files end in `.test.tsx` and are run with `deno task cf test`.
 ## Quick Example
 
 ```tsx
-/// <cts-enable />
 import { action, computed, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 
@@ -135,6 +134,11 @@ const assert_game_ready = computed(() => {
   return game.phase === "ready" && game.players.length === 2;
 });
 ```
+
+Keep assertions deterministic. Do not call `safeDateNow()`,
+`nonPrivateRandom()`, `Date.now()`, or `Math.random()` inside the assertion
+itself. If the pattern stamps a timestamp or random ID, assert that the value
+exists or changed in the expected place.
 
 ## Test Organization
 

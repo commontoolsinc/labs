@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: cell-like-classes
 // Verifies: schema injection works for cell(), ComparableCell.of(), ReadonlyCell.of(), and WriteonlyCell.of()
 //   cell(100) → cell(100, { type: "number" })
@@ -30,7 +41,7 @@ export default function TestCellLikeClasses() {
         writeonly: _writeonly,
     };
 }
+__cfHardenFn(TestCellLikeClasses);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

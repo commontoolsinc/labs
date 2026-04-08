@@ -1,6 +1,7 @@
 import { CommonIframeSandboxElement as _ } from "../src/common-iframe-sandbox.ts";
 import {
   assertEquals,
+  cleanupFixtures,
   ContextShim,
   render,
   setIframeTestHandler,
@@ -49,9 +50,11 @@ window.unsubscribe = (key) => {
 `;
 
 Deno.test("read and writes", async () => {
-  const context = new ContextShim({ a: 1 });
+  cleanupFixtures();
+  try {
+    const context = new ContextShim({ a: 1 });
 
-  const body = `
+    const body = `
 ${API_SHIM}
 <script>
 onUpdate = (key, value) => {
@@ -61,15 +64,20 @@ onUpdate = (key, value) => {
 };
 read('a');
 </script>`;
-  const iframe = await render(body, context);
+    const iframe = await render(body, context);
 
-  await waitForCondition(() => context.get(iframe, "a") === 2);
+    await waitForCondition(() => context.get(iframe, "a") === 2);
+  } finally {
+    cleanupFixtures();
+  }
 });
 
 Deno.test("subscribes", async () => {
-  const context = new ContextShim({ a: 1 });
+  cleanupFixtures();
+  try {
+    const context = new ContextShim({ a: 1 });
 
-  const body = `
+    const body = `
 ${API_SHIM}
 <script>
 const updates = [];
@@ -84,35 +92,40 @@ onUpdate = (key, value) => {
 subscribe("a");
 write("ready", true);
 </script>`;
-  const iframe = await render(body, context);
-  await waitForCondition(() => context.get(iframe, "ready") === true);
-  context.set(iframe, "b", 1);
-  context.set(iframe, "a", 2);
-  context.set(iframe, "a", 3);
-  context.set(iframe, "b", 2);
-  await waitForCondition(() =>
-    compareDeepEquals(context.get(iframe, "updates"), [["a", 2], ["a", 3]])
-  );
-  await waitForCondition(() => context.get(iframe, "unsubscribed") === true);
-  context.set(iframe, "a", 4);
-  context.set(iframe, "a", 5);
-  await sleep(100);
-  await waitForCondition(() =>
-    compareDeepEquals(context.get(iframe, "updates"), [["a", 2], ["a", 3]])
-  );
+    const iframe = await render(body, context);
+    await waitForCondition(() => context.get(iframe, "ready") === true);
+    context.set(iframe, "b", 1);
+    context.set(iframe, "a", 2);
+    context.set(iframe, "a", 3);
+    context.set(iframe, "b", 2);
+    await waitForCondition(() =>
+      compareDeepEquals(context.get(iframe, "updates"), [["a", 2], ["a", 3]])
+    );
+    await waitForCondition(() => context.get(iframe, "unsubscribed") === true);
+    context.set(iframe, "a", 4);
+    context.set(iframe, "a", 5);
+    await sleep(100);
+    await waitForCondition(() =>
+      compareDeepEquals(context.get(iframe, "updates"), [["a", 2], ["a", 3]])
+    );
+  } finally {
+    cleanupFixtures();
+  }
 });
 
 Deno.test("handles multiple iframes", async () => {
-  const context1 = new ContextShim({ a: 1 });
-  const context2 = new ContextShim({ b: 100 });
+  cleanupFixtures();
+  try {
+    const context1 = new ContextShim({ a: 1 });
+    const context2 = new ContextShim({ b: 100 });
 
-  const body1 = `
+    const body1 = `
 ${API_SHIM}
 <script>
 write("b", 1);
 </script>`;
 
-  const body2 = `
+    const body2 = `
 ${API_SHIM}
 <script>
 onUpdate = (key, value) => {
@@ -122,46 +135,56 @@ onUpdate = (key, value) => {
 };
 read("b");
 </script>`;
-  const iframe1 = await render(body1, context1);
-  const iframe2 = await render(body2, context2);
-  await waitForCondition(() =>
-    context1.get(iframe1, "a") === 1 && context1.get(iframe1, "b") === 1
-  );
-  await waitForCondition(() =>
-    context2.get(iframe2, "a") === 200 && context2.get(iframe2, "b") === 100
-  );
+    const iframe1 = await render(body1, context1);
+    const iframe2 = await render(body2, context2);
+    await waitForCondition(() =>
+      context1.get(iframe1, "a") === 1 && context1.get(iframe1, "b") === 1
+    );
+    await waitForCondition(() =>
+      context2.get(iframe2, "a") === 200 && context2.get(iframe2, "b") === 100
+    );
+  } finally {
+    cleanupFixtures();
+  }
 });
 
 Deno.test("handles loading new documents", async () => {
-  const context = new ContextShim({ a: 1 });
+  cleanupFixtures();
+  try {
+    const context = new ContextShim({ a: 1 });
 
-  const body1 = `
+    const body1 = `
 ${API_SHIM}
 <script>
 write("b", 1);
 </script>`;
-  const body2 = `
+    const body2 = `
 ${API_SHIM}
 <script>
 write("c", 1);
 </script>`;
-  const iframe = await render(body1, context);
-  await waitForCondition(() => context.get(iframe, "b") === 1);
-  // @ts-ignore This is a lit property.
-  iframe.src = body2;
-  await waitForCondition(() => context.get(iframe, "c") === 1);
+    const iframe = await render(body1, context);
+    await waitForCondition(() => context.get(iframe, "b") === 1);
+    // @ts-ignore This is a lit property.
+    iframe.src = body2;
+    await waitForCondition(() => context.get(iframe, "c") === 1);
+  } finally {
+    cleanupFixtures();
+  }
 });
 
 Deno.test("cancels subscriptions between documents", async () => {
-  const context = new ContextShim({ a: 1 });
+  cleanupFixtures();
+  try {
+    const context = new ContextShim({ a: 1 });
 
-  const body1 = `
+    const body1 = `
 ${API_SHIM}
 <script>
 subscribe("a");
 write("ready1", true);
 </script>`;
-  const body2 = `
+    const body2 = `
 ${API_SHIM}
 <script>
 onUpdate = (key, value) => {
@@ -175,13 +198,16 @@ onUpdate = (key, value) => {
 subscribe("b");
 write("ready2", true);
 </script>`;
-  const iframe = await render(body1, context);
-  await waitForCondition(() => context.get(iframe, "ready1") === true);
-  // @ts-ignore This is a lit property.
-  iframe.src = body2;
-  await waitForCondition(() => context.get(iframe, "ready2") === true);
-  context.set(iframe, "a", 1000);
-  context.set(iframe, "b", 1000);
-  await waitForCondition(() => context.get(iframe, "got-b-update") === true);
-  assertEquals(context.get(iframe, "got-a-update"), undefined);
+    const iframe = await render(body1, context);
+    await waitForCondition(() => context.get(iframe, "ready1") === true);
+    // @ts-ignore This is a lit property.
+    iframe.src = body2;
+    await waitForCondition(() => context.get(iframe, "ready2") === true);
+    context.set(iframe, "a", 1000);
+    context.set(iframe, "b", 1000);
+    await waitForCondition(() => context.get(iframe, "got-b-update") === true);
+    assertEquals(context.get(iframe, "got-a-update"), undefined);
+  } finally {
+    cleanupFixtures();
+  }
 });

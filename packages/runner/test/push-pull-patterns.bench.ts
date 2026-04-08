@@ -1,7 +1,7 @@
 /**
  * Push vs pull benchmarks using real patterns and list builtins.
  *
- * These benches go through createBuilder() + runtime.run() so they exercise the
+ * These benches go through createTrustedBuilder(runtime) + runtime.run() so they exercise the
  * actual map/filter/flatMap machinery instead of synthetic scheduler actions.
  */
 import { Identity } from "@commonfabric/identity";
@@ -14,8 +14,10 @@ import {
   type TimingStats,
 } from "@commonfabric/utils/logger";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench push pull patterns");
 const space = signer.did();
@@ -336,16 +338,20 @@ addEventListener("unload", () => {
 });
 
 function createEnv(pullMode: boolean): BenchEnv {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    memoryVersion: BENCH_MEMORY_VERSION,
   });
 
   if (pullMode) runtime.scheduler.enablePullMode();
   else runtime.scheduler.disablePullMode();
 
-  const { commonfabric } = createBuilder();
+  const { commonfabric } = createTrustedBuilder(runtime);
   const { lift, pattern } = commonfabric;
 
   return { runtime, storageManager, lift, pattern };

@@ -7,6 +7,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { isCell } from "../src/cell.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -32,7 +33,7 @@ describe("Pattern Runner - Miscellaneous", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       lift,
       pattern,
@@ -166,8 +167,16 @@ describe("Pattern Runner - Miscellaneous", () => {
     const recurse = ({ items }: { items: { items: any[] }[] }): any =>
       items.map((item) => recurse(item));
 
-    // Now test that we catch infinite recursion
-    expect(() => recurse(value as any)).toThrow();
+    // `toThrow()` mis-classifies stack overflows in @std/expect here, and the
+    // test harness may surface the overflow as either an Error or a string.
+    // Assert on the behavior we care about: recursion does not complete.
+    let error: unknown;
+    try {
+      recurse(value as any);
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).not.toBeUndefined();
   });
 
   it("should allow sending cells to an event handler", async () => {

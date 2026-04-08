@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression: .map() on a computed result assigned to a local variable
  * inside another computed() should NOT be transformed to .mapWithPattern().
@@ -7,6 +15,9 @@ import * as __cfHelpers from "commonfabric";
  * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
 import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     name: string;
     price: number;
@@ -17,8 +28,8 @@ interface Item {
 // Context: Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
 //   so `localVar` is a plain array. The .map() must remain untransformed.
 //   This is a negative test for reactive .map() detection on local aliases.
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     const filtered = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -180,5 +191,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

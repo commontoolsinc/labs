@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { lift } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: schema-generation-lift-typed-param
 // Verifies: lift() with a primitive typed parameter generates scalar input and output schemas
 //   lift((value: number) => value * 2) → lift({ type: "number" }, { type: "number" }, fn)
@@ -12,5 +23,4 @@ export const doubleValue = lift({
 } as const satisfies __cfHelpers.JSONSchema, (value: number) => value * 2);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

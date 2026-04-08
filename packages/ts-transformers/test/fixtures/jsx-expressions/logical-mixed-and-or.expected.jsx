@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // Tests mixed && and || operators: (a && b) || c
 // The && should use when, the || should use unless
 // FIXTURE: logical-mixed-and-or
@@ -43,9 +54,12 @@ export default pattern((_state) => {
                     properties: {
                         name: {
                             type: "string"
+                        },
+                        age: {
+                            type: "number"
                         }
                     },
-                    required: ["name"],
+                    required: ["name", "age"],
                     asCell: true
                 }
             },
@@ -83,11 +97,14 @@ export default pattern((_state) => {
                 user: {
                     type: "object",
                     properties: {
+                        name: {
+                            type: "string"
+                        },
                         age: {
                             type: "number"
                         }
                     },
-                    required: ["age"],
+                    required: ["name", "age"],
                     asCell: true
                 }
             },
@@ -108,9 +125,12 @@ export default pattern((_state) => {
                     properties: {
                         name: {
                             type: "string"
+                        },
+                        age: {
+                            type: "number"
                         }
                     },
-                    required: ["name"],
+                    required: ["name", "age"],
                     asCell: true
                 }
             },
@@ -189,5 +209,4 @@ export default pattern((_state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

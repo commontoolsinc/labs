@@ -16,7 +16,7 @@ export function navigateTo(
   let navigated = false;
   let resultCell: Cell<boolean>;
 
-  const action: Action = async (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     // The main reason we might be called again after navigating is that the
     // transaction to update the result cell failed, so we'll just set it again.
     if (navigated) {
@@ -63,10 +63,11 @@ export function navigateTo(
       // Resolve to root piece - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
 
-      // Sync the target cell to ensure data is loaded before navigation
-      await resolvedTarget.sync();
-
-      runtime.navigateCallback(resolvedTarget);
+      void Promise.resolve(runtime.navigateCallback(resolvedTarget)).catch(
+        (error) => {
+          console.error("[navigateTo] navigate callback failed:", error);
+        },
+      );
 
       navigated = true;
       resultCell.set(true);

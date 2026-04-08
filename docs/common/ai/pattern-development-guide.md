@@ -152,6 +152,45 @@ const List = pattern<ListInput, ListOutput>(({ items }) => ({
 }));
 ```
 
+## SES Authoring Limits and Escape Hatches
+
+Patterns now run inside a verified SES subset. The practical authoring rules
+are:
+
+- keep module scope declarative:
+  - use `const`
+  - define `pattern()`, `handler()`, `lift()`, schemas, and plain data
+  - avoid top-level `let`, `var`, classes, or ad hoc mutable caches
+- keep pattern-owned callback bodies straight-line:
+  - avoid `let`, `var`, reassignment, and loop statements
+  - prefer array methods, `computed()`, `derive()`, or a module-scope helper
+- do not rely on authored timers or proxies:
+  - `setTimeout()`, `setInterval()`, and `new Proxy()` are not part of the
+    authored runtime surface yet
+- use explicit time/random escape hatches only when needed:
+  - use `safeDateNow()` instead of `Date.now()`
+  - use `nonPrivateRandom()` instead of `Math.random()`
+  - prefer calling them from `action()`, `handler()`, or one-time
+    initialization rather than inside `computed()` or `derive()`
+
+The current exported helper names are `safeDateNow()` and
+`nonPrivateRandom()`. Older shorthand such as `dateNow` or `insecureRandom`
+does not match the current API.
+
+```tsx
+const createItem = action(() => {
+  items.push({
+    id: `item-${nonPrivateRandom().toString(36).slice(2, 8)}`,
+    createdAt: safeDateNow(),
+    title: title.get(),
+  });
+});
+```
+
+If a pattern needs richer time, scheduling, or entropy behavior, prefer an
+explicit runtime capability or service over hiding imperative state in authored
+callbacks.
+
 ## Common Pitfalls
 
 ### Conditional JSX

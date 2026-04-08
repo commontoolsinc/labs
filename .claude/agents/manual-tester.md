@@ -149,7 +149,7 @@ agent-browser get text @e3
 ### 5. Runtime Debugging (when things go wrong)
 
 When the UI doesn't behave as expected, use the runtime inspection utilities
-via `agent-browser eval`. These are available on `globalThis.commontools` in the
+via `agent-browser eval`. These are available on `globalThis.commonfabric` in the
 browser. Full reference: `docs/development/debugging/console-commands.md`.
 
 **Read cell values** (verify what data the piece actually holds):
@@ -157,13 +157,13 @@ browser. Full reference: `docs/development/debugging/console-commands.md`.
 ```bash
 # Read the full output of the current piece
 agent-browser eval "(async () => {
-  const v = await commontools.readCell();
+  const v = await commonfabric.readCell();
   return JSON.stringify(v).slice(0, 500);
 })()"
 
 # Read a specific field
 agent-browser eval "(async () => {
-  const v = await commontools.readArgumentCell({ path: ['items'] });
+  const v = await commonfabric.readArgumentCell({ path: ['items'] });
   return JSON.stringify(v).slice(0, 500);
 })()"
 ```
@@ -172,7 +172,7 @@ agent-browser eval "(async () => {
 
 ```bash
 agent-browser eval "(async () => {
-  await commontools.vdom.dump();
+  await commonfabric.vdom.dump();
   return 'dumped to console';
 })()"
 ```
@@ -181,7 +181,7 @@ agent-browser eval "(async () => {
 
 ```bash
 agent-browser eval "(async () => {
-  const r = await commontools.detectNonIdempotent(5000);
+  const r = await commonfabric.detectNonIdempotent(5000);
   return JSON.stringify({ nonIdempotent: r.nonIdempotent.length, cycles: r.cycles.length, busyTime: r.busyTime });
 })()"
 ```
@@ -189,13 +189,13 @@ agent-browser eval "(async () => {
 **Check for action schema mismatches** (if handlers seem to do nothing):
 
 ```bash
-agent-browser eval "JSON.stringify(commontools.getLoggerFlagsBreakdown())"
+agent-browser eval "JSON.stringify(commonfabric.getLoggerFlagsBreakdown())"
 ```
 
 **Subscribe to cell updates** (watch values change during interaction):
 
 ```bash
-agent-browser eval "window._cancel = commontools.subscribeToCell()"
+agent-browser eval "window._cancel = commonfabric.subscribeToCell()"
 agent-browser click @e5
 agent-browser console   # Check for "[debug] cell update" entries
 agent-browser eval "window._cancel()"

@@ -1,5 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertNotMatch,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { transformFiles } from "./utils.ts";
 
 const fixture = `
@@ -17,21 +22,181 @@ export { configSchema };
 `;
 
 describe("CommonFabricTransformerPipeline", () => {
-  it("Filters transformations if <cts-enabled /> not provided", async () => {
+  it("transforms by default and supports cf-disable-transform opt-out", async () => {
+    const source = `
+import { computed } from "commonfabric";
+
+const value = computed(() => 1);
+export { value };
+`;
+
+    const enabledByDefault = await transformFiles({
+      "/main.ts": source,
+    });
+    assertStringIncludes(
+      enabledByDefault["/main.ts"]!,
+      "const value = __cfHelpers.derive(",
+    );
+
     const disabled = await transformFiles({
-      "/main.ts": fixture,
+      "/main.ts": `/// <cf-disable-transform />\n${source}`,
     });
-    assert(
-      !/import \* as __cfHelpers/.test(disabled["/main.ts"]!),
-      "no replacements without <cts-enable />",
-    );
-    const enabled = await transformFiles({
-      "/main.ts": `/// <cts-enable />\n` + fixture,
+
+    assertStringIncludes(disabled["/main.ts"]!, "computed(() => 1)");
+    assertNotMatch(disabled["/main.ts"]!, /__cfHelpers\.derive/);
+
+    const legacyEnabled = await transformFiles({
+      "/main.ts": `/// <cts-enable />\n${source}`,
     });
-    assert(
-      /import \* as __cfHelpers/.test(enabled["/main.ts"]!),
-      "no replacements without <cts-enable />",
+
+    assertStringIncludes(
+      legacyEnabled["/main.ts"]!,
+      "const value = __cfHelpers.derive(",
     );
+  });
+
+  it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {
+    const source = `/// <cts-enable />
+import { lift, schema } from "commonfabric";
+
+function buildYears() {
+  return Array.from({ length: 3 }, (_, index) => String(index + 1));
+}
+
+const model = schema({ type: "string" } as const);
+const lookup = (() => ({ open: "Open" }))();
+const days = Array.from({ length: 3 }, (_, index) => String(index + 1));
+const matcher = /^[a-z]+$/;
+const scopeMap = { gmail: "gmail.readonly" } as const;
+const scopes = Object.fromEntries(
+  Object.entries(scopeMap).map(([key, value]) => [key, { value }]),
+);
+const years = buildYears();
+const tags = new Set(["a", "b"]);
+const proxied = new Proxy({ open: "Open" }, {});
+const passthrough = lift((value: string) => value);
+
+export { model, lookup, days, matcher, scopes, years, tags, proxied, passthrough };
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(
+      main,
+      'const model = __cfHelpers.__cf_data(schema({ type: "string" } as const));',
+    );
+    assertStringIncludes(
+      main,
+      'const lookup = __cfHelpers.__cf_data((() => ({ open: "Open" }))());',
+    );
+    assertStringIncludes(
+      main,
+      "const days = __cfHelpers.__cf_data(Array.from({ length: 3 }, (_, index) => String(index + 1)));",
+    );
+    assertStringIncludes(
+      main,
+      "const matcher = __cfHelpers.__cf_data(/^[a-z]+$/);",
+    );
+    assertStringIncludes(
+      main,
+      "const scopes = __cfHelpers.__cf_data(Object.fromEntries(",
+    );
+    assertStringIncludes(
+      main,
+      "const years = __cfHelpers.__cf_data(buildYears());",
+    );
+    assertStringIncludes(
+      main,
+      'const tags = __cfHelpers.__cf_data(new Set(["a", "b"]));',
+    );
+    assert(
+      !main.includes('__cfHelpers.__cf_data(new Proxy({ open: "Open" }, {}));'),
+      "Proxy snapshots stay unsupported until Proxy is re-enabled in SES compartments",
+    );
+    assert(
+      !main.includes("__cfHelpers.__cf_data(lift("),
+      "top-level builder calls should not be wrapped",
+    );
+  });
+
+  it("hardens direct top-level functions with a canonical helper", async () => {
+    const source = `
+const step = (value: number) => value + 1;
+export default function next(value: number) {
+  return step(value);
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(main, "function __cfHardenFn");
+    assertStringIncludes(
+      main,
+      "const step = __cfHardenFn((value: number) => value + 1);",
+    );
+    assertStringIncludes(main, "__cfHardenFn(next);");
+  });
+
+  it("wraps explicit snapshot helpers with __cfHelpers.__cf_data", async () => {
+    const source = `/// <cts-enable />
+import { nonPrivateRandom, safeDateNow } from "commonfabric";
+
+const startedAt = safeDateNow();
+const seed = nonPrivateRandom();
+
+export default function probe() {
+  return [safeDateNow(), nonPrivateRandom(), startedAt, seed];
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(
+      main,
+      "const startedAt = __cfHelpers.__cf_data(safeDateNow());",
+    );
+    assertStringIncludes(
+      main,
+      "const seed = __cfHelpers.__cf_data(nonPrivateRandom());",
+    );
+    assert(
+      !main.includes("__cfHelpers.safeDateNow"),
+      "explicit helper calls should not be rewritten",
+    );
+    assert(
+      !main.includes("__cfHelpers.nonPrivateRandom"),
+      "explicit helper calls should not be rewritten",
+    );
+  });
+
+  it("skips snapshot wrapping when cf-disable-transform is present", async () => {
+    const output = await transformFiles({
+      "/main.ts": `/// <cf-disable-transform />
+function pow(x: number): number {
+  return x * x;
+}
+
+export default pow(5);
+`,
+    });
+
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(
+      main,
+      "export default pow(5);",
+    );
+    assertNotMatch(main, /__cfHelpers\.__cf_data/);
+    assertNotMatch(main, /__cfDataHelper/);
   });
 });
 

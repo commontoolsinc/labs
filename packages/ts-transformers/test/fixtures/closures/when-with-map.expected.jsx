@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Test case for when() with a reactive array map as the value.
  *
@@ -7,6 +15,9 @@ import * as __cfHelpers from "commonfabric";
  * Schema injection needs to know the type of the mapWithPattern result.
  */
 import { Cell, Default, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     label: string;
 }
@@ -22,9 +33,9 @@ interface PatternInput {
 // Context: when(condition, value) returns value if condition is truthy, else
 //   condition. The value branch contains a reactive .map() that must be
 //   transformed to mapWithPattern with proper schema injection.
-export default pattern((__ct_pattern_input) => {
-    const showItems = __ct_pattern_input.key("showItems");
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const showItems = __cf_pattern_input.key("showItems");
+    const items = __cf_pattern_input.key("items");
     return {
         [UI]: (<div>
         {/* when(condition, value) where value is a reactive map */}
@@ -40,8 +51,8 @@ export default pattern((__ct_pattern_input) => {
                     type: "array",
                     items: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, showItems, items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        } as const satisfies __cfHelpers.JSONSchema, showItems, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return <li>{item.key("label")}</li>;
         }, {
             type: "object",
@@ -144,5 +155,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

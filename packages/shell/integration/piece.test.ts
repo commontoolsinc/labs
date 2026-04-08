@@ -168,55 +168,13 @@ describe("shell piece tests", () => {
                 value?: {
                   activePattern?: {
                     id(): string;
-                    cell(): {
-                      key(name: string): {
-                        sync(): Promise<unknown>;
-                      };
-                    };
                   };
                 };
               };
             }
             | null;
           const activePattern = appView?._patterns?.value?.activePattern;
-          if (!activePattern || activePattern.id() !== expectedPieceId) {
-            return false;
-          }
-          const decrement = activePattern.cell().key("decrement");
-          return decrement.sync().then(() => true, () => false);
-        }, { args: [pieceId] });
-      });
-    };
-
-    const clickDecrement = async () => {
-      await waitFor(async () => {
-        return await page.evaluate(async (expectedPieceId) => {
-          const rootView = document.querySelector("x-root-view");
-          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-            | {
-              _patterns?: {
-                value?: {
-                  activePattern?: {
-                    id(): string;
-                    cell(): {
-                      key(name: string): {
-                        sync(): Promise<unknown>;
-                        send(value: unknown): Promise<void>;
-                      };
-                    };
-                  };
-                };
-              };
-            }
-            | null;
-          const activePattern = appView?._patterns?.value?.activePattern;
-          if (!activePattern || activePattern.id() !== expectedPieceId) {
-            return false;
-          }
-          const decrement = activePattern.cell().key("decrement");
-          await decrement.sync();
-          await decrement.send(undefined);
-          return true;
+          return activePattern?.id() === expectedPieceId;
         }, { args: [pieceId] });
       });
     };
@@ -229,7 +187,7 @@ describe("shell piece tests", () => {
     }
     await waitFor(async () => (await piece.result.get(["value"])) === 0);
 
-    await clickDecrement();
+    await clickPieceButton(page, "#counter-decrement");
     try {
       await waitFor(async () => (await piece.result.get(["value"])) === -1);
     } catch (error) {
@@ -237,7 +195,7 @@ describe("shell piece tests", () => {
       throw error;
     }
 
-    await clickDecrement();
+    await clickPieceButton(page, "#counter-decrement");
     try {
       await waitFor(async () => (await piece.result.get(["value"])) === -2);
     } catch (error) {
@@ -246,3 +204,20 @@ describe("shell piece tests", () => {
     }
   });
 });
+
+function clickPieceButton(
+  page: ReturnType<ShellIntegration["page"]>,
+  selector: string,
+) {
+  return waitFor(async () => {
+    try {
+      const button = await page.waitForSelector(selector, {
+        strategy: "pierce",
+      });
+      await button.click();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
+}

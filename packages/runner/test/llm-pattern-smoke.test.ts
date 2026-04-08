@@ -18,6 +18,7 @@ import {
 } from "@commonfabric/llm/client";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -49,7 +50,7 @@ describe("LLM pattern smoke tests", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateText, generateObject } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
   });

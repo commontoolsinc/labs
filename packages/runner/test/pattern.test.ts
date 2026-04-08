@@ -198,7 +198,9 @@ describe("pattern", () => {
     const json = JSON.stringify(doublePattern);
     const parsed = JSON.parse(json);
     expect(json.length).toBeGreaterThan(200);
-    expect(parsed.nodes[0].module.implementation).toContain("=>");
+    expect(typeof parsed.nodes[0].module.implementation).toBe("string");
+    expect("implementationRef" in parsed.nodes[0].module).toBe(true);
+    expect(typeof parsed.nodes[0].module.implementationRef).toBe("string");
   });
 
   it("pattern with map node serializes correctly", () => {

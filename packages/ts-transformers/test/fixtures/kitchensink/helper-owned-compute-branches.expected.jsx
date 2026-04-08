@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * FIXTURE: helper-owned-compute-branches
  * Verifies: helper-owned branches inside computed() can mix compute-owned array
@@ -11,6 +19,9 @@ import * as __cfHelpers from "commonfabric";
  * - authored ifElse branches still lower safely around the mixed map behavior
  */
 import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Badge {
     text: string;
     active: boolean;
@@ -269,10 +280,10 @@ export default pattern((state) => {
                         : ""}
             </span>))}
           {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
-          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const member = __ct_pattern_input.key("element");
-                const memberIndex = __ct_pattern_input.key("index");
-                const project = __ct_pattern_input.params.project;
+          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const member = __cf_pattern_input.key("element");
+                const memberIndex = __cf_pattern_input.key("index");
+                const project = __cf_pattern_input.params.project;
                 return (<small>
               {__cfHelpers.ifElse({
                     type: "boolean"
@@ -473,5 +484,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

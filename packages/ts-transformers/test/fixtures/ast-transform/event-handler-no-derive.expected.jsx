@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, Default, handler, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -28,8 +39,8 @@ const handleClick = handler({
 //   handleClick({ count }) (inside .map())    → left as-is (not wrapped in derive)
 //   pattern<{ count: Default<number, 0> }>    → pattern(fn, inputSchema, outputSchema)
 // Context: Negative test ensuring handler calls in event attributes and inside .map() are not derive-wrapped
-export default pattern((__ct_pattern_input) => {
-    const count = __ct_pattern_input.key("count");
+export default pattern((__cf_pattern_input) => {
+    const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}
@@ -101,5 +112,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

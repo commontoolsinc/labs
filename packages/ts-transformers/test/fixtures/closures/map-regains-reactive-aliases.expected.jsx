@@ -1,5 +1,51 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Default, computed, lift, pattern, wish } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(() => {
+    const foo = wish<Default<string[], [
+    ]>>({ query: "#items" }, {
+        type: "array",
+        items: {
+            type: "string"
+        },
+        "default": []
+    } as const satisfies __cfHelpers.JSONSchema).result!;
+    return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const item = __cf_pattern_input.key("element");
+        return item + "!";
+    }, {
+        type: "object",
+        properties: {
+            element: {
+                type: "string"
+            }
+        },
+        required: ["element"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema), {});
+});
+const __cfModuleCallback_2 = __cfHardenFn(({ element: item, params: {} }) => __cfHelpers.derive({
+    type: "object",
+    properties: {
+        item: {
+            type: "string"
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase()));
 const passthrough = lift({
     type: "array",
     items: {
@@ -83,8 +129,8 @@ export default pattern((state) => {
                 type: "string"
             }
         } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item + "!";
         }, {
             type: "object",
@@ -116,8 +162,8 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
         const foo = passthrough(inner);
-        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item + "!";
         }, {
             type: "object",
@@ -139,30 +185,7 @@ export default pattern((state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
-        const foo = wish<Default<string[], [
-        ]>>({ query: "#items" }, {
-            type: "array",
-            items: {
-                type: "string"
-            },
-            "default": []
-        } as const satisfies __cfHelpers.JSONSchema).result!;
-        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            return item + "!";
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "string"
-                }
-            },
-            required: ["element"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema), {});
-    });
+    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1);
     const fromFiltered = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -197,8 +220,8 @@ export default pattern((state) => {
                 type: "string"
             }
         } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item.key("length") > 1;
         }, {
             type: "object",
@@ -211,8 +234,8 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {});
-        return filtered.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item + "!";
         }, {
             type: "object",
@@ -260,8 +283,8 @@ export default pattern((state) => {
                 type: "string"
             }
         } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item.key("length") > 1;
         }, {
             type: "object",
@@ -274,20 +297,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {});
-        return filtered.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            return __cfHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "string"
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase());
-        }, {
+        return filtered.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
             type: "object",
             properties: {
                 element: {
@@ -355,5 +365,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

@@ -29,6 +29,99 @@ type CalculatorRequest = {
   base?: number;
 };
 
+function evaluateMathExpression(source: string): number {
+  let index = 0;
+
+  function skipWhitespace() {
+    while (index < source.length && /\s/u.test(source[index])) {
+      index += 1;
+    }
+  }
+
+  function parsePrimary(): number {
+    skipWhitespace();
+    const next = source[index];
+
+    if (next === "+" || next === "-") {
+      index += 1;
+      const value = parsePrimary();
+      return next === "-" ? -value : value;
+    }
+
+    if (next === "(") {
+      index += 1;
+      const value = parseExpression();
+      skipWhitespace();
+      if (source[index] !== ")") {
+        throw new Error("Invalid expression");
+      }
+      index += 1;
+      return value;
+    }
+
+    const start = index;
+    let sawDigit = false;
+    while (index < source.length) {
+      const ch = source[index];
+      if (ch >= "0" && ch <= "9") {
+        sawDigit = true;
+        index += 1;
+        continue;
+      }
+      if (ch === ".") {
+        index += 1;
+        continue;
+      }
+      break;
+    }
+
+    if (!sawDigit) {
+      throw new Error("Invalid expression");
+    }
+
+    const value = Number(source.slice(start, index));
+    if (!Number.isFinite(value)) {
+      throw new Error("Invalid number");
+    }
+    return value;
+  }
+
+  function parseTerm(): number {
+    let value = parsePrimary();
+    while (true) {
+      skipWhitespace();
+      const operator = source[index];
+      if (operator !== "*" && operator !== "/") {
+        return value;
+      }
+      index += 1;
+      const rhs = parsePrimary();
+      value = operator === "*" ? value * rhs : value / rhs;
+    }
+  }
+
+  function parseExpression(): number {
+    let value = parseTerm();
+    while (true) {
+      skipWhitespace();
+      const operator = source[index];
+      if (operator !== "+" && operator !== "-") {
+        return value;
+      }
+      index += 1;
+      const rhs = parseTerm();
+      value = operator === "+" ? value + rhs : value - rhs;
+    }
+  }
+
+  const result = parseExpression();
+  skipWhitespace();
+  if (index !== source.length || !Number.isFinite(result)) {
+    throw new Error("Invalid expression");
+  }
+  return result;
+}
+
 export const calculator = pattern<
   CalculatorRequest,
   string | { error: string }
@@ -43,9 +136,7 @@ export const calculator = pattern<
     }
     let result;
     try {
-      result = Function(
-        `"use strict"; return Number(${sanitized}).toString(${sanitizedBase})`,
-      )();
+      result = evaluateMathExpression(sanitized).toString(sanitizedBase);
     } catch (error) {
       result = { error: (error as any)?.message || "<error>" };
     }

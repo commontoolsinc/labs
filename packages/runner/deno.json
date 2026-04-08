@@ -8,6 +8,10 @@
     },
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts"
   },
+  "imports": {
+    "ses": "npm:ses@^1.15.0",
+    "typescript": "npm:typescript"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared.ts",

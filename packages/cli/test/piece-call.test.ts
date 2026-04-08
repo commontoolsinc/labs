@@ -499,7 +499,6 @@ describe("executePieceCallable", () => {
       expect(result.helpText).not.toContain("cf piece call ... search --help");
     });
   });
-
   it("surfaces handler transaction failures as errors", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",

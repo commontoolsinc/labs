@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, derive, handler, NAME, pattern, str, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -24,8 +35,8 @@ const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
 //   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
 //   pattern<{ values: string[] }>      → pattern(fn, inputSchema, outputSchema)
 // Context: Destructured pattern parameter; combines array map transform with derive and handler schemas
-export default pattern((__ct_pattern_input) => {
-    const values = __ct_pattern_input.key("values");
+export default pattern((__cf_pattern_input) => {
+    const values = __cf_pattern_input.key("values");
     derive({
         type: "array",
         items: {
@@ -39,9 +50,9 @@ export default pattern((__ct_pattern_input) => {
         [UI]: (<div>
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>
-            {values.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const value = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
+            {values.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const value = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
                 return (<div>
                 {index}: {value}
               </div>);
@@ -133,5 +144,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

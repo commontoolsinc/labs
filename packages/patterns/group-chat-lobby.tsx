@@ -6,7 +6,9 @@ import {
   ifElse,
   NAME,
   navigateTo,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -45,7 +47,7 @@ function getRandomColor(): string {
     "#FF2D55", // Apple pink
     "#00C7BE", // Apple teal
   ];
-  return colors[Math.floor(Math.random() * colors.length)];
+  return colors[Math.floor(nonPrivateRandom() * colors.length)];
 }
 
 // Get initials from name
@@ -71,8 +73,8 @@ const resetLobby = handler<
 >((_event, { messages, users, sessionId }) => {
   console.log("[resetLobby] Resetting all chat state...");
   // Generate new session ID to invalidate all existing chat room connections
-  const newSessionId = `session-${Date.now()}-${
-    Math.random().toString(36).slice(2)
+  const newSessionId = `session-${safeDateNow()}-${
+    nonPrivateRandom().toString(36).slice(2)
   }`;
   sessionId.set(newSessionId);
   messages.set([]);
@@ -104,8 +106,8 @@ const joinChat = handler<
   // Initialize session ID if not set (first user joining)
   let currentSessionId = sessionId.get();
   if (!currentSessionId) {
-    currentSessionId = `session-${Date.now()}-${
-      Math.random().toString(36).slice(2)
+    currentSessionId = `session-${safeDateNow()}-${
+      nonPrivateRandom().toString(36).slice(2)
     }`;
     sessionId.set(currentSessionId);
     console.log("[joinChat] Initialized new session:", currentSessionId);
@@ -120,7 +122,7 @@ const joinChat = handler<
     // Create new user and add to list
     const newUser: User = {
       name,
-      joinedAt: Date.now(),
+      joinedAt: safeDateNow(),
       color: getRandomColor(),
     };
     users.set([...existingUsers, newUser]);
@@ -131,10 +133,10 @@ const joinChat = handler<
     messages.set([
       ...existingMessages,
       {
-        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
         author: "System",
         content: `${name} joined the chat`,
-        timestamp: Date.now(),
+        timestamp: safeDateNow(),
         type: "system",
         reactions: [],
       },

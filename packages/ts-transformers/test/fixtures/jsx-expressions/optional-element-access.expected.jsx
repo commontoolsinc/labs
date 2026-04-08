@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, NAME, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: optional-element-access
 // Verifies: optional element access (?.[0]) in a negated && guard is transformed to when(derive(...))
 //   !list.get()?.[0] && <span> → when(derive({list}, ({list}) => !list.get()?.[0]), <span>)
@@ -37,12 +48,12 @@ export default pattern(() => {
             properties: {
                 list: {
                     anyOf: [{
+                            type: "undefined"
+                        }, {
                             type: "array",
                             items: {
                                 type: "string"
                             }
-                        }, {
-                            type: "undefined"
                         }],
                     asCell: true
                 }
@@ -88,5 +99,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

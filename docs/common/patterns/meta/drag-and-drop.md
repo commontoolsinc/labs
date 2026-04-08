@@ -33,7 +33,6 @@ Marks a region where items can be dropped. Provides visual feedback (dashed outl
 ## Example
 
 ```tsx
-/// <cts-enable />
 import {
   Default,
   equals,

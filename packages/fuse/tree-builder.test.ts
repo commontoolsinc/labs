@@ -778,6 +778,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     piecesIno,
     entitiesIno,
     pieceMap: new Map([["notes", "of:entity-123"]]),
+    pieceInos: new Map([["notes", pieceIno]]),
     pieceControllers: new Map([["notes", piece as never]]),
     pieceManifest: new Map(),
     pieceSubs: new Map(),
@@ -831,7 +832,7 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
   const entitiesIno = tree.addDir(spaceIno, "entities");
   const pieceIno = tree.addDir(piecesIno, "notes");
   const pieceResultIno = tree.addDir(pieceIno, "result", "object");
-  const script = buildCallableScript("/tmp/ct-exec");
+  const script = buildCallableScript("/tmp/cf-exec");
 
   const handlerIno = tree.addCallable(
     pieceResultIno,
@@ -849,6 +850,7 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
     piecesIno,
     entitiesIno,
     pieceMap: new Map([["notes", "of:entity-123"]]),
+    pieceInos: new Map([["notes", pieceIno]]),
     pieceControllers: new Map([["notes", piece as never]]),
     pieceManifest: new Map(),
     pieceSubs: new Map(),
@@ -969,10 +971,16 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     name: string,
     spaceName: string,
   ) => Promise<bigint>;
+  type HydratePieceProp = (
+    pieceIno: bigint,
+    propName: "input" | "result",
+  ) => Promise<boolean>;
 
   const pieceIno = await (bridge as unknown as {
     loadPieceTree: LoadPieceTree;
   }).loadPieceTree(piece, tree.rootIno, "Sparse Fixture", "home");
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);
@@ -1088,10 +1096,16 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     name: string,
     spaceName: string,
   ) => Promise<bigint>;
+  type HydratePieceProp = (
+    pieceIno: bigint,
+    propName: "input" | "result",
+  ) => Promise<boolean>;
 
   const pieceIno = await (bridge as unknown as {
     loadPieceTree: LoadPieceTree;
   }).loadPieceTree(piece, tree.rootIno, "Mixed Fixture", "home");
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);

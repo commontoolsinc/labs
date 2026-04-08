@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, ifElse, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // Reproduction of bug: .get() called on Cell inside ifElse predicate
 // The transformer wraps predicates in derive(), which unwraps Cells,
 // but fails to remove the .get() calls
@@ -7,10 +18,10 @@ import { Cell, ifElse, pattern, UI } from "commonfabric";
 // Verifies: .get() calls on Cell refs inside ifElse predicates are preserved within derive()
 //   showHistory && messageCount !== dismissedIndex.get() → derive(..., ({...}) => showHistory && messageCount !== dismissedIndex.get())
 // Context: Bug repro -- predicate wrapped in derive() which unwraps Cells, but .get() must remain
-export default pattern((__ct_pattern_input) => {
-    const showHistory = __ct_pattern_input.key("showHistory");
-    const messageCount = __ct_pattern_input.key("messageCount");
-    const dismissedIndex = __ct_pattern_input.key("dismissedIndex");
+export default pattern((__cf_pattern_input) => {
+    const showHistory = __cf_pattern_input.key("showHistory");
+    const messageCount = __cf_pattern_input.key("messageCount");
+    const dismissedIndex = __cf_pattern_input.key("dismissedIndex");
     return {
         [UI]: (<div>
         {ifElse({
@@ -96,5 +107,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

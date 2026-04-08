@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, computed, Default, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Person {
     name: string;
     rank: number;
@@ -15,8 +26,8 @@ interface PatternInput {
 //   adminData.map((entry) => <li>...) → stays plain .map() inside the derive callback
 // Context: opposite of computed-map-in-ternary-branch; no JSX-local rewrite is
 //   available for the hoisted `peopleCount` initializer.
-export default pattern((__ct_pattern_input) => {
-    const people = __ct_pattern_input.key("people");
+export default pattern((__cf_pattern_input) => {
+    const people = __cf_pattern_input.key("people");
     const showAdmin = Writable.of(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -235,5 +246,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

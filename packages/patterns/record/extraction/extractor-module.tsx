@@ -25,14 +25,15 @@ import {
   type ImageData,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
 import {
   createSubPiece,
+  getAvailableTypes,
   getDefinition,
   getFieldToTypeMapping as getFullFieldMapping,
-  SUB_PIECE_REGISTRY,
 } from "../registry.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "../types.ts";
 import type {
@@ -312,7 +313,7 @@ function getPrimaryFieldName(
   fieldName: string,
   moduleType: string,
 ): string {
-  const def = SUB_PIECE_REGISTRY[moduleType];
+  const def = getDefinition(moduleType);
   if (!def?.fieldMapping || def.fieldMapping.length === 0) {
     return fieldName; // No mapping, use as-is
   }
@@ -781,7 +782,7 @@ function buildPreview(
   // Handle array extraction mode (e.g., customFields for custom-field module)
   // Modules with extractionMode: "array" extract an array where each item
   // becomes a separate module instance
-  for (const def of Object.values(SUB_PIECE_REGISTRY)) {
+  for (const def of getAvailableTypes()) {
     if (def.extractionMode !== "array" || !def.fieldMapping) continue;
 
     // Get the array field name (first entry in fieldMapping)
@@ -941,7 +942,7 @@ const dismiss = handler<
   parentSubPieces.set(current.filter((e) => e?.type !== "extractor"));
   parentTrashedSubPieces.push({
     ...selfEntry,
-    trashedAt: new Date().toISOString(),
+    trashedAt: new Date(safeDateNow()).toISOString(),
   });
 });
 
@@ -1627,7 +1628,7 @@ const applySelected = handler<
         if (entry) {
           parentTrashedSubPiecesCell.push({
             ...entry,
-            trashedAt: new Date().toISOString(),
+            trashedAt: new Date(safeDateNow()).toISOString(),
           });
         }
       }

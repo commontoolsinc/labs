@@ -1,10 +1,21 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: pattern-computed-literal-member-default
 // Verifies: literal-member destructuring defaults survive into schema defaults
 //   ({ ["foo"]: foo = "fallback" }) → schema default on "foo"
-export default pattern((__ct_pattern_input) => {
-    const foo = __ct_pattern_input.key("foo");
+export default pattern((__cf_pattern_input) => {
+    const foo = __cf_pattern_input.key("foo");
     return <div>{foo}</div>;
 }, {
     type: "object",
@@ -41,5 +52,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

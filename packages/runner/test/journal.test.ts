@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { assertSpyCalls, spy } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import * as Journal from "../src/storage/transaction/journal.ts";
@@ -14,8 +15,20 @@ describe("Journal", () => {
   let storage: ReturnType<typeof StorageManager.emulate>;
   let journal: ReturnType<typeof Journal.open>;
 
+  const legacyReplica = (spaceDid: typeof space) => {
+    const replica = storage.open(spaceDid).replica;
+    if (!replica.commit) {
+      throw new Error("Expected legacy replica to support commit()");
+    }
+    return replica as typeof replica & {
+      commit: NonNullable<typeof replica.commit>;
+    };
+  };
+
   beforeEach(() => {
-    storage = StorageManager.emulate({ as: signer });
+    // This suite asserts the legacy raw JSON replica shape. V2 coverage lives in
+    // the memory-v2-* tests that exercise the document-envelope model directly.
+    storage = StorageManager.emulate({ as: signer, memoryVersion: "v1" });
     journal = Journal.open(storage);
   });
 
@@ -67,7 +80,7 @@ describe("Journal", () => {
     it("should read existing data from replica", async () => {
       // Pre-populate replica
       const testData = { name: "Charlie", age: 25 };
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -95,7 +108,7 @@ describe("Journal", () => {
 
     it("should read nested paths from replica data", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -127,7 +140,7 @@ describe("Journal", () => {
     it("should read with metadata options", async () => {
       // Pre-populate replica
       const testData = { name: "MetaTest", version: 1 };
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -576,7 +589,7 @@ describe("Journal", () => {
 
     it("should handle mixed reads from replica and writes", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -826,7 +839,7 @@ describe("Journal", () => {
 
     it("should track read invariants in history", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -863,7 +876,7 @@ describe("Journal", () => {
 
     it("should capture original replica read in history, not merged result", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -975,7 +988,7 @@ describe("Journal", () => {
 
   describe("trackReadWithoutLoad reads", () => {
     it("records read activity but skips loading from storage", async () => {
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -1009,6 +1022,38 @@ describe("Journal", () => {
       });
       // No load means no history invariant captured.
       expect([...freshJournal.history(space)]).toHaveLength(0);
+    });
+
+    it("does not consult the replica when only tracking the read", async () => {
+      const replica = legacyReplica(space);
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:track-without-load-no-replica-read",
+            is: { present: true },
+          }),
+        ],
+        claims: [],
+      });
+
+      const getSpy = spy(replica, "get");
+      try {
+        const freshJournal = Journal.open(storage);
+        const { ok: reader } = freshJournal.reader(space);
+        const address = {
+          id: "test:track-without-load-no-replica-read",
+          type: "application/json",
+          path: [],
+        } as const;
+
+        const result = reader!.read(address, { trackReadWithoutLoad: true });
+        expect(result.error).toBeUndefined();
+        expect(result.ok?.value).toBeUndefined();
+        assertSpyCalls(getSpy, 0);
+      } finally {
+        getSpy.restore();
+      }
     });
   });
 

@@ -17,7 +17,13 @@
  *
  * Run: deno task cf test packages/patterns/store-mapper.test.tsx --verbose
  */
-import { computed, handler, pattern, Writable } from "commonfabric";
+import {
+  computed,
+  handler,
+  pattern,
+  safeDateNow,
+  Writable,
+} from "commonfabric";
 import StoreMapper from "./store-mapper.tsx";
 
 interface Aisle {
@@ -225,7 +231,7 @@ export default pattern(() => {
         itemName: "Coffee",
         correctAisle: "Aisle 5",
         incorrectAisle: "",
-        timestamp: Date.now(),
+        timestamp: safeDateNow(),
       },
     ],
   });

@@ -21,6 +21,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
@@ -223,7 +224,7 @@ const buildExportData = lift(
 
     return {
       version: "1.0",
-      exportDate: new Date().toISOString(),
+      exportDate: new Date(safeDateNow()).toISOString(),
       records: exportedRecords,
     };
   },
@@ -667,7 +668,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <cf-file-download
                   $data={exportedJson}
                   filename={`record-backup-${
-                    new Date().toISOString().slice(0, 10)
+                    new Date(safeDateNow()).toISOString().slice(0, 10)
                   }.json`}
                   mimeType="application/json"
                   variant="primary"

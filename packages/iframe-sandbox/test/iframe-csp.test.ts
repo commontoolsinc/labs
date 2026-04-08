@@ -1,6 +1,7 @@
 import {
   assert,
   assertEquals,
+  cleanupFixtures,
   invertPromise,
   render,
   setIframeTestHandler,
@@ -229,23 +230,28 @@ function defineTest(
   expected: string | null | RegExp,
 ) {
   Deno.test(name, async () => {
-    const body = `
-        ${CSP_REPORTER}
-        ${html}
-      `;
-    const iframe = await render(body);
-    if (expected == null) {
-      await invertPromise(waitForEvent(iframe, "common-iframe-error"));
-    } else {
-      const event = await waitForEvent(
-        iframe,
-        "common-iframe-error",
-      ) as CustomEvent;
-      if (typeof expected === "string") {
-        assertEquals(event.detail.description, expected);
+    cleanupFixtures();
+    try {
+      const body = `
+          ${CSP_REPORTER}
+          ${html}
+        `;
+      const iframe = await render(body);
+      if (expected == null) {
+        await invertPromise(waitForEvent(iframe, "common-iframe-error"));
       } else {
-        assert(expected.test(event.detail.description));
+        const event = await waitForEvent(
+          iframe,
+          "common-iframe-error",
+        ) as CustomEvent;
+        if (typeof expected === "string") {
+          assertEquals(event.detail.description, expected);
+        } else {
+          assert(expected.test(event.detail.description));
+        }
       }
+    } finally {
+      cleanupFixtures();
     }
   });
 }

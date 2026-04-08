@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, pattern, action } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface BaseState {
     a?: Cell<string>;
     b: Cell<number>;
@@ -10,9 +21,9 @@ type ReqState = Required<BaseState>;
 // Verifies: Required<BaseState> makes originally-optional properties required in capture schemas
 //   action(() => a.set("hello")) → handler(false, { a: { type: "string", asCell, required } }, ...)({ a })
 // Context: BaseState.a is optional, but Required<> forces it to required in both input and capture schemas
-export default pattern((__ct_pattern_input) => {
-    const a = __ct_pattern_input.key("a");
-    const b = __ct_pattern_input.key("b");
+export default pattern((__cf_pattern_input) => {
+    const a = __cf_pattern_input.key("a");
+    const b = __cf_pattern_input.key("b");
     return {
         setA: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
@@ -66,5 +77,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

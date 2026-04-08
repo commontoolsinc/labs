@@ -16,6 +16,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -49,8 +50,7 @@ interface LobbyOutput {
   reset: Stream<void>;
 }
 
-// Module-level function for navigation (pattern from Scrabble)
-let createGameAndNavigate: (
+function createGameAndNavigate(
   gameName: string,
   player1: Writable<PlayerData | null>,
   player2: Writable<PlayerData | null>,
@@ -58,7 +58,28 @@ let createGameAndNavigate: (
   gameState: Writable<GameState>,
   myName: string,
   myPlayerNumber: 1 | 2,
-) => unknown = null as any;
+) {
+  console.log("[createGameAndNavigate] Starting...");
+  console.log(
+    "[createGameAndNavigate] myName:",
+    myName,
+    "myPlayerNumber:",
+    myPlayerNumber,
+  );
+
+  const gameInstance = BattleshipRoom({
+    gameName,
+    player1,
+    player2,
+    shots,
+    gameState,
+    myName,
+    myPlayerNumber,
+  });
+
+  console.log("[createGameAndNavigate] Game instance created");
+  return navigateTo(gameInstance);
+}
 
 // Handler for joining as a specific player slot
 const joinAsPlayer = handler<
@@ -102,7 +123,7 @@ const joinAsPlayer = handler<
       name,
       ships,
       color: getRandomColor(playerSlot - 1),
-      joinedAt: Date.now(),
+      joinedAt: safeDateNow(),
     };
 
     // Store player data directly (no JSON serialization)
@@ -133,17 +154,15 @@ const joinAsPlayer = handler<
 
     // Navigate to game room
     console.log("[joinAsPlayer] Navigating to game room...");
-    if (createGameAndNavigate) {
-      return createGameAndNavigate(
-        gameName,
-        player1,
-        player2,
-        shots,
-        gameState,
-        name,
-        playerSlot,
-      );
-    }
+    return createGameAndNavigate(
+      gameName,
+      player1,
+      player2,
+      shots,
+      gameState,
+      name,
+      playerSlot,
+    );
   },
 );
 
@@ -174,17 +193,15 @@ const rejoinGame = handler<
     if (!playerData) return;
 
     console.log("[rejoinGame] Rejoining as:", playerData.name);
-    if (createGameAndNavigate) {
-      return createGameAndNavigate(
-        gameName,
-        player1,
-        player2,
-        shots,
-        gameState,
-        playerData.name,
-        playerSlot,
-      );
-    }
+    return createGameAndNavigate(
+      gameName,
+      player1,
+      player2,
+      shots,
+      gameState,
+      playerData.name,
+      playerSlot,
+    );
   },
 );
 
@@ -222,7 +239,7 @@ const joinPlayer1Handler = handler<
     name: name.trim(),
     ships: generateRandomShips(),
     color: getRandomColor(0),
-    joinedAt: Date.now(),
+    joinedAt: safeDateNow(),
   };
 
   player1.set(playerData);
@@ -258,7 +275,7 @@ const joinPlayer2Handler = handler<
     name: name.trim(),
     ships: generateRandomShips(),
     color: getRandomColor(1),
-    joinedAt: Date.now(),
+    joinedAt: safeDateNow(),
   };
 
   player2.set(playerData);
@@ -613,38 +630,5 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
     };
   },
 );
-
-// Navigation function setup
-createGameAndNavigate = (
-  gameName: string,
-  player1: Writable<PlayerData | null>,
-  player2: Writable<PlayerData | null>,
-  shots: Writable<ShotsState>,
-  gameState: Writable<GameState>,
-  myName: string,
-  myPlayerNumber: 1 | 2,
-) => {
-  console.log("[createGameAndNavigate] Starting...");
-  console.log(
-    "[createGameAndNavigate] myName:",
-    myName,
-    "myPlayerNumber:",
-    myPlayerNumber,
-  );
-
-  // Pass typed Cells to BattleshipRoom
-  const gameInstance = BattleshipRoom({
-    gameName,
-    player1,
-    player2,
-    shots,
-    gameState,
-    myName,
-    myPlayerNumber,
-  });
-
-  console.log("[createGameAndNavigate] Game instance created");
-  return navigateTo(gameInstance);
-};
 
 export default BattleshipLobby;

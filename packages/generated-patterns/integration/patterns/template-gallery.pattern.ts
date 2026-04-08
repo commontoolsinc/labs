@@ -181,7 +181,53 @@ function buildTemplateCards(
   return cards;
 }
 
-const sanitizedDefaultTemplates = buildTemplateCards(defaultTemplateSeeds);
+const sanitizedDefaultTemplates: TemplateCard[] = [
+  {
+    id: "campaign-launch",
+    name: "Campaign Launch Plan",
+    categoryKey: "marketing",
+    category: "Marketing",
+    summary: "Coordinate channel workstreams for launch readiness.",
+    tags: ["campaign", "launch", "checklist"],
+    popularity: 92,
+  },
+  {
+    id: "brand-style-guide",
+    name: "Brand Style Guide",
+    categoryKey: "design",
+    category: "Design",
+    summary: "Document voice, typography, and color decisions.",
+    tags: ["design", "brand"],
+    popularity: 84,
+  },
+  {
+    id: "ops-standup-board",
+    name: "Operations Standup Board",
+    categoryKey: "operations",
+    category: "Operations",
+    summary: "Track blockers and owners for daily standups.",
+    tags: ["operations", "standup"],
+    popularity: 78,
+  },
+  {
+    id: "budget-forecast",
+    name: "Budget Forecast Tracker",
+    categoryKey: "finance",
+    category: "Finance",
+    summary: "Model spend scenarios across quarters and teams.",
+    tags: ["finance", "forecast"],
+    popularity: 73,
+  },
+  {
+    id: "support-playbook",
+    name: "Support Response Playbook",
+    categoryKey: "support",
+    category: "Support",
+    summary: "Outline response templates per severity tier.",
+    tags: ["support", "playbook"],
+    popularity: 69,
+  },
+];
 
 function cloneCards(entries: readonly TemplateCard[]): TemplateCard[] {
   return entries.map((entry) => ({

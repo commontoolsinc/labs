@@ -41,9 +41,10 @@ assert_not_exists() {
 
 path_exists() {
   local path="$1"
+  local probe_timeout="${2:-3}"
 
   if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=KILL 1 test -e "$path" >/dev/null 2>&1
+    timeout --signal=KILL "$probe_timeout" test -e "$path" >/dev/null 2>&1
     return $?
   fi
 
@@ -67,11 +68,16 @@ assert_json_eq() {
 wait_for_path() {
   local path="$1"
   local timeout_seconds="${2:-20}"
-  local attempts=$((timeout_seconds * 10))
+  local started_at
+  started_at=$(date +%s)
 
-  for _ in $(seq 1 "$attempts"); do
-    if path_exists "$path"; then
+  while true; do
+    # Initial lazy hydration of FUSE paths may need a network round-trip.
+    if path_exists "$path" 1; then
       return 0
+    fi
+    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+      break
     fi
     sleep 0.1
   done
@@ -83,21 +89,25 @@ resolve_entity_dir() {
   local entities_dir="$1"
   local bare_id="$2"
   local timeout_seconds="${3:-20}"
-  local attempts=$((timeout_seconds * 10))
+  local started_at
+  started_at=$(date +%s)
   local canonical_entity_dir="$entities_dir/of:$bare_id"
   local bare_entity_dir="$entities_dir/$bare_id"
 
-  for _ in $(seq 1 "$attempts"); do
-    if path_exists "$canonical_entity_dir"; then
+  while true; do
+    if path_exists "$canonical_entity_dir" 1; then
       printf '%s\n' "$canonical_entity_dir"
       return 0
     fi
 
-    if path_exists "$bare_entity_dir"; then
+    if path_exists "$bare_entity_dir" 1; then
       printf '%s\n' "$bare_entity_dir"
       return 0
     fi
 
+    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+      break
+    fi
     sleep 0.1
   done
 
@@ -198,6 +208,8 @@ cf id new >"$IDENTITY"
 
 PIECE_ID=$(cf piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
 echo "Created piece: $PIECE_ID"
+cf piece step $SPACE_ARGS --piece "$PIECE_ID"
+echo "Stepped piece: $PIECE_ID"
 MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background)
 echo "$MOUNT_OUTPUT"
 
@@ -224,7 +236,7 @@ sleep 1
 
 wait_for_path "$MOUNTPOINT/$SPACE/pieces"
 
-PIECE_NAME="Fuse Exec Fixture"
+PIECE_NAME="Fuse-Exec-Fixture"
 PIECE_DIR="$MOUNTPOINT/$SPACE/pieces/$PIECE_NAME"
 RESULT_DIR="$PIECE_DIR/result"
 RESULT_JSON="$PIECE_DIR/result.json"

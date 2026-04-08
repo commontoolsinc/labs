@@ -4,6 +4,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { handler, lift } from "../src/builder/module.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import {
   type AnyCellWrapping,
   type JSONSchema,
@@ -45,7 +46,7 @@ describe("Schema-to-TS Type Conversion", () => {
       storageManager,
     });
     tx = runtime.edit();
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ str } = commonfabric);
   });
 

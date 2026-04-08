@@ -40,7 +40,7 @@ const p = pattern<{ items: string[] }>((state) => ({
     assertEquals(computationDiagnostics.length, 0);
     assertStringIncludes(
       output,
-      "const fontSize = __ct_pattern_input.params.style[key];",
+      "const fontSize = __cf_pattern_input.params.style[key];",
     );
   },
 );
@@ -249,15 +249,15 @@ Deno.test(
 
     assertStringIncludes(
       mapWindow,
-      'const selectedExampleId = __ct_pattern_input.key("params", "selectedExampleId");',
+      'const selectedExampleId = __cf_pattern_input.key("params", "selectedExampleId");',
     );
     assertStringIncludes(
       mapWindow,
-      'const currentItem = __ct_pattern_input.key("params", "currentItem");',
+      'const currentItem = __cf_pattern_input.key("params", "currentItem");',
     );
     assertStringIncludes(
       mapWindow,
-      'const examples = __ct_pattern_input.key("params", "examples");',
+      'const examples = __cf_pattern_input.key("params", "examples");',
     );
   },
 );
@@ -278,6 +278,108 @@ Deno.test(
         'required: ["itemsWithAisles", "items", "correctionIndex", "correctionTitle", "hasConnectedStore"]',
       ),
       "expected shopping-list sorted branch to stay pattern-lowered instead of wrapping the whole branch in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: imported pattern factory calls with local cells stay structural",
+  async () => {
+    const source = `/// <cts-enable />
+import { Writable, pattern, type PatternFactory } from "commonfabric";
+
+declare const Child: PatternFactory<{ value: number }, { value: number }>;
+
+export default pattern(() => {
+  const value = Writable.of<number>(1);
+  const child = Child({ value });
+
+  return {
+    childValue: child.key("value"),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, "const child = Child({ value });");
+    assertStringIncludes(output, 'childValue: child.key("value")');
+    assert(
+      !/__cfHelpers\.derive\([\s\S]{0,240}Child\(\{ value \}\)\)/.test(output),
+      "expected pattern factory invocation to stay structural instead of being wrapped in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: opaque-returning factory helpers with local cells stay structural",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, Writable } from "commonfabric";
+
+function createAuthManager(input: { accountType: string }) {
+  return pattern<{ accountType: string }, {
+    auth: { email: string };
+    fullUI: string;
+  }>(({ accountType }) => ({
+    auth: { email: accountType },
+    fullUI: accountType,
+  }))(input);
+}
+
+export default pattern(() => {
+  const selectedAccountType = Writable.of<string>("default");
+  const authManager = createAuthManager({
+    accountType: selectedAccountType,
+  });
+
+  return {
+    auth: authManager.key("auth"),
+    ui: authManager.key("fullUI"),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, "const authManager = createAuthManager({");
+    assertStringIncludes(output, "accountType: selectedAccountType,");
+    assert(
+      !/__cfHelpers\.derive\([\s\S]{0,280}createAuthManager\(\{[\s\S]{0,120}accountType: selectedAccountType[\s\S]{0,120}\}\)\)/
+        .test(
+          output,
+        ),
+      "expected opaque-returning factory helper to stay structural instead of being wrapped in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: derive callbacks that rely on contextual typing still receive injected schemas",
+  async () => {
+    const source = `/// <cts-enable />
+import { derive, pattern } from "commonfabric";
+
+const summarize = (values: string[]) => values.length;
+
+export default pattern<{ values: string[] }>(({ values }) => {
+  const result = derive(values, (entries) => summarize(entries.get()));
+  return { result };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const normalized = output.replace(/\s+/g, " ");
+
+    assertMatch(
+      normalized,
+      /const result = derive\([\s\S]*, values, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\);/,
     );
   },
 );

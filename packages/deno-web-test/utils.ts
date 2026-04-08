@@ -1,9 +1,13 @@
 import * as path from "@std/path";
+import ts from "typescript";
 import { Manifest } from "./manifest.ts";
 import { Summary, TestFileResults } from "./interface.ts";
-import { build } from "@commonfabric/felt";
 
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
+
+const BUNDLE_RETRY_ATTEMPTS = 5;
+const BUNDLE_RETRYABLE_ESBUILD_COPY = "failed to copy esbuild binary";
+const BUNDLE_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
 
 // Given a `Manifest`, moves harness code and bundled
 // tests to the manifest's `serverDir`.
@@ -16,11 +20,7 @@ export const buildTestDir = async (manifest: Manifest) => {
       "dist",
       tsToJs(testPath),
     );
-
-    await build(Object.assign({
-      entryPoints: [input],
-      outfile: output,
-    }, manifest.config.esbuildConfig ?? {}));
+    await bundleTestFile(manifest, testPath, input, output);
   }
 
   // Bundle all extra includes and move to server root.
@@ -63,6 +63,247 @@ export function summarize(results: TestFileResults[]): Summary {
     }
   }
   return { passed, duration, failed };
+}
+
+async function bundleTestFile(
+  manifest: Manifest,
+  testPath: string,
+  input: string,
+  output: string,
+): Promise<void> {
+  const args = [
+    "bundle",
+    "--quiet",
+    "--unstable-raw-imports",
+    "--platform=browser",
+    "--output",
+    output,
+  ];
+
+  const configPath = await resolveBundleConfigPath(manifest);
+  if (configPath) {
+    args.push("--config", configPath);
+  }
+
+  for (const specifier of manifest.config.esbuildConfig?.external ?? []) {
+    args.push("--external", specifier);
+  }
+
+  args.push(input);
+
+  const decoder = new TextDecoder();
+  for (let attempt = 1; attempt <= BUNDLE_RETRY_ATTEMPTS; attempt++) {
+    const result = await new Deno.Command(Deno.execPath(), {
+      args,
+      cwd: manifest.projectDir,
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (result.success) {
+      await downlevelBundleIfNeeded(output, manifest);
+      return;
+    }
+
+    const stderr = decoder.decode(result.stderr);
+    if (
+      attempt === BUNDLE_RETRY_ATTEMPTS || !isRetryableBundleFailure(stderr)
+    ) {
+      throw new Error(`Failed to bundle ${testPath}: ${stderr}`);
+    }
+
+    // Deno can race while copying the esbuild helper binary in CI.
+    await sleepForRetry(attempt);
+  }
+}
+
+async function resolveBundleConfigPath(
+  manifest: Manifest,
+): Promise<string | undefined> {
+  const packageConfigPath = path.join(manifest.projectDir, "deno.json");
+  const workspaceConfigPath = await findWorkspaceConfigPath(
+    manifest.projectDir,
+  );
+  const packageConfig = await readConfigIfExists(packageConfigPath);
+  const workspaceConfig = workspaceConfigPath
+    ? await readConfigIfExists(workspaceConfigPath)
+    : undefined;
+  const workspacePackageImports = workspaceConfigPath && workspaceConfig
+    ? await resolveWorkspacePackageImports(workspaceConfigPath, workspaceConfig)
+    : {};
+
+  const tsconfigRaw = manifest.config.esbuildConfig?.tsconfigRaw;
+  const compilerOptions = typeof tsconfigRaw === "string"
+    ? undefined
+    : tsconfigRaw?.compilerOptions;
+  const imports = {
+    ...toStringRecord(workspaceConfig?.imports),
+    ...workspacePackageImports,
+    ...toStringRecord(packageConfig?.imports),
+  };
+
+  const bundleConfigPath = path.join(
+    manifest.serverDir,
+    "deno-web-test.bundle.json",
+  );
+  await Deno.writeTextFile(
+    bundleConfigPath,
+    JSON.stringify({
+      imports: Object.keys(imports).length === 0 ? undefined : imports,
+      compilerOptions: {
+        ...toUnknownRecord(workspaceConfig?.compilerOptions),
+        ...toUnknownRecord(packageConfig?.compilerOptions),
+        ...toUnknownRecord(compilerOptions),
+      },
+    }),
+  );
+  return bundleConfigPath;
+}
+
+async function downlevelBundleIfNeeded(
+  outputPath: string,
+  manifest: Manifest,
+): Promise<void> {
+  const supported = manifest.config.esbuildConfig?.supported;
+  if (!supported || supported.using !== false) {
+    return;
+  }
+
+  const bundledSource = await Deno.readTextFile(outputPath);
+  const transformed = ts.transpileModule(bundledSource, {
+    compilerOptions: {
+      allowJs: true,
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+  });
+  await Deno.writeTextFile(outputPath, transformed.outputText);
+}
+
+async function resolveWorkspacePackageImports(
+  workspaceConfigPath: string,
+  workspaceConfig: Record<string, unknown>,
+): Promise<Record<string, string>> {
+  const workspaceEntries = Array.isArray(workspaceConfig.workspace)
+    ? workspaceConfig.workspace
+    : [];
+  const workspaceRoot = path.dirname(workspaceConfigPath);
+  const imports: Record<string, string> = {};
+
+  for (const entry of workspaceEntries) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+
+    const packageDir = path.resolve(workspaceRoot, entry);
+    const packageConfig = await readConfigIfExists(
+      path.join(packageDir, "deno.json"),
+    );
+    if (!packageConfig) {
+      continue;
+    }
+
+    const packageName = typeof packageConfig.name === "string"
+      ? packageConfig.name
+      : undefined;
+    Object.assign(imports, toStringRecord(packageConfig.imports));
+
+    if (!packageName) {
+      continue;
+    }
+
+    const exports = packageConfig.exports;
+    if (typeof exports === "string") {
+      imports[packageName] = path.toFileUrl(path.join(packageDir, exports))
+        .toString();
+      continue;
+    }
+
+    if (!exports || typeof exports !== "object") {
+      continue;
+    }
+
+    for (const [specifier, target] of Object.entries(exports)) {
+      if (typeof target !== "string") {
+        continue;
+      }
+      const importKey = specifier === "."
+        ? packageName
+        : `${packageName}${specifier.slice(1)}`;
+      imports[importKey] = path.toFileUrl(path.join(packageDir, target))
+        .toString();
+    }
+  }
+
+  return imports;
+}
+
+async function sleepForRetry(attempt: number): Promise<void> {
+  const delayMs = 250 * 2 ** (attempt - 1);
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function isRetryableBundleFailure(stderr: string): boolean {
+  return stderr.includes(BUNDLE_RETRYABLE_ETXTBSY) ||
+    stderr.includes(BUNDLE_RETRYABLE_ESBUILD_COPY);
+}
+
+async function findWorkspaceConfigPath(
+  startDir: string,
+): Promise<string | undefined> {
+  let currentDir = startDir;
+  let lastConfigPath: string | undefined;
+
+  while (true) {
+    const configPath = path.join(currentDir, "deno.json");
+    const config = await readConfigIfExists(configPath);
+    if (config) {
+      lastConfigPath = configPath;
+      if ("workspace" in config) {
+        return configPath;
+      }
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      return lastConfigPath;
+    }
+    currentDir = parentDir;
+  }
+}
+
+async function readConfigIfExists(
+  configPath: string,
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    return JSON.parse(await Deno.readTextFile(configPath));
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function toStringRecord(
+  value: unknown,
+): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] =>
+      typeof entry[1] === "string"
+    ),
+  );
+}
+
+function toUnknownRecord(
+  value: unknown,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return value as Record<string, unknown>;
 }
 
 // Use this instead of `@std/fs#copy`, because we want to copy resolved

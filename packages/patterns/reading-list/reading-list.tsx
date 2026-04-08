@@ -7,6 +7,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -89,7 +90,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
           title: trimmedTitle,
           author: author.trim(),
           type,
-          addedAt: Date.now(),
+          addedAt: safeDateNow(),
         });
         items.push(newItemPiece);
         newTitle.set("");

@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Writable, computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Habit {
     name: string;
 }
@@ -18,15 +29,15 @@ interface Input {
 //   const logList = logs.get()
 //   logList.some(fn) -> plain JS some(fn), not callback-lowered
 // Context: Outer habits.map(...) is pattern-owned, but the inner some() runs on the aliased unwrapped array inside computed()
-export default pattern((__ct_pattern_input) => {
-    const habits = __ct_pattern_input.key("habits");
-    const logs = __ct_pattern_input.key("logs");
-    const todayDate = __ct_pattern_input.key("todayDate");
+export default pattern((__cf_pattern_input) => {
+    const habits = __cf_pattern_input.key("habits");
+    const logs = __cf_pattern_input.key("logs");
+    const todayDate = __cf_pattern_input.key("todayDate");
     return {
-        [UI]: <div>{habits.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const habit = __ct_pattern_input.key("element");
-                const logs = __ct_pattern_input.key("params", "logs");
-                const todayDate = __ct_pattern_input.key("params", "todayDate");
+        [UI]: <div>{habits.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const habit = __cf_pattern_input.key("element");
+                const logs = __cf_pattern_input.key("params", "logs");
+                const todayDate = __cf_pattern_input.key("params", "todayDate");
                 const doneToday = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -245,5 +256,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

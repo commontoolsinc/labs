@@ -159,4 +159,84 @@ describe("SelectorTracker", () => {
       expect(existingSelector1).toEqual(standardInitialSelector);
     });
   });
+
+  describe("getStandardSchema", () => {
+    it("interns standardized structurally equal schemas", () => {
+      const first = {
+        type: "object",
+        asCell: true,
+        properties: {
+          child: {
+            type: "string",
+            asStream: true,
+          },
+        },
+      } as const satisfies JSONSchema;
+      const second = {
+        properties: {
+          child: {
+            asStream: true,
+            type: "string",
+          },
+        },
+        asCell: true,
+        type: "object",
+      } as const satisfies JSONSchema;
+
+      const standardizedFirst = SelectorTracker.getStandardSchema(first);
+      const standardizedSecond = SelectorTracker.getStandardSchema(second);
+
+      expect(standardizedFirst).toBe(standardizedSecond);
+      expect(standardizedFirst).toEqual({
+        properties: {
+          child: {
+            type: "string",
+          },
+        },
+        type: "object",
+      });
+    });
+
+    it("does not reuse cached output for mutable schemas edited in place", () => {
+      const mutable = {
+        type: "object",
+        properties: {
+          child: {
+            type: "string",
+            asCell: true,
+          },
+        },
+      } as {
+        type: "object";
+        properties: Record<string, JSONSchema>;
+      };
+
+      const first = SelectorTracker.getStandardSchema(mutable as JSONSchema);
+      mutable.properties = {
+        count: {
+          type: "number",
+        },
+      };
+
+      const second = SelectorTracker.getStandardSchema(mutable as JSONSchema);
+
+      expect(first).toEqual({
+        properties: {
+          child: {
+            type: "string",
+          },
+        },
+        type: "object",
+      });
+      expect(second).toEqual({
+        properties: {
+          count: {
+            type: "number",
+          },
+        },
+        type: "object",
+      });
+      expect(second).not.toBe(first);
+    });
+  });
 });

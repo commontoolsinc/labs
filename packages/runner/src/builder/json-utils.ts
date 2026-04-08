@@ -302,7 +302,12 @@ function itemsSchemaFromArray(
 }
 
 export function moduleToJSON(module: Module) {
-  const { toJSON: _, ...rest } = module as Module & { toJSON: () => any };
+  const frame = getTopFrame();
+  const {
+    implementation: _implementation,
+    toJSON: _,
+    ...rest
+  } = module as Module & { toJSON: () => any };
   let implementation = module.implementation;
 
   // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.
@@ -328,13 +333,53 @@ export function moduleToJSON(module: Module) {
       new Map(),
       false,
     ) as unknown as Pattern;
-  } else if (typeof implementation === "function") {
-    implementation = implementation.toString();
+    return {
+      ...rest,
+      implementation,
+    };
+  }
+
+  if (typeof implementation === "function") {
+    if (
+      module.type === "javascript" &&
+      typeof module.implementationRef !== "string"
+    ) {
+      throw new Error(
+        "JavaScript function modules must carry implementationRef before serialization",
+      );
+    }
+    const preview = (implementation as { preview?: string }).preview ??
+      implementation.toString().slice(0, 200);
+    const location = (implementation as { src?: string }).src;
+    const admittedImplementation = module.type === "javascript" &&
+        typeof module.implementationRef === "string"
+      ? frame?.verifiedLoadId
+        ? frame.runtime?.harness?.getVerifiedFunctionInLoad(
+          frame.verifiedLoadId,
+          module.implementationRef,
+        ) ?? frame.runtime?.harness?.getExecutableFunction(
+          module.implementationRef,
+        )
+        : frame?.runtime?.harness?.getExecutableFunction(
+          module.implementationRef,
+        )
+      : undefined;
+    return {
+      ...rest,
+      ...(module.type === "javascript" &&
+          admittedImplementation !== implementation
+        ? {
+          implementation: Function.prototype.toString.call(implementation),
+        }
+        : {}),
+      ...(preview ? { preview } : {}),
+      ...(location ? { location } : {}),
+    };
   }
 
   return {
     ...rest,
-    implementation,
+    ...(implementation !== undefined ? { implementation } : {}),
   };
 }
 

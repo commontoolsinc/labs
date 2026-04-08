@@ -20,6 +20,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -275,16 +276,13 @@ export default pattern<Input, Output>(
     const _initDepts = computed(() => {
       const current = departments.get();
       if (current.length === 0) {
-        // Schedule the set for next tick to avoid reactive cycle
-        queueMicrotask(() => {
-          departments.set(
-            DEFAULT_DEPARTMENTS.map((d) => ({
-              ...d,
-              location: "unassigned" as const,
-              description: "",
-            })),
-          );
-        });
+        departments.set(
+          DEFAULT_DEPARTMENTS.map((d) => ({
+            ...d,
+            location: "unassigned" as const,
+            description: "",
+          })),
+        );
       }
       return true;
     });
@@ -2152,7 +2150,7 @@ export default pattern<Input, Output>(
                               itemName: item,
                               correctAisle: aisle,
                               incorrectAisle: "",
-                              timestamp: Date.now(),
+                              timestamp: safeDateNow(),
                             });
                             itemLocations.set(filtered);
                             newCorrectionItem.set("");

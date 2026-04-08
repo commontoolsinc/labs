@@ -42,6 +42,7 @@ import {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../storage/interface.ts";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 /** Declare a pattern
  *
@@ -110,6 +111,8 @@ export function pattern<T, R>(
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
+  hardenVerifiedFunction(fn);
+
   // The pattern graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
   // values.
@@ -385,9 +388,13 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
     parent,
     opaqueRefs: new Set(),
     generatedIdCounter: 0,
+    ...(parent?.verifiedLoadId && { verifiedLoadId: parent.verifiedLoadId }),
     ...(parent?.runtime && { runtime: parent.runtime }),
     ...(parent?.tx && { tx: parent.tx }),
     ...(parent?.space && { space: parent.space }),
+    ...(parent?.sourceLocationContext && {
+      sourceLocationContext: parent.sourceLocationContext,
+    }),
     ...frame,
   };
 
@@ -400,13 +407,15 @@ export function pushFrameFromCause(
   props: {
     unsafe_binding?: UnsafeBinding;
     inHandler?: boolean;
+    verifiedLoadId?: string;
     runtime?: Runtime;
     tx?: IExtendedStorageTransaction;
     space?: MemorySpace;
   },
 ): Frame {
   const parent = getTopFrame();
-  const { unsafe_binding, inHandler, runtime, tx, space } = props;
+  const { unsafe_binding, inHandler, runtime, tx, space, verifiedLoadId } =
+    props;
 
   // If no runtime provided, try to inherit from parent (may be undefined during construction)
   const frameRuntime = runtime ?? parent?.runtime;
@@ -418,9 +427,14 @@ export function pushFrameFromCause(
     cause,
     generatedIdCounter: 0,
     opaqueRefs: new Set(),
+    ...(parent?.verifiedLoadId && { verifiedLoadId: parent.verifiedLoadId }),
+    ...(verifiedLoadId && { verifiedLoadId }),
     ...(frameRuntime && { runtime: frameRuntime }),
     ...(frameSpace && { space: frameSpace }),
     ...(frameTx && { tx: frameTx }),
+    ...(parent?.sourceLocationContext && {
+      sourceLocationContext: parent.sourceLocationContext,
+    }),
     ...(inHandler && { inHandler: true }),
     ...(unsafe_binding ? { unsafe_binding } : {}),
   };

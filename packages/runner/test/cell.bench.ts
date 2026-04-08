@@ -3,16 +3,21 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
+import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
 
 // Setup helper to create runtime and transaction
 function setup() {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
@@ -21,12 +26,11 @@ function setup() {
 // Cleanup helper
 async function cleanup(
   runtime: Runtime,
-  storageManager: ReturnType<typeof StorageManager.emulate>,
+  _storageManager: ReturnType<typeof StorageManager.emulate>,
   tx?: IExtendedStorageTransaction,
 ) {
   await tx?.commit();
   await runtime.dispose();
-  await storageManager.close();
 }
 
 // Benchmark: Cell creation
@@ -801,7 +805,7 @@ Deno.bench("Cell array - map operation with schema (100x)", async () => {
 });
 
 // Benchmark: Link operations
-Deno.bench("Cell getAsLink - link generation schemaless (100x)", async () => {
+Deno.bench("Cell getAsLink - link generation schemaless (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   const cell = runtime.getCell<{ value: number }>(
@@ -814,14 +818,16 @@ Deno.bench("Cell getAsLink - link generation schemaless (100x)", async () => {
   await tx.commit();
 
   // Measure link generation
+  b.start();
   for (let i = 0; i < 100; i++) {
     cell.getAsLink();
   }
+  b.end();
 
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell getAsLink - with options (100x)", async () => {
+Deno.bench("Cell getAsLink - with options (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   const cell1 = runtime.getCell<{ value: number }>(
@@ -842,9 +848,11 @@ Deno.bench("Cell getAsLink - with options (100x)", async () => {
   await tx.commit();
 
   // Measure link generation with options
+  b.start();
   for (let i = 0; i < 100; i++) {
     cell1.getAsLink({ base: cell2, includeSchema: true });
   }
+  b.end();
 
   await cleanup(runtime, storageManager, tx);
 });
@@ -1338,10 +1346,14 @@ const notebookSchema: JSONSchema = {
 };
 
 async function benchmarkNotebookReads(noteCount: number, readCount: number) {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    memoryVersion: BENCH_MEMORY_VERSION,
   });
 
   // Write data in tx1

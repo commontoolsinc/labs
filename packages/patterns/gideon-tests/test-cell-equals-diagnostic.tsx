@@ -7,7 +7,16 @@
  * 2. Set selectedItem to that value
  * 3. Check if it creates links/aliases vs copies
  */
-import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  Default,
+  handler,
+  NAME,
+  nonPrivateRandom,
+  pattern,
+  safeDateNow,
+  UI,
+  Writable,
+} from "commonfabric";
 
 interface Item {
   title: string;
@@ -27,8 +36,8 @@ const addItem = handler<
 >(
   (_, { items, log }) => {
     const newItem: Item = {
-      title: `Item-${Date.now()}`,
-      value: Math.floor(Math.random() * 100),
+      title: `Item-${safeDateNow()}`,
+      value: Math.floor(nonPrivateRandom() * 100),
     };
     items.push(newItem);
     log.push(`Added item: ${newItem.title}`);

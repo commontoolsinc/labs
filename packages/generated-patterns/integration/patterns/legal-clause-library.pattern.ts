@@ -273,19 +273,52 @@ const sanitizeClause = (value: unknown): ClauseRecord | null => {
   };
 };
 
-const defaultClauseRecords: ClauseRecord[] = (() => {
-  const dedup = new Map<string, ClauseRecord>();
-  for (const entry of defaultClauses) {
-    const clause = sanitizeClause(entry);
-    if (!clause) continue;
-    if (!dedup.has(clause.id)) {
-      dedup.set(clause.id, clause);
-    }
-  }
-  const list = Array.from(dedup.values());
-  list.sort(compareClauses);
-  return list;
-})();
+const defaultClauseRecords: ClauseRecord[] = [
+  {
+    id: "nda-standard",
+    title: "Standard NDA",
+    topicKey: "confidentiality",
+    topicLabel: "Confidentiality",
+    region: "na",
+    status: "approved",
+    text: "Outlines confidentiality duties for mutual disclosures.",
+    excerpt: "Outlines confidentiality duties for mutual disclosures.",
+    lastReviewed: "2023-09-12",
+  },
+  {
+    id: "ccpa-supplement",
+    title: "California Privacy Supplement",
+    topicKey: "data-protection",
+    topicLabel: "Data Protection",
+    region: "na",
+    status: "approved",
+    text: "Extends privacy rights alignment for California residents.",
+    excerpt: "Extends privacy rights alignment for California residents.",
+    lastReviewed: "2023-07-22",
+  },
+  {
+    id: "gdpr-data-addendum",
+    title: "GDPR Data Addendum",
+    topicKey: "data-protection",
+    topicLabel: "Data Protection",
+    region: "eu",
+    status: "draft",
+    text: "Captures controller-processor duties under EU GDPR.",
+    excerpt: "Captures controller-processor duties under EU GDPR.",
+    lastReviewed: "2023-08-01",
+  },
+  {
+    id: "supplier-governance",
+    title: "Supplier Governance Clause",
+    topicKey: "supplier-risk",
+    topicLabel: "Supplier Risk",
+    region: "apac",
+    status: "deprecated",
+    text: "Sets supplier reporting cadence and remediation timelines.",
+    excerpt: "Sets supplier reporting cadence and remediation timelines.",
+    lastReviewed: "2023-05-10",
+  },
+];
 
 const cloneDefaultClauses = (): ClauseRecord[] =>
   defaultClauseRecords.map(cloneClause);

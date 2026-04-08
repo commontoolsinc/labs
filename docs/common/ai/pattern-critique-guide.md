@@ -26,6 +26,8 @@ Check that these are not inside the pattern body:
 | `handler()` defined inside pattern | Move to module scope, or use `action()` instead |
 | `lift()` immediately invoked (`lift(...)(args)`) | Use `computed()` or define lift at module scope |
 | helper functions defined inside pattern | Move to module scope |
+| top-level `let`, `var`, or class | Convert to `const` plain data, or move stateful logic into actions, handlers, or helpers |
+| `setTimeout()` or `setInterval()` in authored pattern code | Use a reactive/runtime primitive instead; authored timers are not available yet |
 
 Allowed inside patterns:
 
@@ -44,6 +46,8 @@ Allowed inside patterns:
 | `.get()` on computed or lift result | Access directly; only `Writable` uses `.get()` |
 | `items.filter(...)` inline in JSX | Wrap in `computed()` outside JSX |
 | `items.sort(...)` inline in JSX | Wrap in `computed()` outside JSX |
+| `Date.now()` or `Math.random()` in authored pattern code | Use `safeDateNow()` or `nonPrivateRandom()` |
+| `safeDateNow()` or `nonPrivateRandom()` inside `computed()` or `derive()` without clear intent | Move the snapshot into `action()`, `handler()`, or one-time initialization |
 | nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
 | `lift()` closing over reactive deps | Pass dependencies as explicit parameters |
 | cells from composed patterns in `ifElse` | Wrap in a local `computed()` bridge |
@@ -74,17 +78,17 @@ Ternaries are valid in JSX. The transformer auto-converts them to `ifElse()`.
 | `$checked={item}` | `$checked={item.done}` |
 | wrong event name | Use `oncf-send`, `oncf-input`, or `oncf-change` |
 
-### 6. Style Syntax
+### 6. Custom Component Props and Styling Affordances
 
-HTML elements require object style syntax. Custom `cf-*` elements require
-string style syntax. Also check that custom component props use the correct
-camelCase names.
+Check that Common Fabric component props use the correct camelCase names and
+that the implementation uses public styling affordances intentionally rather
+than guessing at unsupported internals.
 
 | Violation | Fix |
 |-----------|-----|
-| string style on HTML | Convert to object syntax |
-| object style on `cf-*` | Convert to string syntax |
 | kebab-case props on `cf-*` | Use camelCase, for example `allowCustom` |
+| styling through guessed shadow-internal selectors | Prefer documented custom properties, parts, or theme hooks |
+| arbitrary one-off visual overrides where theme/custom properties would work | Prefer public styling affordances with fallbacks |
 
 ### 7. Handler Binding
 
@@ -108,7 +112,7 @@ camelCase names.
 | Violation | Fix |
 |-----------|-----|
 | array schema at the root of `generateObject` | Wrap it in an object such as `{ items: T[] }` |
-| missing `/// <cts-enable />` | Add it at the top of the file |
+| accidental `/// <cf-disable-transform />` in a file relying on CTS rewrites | Remove the opt-out or provide explicit runtime forms/schemas |
 | prompt derived from agent-written cells | Split the source cells to avoid loops |
 | invalid model-name format | Use `vendor:model` |
 
@@ -157,6 +161,10 @@ When to use `handler()`:
 | normalized state | no duplicate data, single source of truth |
 | self-documenting types | type names and field names are clear without comments |
 | appropriate granularity | neither too fine nor too coarse |
+| visual hierarchy | important content and actions read clearly at a glance |
+| spacing and grouping | related elements are grouped; the layout does not collapse into a raw form dump |
+| empty and first-run states | zero-data flows are understandable and actionable |
+| theme/styling stance | theme hooks, custom properties, or parts are used intentionally when relevant |
 
 ### 13. Regression Check
 

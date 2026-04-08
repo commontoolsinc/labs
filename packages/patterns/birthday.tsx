@@ -5,7 +5,14 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Tracks birthday with separate month, day, and year fields.
  */
-import { computed, type Default, NAME, pattern, UI } from "commonfabric";
+import {
+  computed,
+  type Default,
+  NAME,
+  pattern,
+  safeDateNow,
+  UI,
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -51,7 +58,7 @@ const DAY_ITEMS = Array.from({ length: 31 }, (_, i) => ({
 }));
 
 function generateYearItems(): Array<{ value: string; label: string }> {
-  const currentYear = new Date().getFullYear();
+  const currentYear = new Date(safeDateNow()).getFullYear();
   const years: Array<{ value: string; label: string }> = [];
   for (let year = currentYear; year >= 1920; year--) {
     years.push({ value: String(year), label: String(year) });

@@ -29,7 +29,10 @@ import type {
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
-import { markReadAsPotentialWrite } from "./scheduler.ts";
+import {
+  allowMutableTransactionRead,
+  markReadAsPotentialWrite,
+} from "./scheduler.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -64,7 +67,11 @@ export function diffAndUpdate(
 ): boolean {
   const readOptions: IReadOptions = {
     ...options,
-    meta: { ...options?.meta, ...markReadAsPotentialWrite },
+    meta: {
+      ...options?.meta,
+      ...markReadAsPotentialWrite,
+      ...allowMutableTransactionRead,
+    },
   };
   const changes = normalizeAndDiff(
     runtime,
@@ -758,6 +765,15 @@ export function applyChangeSet(
   // CT-1123: Removed compactChangeSet - structural sharing makes redundant writes
   // cheap (O(path_depth) with noop detection), while compaction added O(N²) overhead.
   // Benchmarks showed 2.5-4.4x slowdown with compactChangeSet enabled.
+  if (tx.writeValuesOrThrow) {
+    tx.writeValuesOrThrow(
+      changes.map((change) => ({
+        address: change.location,
+        value: change.value,
+      })),
+    );
+    return;
+  }
   for (const change of changes) {
     tx.writeValueOrThrow(change.location, change.value);
   }

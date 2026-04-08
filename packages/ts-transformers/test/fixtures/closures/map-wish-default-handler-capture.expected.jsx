@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Default, handler, NAME, pattern, UI, wish, Writable, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 type Item = {
     name: string;
     value: number;
@@ -71,9 +82,9 @@ export default pattern((_) => {
     return {
         [NAME]: "Test",
         [UI]: (<ul>
-        {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const items = __ct_pattern_input.params.items;
+        {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const items = __cf_pattern_input.params.items;
                 return (<li>
             {item.key("name")}
             <button type="button" onClick={removeItem({ items, item })}>
@@ -178,5 +189,4 @@ export default pattern((_) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

@@ -1,5 +1,5 @@
 import { type Config } from "@commonfabric/felt";
-import ports from "@commontools/ports" with { type: "json" };
+import ports from "@commonfabric/ports" with { type: "json" };
 
 const PRODUCTION = !!Deno.env.get("PRODUCTION");
 const ENVIRONMENT = PRODUCTION ? "production" : "development";
@@ -41,14 +41,18 @@ const config: Config = {
       "$ENVIRONMENT": ENVIRONMENT,
       "$API_URL": Deno.env.get("API_URL"),
       "$COMMIT_SHA": Deno.env.get("COMMIT_SHA"),
-      "$EXPERIMENTAL_MODERN_DATA_MODEL": Deno.env.get(
-        "EXPERIMENTAL_MODERN_DATA_MODEL",
+      "$MEMORY_VERSION": Deno.env.get("CT_INTEGRATION_MEMORY_VERSION"),
+      "$EXPERIMENTAL_RICH_STORABLE_VALUES": Deno.env.get(
+        "EXPERIMENTAL_RICH_STORABLE_VALUES",
+      ),
+      "$EXPERIMENTAL_STORABLE_PROTOCOL": Deno.env.get(
+        "EXPERIMENTAL_STORABLE_PROTOCOL",
       ),
       "$EXPERIMENTAL_UNIFIED_JSON_ENCODING": Deno.env.get(
         "EXPERIMENTAL_UNIFIED_JSON_ENCODING",
       ),
-      "$EXPERIMENTAL_MODERN_HASH": Deno.env.get(
-        "EXPERIMENTAL_MODERN_HASH",
+      "$EXPERIMENTAL_CANONICAL_HASHING": Deno.env.get(
+        "EXPERIMENTAL_CANONICAL_HASHING",
       ),
       "$EXPERIMENTAL_MODERN_SCHEMA_HASH": Deno.env.get(
         "EXPERIMENTAL_MODERN_SCHEMA_HASH",

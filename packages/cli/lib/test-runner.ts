@@ -26,6 +26,7 @@
  */
 
 import { Identity } from "@commonfabric/identity";
+import type { MemoryVersion } from "@commonfabric/memory/interface";
 import { Engine, Runtime } from "@commonfabric/runner";
 import type {
   Cell,
@@ -41,11 +42,48 @@ import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 import {
   type CDFPoint,
+  getLogger,
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
   resetAllCountBaselines,
+  resetAllLoggerCounts,
   resetAllTimingBaselines,
+  resetAllTimingStats,
 } from "@commonfabric/utils/logger";
+
+const phaseLogger = getLogger("test-runner-phase", {
+  enabled: false,
+  level: "debug",
+  logCountEvery: 0,
+});
+
+type TimeStampConsole = Console & {
+  timeStamp?: (label?: string) => void;
+};
+
+let phaseMarkSequence = 0;
+
+function markPhaseBoundary(label: string, boundary: "start" | "end"): string {
+  const markName = `${label}:${boundary}#${++phaseMarkSequence}`;
+  performance.mark(markName);
+  (console as TimeStampConsole).timeStamp?.(`${label}:${boundary}`);
+  return markName;
+}
+async function withPhase<T>(
+  keys: readonly string[],
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  const label = `cf-test/${keys.join("/")}`;
+  const startMark = markPhaseBoundary(label, "start");
+  phaseLogger.timeStart(...keys);
+  try {
+    return await fn();
+  } finally {
+    const endMark = markPhaseBoundary(label, "end");
+    phaseLogger.timeEnd(...keys);
+    performance.measure(`${label}#${phaseMarkSequence}`, startMark, endMark);
+  }
+}
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
@@ -94,6 +132,8 @@ export interface TestRunnerOptions {
   verbose?: boolean;
   /** Root directory for resolving imports. If not provided, uses the test file's directory. */
   root?: string;
+  /** Force the storage/runtime memory implementation used by the test harness. */
+  memoryVersion?: MemoryVersion;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
   /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
@@ -102,6 +142,10 @@ export interface TestRunnerOptions {
   statsActionLimit?: number;
   /** Override scheduler mode for the test runtime. */
   schedulerMode?: "default" | "push" | "pull";
+  /** Print storage-related logger timings and counts after each test file. */
+  storageStats?: boolean;
+  /** Limit for storage timing/count tables when storageStats is enabled. */
+  storageStatsLimit?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +171,16 @@ type GlobalWithLoggers = {
           error: number;
           total: number;
         };
+        countsByKey?: Record<
+          string,
+          {
+            debug: number;
+            info: number;
+            warn: number;
+            error: number;
+            total: number;
+          }
+        >;
       }
     >;
   };
@@ -402,6 +456,156 @@ function printLoggerStats(
   }
 }
 
+function isStorageLoggerName(name: string): boolean {
+  return name === "traverse" ||
+    name === "memory-provider" ||
+    name === "memory-v2-query" ||
+    name === "memory-v2-server" ||
+    name.startsWith("storage") ||
+    name === "extended-storage-transaction";
+}
+
+function printStorageStats(elapsedMs: number, limit = 16): void {
+  type StorageCountEntry = {
+    name: string;
+    d: number;
+    i: number;
+    w: number;
+    e: number;
+    total: number;
+  };
+
+  type StorageCountKeyEntry = {
+    logger: string;
+    key: string;
+    d: number;
+    i: number;
+    w: number;
+    e: number;
+    total: number;
+  };
+
+  console.log(`  🗄 ${fmtMs(elapsedMs)} | Storage totals:`);
+
+  const timingBreakdown = getTimingStatsBreakdown();
+  const timingEntries: {
+    name: string;
+    n: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }[] = [];
+
+  for (const [loggerName, timings] of Object.entries(timingBreakdown)) {
+    if (!isStorageLoggerName(loggerName)) continue;
+    for (const [key, timing] of Object.entries(timings)) {
+      if (timing.count === 0) continue;
+      timingEntries.push({
+        name: `${loggerName}/${key}`,
+        n: timing.count,
+        p50: timing.p50,
+        p95: timing.p95,
+        max: timing.max,
+      });
+    }
+  }
+
+  if (timingEntries.length > 0) {
+    timingEntries.sort((a, b) => b.p95 - a.p95);
+    console.log(
+      `           Timings (top ${
+        Math.min(limit, timingEntries.length)
+      } by p95):`,
+    );
+    for (const entry of timingEntries.slice(0, limit)) {
+      const name = entry.name.padEnd(35);
+      console.log(
+        `             ${name}  n=${String(entry.n).padStart(5)} p50=${
+          fmtMs(entry.p50).padStart(7)
+        } p95=${fmtMs(entry.p95).padStart(7)} max=${
+          fmtMs(entry.max).padStart(7)
+        }`,
+      );
+    }
+  }
+
+  const g = globalThis as unknown as GlobalWithLoggers;
+  const countEntries: StorageCountEntry[] = [];
+  if (g.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(g.commonfabric.logger)) {
+      if (!isStorageLoggerName(name)) continue;
+      const c = logger.counts;
+      if (c.total > 0) {
+        countEntries.push({
+          name,
+          d: c.debug,
+          i: c.info,
+          w: c.warn,
+          e: c.error,
+          total: c.total,
+        });
+      }
+    }
+  }
+
+  if (countEntries.length > 0) {
+    countEntries.sort((a, b) => b.total - a.total);
+    console.log(`           Counts (all storage loggers):`);
+    for (const entry of countEntries) {
+      const parts: string[] = [];
+      if (entry.d > 0) parts.push(`d:${entry.d}`);
+      if (entry.i > 0) parts.push(`i:${entry.i}`);
+      if (entry.w > 0) parts.push(`w:${entry.w}`);
+      if (entry.e > 0) parts.push(`e:${entry.e}`);
+      const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
+      console.log(
+        `             ${entry.name.padEnd(35)} n=${
+          String(entry.total).padStart(7)
+        }${levels}`,
+      );
+    }
+  }
+
+  const keyEntries: StorageCountKeyEntry[] = [];
+  if (g.commonfabric?.logger) {
+    for (const [loggerName, logger] of Object.entries(g.commonfabric.logger)) {
+      if (!isStorageLoggerName(loggerName) || !logger.countsByKey) continue;
+      for (const [key, counts] of Object.entries(logger.countsByKey)) {
+        if (counts.total === 0) continue;
+        keyEntries.push({
+          logger: loggerName,
+          key,
+          d: counts.debug,
+          i: counts.info,
+          w: counts.warn,
+          e: counts.error,
+          total: counts.total,
+        });
+      }
+    }
+  }
+
+  if (keyEntries.length > 0) {
+    keyEntries.sort((a, b) => b.total - a.total);
+    console.log(
+      `           Count keys (top ${Math.min(limit, keyEntries.length)}):`,
+    );
+    for (const entry of keyEntries.slice(0, limit)) {
+      const parts: string[] = [];
+      if (entry.d > 0) parts.push(`d:${entry.d}`);
+      if (entry.i > 0) parts.push(`i:${entry.i}`);
+      if (entry.w > 0) parts.push(`w:${entry.w}`);
+      if (entry.e > 0) parts.push(`e:${entry.e}`);
+      const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
+      console.log(
+        `             ${`${entry.logger}/${entry.key}`.padEnd(55)} n=${
+          String(entry.total).padStart(7)
+        }${levels}`,
+      );
+    }
+  }
+}
+
 /**
  * Print a table of scheduler action stats, sorted by total time descending.
  * Mirrors the table view in the shell's SchedulerGraphView debug UI.
@@ -543,39 +747,59 @@ export async function runTestPattern(
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
   const startTime = performance.now();
+  performance.clearMarks();
+  performance.clearMeasures();
+  resetAllLoggerCounts();
+  resetAllTimingStats();
 
   // Collect runtime errors via the scheduler's error handler
   const runtimeErrors: ErrorWithContext[] = [];
 
   // 1. Create emulated runtime (same as piece step)
-  const identity = await Identity.fromPassphrase("test-runner");
-  const space = identity.did();
-  const { StorageManager } = await import(
-    "@commonfabric/runner/storage/cache.deno"
+  const identity = await withPhase(
+    ["runTestPattern", "identity"],
+    () => Identity.fromPassphrase("test-runner"),
   );
-  const storageManager = StorageManager.emulate({ as: identity });
+  const space = identity.did();
+  const { StorageManager } = await withPhase([
+    "runTestPattern",
+    "storageImport",
+  ], () => import("@commonfabric/runner/storage/cache.deno"));
+  const storageManager = await withPhase(
+    ["runTestPattern", "storageManager"],
+    () =>
+      StorageManager.emulate({
+        as: identity,
+        memoryVersion: options.memoryVersion,
+      }),
+  );
 
   // Track navigation events for assertions and verbose output
   const navigations: NavigationEvent[] = [];
   let currentActionIndex = -1;
 
-  const runtime = new Runtime({
-    storageManager,
-    experimental: experimentalOptionsFromEnv(),
-    apiUrl: new URL(import.meta.url),
-    errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
-    navigateCallback: (target) => {
-      const name = (target.key("$NAME") as Cell<string | undefined>).get();
-      navigations.push({
-        name,
-        afterActionIndex: currentActionIndex,
-      });
-      if (options.verbose) {
-        const label = typeof name === "string" ? name : "(unnamed)";
-        console.log(`    → navigateTo: ${label}`);
-      }
-    },
-  });
+  const runtime = await withPhase(
+    ["runTestPattern", "runtime"],
+    () =>
+      new Runtime({
+        storageManager,
+        memoryVersion: options.memoryVersion,
+        experimental: experimentalOptionsFromEnv(),
+        apiUrl: new URL(import.meta.url),
+        errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
+        navigateCallback: (target) => {
+          const name = (target.key("$NAME") as Cell<string | undefined>).get();
+          navigations.push({
+            name,
+            afterActionIndex: currentActionIndex,
+          });
+          if (options.verbose) {
+            const label = typeof name === "string" ? name : "(unnamed)";
+            console.log(`    → navigateTo: ${label}`);
+          }
+        },
+      }),
+  );
   if (options.schedulerMode === "push") {
     runtime.scheduler.disablePullMode();
   } else if (options.schedulerMode === "pull") {
@@ -585,18 +809,31 @@ export async function runTestPattern(
   if (options.verbose) {
     runtime.scheduler.enableSettleStats();
   }
-  const engine = new Engine(runtime);
+  const engine = await withPhase(
+    ["runTestPattern", "engine"],
+    () => new Engine(runtime),
+  );
 
   // Track sink subscription for cleanup
   let sinkCancel: (() => void) | undefined;
 
   try {
     // 2. Compile the test pattern
-    const program = await engine.resolve(
-      new FileSystemProgramResolver(testPath, options.root),
+    const program = await withPhase(
+      ["runTestPattern", "resolve"],
+      () =>
+        engine.resolve(
+          new FileSystemProgramResolver(testPath, options.root),
+        ),
     );
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { jsScript, id } = await withPhase(
+      ["runTestPattern", "compile"],
+      () => engine.compile(program),
+    );
+    const { main } = await withPhase(
+      ["runTestPattern", "evaluate"],
+      () => engine.evaluate(id, jsScript, program.files),
+    );
 
     if (!main?.default) {
       throw new Error(
@@ -616,7 +853,7 @@ export async function runTestPattern(
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
     // access allPieces, recentPieces, etc. work correctly.
-    {
+    await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
       const defaultPatternCell = runtime.getCell(
@@ -633,39 +870,56 @@ export async function runTestPattern(
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
       await setupTx.commit();
       await runtime.idle();
-    }
+    });
 
     // 4. Instantiate the test pattern using runtime.run() for proper space context
-    const tx = runtime.edit();
+    const patternResult = await withPhase(
+      ["runTestPattern", "patternRun"],
+      async () => {
+        const tx = runtime.edit();
 
-    // Create a result cell for the pattern
-    const resultCell = runtime.getCell<Record<string, unknown>>(
-      space,
-      `test-pattern-result-${Date.now()}`,
-      undefined,
-      tx,
+        // Create a result cell for the pattern
+        const resultCell = runtime.getCell<Record<string, unknown>>(
+          space,
+          `test-pattern-result-${Date.now()}`,
+          undefined,
+          tx,
+        );
+
+        // Run the pattern with proper space context
+        const value = runtime.run(tx, testPatternFactory, {}, resultCell);
+
+        // Commit the transaction
+        await tx.commit();
+        return value;
+      },
     );
 
-    // Run the pattern with proper space context
-    const patternResult = runtime.run(tx, testPatternFactory, {}, resultCell);
-
-    // Commit the transaction
-    await tx.commit();
-
-    // Wait for initial setup to complete
-    await runtime.idle();
-    // Also wait for all in-flight storage subscriptions to settle.
-    // replica.poll() fires without await during mount(), so subscription
-    // updates can arrive after idle() resolves, scheduling more work.
-    await storageManager.synced();
-    await runtime.idle();
+    await withPhase(["runTestPattern", "initialSettle"], async () => {
+      // Wait for initial setup to complete
+      await runtime.idle();
+      // Also wait for all in-flight storage subscriptions to settle.
+      // replica.poll() fires without await during mount(), so subscription
+      // updates can arrive after idle() resolves, scheduling more work.
+      await storageManager.synced();
+      await runtime.idle();
+    });
 
     // Keep the pattern reactive - store cancel function for cleanup
-    sinkCancel = patternResult.sink(() => {});
+    sinkCancel = await withPhase(
+      ["runTestPattern", "sink"],
+      () => patternResult.sink(() => {}),
+    );
 
     // 4. Get the tests array from pattern output
-    const testsCell = patternResult.key("tests") as Cell<unknown>;
-    const testsValue = testsCell.get();
+    const testsCell = await withPhase(
+      ["runTestPattern", "testsCell"],
+      () => patternResult.key("tests") as Cell<unknown>,
+    );
+    const testsValue = await withPhase(
+      ["runTestPattern", "testsValue"],
+      () => testsCell.get(),
+    );
 
     // Validate it's an array
     if (!Array.isArray(testsValue)) {
@@ -676,13 +930,21 @@ export async function runTestPattern(
     }
 
     // Check for allowRuntimeErrors and expectNonIdempotent flags
-    const allowRuntimeErrors =
-      (patternResult.key("allowRuntimeErrors") as Cell<unknown>).get() === true;
-    const expectNonIdempotent =
-      (patternResult.key("expectNonIdempotent") as Cell<unknown>).get() ===
-        true;
+    const allowRuntimeErrors = await withPhase(
+      ["runTestPattern", "allowRuntimeErrors"],
+      () =>
+        (patternResult.key("allowRuntimeErrors") as Cell<unknown>).get() ===
+          true,
+    );
+    const expectNonIdempotent = await withPhase(
+      ["runTestPattern", "expectNonIdempotent"],
+      () =>
+        (patternResult.key("expectNonIdempotent") as Cell<unknown>).get() ===
+          true,
+    );
 
     if (options.verbose) {
+      console.log(`  Storage backend: ${storageManager.memoryVersion}`);
       console.log(`  Found ${testsValue.length} test steps`);
       printLoggerStats(
         performance.now() - startTime,
@@ -694,6 +956,63 @@ export async function runTestPattern(
       resetAllCountBaselines();
       resetAllTimingBaselines();
     }
+
+    const settleRuntime = async (
+      stepIndex: number,
+      stepLabel: string,
+      maxSettle = 20,
+    ): Promise<void> => {
+      await withPhase(
+        ["runTestPattern", "step", stepLabel, "settle"],
+        () =>
+          Promise.race([
+            (async () => {
+              for (let settle = 0; settle < maxSettle; settle++) {
+                const iterStart = performance.now();
+                await withPhase(
+                  [
+                    "runTestPattern",
+                    "step",
+                    stepLabel,
+                    "settle",
+                    `iter-${settle}`,
+                    "idle",
+                  ],
+                  () => runtime.idle(),
+                );
+                await withPhase(
+                  [
+                    "runTestPattern",
+                    "step",
+                    stepLabel,
+                    "settle",
+                    `iter-${settle}`,
+                    "synced",
+                  ],
+                  () => storageManager.synced(),
+                );
+                const totalMs = performance.now() - iterStart;
+                if (options.verbose && totalMs > 1) {
+                  console.log(
+                    `      settle[${settle}]: ${fmtMs(totalMs)}`,
+                  );
+                }
+                // If both resolved nearly instantly, the system is settled.
+                // synced() has ~1ms of overhead even when idle, so use 2ms.
+                if (settle > 0 && totalMs < 2) break;
+              }
+              await withPhase(
+                ["runTestPattern", "step", stepLabel, "settle", "finalIdle"],
+                () => runtime.idle(),
+              );
+            })(),
+            timeout(
+              TIMEOUT,
+              `Action at index ${stepIndex} timed out after ${TIMEOUT}ms`,
+            ),
+          ]),
+      );
+    };
 
     // 5. Process tests sequentially
     const results: TestResult[] = [];
@@ -779,12 +1098,15 @@ export async function runTestPattern(
         }
 
         // Get the action stream via .key()
-        const actionStream = testsCell.key(i).key(
-          "action",
-        ) as unknown as Stream<unknown>;
+        const actionStream = await withPhase(
+          ["runTestPattern", "step", actionName, "stream"],
+          () => testsCell.key(i).key("action") as unknown as Stream<unknown>,
+        );
 
         // Send undefined for void streams
-        actionStream.send(undefined);
+        await withPhase(["runTestPattern", "step", actionName, "send"], () => {
+          actionStream.send(undefined);
+        });
 
         // Wait for idle, then settle commits and re-idle.
         // Optimistic commits can fail (CAS conflicts), causing rollbacks
@@ -792,30 +1114,7 @@ export async function runTestPattern(
         // resolve quickly (< 1ms), indicating quiescence. Max iterations
         // as a safety net against infinite loops.
         try {
-          const MAX_SETTLE = 20;
-          await Promise.race([
-            (async () => {
-              for (let settle = 0; settle < MAX_SETTLE; settle++) {
-                const iterStart = performance.now();
-                await runtime.idle();
-                await storageManager.synced();
-                const totalMs = performance.now() - iterStart;
-                if (options.verbose && totalMs > 1) {
-                  console.log(
-                    `      settle[${settle}]: ${fmtMs(totalMs)}`,
-                  );
-                }
-                // If both resolved nearly instantly, the system is settled.
-                // synced() has ~1ms of overhead even when idle, so use 2ms.
-                if (settle > 0 && totalMs < 2) break;
-              }
-              await runtime.idle();
-            })(),
-            timeout(
-              TIMEOUT,
-              `Action at index ${i} timed out after ${TIMEOUT}ms`,
-            ),
-          ]);
+          await settleRuntime(i, actionName, 20);
         } catch (err) {
           results.push({
             name: actionName,
@@ -970,19 +1269,55 @@ export async function runTestPattern(
         let passed = false;
         let error: string | undefined;
 
-        try {
+        const evaluateAssertion = (): { passed: boolean; error?: string } => {
           // Get the assertion cell via .key()
-          const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
-          const value = assertCell.get();
-          passed = value === true;
-          if (!passed) {
-            error = `Expected true, got ${JSON.stringify(value)}`;
+          try {
+            const assertCell = testsCell.key(i).key("assertion") as Cell<
+              unknown
+            >;
+            const value = assertCell.get();
+            if (value === true) {
+              return { passed: true };
+            }
+            return {
+              passed: false,
+              error: `Expected true, got ${JSON.stringify(value)}`,
+            };
+          } catch (err) {
+            return {
+              passed: false,
+              error: `Error reading assertion: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            };
           }
-        } catch (err) {
-          passed = false;
-          error = `Error reading assertion: ${
-            err instanceof Error ? err.message : String(err)
-          }`;
+        };
+
+        ({ passed, error } = await withPhase(
+          ["runTestPattern", "step", assertionName, "evaluate"],
+          () => evaluateAssertion(),
+        ));
+
+        if (!passed && lastActionIndex !== null) {
+          try {
+            for (let retry = 0; retry < 3 && !passed; retry++) {
+              await new Promise((resolve) => setTimeout(resolve, 0));
+              await settleRuntime(i, assertionName, 6);
+              ({ passed, error } = await withPhase(
+                [
+                  "runTestPattern",
+                  "step",
+                  assertionName,
+                  `retry-${retry + 1}`,
+                  "evaluate",
+                ],
+                () => evaluateAssertion(),
+              ));
+            }
+          } catch (err) {
+            passed = false;
+            error = err instanceof Error ? err.message : String(err);
+          }
         }
 
         results.push({
@@ -1027,6 +1362,12 @@ export async function runTestPattern(
     if (options.verbose) {
       printActionStatsTable(runtime);
     }
+    if (options.storageStats) {
+      printStorageStats(
+        performance.now() - startTime,
+        options.storageStatsLimit ?? 16,
+      );
+    }
 
     // Collect idempotency violations detected during normal execution
     const nonIdempotent = runtime.getIdempotencyViolations()
@@ -1068,9 +1409,16 @@ export async function runTestPattern(
     };
   } finally {
     // 6. Cleanup
-    sinkCancel?.();
-    engine.dispose();
-    await storageManager.close();
+    await withPhase(["runTestPattern", "cleanup", "sinkCancel"], () => {
+      sinkCancel?.();
+    });
+    await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
+      engine.dispose();
+    });
+    await withPhase(
+      ["runTestPattern", "cleanup", "storageClose"],
+      () => storageManager.close(),
+    );
   }
 }
 

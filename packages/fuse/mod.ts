@@ -204,17 +204,41 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
     node: ReturnType<typeof tree.getNode>,
   ) {
+    // FUSE-T (macOS NFS translation) ignores notify_inval_entry and
+    // notify_inval_inode, so the only way to ensure reads see fresh data
+    // after writes is to keep cache timeouts short. Piece content inodes
+    // (under pieces/ and entities/) use 0 so every read hits our callbacks.
+    // Static inodes (root, space.json, .status) use 1s.
+    const isDynamic = bridge?.shouldPrepareDirectory(ino) ||
+      bridge?.shouldPrepareLookup(
+        tree.parents.get(ino) ?? 0n,
+        tree.getPath(ino).split("/").pop() ?? "",
+      );
+    const timeout = isDynamic ? 0 : 1.0;
     const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
     writeEntryParam(entryBuf, {
       ino,
       attr: buildStat(node!, ino),
-      attrTimeout: 1.0,
-      entryTimeout: 1.0,
+      attrTimeout: timeout,
+      entryTimeout: timeout,
     });
     fuse.symbols.fuse_reply_entry(
       req,
       Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
     );
+  }
+
+  function replyLookupFromTree(
+    req: Deno.PointerValue,
+    parent: bigint,
+    name: string,
+  ): boolean {
+    const ino = tree.lookup(parent, name);
+    if (ino === undefined) return false;
+    const node = tree.getNode(ino);
+    if (!node) return false;
+    replyEntry(req, ino, node);
+    return true;
   }
 
   // lookup(req, parent_ino, name_ptr)
@@ -230,52 +254,43 @@ export async function main(argv: string[] = Deno.args) {
       logOp("lookup", parentIno.toString());
       const name = readCString(namePtr);
       const parent = BigInt(parentIno);
-      const ino = tree.lookup(parent, name);
 
-      if (ino !== undefined) {
-        const node = tree.getNode(ino);
-        if (node) {
-          replyEntry(req, ino, node);
+      // If at root and bridge is available, try async space connection.
+      // Reply from tree synchronously if space is already connected.
+      if (parent === tree.rootIno && bridge && !name.startsWith(".")) {
+        if (replyLookupFromTree(req, parent, name)) {
           return;
         }
-      }
-
-      // If at root and bridge is available, try async space connection
-      if (parent === tree.rootIno && bridge && !name.startsWith(".")) {
-        // Fire off async connection — FUSE req stays valid until replied
         bridge.connectSpace(name).then(() => {
-          const newIno = tree.lookup(parent, name);
-          if (newIno !== undefined) {
-            const newNode = tree.getNode(newIno);
-            if (newNode) {
-              replyEntry(req, newIno, newNode);
-              return;
-            }
+          if (!replyLookupFromTree(req, parent, name)) {
+            fuse.symbols.fuse_reply_err(req, ENOENT);
           }
-          fuse.symbols.fuse_reply_err(req, ENOENT);
         }).catch(() => {
           fuse.symbols.fuse_reply_err(req, ENOENT);
         });
         return;
       }
 
-      // On-demand entity resolution under <space>/entities/
-      if (bridge && !name.startsWith(".") && bridge.isEntitiesDir(parent)) {
-        bridge.resolveEntity(parent, name).then((resolved) => {
-          if (resolved) {
-            const newIno = tree.lookup(parent, name);
-            if (newIno !== undefined) {
-              const newNode = tree.getNode(newIno);
-              if (newNode) {
-                replyEntry(req, newIno, newNode);
-                return;
-              }
-            }
+      if (bridge && bridge.shouldPrepareLookup(parent, name)) {
+        // Fast path: if entry is already in the tree (stubs, meta.json,
+        // previously hydrated data), reply immediately and trigger
+        // hydration in the background for not-yet-populated entries.
+        if (replyLookupFromTree(req, parent, name)) {
+          bridge.prepareLookup(parent, name).catch(() => {});
+          return;
+        }
+        // Slow path: entry not in tree, must hydrate before replying.
+        bridge.prepareLookup(parent, name).then(() => {
+          if (!replyLookupFromTree(req, parent, name)) {
+            fuse.symbols.fuse_reply_err(req, ENOENT);
           }
-          fuse.symbols.fuse_reply_err(req, ENOENT);
         }).catch(() => {
           fuse.symbols.fuse_reply_err(req, ENOENT);
         });
+        return;
+      }
+
+      if (replyLookupFromTree(req, parent, name)) {
         return;
       }
 
@@ -314,10 +329,16 @@ export async function main(argv: string[] = Deno.args) {
       const statBuf = new ArrayBuffer(STAT_SIZE);
       writeStat(statBuf, buildStat(node, inode));
 
+      const parentIno = tree.parents.get(inode) ?? 0n;
+      const isDynamic = bridge?.shouldPrepareDirectory(inode) ||
+        bridge?.shouldPrepareLookup(
+          parentIno,
+          tree.getPath(inode).split("/").pop() ?? "",
+        );
       fuse.symbols.fuse_reply_attr(
         req,
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-        1.0,
+        isDynamic ? 0 : 1.0,
       );
     },
   );
@@ -532,75 +553,89 @@ export async function main(argv: string[] = Deno.args) {
     ) => {
       logOp("readdir", ino.toString());
       const inode = BigInt(ino);
-      const node = tree.getNode(inode);
-      if (!node || node.kind !== "dir") {
-        fuse.symbols.fuse_reply_err(req, ENOENT);
+      const sendDirectoryReply = () => {
+        const node = tree.getNode(inode);
+        if (!node || node.kind !== "dir") {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+          return;
+        }
+
+        const bufSize = Number(size);
+        const startOffset = Number(offset);
+
+        type DirEntry = { name: string; ino: bigint; mode: number };
+        const entries: DirEntry[] = [
+          { name: ".", ino: inode, mode: DIR_MODE },
+          {
+            name: "..",
+            ino: tree.parents.get(inode) ?? 1n,
+            mode: DIR_MODE,
+          },
+        ];
+
+        for (const [childName, childIno] of tree.getChildren(inode)) {
+          const childNode = tree.getNode(childIno);
+          if (!childNode) continue;
+          entries.push({
+            name: childName,
+            ino: childIno,
+            mode: nodeMode(
+              childNode,
+              Boolean(
+                bridge?.resolveWritePath(childIno) ||
+                  bridge?.resolveSourceWritePath(childIno),
+              ),
+            ),
+          });
+        }
+
+        const buf = new Uint8Array(bufSize);
+        let pos = 0;
+
+        for (let i = startOffset; i < entries.length; i++) {
+          const entry = entries[i];
+          const nameBuf = encoder.encode(entry.name + "\0");
+          const statBuf = new ArrayBuffer(STAT_SIZE);
+          writeStat(statBuf, {
+            ino: entry.ino,
+            mode: entry.mode,
+            nlink: 1,
+            size: 0,
+            uid: mountOwnership.uid,
+            gid: mountOwnership.gid,
+          });
+
+          const remaining = bufSize - pos;
+          const entrySize = fuse.symbols.fuse_add_direntry(
+            req,
+            Deno.UnsafePointer.of(buf.subarray(pos)),
+            BigInt(remaining),
+            nameBuf,
+            Deno.UnsafePointer.of(new Uint8Array(statBuf)),
+            BigInt(i + 1),
+          );
+
+          if (Number(entrySize) > remaining) break;
+          pos += Number(entrySize);
+        }
+
+        fuse.symbols.fuse_reply_buf(
+          req,
+          Deno.UnsafePointer.of(buf),
+          BigInt(pos),
+        );
+      };
+
+      if (bridge?.shouldPrepareDirectory(inode)) {
+        bridge.prepareDirectory(inode).then(() => {
+          sendDirectoryReply();
+        }).catch(() => {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+        });
         return;
       }
 
-      const bufSize = Number(size);
-      const startOffset = Number(offset);
-
-      // Build entry list: ".", "..", then children
-      type DirEntry = { name: string; ino: bigint; mode: number };
-      const entries: DirEntry[] = [
-        { name: ".", ino: inode, mode: DIR_MODE },
-        {
-          name: "..",
-          ino: tree.parents.get(inode) ?? 1n,
-          mode: DIR_MODE,
-        },
-      ];
-
-      for (const [childName, childIno] of tree.getChildren(inode)) {
-        const childNode = tree.getNode(childIno);
-        if (!childNode) continue;
-        entries.push({
-          name: childName,
-          ino: childIno,
-          mode: nodeMode(
-            childNode,
-            Boolean(bridge?.resolveWritePath(childIno)),
-          ),
-        });
-      }
-
-      // Fill buffer starting from startOffset
-      const buf = new Uint8Array(bufSize);
-      let pos = 0;
-
-      for (let i = startOffset; i < entries.length; i++) {
-        const entry = entries[i];
-        const nameBuf = encoder.encode(entry.name + "\0");
-        const statBuf = new ArrayBuffer(STAT_SIZE);
-        writeStat(statBuf, {
-          ino: entry.ino,
-          mode: entry.mode,
-          nlink: 1,
-          size: 0,
-          uid: mountOwnership.uid,
-          gid: mountOwnership.gid,
-        });
-
-        const remaining = bufSize - pos;
-        const entrySize = fuse.symbols.fuse_add_direntry(
-          req,
-          Deno.UnsafePointer.of(buf.subarray(pos)),
-          BigInt(remaining),
-          nameBuf,
-          Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-          BigInt(i + 1), // next offset
-        );
-
-        if (Number(entrySize) > remaining) break;
-        pos += Number(entrySize);
-      }
-
-      fuse.symbols.fuse_reply_buf(
-        req,
-        Deno.UnsafePointer.of(buf),
-        BigInt(pos),
-      );
+      sendDirectoryReply();
     },
   );
   callbacks.push(readdirCb);
@@ -626,8 +661,21 @@ export async function main(argv: string[] = Deno.args) {
     try {
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
-        const value = JSON.parse(text.trim());
+        const trimmed = text.trim();
+        let value: unknown;
+        try {
+          value = JSON.parse(trimmed);
+        } catch {
+          // Bare string — treat as string value so callers don't need
+          // to double-quote (e.g. `echo book > addItem.handler`).
+          value = trimmed;
+        }
         await bridge.sendToHandlerTarget(writeTarget.target, value);
+        // Don't invalidate here — sendToHandlerTarget waits for
+        // runtime.idle() + synced(), but the downstream reactive graph
+        // may not have settled yet. The cell.sink subscription in
+        // subscribePiece fires when the result cell actually updates,
+        // which triggers invalidateRootPropCache at the right time.
         if (handle.version === flushVersion) {
           handle.dirty = false;
           handle.truncatePending = false;
@@ -720,6 +768,7 @@ export async function main(argv: string[] = Deno.args) {
       if (writePath.fsProjection) {
         const ok = await bridge.writeFsFile(writePath, text);
         if (!ok) return EINVAL;
+        bridge.invalidateWritePath(writePath);
         if (handle.version === flushVersion) {
           handle.dirty = false;
           handle.truncatePending = false;
@@ -768,6 +817,7 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       await bridge.writeValue(writePath, value);
+      bridge.invalidateWritePath(writePath);
       if (handle.version === flushVersion) {
         handle.dirty = false;
         handle.truncatePending = false;
@@ -1191,7 +1241,9 @@ export async function main(argv: string[] = Deno.args) {
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         "",
-      ).catch((e) => {
+      ).then(() => {
+        bridge.invalidateWritePath(parentPath);
+      }).catch((e) => {
         console.error(`[fuse] create write error: ${e}`);
       });
     },
@@ -1235,7 +1287,9 @@ export async function main(argv: string[] = Deno.args) {
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         {},
-      ).catch((e) => {
+      ).then(() => {
+        bridge.invalidateWritePath(parentPath);
+      }).catch((e) => {
         console.error(`[fuse] mkdir write error: ${e}`);
       });
     },
@@ -1301,6 +1355,7 @@ export async function main(argv: string[] = Deno.args) {
             if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
               currentValue.splice(idx, 1);
               await bridge!.writeValue(parentPath, currentValue);
+              bridge!.invalidateWritePath(parentPath);
             }
           }
         } else {
@@ -1316,6 +1371,7 @@ export async function main(argv: string[] = Deno.args) {
             const obj = { ...(currentValue as Record<string, unknown>) };
             delete obj[name];
             await bridge!.writeValue(parentPath, obj);
+            bridge!.invalidateWritePath(parentPath);
           }
         }
       })().catch((e) => {
@@ -1383,6 +1439,7 @@ export async function main(argv: string[] = Deno.args) {
             if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
               currentValue.splice(idx, 1);
               await bridge!.writeValue(parentPath, currentValue);
+              bridge!.invalidateWritePath(parentPath);
             }
           }
         } else {
@@ -1398,6 +1455,7 @@ export async function main(argv: string[] = Deno.args) {
             const obj = { ...(currentValue as Record<string, unknown>) };
             delete obj[name];
             await bridge!.writeValue(parentPath, obj);
+            bridge!.invalidateWritePath(parentPath);
           }
         }
       })().catch((e) => {
@@ -1467,6 +1525,7 @@ export async function main(argv: string[] = Deno.args) {
           { ...newParentPath, jsonPath: destPath },
           value,
         );
+        bridge!.invalidateWritePath(newParentPath);
 
         // Delete old path: read parent, delete key, write back
         const oldParentWritePath = bridge!.resolveWritePath(oldParent);
@@ -1483,11 +1542,13 @@ export async function main(argv: string[] = Deno.args) {
             const obj = { ...(parentValue as Record<string, unknown>) };
             delete obj[oldName];
             await bridge!.writeValue(oldParentWritePath, obj);
+            bridge!.invalidateWritePath(oldParentWritePath);
           } else if (Array.isArray(parentValue)) {
             const idx = Number(oldName);
             if (!isNaN(idx)) {
               parentValue.splice(idx, 1);
               await bridge!.writeValue(oldParentWritePath, parentValue);
+              bridge!.invalidateWritePath(oldParentWritePath);
             }
           }
         }
@@ -1553,7 +1614,9 @@ export async function main(argv: string[] = Deno.args) {
       replyEntry(req, ino, node);
 
       // Fire-and-forget write to cell
-      bridge.writeValue(writePath, sigilValue).catch((e) => {
+      bridge.writeValue(writePath, sigilValue).then(() => {
+        bridge.invalidateWritePath(parentPath);
+      }).catch((e) => {
         console.error(`[fuse] symlink write error: ${e}`);
       });
     },

@@ -12,7 +12,7 @@
  *
  * Run: deno task cf test packages/patterns/battleship/multiplayer/room.test.tsx --root packages/patterns/battleship --verbose
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, safeDateNow, Writable } from "commonfabric";
 import BattleshipRoom from "./room.tsx";
 import {
   createInitialShots,
@@ -48,7 +48,7 @@ function createTestPlayer(name: string, playerNum: 1 | 2): PlayerData {
     name,
     ships: createTestShips(),
     color: playerNum === 1 ? "#3b82f6" : "#ef4444",
-    joinedAt: Date.now(),
+    joinedAt: safeDateNow(),
   };
 }
 

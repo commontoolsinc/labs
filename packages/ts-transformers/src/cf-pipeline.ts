@@ -3,6 +3,9 @@ import {
   EmptyArrayOfValidationTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
   JsxExpressionSiteRouterTransformer,
+  ModuleScopeCfDataTransformer,
+  ModuleScopeFunctionHardeningTransformer,
+  ModuleScopeShadowingTransformer,
   OpaqueGetValidationTransformer,
   PatternCallbackLoweringTransformer,
   PatternContextValidationTransformer,
@@ -28,6 +31,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
       mapCallbackRegistry: new WeakSet(),
       syntheticComputeCallbackRegistry: new WeakSet(),
       syntheticComputeOwnedNodeRegistry: new WeakSet(),
+      syntheticReactiveCollectionRegistry: new WeakSet(),
       schemaHints: new WeakMap(),
       capabilitySummaryRegistry: new WeakMap(),
       ...options,
@@ -63,6 +67,9 @@ export class CommonFabricTransformerPipeline extends Pipeline {
     transformers.push(
       new SchemaInjectionTransformer(sharedOps),
       new SchemaGeneratorTransformer(sharedOps),
+      new ModuleScopeShadowingTransformer(sharedOps),
+      new ModuleScopeCfDataTransformer(sharedOps),
+      new ModuleScopeFunctionHardeningTransformer(sharedOps),
     );
 
     super(transformers);

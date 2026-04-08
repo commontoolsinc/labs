@@ -22,7 +22,9 @@ import {
   ifElse,
   lift,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -194,27 +196,14 @@ interface AutoClassifiedItem {
 }
 
 // =============================================================================
-// REGEX CACHE
+// REGEX SAFETY
 // =============================================================================
-
-/**
- * Maximum number of cached regex patterns to prevent memory leaks.
- * Uses simple LRU-like eviction (removes oldest entries when full).
- */
-const REGEX_CACHE_MAX_SIZE = 100;
 
 /**
  * Maximum length for regex patterns to prevent ReDoS attacks.
  * Patterns longer than this are rejected.
  */
 const REGEX_MAX_PATTERN_LENGTH = 500;
-
-/**
- * Module-scoped cache for compiled RegExp objects.
- * Key format: `${pattern}|${caseInsensitive ? 'i' : ''}`
- * This avoids recompiling the same regex thousands of times when matching rules.
- */
-const regexCache = new Map<string, RegExp | null>();
 
 /**
  * Check if a regex pattern is potentially dangerous (ReDoS).
@@ -245,41 +234,24 @@ function isRegexSafe(pattern: string): boolean {
 }
 
 /**
- * Get a cached compiled regex, or compile and cache it.
+ * Compile a regex after validation.
  * Returns null for invalid or potentially dangerous regex patterns.
  */
 function getCachedRegex(
   pattern: string,
   caseInsensitive: boolean,
 ): RegExp | null {
-  const cacheKey = `${pattern}|${caseInsensitive ? "i" : ""}`;
-
-  if (regexCache.has(cacheKey)) {
-    return regexCache.get(cacheKey)!;
-  }
-
   // Check for potentially dangerous patterns (ReDoS prevention)
   if (!isRegexSafe(pattern)) {
     console.warn(
       `[Classifier] Rejecting potentially dangerous regex pattern: "${pattern}"`,
     );
-    regexCache.set(cacheKey, null);
     return null;
-  }
-
-  // Evict oldest entries if cache is full (simple LRU-like behavior)
-  if (regexCache.size >= REGEX_CACHE_MAX_SIZE) {
-    const firstKey = regexCache.keys().next().value;
-    if (firstKey) {
-      regexCache.delete(firstKey);
-    }
   }
 
   try {
     const flags = caseInsensitive ? "i" : "";
-    const regex = new RegExp(pattern, flags);
-    regexCache.set(cacheKey, regex);
-    return regex;
+    return new RegExp(pattern, flags);
   } catch (e) {
     // Log invalid regex pattern for debugging
     console.warn(
@@ -287,8 +259,6 @@ function getCachedRegex(
         e instanceof Error ? e.message : "Unknown error"
       }`,
     );
-    // Cache null to avoid re-trying
-    regexCache.set(cacheKey, null);
     return null;
   }
 }
@@ -299,7 +269,7 @@ function getCachedRegex(
 
 /** Generate a unique ID */
 function generateId(): string {
-  return Math.random().toString(36).substring(2, 15);
+  return nonPrivateRandom().toString(36).substring(2, 15);
 }
 
 /** Validate a regex pattern and return validation result */
@@ -660,7 +630,7 @@ const confirmPendingClassification = handler<
     decidedBy: "suggestion-accepted",
     reasoning: result.reasoning,
     confidence: result.confidence,
-    labeledAt: Date.now(),
+    labeledAt: safeDateNow(),
     wasCorrection: false,
     isInteresting: result.confidence < 0.7,
     interestingReason: result.confidence < 0.7
@@ -695,7 +665,7 @@ const correctPendingClassification = handler<
     decidedBy: "user",
     reasoning: "User correction",
     confidence: 1.0,
-    labeledAt: Date.now(),
+    labeledAt: safeDateNow(),
     wasCorrection: true,
     originalPrediction: item.result.classification,
     isInteresting: true,
@@ -810,7 +780,7 @@ const reclassifyExampleHandler = handler<
   // Set as current item with a new ID (so it's treated as a fresh classification)
   const newInput: ClassifiableInput = {
     id: generateId(),
-    receivedAt: Date.now(),
+    receivedAt: safeDateNow(),
     fields: { ...inputData.fields },
   };
   currentItem.set(newInput);
@@ -948,7 +918,7 @@ const submitItemHandler = handler<
     // Create the input object
     const input: ClassifiableInput = {
       id: generateId(),
-      receivedAt: Date.now(),
+      receivedAt: safeDateNow(),
       fields: { ...event.fields },
     };
 
@@ -971,7 +941,7 @@ const submitItemHandler = handler<
           ruleMatch.matchedRules.join(", ")
         }`,
         confidence: ruleMatch.confidence,
-        labeledAt: Date.now(),
+        labeledAt: safeDateNow(),
         wasCorrection: false,
         isInteresting: false,
       };
@@ -985,7 +955,7 @@ const submitItemHandler = handler<
         reasoning: example.reasoning,
         matchedRules: ruleMatch.matchedRules,
         tier: ruleMatch.highestTier,
-        classifiedAt: Date.now(),
+        classifiedAt: safeDateNow(),
       };
       recentAutoClassified.set(
         [autoItem, ...recentAutoClassified.get()].slice(0, 10),
@@ -1089,7 +1059,7 @@ const confirmClassificationHandler = handler<
     decidedBy: "suggestion-accepted",
     reasoning: result.reasoning,
     confidence: result.confidence,
-    labeledAt: Date.now(),
+    labeledAt: safeDateNow(),
     wasCorrection: false,
     isInteresting: result.confidence < 0.7,
     interestingReason: result.confidence < 0.7
@@ -1126,7 +1096,7 @@ const correctClassificationHandler = handler<
     decidedBy: "user",
     reasoning: reasoning || "User correction",
     confidence: 1.0,
-    labeledAt: Date.now(),
+    labeledAt: safeDateNow(),
     wasCorrection: true,
     originalPrediction: item.result.classification,
     isInteresting: true,
@@ -1183,7 +1153,7 @@ const addRuleHandler = handler<
     falsePositives: 0,
     trueNegatives: 0,
     falseNegatives: 0,
-    createdAt: Date.now(),
+    createdAt: safeDateNow(),
     isShared: false,
   };
   rules.push(newRule);
@@ -1267,7 +1237,7 @@ const acceptSuggestionHandler = handler<
     falsePositives: 0,
     trueNegatives: 0,
     falseNegatives: 0,
-    createdAt: Date.now(),
+    createdAt: safeDateNow(),
     isShared: false,
   };
   rules.push(newRule);
@@ -1327,7 +1297,7 @@ const acceptCurrentClassificationHandler = handler<
     decidedBy: "suggestion-accepted",
     reasoning: classification.reasoning,
     confidence: classification.confidence,
-    labeledAt: Date.now(),
+    labeledAt: safeDateNow(),
     wasCorrection: false,
     isInteresting: classification.confidence < 0.7,
     interestingReason: classification.confidence < 0.7
@@ -1366,7 +1336,7 @@ const correctCurrentClassificationHandler = handler<
     decidedBy: "user",
     reasoning: "User corrected classification",
     confidence: 1.0, // User is certain
-    labeledAt: Date.now(),
+    labeledAt: safeDateNow(),
     wasCorrection: true,
     originalPrediction: classification.classification,
     isInteresting: true,
@@ -1409,7 +1379,7 @@ const acceptUndoneClassificationHandler = handler<
     decidedBy: "suggestion-accepted",
     reasoning: undone.reasoning,
     confidence: undone.confidence,
-    labeledAt: Date.now(),
+    labeledAt: safeDateNow(),
     wasCorrection: false,
     isInteresting: false,
   });
@@ -1492,7 +1462,7 @@ const correctUndoneClassificationHandler = handler<
     decidedBy: "user",
     reasoning: "User corrected classification",
     confidence: 1.0, // User is certain
-    labeledAt: Date.now(),
+    labeledAt: safeDateNow(),
     wasCorrection: true,
     originalPrediction: undone.label,
     isInteresting: true,

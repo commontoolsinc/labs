@@ -57,7 +57,7 @@ const p = pattern((input: { list: Array<{ name: string; age: number }> }) => <di
     assertStringIncludes(output, ".mapWithPattern(");
     assertStringIncludes(
       output,
-      'const name = __ct_pattern_input.key("element", "name");',
+      'const name = __cf_pattern_input.key("element", "name");',
     );
   },
 );
@@ -89,6 +89,28 @@ const p = pattern<State>((state) => ({
       assertStringIncludes(output, `state.key("${property}")`);
       extraAssert(output);
     }
+  },
+);
+
+Deno.test(
+  "Transform guards: numeric element-access receiver keys use canonical numeric values",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commonfabric";
+interface Item { name: string }
+interface Group { items: Item[] }
+const p = pattern((input: { groups: Group[] }) =>
+  input.groups[1e2].items.map((item) => item.name)
+);
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(
+      output,
+      'input.key("groups", "100", "items").mapWithPattern(',
+    );
+    assert(!output.includes('"1e2"'));
   },
 );
 

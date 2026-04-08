@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: derive-nested-callback
 // Verifies: capture extraction works with nested .map() which is itself transformed to mapWithPattern
 //   derive(numbers, fn) → derive(schema, schema, { numbers, multiplier }, fn)
@@ -40,9 +51,9 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const n = __ct_pattern_input.key("element");
-        const multiplier = __ct_pattern_input.key("params", "multiplier");
+    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const n = __cf_pattern_input.key("element");
+        const multiplier = __cf_pattern_input.key("params", "multiplier");
         return n * multiplier.get();
     }, {
         type: "object",
@@ -76,5 +87,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

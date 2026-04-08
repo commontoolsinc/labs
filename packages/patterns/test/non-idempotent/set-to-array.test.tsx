@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/test/non-idempotent/set-to-array.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commonfabric";
+import { computed, nonPrivateRandom, pattern, Writable } from "commonfabric";
 
 export default pattern(() => {
   const items = Writable.of([
@@ -20,7 +20,7 @@ export default pattern(() => {
   // Non-idempotent: random sort before Set changes iteration order
   computed(() => {
     const tags = items.get().map((i) => i.tag);
-    const shuffled = tags.sort(() => Math.random() - 0.5);
+    const shuffled = tags.sort(() => nonPrivateRandom() - 0.5);
     const set = new Set(shuffled);
     uniqueTags.set([...set]);
   });

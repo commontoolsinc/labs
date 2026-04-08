@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: literal-widen-number
 // Verifies: numeric literals (int, negative, float, scientific, zero) are all widened to { type: "number" }
 //   cell(10) → cell(10, { type: "number" })
@@ -25,7 +36,7 @@ export default function TestLiteralWidenNumber() {
     } as const satisfies __cfHelpers.JSONSchema);
     return null;
 }
+__cfHardenFn(TestLiteralWidenNumber);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

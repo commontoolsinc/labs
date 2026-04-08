@@ -23,7 +23,7 @@
  * Run: deno task cf test packages/patterns/notes/notebook.test.tsx --verbose
  */
 import { action, computed, pattern } from "commonfabric";
-import { NAME } from "@commonfabric/runner";
+import { NAME } from "commonfabric";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
 

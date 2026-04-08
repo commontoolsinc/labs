@@ -11,7 +11,6 @@ import {
   linkPieces,
   LinkValidationError,
   listPieces,
-  loadManager,
   MapFormat,
   newPiece,
   PieceConfig,
@@ -22,8 +21,8 @@ import {
   setHomePattern,
   setPiecePattern,
   SpaceConfig,
+  stepPiece,
 } from "../lib/piece.ts";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { renderPiece } from "../lib/piece-render.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commonfabric/utils/encoding";
@@ -31,7 +30,7 @@ import { cliText } from "../lib/cli-name.ts";
 import { absPath } from "../lib/utils.ts";
 import { parsePath } from "@commonfabric/piece/ops";
 import { UI } from "@commonfabric/runner";
-import ports from "@commontools/ports" with { type: "json" };
+import ports from "@commonfabric/ports" with { type: "json" };
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -267,13 +266,7 @@ export const piece = new Command()
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
-    const manager = await loadManager(pieceConfig);
-    const pieces = new PiecesController(manager);
-    // Start in this transient runtime, wait, then stop and exit
-    const piece = await pieces.get(pieceConfig.piece, true);
-    await piece.getCell().pull();
-    await manager.synced();
-    await pieces.stop(pieceConfig.piece);
+    await stepPiece(pieceConfig);
     render(`Stepped piece ${pieceConfig.piece}`);
   })
   /* piece apply */
@@ -742,26 +735,32 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
-    setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
-    const result = await executePieceCallable(
-      pieceConfig,
-      callableName,
-      rawArgs,
-    );
-    if (result.helpText) {
-      render(result.helpText);
-      return;
-    }
-    if (result.outputText) {
-      render(result.outputText);
-      return;
-    }
-    render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
-    hint(cliText(`NEXT STEPS:
+    try {
+      setQuietMode(!!options.quiet);
+      const pieceConfig = parsePieceOptions(options);
+      const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
+      const result = await executePieceCallable(
+        pieceConfig,
+        callableName,
+        rawArgs,
+      );
+      if (result.helpText) {
+        render(result.helpText);
+        return;
+      }
+      if (result.outputText) {
+        render(result.outputText);
+        return;
+      }
+      render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
+      hint(cliText(`NEXT STEPS:
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
   → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message);
+      Deno.exit(1);
+    }
   })
   /* piece rm */
   .command("rm", "Remove a piece")

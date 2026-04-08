@@ -18,7 +18,7 @@ import {
   ID_FIELD,
   isPattern,
   NAME,
-  schema,
+  schema as schemaIdentity,
   SELF,
   TYPE,
   UI,
@@ -57,25 +57,69 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-epoch";
 import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
+import { nonPrivateRandom, safeDateNow } from "./safe-builtins.ts";
+import {
+  registerUnsafeHostTrustedValue,
+  type UnsafeHostTrust,
+} from "../unsafe-host-trust.ts";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
 const toSchema: ToSchemaFunction = (_options?) => {
   throw new Error(
     "toSchema() must be transformed at compile time - transformer not running\n" +
-      "help: enable CTS with /// <cts-enable /> directive, ensure using correct build process",
+      "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> if present, or ensure you are using the Common Fabric build process",
   );
 };
 
+const runtimeSchema = freezeVerifiedPlainData as typeof schemaIdentity;
+
+export interface CreateBuilderOptions {
+  unsafeHostTrust?: UnsafeHostTrust;
+}
+
 /**
  * Creates a set of builder functions with the given runtime
- * @param runtime - The runtime instance to use for cell creation
  * @returns An object containing all builder functions
  */
-export const createBuilder = (): {
+export const createBuilder = (options: CreateBuilderOptions = {}): {
   commonfabric: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
+  const trustValue = <T>(value: T): T => {
+    registerUnsafeHostTrustedValue(options.unsafeHostTrust, value);
+    return value;
+  };
+
+  const trustedPattern = ((...args: any[]) =>
+    trustValue(
+      (pattern as (...args: any[]) => unknown)(...args),
+    )) as typeof pattern;
+  const trustedLift = ((...args: any[]) =>
+    trustValue(
+      (lift as (...args: any[]) => unknown)(...args),
+    )) as typeof lift;
+  const trustedHandler = ((...args: any[]) =>
+    trustValue(
+      (handler as (...args: any[]) => unknown)(...args),
+    )) as typeof handler;
+  const trustedComputed = ((...args: any[]) =>
+    trustValue(
+      (computed as (...args: any[]) => unknown)(...args),
+    )) as typeof computed;
+  const trustedDerive = ((...args: any[]) =>
+    trustValue(
+      (derive as (...args: any[]) => unknown)(...args),
+    )) as typeof derive;
+  const trustedStr =
+    ((strings: TemplateStringsArray, ...values: unknown[]) =>
+      trustValue(str(strings, ...values))) as typeof str;
+  const trustedPatternTool = ((...args: any[]) =>
+    trustValue(
+      (patternTool as (...args: any[]) => unknown)(...args),
+    )) as typeof patternTool;
+
   // Associate runtime programs with patterns after compilation and initial eval
   // and before compilation returns, so before any e.g. pattern would be
   // instantiated. This way they get saved with a way to rehydrate them.
@@ -88,84 +132,92 @@ export const createBuilder = (): {
     }
   };
 
+  const commonfabric = {
+    // Pattern creation
+    pattern: trustedPattern,
+    patternTool: trustedPatternTool,
+
+    // Module creation
+    lift: trustedLift,
+    handler: trustedHandler,
+    action,
+    derive: trustedDerive,
+    computed: trustedComputed,
+
+    // Built-in modules
+    str: trustedStr,
+    ifElse,
+    when,
+    unless,
+    llm,
+    llmDialog,
+    generateObject,
+    generateText,
+    fetchData,
+    fetchProgram,
+    streamData,
+    compileAndRun,
+    navigateTo,
+    wish,
+
+    // Cell creation
+    cell: cellConstructorFactory<AsCell>("cell").of,
+    equals: cellConstructorFactory<AsCell>("cell").equals,
+
+    // Cell constructors with static methods
+    Cell: cellConstructorFactory<AsCell>("cell"),
+    Writable: cellConstructorFactory<AsCell>("cell"), // Alias for Cell with clearer semantics
+    OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
+    Stream: cellConstructorFactory<AsStream>("stream"),
+    ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),
+    ReadonlyCell: cellConstructorFactory<AsReadonlyCell>("readonly"),
+    WriteonlyCell: cellConstructorFactory<AsWriteonlyCell>("writeonly"),
+
+    // Utility
+    byRef,
+
+    // Environment
+    getPatternEnvironment,
+    nonPrivateRandom,
+    safeDateNow,
+
+    // Entity utilities
+    getEntityId,
+
+    // Constants
+    ID,
+    ID_FIELD,
+    SELF,
+    TYPE,
+    NAME,
+    UI,
+    FS,
+
+    // Schema utilities
+    schema: runtimeSchema,
+    toSchema,
+    __cf_data: freezeVerifiedPlainData,
+    AuthSchema,
+    WebhookConfigSchema,
+
+    // Render utils
+    h,
+
+    // Fabric value classes -- runtime values backing the type declarations
+    // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
+    // checks in patterns.
+    FabricInstance,
+    FabricPrimitive,
+    FabricEpochNsec,
+    FabricEpochDays,
+    FabricHash,
+  } as BuilderFunctionsAndConstants & {
+    __cfHelpers?: BuilderFunctionsAndConstants;
+  };
+  commonfabric.__cfHelpers = commonfabric;
+
   return {
-    commonfabric: {
-      // Pattern creation
-      pattern,
-      patternTool,
-
-      // Module creation
-      lift,
-      handler,
-      action,
-      derive,
-      computed,
-
-      // Built-in modules
-      str,
-      ifElse,
-      when,
-      unless,
-      llm,
-      llmDialog,
-      generateObject,
-      generateText,
-      fetchData,
-      fetchProgram,
-      streamData,
-      compileAndRun,
-      navigateTo,
-      wish,
-
-      // Cell creation
-      cell: cellConstructorFactory<AsCell>("cell").of,
-      equals: cellConstructorFactory<AsCell>("cell").equals,
-
-      // Cell constructors with static methods
-      Cell: cellConstructorFactory<AsCell>("cell"),
-      Writable: cellConstructorFactory<AsCell>("cell"), // Alias for Cell with clearer semantics
-      OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
-      Stream: cellConstructorFactory<AsStream>("stream"),
-      ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),
-      ReadonlyCell: cellConstructorFactory<AsReadonlyCell>("readonly"),
-      WriteonlyCell: cellConstructorFactory<AsWriteonlyCell>("writeonly"),
-
-      // Utility
-      byRef,
-
-      // Environment
-      getPatternEnvironment,
-
-      // Entity utilities
-      getEntityId,
-
-      // Constants
-      ID,
-      ID_FIELD,
-      SELF,
-      TYPE,
-      NAME,
-      UI,
-      FS,
-
-      // Schema utilities
-      schema,
-      toSchema,
-      AuthSchema,
-      WebhookConfigSchema,
-
-      // Render utils
-      h,
-
-      // Fabric value classes -- runtime values backing the type declarations
-      // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
-      // checks in patterns.
-      FabricInstance,
-      FabricPrimitive,
-      FabricEpochNsec,
-      FabricEpochDays,
-      FabricHash,
-    },
+    commonfabric,
     exportsCallback,
   };
 };

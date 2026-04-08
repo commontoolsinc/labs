@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Input {
     foo: string;
     count: number;
@@ -9,9 +20,9 @@ interface Input {
 // Verifies: interface-backed destructuring defaults keep schema defaults and non-default sibling fields
 //   ({ foo = "fallback", count = 0 }) → schema defaults for foo/count
 //   enabled stays present in the input schema even though it is not destructured
-export default pattern((__ct_pattern_input) => {
-    const foo = __ct_pattern_input.key("foo");
-    const count = __ct_pattern_input.key("count");
+export default pattern((__cf_pattern_input) => {
+    const foo = __cf_pattern_input.key("foo");
+    const count = __cf_pattern_input.key("count");
     return (<div>
     {foo}:{count}
   </div>);
@@ -54,5 +65,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

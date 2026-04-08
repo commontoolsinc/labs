@@ -13,21 +13,31 @@ import type {
   IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
+  IReadActivity,
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
+  ITransactionWriteRequest,
   MemorySpace,
   ReaderError,
   ReadError,
   Result,
   StorageTransactionStatus,
+  TransactionReactivityLog,
+  TransactionWriteDetail,
   Unit,
   WriteError,
   WriterError,
 } from "./interface.ts";
-import { toThrowable } from "./interface.ts";
+import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionReadActivities,
+  getTransactionWriteDetails,
+} from "./transaction-inspection.ts";
+import { reactivityLogFromActivities } from "./reactivity-log.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
 
@@ -43,11 +53,48 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void
   >();
+  private readOnlySource?: string;
 
   constructor(public tx: IStorageTransaction) {}
 
+  setReadOnly(reason = "runtime.readTx()"): void {
+    this.readOnlySource = reason;
+    this.tx.setReadOnly?.(reason);
+  }
+
+  clearReadOnly(): void {
+    this.readOnlySource = undefined;
+    this.tx.clearReadOnly?.();
+  }
+
+  isReadOnly(): boolean {
+    return this.readOnlySource !== undefined || this.tx.isReadOnly?.() === true;
+  }
+
+  private assertWritable(method: string): void {
+    if (!this.isReadOnly()) {
+      return;
+    }
+    throw createReadOnlyTransactionError(method, this.readOnlySource);
+  }
+
   get journal(): ITransactionJournal {
     return this.tx.journal;
+  }
+
+  getReactivityLog(): TransactionReactivityLog {
+    return getDirectTransactionReactivityLog(this.tx) ??
+      reactivityLogFromActivities(this.tx.journal.activity());
+  }
+
+  getReadActivities(): Iterable<IReadActivity> {
+    return getTransactionReadActivities(this.tx);
+  }
+
+  getWriteDetails(
+    space: MemorySpace,
+  ): Iterable<TransactionWriteDetail> {
+    return getTransactionWriteDetails(this.tx, space);
   }
 
   status(): StorageTransactionStatus {
@@ -95,13 +142,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
+    this.assertWritable("writer()");
     return this.tx.writer(space);
   }
 
   write(
     address: IMemorySpaceAddress,
-    value: any,
+    value: FabricValue,
   ): Result<IAttestation, WriteError | WriterError> {
+    this.assertWritable("write()");
     return this.tx.write(address, value);
   }
 
@@ -109,6 +158,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue,
   ): void {
+    this.assertWritable("writeOrThrow()");
     const writeResult = this.tx.write(address, value);
     if (
       writeResult.error &&
@@ -181,14 +231,50 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue,
   ): void {
+    this.assertWritable("writeValueOrThrow()");
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
 
+  writeValuesOrThrow(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): void {
+    this.assertWritable("writeValuesOrThrow()");
+    if (this.tx.writeBatch) {
+      const result = this.tx.writeBatch(
+        (function* () {
+          for (const write of writes) {
+            yield {
+              address: {
+                ...write.address,
+                path: ["value", ...write.address.path],
+              },
+              value: write.value,
+            };
+          }
+        })(),
+      );
+      if (result.error) {
+        throw toThrowable(result.error);
+      }
+      return;
+    }
+
+    for (const write of writes) {
+      this.writeValueOrThrow(write.address, write.value);
+    }
+  }
+
   abort(reason?: any): Result<any, InactiveTransactionError> {
+    this.assertWritable("abort()");
     return this.tx.abort(reason);
   }
 
   commit(): Promise<Result<Unit, CommitError>> {
+    if (this.isReadOnly()) {
+      return Promise.reject(
+        createReadOnlyTransactionError("commit()", this.readOnlySource),
+      );
+    }
     const promise = this.tx.commit();
 
     // Call commit callbacks after commit completes (success or failure) Note
@@ -232,6 +318,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void,
   ): void {
+    this.assertWritable("addCommitCallback()");
     this.commitCallbacks.add(callback);
   }
 }
@@ -281,8 +368,37 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.tx;
   }
 
+  setReadOnly(reason?: string): void {
+    this.wrapped.setReadOnly?.(reason);
+  }
+
+  clearReadOnly(): void {
+    this.wrapped.clearReadOnly?.();
+  }
+
+  isReadOnly(): boolean {
+    return this.wrapped.isReadOnly?.() === true;
+  }
+
   get journal(): ITransactionJournal {
     return this.wrapped.journal;
+  }
+
+  getReactivityLog(): TransactionReactivityLog {
+    return this.wrapped.getReactivityLog?.() ??
+      reactivityLogFromActivities(this.wrapped.journal.activity());
+  }
+
+  getReadActivities(): Iterable<IReadActivity> {
+    return this.wrapped.getReadActivities?.() ??
+      getTransactionReadActivities(this.wrapped.tx);
+  }
+
+  getWriteDetails(
+    space: MemorySpace,
+  ): Iterable<TransactionWriteDetail> {
+    return this.wrapped.getWriteDetails?.(space) ??
+      getTransactionWriteDetails(this.wrapped.tx, space);
   }
 
   status(): StorageTransactionStatus {
@@ -353,6 +469,17 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     value: FabricValue,
   ): void {
     return this.wrapped.writeValueOrThrow(address, value);
+  }
+
+  writeValuesOrThrow(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): void {
+    if (this.wrapped.writeValuesOrThrow) {
+      return this.wrapped.writeValuesOrThrow(writes);
+    }
+    for (const write of writes) {
+      this.wrapped.writeValueOrThrow(write.address, write.value);
+    }
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {

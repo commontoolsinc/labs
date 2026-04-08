@@ -26,6 +26,7 @@
  * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
+import { __cf_data, type Opaque } from "commonfabric";
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import GoogleAuth from "../google-auth.tsx";
@@ -36,14 +37,14 @@ export type {
   AuthState,
   TokenExpiryWarning,
 } from "../../../auth/auth-types.ts";
-export type {
+import type {
   AuthManagerInput as GoogleAuthManagerInput,
   AuthManagerOutput as GoogleAuthManagerOutput,
 } from "../../../auth/create-auth-manager.tsx";
+export type { GoogleAuthManagerInput, GoogleAuthManagerOutput };
 export type { Auth } from "../google-auth.tsx";
 
-/** Scope mapping for Google APIs - friendly names to URLs */
-export const SCOPE_MAP = {
+const GOOGLE_SCOPE_MAP_VALUES = {
   gmail: "https://www.googleapis.com/auth/gmail.readonly",
   gmailSend: "https://www.googleapis.com/auth/gmail.send",
   gmailModify: "https://www.googleapis.com/auth/gmail.modify",
@@ -53,33 +54,43 @@ export const SCOPE_MAP = {
   docs: "https://www.googleapis.com/auth/documents.readonly",
   contacts: "https://www.googleapis.com/auth/contacts.readonly",
 } as const;
+export type ScopeKey = keyof typeof GOOGLE_SCOPE_MAP_VALUES;
+
+/** Scope mapping for Google APIs - friendly names to URLs */
+const GOOGLE_SCOPE_MAP: Record<ScopeKey, string> = __cf_data(
+  GOOGLE_SCOPE_MAP_VALUES,
+);
+export const SCOPE_MAP = GOOGLE_SCOPE_MAP;
 
 /** Human-readable scope descriptions */
-export const SCOPE_DESCRIPTIONS = {
-  gmail: "Gmail (read emails)",
-  gmailSend: "Gmail (send emails)",
-  gmailModify: "Gmail (add/remove labels)",
-  calendar: "Calendar (read events)",
-  calendarWrite: "Calendar (create/edit/delete events)",
-  drive: "Drive (read/write files & comments)",
-  docs: "Docs (read document content)",
-  contacts: "Contacts (read contacts)",
-} as const;
-
-export type ScopeKey = keyof typeof SCOPE_MAP;
+const GOOGLE_SCOPE_DESCRIPTIONS = __cf_data(
+  {
+    gmail: "Gmail (read emails)",
+    gmailSend: "Gmail (send emails)",
+    gmailModify: "Gmail (add/remove labels)",
+    calendar: "Calendar (read events)",
+    calendarWrite: "Calendar (create/edit/delete events)",
+    drive: "Drive (read/write files & comments)",
+    docs: "Docs (read document content)",
+    contacts: "Contacts (read contacts)",
+  } as const,
+);
+export const SCOPE_DESCRIPTIONS = GOOGLE_SCOPE_DESCRIPTIONS;
 
 /** Account type for multi-account support */
 export type AccountType = "default" | "personal" | "work";
 
 /** Unified scope registry for the auth manager factory */
-const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
-  Object.entries(SCOPE_MAP).map(([key, url]) => [
-    key,
-    { description: SCOPE_DESCRIPTIONS[key as ScopeKey], scopeString: url },
-  ]),
+const SCOPES: AuthManagerDescriptor["scopes"] = __cf_data(
+  Object.fromEntries(
+    Object.entries(SCOPE_MAP).map(([key, url]) => [
+      key,
+      { description: SCOPE_DESCRIPTIONS[key as ScopeKey], scopeString: url },
+    ]),
+  ),
 );
 
-const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
+const GoogleAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
   name: "google",
   displayName: "Google",
   brandColor: "#4285f4",
@@ -91,12 +102,16 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
   tokenField: "token",
   scopes: SCOPES,
   hasAvatarSupport: true,
-};
+});
 
-export const GoogleAuthManager = createAuthManager(
-  GoogleAuthManagerDescriptor,
-  GoogleAuth,
-);
+export function GoogleAuthManager(
+  input: Opaque<GoogleAuthManagerInput>,
+): GoogleAuthManagerOutput {
+  return createAuthManager(
+    GoogleAuthManagerDescriptor,
+    GoogleAuth,
+  )(input);
+}
 
 export default GoogleAuthManager;
 

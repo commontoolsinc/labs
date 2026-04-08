@@ -18,6 +18,7 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   UI,
 } from "commonfabric";
 
@@ -55,7 +56,7 @@ const updateViaComputed = handler<
   const current = computedAuth.get();
   computedAuth.set({
     ...current,
-    token: "updated-via-computed-" + Date.now(),
+    token: "updated-via-computed-" + safeDateNow(),
     refreshCount: current.refreshCount + 1,
   });
 });
@@ -69,7 +70,7 @@ const updateViaKey = handler<
   const current = authViaKey.get();
   authViaKey.set({
     ...current,
-    token: "updated-via-key-" + Date.now(),
+    token: "updated-via-key-" + safeDateNow(),
     refreshCount: current.refreshCount + 1,
   });
 });
@@ -85,7 +86,7 @@ const updateDirect = handler<
     ...current,
     auth: {
       ...current.auth,
-      token: "updated-direct-" + Date.now(),
+      token: "updated-direct-" + safeDateNow(),
       refreshCount: current.auth.refreshCount + 1,
     },
   });

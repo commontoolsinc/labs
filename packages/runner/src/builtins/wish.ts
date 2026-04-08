@@ -640,6 +640,7 @@ export function wish(
   parentCell: Cell<any>,
   runtime: Runtime,
 ): Action {
+  let cancelled = false;
   // Per-instance cached #now cell — prevents non-idempotent re-runs from
   // Date.now() producing a different value each time the sync action fires.
   let nowCell: Cell<unknown> | undefined;
@@ -653,6 +654,13 @@ export function wish(
     }
     | undefined;
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
+
+  addCancel(() => {
+    cancelled = true;
+    if (suggestionPatternResultCell) {
+      runtime.runner.stop(suggestionPatternResultCell);
+    }
+  });
 
   function launchSuggestionPattern(
     input: {
@@ -676,8 +684,6 @@ export function wish(
         undefined,
         tx,
       );
-
-      addCancel(() => runtime.runner.stop(suggestionPatternResultCell!));
     }
 
     if (!suggestionPattern) {
@@ -691,7 +697,7 @@ export function wish(
       }
       // Once fetch completes, run the pattern without a tx (it creates its own)
       void suggestionPatternFetchPromise.then((pattern) => {
-        if (pattern) {
+        if (!cancelled && pattern && suggestionPatternResultCell) {
           wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
             `[WISH RUN SUGGESTION] source=${sourceKey}`,
             `query=${input.situation}`,
@@ -715,26 +721,28 @@ export function wish(
         }
       });
     } else {
-      wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
-        `[WISH RUN SUGGESTION] source=${sourceKey}`,
-        `query=${input.situation}`,
-        `mode=reuse-pattern`,
-        `result=${
-          suggestionPatternResultCell
-            ? describeCell(suggestionPatternResultCell)
-            : "unknown"
-        }`,
-      ]);
-      wishFlowLogger.debug(
-        `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
-        () => [`source=${sourceKey}`],
-      );
-      runtime.run(
-        tx,
-        suggestionPattern,
-        suggestionPatternInput,
-        suggestionPatternResultCell,
-      );
+      if (!cancelled && suggestionPatternResultCell) {
+        wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
+          `[WISH RUN SUGGESTION] source=${sourceKey}`,
+          `query=${input.situation}`,
+          `mode=reuse-pattern`,
+          `result=${
+            suggestionPatternResultCell
+              ? describeCell(suggestionPatternResultCell)
+              : "unknown"
+          }`,
+        ]);
+        wishFlowLogger.debug(
+          `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
+          () => [`source=${sourceKey}`],
+        );
+        runtime.run(
+          tx,
+          suggestionPattern,
+          suggestionPatternInput,
+          suggestionPatternResultCell,
+        );
+      }
     }
 
     if (!providedTx) tx.commit();

@@ -1,10 +1,21 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: pattern-array-destructure-param
 // Verifies: top-level array destructuring in pattern params lowers to index-based key access
-//   ([first]) => <div>{first}</div> → const first = __ct_pattern_input.key("0")
-export default pattern((__ct_pattern_input) => {
-    const first = __ct_pattern_input.key("0");
+//   ([first]) => <div>{first}</div> → const first = __cf_pattern_input.key("0")
+export default pattern((__cf_pattern_input) => {
+    const first = __cf_pattern_input.key("0");
     return <div>{first}</div>;
 }, {
     type: "array",
@@ -34,5 +45,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

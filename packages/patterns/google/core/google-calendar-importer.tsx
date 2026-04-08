@@ -37,50 +37,6 @@ export type Auth = {
   }, { email: ""; name: ""; picture: "" }>;
 };
 
-const env = getPatternEnvironment();
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// ========== OPTIONAL DERIVE DEBUG INSTRUMENTATION ==========
-// Set DEBUG_DERIVE=true to enable derive() call counting for performance investigation.
-// IMPORTANT: Keep disabled in production - the setInterval has no cleanup mechanism.
-const DEBUG_DERIVE = false;
-
-let deriveCallCount = 0;
-let perRowDeriveCount = 0;
-let lastLogTime = Date.now();
-const startTime = Date.now();
-
-function logDeriveCall(name: string, isPerRow = false) {
-  if (!DEBUG_DERIVE) return;
-  deriveCallCount++;
-  if (isPerRow) perRowDeriveCount++;
-  const now = Date.now();
-  const elapsed = now - startTime;
-  // Log on milestones or every second
-  if (now - lastLogTime > 1000 || deriveCallCount % 100 === 0) {
-    console.log(
-      `[DERIVE DEBUG] ${name}: total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
-    );
-    lastLogTime = now;
-  }
-}
-
-// Only start interval if debugging is enabled
-if (DEBUG_DERIVE) {
-  try {
-    setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(
-        `[DERIVE DEBUG SUMMARY] total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
-      );
-    }, 5000);
-  } catch {
-    // Ignore if setInterval isn't available during compilation
-  }
-}
-// ========== END DEBUG INSTRUMENTATION ==========
-
 export type CalendarEvent = {
   id: string;
   summary: string;
@@ -130,13 +86,6 @@ function debugWarn(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.warn(...args);
 }
 
-interface CalendarClientConfig {
-  retries?: number;
-  delay?: number;
-  delayIncrement?: number;
-  debugMode?: boolean;
-}
-
 // Helper function to parse calendar API response (extracted to module scope for compiler compliance)
 function parseCalendarApiItem(apiItem: any): Calendar {
   return {
@@ -147,137 +96,6 @@ function parseCalendarApiItem(apiItem: any): Calendar {
     backgroundColor: apiItem.backgroundColor || "#4285f4",
     foregroundColor: apiItem.foregroundColor || "#ffffff",
   };
-}
-
-class CalendarClient {
-  private auth: Writable<Auth>;
-  private retries: number;
-  private delay: number;
-  private delayIncrement: number;
-  private debugMode: boolean;
-
-  constructor(
-    auth: Writable<Auth>,
-    { retries = 3, delay = 1000, delayIncrement = 100, debugMode = false }:
-      CalendarClientConfig = {},
-  ) {
-    this.auth = auth;
-    this.retries = retries;
-    this.delay = delay;
-    this.delayIncrement = delayIncrement;
-    this.debugMode = debugMode;
-  }
-
-  private async refreshAuth() {
-    const body = {
-      refreshToken: this.auth.get().refreshToken,
-    };
-
-    debugLog(this.debugMode, "refreshAuthToken", body);
-
-    const res = await fetch(
-      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    );
-    if (!res.ok) {
-      throw new Error("Could not acquire a refresh token.");
-    }
-    const json = await res.json();
-    const authData = json.tokenInfo as Auth;
-    this.auth.update(authData);
-  }
-
-  async getCalendarList(): Promise<Calendar[]> {
-    const url = new URL(
-      "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-    );
-    const res = await this.googleRequest(url);
-    const json = await res.json();
-
-    if (!json.items || !Array.isArray(json.items)) {
-      debugLog(this.debugMode, "No calendars found:", json);
-      return [];
-    }
-
-    return json.items.map(parseCalendarApiItem);
-  }
-
-  async getEvents(
-    calendarId: string,
-    timeMin: Date,
-    timeMax: Date,
-    maxResults: number = 100,
-  ): Promise<any[]> {
-    const url = new URL(
-      `https://www.googleapis.com/calendar/v3/calendars/${
-        encodeURIComponent(calendarId)
-      }/events`,
-    );
-    url.searchParams.set("timeMin", timeMin.toISOString());
-    url.searchParams.set("timeMax", timeMax.toISOString());
-    url.searchParams.set("maxResults", maxResults.toString());
-    url.searchParams.set("singleEvents", "true");
-    url.searchParams.set("orderBy", "startTime");
-
-    debugLog(this.debugMode, "Fetching events from:", url.toString());
-
-    const res = await this.googleRequest(url);
-    const json = await res.json();
-
-    if (!json.items || !Array.isArray(json.items)) {
-      debugLog(this.debugMode, "No events found:", json);
-      return [];
-    }
-
-    return json.items;
-  }
-
-  private async googleRequest(
-    url: URL,
-    _options?: RequestInit,
-    _retries?: number,
-  ): Promise<Response> {
-    const token = this.auth.get().token;
-    if (!token) {
-      throw new Error("No authorization token.");
-    }
-
-    const retries = _retries ?? this.retries;
-    const options = _options ?? {};
-    options.headers = new Headers(options.headers);
-    options.headers.set("Authorization", `Bearer ${token}`);
-
-    const res = await fetch(url, options);
-    const { ok, status, statusText } = res;
-
-    if (ok) {
-      debugLog(this.debugMode, `${url}: ${status} ${statusText}`);
-      return res;
-    }
-
-    debugWarn(
-      this.debugMode,
-      `${url}: ${status} ${statusText}`,
-      `Remaining retries: ${retries}`,
-    );
-    if (retries === 0) {
-      throw new Error("Too many failed attempts.");
-    }
-
-    await sleep(this.delay);
-
-    if (status === 401) {
-      await this.refreshAuth();
-    } else if (status === 429) {
-      this.delay += this.delayIncrement;
-      debugLog(this.debugMode, `Incrementing delay to ${this.delay}`);
-      await sleep(this.delay);
-    }
-    return this.googleRequest(url, _options, retries - 1);
-  }
 }
 
 function parseCalendarEvent(
@@ -346,7 +164,122 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
   }
 
   const settings = state.settings.get();
-  const client = new CalendarClient(state.auth, { debugMode });
+  const auth = state.auth;
+  const maxRetries = 3;
+  let retryDelay = 1000;
+  const retryDelayIncrement = 100;
+
+  const refreshAuth = async () => {
+    const body = {
+      refreshToken: auth.get().refreshToken,
+    };
+    const env = getPatternEnvironment();
+
+    debugLog(debugMode, "refreshAuthToken", body);
+
+    const res = await fetch(
+      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      throw new Error("Could not acquire a refresh token.");
+    }
+    const json = await res.json();
+    const authData = json.tokenInfo as Auth;
+    auth.update(authData);
+  };
+
+  const googleRequest = async (
+    url: URL,
+    _options?: RequestInit,
+    _retries?: number,
+  ): Promise<Response> => {
+    const token = auth.get().token;
+    if (!token) {
+      throw new Error("No authorization token.");
+    }
+
+    const retries = _retries ?? maxRetries;
+    const options = _options ?? {};
+    options.headers = new Headers(options.headers);
+    options.headers.set("Authorization", `Bearer ${token}`);
+
+    const res = await fetch(url, options);
+    const { ok, status, statusText } = res;
+
+    if (ok) {
+      debugLog(debugMode, `${url}: ${status} ${statusText}`);
+      return res;
+    }
+
+    debugWarn(
+      debugMode,
+      `${url}: ${status} ${statusText}`,
+      `Remaining retries: ${retries}`,
+    );
+    if (retries === 0) {
+      throw new Error("Too many failed attempts.");
+    }
+
+    if (status === 401) {
+      await refreshAuth();
+    } else if (status === 429) {
+      retryDelay += retryDelayIncrement;
+      debugLog(
+        debugMode,
+        `Incrementing retry delay to ${retryDelay}; SES retries continue immediately without timers`,
+      );
+    }
+    return googleRequest(url, _options, retries - 1);
+  };
+
+  const getCalendarList = async (): Promise<Calendar[]> => {
+    const url = new URL(
+      "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+    );
+    const res = await googleRequest(url);
+    const json = await res.json();
+
+    if (!json.items || !Array.isArray(json.items)) {
+      debugLog(debugMode, "No calendars found:", json);
+      return [];
+    }
+
+    return json.items.map(parseCalendarApiItem);
+  };
+
+  const getEvents = async (
+    calendarId: string,
+    timeMin: Date,
+    timeMax: Date,
+    maxResults: number = 100,
+  ): Promise<any[]> => {
+    const url = new URL(
+      `https://www.googleapis.com/calendar/v3/calendars/${
+        encodeURIComponent(calendarId)
+      }/events`,
+    );
+    url.searchParams.set("timeMin", timeMin.toISOString());
+    url.searchParams.set("timeMax", timeMax.toISOString());
+    url.searchParams.set("maxResults", maxResults.toString());
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("orderBy", "startTime");
+
+    debugLog(debugMode, "Fetching events from:", url.toString());
+
+    const res = await googleRequest(url);
+    const json = await res.json();
+
+    if (!json.items || !Array.isArray(json.items)) {
+      debugLog(debugMode, "No events found:", json);
+      return [];
+    }
+
+    return json.items;
+  };
 
   try {
     // Get calendar list
@@ -356,7 +289,7 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
     const previousCalendarCount = state.calendars.get().length;
     const currentSelected = state.selectedCalendarIds?.get() || [];
 
-    const calendars = await client.getCalendarList();
+    const calendars = await getCalendarList();
     debugLog(debugMode, `Found ${calendars.length} calendars`);
 
     // Only update calendars if the list actually changed (prevents reactive loop)
@@ -419,7 +352,7 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
           debugMode,
           `Fetching events from calendar: ${calendar.summary} (${calendar.id})`,
         );
-        const rawEvents = await client.getEvents(
+        const rawEvents = await getEvents(
           calendar.id,
           timeMin,
           timeMax,
@@ -434,9 +367,6 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
           `Found ${events.length} events in ${calendar.summary}`,
         );
         allEvents.push(...events);
-
-        // Small delay between calendar requests to avoid rate limiting
-        await sleep(200);
       } catch (error) {
         debugWarn(
           debugMode,
@@ -1065,10 +995,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       ),
       events,
       calendars,
-      eventCount: derive(events, (list: CalendarEvent[]) => {
-        logDeriveCall(`eventCount (length=${list?.length})`);
-        return list?.length || 0;
-      }),
+      eventCount: derive(events, (list: CalendarEvent[]) => list?.length || 0),
       summary,
       bgUpdater: calendarUpdater({
         events,

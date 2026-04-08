@@ -294,8 +294,8 @@ Deno.test(
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare function identity<T>(value: T): T;
 
-      const callback = (__ct_pattern_input: any) => {
-        const row = __ct_pattern_input.key("element");
+      const callback = (__cf_pattern_input: any) => {
+        const row = __cf_pattern_input.key("element");
         const label = identity(row.done ? "Done" : "Pending");
         return label;
       };
@@ -1560,7 +1560,7 @@ const sharedPostClosureJsxRouteCases: JsxRouteCase[] = [
         interface IntrinsicElements {
           div: any;
           span: any;
-          "ct-vstack": any;
+          "cf-vstack": any;
         }
       }
 
@@ -1572,10 +1572,10 @@ const sharedPostClosureJsxRouteCases: JsxRouteCase[] = [
             ? <span>No events yet</span>
             : state.recentEvents.get() &&
               state.recentEvents.map((event: any) => (
-              <ct-vstack>
+              <cf-vstack>
                 <span>{event.label}</span>
                 {event.tags.map((tag: string) => <span>{tag}</span>)}
-              </ct-vstack>
+              </cf-vstack>
               ))}
         </div>
       ));

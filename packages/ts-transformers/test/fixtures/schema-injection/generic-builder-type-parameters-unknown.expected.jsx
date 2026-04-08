@@ -1,5 +1,19 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { handler, lift } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn((_value) => {
+    throw new Error("not executed");
+});
 // FIXTURE: generic-builder-type-parameters-unknown
 // Verifies: generic definition-site builder wrappers degrade builder schemas to unknown
 //   lift<T, U>(fn) → lift({ type: "unknown" }, { type: "unknown" }, fn)
@@ -9,10 +23,9 @@ export function buildLift<T, U>() {
         type: "unknown"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "unknown"
-    } as const satisfies __cfHelpers.JSONSchema, (_value) => {
-        throw new Error("not executed");
-    });
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1);
 }
+__cfHardenFn(buildLift);
 export function buildHandler<E, S>() {
     return handler({
         type: "unknown"
@@ -23,7 +36,7 @@ export function buildHandler<E, S>() {
         void state;
     });
 }
+__cfHardenFn(buildHandler);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

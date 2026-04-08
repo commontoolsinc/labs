@@ -23,6 +23,7 @@ import {
   lift,
   navigateTo,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
@@ -47,7 +48,7 @@ export type { AuthInfo, AuthState, TokenExpiryWarning };
 
 export interface AuthManagerInput {
   requiredScopes?: Default<string[], []>;
-  accountType?: Default<string, "default">;
+  accountType?: Default<"default" | "personal" | "work", "default">;
   debugMode?: Default<boolean, false>;
 }
 
@@ -126,23 +127,14 @@ const attemptRefresh = handler<
 >((_event, { refreshStream, refreshing, refreshFailed, refreshStartedAt }) => {
   if (!refreshStream?.send) {
     refreshFailed.set(true);
+    refreshStartedAt.set(0);
     return;
   }
   refreshing.set(true);
   refreshFailed.set(false);
-  refreshStartedAt.set(Date.now());
+  refreshStartedAt.set(safeDateNow());
 
   refreshStream.send({});
-
-  // Note: in theory the Writable could be invalid if the pattern were
-  // hot-reloaded, but CTS pattern lifecycle matches page lifecycle so
-  // there is no practical risk of accessing a stale Writable here.
-  setTimeout(() => {
-    if (refreshing.get()) {
-      refreshing.set(false);
-      refreshFailed.set(true);
-    }
-  }, REFRESH_FAILURE_TIMEOUT_MS);
 });
 
 // =============================================================================
@@ -331,7 +323,7 @@ export function createAuthManager<T, R>(
         scope: [".", "~"],
       });
 
-      const now = Writable.of(Date.now());
+      const now = Writable.of(safeDateNow());
       startReactiveClock(now);
 
       // Normalize the wish-provided UI into a local render-node contract so
@@ -353,8 +345,8 @@ export function createAuthManager<T, R>(
       const tokenExpiryDisplay = authState.tokenExpiryDisplay;
 
       // Refresh state
-      const refreshStream = authState.refreshStream;
       const refreshing = Writable.of(false);
+      const refreshStream = authState.refreshStream;
       const isRefreshing = computed(() => refreshing.get());
       const refreshFailed = Writable.of(false);
       const refreshStartedAt = Writable.of(0);
@@ -366,6 +358,19 @@ export function createAuthManager<T, R>(
         if (expiresAt > now.get()) {
           refreshing.set(false);
           refreshFailed.set(false);
+          refreshStartedAt.set(0);
+        }
+      });
+
+      // Mark the refresh attempt as failed if no new token arrives in time.
+      computed(() => {
+        if (!refreshing.get()) return;
+        const startedAt = refreshStartedAt.get();
+        if (!startedAt) return;
+        if (now.get() - startedAt >= REFRESH_FAILURE_TIMEOUT_MS) {
+          refreshing.set(false);
+          refreshFailed.set(true);
+          refreshStartedAt.set(0);
         }
       });
 

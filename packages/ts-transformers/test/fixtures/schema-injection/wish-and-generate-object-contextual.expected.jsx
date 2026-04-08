@@ -1,12 +1,23 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { generateObject, type WishState, wish, } from "commonfabric";
-const existingLabelSchema = {
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const existingLabelSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         label: { type: "string" },
     },
     required: ["label"],
-} as const;
+} as const);
 // FIXTURE: wish-and-generate-object-contextual
 // Verifies: wish() injects schemas from explicit and contextual result types, and generateObject() injects explicit schemas
 //   wish<string>({ query }) → wish<string>({ query }, { type: "string" })
@@ -84,7 +95,7 @@ export default function TestWishAndGenerateObjectContextual() {
         preSchemaObject,
     };
 }
+__cfHardenFn(TestWishAndGenerateObjectContextual);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

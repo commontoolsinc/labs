@@ -15,8 +15,6 @@ import {
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Entity } from "@commonfabric/memory/interface";
-import * as Fact from "@commonfabric/memory/fact";
-import * as Changes from "@commonfabric/memory/changes";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -330,6 +328,25 @@ describe("scheduler", () => {
       entityId: expect.stringMatching(/^of:/),
       path: [],
     });
+  });
+
+  it("falls back to value-path write details for non-JSON diagnostics", () => {
+    const scheduler = runtime.scheduler as any;
+    const write = {
+      space,
+      id: "scheduler-non-json-value-fallback",
+      type: "text/plain",
+      path: ["body"],
+    };
+    const details = new Map<string, unknown>([[
+      scheduler.makeAddressKey({
+        ...write,
+        path: ["value", "body"],
+      }),
+      "hello",
+    ]]);
+
+    expect(scheduler.lookupComparableWriteValue(details, write)).toBe("hello");
   });
 
   it("should remove actions", async () => {
@@ -1322,21 +1339,9 @@ describe("event handling", () => {
   });
 
   it(
-    "should retry event handler when commit fails, up to retries count",
+    "should retry event handler when the handler transaction aborts, up to retries count",
     async () => {
-      // Prepare remote memory with existing fact to induce conflict on commit
-      const memory = storageManager.session().mount(space);
       const entityId = `test:retry-conflict-${Date.now()}` as Entity;
-      const existingFact = Fact.assert({
-        the: "application/json",
-        of: entityId,
-        is: { version: 1 },
-      });
-      await memory.transact({ changes: Changes.from([existingFact]) });
-
-      // Reset local replica so local writes will conflict with remote state
-      const { replica } = storageManager.open(space);
-      (replica as any).reset();
 
       // Set up an event cell and commit initial state
       const eventCell = runtime.getCell<number>(

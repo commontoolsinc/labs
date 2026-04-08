@@ -402,7 +402,7 @@ function rewriteTrackedOpaquePatternBody(
       if (ts.isIdentifier(initializer)) {
         rootIdentifier = context.factory.createIdentifier(initializer.text);
       } else {
-        rootIdentifier = context.factory.createUniqueName("__ct_destructure");
+        rootIdentifier = context.factory.createUniqueName("__cf_destructure");
         rewrittenDeclarations.push(
           context.factory.createVariableDeclaration(
             rootIdentifier,

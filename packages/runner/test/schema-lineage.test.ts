@@ -4,6 +4,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
@@ -272,7 +273,7 @@ describe("Schema propagation end-to-end example", () => {
       storageManager,
     });
     tx = runtime.edit();
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, UI } = commonfabric);
   });
 

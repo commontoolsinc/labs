@@ -11,11 +11,9 @@ import {
 } from "../ast/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 
-let schemaTransformer: ReturnType<typeof createSchemaTransformerV2> | undefined;
-
 export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
-    if (!schemaTransformer) schemaTransformer = createSchemaTransformerV2();
+    const schemaTransformer = createSchemaTransformerV2();
     const { sourceFile, tsContext: transformation, checker } = context;
     const { logger, typeRegistry, schemaHints } = context.options;
 
@@ -72,7 +70,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           typeArg.end === -1
         ) {
           // Synthetic TypeNode path - use new method that shares context properly
-          schema = schemaTransformer!.generateSchemaFromSyntheticTypeNode(
+          schema = schemaTransformer.generateSchemaFromSyntheticTypeNode(
             typeArg,
             checker,
             typeRegistry,
@@ -80,7 +78,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           );
         } else {
           // Normal Type path
-          schema = schemaTransformer!.generateSchema(
+          schema = schemaTransformer.generateSchema(
             type,
             checker,
             typeArg,

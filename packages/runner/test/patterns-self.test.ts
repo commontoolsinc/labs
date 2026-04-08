@@ -8,6 +8,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema, SELF } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 // Import types from public API for compile-time type tests
 import { type OpaqueRef } from "@commonfabric/api";
@@ -32,7 +33,7 @@ describe("Pattern Runner - SELF", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       pattern,
     } = commonfabric);

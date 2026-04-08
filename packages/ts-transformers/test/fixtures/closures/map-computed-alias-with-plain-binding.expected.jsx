@@ -1,8 +1,54 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ element, params: {} }) => {
+    const __cf_val_key = dynamicKey();
+    const { foo } = element;
+    const val = __cfHelpers.derive({
+        type: "object",
+        properties: {
+            element: true,
+            __cf_val_key: true
+        },
+        required: ["element", "__cf_val_key"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        element: element,
+        __cf_val_key: __cf_val_key
+    }, ({ element, __cf_val_key }) => element[__cf_val_key]);
+    return (<span>{__cfHelpers.derive({
+        type: "object",
+        properties: {
+            foo: {
+                type: "number"
+            },
+            val: {
+                type: "number"
+            }
+        },
+        required: ["foo", "val"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        foo: foo,
+        val: val
+    }, ({ foo, val }) => foo + val)}</span>);
+});
 function dynamicKey(): "value" {
     return "value";
 }
+__cfHardenFn(dynamicKey);
 interface Item {
     foo: number;
     value: number;
@@ -18,41 +64,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const element = __ct_pattern_input.key("element");
-                const __ct_val_key = dynamicKey();
-                const foo = element.key("foo");
-                const val = __cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        element: true,
-                        __ct_val_key: true
-                    },
-                    required: ["element", "__ct_val_key"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    element: element,
-                    __ct_val_key: __ct_val_key
-                }, ({ element, __ct_val_key }) => element[__ct_val_key]);
-                return (<span>{__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        foo: {
-                            type: "number"
-                        },
-                        val: {
-                            type: "number"
-                        }
-                    },
-                    required: ["foo", "val"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    foo: foo,
-                    val: val
-                }, ({ foo, val }) => foo + val)}</span>);
-            }, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -154,5 +166,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

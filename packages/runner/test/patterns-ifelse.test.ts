@@ -8,6 +8,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema, type Schema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { isCell, isStream } from "../src/cell.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -33,7 +34,7 @@ describe("Pattern Runner - ifElse", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       derive,
       pattern,

@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { setPatternEnvironment } from "../src/env.ts";
 
@@ -28,7 +29,7 @@ describe("fetch-data mutex mechanism", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     pattern = commonfabric.pattern;
     computed = commonfabric.computed;
     byRef = commonfabric.byRef;

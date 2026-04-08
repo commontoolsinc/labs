@@ -1,16 +1,15 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { getLogger } from "@commonfabric/utils/logger";
-import { patternBreakpoint } from "./pattern-breakpoint.ts";
-import { isRecord, type Mutable } from "@commonfabric/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   type Frame,
   isModule,
-  isOpaqueRef,
   isPattern,
   isStreamValue,
-  type JSONSchema,
   type Module,
   NAME,
   type NodeFactory,
@@ -45,7 +44,7 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { LINK_V1_TAG, type SigilLink } from "./sigil-types.ts";
+import type { SigilLink } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -62,6 +61,23 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
+import {
+  cellAwareDeepCopy,
+  describePatternOrModule,
+  extractDefaultValues,
+  getSpellLink,
+  mergeObjects,
+  sanitizeDebugLabel,
+  setRunnableName,
+  validateAndCheckOpaqueRefs,
+} from "./runner-utils.ts";
+import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
+export {
+  cellAwareDeepCopy,
+  extractDefaultValues,
+  mergeObjects,
+  validateAndCheckOpaqueRefs,
+} from "./runner-utils.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
@@ -75,10 +91,50 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   logCountEvery: 0,
 });
 
+type ProcessCellData<T> = {
+  [TYPE]: string;
+  spell?: SigilLink;
+  argument?: T;
+  internal?: FabricValue;
+  resultRef: SigilLink;
+};
+
+type SetupResult<R> = {
+  resultCell: Cell<R>;
+  pattern?: Pattern;
+  processCell?: Cell<any>;
+  needsStart: boolean;
+};
+
+type BoundNodeIO = {
+  inputs: FabricValue;
+  outputs: FabricValue;
+  reads: NormalizedFullLink[];
+  writes: NormalizedFullLink[];
+};
+
+type ResolvedJavaScriptModule = {
+  fn: (...args: any[]) => any;
+  name: string | undefined;
+  verifiedLoadId: string | undefined;
+};
+
+type JavaScriptNodeContext = BoundNodeIO & {
+  tx: IExtendedStorageTransaction;
+  module: Module;
+  processCell: Cell<any>;
+  addCancel: AddCancel;
+  pattern: Pattern;
+  fn: (...args: any[]) => any;
+  name: string | undefined;
+  verifiedLoadId: string | undefined;
+};
+
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
+  private locallyPreparedResults = new Set<`${MemorySpace}/${URI}`>();
   // Map whose key is the result cell's full key, and whose values are the
   // patterns as strings
   private resultPatternCache = new Map<`${MemorySpace}/${URI}`, string>();
@@ -171,149 +227,137 @@ export class Runner {
     }
   }
 
-  /**
-   * Internal setup that returns whether scheduling is required.
-   */
-  private setupInternal<T, R = any>(
-    providedTx: IExtendedStorageTransaction | undefined,
-    patternOrModule: Pattern | Module | undefined,
-    argument: T,
+  private getOrCreateProcessCell<T, R>(
+    tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
-  ): {
-    resultCell: Cell<R>;
-    pattern?: Pattern;
-    processCell?: Cell<any>;
-    needsStart: boolean;
-  } {
-    const tx = providedTx ?? this.runtime.edit();
-
-    type ProcessCellData = {
-      [TYPE]: string;
-      spell?: SigilLink;
-      argument?: T;
-      internal?: FabricValue;
-      resultRef: SigilLink;
-    };
-
-    let processCell: Cell<ProcessCellData>;
-
+  ): Cell<ProcessCellData<T>> {
     const sourceCell = resultCell.withTx(tx).getSourceCell();
     if (sourceCell !== undefined) {
-      processCell = sourceCell as Cell<ProcessCellData>;
-    } else {
-      processCell = this.runtime.getCell<ProcessCellData>(
-        resultCell.space,
-        resultCell, // Cause
-        undefined,
-        tx,
-      );
-      resultCell.withTx(tx).setSourceCell(processCell);
+      return sourceCell as Cell<ProcessCellData<T>>;
     }
 
-    logger.debug("cell-info", () => [
-      `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
-      `processCell: ${
-        resultCell.withTx(tx).getSourceCell()?.getAsNormalizedFullLink().id
-      }`,
-    ]);
+    const processCell = this.runtime.getCell<ProcessCellData<T>>(
+      resultCell.space,
+      resultCell,
+      undefined,
+      tx,
+    );
+    resultCell.withTx(tx).setSourceCell(processCell);
+    return processCell;
+  }
 
-    let patternId: string | undefined;
+  private resolveSetupPattern(
+    patternOrModule: Pattern | Module | undefined,
+    previousPatternId: string | undefined,
+  ):
+    | {
+      pattern: Pattern;
+      patternId: string;
+      resolvedPatternOrModule: Pattern | Module;
+    }
+    | undefined {
+    let resolvedPatternOrModule = patternOrModule;
+    let patternId = patternOrModule ? undefined : previousPatternId;
 
-    const previousPatternId = processCell.withTx(tx).key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    });
-
-    if (!patternOrModule && previousPatternId) {
-      patternId = previousPatternId;
-      patternOrModule = this.runtime.patternManager.patternById(patternId!);
-      if (!patternOrModule) throw new Error(`Unknown pattern: ${patternId}`);
-    } else if (!patternOrModule) {
-      console.warn(
-        "No pattern provided and no pattern found in process doc. Not running.",
+    if (!resolvedPatternOrModule && patternId) {
+      resolvedPatternOrModule = this.runtime.patternManager.patternById(
+        patternId,
       );
+      if (!resolvedPatternOrModule) {
+        throw new Error(`Unknown pattern: ${patternId}`);
+      }
+    } else if (!resolvedPatternOrModule) {
+      return undefined;
+    }
+
+    const pattern = isModule(resolvedPatternOrModule)
+      ? this.moduleToPattern(resolvedPatternOrModule)
+      : resolvedPatternOrModule;
+    patternId ??= this.runtime.patternManager.registerPattern(pattern);
+
+    return { pattern, patternId, resolvedPatternOrModule };
+  }
+
+  private updateProcessArgument<T>(
+    tx: IExtendedStorageTransaction,
+    processCell: Cell<ProcessCellData<T>>,
+    argument: T,
+  ): void {
+    diffAndUpdate(
+      this.runtime,
+      tx,
+      processCell.key("argument").getAsNormalizedFullLink(),
+      argument,
+      processCell.getAsNormalizedFullLink(),
+    );
+  }
+
+  private maybeReuseRunningSetup<T, R>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<R>,
+    processCell: Cell<ProcessCellData<T>>,
+    argument: T,
+    patternId: string,
+    previousPatternId: string | undefined,
+  ): SetupResult<R> | undefined {
+    const key = this.getDocKey(resultCell);
+    if (!this.cancels.has(key)) return undefined;
+
+    if (argument === undefined && patternId === previousPatternId) {
       return { resultCell, needsStart: false };
     }
 
-    let pattern: Pattern;
-
-    // If this is a module, not a pattern, wrap it in a pattern that just runs,
-    // passing arguments in unmodified and passing all results through as is
-    if (isModule(patternOrModule)) {
-      const module = patternOrModule as Module;
-      patternId ??= this.runtime.patternManager.registerPattern(module);
-
-      pattern = {
-        argumentSchema: module.argumentSchema ?? {},
-        resultSchema: module.resultSchema ?? {},
-        result: { $alias: { path: ["internal"] } },
-        nodes: [
-          {
-            module,
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal"] } },
-          },
-        ],
-      } satisfies Pattern;
-    } else {
-      pattern = patternOrModule as Pattern;
+    if (previousPatternId === patternId) {
+      this.updateProcessArgument(tx, processCell, argument);
+      return { resultCell, needsStart: false };
     }
 
-    const sourceKey = getTxDebugActionId(tx) ?? "none";
-    triggerFlowLogger.debug(`setup-internal/${sourceKey}`, () => [
-      `[SETUP] source=${sourceKey}`,
-      `result=${resultCell.getAsNormalizedFullLink().id}`,
-      `process=${processCell.getAsNormalizedFullLink().id}`,
-      `reusedSource=${sourceCell !== undefined}`,
-      `pattern=${describePatternOrModule(patternOrModule)}`,
-      `previousPatternId=${previousPatternId ?? "none"}`,
-      `nextPatternId=${patternId ?? "none"}`,
-    ]);
+    return undefined;
+  }
 
-    patternId ??= this.runtime.patternManager.registerPattern(pattern);
-    this.runtime.patternManager.savePattern({
-      patternId,
-      space: resultCell.space,
-    }, tx);
-
-    // If the bindings are a cell, doc or doc link, convert them to an alias
-    if (isCellLink(argument)) {
-      argument = createSigilLinkFromParsedLink(
-        parseLink(argument),
-        { base: processCell, includeSchema: true, overwrite: "redirect" },
-      ) as T;
+  private updateResultProjection<R>(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    processCell: Cell<any>,
+    resultCell: Cell<R>,
+  ): void {
+    let result = unwrapOneLevelAndBindtoDoc<R, any>(
+      pattern.result as R,
+      processCell,
+    );
+    const previousResult = resultCell.withTx(tx).getRaw({
+      meta: ignoreReadForScheduling,
+    });
+    if (isRecord(previousResult) && previousResult[NAME]) {
+      result = { ...result, [NAME]: previousResult[NAME] };
     }
-
-    const key = this.getDocKey(resultCell);
-    const alreadyRunning = this.cancels.has(key);
-
-    if (alreadyRunning) {
-      // If it's already running and no new pattern or argument are given,
-      // we are just returning the result doc
-      if (argument === undefined && patternId === previousPatternId) {
-        return { resultCell, needsStart: false };
-      }
-
-      if (previousPatternId === patternId) {
-        // If the pattern is the same, but argument is different, just update the
-        // argument without stopping
-        diffAndUpdate(
-          this.runtime,
-          tx,
-          processCell.key("argument").getAsNormalizedFullLink(),
-          argument,
-          processCell.getAsNormalizedFullLink(),
-        );
-        return { resultCell, needsStart: false };
-      }
-
-      // Pattern changed - let the $TYPE sink detect the change and handle
-      // stop() + start(). Don't call stop() here as it would cancel the sink.
+    if (!deepEqual(result, previousResult)) {
+      resultCell.withTx(tx).setRawUntyped(
+        fabricFromNativeValue(result, false),
+      );
     }
+  }
 
-    // Walk the pattern's schema and extract all default values
+  private attachPatternMaterializer(
+    pattern: Pattern,
+    processCell: Cell<any>,
+  ): void {
+    if (!pattern[unsafe_originalPattern]) return;
+
+    pattern[unsafe_materializeFactory] =
+      (tx: IExtendedStorageTransaction) => (path: readonly PropertyKey[]) =>
+        processCell.getAsQueryResult(path as PropertyKey[], tx);
+  }
+
+  private applySetupState<T, R>(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    patternId: string,
+    argument: T,
+    resultCell: Cell<R>,
+    processCell: Cell<ProcessCellData<T>>,
+  ): void {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
-
-    // Important to use DeepCopy here, as the resulting object will be modified!
     const previousInternal = processCell.key("internal").getRawUntyped({
       meta: ignoreReadForScheduling,
       frozen: false,
@@ -331,17 +375,16 @@ export class Runner {
       isRecord(previousInternal) ? previousInternal : {},
     ) as FabricValue;
 
-    // Still necessary until we consistently use schema for defaults.
-    // Only do it on first load.
+    let nextArgument = argument;
     if (
       !processCell.key("argument").getRaw({ meta: ignoreReadForScheduling })
     ) {
-      argument = mergeObjects<T>(argument as any, defaults);
+      nextArgument = mergeObjects<T>(argument as any, defaults);
     }
 
-    processCell.withTx(tx).setRawUntyped({
+    processCell.withTx(tx).setRawUntyped(fabricFromNativeValue({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
-      [TYPE]: patternId || "unknown",
+      [TYPE]: patternId,
       resultRef: pattern.resultSchema !== undefined
         ? resultCell.asSchema(pattern.resultSchema).getAsLink({
           base: processCell,
@@ -353,43 +396,107 @@ export class Runner {
           base: processCell,
         }),
       internal,
-      ...(patternId !== undefined) ? { spell: getSpellLink(patternId) } : {},
-    } as FabricValue);
-    if (argument) {
-      diffAndUpdate(
-        this.runtime,
-        tx,
-        processCell.key("argument").getAsNormalizedFullLink(),
-        argument,
-        processCell.getAsNormalizedFullLink(),
-      );
+      spell: getSpellLink(patternId),
+    }, false));
+
+    if (nextArgument) {
+      this.updateProcessArgument(tx, processCell, nextArgument);
     }
 
-    // Send "query" to results to the result doc only on initial run or if
-    // pattern changed. This preserves user modifications like renamed pieces.
-    let result = unwrapOneLevelAndBindtoDoc<R, any>(
-      pattern.result as R,
-      processCell,
-    );
-    const previousResult = resultCell.withTx(tx).getRaw({
+    this.updateResultProjection(tx, pattern, processCell, resultCell);
+    this.attachPatternMaterializer(pattern, processCell);
+  }
+
+  /**
+   * Internal setup that returns whether scheduling is required.
+   */
+  private setupInternal<T, R = any>(
+    providedTx: IExtendedStorageTransaction | undefined,
+    patternOrModule: Pattern | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): SetupResult<R> {
+    const tx = providedTx ?? this.runtime.edit();
+    const sourceCell = resultCell.withTx(tx).getSourceCell();
+    const processCell = this.getOrCreateProcessCell<T, R>(tx, resultCell);
+
+    logger.debug("cell-info", () => [
+      `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
+      `processCell: ${
+        resultCell.withTx(tx).getSourceCell()?.getAsNormalizedFullLink().id
+      }`,
+    ]);
+
+    const previousPatternId = processCell.withTx(tx).key(TYPE).getRaw({
       meta: ignoreReadForScheduling,
     });
-    if (isRecord(previousResult) && previousResult[NAME]) {
-      result = { ...result, [NAME]: previousResult[NAME] };
-    }
-    if (!deepEqual(result, previousResult)) {
-      resultCell.withTx(tx).setRawUntyped(result as FabricValue);
+    const resolvedPattern = this.resolveSetupPattern(
+      patternOrModule,
+      previousPatternId,
+    );
+
+    if (!resolvedPattern) {
+      console.warn(
+        "No pattern provided and no pattern found in process doc. Not running.",
+      );
+      this.locallyPreparedResults.delete(this.getDocKey(resultCell));
+      return { resultCell, needsStart: false };
     }
 
-    // [unsafe closures:] For patterns from closures, add a materialize factory
-    if (pattern[unsafe_originalPattern]) {
-      pattern[unsafe_materializeFactory] =
-        (tx: any) => (path: readonly PropertyKey[]) =>
-          processCell.getAsQueryResult(path as PropertyKey[], tx);
+    const { pattern, patternId, resolvedPatternOrModule } = resolvedPattern;
+    const sourceKey = getTxDebugActionId(tx) ?? "none";
+    triggerFlowLogger.debug(`setup-internal/${sourceKey}`, () => [
+      `[SETUP] source=${sourceKey}`,
+      `result=${resultCell.getAsNormalizedFullLink().id}`,
+      `process=${processCell.getAsNormalizedFullLink().id}`,
+      `reusedSource=${sourceCell !== undefined}`,
+      `pattern=${describePatternOrModule(resolvedPatternOrModule)}`,
+      `previousPatternId=${previousPatternId ?? "none"}`,
+      `nextPatternId=${patternId}`,
+    ]);
+
+    this.runtime.patternManager.savePattern({
+      patternId,
+      space: resultCell.space,
+    }, tx);
+
+    if (isCellLink(argument)) {
+      argument = createSigilLinkFromParsedLink(
+        parseLink(argument),
+        { base: processCell, includeSchema: true, overwrite: "redirect" },
+      ) as T;
     }
 
-    // Discover and cache all JavaScript functions in the pattern before start
+    const runningSetup = this.maybeReuseRunningSetup(
+      tx,
+      resultCell,
+      processCell,
+      argument,
+      patternId,
+      previousPatternId,
+    );
+    if (runningSetup) {
+      return runningSetup;
+    }
+
+    this.applySetupState(
+      tx,
+      pattern,
+      patternId,
+      argument,
+      resultCell,
+      processCell,
+    );
+
     this.discoverAndCacheFunctions(pattern, new Set());
+
+    const key = this.getDocKey(resultCell);
+    this.locallyPreparedResults.add(key);
+    tx.addCommitCallback((_tx, result) => {
+      if (result.error) {
+        this.locallyPreparedResults.delete(key);
+      }
+    });
 
     return { resultCell, pattern, processCell, needsStart: true };
   }
@@ -450,6 +557,7 @@ export class Runner {
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
     const key = this.getDocKey(resultCell);
+    this.locallyPreparedResults.delete(key);
 
     // Create cancel group early - before the $TYPE sink
     const [cancel, addCancel] = useCancelGroup();
@@ -607,6 +715,12 @@ export class Runner {
     resultCell: Cell<T>,
     seenCells: Set<Cell> = new Set(),
   ): Promise<boolean> {
+    // `synced === true` means this cell was rehydrated from storage rather than
+    // assembled purely from writes in the current runtime, so start() may need
+    // to await dependency sync before process startup.
+    const wasSyncedAtEntry =
+      (resultCell as Cell<any> & { synced?: boolean }).synced === true;
+
     // Step 1: For subpath cells, resolve to root cell
     const link = resultCell.getAsNormalizedFullLink();
     const rootCell = link.path.length > 0
@@ -614,6 +728,7 @@ export class Runner {
       : resultCell;
 
     const key = this.getDocKey(rootCell);
+    const wasPreparedLocally = this.locallyPreparedResults.has(key);
 
     // Step 2: Already started? Return success
     if (this.cancels.has(key)) return Promise.resolve(true);
@@ -676,15 +791,40 @@ export class Runner {
         });
     }
 
-    // Step 6: Start the pattern
-    try {
-      this.startCore(rootCell, processCell);
-    } catch (err) {
-      return Promise.reject(err);
+    const resolvedPattern = this.resolveToPattern(pattern);
+
+    // Fast path for pieces prepared in the current runtime via setup()/run().
+    // Those writes are already present locally, so we should preserve the
+    // historical synchronous start() behavior even if an earlier read flipped
+    // the cell's generic `synced` flag. The dependency sync below is
+    // specifically for resumed pieces that came from storage.
+    if (!wasSyncedAtEntry || wasPreparedLocally) {
+      try {
+        this.startCore(rootCell, processCell, {
+          givenPattern: resolvedPattern,
+        });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+
+      return Promise.resolve(true);
     }
 
-    // Success!
-    return Promise.resolve(true);
+    // Step 6: Sync the cells this running pattern depends on before wiring the
+    // scheduler back up in a fresh runtime. Without this, resumed pieces can
+    // observe the last persisted result but miss subsequent input updates.
+    return this.syncCellsForRunningPattern(rootCell, resolvedPattern)
+      .then(() => {
+        try {
+          this.startCore(rootCell, processCell, {
+            givenPattern: resolvedPattern,
+          });
+        } catch (err) {
+          return Promise.reject(err);
+        }
+
+        return true;
+      });
   }
 
   private startWithTx<T = any>(
@@ -980,6 +1120,7 @@ export class Runner {
     const key = this.getDocKey(resultCell);
     this.cancels.get(key)?.();
     this.cancels.delete(key);
+    this.locallyPreparedResults.delete(key);
   }
 
   stopAll(): void {
@@ -995,6 +1136,7 @@ export class Runner {
     // Clear the result pattern cache as well, since the actions have been
     // canceled
     this.resultPatternCache.clear();
+    this.locallyPreparedResults.clear();
   }
 
   /**
@@ -1035,12 +1177,16 @@ export class Runner {
 
     switch (module.type) {
       case "javascript":
-        // Cache JavaScript functions that are already function objects
-        if (
-          typeof module.implementation === "function" &&
-          !this.functionCache.has(module)
-        ) {
-          this.functionCache.set(module, module.implementation);
+        // Only prewarm the cache from functions that were already registered
+        // by the SES verification/evaluation pipeline. Host callbacks must not
+        // enter the execution cache directly.
+        if (module.implementationRef && !this.functionCache.has(module)) {
+          const executable = this.runtime.harness.getExecutableFunction(
+            module.implementationRef,
+          );
+          if (executable) {
+            this.functionCache.set(module, executable);
+          }
         }
         break;
 
@@ -1196,44 +1342,58 @@ export class Runner {
     }
   }
 
-  private instantiateJavaScriptNode(
-    tx: IExtendedStorageTransaction,
-    module: Module,
+  private bindNodeIO(
     inputBindings: FabricValue,
     outputBindings: FabricValue,
     processCell: Cell<any>,
-    addCancel: AddCancel,
-    pattern: Pattern,
-  ) {
-    const inputs = unwrapOneLevelAndBindtoDoc(
-      inputBindings,
-      processCell,
-    );
-
-    const reads = findAllWriteRedirectCells(inputs, processCell);
-
+  ): BoundNodeIO {
+    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllWriteRedirectCells(outputs, processCell);
+    return {
+      inputs,
+      outputs,
+      reads: findAllWriteRedirectCells(inputs, processCell),
+      writes: findAllWriteRedirectCells(outputs, processCell),
+    };
+  }
 
-    let fn: (inputs: any) => any;
+  private resolveJavaScriptFunction(
+    module: Module,
+    pattern: Pattern,
+  ): ResolvedJavaScriptModule {
+    let fn: (...args: any[]) => any;
+    const patternId = this.runtime.patternManager.getPatternId(pattern);
+    const verifiedLoadId = module.implementationRef
+      ? this.runtime.harness.getVerifiedLoadId?.(
+        module.implementationRef,
+        patternId,
+      )
+      : undefined;
 
-    if (typeof module.implementation === "string") {
-      // Try to get from cache first
+    if (module.implementationRef) {
       const cached = this.functionCache.get(module);
       if (cached) {
-        fn = cached as (inputs: any) => any;
+        fn = cached;
       } else {
-        // Fall back to evaluating and cache it
-        fn = this.runtime.harness.getInvocation(module.implementation) as (
-          inputs: any,
-        ) => any;
+        const executable = this.runtime.harness.getExecutableFunction(
+          module.implementationRef,
+          patternId,
+        );
+        fn = executable
+          ? executable as (...args: any[]) => any
+          : this.getFallbackJavaScriptImplementation(module);
         this.functionCache.set(module, fn);
       }
     } else {
-      fn = module.implementation as (inputs: any) => any;
+      const cached = this.functionCache.get(module);
+      if (cached) {
+        fn = cached;
+      } else {
+        fn = this.getFallbackJavaScriptImplementation(module);
+        this.functionCache.set(module, fn);
+      }
     }
 
-    // Prefer .src (backup) over .name since name can be finicky
     const namedFn = fn as {
       src?: string;
       name?: string;
@@ -1247,572 +1407,679 @@ export class Runner {
       });
     }
 
-    if (module.wrapper && module.wrapper in moduleWrappers) {
-      fn = moduleWrappers[module.wrapper](fn);
-    }
+    return { fn, name, verifiedLoadId };
+  }
 
-    // Check if $event is a stream alias
-    let streamLink: NormalizedFullLink | undefined = undefined;
-    if (isRecord(inputs) && "$event" in inputs) {
-      let value: FabricValue = inputs.$event as FabricValue;
-      while (isWriteRedirectLink(value)) {
-        const maybeStreamLink = resolveLink(
-          this.runtime,
-          tx,
-          parseLink(value, processCell),
-          "writeRedirect",
-        );
-        value = tx.readValueOrThrow(maybeStreamLink);
-      }
-      if (isStreamValue(value)) {
-        streamLink = parseLink(inputs.$event, processCell);
-      }
-    }
+  private resolveJavaScriptStreamLink(
+    inputs: FabricValue,
+    processCell: Cell<any>,
+    tx: IExtendedStorageTransaction,
+  ): NormalizedFullLink | undefined {
+    if (!isRecord(inputs) || !("$event" in inputs)) return undefined;
 
-    if (streamLink) {
-      // Register as event handler for the stream
-      const handler = (tx: IExtendedStorageTransaction, event: any) => {
-        // TODO(seefeld): Scheduler has to create the transaction instead
-        if (event?.preventDefault) event.preventDefault();
-        const eventInputs = {
-          ...(inputs as Record<string, any>),
-          $event: event,
-        };
-        const cause = {
-          ...(inputs as Record<string, any>),
-          $event: crypto.randomUUID(),
-        };
-
-        const frame = pushFrameFromCause(
-          cause,
-          {
-            unsafe_binding: {
-              pattern,
-              materialize: (path: readonly PropertyKey[]) =>
-                processCell.getAsQueryResult(path, tx),
-              space: processCell.space,
-              tx,
-            },
-            inHandler: true,
-            runtime: this.runtime,
-            space: processCell.space,
-            tx,
-          },
-        );
-
-        try {
-          const inputsCell = this.runtime.getImmutableCell(
-            processCell.space,
-            eventInputs,
-            undefined,
-            tx,
-          );
-
-          const argument = module.argumentSchema !== undefined
-            ? inputsCell.asSchema(module.argumentSchema).get()
-            : inputsCell.getAsQueryResult(
-              [],
-              tx,
-              (module as { writableProxy?: boolean }).writableProxy,
-            );
-
-          // If we have a schema of false, we don't use our argument, so undefined is ok
-          const isValidArgument = module.argumentSchema === false ||
-            argument !== undefined;
-
-          // Set/clear the invalid input flag for stream handlers
-          if (name) {
-            if (!isValidArgument) {
-              let queryResult: string;
-              try {
-                queryResult = JSON.stringify(
-                  inputsCell.getAsQueryResult([], tx),
-                );
-              } catch (_e) {
-                queryResult = "(Can't serialize to JSON)";
-              }
-              logger.flag(
-                "action invalid input",
-                `action:${name}`,
-                true,
-                {
-                  schema: module.argumentSchema,
-                  raw: inputsCell.getRaw(),
-                  queryResult,
-                },
-              );
-            } else {
-              logger.flag(
-                "action invalid input",
-                `action:${name}`,
-                false,
-              );
-            }
-          }
-
-          if (!isValidArgument) {
-            logger.error(
-              "stream",
-              () => [
-                "action argument is undefined (potential schema mismatch) -- not running",
-                {
-                  schema: module.argumentSchema,
-                  raw: inputsCell.getRaw(),
-                  asQueryResult: (() => {
-                    let result;
-                    try {
-                      result = JSON.stringify(
-                        inputsCell.getAsQueryResult([], tx),
-                      );
-                    } catch (_e) {
-                      result = "(Can't serialize to JSON)";
-                    }
-                    return result;
-                  })(),
-                },
-              ],
-            );
-          }
-          // We only run the action if we have a valid argument, or the function's schema
-          // is false (like an input of `never`).
-          const result = name &&
-              this.runtime.scheduler.hasBreakpoint(`handler:${name}`)
-            ? patternBreakpoint(
-              fn,
-              isValidArgument,
-              argument,
-              module.argumentSchema,
-              module.resultSchema,
-              inputsCell,
-            )
-            : isValidArgument
-            ? fn(argument)
-            : undefined;
-
-          const postRun = (result: any) => {
-            if (
-              validateAndCheckOpaqueRefs(result, name) ||
-              frame.opaqueRefs.size > 0
-            ) {
-              const resultPattern = patternFromFrame(
-                () => result,
-              );
-
-              const resultCell = this.run(
-                tx,
-                resultPattern,
-                undefined,
-                this.runtime.getCell(
-                  processCell.space,
-                  { resultFor: cause },
-                  undefined,
-                  tx,
-                ),
-              );
-
-              const rawResult = tx.readValueOrThrow(
-                resultCell.getAsNormalizedFullLink(),
-                { meta: ignoreReadForScheduling },
-              );
-
-              const resultRedirects = findAllWriteRedirectCells(
-                rawResult,
-                processCell,
-              );
-
-              // NOTE: We intentionally do NOT cache or deduplicate the result
-              // pattern here (unlike the action handler path). Each handler
-              // invocation creates a new sub-pattern instance by design.
-
-              // Create effect that re-runs when inputs change
-              // (nothing else would read from it, otherwise)
-              const readResultAction: Action = (tx) =>
-                resultRedirects.forEach((link) => tx.readValueOrThrow(link));
-              if (name) {
-                Object.defineProperty(readResultAction, "name", {
-                  value: `readResult:${name}`,
-                  configurable: true,
-                });
-                // Also set .src as backup (name can be finicky)
-                (readResultAction as Action & { src?: string }).src =
-                  `readResult:${name}`;
-              }
-              const cancel = this.runtime.scheduler.subscribe(
-                readResultAction,
-                readResultAction,
-                { isEffect: true },
-              );
-              addCancel(() => {
-                cancel();
-                this.stop(resultCell);
-              });
-            }
-            return result;
-          };
-
-          if (result instanceof Promise) {
-            return result.then(postRun);
-          } else {
-            return postRun(result);
-          }
-        } catch (error) {
-          (error as Error & { frame?: Frame }).frame = frame;
-          throw error;
-        } finally {
-          popFrame(frame);
-        }
-      };
-
-      if (name) {
-        Object.defineProperty(handler, "name", {
-          value: `handler:${name}`,
-          configurable: true,
-        });
-      }
-      const wrappedHandler = Object.assign(handler, {
-        reads,
-        writes,
-        module,
-        pattern,
-      });
-
-      // Create callback to populate dependencies for pull mode scheduling.
-      // This reads all cells the handler will access (from the argument schema and event).
-      const populateDependencies = module.argumentSchema
-        ? (depTx: IExtendedStorageTransaction, event: any) => {
-          const eventInputs = {
-            ...(inputs as Record<string, any>),
-            $event: event,
-          };
-          const inputsCell = this.runtime.getImmutableCell(
-            processCell.space,
-            eventInputs,
-            undefined,
-            depTx,
-          );
-          // Use traverseCells to read into all nested Cell objects (including event)
-          inputsCell.asSchema(module.argumentSchema!).get({
-            traverseCells: true,
-          });
-        }
-        : undefined;
-
-      addCancel(
-        this.runtime.scheduler.addEventHandler(
-          wrappedHandler,
-          streamLink,
-          populateDependencies,
-        ),
+    let value: FabricValue = inputs.$event as FabricValue;
+    while (isWriteRedirectLink(value)) {
+      const maybeStreamLink = resolveLink(
+        this.runtime,
+        tx,
+        parseLink(value, processCell),
+        "writeRedirect",
       );
-    } else {
-      if (isRecord(inputs) && "$event" in inputs) {
-        throw new Error(
-          "Handler used as lift, because $stream: true was overwritten",
-        );
-      }
+      value = tx.readValueOrThrow(maybeStreamLink);
+    }
 
-      // Schedule the action to run when the inputs change
-      const inputsCell = this.runtime.getImmutableCell(
+    return isStreamValue(value)
+      ? parseLink(inputs.$event, processCell)
+      : undefined;
+  }
+
+  private createPatternFrame(
+    cause: unknown,
+    pattern: Pattern,
+    processCell: Cell<any>,
+    tx: IExtendedStorageTransaction,
+    inHandler: boolean,
+    verifiedLoadId?: string,
+  ): Frame {
+    return pushFrameFromCause(cause, {
+      unsafe_binding: {
+        pattern,
+        materialize: (path: readonly PropertyKey[]) =>
+          processCell.getAsQueryResult(path, tx),
+        space: processCell.space,
+        tx,
+      },
+      inHandler,
+      runtime: this.runtime,
+      space: processCell.space,
+      tx,
+      ...(verifiedLoadId ? { verifiedLoadId } : {}),
+    });
+  }
+
+  private readJavaScriptArgument(
+    module: Module,
+    inputsCell: Cell<any>,
+    tx: IExtendedStorageTransaction,
+    options: { bindTxToSchema?: boolean; writableProxy?: boolean } = {},
+  ): { argument: any; isValidArgument: boolean } {
+    const argument = module.argumentSchema !== undefined
+      ? options.bindTxToSchema
+        ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
+        : inputsCell.asSchema(module.argumentSchema).get()
+      : inputsCell.getAsQueryResult([], tx, options.writableProxy);
+
+    return {
+      argument,
+      isValidArgument: module.argumentSchema === false ||
+        argument !== undefined,
+    };
+  }
+
+  private serializeQueryResult(
+    inputsCell: Cell<any>,
+    tx: IExtendedStorageTransaction,
+  ): string {
+    try {
+      return JSON.stringify(inputsCell.getAsQueryResult([], tx));
+    } catch (_error) {
+      return "(Can't serialize to JSON)";
+    }
+  }
+
+  private getJavaScriptInputState(
+    module: Module,
+    inputsCell: Cell<any>,
+    tx: IExtendedStorageTransaction,
+  ): { schema: Module["argumentSchema"]; raw: unknown; queryResult: string } {
+    return {
+      schema: module.argumentSchema,
+      raw: inputsCell.getRaw(),
+      queryResult: this.serializeQueryResult(inputsCell, tx),
+    };
+  }
+
+  private updateInvalidInputFlag(
+    name: string | undefined,
+    isValidArgument: boolean,
+    module: Module,
+    inputsCell: Cell<any>,
+    tx: IExtendedStorageTransaction,
+  ): void {
+    if (!name) return;
+
+    if (!isValidArgument) {
+      logger.flag(
+        "action invalid input",
+        `action:${name}`,
+        true,
+        this.getJavaScriptInputState(module, inputsCell, tx),
+      );
+      return;
+    }
+
+    logger.flag(
+      "action invalid input",
+      `action:${name}`,
+      false,
+    );
+  }
+
+  private handleJavaScriptHandlerResult(
+    tx: IExtendedStorageTransaction,
+    result: any,
+    name: string | undefined,
+    frame: Frame,
+    processCell: Cell<any>,
+    addCancel: AddCancel,
+    cause: Record<string, any>,
+  ): any {
+    if (
+      !validateAndCheckOpaqueRefs(result, name) &&
+      frame.opaqueRefs.size === 0
+    ) {
+      return result;
+    }
+
+    const resultPattern = patternFromFrame(() => result);
+    const resultCell = this.run(
+      tx,
+      resultPattern,
+      undefined,
+      this.runtime.getCell(
         processCell.space,
-        inputs,
+        { resultFor: cause },
+        undefined,
+        tx,
+      ),
+    );
+
+    const rawResult = tx.readValueOrThrow(
+      resultCell.getAsNormalizedFullLink(),
+      { meta: ignoreReadForScheduling },
+    );
+    const resultRedirects = findAllWriteRedirectCells(rawResult, processCell);
+    const readResultAction: Action = (tx) =>
+      resultRedirects.forEach((link) => tx.readValueOrThrow(link));
+
+    if (name) {
+      setRunnableName(readResultAction, `readResult:${name}`, { setSrc: true });
+    }
+
+    const cancel = this.runtime.scheduler.subscribe(
+      readResultAction,
+      readResultAction,
+      { isEffect: true },
+    );
+    addCancel(() => {
+      cancel();
+      this.stop(resultCell);
+    });
+
+    return result;
+  }
+
+  private writeJavaScriptActionResult(
+    tx: IExtendedStorageTransaction,
+    result: any,
+    name: string | undefined,
+    frame: Frame,
+    processCell: Cell<any>,
+    outputs: FabricValue,
+    addCancel: AddCancel,
+    resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
+    previousResultCellRef: { current?: Cell<any> },
+    recordIgnoredSchedulingWrite?: (link: NormalizedFullLink) => void,
+  ): any {
+    if (
+      !validateAndCheckOpaqueRefs(result, name) &&
+      frame.opaqueRefs.size === 0
+    ) {
+      sendValueToBinding(tx, processCell, outputs, result);
+      return result;
+    }
+
+    const resultPattern = patternFromFrame(() => result);
+    const resultCell = previousResultCellRef.current ??
+      this.runtime.getCell(
+        processCell.space,
+        { resultFor },
         undefined,
         tx,
       );
 
-      // Cache the result cell, so we don't regenerate it
-      // This will break if we altered the process cell to point to a
-      // different result, so don't do that.
-      let previousResultCell: Cell<any> | undefined;
+    const resultPatternAsString = JSON.stringify(resultPattern);
+    const cacheKey = `${resultCell.space}/${resultCell.sourceURI}` as const;
+    const previousResultPatternAsString = this.resultPatternCache.get(cacheKey);
+    const patternUnchanged =
+      previousResultPatternAsString === resultPatternAsString;
 
-      let previouslyInvalidArgument = false;
+    if (!patternUnchanged) {
+      this.resultPatternCache.set(cacheKey, resultPatternAsString);
 
-      const action: Action & {
-        ignoredSchedulingWrites?: NormalizedFullLink[];
-      } = (tx: IExtendedStorageTransaction) => {
-        action.ignoredSchedulingWrites = [];
-        const frame = pushFrameFromCause(
-          { inputs, outputs, fn: fn.toString() },
+      const childSetupTx = new TransactionWrapper(tx, {
+        nonReactive: true,
+      });
+      this.run(
+        childSetupTx,
+        resultPattern,
+        undefined,
+        resultCell,
+      );
+      const childProcessCell = resultCell.withTx(tx).getSourceCell();
+      if (childProcessCell) {
+        recordIgnoredSchedulingWrite?.(
+          childProcessCell.getAsNormalizedFullLink(),
+        );
+      }
+      addCancel(() => this.stop(resultCell));
+
+      tx.addCommitCallback((_committedTx, result) => {
+        if (result.error) {
+          this.stop(resultCell);
+        }
+      });
+    }
+
+    previousResultCellRef.current ??= resultCell;
+    sendValueToBinding(
+      tx,
+      processCell,
+      outputs,
+      resultCell.getAsLink({ base: processCell }),
+    );
+    return result;
+  }
+
+  private instantiateJavaScriptHandlerNode(
+    {
+      module,
+      processCell,
+      addCancel,
+      pattern,
+      fn,
+      name,
+      inputs,
+      reads,
+      writes,
+      verifiedLoadId,
+      streamLink,
+    }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
+  ): void {
+    const handler = (tx: IExtendedStorageTransaction, event: any) => {
+      if (event?.preventDefault) event.preventDefault();
+
+      const eventInputs = {
+        ...(inputs as Record<string, any>),
+        $event: event,
+      };
+      const cause = {
+        ...(inputs as Record<string, any>),
+        $event: crypto.randomUUID(),
+      };
+      const frame = this.createPatternFrame(
+        cause,
+        pattern,
+        processCell,
+        tx,
+        true,
+        verifiedLoadId,
+      );
+
+      try {
+        const inputsCell = this.runtime.getImmutableCell(
+          processCell.space,
+          eventInputs,
+          undefined,
+          tx,
+        );
+        const { argument, isValidArgument } = this.readJavaScriptArgument(
+          module,
+          inputsCell,
+          tx,
           {
-            unsafe_binding: {
-              pattern,
-              materialize: (path: readonly PropertyKey[]) =>
-                processCell.getAsQueryResult(path, tx),
-              space: processCell.space,
-              tx,
-            },
-            inHandler: false,
-            runtime: this.runtime,
-            space: processCell.space,
-            tx,
+            writableProxy:
+              (module as { writableProxy?: boolean }).writableProxy,
           },
         );
-        // Store the frame on the action so the scheduler can attach it to
-        // errors created outside the action (e.g. "Too many iterations").
-        (action as Action & { lastFrame?: Frame }).lastFrame = frame;
 
-        const handleErrorOutput = (error: unknown) => {
-          if (
-            error !== null &&
-            (typeof error === "object" || typeof error === "function")
-          ) {
-            (error as Error & { frame?: Frame }).frame = frame;
-          }
-          try {
-            sendValueToBinding(tx, processCell, outputs, undefined);
-          } catch (bindingError) {
-            logger.error(
-              "runner",
-              "Failed to write undefined to binding on error",
-              bindingError,
-            );
-          }
-          throw error;
-        };
+        this.updateInvalidInputFlag(
+          name,
+          isValidArgument,
+          module,
+          inputsCell,
+          tx,
+        );
 
-        try {
-          logger.timeStart("action", "readInputs");
-          const argument = (() => {
-            try {
-              return module.argumentSchema !== undefined
-                ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-                : inputsCell.getAsQueryResult([], tx);
-            } finally {
-              logger.timeEnd("action", "readInputs");
-            }
-          })();
-
-          // If we have a schema of false, we don't use our argument, so undefined is ok
-          const isValidArgument = module.argumentSchema === false ||
-            argument !== undefined;
-
-          // Set/clear the invalid input flag (always, not just on transitions)
-          if (name) {
-            if (!isValidArgument) {
-              let queryResult: string;
-              try {
-                queryResult = JSON.stringify(
-                  inputsCell.getAsQueryResult([], tx),
-                );
-              } catch (_e) {
-                queryResult = "(Can't serialize to JSON)";
-              }
-              logger.flag(
-                "action invalid input",
-                `action:${name}`,
-                true,
-                {
-                  schema: module.argumentSchema,
-                  raw: inputsCell.getRaw(),
-                  queryResult,
-                },
-              );
-            } else {
-              logger.flag(
-                "action invalid input",
-                `action:${name}`,
-                false,
-              );
-            }
-          }
-
-          if (!isValidArgument || previouslyInvalidArgument) {
-            logger.info(
-              "action",
-              () => [
-                isValidArgument
-                  ? "action argument is valid now -- running"
-                  : "action argument is undefined (potential schema mismatch) -- not running",
-                {
-                  schema: module.argumentSchema,
-                  raw: inputsCell.getRaw(),
-                  asQueryResult: (() => {
-                    let result;
-                    try {
-                      result = JSON.stringify(
-                        inputsCell.getAsQueryResult([], tx),
-                      );
-                    } catch (_e) {
-                      result = "(Can't serialize to JSON)";
-                    }
-                    return result;
-                  })(),
-                },
-              ],
-            );
-            previouslyInvalidArgument = !isValidArgument;
-          }
-
-          // We only run the action if we have a valid argument, or the function's schema
-          // is false (like an input of `never`).
-          const result = name &&
-              this.runtime.scheduler.hasBreakpoint(`action:${name}`)
-            ? patternBreakpoint(
-              fn,
-              isValidArgument,
-              argument,
-              module.argumentSchema,
-              module.resultSchema,
-              inputsCell,
-            )
-            : isValidArgument
-            ? fn(argument)
-            : undefined;
-
-          const postRun = (result: any) => {
-            if (
-              validateAndCheckOpaqueRefs(result, name) ||
-              frame.opaqueRefs.size > 0
-            ) {
-              const resultPattern = patternFromFrame(
-                () => result,
-              );
-              const resultCell = previousResultCell ??
-                this.runtime.getCell(
-                  processCell.space,
-                  { resultFor: { inputs, outputs, fn: fn.toString() } },
-                  undefined,
-                  tx,
-                );
-
-              // If nothing changed, don't rerun the pattern, but still ensure
-              // the output binding points to the result cell (it may have been
-              // overwritten by a plain value in a previous run)
-              const resultPatternAsString = JSON.stringify(resultPattern);
-              const previousResultPatternAsString = this.resultPatternCache.get(
-                `${resultCell.space}/${resultCell.sourceURI}`,
-              );
-              const patternUnchanged =
-                previousResultPatternAsString === resultPatternAsString;
-
-              if (!patternUnchanged) {
-                this.resultPatternCache.set(
-                  `${resultCell.space}/${resultCell.sourceURI}`,
-                  resultPatternAsString,
-                );
-
-                // Sub-pattern setup reads are child lifecycle bookkeeping, not
-                // semantic dependencies of the parent action. Keep the writes
-                // in the same transaction but suppress those reads from
-                // polluting the parent action's reactivity log.
-                const childSetupTx = new TransactionWrapper(tx, {
-                  nonReactive: true,
-                });
-                this.run(
-                  childSetupTx,
-                  resultPattern,
-                  undefined,
-                  resultCell,
-                );
-                const childProcessCell = resultCell.withTx(tx).getSourceCell();
-                if (childProcessCell) {
-                  action.ignoredSchedulingWrites?.push(
-                    childProcessCell.getAsNormalizedFullLink(),
-                  );
-                }
-                addCancel(() => this.stop(resultCell));
-
-                // CT-1316: If the TX commit fails (e.g. session cancel,
-                // conflict), the sub-pattern's process cell data will be
-                // reverted. Stop the sub-pattern so its actions don't run
-                // with empty/stale data and create new commits that also
-                // get reverted — preventing an infinite cycle.
-                tx.addCommitCallback((_committedTx, result) => {
-                  if (result.error) {
-                    this.stop(resultCell);
-                  }
-                });
-              }
-
-              if (!previousResultCell) {
-                previousResultCell = resultCell;
-              }
-              // Always write the link - a previous run may have overwritten
-              // the output with a plain value (e.g., empty array)
-              sendValueToBinding(
-                tx,
-                processCell,
-                outputs,
-                resultCell.getAsLink({ base: processCell }),
-              );
-            } else {
-              sendValueToBinding(
-                tx,
-                processCell,
-                outputs,
-                result,
-              );
-            }
-            return result;
-          };
-
-          if (result instanceof Promise) {
-            return result.then(postRun).catch(handleErrorOutput);
-          } else {
-            return postRun(result);
-          }
-        } catch (error) {
-          handleErrorOutput(error);
-        } finally {
-          popFrame(frame);
+        if (!isValidArgument) {
+          const inputState = this.getJavaScriptInputState(
+            module,
+            inputsCell,
+            tx,
+          );
+          logger.error(
+            "stream",
+            () => [
+              "action argument is undefined (potential schema mismatch) -- not running",
+              {
+                schema: inputState.schema,
+                raw: inputState.raw,
+                asQueryResult: inputState.queryResult,
+              },
+            ],
+          );
         }
-      };
 
-      if (name) {
-        Object.defineProperty(action, "name", {
-          value: `action:${name}`,
-          configurable: true,
-        });
-        // Also set .src as backup (name can be finicky)
-        (action as Action & { src?: string }).src = `action:${name}`;
+        const result = isValidArgument
+          ? this.invokeJavaScriptImplementation(
+            module,
+            fn,
+            argument,
+            verifiedLoadId,
+          )
+          : undefined;
+        const postRun = (result: any) =>
+          this.handleJavaScriptHandlerResult(
+            tx,
+            result,
+            name,
+            frame,
+            processCell,
+            addCancel,
+            cause,
+          );
+
+        return result instanceof Promise
+          ? result.then(postRun)
+          : postRun(result);
+      } catch (error) {
+        (error as Error & { frame?: Frame }).frame = frame;
+        throw error;
+      } finally {
+        popFrame(frame);
       }
-      const wrappedAction = Object.assign(action, {
-        reads,
-        writes,
-        module,
-        pattern,
-      });
+    };
 
-      // Create populateDependencies callback to discover what cells the action reads
-      // and writes. Both are needed for pull-based scheduling:
-      // - reads: to know when to re-run the action (input dependencies)
-      // - writes: so collectDirtyDependencies() can find this computation when
-      //   an effect needs its outputs
-      const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-        logger.timeStart("action", "populateDependencies");
-        try {
-          // Capture read dependencies - use the pre-computed reads list
-          // Note: We DON'T run fn(depTx) here because that would execute
-          // user code with side effects during dependency discovery
-          if (module.argumentSchema !== undefined) {
-            const inputsCell = this.runtime.getImmutableCell(
-              processCell.space,
-              inputs,
-              undefined,
-              depTx,
-            );
-            inputsCell.asSchema(module.argumentSchema!).get({
-              traverseCells: true,
-            });
-          } else {
-            for (const read of reads) {
-              this.runtime.getCellFromLink(read, undefined, depTx)?.get();
-            }
-          }
-          // Capture write dependencies by marking outputs as potential writes
-          for (const output of writes) {
-            // Reading with markReadAsPotentialWrite registers this as a write dependency
-            this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-              meta: markReadAsPotentialWrite,
-            });
-          }
-        } finally {
-          logger.timeEnd("action", "populateDependencies");
+    if (name) {
+      setRunnableName(handler, `handler:${name}`);
+    }
+
+    const wrappedHandler = Object.assign(handler, {
+      reads,
+      writes,
+      module,
+      pattern,
+    });
+
+    const populateDependencies = module.argumentSchema
+      ? (depTx: IExtendedStorageTransaction, event: any) => {
+        const eventInputs = {
+          ...(inputs as Record<string, any>),
+          $event: event,
+        };
+        const inputsCell = this.runtime.getImmutableCell(
+          processCell.space,
+          eventInputs,
+          undefined,
+          depTx,
+        );
+        inputsCell.asSchema(module.argumentSchema!).get({
+          traverseCells: true,
+        });
+      }
+      : undefined;
+
+    addCancel(
+      this.runtime.scheduler.addEventHandler(
+        wrappedHandler,
+        streamLink,
+        populateDependencies,
+      ),
+    );
+  }
+
+  private instantiateJavaScriptActionNode(
+    {
+      tx,
+      module,
+      processCell,
+      addCancel,
+      pattern,
+      fn,
+      name,
+      inputs,
+      outputs,
+      reads,
+      writes,
+      verifiedLoadId,
+    }: JavaScriptNodeContext,
+  ): void {
+    if (isRecord(inputs) && "$event" in inputs) {
+      throw new Error(
+        "Handler used as lift, because $stream: true was overwritten",
+      );
+    }
+
+    const inputsCell = this.runtime.getImmutableCell(
+      processCell.space,
+      inputs,
+      undefined,
+      tx,
+    );
+    const previousResultCellRef: { current?: Cell<any> } = {};
+    let previouslyInvalidArgument = false;
+    const fnSource = fn.toString();
+
+    const action: Action & {
+      ignoredSchedulingWrites?: NormalizedFullLink[];
+    } = (tx: IExtendedStorageTransaction) => {
+      action.ignoredSchedulingWrites = [];
+      const resultFor = { inputs, outputs, fn: fnSource };
+      const frame = this.createPatternFrame(
+        resultFor,
+        pattern,
+        processCell,
+        tx,
+        false,
+        verifiedLoadId,
+      );
+      (action as Action & { lastFrame?: Frame }).lastFrame = frame;
+
+      const handleErrorOutput = (error: unknown) => {
+        if (
+          error !== null &&
+          (typeof error === "object" || typeof error === "function")
+        ) {
+          (error as Error & { frame?: Frame }).frame = frame;
         }
+        try {
+          sendValueToBinding(tx, processCell, outputs, undefined);
+        } catch (bindingError) {
+          logger.error(
+            "runner",
+            "Failed to write undefined to binding on error",
+            bindingError,
+          );
+        }
+        throw error;
       };
 
-      addCancel(
-        this.runtime.scheduler.subscribe(wrappedAction, populateDependencies),
-      );
+      try {
+        logger.timeStart("action", "readInputs");
+        const { argument, isValidArgument } = (() => {
+          try {
+            return this.readJavaScriptArgument(
+              module,
+              inputsCell,
+              tx,
+              { bindTxToSchema: true },
+            );
+          } finally {
+            logger.timeEnd("action", "readInputs");
+          }
+        })();
+
+        this.updateInvalidInputFlag(
+          name,
+          isValidArgument,
+          module,
+          inputsCell,
+          tx,
+        );
+
+        if (!isValidArgument || previouslyInvalidArgument) {
+          const inputState = this.getJavaScriptInputState(
+            module,
+            inputsCell,
+            tx,
+          );
+          logger.info(
+            "action",
+            () => [
+              isValidArgument
+                ? "action argument is valid now -- running"
+                : "action argument is undefined (potential schema mismatch) -- not running",
+              {
+                schema: inputState.schema,
+                raw: inputState.raw,
+                asQueryResult: inputState.queryResult,
+              },
+            ],
+          );
+          previouslyInvalidArgument = !isValidArgument;
+        }
+
+        const result = isValidArgument
+          ? this.invokeJavaScriptImplementation(
+            module,
+            fn,
+            argument,
+            verifiedLoadId,
+          )
+          : undefined;
+        const postRun = (result: any) =>
+          this.writeJavaScriptActionResult(
+            tx,
+            result,
+            name,
+            frame,
+            processCell,
+            outputs,
+            addCancel,
+            resultFor,
+            previousResultCellRef,
+            (link) => action.ignoredSchedulingWrites?.push(link),
+          );
+
+        return result instanceof Promise
+          ? result.then(postRun).catch(handleErrorOutput)
+          : postRun(result);
+      } catch (error) {
+        handleErrorOutput(error);
+      } finally {
+        popFrame(frame);
+      }
+    };
+
+    if (name) {
+      setRunnableName(action, `action:${name}`, { setSrc: true });
+    }
+
+    const wrappedAction = Object.assign(action, {
+      reads,
+      writes,
+      module,
+      pattern,
+    });
+
+    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      logger.timeStart("action", "populateDependencies");
+      try {
+        if (module.argumentSchema !== undefined) {
+          const inputsCell = this.runtime.getImmutableCell(
+            processCell.space,
+            inputs,
+            undefined,
+            depTx,
+          );
+          inputsCell.asSchema(module.argumentSchema!).get({
+            traverseCells: true,
+          });
+        } else {
+          for (const read of reads) {
+            this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+          }
+        }
+
+        for (const output of writes) {
+          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
+            meta: markReadAsPotentialWrite,
+          });
+        }
+      } finally {
+        logger.timeEnd("action", "populateDependencies");
+      }
+    };
+
+    addCancel(
+      this.runtime.scheduler.subscribe(wrappedAction, populateDependencies),
+    );
+  }
+
+  private instantiateJavaScriptNode(
+    tx: IExtendedStorageTransaction,
+    module: Module,
+    inputBindings: FabricValue,
+    outputBindings: FabricValue,
+    processCell: Cell<any>,
+    addCancel: AddCancel,
+    pattern: Pattern,
+  ) {
+    const io = this.bindNodeIO(inputBindings, outputBindings, processCell);
+    const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
+      module,
+      pattern,
+    );
+    const context: JavaScriptNodeContext = {
+      tx,
+      module,
+      processCell,
+      addCancel,
+      pattern,
+      fn,
+      name,
+      verifiedLoadId,
+      ...io,
+    };
+
+    const streamLink = this.resolveJavaScriptStreamLink(
+      io.inputs,
+      processCell,
+      tx,
+    );
+    if (streamLink) {
+      this.instantiateJavaScriptHandlerNode({ ...context, streamLink });
+      return;
+    }
+
+    this.instantiateJavaScriptActionNode(context);
+  }
+
+  private getFallbackJavaScriptImplementation(
+    module: Module,
+  ): (...args: any[]) => any {
+    if (typeof module.implementation === "function") {
+      return this.runtime.harness.getInvocation(
+        Function.prototype.toString.call(module.implementation),
+      ) as (...args: any[]) => any;
+    }
+    if (typeof module.implementation === "string") {
+      return this.runtime.harness.getInvocation(module.implementation) as (
+        ...args: any[]
+      ) => any;
+    }
+    throw new Error(
+      "JavaScript module is missing an executable implementation",
+    );
+  }
+
+  private invokeJavaScriptImplementation(
+    module: Module,
+    fn: (...args: any[]) => any,
+    argument: unknown,
+    verifiedLoadId?: string,
+  ): unknown {
+    const invoke = () => {
+      if (module.wrapper === "handler") {
+        const event = isRecord(argument) && "$event" in argument
+          ? argument.$event
+          : undefined;
+        const context = isRecord(argument) && "$ctx" in argument
+          ? argument.$ctx
+          : undefined;
+        return fn(event, context);
+      }
+
+      return fn(argument);
+    };
+
+    if (!verifiedLoadId || !this.runtime.harness.registerVerifiedFunction) {
+      return invoke();
+    }
+
+    const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
+      (implementationRef, implementation) => {
+        this.runtime.harness.registerVerifiedFunction!(
+          verifiedLoadId,
+          implementationRef,
+          implementation as (input: any) => void,
+        );
+      },
+    );
+    try {
+      return invoke();
+    } finally {
+      restoreVerifiedFunctionRegistrar();
     }
   }
 
@@ -1911,11 +2178,7 @@ export class Runner {
       sanitizeDebugLabel(impl.name) ??
       "anonymous";
     const rawName = `raw:${rawTargetName}`;
-    Object.defineProperty(action, "name", {
-      value: rawName,
-      configurable: true,
-    });
-    (action as Action & { src?: string }).src = rawName;
+    setRunnableName(action, rawName, { setSrc: true });
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
@@ -2054,232 +2317,8 @@ export class Runner {
   }
 }
 
-// This takes a pattern id and returns a sigil link with the corresponding entity.
-function getSpellLink(patternId: string): SigilLink {
-  const id = hashOf({ causal: { patternId, type: "pattern" } }).toJSON()["/"];
-  return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
-}
-
-/**
- * Validates an action result and checks if it contains opaque refs.
- * Throws if result contains invalid types (Map, Set, functions, etc.).
- * Returns true if the result contains any OpaqueRefs.
- */
-export function validateAndCheckOpaqueRefs(
-  value: unknown,
-  actionName?: string,
-  path: string[] = [],
-): boolean {
-  // Allowed types
-  if (value === null || value === undefined) return false;
-  if (isOpaqueRef(value)) return true;
-  if (isCellLink(value)) return false;
-
-  const formatError = (typeName: string, hint?: string) => {
-    const pathStr = path.length > 0 ? ` at path "${path.join(".")}"` : "";
-    const actionStr = actionName ? `\n  in action: ${actionName}` : "";
-    const hintStr = hint ? ` ${hint}` : "";
-    return `Action returned a ${typeName}${pathStr}.${actionStr}\nActions must return JSON-serializable values, OpaqueRefs, or Cells.${hintStr}`;
-  };
-
-  // Functions are not allowed
-  if (typeof value === "function") {
-    throw new Error(formatError("function"));
-  }
-
-  // Symbols are not JSON-serializable
-  if (typeof value === "symbol") {
-    throw new Error(formatError("Symbol", "Consider removing this property."));
-  }
-
-  // BigInt is not JSON-serializable
-  if (typeof value === "bigint") {
-    throw new Error(
-      formatError("BigInt", "Consider converting to number or string."),
-    );
-  }
-
-  // NaN and Infinity are not JSON-serializable (they become null)
-  if (typeof value === "number") {
-    if (Number.isNaN(value)) {
-      throw new Error(
-        formatError("NaN", "Check your inputs or return null instead."),
-      );
-    }
-    if (!Number.isFinite(value)) {
-      throw new Error(
-        formatError("Infinity", "Check your inputs or return null instead."),
-      );
-    }
-    return false;
-  }
-
-  // Other primitives (string, boolean) are fine
-  if (typeof value !== "object") return false;
-
-  // From here, value is object (non-null)
-  const obj = value as object;
-
-  // Check for Map and Set before other object checks
-  if (obj instanceof Map) {
-    throw new Error(
-      formatError("Map", "Consider using a plain object instead."),
-    );
-  }
-
-  if (obj instanceof Set) {
-    throw new Error(formatError("Set", "Consider using an array instead."));
-  }
-
-  // Arrays - recurse
-  if (Array.isArray(obj)) {
-    return obj.some((item: unknown, index: number) =>
-      validateAndCheckOpaqueRefs(item, actionName, [...path, `[${index}]`])
-    );
-  }
-
-  // Reject non-plain objects (Date, RegExp, etc.)
-  const proto = Object.getPrototypeOf(obj);
-  if (proto !== null && proto !== Object.prototype) {
-    const typeName = obj.constructor?.name ?? "unknown type";
-    throw new Error(formatError(typeName));
-  }
-
-  // Plain object - recurse
-  return Object.entries(obj as Record<string, unknown>).some(
-    ([key, val]) => validateAndCheckOpaqueRefs(val, actionName, [...path, key]),
-  );
-}
-
-export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
-  if (isCellLink(value)) return value as Mutable<T>;
-  if (isRecord(value)) {
-    return Array.isArray(value)
-      ? value.map(cellAwareDeepCopy) as unknown as Mutable<T>
-      : Object.fromEntries(
-        Object.entries(value).map((
-          [key, value],
-        ) => [key, cellAwareDeepCopy(value)]),
-      ) as unknown as Mutable<T>;
-    // Literal value:
-  } else return value as Mutable<T>;
-}
-
-/**
- * Extracts default values from a JSON schema object.
- * @param schema - The JSON schema to extract defaults from
- * @returns An object containing the default values, or undefined if none found
- */
-export function extractDefaultValues(
-  schema: JSONSchema,
-): FabricValue {
-  if (typeof schema !== "object" || schema === null) return undefined;
-
-  if (
-    schema.type === "object" && schema.properties && isRecord(schema.properties)
-  ) {
-    // Ignore the schema.default if it's not an object, since it's not a valid
-    // default value for an object.
-    const obj = cellAwareDeepCopy(
-      isRecord(schema.default) ? schema.default : {},
-    );
-    for (const [propKey, propSchema] of Object.entries(schema.properties)) {
-      const value = extractDefaultValues(propSchema);
-      if (value !== undefined) {
-        (obj as Record<string, unknown>)[propKey] = value;
-      }
-    }
-
-    return Object.entries(obj).length > 0 ? obj : undefined;
-  }
-
-  return schema.default;
-}
-
-/**
- * Merges objects into a single object, preferring values from later objects.
- * Recursively calls itself for nested objects, passing on any objects that
- * matching properties.
- * @param objects - Objects to merge
- * @returns A merged object, or undefined if no objects provided
- */
-export function mergeObjects<T>(
-  ...objects: (Partial<T> | undefined)[]
-): T {
-  objects = objects.filter((obj) => obj !== undefined);
-  if (objects.length === 0) return {} as T;
-  if (objects.length === 1) return objects[0] as T;
-
-  const seen = new Set<PropertyKey>();
-  const result: Record<string, unknown> = {};
-
-  for (const obj of objects) {
-    // If we have a literal value, return it. Same for arrays, since we wouldn't
-    // know how to merge them. Note that earlier objects take precedence, so if
-    // an earlier was e.g. an object, we'll return that instead of the literal.
-    if (!isRecord(obj) || Array.isArray(obj) || isCellLink(obj)) {
-      return obj as T;
-    }
-
-    // Then merge objects, only passing those on that have any values.
-    for (const key of Object.keys(obj)) {
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const merged = mergeObjects<T[keyof T]>(
-        ...objects.map((obj) =>
-          (obj as Record<string, unknown>)?.[key] as T[keyof T]
-        ),
-      );
-      if (merged !== undefined) result[key] = merged;
-    }
-  }
-
-  return result as T;
-}
-
-function sanitizeDebugLabel(label?: string): string | undefined {
-  if (!label) return undefined;
-  return label.replace(/^async\s+/, "").trim() || undefined;
-}
-
 function getTxDebugActionId(
   tx?: IExtendedStorageTransaction,
 ): string | undefined {
   return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
 }
-
-function describePatternOrModule(
-  patternOrModule: Pattern | Module | undefined,
-): string {
-  if (!patternOrModule) return "undefined";
-  if (isModule(patternOrModule)) {
-    if (
-      patternOrModule.type === "ref" &&
-      typeof patternOrModule.implementation === "string"
-    ) {
-      return `module:ref:${patternOrModule.implementation}`;
-    }
-
-    if (typeof patternOrModule.implementation === "function") {
-      const impl = patternOrModule.implementation as {
-        debugName?: string;
-        src?: string;
-        name?: string;
-      };
-      const name = sanitizeDebugLabel(impl.debugName) ??
-        sanitizeDebugLabel(impl.src) ??
-        sanitizeDebugLabel(impl.name) ??
-        "anonymous";
-      return `module:${patternOrModule.type}:${name}`;
-    }
-
-    return `module:${patternOrModule.type}`;
-  }
-
-  return `pattern:nodes=${patternOrModule.nodes.length}`;
-}
-
-const moduleWrappers = {
-  handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
-    fn(props.$event, props.$ctx),
-};

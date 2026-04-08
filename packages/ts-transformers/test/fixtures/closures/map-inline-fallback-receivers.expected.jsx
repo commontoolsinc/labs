@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Reaction {
     emoji: string;
     userNames: string[];
@@ -16,16 +27,16 @@ interface Input {
 //   (msg.reactions ?? []).map(fn) → derive(...).mapWithPattern(pattern(...), { msg: { id: ... } })
 //   (msg.reactions || []).map(fn) → derive(...).mapWithPattern(pattern(...), { msg: { id: ... } })
 // Context: Nested map — outer maps messages, inner fallback receivers capture msg.id and message-local reaction data
-export default pattern((__ct_pattern_input) => {
-    const messages = __ct_pattern_input.key("messages");
+export default pattern((__cf_pattern_input) => {
+    const messages = __cf_pattern_input.key("messages");
     return {
         [UI]: (<div>
-        {messages.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const msg = __ct_pattern_input.key("element");
+        {messages.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const msg = __cf_pattern_input.key("element");
                 return (<section>
-            {(msg.key("reactions") ?? []).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                        const reaction = __ct_pattern_input.key("element");
-                        const msg = __ct_pattern_input.key("params", "msg");
+            {(msg.key("reactions") ?? []).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                        const reaction = __cf_pattern_input.key("element");
+                        const msg = __cf_pattern_input.key("params", "msg");
                         return (<button type="button" data-msg-id={msg.key("id")}>
                 {reaction.key("emoji")}
               </button>);
@@ -94,9 +105,9 @@ export default pattern((__ct_pattern_input) => {
                             id: msg.key("id")
                         }
                     })}
-            {(msg.key("reactions") || []).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                        const reaction = __ct_pattern_input.key("element");
-                        const msg = __ct_pattern_input.key("params", "msg");
+            {(msg.key("reactions") || []).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                        const reaction = __cf_pattern_input.key("element");
+                        const msg = __cf_pattern_input.key("params", "msg");
                         return (<span>
                 {msg.key("id")}:{reaction.key("userNames", "length")}
               </span>);
@@ -304,5 +315,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

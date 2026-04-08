@@ -1,11 +1,22 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
-const multiplier = Writable.of(2, {
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const multiplier = __cfHelpers.__cf_data(Writable.of(2, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const prefix = Writable.of("Result: ", {
+} as const satisfies __cfHelpers.JSONSchema));
+const prefix = __cfHelpers.__cf_data(Writable.of("Result: ", {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema));
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };
@@ -19,8 +30,8 @@ type Output = {
 export default pattern(() => {
     const tool = patternTool(({ value, prefix, multiplier }: {
         value: number;
-        prefix: __cfHelpers.Cell<string>;
-        multiplier: __cfHelpers.Cell<number>;
+        prefix: import("commonfabric").Cell<string>;
+        multiplier: import("commonfabric").Cell<number>;
     }) => {
         return derive({
             type: "object",
@@ -76,5 +87,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

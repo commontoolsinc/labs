@@ -1,5 +1,40 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: {} }) => (<span>{__cfHelpers.derive({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                maybe: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["value"]
+                }
+            }
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, { item: {
+        maybe: item.maybe
+    } }, ({ item }) => item.maybe?.value ?? 0)}</span>));
 interface Item {
     maybe?: {
         value: number;
@@ -20,42 +55,10 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <span>{state.key("maybe", "value")}</span>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                return (<span>{__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                maybe: {
-                                    type: "object",
-                                    properties: {
-                                        value: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["value"]
-                                }
-                            }
-                        }
-                    },
-                    required: ["item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, { item: {
-                        maybe: item.key("maybe")
-                    } }, ({ item }) => item.maybe?.value ?? 0)}</span>);
-            }, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
                         type: "object",
                         properties: {
                             maybe: {
@@ -69,7 +72,8 @@ export default pattern((state) => {
                             }
                         }
                     }
-                }
+                },
+                required: ["element"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -161,5 +165,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

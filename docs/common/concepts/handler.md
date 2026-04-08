@@ -84,6 +84,23 @@ export default pattern(({ items }) => {
 
 **Why:** The CTS transformer processes patterns at compile time and cannot handle closures over pattern-scoped variables in handlers.
 
+Handlers also live on the verified SES module-scope surface. Define them once
+at the top level, then pass any changing state through the binding object
+instead of hiding it in module-scoped mutable variables.
+
+## SES-Friendly Handlers
+
+- Bind changing state explicitly. Avoid top-level mutable caches, counters, or
+  class instances.
+- Keep the handler callback direct and readable. If the body becomes too
+  imperative, push complex logic into a helper and keep the bound state
+  explicit.
+- Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient
+  `Date.now()` and `Math.random()` when a handler needs a timestamp or random
+  ID.
+- Timers are not exposed inside authored modules yet, so do not rely on
+  `setTimeout()` or `setInterval()` in handler code.
+
 ## Exporting Handlers as Streams
 
 Bound handlers become `Stream<T>` and can be exported for other patterns to call:

@@ -1,9 +1,14 @@
 import * as MemoryProvider from "@commonfabric/memory/provider";
 import * as Consumer from "@commonfabric/memory/consumer";
+import * as V2Storage from "./v2.ts";
+import * as V2Emulate from "./v2-emulate.ts";
 import {
+  getDefaultMemoryVersion,
   type Options,
   Provider,
   StorageManager as BaseStorageManager,
+  type V1StorageManagerOptions,
+  type V2StorageManagerOptions,
 } from "./cache.ts";
 import * as StorageSubscription from "./subscription.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -21,6 +26,7 @@ export class StorageManagerEmulator extends BaseStorageManager {
     if (!this.#session) {
       this.#memoryProvider = MemoryProvider.emulate({
         serviceDid: this.as.did(),
+        memoryVersion: this.memoryVersion,
       });
       this.#session = Consumer.open({
         as: this.as,
@@ -34,7 +40,12 @@ export class StorageManagerEmulator extends BaseStorageManager {
       space,
       session: this.session(),
       subscription: this.#subscription,
+      memoryVersion: this.memoryVersion,
     });
+  }
+
+  override open(space: MemorySpace): Provider {
+    return super.open(space) as Provider;
   }
 
   mount(space: MemorySpace) {
@@ -46,6 +57,10 @@ export class StorageManagerEmulator extends BaseStorageManager {
    */
   override subscribe(subscription: IStorageSubscription): void {
     this.#subscription.subscribe(subscription);
+  }
+
+  override unsubscribe(subscription: IStorageSubscription): void {
+    this.#subscription.unsubscribe(subscription);
   }
 
   override async close() {
@@ -62,7 +77,33 @@ export class StorageManagerEmulator extends BaseStorageManager {
 }
 
 export class StorageManager extends BaseStorageManager {
-  static override open(options: Options) {
+  static override open(
+    options: V1StorageManagerOptions,
+  ): StorageManager | StorageManagerEmulator;
+  static override open(
+    options: V2StorageManagerOptions,
+  ): V2Storage.StorageManager | V2Emulate.EmulatedStorageManager;
+  static override open(
+    options: Options,
+  ):
+    | StorageManager
+    | StorageManagerEmulator
+    | V2Storage.StorageManager
+    | V2Emulate.EmulatedStorageManager;
+  static override open(
+    options: Options,
+  ):
+    | StorageManager
+    | StorageManagerEmulator
+    | V2Storage.StorageManager
+    | V2Emulate.EmulatedStorageManager {
+    const memoryVersion = options.memoryVersion ?? getDefaultMemoryVersion();
+    if (memoryVersion === "v2") {
+      if (options.address.protocol === "memory:") {
+        return this.emulate(options);
+      }
+      return V2Storage.StorageManager.open(options);
+    }
     if (options.address.protocol === "memory:") {
       return this.emulate(options);
     } else {
@@ -70,8 +111,21 @@ export class StorageManager extends BaseStorageManager {
     }
   }
   static emulate(
+    options: Omit<V1StorageManagerOptions, "address">,
+  ): StorageManagerEmulator;
+  static emulate(
+    options: Omit<V2StorageManagerOptions, "address">,
+  ): V2Emulate.EmulatedStorageManager;
+  static emulate(
     options: Omit<Options, "address">,
-  ) {
+  ): StorageManagerEmulator | V2Emulate.EmulatedStorageManager;
+  static emulate(
+    options: Omit<Options, "address">,
+  ): StorageManagerEmulator | V2Emulate.EmulatedStorageManager {
+    const memoryVersion = options.memoryVersion ?? getDefaultMemoryVersion();
+    if (memoryVersion === "v2") {
+      return V2Emulate.EmulatedStorageManager.emulate(options);
+    }
     return new StorageManagerEmulator({
       ...options,
       address: new URL("memory://"),

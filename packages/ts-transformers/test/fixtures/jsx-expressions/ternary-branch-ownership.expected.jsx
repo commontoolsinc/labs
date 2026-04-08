@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { computed, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface TagEvent {
     label: string;
 }
@@ -145,9 +156,9 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, { state: state }, ({ state }) => state.recentEvents.length === 0), <span>No events yet</span>, <div>
-              {state.key("recentEvents").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const event = __ct_pattern_input.key("element");
-                const idx = __ct_pattern_input.key("index");
+              {state.key("recentEvents").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const event = __cf_pattern_input.key("element");
+                const idx = __cf_pattern_input.key("index");
                 return (<cf-hstack key={idx} gap="2">
                   <span>{event.key("label")}</span>
                 </cf-hstack>);
@@ -360,5 +371,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

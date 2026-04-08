@@ -9,6 +9,21 @@ import {
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
 
+function isZeroArgInlineIifeCall(
+  expression: ts.CallExpression,
+): boolean {
+  if (expression.arguments.length !== 0) {
+    return false;
+  }
+
+  let callee: ts.Expression = expression.expression;
+  while (ts.isParenthesizedExpression(callee)) {
+    callee = callee.expression;
+  }
+
+  return ts.isArrowFunction(callee) || ts.isFunctionExpression(callee);
+}
+
 function getConditionalHelperArgLabel(
   helperName: "ifElse" | "when" | "unless",
   index: number,
@@ -181,6 +196,18 @@ export const emitCallExpression: Emitter = ({
   // Skip derive wrapping in safe contexts - they don't need it
   if (inSafeContext) {
     return undefined;
+  }
+
+  // Preserve authored zero-arg IIFEs in the derive-preferring post-closure
+  // path so the existing inner expression-site machinery can decompose their
+  // local aliases instead of forcing a blanket wrapper around the whole call.
+  if (
+    preferDeriveWrappers &&
+    isAuthoredCall &&
+    isZeroArgInlineIifeCall(expression)
+  ) {
+    const rewritten = rewriteChildren(expression);
+    return rewritten !== expression ? rewritten : undefined;
   }
 
   if (dataFlows.length === 0) return undefined;

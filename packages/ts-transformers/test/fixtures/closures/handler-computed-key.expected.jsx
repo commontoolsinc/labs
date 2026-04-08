@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     records: Record<string, Cell<number>>;
 }
@@ -8,6 +19,7 @@ function nextKey(): string {
     counter += 1;
     return `key-${counter}`;
 }
+__cfHardenFn(nextKey);
 // FIXTURE: handler-computed-key
 // Verifies: handler capturing a Record with computed (dynamic) key access is transformed correctly
 //   onClick={() => recordMap[nextKey()]!.set(counter)) → handler(false, { recordMap: { additionalProperties, asOpaque } }, ...)({ recordMap })
@@ -28,7 +40,7 @@ export default pattern((state) => {
                 }
             },
             required: ["recordMap"]
-        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter))({
+        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter))({
             recordMap: recordMap
         })}>
         Step
@@ -79,5 +91,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

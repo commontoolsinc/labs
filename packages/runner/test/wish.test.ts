@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { NAME, UI } from "../src/builder/types.ts";
@@ -28,7 +29,7 @@ describe("wish built-in", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ wish, pattern } = commonfabric);
   });
 
@@ -860,7 +861,7 @@ describe("wish built-in", () => {
       });
       tx = runtime.edit();
 
-      const { commonfabric } = createBuilder();
+      const { commonfabric } = createTrustedBuilder(runtime);
       ({ wish, pattern } = commonfabric);
     });
 
@@ -2183,7 +2184,7 @@ describe("wish built-in", () => {
       });
       tx = runtime.edit();
 
-      const { commonfabric } = createBuilder();
+      const { commonfabric } = createTrustedBuilder(runtime);
       ({ wish, pattern } = commonfabric);
     });
 
@@ -2374,7 +2375,7 @@ describe("wish built-in", () => {
 
     it("resolves hashtag using computed query (GoogleAuthManager pattern)", async () => {
       // This test mimics GoogleAuthManager which uses computed() for the wish query
-      const { commonfabric: { computed } } = createBuilder();
+      const { commonfabric: { computed } } = createTrustedBuilder(runtime);
 
       // Setup: Favorites with #googleAuth tag in home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);

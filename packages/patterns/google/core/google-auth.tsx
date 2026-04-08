@@ -1,11 +1,13 @@
 /// <cts-enable />
 import {
+  __cf_data,
   computed,
   Default,
   handler,
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -13,7 +15,7 @@ import {
 
 type Secret<T> = T;
 
-import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
 import {
   REFRESH_THRESHOLD_MS,
   startReactiveClock,
@@ -27,30 +29,34 @@ import {
 } from "../../auth/auth-ui-helpers.tsx";
 
 // Scope mapping for Google APIs
-const SCOPE_MAP = {
-  gmail: "https://www.googleapis.com/auth/gmail.readonly",
-  gmailSend: "https://www.googleapis.com/auth/gmail.send",
-  gmailModify: "https://www.googleapis.com/auth/gmail.modify",
-  calendar: "https://www.googleapis.com/auth/calendar.readonly",
-  calendarWrite: "https://www.googleapis.com/auth/calendar.events",
-  drive: "https://www.googleapis.com/auth/drive",
-  docs: "https://www.googleapis.com/auth/documents.readonly",
-  contacts: "https://www.googleapis.com/auth/contacts.readonly",
-} as const;
+const SCOPE_MAP = __cf_data(
+  {
+    gmail: "https://www.googleapis.com/auth/gmail.readonly",
+    gmailSend: "https://www.googleapis.com/auth/gmail.send",
+    gmailModify: "https://www.googleapis.com/auth/gmail.modify",
+    calendar: "https://www.googleapis.com/auth/calendar.readonly",
+    calendarWrite: "https://www.googleapis.com/auth/calendar.events",
+    drive: "https://www.googleapis.com/auth/drive",
+    docs: "https://www.googleapis.com/auth/documents.readonly",
+    contacts: "https://www.googleapis.com/auth/contacts.readonly",
+  } as const,
+);
 
-const SCOPE_DESCRIPTIONS = {
-  gmail: "Gmail (read emails)",
-  gmailSend: "Gmail (send emails)",
-  gmailModify: "Gmail (add/remove labels)",
-  calendar: "Calendar (read events)",
-  calendarWrite: "Calendar (create/edit/delete events)",
-  drive: "Drive (read/write files & comments)",
-  docs: "Docs (read document content)",
-  contacts: "Contacts (read contacts)",
-} as const;
+const SCOPE_DESCRIPTIONS = __cf_data(
+  {
+    gmail: "Gmail (read emails)",
+    gmailSend: "Gmail (send emails)",
+    gmailModify: "Gmail (add/remove labels)",
+    calendar: "Calendar (read events)",
+    calendarWrite: "Calendar (create/edit/delete events)",
+    drive: "Drive (read/write files & comments)",
+    docs: "Docs (read document content)",
+    contacts: "Contacts (read contacts)",
+  } as const,
+);
 
 // Short names for scope summary display in previewUI
-const SCOPE_SHORT_NAMES: Record<string, string> = {
+const SCOPE_SHORT_NAMES: Record<string, string> = __cf_data({
   "https://www.googleapis.com/auth/gmail.readonly": "Gmail",
   "https://www.googleapis.com/auth/gmail.send": "Gmail Send",
   "https://www.googleapis.com/auth/gmail.modify": "Gmail",
@@ -59,10 +65,10 @@ const SCOPE_SHORT_NAMES: Record<string, string> = {
   "https://www.googleapis.com/auth/drive": "Drive",
   "https://www.googleapis.com/auth/documents.readonly": "Docs",
   "https://www.googleapis.com/auth/contacts.readonly": "Contacts",
-};
+});
 
 // Short names for scope keys (for configured scopes summary)
-const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
+const SCOPE_KEY_SHORT_NAMES: Record<string, string> = __cf_data({
   gmail: "Gmail",
   gmailSend: "Gmail",
   gmailModify: "Gmail",
@@ -71,13 +77,13 @@ const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
   drive: "Drive",
   docs: "Docs",
   contacts: "Contacts",
-};
+});
 
 /**
  * Helper to create preview UI for picker display.
  * Exported for use by wrapper patterns (google-auth-personal, google-auth-work).
  *
- * NOTE: Date.now() is captured at call time. This is intentional — the preview
+ * NOTE: safeDateNow() is captured at call time. This is intentional — the preview
  * is a snapshot shown in the picker card, not a live-updating display. The main
  * pattern UI has its own reactive clock for real-time expiry tracking.
  */
@@ -91,7 +97,7 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  const now = Date.now();
+  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -278,28 +284,32 @@ interface Output {
   bgUpdater: Stream<Record<string, never>>;
 }
 
-// Create guarded refresh function for Google OAuth.
-// Module-scope singleton is intentional: google-auth is loaded once per provider
-// (google-auth-personal and google-auth-work are separate modules that compose
-// this one, so each provider gets its own guard instance).
-const refreshAuthToken = createRefreshFunction(
-  "/api/integrations/google-oauth/refresh",
-);
+async function refreshGoogleAuthToken(
+  auth: Writable<Auth>,
+  refreshInProgress: Writable<boolean>,
+): Promise<boolean> {
+  return await refreshOAuthToken(
+    auth,
+    "/api/integrations/google-oauth/refresh",
+    refreshInProgress,
+  );
+}
 
 // Handler for refreshing OAuth tokens from UI button
 const handleRefresh = handler<
   unknown,
   {
     auth: Writable<Auth>;
+    refreshInProgress: Writable<boolean>;
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
   }
 >(
-  async (_event, { auth, refreshing, refreshFailed }) => {
+  async (_event, { auth, refreshInProgress, refreshing, refreshFailed }) => {
     refreshing.set(true);
     refreshFailed.set(false);
     try {
-      const didRefresh = await refreshAuthToken(auth);
+      const didRefresh = await refreshGoogleAuthToken(auth, refreshInProgress);
       refreshing.set(false);
       if (!didRefresh) return;
       refreshFailed.set(false);
@@ -323,30 +333,36 @@ const getScopeFriendlyName = (scope: string): string => {
 // Handler for refreshing tokens from other pieces (cross-piece calling)
 const refreshTokenHandler = handler<
   Record<string, never>,
-  { auth: Writable<Auth> }
->(async (_event, { auth }) => {
-  await refreshAuthToken(auth);
+  {
+    auth: Writable<Auth>;
+    refreshInProgress: Writable<boolean>;
+  }
+>(async (_event, { auth, refreshInProgress }) => {
+  await refreshGoogleAuthToken(auth, refreshInProgress);
 });
 
 // Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
-  { auth: Writable<Auth> }
+  {
+    auth: Writable<Auth>;
+    refreshInProgress: Writable<boolean>;
+  }
 >(
-  async (_event, { auth }) => {
+  async (_event, { auth, refreshInProgress }) => {
     const currentAuth = auth.get();
     if (!currentAuth?.token || !currentAuth?.refreshToken) return;
 
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - Date.now();
+    const timeRemaining = expiresAt - safeDateNow();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
 
     try {
-      await refreshAuthToken(auth);
+      await refreshGoogleAuthToken(auth, refreshInProgress);
       console.log("[google-auth bgUpdater] Token refreshed successfully");
     } catch (e) {
       const status = (e as { status?: number }).status;
@@ -405,7 +421,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = Writable.of(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -420,6 +436,7 @@ export default pattern<Input, Output>(
     // PERFORMANCE FIX: Pre-compute disabled state (same for all checkboxes)
     const checkboxesDisabled = computed(() => !!auth?.user?.email);
 
+    const refreshInProgress = Writable.of(false);
     const refreshing = Writable.of(false);
     const refreshFailed = Writable.of(false);
 
@@ -698,7 +715,12 @@ export default pattern<Input, Output>(
               </p>
               <button
                 type="button"
-                onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                onClick={handleRefresh({
+                  auth,
+                  refreshInProgress,
+                  refreshing,
+                  refreshFailed,
+                })}
                 disabled={refreshing}
                 style={{
                   padding: "10px 20px",
@@ -795,7 +817,12 @@ export default pattern<Input, Output>(
                 </div>
                 <button
                   type="button"
-                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                  onClick={handleRefresh({
+                    auth,
+                    refreshInProgress,
+                    refreshing,
+                    refreshFailed,
+                  })}
                   disabled={refreshing}
                   style={{
                     padding: "8px 16px",
@@ -836,8 +863,8 @@ export default pattern<Input, Output>(
       selectedScopes,
       userChip,
       previewUI,
-      refreshToken: refreshTokenHandler({ auth }),
-      bgUpdater: bgRefreshHandler({ auth }),
+      refreshToken: refreshTokenHandler({ auth, refreshInProgress }),
+      bgUpdater: bgRefreshHandler({ auth, refreshInProgress }),
     };
   },
 );

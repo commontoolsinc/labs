@@ -38,6 +38,7 @@ export async function main(args: string[]) {
   // Extract --log-level before Cliffy parses
   const { level, args: cleanArgs } = extractLogLevel(args);
   Deno.env.set("CF_CLI_NAME", cliName());
+  const profileDoneMarker = Deno.env.get("CT_PROFILE_DONE_MARKER");
 
   if (level) {
     setGlobalLogFloor(level as LogLevel);
@@ -50,6 +51,10 @@ export async function main(args: string[]) {
 
   try {
     await parse(cleanArgs);
+    if (profileDoneMarker) {
+      console.log(profileDoneMarker);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     Deno.exit(0);
   } catch (e) {
     // TransformerError and CompilerError have nicely formatted messages
@@ -60,6 +65,10 @@ export async function main(args: string[]) {
       console.error(e.stack ?? e.message);
     } else {
       console.error(e);
+    }
+    if (profileDoneMarker) {
+      console.log(profileDoneMarker);
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
     Deno.exit(1);
   }

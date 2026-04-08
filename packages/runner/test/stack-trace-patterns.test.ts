@@ -79,6 +79,15 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
 
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: lift value too large");
+  assertEquals(
+    stack.includes("<CT_INTERNAL>"),
+    false,
+    `stack should preserve runner internal frames by default:\n${stack}`,
+  );
+  assertMatch(
+    stack,
+    /packages\/runner\/src\/(?:sandbox\/ses-runtime|harness\/engine|scheduler)\.ts/,
+  );
 
   // First frame must point to the throw location in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
@@ -155,6 +164,15 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
 
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: handler crash on purpose");
+  assertEquals(
+    stack.includes("<CT_INTERNAL>"),
+    false,
+    `stack should preserve runner internal frames by default:\n${stack}`,
+  );
+  assertMatch(
+    stack,
+    /packages\/runner\/src\/(?:sandbox\/ses-runtime|harness\/engine|scheduler)\.ts/,
+  );
 
   // First frame must point to the throw location in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));

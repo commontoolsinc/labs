@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     counter: Cell<number>;
 }
@@ -23,7 +34,7 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { state }) => state.counter.set(state.counter.get() + 1))({
+        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.counter.set(state.counter.get() + 1))({
             state: {
                 counter: state.key("counter")
             }
@@ -72,5 +83,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

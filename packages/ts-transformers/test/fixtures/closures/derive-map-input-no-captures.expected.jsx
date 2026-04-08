@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Edge case: derive with a .map() result as input, NO captures in derive callback,
  * and NO explicit type annotation on the callback parameter.
@@ -13,6 +21,9 @@ import * as __cfHelpers from "commonfabric";
  * because checker.getTypeAtLocation() doesn't know about synthetic nodes.
  */
 import { Cell, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     id: number;
     value: string;
@@ -22,8 +33,8 @@ interface Item {
 //   items.map(fn) → items.mapWithPattern(pattern(...))
 //   derive(mappedInput, fn) → derive(schema, schema, mappedInput, fn) (no capture extraction)
 // Context: tests interaction between map transform and derive schema injection on a synthetic node
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     // items.map() will be transformed to items.mapWithPattern()
     // derive has NO captures, so it won't be transformed by ClosureTransformer
     // The callback param has NO explicit type annotation
@@ -34,8 +45,8 @@ export default pattern((__ct_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const item = __ct_pattern_input.key("element");
+    } as const satisfies __cfHelpers.JSONSchema, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const item = __cf_pattern_input.key("element");
         return item.key("value");
     }, {
         type: "object",
@@ -100,5 +111,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

@@ -3,11 +3,12 @@
 import { assert, assertEquals } from "@std/assert";
 import { Runtime } from "@commonfabric/runner";
 import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
-import { Provider, StorageManager } from "@commonfabric/runner/storage/cache";
+import {
+  Provider,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema } from "@commonfabric/runner";
 import { toURI } from "../src/uri-utils.ts";
-import { env } from "@commonfabric/integration";
-const { API_URL } = env;
 
 // Create test identity
 const keyConfig: IdentityCreateConfig = {
@@ -19,17 +20,29 @@ console.log("\n=== TEST: Simple object persistence ===");
 
 const TIMEOUT_MS = 180000; // 3 minutes timeout
 
+// Archived v1 integration coverage. The live toolshed path is intentionally
+// hard-cut to v2, and the corresponding cutover behavior is covered in the
+// memory-v2 subscription/reconnect race tests.
+
+const createV1Runtime = (identity: Identity) => {
+  const storageManager = StorageManager.emulate({
+    as: identity,
+    memoryVersion: "v1",
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL("memory://"),
+    storageManager,
+    memoryVersion: "v1",
+  });
+  return { runtime, storageManager };
+};
+
 async function test() {
   // First runtime - save data
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime1, storageManager: storageManager1 } =
+    createV1Runtime(identity);
   const provider1: Provider =
-    (runtime1.storageManager.open(identity.did()) as any).provider;
+    storageManager1.openConnection(identity.did()).provider;
 
   const schema = {
     type: "object",
@@ -61,16 +74,11 @@ async function test() {
   );
 
   // Second runtime - fetch data
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime2, storageManager: storageManager2 } =
+    createV1Runtime(identity);
 
   const provider2: Provider =
-    (runtime2.storageManager.open(identity.did()) as any).provider;
+    storageManager2.openConnection(identity.did()).provider;
   let s2Count = 0;
   provider2.replica.heap.subscribe(
     { id: uri, type: "application/json" },
@@ -155,6 +163,7 @@ async function runTest() {
 
 Deno.test({
   name: "pending nursery test",
+  ignore: true,
   fn: async () => {
     let timeoutHandle: number;
     const timeoutPromise = new Promise((_, reject) => {

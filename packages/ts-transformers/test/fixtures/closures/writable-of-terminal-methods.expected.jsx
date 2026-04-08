@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Writable.of() result accessed via .get()/.set() in action
  * callbacks. These are terminal methods handled correctly regardless
@@ -6,6 +14,9 @@ import * as __cfHelpers from "commonfabric";
  * .get()/.set() are terminal methods.
  */
 import { action, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     title: string;
 }
@@ -13,12 +24,12 @@ interface State {
 // Verifies: Writable.of() gets schema annotation, and action() with .set() becomes handler()
 //   Writable.of(0) → Writable.of(0, { type: "number" })
 //   action(() => { counter.set(0); label.set("Count"); }) → handler(false, captureSchema, (_, { counter, label }) => ...)
-//   ({ title }) → (__ct_pattern_input) => { title = __ct_pattern_input.key("title"); }
+//   ({ title }) → (__cf_pattern_input) => { title = __cf_pattern_input.key("title"); }
 // Context: Writable.of() produces opaque cells. The .set() calls inside
 //   action() are terminal methods that require the action to be rewritten as a
 //   handler with captured cell references (counter, label) in its schema.
-export default pattern((__ct_pattern_input) => {
-    const title = __ct_pattern_input.key("title");
+export default pattern((__cf_pattern_input) => {
+    const title = __cf_pattern_input.key("title");
     const counter = Writable.of(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -101,5 +112,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

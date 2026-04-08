@@ -6,6 +6,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -13,7 +14,7 @@ import {
 
 type Secret<T> = T;
 
-import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
 import {
   REFRESH_THRESHOLD_MS,
   startReactiveClock,
@@ -64,10 +65,10 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // Date.now() capture is intentional — createPreviewUI produces a static
+  // safeDateNow() capture is intentional — createPreviewUI produces a static
   // snapshot for picker display, not a live-updating component. The main
   // pattern UI uses a reactive clock (startReactiveClock) separately.
-  const now = Date.now();
+  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -222,28 +223,35 @@ interface Output {
   bgUpdater: Stream<Record<string, never>>;
 }
 
-// Module-scope singleton refresh guard for Airtable OAuth.
-// This is intentional: all instances of this auth pattern share one guard,
-// preventing concurrent refresh requests. This is correct because each
-// provider (e.g. Airtable, Google) has its own module with its own guard.
-const refreshAuthToken = createRefreshFunction(
-  "/api/integrations/airtable-oauth/refresh",
-);
+async function refreshAirtableAuthToken(
+  auth: Writable<AirtableAuth>,
+  refreshInProgress: Writable<boolean>,
+): Promise<boolean> {
+  return await refreshOAuthToken(
+    auth,
+    "/api/integrations/airtable-oauth/refresh",
+    refreshInProgress,
+  );
+}
 
 // Handler for refreshing tokens from UI button
 const handleRefresh = handler<
   unknown,
   {
     auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
   }
 >(
-  async (_event, { auth, refreshing, refreshFailed }) => {
+  async (_event, { auth, refreshInProgress, refreshing, refreshFailed }) => {
     refreshing.set(true);
     refreshFailed.set(false);
     try {
-      const didRefresh = await refreshAuthToken(auth);
+      const didRefresh = await refreshAirtableAuthToken(
+        auth,
+        refreshInProgress,
+      );
       refreshing.set(false);
       if (!didRefresh) return;
       refreshFailed.set(false);
@@ -257,24 +265,30 @@ const handleRefresh = handler<
 // Handler for refreshing tokens from other pieces
 const refreshTokenHandler = handler<
   Record<string, never>,
-  { auth: Writable<AirtableAuth> }
->(async (_event, { auth }) => {
-  await refreshAuthToken(auth);
+  {
+    auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
+  }
+>(async (_event, { auth, refreshInProgress }) => {
+  await refreshAirtableAuthToken(auth, refreshInProgress);
 });
 
 // Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
-  { auth: Writable<AirtableAuth> }
+  {
+    auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
+  }
 >(
-  async (_event, { auth }) => {
+  async (_event, { auth, refreshInProgress }) => {
     const currentAuth = auth.get();
     if (!currentAuth?.accessToken || !currentAuth?.refreshToken) return;
 
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - Date.now();
+    const timeRemaining = expiresAt - safeDateNow();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log(
@@ -282,7 +296,7 @@ const bgRefreshHandler = handler<
     );
 
     try {
-      await refreshAuthToken(auth);
+      await refreshAirtableAuthToken(auth, refreshInProgress);
       console.log("[airtable-auth bgUpdater] Token refreshed successfully");
     } catch (e) {
       const status = (e as { status?: number }).status;
@@ -341,7 +355,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = Writable.of(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -355,6 +369,7 @@ export default pattern<Input, Output>(
 
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
+    const refreshInProgress = Writable.of(false);
     const refreshing = Writable.of(false);
     const refreshFailed = Writable.of(false);
 
@@ -368,7 +383,7 @@ export default pattern<Input, Output>(
       const email = auth?.user?.email || "";
       const name = auth?.user?.name || "";
       const isAuthenticated = !!email;
-      const now = Date.now();
+      const now = safeDateNow();
       const expiresAt = auth?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -604,7 +619,12 @@ export default pattern<Input, Output>(
               </p>
               <button
                 type="button"
-                onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                onClick={handleRefresh({
+                  auth,
+                  refreshInProgress,
+                  refreshing,
+                  refreshFailed,
+                })}
                 disabled={refreshing}
                 style={{
                   padding: "10px 20px",
@@ -708,7 +728,12 @@ export default pattern<Input, Output>(
                 </div>
                 <button
                   type="button"
-                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                  onClick={handleRefresh({
+                    auth,
+                    refreshInProgress,
+                    refreshing,
+                    refreshFailed,
+                  })}
                   disabled={refreshing}
                   style={{
                     padding: "8px 16px",
@@ -868,8 +893,8 @@ export default pattern<Input, Output>(
           </div>
         </div>
       ),
-      refreshToken: refreshTokenHandler({ auth }),
-      bgUpdater: bgRefreshHandler({ auth }),
+      refreshToken: refreshTokenHandler({ auth, refreshInProgress }),
+      bgUpdater: bgRefreshHandler({ auth, refreshInProgress }),
     };
   },
 );

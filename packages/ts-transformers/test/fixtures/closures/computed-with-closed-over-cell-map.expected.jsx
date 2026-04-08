@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Writable, computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: computed-with-closed-over-cell-map
 // Verifies: .map() on a closed-over Cell inside computed() IS transformed to .mapWithPattern()
 //   computed(() => numbers.map(n => n * multiplier.get())) → derive(..., { numbers, multiplier }, ({ numbers, multiplier }) => numbers.mapWithPattern(pattern(fn, ...), { multiplier }))
@@ -44,9 +55,9 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         numbers: numbers,
         multiplier: multiplier
-    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const n = __ct_pattern_input.key("element");
-        const multiplier = __ct_pattern_input.key("params", "multiplier");
+    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const n = __cf_pattern_input.key("element");
+        const multiplier = __cf_pattern_input.key("params", "multiplier");
         return n * multiplier.get();
     }, {
         type: "object",
@@ -80,5 +91,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

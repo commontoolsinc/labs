@@ -19,10 +19,16 @@ describe("StorageTransaction", () => {
   let runtime: Runtime;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    // This suite asserts the legacy raw JSON replica shape. V2 coverage lives in
+    // the memory-v2-* tests that exercise the document-envelope model directly.
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     runtime = new Runtime({
       storageManager,
       apiUrl: new URL("http://localhost:8000"),
+      memoryVersion: "v1",
     });
   });
 
@@ -570,10 +576,14 @@ describe("DocImpl shim notifications", () => {
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: "v1",
     });
     tx = runtime.edit();
   });
@@ -680,10 +690,14 @@ describe("root value rewriting", () => {
   let runtime: Runtime;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     runtime = new Runtime({
       storageManager,
       apiUrl: new URL("http://localhost:8000"),
+      memoryVersion: "v1",
     });
   });
 
@@ -770,10 +784,14 @@ describe("numeric path key edge cases", () => {
   let runtime: Runtime;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     runtime = new Runtime({
       storageManager,
       apiUrl: new URL("http://localhost:8000"),
+      memoryVersion: "v1",
     });
   });
 
@@ -1081,10 +1099,14 @@ describe("data: URI behaviors", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     runtime = new Runtime({
       storageManager,
       apiUrl: new URL("http://localhost:8000"),
+      memoryVersion: "v1",
     });
   });
 
@@ -1157,10 +1179,14 @@ describe("Cell-level transaction isolation", () => {
   let runtime: Runtime;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     runtime = new Runtime({
       storageManager,
       apiUrl: new URL("http://localhost:8000"),
+      memoryVersion: "v1",
     });
   });
 

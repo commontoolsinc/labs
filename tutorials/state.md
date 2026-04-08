@@ -39,7 +39,6 @@ export default pattern(() => {
 ```
 We can now display the cell within the `[UI]` section of the pattern:
 ```{code-block} typescript
-/// <cts-enable />
 import {
   cell,
   h,
@@ -175,9 +174,8 @@ Here's what the full Pattern looks like:
 ```{code-block} typescript
 :label: state_code_full
 :linenos: true
-:emphasize-lines: 7,8,14,15,16,17,23,24
+:emphasize-lines: 6,7,13,14,15,16,22,23
 :caption: Full State Code
-/// <cts-enable />
 import {
   cell,
   h,
@@ -227,4 +225,3 @@ We used the Open Source SRD 5.1 for character sheet information.
 See [SRD 5.1](https://www.dndbeyond.com/srd).
 It is licensed under
 Creative Commons Attribution 4.0 International (“CC-BY-4.0”)
-

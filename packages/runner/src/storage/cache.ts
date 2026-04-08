@@ -1,8 +1,6 @@
-import {
-  hashObjectFromString,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { hashObjectFromString } from "@commonfabric/data-model/value-hash";
+import type { FabricValue } from "@commonfabric/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -27,7 +25,7 @@ import type {
 } from "@commonfabric/memory/interface";
 import { set, setSelector } from "@commonfabric/memory/selection";
 import type { MemorySpaceSession } from "@commonfabric/memory/consumer";
-import { assert, unclaimed } from "@commonfabric/memory/fact";
+import { assert, retract, unclaimed } from "@commonfabric/memory/fact";
 import { COMMIT_LOG_TYPE, toRevision } from "@commonfabric/memory/commit";
 import * as Consumer from "@commonfabric/memory/consumer";
 import * as Codec from "@commonfabric/memory/codec";
@@ -37,7 +35,8 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { hashSchema } from "@commonfabric/data-model/schema-hash";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
 import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
@@ -46,9 +45,10 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import type {
+import {
   Assert,
   Claim,
+  getDefaultMemoryVersion,
   IRemoteStorageProviderSettings,
   IStorageManager,
   IStorageProvider,
@@ -57,7 +57,10 @@ import type {
   IStorageTransaction,
   IStoreError,
   ITransaction,
+  MemoryVersion,
+  OptStorageValue,
   PullError,
+  PushError,
   Retract,
   StorageValue,
   URI,
@@ -71,6 +74,7 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commonfabric/memory/acl";
+import * as V2Storage from "./v2.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -133,6 +137,10 @@ const logger = getLogger("storage.cache", {
   level: "error",
   logCountEvery: 0, // Disable auto-logging of counts
 });
+
+const isExpectedSessionCancel = (error: unknown): boolean => {
+  return error instanceof Error && error.message === "session cancel";
+};
 
 // Module-level cache: data URI + schema hash + path + space → Promise
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
@@ -348,6 +356,18 @@ class PullQueue {
   }
 }
 
+// Only cache against already-deep-frozen inputs. Mutable schemas can be edited
+// in place, and keying the cache by their identity would return stale results.
+const standardizedSchemaCache = new WeakMap<object, JSONSchema>();
+
+const selectorRefFor = (selector: SchemaPathSelector): string =>
+  JSON.stringify([
+    selector.path,
+    selector.schema === undefined
+      ? ""
+      : hashSchema(SelectorTracker.getStandardSchema(selector.schema)),
+  ]);
+
 // This class helps us maintain a client model of our server side subscriptions
 export class SelectorTracker<T = Result<Unit, Error>> {
   // Map from BaseMemoryAddress key string to set of selectorRef strings
@@ -367,7 +387,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (selector === undefined || selector.schema === undefined) {
       return;
     }
-    const selectorRef = hashOf(JSON.stringify(selector)).toString();
+    const selectorRef = selectorRefFor(selector);
     this.refTracker.add(toKey(address), selectorRef);
     this.selectors.set(selectorRef, selector);
     this.standardizedSelector.set(selectorRef, {
@@ -388,7 +408,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   ): boolean {
     const selectorRefs = this.refTracker.get(toKey(address));
     if (selectorRefs !== undefined) {
-      const selectorRef = hashOf(JSON.stringify(selector)).toString();
+      const selectorRef = selectorRefFor(selector);
       return selectorRefs.has(selectorRef);
     }
     return false;
@@ -404,7 +424,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (selectorRefs === undefined) {
       return noMatch;
     }
-    const newSelectorRef = hashOf(JSON.stringify(selector)).toString();
+    const newSelectorRef = selectorRefFor(selector);
     // A selector is its own superset
     if (selectorRefs.has(newSelectorRef)) {
       const promiseKey = `${toKey(address)}?${newSelectorRef}`;
@@ -417,7 +437,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     const newSchema = selector.schema
       ? SelectorTracker.getStandardSchema(selector.schema)
       : false;
-    const newSchemaString = JSON.stringify(newSchema);
+    const newSchemaHash = newSchema === false ? false : hashSchema(newSchema);
     for (const selectorRef of selectorRefs) {
       const existingSelector = this.standardizedSelector.get(selectorRef)!;
       const existingAddress = { ...address, path: existingSelector.path };
@@ -437,6 +457,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           false,
         );
         const sortedSubSchema = SelectorTracker.getStandardSchema(subSchema);
+        const sortedSubSchemaHash = typeof sortedSubSchema === "boolean"
+          ? sortedSubSchema
+          : hashSchema(sortedSubSchema);
         // Basic matching -- we may not recognize some supersets
         // If the subSchema has ifc flags, but the new schema does not, the
         // existing selector can still be a superset.
@@ -446,8 +469,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         // is not a subset of the original query, but we treat it as such.
         if (
           ContextualFlowControl.isTrueSchema(subSchema) ||
-          JSON.stringify(sortedSubSchema) === newSchemaString ||
-          SelectorTracker.checkAnyOf(subSchema, newSchemaString) ||
+          sortedSubSchemaHash === newSchemaHash ||
+          SelectorTracker.checkAnyOf(subSchema, newSchemaHash) ||
           newSchema === false
         ) {
           const promiseKey = `${toKey(address)}?${selectorRef}`;
@@ -455,16 +478,22 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         } else {
           const newSchemaRefs = new Set<string>();
           ContextualFlowControl.findRefs(newSchema, newSchemaRefs);
+          const newSchemaObj = isRecord(newSchema) ? newSchema : undefined;
+          const sortedSubSchemaObj = isRecord(sortedSubSchema)
+            ? sortedSubSchema
+            : undefined;
           // If we don't use any $refs, we can compare these without $defs
           if (
-            isRecord(newSchema) && isRecord(sortedSubSchema) &&
+            newSchemaObj && sortedSubSchemaObj &&
             newSchemaRefs.size == 0
           ) {
-            const { $defs: _defs1, ...newSchemaNoDefs } = newSchema;
-            const { $defs: _defs2, ...subSchemaNoDefs } = sortedSubSchema;
+            const { $defs: _defs1, ...newSchemaNoDefs } = newSchemaObj;
+            const { $defs: _defs2, ...subSchemaNoDefs } = sortedSubSchemaObj;
             if (
-              JSON.stringify(subSchemaNoDefs) ===
-                JSON.stringify(newSchemaNoDefs)
+              hashSchema(
+                SelectorTracker.getStandardSchema(subSchemaNoDefs),
+              ) ===
+                hashSchema(SelectorTracker.getStandardSchema(newSchemaNoDefs))
             ) {
               const promiseKey = `${toKey(address)}?${selectorRef}`;
               return [existingSelector, this.selectorPromises.get(promiseKey)!];
@@ -487,9 +516,20 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): Promise<T> | undefined {
-    const selectorRef = hashOf(JSON.stringify(selector)).toString();
+    const selectorRef = selectorRefFor(selector);
     const promiseKey = `${toKey(address)}?${selectorRef}`;
     return this.selectorPromises.get(promiseKey);
+  }
+
+  delete(address: BaseMemoryAddress, selector: SchemaPathSelector): void {
+    const selectorRef = selectorRefFor(selector);
+    this.refTracker.deleteValue(toKey(address), selectorRef);
+    const promiseKey = `${toKey(address)}?${selectorRef}`;
+    this.selectorPromises.delete(promiseKey);
+    if (![...this.refTracker].some(([, refs]) => refs.has(selectorRef))) {
+      this.selectors.delete(selectorRef);
+      this.standardizedSelector.delete(selectorRef);
+    }
   }
 
   getAllPromises(): Iterable<Promise<T>> {
@@ -524,7 +564,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   // If the anyOf items are `$ref` items, resolve them, then check.
   static checkAnyOf(
     schema: JSONSchema,
-    schemaString: string,
+    schemaHash: string | false,
   ): boolean {
     return isRecord(schema) && Array.isArray(schema.anyOf) &&
       (schema.anyOf.some((item) => {
@@ -532,7 +572,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         // in the parent of the anyOf, but this is just an optimization.
         item = SelectorTracker.getStandardSchema(item);
         // We might match before resolving the `$ref`
-        if (JSON.stringify(item) === schemaString) {
+        if (hashSchema(item) === schemaHash) {
           return true;
         }
         // Include $defs and compare again
@@ -541,7 +581,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
             $defs: schema.$defs,
           });
           item = SelectorTracker.getStandardSchema(item);
-          if (JSON.stringify(item) === schemaString) {
+          if (hashSchema(item) === schemaHash) {
             return true;
           }
         }
@@ -549,7 +589,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           item = ContextualFlowControl.resolveSchemaRefs(item, schema);
           item = SelectorTracker.getStandardSchema(item);
           // We might match after resolving the `$ref`
-          return JSON.stringify(item) === schemaString;
+          return hashSchema(item) === schemaHash;
         }
         return false;
       }));
@@ -567,6 +607,13 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   static getStandardSchema(schema: JSONSchema): JSONSchema {
     if (typeof schema === "boolean") {
       return schema;
+    }
+    const cacheable = isDeepFrozen(schema);
+    if (cacheable) {
+      const cached = standardizedSchemaCache.get(schema);
+      if (cached !== undefined) {
+        return cached;
+      }
     }
     const traverse = (
       value: Readonly<any>,
@@ -588,7 +635,11 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         }
       } else return value;
     };
-    return traverse(schema) as JSONSchema;
+    const standardized = internSchema(traverse(schema) as JSONSchema);
+    if (cacheable) {
+      standardizedSchemaCache.set(schema, standardized);
+    }
+    return standardized;
   }
 }
 
@@ -831,10 +882,12 @@ export class Replica {
       // the nursery/heap and sent out change information.
       const integratedPromise = query.promise.then(async (result) => {
         if (result.error) {
-          logger.error(
-            "query-error",
-            () => ["query failure", queryArgs, result.error],
-          );
+          if (!isExpectedSessionCancel(result.error)) {
+            logger.error(
+              "query-error",
+              () => ["query failure", queryArgs, result.error],
+            );
+          }
           // Surface auth errors prominently so they're not silently swallowed
           if ((result.error as any).name === "AuthorizationError") {
             console.error(
@@ -914,10 +967,12 @@ export class Replica {
     // Check for errors
     for (const result of results) {
       if ((result as any).error) {
-        logger.error(
-          "pull-error",
-          () => ["query failure", queryArgs, (result as any).error],
-        );
+        if (!isExpectedSessionCancel((result as any).error)) {
+          logger.error(
+            "pull-error",
+            () => ["query failure", queryArgs, (result as any).error],
+          );
+        }
         return { error: (result as any).error as PullError };
       }
     }
@@ -1449,6 +1504,7 @@ export interface RemoteStorageProviderOptions {
   the?: string;
   settings?: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
+  memoryVersion?: MemoryVersion;
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -1471,7 +1527,7 @@ export interface ProviderConnectionOptions extends ConnectionOptions {
   provider: Provider;
 }
 
-class ProviderConnection implements IStorageProvider {
+export class ProviderConnection implements IStorageProvider {
   address: URL;
   connection: WebSocket | null = null;
   connectionCount = 0;
@@ -1493,8 +1549,13 @@ class ProviderConnection implements IStorageProvider {
   queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
 
   constructor(
-    { id, address, provider, inspector, spaceIdentity }:
-      ProviderConnectionOptions,
+    {
+      id,
+      address,
+      provider,
+      inspector,
+      spaceIdentity,
+    }: ProviderConnectionOptions,
   ) {
     this.address = address;
     this.provider = provider;
@@ -1767,6 +1828,7 @@ export class Provider implements IStorageProvider {
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
   spaceIdentity?: Signer;
+  readonly memoryVersion: MemoryVersion;
 
   subscribers: Map<
     string,
@@ -1793,6 +1855,7 @@ export class Provider implements IStorageProvider {
     the = "application/json",
     settings = defaultSettings,
     spaceIdentity,
+    memoryVersion = getDefaultMemoryVersion(),
   }: RemoteStorageProviderOptions) {
     this.the = the as MIME;
     this.settings = settings;
@@ -1800,6 +1863,7 @@ export class Provider implements IStorageProvider {
     this.spaces = new Map();
     this.subscription = subscription;
     this.spaceIdentity = spaceIdentity;
+    this.memoryVersion = memoryVersion;
     this.workspace = this.mount(space);
   }
 
@@ -1867,7 +1931,71 @@ export class Provider implements IStorageProvider {
       Promise.all(this.workspace.commitPromises),
     ]);
   }
+  get<T extends FabricValue = FabricValue>(
+    uri: URI,
+  ): OptStorageValue<T> {
+    const entity = this.workspace.get({ id: uri, type: this.the });
 
+    return entity?.is as OptStorageValue<T>;
+  }
+
+  // This is mostly just used by tests and tools, since the transactions will
+  // directly commit their results.
+  async send<T extends FabricValue = FabricValue>(
+    batch: { uri: URI; value: StorageValue<T> }[],
+  ): Promise<
+    Result<Unit, PushError>
+  > {
+    const { the, workspace } = this;
+    const LABEL_TYPE = "application/label+json" as const;
+
+    // Collect facts so that we can derive desired state and a corresponding
+    // transaction
+    const facts: Fact[] = [];
+    for (const { uri, value } of batch) {
+      const newValue = value.value !== undefined
+        ? fabricFromNativeValue({ value: value.value, source: value.source })
+        : undefined;
+
+      const current = workspace.get({ id: uri, type: this.the });
+      if (!deepEqual(current?.is, newValue)) {
+        if (newValue !== undefined) {
+          facts.push(assert({
+            the,
+            of: uri,
+            is: newValue as FabricValue,
+            // If fact has no `cause` it is unclaimed fact.
+            cause: current?.cause ? current : null,
+          }));
+        } else {
+          facts.push(retract(current as Consumer.Assertion));
+        }
+      }
+      if (this.memoryVersion === "v1" && value.labels !== undefined) {
+        const currentLabel = workspace.get({ id: uri, type: LABEL_TYPE });
+        if (!deepEqual(currentLabel?.is, value.labels)) {
+          if (value.labels !== undefined) {
+            facts.push(assert({
+              the: LABEL_TYPE,
+              of: uri,
+              is: value.labels as FabricValue,
+              // If fact has no `cause` it is unclaimed fact.
+              cause: currentLabel?.cause ? currentLabel : null,
+            }));
+          } else {
+            facts.push(retract(currentLabel as Consumer.Assertion));
+          }
+        }
+      }
+    }
+    // If we don't have any writes, don't bother sending it.
+    if (facts.length > 0) {
+      const result = await this.workspace.commit({ facts, claims: [] });
+      return result.error ? result : { ok: {} };
+    } else {
+      return { ok: {} };
+    }
+  }
   /**
    * Polls all spaces for changes.
    */
@@ -1956,19 +2084,39 @@ export interface Options {
    * (Temporary) Space identity.
    */
   spaceIdentity?: Signer;
+
+  /**
+   * Storage implementation selection during the v1/v2 cutover.
+   */
+  memoryVersion?: MemoryVersion;
 }
+
+export type V1StorageManagerOptions = Options & {
+  memoryVersion?: "v1";
+};
+
+export type V2StorageManagerOptions = Options & {
+  memoryVersion: "v2";
+};
 
 export class StorageManager implements IStorageManager {
   address: URL;
   as: Signer;
   id: string;
+  readonly memoryVersion: MemoryVersion;
   settings: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
   #providers: Map<string, IStorageProviderWithReplica> = new Map();
   #subscription = SubscriptionManager.create();
   #crossSpacesPromises: Set<Promise<void>> = new Set();
 
-  static open(options: Options) {
+  static open(options: V1StorageManagerOptions): StorageManager;
+  static open(options: V2StorageManagerOptions): V2Storage.StorageManager;
+  static open(options: Options): StorageManager | V2Storage.StorageManager {
+    const memoryVersion = options.memoryVersion ?? getDefaultMemoryVersion();
+    if (memoryVersion === "v2") {
+      return V2Storage.StorageManager.open(options);
+    }
     if (options.address.protocol === "memory:") {
       throw new RangeError(
         "memory: protocol is not supported in browser runtime",
@@ -1983,6 +2131,7 @@ export class StorageManager implements IStorageManager {
       address,
       as,
       id = crypto.randomUUID(),
+      memoryVersion = getDefaultMemoryVersion(),
       settings = defaultSettings,
       spaceIdentity,
     }: Options,
@@ -1991,6 +2140,7 @@ export class StorageManager implements IStorageManager {
     this.settings = settings;
     this.as = as;
     this.id = id;
+    this.memoryVersion = memoryVersion;
     this.spaceIdentity = spaceIdentity;
   }
 
@@ -1999,7 +2149,7 @@ export class StorageManager implements IStorageManager {
    * creates a new web socket connection to `${this.address}?space=${space}`
    * in order to cluster connections for the space in the same group.
    */
-  open(space: MemorySpace) {
+  open(space: MemorySpace): IStorageProviderWithReplica {
     const provider = this.#providers.get(space);
     if (!provider) {
       const provider = this.connect(space);
@@ -2007,6 +2157,10 @@ export class StorageManager implements IStorageManager {
       return provider;
     }
     return provider;
+  }
+
+  openConnection(space: MemorySpace): ProviderConnection {
+    return this.open(space) as ProviderConnection;
   }
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
@@ -2026,6 +2180,7 @@ export class StorageManager implements IStorageManager {
       settings,
       subscription: this.#subscription,
       session: Consumer.create({ as }),
+      memoryVersion: this.memoryVersion,
       spaceIdentity: spaceIdentityForSpace,
     });
   }
@@ -2053,6 +2208,10 @@ export class StorageManager implements IStorageManager {
    */
   subscribe(subscription: IStorageSubscription): void {
     this.#subscription.subscribe(subscription);
+  }
+
+  unsubscribe(subscription: IStorageSubscription): void {
+    this.#subscription.unsubscribe(subscription);
   }
 
   /**
@@ -2105,17 +2264,14 @@ export class StorageManager implements IStorageManager {
     if (!space) throw new Error("No space set");
 
     if (id.startsWith("data:")) {
-      return this.syncDataURICell(cell, space, id, schema);
+      return await this.syncDataURICell(cell, space, id, schema);
     }
 
     const storageProvider = this.open(space);
-
-    const selector = {
+    await storageProvider.sync(id as URI, {
       path: cell.path.map((p) => p.toString()),
       schema: schema ?? false,
-    };
-
-    await storageProvider.sync(id, selector);
+    });
     return cell;
   }
 
@@ -2274,8 +2430,12 @@ export const getChanges = (
 const _generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
 ): JSONSchema | undefined => {
-  if (isRecord(change.is) && "labels" in change.is) {
-    return { ifc: change.is.labels } as JSONSchema;
+  const value = change?.is;
+  if (isRecord(value)) {
+    const labels = (value as { labels?: unknown }).labels;
+    if (labels !== undefined) {
+      return { ifc: labels } as JSONSchema;
+    }
   }
   return undefined;
 };

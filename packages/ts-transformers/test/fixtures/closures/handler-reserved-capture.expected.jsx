@@ -1,25 +1,36 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     label: string;
 }
 // FIXTURE: handler-reserved-capture
-// Verifies: captured variable named __ct_handler_event is renamed to avoid collision with the synthetic event param
-//   onClick={() => __ct_handler_event) → handler(false, { __ct_handler_event: ... }, (__ct_handler_event_1, { __ct_handler_event }) => ...)
-// Context: Edge case -- user variable collides with internal __ct_handler_event name; event param gets suffixed
+// Verifies: captured variable named __cf_handler_event is renamed to avoid collision with the synthetic event param
+//   onClick={() => __cf_handler_event) → handler(false, { __cf_handler_event: ... }, (__cf_handler_event_1, { __cf_handler_event }) => ...)
+// Context: Edge case -- user variable collides with internal __cf_handler_event name; event param gets suffixed
 export default pattern((state) => {
-    const __ct_handler_event = state.key("label");
+    const __cf_handler_event = state.key("label");
     return {
         [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
-                __ct_handler_event: {
+                __cf_handler_event: {
                     type: "string"
                 }
             },
-            required: ["__ct_handler_event"]
-        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event_1, { __ct_handler_event }) => __ct_handler_event)({
-            __ct_handler_event: __ct_handler_event
+            required: ["__cf_handler_event"]
+        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event_1, { __cf_handler_event }) => __cf_handler_event)({
+            __cf_handler_event: __cf_handler_event
         })}>
         Echo
       </button>),
@@ -64,5 +75,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

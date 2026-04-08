@@ -20,7 +20,9 @@ import {
   handler,
   ifElse,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
@@ -88,7 +90,9 @@ const COLORS = [
 
 // Simple random ID generator
 const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+  `${safeDateNow().toString(36)}-${
+    nonPrivateRandom().toString(36).slice(2, 11)
+  }`;
 
 // ============ STYLES ============
 
@@ -930,13 +934,13 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       );
                     }
 
-                    lastDropTime.set(Date.now());
+                    lastDropTime.set(safeDateNow());
                   });
 
                   // Click handlers for creating events at specific hours
                   const hourClickActions = HOURS.map((hour) =>
                     action(() => {
-                      if (Date.now() - lastDropTime.get() < 300) {
+                      if (safeDateNow() - lastDropTime.get() < 300) {
                         return;
                       }
                       newEventTitle.set("");
@@ -1256,7 +1260,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
                   // Click action to open edit modal
                   const openEvent = action(() => {
-                    if (Date.now() - lastDropTime.get() < 300) {
+                    if (safeDateNow() - lastDropTime.get() < 300) {
                       return;
                     }
                     // Populate edit form with event data

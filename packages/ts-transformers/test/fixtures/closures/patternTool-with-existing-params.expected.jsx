@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 const multiplier = cell(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
@@ -25,7 +36,7 @@ export default pattern(() => {
     const tool = patternTool(({ value, offset, multiplier }: {
         value: number;
         offset: number;
-        multiplier: __cfHelpers.Cell<number>;
+        multiplier: import("commonfabric").Cell<number>;
     }) => {
         return derive({
             type: "object",
@@ -88,5 +99,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

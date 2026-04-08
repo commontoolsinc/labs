@@ -483,7 +483,6 @@ System:
 ```typescript
 // The LLM generates the forked pattern source
 const forkedSource = `
-  /// <cts-enable />
   export interface Contractor extends PersonLike {
     name: string;
     hourlyRate: number;
@@ -593,7 +592,6 @@ export interface UpgradeOption {
 ## Example: Contacts Container (with Lists of Lists)
 
 ```typescript
-/// <cts-enable />
 import { pattern, NAME, UI, Writable, action, computed } from "commonfabric";
 import type { PersonLike, ContainerItem, ContainerProtocol } from "commonfabric";
 
@@ -677,7 +675,6 @@ This shows how a user might fork the base Contact pattern to create a FamilyMemb
 
 ### Base: contact.tsx (provided)
 ```typescript
-/// <cts-enable />
 import { pattern, NAME, UI, Writable, Default, computed } from "commonfabric";
 import type { PersonLike } from "commonfabric";
 
@@ -710,7 +707,6 @@ User says: "I need to track family members with birthdays and dietary restrictio
 LLM forks contact.tsx and adds the requested fields:
 
 ```typescript
-/// <cts-enable />
 import { pattern, NAME, UI, Writable, Default, computed } from "commonfabric";
 import type { PersonLike } from "commonfabric";
 
@@ -754,7 +750,6 @@ export default pattern<{ member: Writable<Default<FamilyMember, { name: "", rela
 ### Example: Contacts with Google Import Sub-List
 
 ```typescript
-/// <cts-enable />
 import { pattern, NAME, UI, Writable, computed } from "commonfabric";
 import type { PersonLike, ContainerProtocol } from "commonfabric";
 

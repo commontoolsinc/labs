@@ -320,13 +320,31 @@ export function findAndInlineDataURILinks(value: any): any {
       return value;
     }
   } else if (Array.isArray(value)) {
-    return value.map(findAndInlineDataURILinks);
+    let next: any[] | undefined;
+    for (let index = 0; index < value.length; index++) {
+      if (!(index in value)) continue;
+      const current = value[index];
+      const inlined = findAndInlineDataURILinks(current);
+      if (next) {
+        next[index] = inlined;
+      } else if (inlined !== current) {
+        next = value.slice();
+        next[index] = inlined;
+      }
+    }
+    return next ?? value;
   } else if (isRecord(value)) {
-    return Object.fromEntries(
-      Object.entries(value).map((
-        [key, value],
-      ) => [key, findAndInlineDataURILinks(value)]),
-    );
+    let next: Record<string, unknown> | undefined;
+    for (const [key, entry] of Object.entries(value)) {
+      const inlined = findAndInlineDataURILinks(entry);
+      if (next) {
+        next[key] = inlined;
+      } else if (inlined !== entry) {
+        next = { ...value };
+        next[key] = inlined;
+      }
+    }
+    return next ?? value;
   } else {
     return value;
   }

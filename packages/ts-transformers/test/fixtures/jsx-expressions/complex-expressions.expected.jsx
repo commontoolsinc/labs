@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Problem {
     price: number;
     discount: number;
@@ -9,10 +20,10 @@ interface Problem {
 // Verifies: multi-variable arithmetic in JSX is wrapped in derive() with captured refs
 //   {price - discount}             → derive({price, discount}, (...) => price - discount)
 //   {(price - discount) * (1+tax)} → derive({price, discount, tax}, (...) => ...)
-export default pattern((__ct_pattern_input) => {
-    const price = __ct_pattern_input.key("price");
-    const discount = __ct_pattern_input.key("discount");
-    const tax = __ct_pattern_input.key("tax");
+export default pattern((__cf_pattern_input) => {
+    const price = __cf_pattern_input.key("price");
+    const discount = __cf_pattern_input.key("discount");
+    const tax = __cf_pattern_input.key("tax");
     return {
         [UI]: (<div>
           <p>Price: {price}</p>
@@ -102,5 +113,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

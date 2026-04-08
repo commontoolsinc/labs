@@ -16,6 +16,8 @@ import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 export type { JSONSchema, JSONValue, Program };
 
+import type { MemoryVersion } from "@commonfabric/memory/interface";
+
 export type MessageId = number;
 
 export type CellRef = NormalizedFullLink;
@@ -120,6 +122,8 @@ export interface InitializationData {
   spaceIdentity?: KeyPairRaw;
   // Default timeout in milliseconds.
   timeoutMs?: number;
+  // Test-only storage/runtime override for integration comparisons.
+  memoryVersion?: MemoryVersion;
   // Experimental space-model feature flags.
   experimental?: {
     modernDataModel?: boolean;

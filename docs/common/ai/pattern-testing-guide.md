@@ -45,7 +45,6 @@ The usual shape is:
 4. return the test sequence in order
 
 ```tsx
-/// <cts-enable />
 
 import { action, computed, pattern } from "commonfabric";
 import Pattern from "./pattern.tsx";
@@ -79,6 +78,17 @@ export default pattern(() => {
   transition
 - test a sub-pattern before building the next dependent layer when that helps
   isolate failures
+
+## Testing Time and Randomness
+
+If a pattern uses `safeDateNow()` or `nonPrivateRandom()`, keep the assertions
+deterministic:
+
+- prefer asserting that a value was set, changed, or has the expected shape
+- avoid calling `safeDateNow()`, `nonPrivateRandom()`, `Date.now()`, or
+  `Math.random()` inside a test `computed()` assertion
+- if you need an exact value, capture it in the action under test and assert
+  against the captured result rather than recomputing it in the assertion
 
 ## Done When
 

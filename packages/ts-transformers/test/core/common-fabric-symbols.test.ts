@@ -113,7 +113,7 @@ describe("symbolDeclaresCommonFabricDefault", () => {
           export type Default<T, V = T> = T;
         `,
         "/test.ts": `
-          import type { Default } from "/lib/defaults";
+          import type { Default } from "@commonfabric/lib/defaults";
 
           interface MyArgs {
             count: Default<number, 0>;

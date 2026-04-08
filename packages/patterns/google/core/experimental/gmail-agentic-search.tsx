@@ -24,15 +24,17 @@
  * ```
  */
 import {
+  action,
   Default,
   derive,
   generateObject,
-  getPatternEnvironment,
   handler,
   ifElse,
   NAME,
   navigateTo,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   wish,
@@ -45,7 +47,7 @@ import {
 } from "../util/google-auth-manager.tsx";
 import GoogleAuth from "../google-auth.tsx";
 import {
-  GmailClient,
+  gmailClient,
   validateAndRefreshTokenCrossPiece,
 } from "../util/gmail-client.ts";
 import GmailSearchRegistry from "./gmail-search-registry.tsx";
@@ -57,8 +59,6 @@ import type {
 // Re-export Auth type for convenience
 export type { Auth } from "../gmail-importer.tsx";
 import type { Auth } from "../gmail-importer.tsx";
-
-const _env = getPatternEnvironment();
 
 // Debug flag for development - disable in production
 const DEBUG_AGENT = false;
@@ -311,7 +311,7 @@ export interface GmailAgenticSearchOutput {
 //   const existingKeys = new Set(currentItems.map(i => `${i.field1}:${i.field2}`.toLowerCase()));
 //
 //   if (!existingKeys.has(dedupeKey)) {
-//     const id = `record-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+//     const id = `record-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`;
 //     const newRecord = {
 //       id,
 //       field1: input.field1,
@@ -355,19 +355,6 @@ export interface GmailAgenticSearchOutput {
 // Handlers must be defined at module scope, not inside patterns.
 // ============================================================================
 
-// Handler to create a new GmailSearchRegistry piece
-const createSearchRegistryHandler = handler<unknown, Record<string, never>>(
-  () => {
-    if (DEBUG_AGENT) {
-      console.log("[GmailAgenticSearch] Creating new search registry piece");
-    }
-    const registryPiece = GmailSearchRegistry({
-      queries: [],
-    });
-    return navigateTo(registryPiece);
-  },
-);
-
 // Handler to change account type (writes to local writable cell)
 const setAccountTypeHandler = handler<
   { target: { value: string } },
@@ -388,7 +375,7 @@ const stopScanHandler = handler<
     isScanning: Writable<Default<boolean, false>>;
   }
 >((_, state) => {
-  state.lastScanAt.set(Date.now());
+  state.lastScanAt.set(safeDateNow());
   state.isScanning.set(false);
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Scan stopped");
@@ -403,7 +390,7 @@ const completeScanHandler = handler<
     isScanning: Writable<Default<boolean, false>>;
   }
 >((_, state) => {
-  state.lastScanAt.set(Date.now());
+  state.lastScanAt.set(safeDateNow());
   state.isScanning.set(false);
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Scan completed");
@@ -432,7 +419,7 @@ const addDebugLogEntry = (
   entry: Omit<DebugLogEntry, "timestamp">,
 ) => {
   try {
-    logCell.push({ ...entry, timestamp: Date.now() });
+    logCell.push({ ...entry, timestamp: safeDateNow() });
   } catch (err) {
     // Log to console but don't let debug logging errors crash the agent
     console.error("[GmailAgenticSearch] Debug log error:", err);
@@ -577,8 +564,8 @@ const searchGmailHandler = handler<
         };
       }
 
-      // Use GmailClient with the auth cell and onRefresh callback
-      const client = new GmailClient(state.auth, {
+      // Use gmailClient with the auth cell and onRefresh callback
+      const client = gmailClient(state.auth, {
         debugMode: false,
         onRefresh,
       });
@@ -620,7 +607,7 @@ const searchGmailHandler = handler<
           {
             query: input.query,
             emailCount: emails.length,
-            timestamp: Date.now(),
+            timestamp: safeDateNow(),
           },
         ],
         status: "analyzing",
@@ -638,7 +625,7 @@ const searchGmailHandler = handler<
         // Update existing query using .key().key().set() for atomic updates
         const existing = currentLocalQueries[existingQueryIndex];
         const itemCell = state.localQueries.key(existingQueryIndex);
-        itemCell.key("lastUsed").set(Date.now());
+        itemCell.key("lastUsed").set(safeDateNow());
         itemCell.key("useCount").set(existing.useCount + 1);
         // Auto-increase effectiveness if it found results (capped at 5)
         itemCell.key("effectiveness").set(
@@ -650,14 +637,14 @@ const searchGmailHandler = handler<
         state.lastExecutedQueryIdCell.set(existing.id);
       } else if (emails.length > 0) {
         // Only add new query if it found results
-        const newQueryId = `query-${Date.now()}-${
-          Math.random().toString(36).slice(2, 8)
+        const newQueryId = `query-${safeDateNow()}-${
+          nonPrivateRandom().toString(36).slice(2, 8)
         }`;
         const newQuery: LocalQuery = {
           id: newQueryId,
           query: input.query,
-          createdAt: Date.now(),
-          lastUsed: Date.now(),
+          createdAt: safeDateNow(),
+          lastUsed: safeDateNow(),
           useCount: 1,
           effectiveness: 1, // Start at 1 since it found results
           shareStatus: "private",
@@ -987,32 +974,6 @@ const _updateSanitizedQueryHandler = handler<
   }
 });
 
-// Handler to create a new GoogleAuth piece (module scope)
-const createGoogleAuthHandler = handler(() => {
-  const authPiece = GoogleAuth({
-    selectedScopes: {
-      gmail: true,
-      gmailSend: false,
-      gmailModify: false,
-      calendar: false,
-      calendarWrite: false,
-      drive: false,
-      docs: false,
-      contacts: false,
-    },
-    auth: {
-      token: "",
-      tokenType: "",
-      scope: [],
-      expiresIn: 0,
-      expiresAt: 0,
-      refreshToken: "",
-      user: { email: "", name: "", picture: "" },
-    },
-  });
-  return navigateTo(authPiece);
-});
-
 // ============================================================================
 // PATTERN
 // ============================================================================
@@ -1219,7 +1180,7 @@ const GmailAgenticSearch = pattern<
       if (!a?.expiresAt) return false;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
-      return Date.now() > (a.expiresAt - bufferMs);
+      return safeDateNow() > (a.expiresAt - bufferMs);
     });
 
     // Gmail scope URL for checking
@@ -1232,11 +1193,42 @@ const GmailAgenticSearch = pattern<
 
     // Note: Scope warnings are handled by authFullUI via createGoogleAuth utility
 
-    // Use module-scope handler for creating GoogleAuth
-    const createGoogleAuth = createGoogleAuthHandler;
+    const createGoogleAuth = action(() =>
+      navigateTo(
+        GoogleAuth({
+          selectedScopes: {
+            gmail: true,
+            gmailSend: false,
+            gmailModify: false,
+            calendar: false,
+            calendarWrite: false,
+            drive: false,
+            docs: false,
+            contacts: false,
+          },
+          auth: {
+            token: "",
+            tokenType: "",
+            scope: [],
+            expiresIn: 0,
+            expiresAt: 0,
+            refreshToken: "",
+            user: { email: "", name: "", picture: "" },
+          },
+        }),
+      )
+    );
 
-    // Use module-scope handlers
-    const createSearchRegistry = createSearchRegistryHandler;
+    const createSearchRegistry = action(() => {
+      if (DEBUG_AGENT) {
+        console.log("[GmailAgenticSearch] Creating new search registry piece");
+      }
+      return navigateTo(
+        GmailSearchRegistry({
+          queries: [],
+        }),
+      );
+    });
     // Pre-bind handler with required state - bound handlers work in JSX but not in derive callbacks
     const boundSetAccountType = setAccountTypeHandler({
       selectedType: selectedAccountType,
@@ -2128,9 +2120,6 @@ When you're done searching, STOP calling tools and produce your final structured
     // and called directly with all parameters in onClick handlers (no pre-binding needed)
     // Note: localQueriesExpanded/toggleLocalQueries removed - using native <details>/<summary> instead
 
-    // Pre-bind handler for creating registry
-    const boundCreateSearchRegistry = createSearchRegistry({});
-
     // Local Queries UI - collapsible list of saved queries
     // Uses native <details>/<summary> to avoid nested derive closure issues
     // (see superstition: 2025-12-06-use-native-details-summary-for-expand-collapse.md)
@@ -2840,7 +2829,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                             (pendingWritable.key(idx).key(
                                               "submittedAt",
                                             ) as Writable<number | undefined>)
-                                              .set(Date.now());
+                                              .set(safeDateNow());
                                           }
 
                                           // Update local query status to submitted
@@ -2902,7 +2891,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                         it with tag #gmailSearchRegistry.
                                       </div>
                                       <cf-button
-                                        onClick={boundCreateSearchRegistry}
+                                        onClick={createSearchRegistry}
                                         variant="secondary"
                                         size="sm"
                                       >

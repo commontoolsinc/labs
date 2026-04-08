@@ -507,6 +507,24 @@ export interface GetLoggerOptions {
 }
 
 /**
+ * Optional timing-output bridge for exporting selected logger timings to
+ * Performance entries and/or console output.
+ *
+ * Matching is prefix-based against:
+ * - the timing key path, e.g. "scheduler/execute"
+ * - the logger module name, e.g. "scheduler"
+ * - the combined form "<module>:<keyPath>", e.g. "scheduler:scheduler/execute"
+ *
+ * Use ["*"] to match every timed span.
+ */
+export interface TimingOutputConfig {
+  include: string[];
+  measure?: boolean;
+  console?: boolean;
+  minMs?: number;
+}
+
+/**
  * Call counts for each log level
  */
 export interface LogCounts {
@@ -515,6 +533,88 @@ export interface LogCounts {
   warn: number;
   error: number;
   readonly total: number;
+}
+
+let _globalTimingOutputConfig: TimingOutputConfig | undefined =
+  getEnvTimingOutputConfig();
+
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function parseTimingInclude(source: string | undefined): string[] {
+  if (!source) return [];
+  return source
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function getEnvTimingOutputConfig(): TimingOutputConfig | undefined {
+  if (!isDeno()) return undefined;
+
+  try {
+    const include = parseTimingInclude(Deno.env.get("CT_LOG_TIMING"));
+    if (include.length === 0) return undefined;
+
+    const consoleEnabled = parseBooleanEnv(
+      Deno.env.get("CT_LOG_TIMING_CONSOLE"),
+    ) ?? false;
+    const measureEnabled = parseBooleanEnv(
+      Deno.env.get("CT_LOG_TIMING_MEASURE"),
+    ) ?? true;
+    const minMsRaw = Deno.env.get("CT_LOG_TIMING_MIN_MS");
+    const minMs = minMsRaw !== undefined ? Number(minMsRaw) : undefined;
+
+    const config: TimingOutputConfig = {
+      include,
+      console: consoleEnabled,
+      measure: measureEnabled,
+    };
+    if (typeof minMs === "number" && Number.isFinite(minMs)) {
+      config.minMs = minMs;
+    }
+    return config;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setGlobalTimingOutputConfig(
+  config: TimingOutputConfig | undefined,
+): void {
+  _globalTimingOutputConfig = config ?? getEnvTimingOutputConfig();
+}
+
+export function getGlobalTimingOutputConfig():
+  | TimingOutputConfig
+  | undefined {
+  return _globalTimingOutputConfig
+    ? {
+      ..._globalTimingOutputConfig,
+      include: [..._globalTimingOutputConfig.include],
+    }
+    : undefined;
+}
+
+function matchesTimingOutputConfig(
+  config: TimingOutputConfig,
+  moduleName: string | undefined,
+  keyPath: string,
+): boolean {
+  if (config.include.length === 0) return false;
+  if (config.include.includes("*")) return true;
+
+  const combined = moduleName ? `${moduleName}:${keyPath}` : keyPath;
+  return config.include.some((pattern) =>
+    combined.startsWith(pattern) ||
+    keyPath.startsWith(pattern) ||
+    (moduleName?.startsWith(pattern) ?? false)
+  );
 }
 
 /**
@@ -647,6 +747,50 @@ export class Logger {
       this._countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
     }
     this._countsByKey[key][level]++;
+  }
+
+  private emitTimingOutputs(
+    keyPath: string,
+    startTime: number,
+    endTime: number,
+    elapsed: number,
+  ): void {
+    const config = _globalTimingOutputConfig;
+    if (
+      !config || !matchesTimingOutputConfig(config, this.moduleName, keyPath)
+    ) {
+      return;
+    }
+    if (config.minMs !== undefined && elapsed < config.minMs) {
+      return;
+    }
+
+    const measureName = this.moduleName
+      ? `logger:${this.moduleName}:${keyPath}`
+      : `logger:${keyPath}`;
+
+    if (config.measure !== false) {
+      try {
+        performance.measure(measureName, {
+          start: startTime,
+          end: endTime,
+        });
+      } catch {
+        // Ignore measure failures in runtimes with partial support.
+      }
+    }
+
+    if (config.console) {
+      const prefix = this.moduleName
+        ? `%c[TIMING][${this.moduleName}::${getTimeStamp()}]`
+        : `%c[TIMING][${getTimeStamp()}]`;
+      const duration = `${elapsed.toFixed(3)}ms`;
+      if (shouldLogToStderr()) {
+        logToStderr(prefix.replace("%c", ""), keyPath, duration);
+      } else {
+        console.log(prefix, LOG_COLORS.debug, keyPath, duration);
+      }
+    }
   }
 
   /**
@@ -828,8 +972,10 @@ export class Logger {
     }
     this._activeTimers.delete(keyPath);
 
-    const elapsed = performance.now() - startTime;
+    const endTime = performance.now();
+    const elapsed = endTime - startTime;
     this._recordTime(elapsed, keys);
+    this.emitTimingOutputs(keyPath, startTime, endTime, elapsed);
     return elapsed;
   }
 
@@ -865,7 +1011,9 @@ export class Logger {
 
     const elapsed = endTime - startTime;
     if (keys.length > 0) {
+      const keyPath = keys.join("/");
       this._recordTime(elapsed, keys);
+      this.emitTimingOutputs(keyPath, startTime, endTime, elapsed);
     }
     return elapsed;
   }
@@ -1332,6 +1480,8 @@ if (typeof globalThis !== "undefined") {
       resetAllTimingBaselines?: typeof resetAllTimingBaselines;
       setGlobalLogFloor?: typeof setGlobalLogFloor;
       getGlobalLogFloor?: typeof getGlobalLogFloor;
+      setGlobalTimingOutputConfig?: typeof setGlobalTimingOutputConfig;
+      getGlobalTimingOutputConfig?: typeof getGlobalTimingOutputConfig;
     };
   };
   if (!global.commonfabric) {
@@ -1347,4 +1497,6 @@ if (typeof globalThis !== "undefined") {
   global.commonfabric.resetAllTimingBaselines = resetAllTimingBaselines;
   global.commonfabric.setGlobalLogFloor = setGlobalLogFloor;
   global.commonfabric.getGlobalLogFloor = getGlobalLogFloor;
+  global.commonfabric.setGlobalTimingOutputConfig = setGlobalTimingOutputConfig;
+  global.commonfabric.getGlobalTimingOutputConfig = getGlobalTimingOutputConfig;
 }

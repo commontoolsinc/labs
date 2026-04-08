@@ -5,6 +5,7 @@ import {
   type Pattern,
   unsafe_originalPattern,
   unsafe_parentPattern,
+  unsafe_verifiedLoadId,
 } from "./builder/types.ts";
 import { type AnyCell, type Cell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -171,6 +172,9 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       );
       if (binding[unsafe_originalPattern]) {
         result[unsafe_originalPattern] = binding[unsafe_originalPattern];
+      }
+      if (binding[unsafe_verifiedLoadId]) {
+        result[unsafe_verifiedLoadId] = binding[unsafe_verifiedLoadId];
       }
       return result;
     } else return binding;

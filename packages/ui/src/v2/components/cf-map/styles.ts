@@ -1,6 +1,6 @@
 /**
  * Styles for cf-map component
- * Includes Leaflet core CSS and ct-* theme integration
+ * Includes Leaflet core CSS and cf-* theme integration
  */
 
 import { css } from "lit";

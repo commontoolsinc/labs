@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression test: action() result used in same ternary branch as computed()
  *
@@ -7,6 +15,9 @@ import * as __cfHelpers from "commonfabric";
  * the whole JSX branch through an extra derive wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Card {
     title: string;
     description: string;
@@ -20,8 +31,8 @@ interface Input {
 //   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
 //   nested hasDescription ternary → local ifElse(...) inside the JSX branch
 // Context: Regression coverage for JSX-local rewriting with action references in the same branch
-export default pattern((__ct_pattern_input) => {
-    const card = __ct_pattern_input.key("card");
+export default pattern((__cf_pattern_input) => {
+    const card = __cf_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -176,5 +187,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

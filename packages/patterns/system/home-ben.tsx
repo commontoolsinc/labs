@@ -6,7 +6,9 @@ import {
   generateText,
   handler,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   toSchema,
   UI,
   Writable,
@@ -149,7 +151,7 @@ const addFavorite = handler<
     // Add journal entry for the favorite action
     const snapshot = captureSnapshot(piece, schemaTag);
     journal.push({
-      timestamp: Date.now(),
+      timestamp: safeDateNow(),
       eventType: "piece:favorited",
       subject: piece,
       snapshot,
@@ -178,7 +180,7 @@ const removeFavorite = handler<
 
     // Add journal entry for the unfavorite action
     journal.push({
-      timestamp: Date.now(),
+      timestamp: safeDateNow(),
       eventType: "piece:unfavorited",
       subject: piece as any,
       snapshot,
@@ -245,7 +247,7 @@ const submitAnswerHandler = handler<
         ...q,
         status: "answered" as const,
         answer: userAnswer,
-        answeredAt: Date.now(),
+        answeredAt: safeDateNow(),
       }
       : q
   );
@@ -255,7 +257,7 @@ const submitAnswerHandler = handler<
     content: `${question.question} → ${userAnswer}`,
     confidence: 1.0, // User-provided = high confidence
     source: `user:question:${question.id}`,
-    timestamp: Date.now(),
+    timestamp: safeDateNow(),
   };
 
   // Update learned with new fact and updated question
@@ -510,7 +512,7 @@ Return valid JSON matching the schema.`,
           content: f.content,
           confidence: f.confidence,
           source: `journal:${maxTimestamp}`,
-          timestamp: Date.now(),
+          timestamp: safeDateNow(),
         }));
       if (newFacts.length > 0) {
         updatedLearned = {
@@ -563,7 +565,9 @@ Return valid JSON matching the schema.`,
       const newQuestions = result.questions
         .filter((q) => !existingQuestionTexts.has(q.question))
         .map((q) => ({
-          id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: `q-${safeDateNow()}-${
+            nonPrivateRandom().toString(36).slice(2, 7)
+          }`,
           question: q.question,
           category: q.category,
           priority: q.priority,

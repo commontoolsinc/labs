@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, NAME, pattern, UI } from "commonfabric";
 
 export default pattern(() => {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, pattern, UI } from "commonfabric";
 
 interface FriendListState {

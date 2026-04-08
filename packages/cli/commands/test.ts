@@ -1,4 +1,5 @@
 import { Command } from "@cliffy/command";
+import type { MemoryVersion } from "@commonfabric/memory/interface";
 import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
 import { cliText } from "../lib/cli-name.ts";
@@ -45,6 +46,18 @@ export const test = new Command()
     "Root directory for resolving imports. Enables imports like '../shared/utils.tsx'.",
   )
   .option(
+    "--memory-version <version:string>",
+    "Force the test harness storage/runtime implementation (v1 or v2).",
+    {
+      value: (value: string): MemoryVersion => {
+        if (value === "v1" || value === "v2") {
+          return value;
+        }
+        throw new Error(`Invalid memory version: ${value}`);
+      },
+    },
+  )
+  .option(
     "--stats-threshold <ms:number>",
     "Print logger stats for steps slower than this (ms). 0 = every step. Requires --verbose.",
     { default: 5000 },
@@ -62,6 +75,15 @@ export const test = new Command()
     "--scheduler-mode <mode:string>",
     "Scheduler mode for test runtimes: default, push, or pull.",
     { default: "default" },
+  )
+  .option(
+    "--storage-stats",
+    "Print storage-related logger timings and counts after each test file.",
+  )
+  .option(
+    "--storage-stats-limit <count:number>",
+    "Maximum number of storage timing/count entries to print with --storage-stats.",
+    { default: 16 },
   )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
@@ -142,10 +164,13 @@ export const test = new Command()
       timeout: options.timeout,
       verbose: options.verbose,
       root,
+      memoryVersion: options.memoryVersion,
       statsThreshold: options.statsThreshold,
       statsInclude,
       statsActionLimit: options.statsActionLimit,
       schedulerMode,
+      storageStats: options.storageStats,
+      storageStatsLimit: options.storageStatsLimit,
     });
 
     // Exit with error code if any tests failed

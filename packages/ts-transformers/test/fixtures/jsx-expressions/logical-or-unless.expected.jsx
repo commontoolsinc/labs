@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: logical-or-unless
 // Verifies: || with JSX fallback on right side is transformed to unless()
 //   items.get().length || <span>List is empty</span> → unless(derive(...length), <span>List is empty</span>)
@@ -33,7 +44,7 @@ export default pattern((_state) => {
                 items: {
                     type: "array",
                     items: {
-                        type: "unknown"
+                        type: "string"
                     },
                     asCell: true
                 }
@@ -76,5 +87,4 @@ export default pattern((_state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

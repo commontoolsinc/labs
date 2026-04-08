@@ -5,6 +5,7 @@ import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { trustPattern } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -23,20 +24,24 @@ Deno.test("computed throws error", async () => {
     runtime,
   });
 
-  const testPattern = pattern<{ input: number }>(({ input }) => {
-    // deno-lint-ignore no-explicit-any
-    const poisoned = (lift((val: number) => {
-      if (val > 1) throw new Error("Poisoned!");
-      return `got: ${val}`;
-    })(input) as any).for("poisoned");
+  const testPattern = trustPattern(
+    runtime,
+    pattern<{ input: number }>(({ input }) => {
+      // deno-lint-ignore no-explicit-any
+      const poisoned = (lift((val: number) => {
+        if (val > 1) throw new Error("Poisoned!");
+        return `got: ${val}`;
+      })(input) as any).for("poisoned");
 
-    // deno-lint-ignore no-explicit-any
-    const healthy = (lift((p: string) => `healthy: ${p}`)(poisoned) as any).for(
-      "healthy",
-    );
+      // deno-lint-ignore no-explicit-any
+      const healthy = (lift((p: string) => `healthy: ${p}`)(poisoned) as any)
+        .for(
+          "healthy",
+        );
 
-    return { poisoned, healthy };
-  });
+      return { poisoned, healthy };
+    }),
+  );
 
   const resultCell = runtime.getCell(space, "test-instance");
 

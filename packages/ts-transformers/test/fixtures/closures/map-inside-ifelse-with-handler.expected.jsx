@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, handler, ifElse, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     id: number;
     name: string;
@@ -50,9 +61,9 @@ const removeItem = handler({
 //   .map(fn) → .mapWithPattern(pattern(...), {items: ...})
 //   hasItems ternary → ifElse(...)
 // Context: Map nested inside ifElse; handler references both the items array and iterator variable
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    const hasItems = __ct_pattern_input.key("hasItems");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    const hasItems = __cf_pattern_input.key("hasItems");
     // CT-1035: Map inside ifElse branches should transform to mapWithPattern
     // The handler closure should work correctly with the map iterator variable
     return {
@@ -70,9 +81,9 @@ export default pattern((__ct_pattern_input) => {
                         properties: {}
                     }]
             } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, hasItems, <div>
-              {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                    const item = __ct_pattern_input.key("element");
-                    const items = __ct_pattern_input.key("params", "items");
+              {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const item = __cf_pattern_input.key("element");
+                    const items = __cf_pattern_input.key("params", "items");
                     return (<div>
                   <span>{item.key("name")}</span>
                   <button type="button" onClick={removeItem({ items, item })}>Remove</button>
@@ -197,5 +208,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

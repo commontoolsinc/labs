@@ -283,11 +283,25 @@ export class RuntimeProcessor {
       spaceName: data.spaceName,
     };
 
-    const storageManager = StorageManager.open({
-      as: identity,
-      spaceIdentity: spaceIdentity,
-      address: new URL("/api/storage/memory", data.apiUrl),
-    });
+    const storageManager = data.memoryVersion === "v1"
+      ? StorageManager.open({
+        as: identity,
+        spaceIdentity: spaceIdentity,
+        address: new URL("/api/storage/memory", data.apiUrl),
+        memoryVersion: "v1",
+      })
+      : data.memoryVersion === "v2"
+      ? StorageManager.open({
+        as: identity,
+        spaceIdentity: spaceIdentity,
+        address: new URL("/api/storage/memory", data.apiUrl),
+        memoryVersion: "v2",
+      })
+      : StorageManager.open({
+        as: identity,
+        spaceIdentity: spaceIdentity,
+        address: new URL("/api/storage/memory", data.apiUrl),
+      });
 
     // Construct compilation cache if a build hash was provided (browser path).
     const cachedCompiler = data.buildHash
@@ -300,6 +314,7 @@ export class RuntimeProcessor {
       storageManager,
       patternEnvironment: { apiUrl: apiUrlObj },
       telemetry,
+      memoryVersion: data.memoryVersion,
       experimental: data.experimental,
       cachedCompiler,
       consoleHandler: ({ metadata, method, args }) => {
@@ -319,38 +334,6 @@ export class RuntimeProcessor {
 
       navigateCallback: (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
-        const writeContext = runtime.getWriteDebugContext();
-        // Add to the space's piece list here if it's from the
-        // same space.
-        if (link.space !== space) {
-          console.warn("Navigating cross-space, not adding to pieces list.");
-        } else {
-          void runtime.withWriteDebugContext(
-            writeContext,
-            () => pieceManager!.add([target]),
-          ).catch((e: unknown) => {
-            console.error(
-              "[RuntimeProcessor] Failed to add navigated piece:",
-              {
-                error: e instanceof Error ? e.message : e,
-              },
-            );
-          });
-
-          // Track as recently used (async, fire-and-forget)
-          void runtime.withWriteDebugContext(
-            writeContext,
-            () => RuntimeProcessor.trackRecentPiece(pieceManager!, target),
-          ).catch((e: unknown) => {
-            console.error(
-              "[RuntimeProcessor] Failed to track recent piece:",
-              {
-                error: e instanceof Error ? e.message : e,
-              },
-            );
-          });
-        }
-
         self.postMessage({
           type: NotificationType.NavigateRequest,
           targetCellRef: link,
@@ -774,24 +757,6 @@ export class RuntimeProcessor {
     });
   };
 
-  private static async trackRecentPiece(
-    pieceManager: PieceManager,
-    target: unknown,
-  ): Promise<void> {
-    const defaultPattern = await pieceManager.getDefaultPattern();
-    if (!defaultPattern) return;
-
-    const cell = defaultPattern.asSchema({
-      type: "object",
-      properties: {
-        trackRecent: { asStream: true },
-      },
-      required: ["trackRecent"],
-    });
-    const handler = cell.key("trackRecent");
-    handler.send({ piece: target });
-  }
-
   getPatternSources(
     _request: GetPatternSourcesRequest,
   ): PatternSourcesResponse {
@@ -832,7 +797,6 @@ export class RuntimeProcessor {
   setBreakpoints(request: SetBreakpointsRequest): void {
     this.runtime.scheduler.setBreakpoints(request.actionIds);
   }
-
   async detectNonIdempotent(
     request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {

@@ -105,7 +105,11 @@ interface CatalogInput {
     },
     {
       name: "Patterns";
-      items: [{ id: "note"; label: "Note" }];
+      items: [
+        { id: "note"; label: "Note" },
+        { id: "vignette-recipe"; label: "Vignette: Recipe" },
+        { id: "vignette-finance"; label: "Vignette: Finance" },
+      ];
     },
   ]>;
 }

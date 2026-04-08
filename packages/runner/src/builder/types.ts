@@ -12,6 +12,7 @@ import type {
   ByRefFunction,
   Cell,
   CellTypeConstructor,
+  CfDataFunction,
   CompileAndRunFunction,
   ComputedFunction,
   DeriveFunction,
@@ -34,10 +35,12 @@ import type {
   LLMFunction,
   Module,
   NavigateToFunction,
+  NonPrivateRandomFunction,
   Opaque,
   OpaqueRef,
   Pattern,
   PatternToolFunction,
+  SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
   StreamDataFunction,
@@ -165,9 +168,11 @@ declare module "@commonfabric/api" {
   export interface Module {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
+    implementationRef?: string;
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
+    writableProxy?: boolean;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
   }
@@ -189,6 +194,7 @@ export type Node = {
 
 // Used to get back to original pattern from a JSONified representation.
 export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
+export const unsafe_verifiedLoadId = Symbol("unsafe_verifiedLoadId");
 export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
 export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
 
@@ -201,6 +207,7 @@ declare module "@commonfabric/api" {
     nodes: Node[];
     program?: RuntimeProgram;
     [unsafe_originalPattern]?: Pattern;
+    [unsafe_verifiedLoadId]?: string;
     [unsafe_parentPattern]?: Pattern;
     [unsafe_materializeFactory]?: (
       tx: IExtendedStorageTransaction,
@@ -226,16 +233,24 @@ export type UnsafeBinding = {
   parent?: UnsafeBinding;
 };
 
+export type SourceLocationContext = {
+  script: string;
+  filename: string;
+  nextSearchOffset: number;
+};
+
 export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
+  verifiedLoadId?: string;
   runtime?: Runtime;
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;
   inHandler?: boolean;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
+  sourceLocationContext?: SourceLocationContext;
 };
 
 // Builder functions interface
@@ -285,6 +300,8 @@ export interface BuilderFunctionsAndConstants {
 
   // Environment
   getPatternEnvironment: GetPatternEnvironmentFunction;
+  nonPrivateRandom: NonPrivateRandomFunction;
+  safeDateNow: SafeDateNowFunction;
 
   // Entity utilities
   getEntityId: GetEntityIdFunction;
@@ -301,6 +318,7 @@ export interface BuilderFunctionsAndConstants {
   // Schema utilities
   schema: typeof schema;
   toSchema: typeof toSchema;
+  __cf_data: CfDataFunction;
   AuthSchema: typeof AuthSchema;
   WebhookConfigSchema: typeof WebhookConfigSchema;
 

@@ -18,7 +18,7 @@ const { API_URL } = env;
 const MEMORY_WS_URL = `${
   API_URL.replace("http://", "ws://")
 }/api/storage/memory`;
-const SPACE_NAME = "runner_integration";
+const SPACE_NAME_PREFIX = "runner_integration";
 
 const TOTAL_COUNT = 20; // how many elements we push to the array
 const TIMEOUT_MS = 180000; // timeout for the test in ms (3 minutes)
@@ -30,11 +30,12 @@ console.log(`API URL: ${API_URL}`);
 // Main test function
 async function runTest() {
   const account = await Identity.fromPassphrase("common user");
-  const space_thingy = await account.derive(SPACE_NAME);
+  const spaceName = `${SPACE_NAME_PREFIX}-${crypto.randomUUID()}`;
+  const space_thingy = await account.derive(spaceName);
   const space_thingy_space = space_thingy.did();
   const session = {
     isPrivate: false,
-    spaceName: SPACE_NAME,
+    spaceName,
     space: space_thingy_space,
     as: space_thingy,
   } as Session;

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   DID,

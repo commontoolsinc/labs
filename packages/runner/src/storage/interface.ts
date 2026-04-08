@@ -1,26 +1,32 @@
 import type { Immutable } from "@commonfabric/utils/types";
+import type { PatchOp } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
-import type {
-  Assertion,
-  AuthorizationError as IAuthorizationError,
-  ConflictError as IConflictError,
-  ConnectionError as IConnectionError,
-  DID,
-  Fact,
-  Invariant as IClaim,
-  MemorySpace,
-  QueryError as IQueryError,
-  Result,
-  SchemaPathSelector,
-  Signer,
-  State,
-  The as MediaType,
-  TransactionError,
-  Unit,
-  URI,
-  Variant,
+import {
+  type Assertion,
+  type AuthorizationError as IAuthorizationError,
+  type ConflictError as IConflictError,
+  type ConnectionError as IConnectionError,
+  DEFAULT_MEMORY_VERSION,
+  type DID,
+  type FabricValue,
+  type Fact,
+  getDefaultMemoryVersion,
+  getIntegrationMemoryVersionOverride,
+  INTEGRATION_MEMORY_VERSION_ENV,
+  type Invariant as IClaim,
+  type MemorySpace,
+  type MemoryVersion,
+  type QueryError as IQueryError,
+  type Result,
+  type SchemaPathSelector,
+  type Signer,
+  type State,
+  type The as MediaType,
+  type TransactionError,
+  type Unit,
+  type URI,
+  type Variant,
 } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
 
@@ -31,12 +37,19 @@ export type {
   IClaim,
   MediaType,
   MemorySpace,
+  MemoryVersion,
   Result,
   SchemaPathSelector,
   Signer,
   State,
   Unit,
   URI,
+};
+export {
+  DEFAULT_MEMORY_VERSION,
+  getDefaultMemoryVersion,
+  getIntegrationMemoryVersionOverride,
+  INTEGRATION_MEMORY_VERSION_ENV,
 };
 
 export type ChangeGroup = unknown;
@@ -98,6 +111,7 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
+  readonly memoryVersion: MemoryVersion;
 
   /**
    * The signer used for authenticating storage operations.
@@ -213,7 +227,7 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
  * {@link IStorageManager} in the future. It provides capability to subscribe
  * to the storage notifications.
  */
-export interface IStorageSubscriptionCapability {
+export interface IStorageNotificationCapability {
   /**
    * Subscribes to the storage manager's notifications.
    *
@@ -241,13 +255,18 @@ export interface IStorageSubscriptionCapability {
    * storage.subscribe(log(5));
    * ```
    */
-  subscribe(subscription: IStorageSubscription): void;
+  subscribe(subscription: IStorageNotification): void;
+
+  /**
+   * Removes a previously registered notification subscriber.
+   */
+  unsubscribe?(subscription: IStorageNotification): void;
 }
 
 /**
  * Subscription that can be used to receive storage notifications.
  */
-export interface IStorageSubscription {
+export interface IStorageNotification {
   /**
    * Called with a next notification, if returns `{ done: true }` or throws an
    * exception, subscription will be cancelled and method will not be called
@@ -259,6 +278,19 @@ export interface IStorageSubscription {
     notification: StorageNotification,
   ): Omit<IteratorResult<unknown, unknown>, "value"> | undefined;
 }
+
+/**
+ * Backward-compatible alias retained while the v1 naming is still used
+ * throughout the runner.
+ */
+export interface IStorageSubscriptionCapability
+  extends IStorageNotificationCapability {}
+
+/**
+ * Backward-compatible alias retained while the v1 naming is still used
+ * throughout the runner.
+ */
+export interface IStorageSubscription extends IStorageNotification {}
 
 /**
  * Notification produced by the underlying storage. It is a variant type
@@ -378,6 +410,11 @@ export interface IResetNotification {
 export interface IMergedChanges extends Iterable<IMemoryChange> {
 }
 
+export interface ITransactionWriteRequest {
+  address: IMemorySpaceAddress;
+  value: FabricValue;
+}
+
 export interface IMemoryChange {
   /**
    * Memory address that was changed.
@@ -426,10 +463,41 @@ export interface IStorageTransaction {
    */
   immediate?: boolean;
   /**
+   * Optional read-only mode hook used by runtime-generated fallback read
+   * transactions.
+   */
+  setReadOnly?(reason?: string): void;
+  clearReadOnly?(): void;
+  isReadOnly?(): boolean;
+  /**
    * The transaction journal containing all read and write activities.
    * Provides access to transaction operations and dependency tracking.
    */
   readonly journal: ITransactionJournal;
+
+  /**
+   * Optional lightweight dependency summary.
+   *
+   * V2 transactions can provide this directly instead of requiring callers to
+   * reconstruct it from journal activity.
+   */
+  getReactivityLog?(): TransactionReactivityLog;
+
+  /**
+   * Optional raw read observations recorded by this transaction.
+   *
+   * V2 transactions can provide these directly instead of requiring callers to
+   * scan journal activity.
+   */
+  getReadActivities?(): Iterable<IReadActivity>;
+
+  /**
+   * Optional write details for the given space.
+   *
+   * V2 transactions can provide the current and previous values directly
+   * instead of materializing novelty/history attestations.
+   */
+  getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
    * Describes current status of the transaction. Returns a union type with
@@ -486,6 +554,14 @@ export interface IStorageTransaction {
   ): Result<IAttestation, WriterError | WriteError>;
 
   /**
+   * Optional batched write hook for transactions that can apply multiple path
+   * writes more efficiently than one-at-a-time.
+   */
+  writeBatch?(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): Result<Unit, WriterError | WriteError>;
+
+  /**
    * Creates a memory space reader for inside this transaction. Fails if
    * transaction is no longer in progress. Requesting a reader for the same
    * memory space will return same reader instance.
@@ -516,11 +592,17 @@ export interface IStorageTransaction {
    * MAY also fail due to insufficient authorization level or due to various IO
    * problems.
    *
-   * Commit is idempotent, meaning calling it over and over will return same
-   * exact value as on first call and no execution will take place on subsequent
-   * calls.
+   * Calling commit on a transaction that has already completed (committed or
+   * failed) returns the prior error or a {@link IStorageTransactionComplete}
+   * error. Commit is NOT idempotent — it does not replay the original result.
    */
   commit(): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Optional native commit draft hook for storage backends that can consume a
+   * more direct representation than legacy fact archives.
+   */
+  getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
@@ -553,13 +635,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): Immutable<FabricValue>;
+  ): FabricValue;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.
    *
-   * Also prepends `value` to path, for how source metadata currently works.
+   * Thin convenience wrapper over `readOrThrow()` that prepends `"value"` to
+   * the supplied path.
    *
    * @param address - Memory address to read from.
    * @returns The read value.
@@ -567,7 +650,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): Immutable<FabricValue>;
+  ): FabricValue;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
@@ -585,7 +668,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Writes a value into a storage at a given address, including creating parent
    * entries in the document if a path is provided or throws an error.
    *
-   * Also prepends `value` to path, for how source metadata currently works.
+   * Thin convenience wrapper over `writeOrThrow()` that prepends `"value"` to
+   * the supplied path.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
@@ -593,6 +677,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   writeValueOrThrow(
     address: IMemorySpaceAddress,
     value: FabricValue,
+  ): void;
+
+  /**
+   * Optional batched write helper that preserves the extended transaction's
+   * `["value", ...path]` helper semantics on top of `writeBatch`.
+   */
+  writeValuesOrThrow?(
+    writes: Iterable<ITransactionWriteRequest>,
   ): void;
 }
 
@@ -830,8 +922,13 @@ export interface ISpaceReplica extends ISpace {
    */
   get(entry: BaseMemoryAddress): State | undefined;
 
-  commit(
+  commit?(
     transaction: ITransaction,
+    source?: IStorageTransaction,
+  ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  commitNative?(
+    transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
@@ -867,6 +964,43 @@ export interface ITransactionJournal {
 
   novelty(space: MemorySpace): Iterable<IAttestation>;
   history(space: MemorySpace): Iterable<IAttestation>;
+}
+
+export interface TransactionReactivityLog {
+  reads: IMemorySpaceAddress[];
+  shallowReads: IMemorySpaceAddress[];
+  writes: IMemorySpaceAddress[];
+  potentialWrites?: IMemorySpaceAddress[];
+}
+
+export interface TransactionWriteDetail {
+  address: IMemorySpaceAddress;
+  value?: Immutable<FabricValue>;
+  previousValue?: Immutable<FabricValue>;
+}
+
+export type NativeStorageCommitOperation =
+  | {
+    op: "set";
+    id: URI;
+    type: MediaType;
+    value: FabricValue;
+  }
+  | {
+    op: "delete";
+    id: URI;
+    type: MediaType;
+  }
+  | {
+    op: "patch";
+    id: URI;
+    type: MediaType;
+    patches: PatchOp[];
+    value: FabricValue;
+  };
+
+export interface NativeStorageCommit {
+  operations: readonly NativeStorageCommitOperation[];
 }
 
 export interface ITransaction {
@@ -964,6 +1098,18 @@ export {
   createNonReactiveTransaction,
   TransactionWrapper,
 } from "./extended-storage-transaction.ts";
+
+export const createReadOnlyTransactionError = (
+  method: string,
+  source = "runtime.readTx()",
+): Error => {
+  const error = new Error(
+    `Cannot call ${method} on a read-only transaction returned by ${source}; ` +
+      "use runtime.edit() to create an owned writable transaction.",
+  );
+  error.name = "ReadOnlyTransactionError";
+  return error;
+};
 
 /**
  * Converts an IStorageError to a throwable Error instance.

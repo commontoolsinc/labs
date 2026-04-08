@@ -1,11 +1,11 @@
 import ts from "typescript";
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
+import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 
 import {
   classifyArrayMethodCall,
   detectCallKind,
   ensureTypeNodeRegistered,
-  getDeriveInputAndCallbackArgument,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
   getVariableInitializer,
@@ -21,6 +21,7 @@ import {
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import {
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
@@ -968,8 +969,12 @@ function inferLiftFactoryResultType(
     return undefined;
   }
 
-  const callback = factoryInitializer.arguments[0];
-  if (!callback || !isFunctionLikeExpression(callback)) {
+  const callback = resolveFunctionLikeExpression(
+    factoryInitializer.arguments[0],
+    checker,
+    sourceFile,
+  );
+  if (!callback) {
     return undefined;
   }
 
@@ -1149,7 +1154,11 @@ function inferDeriveResultTypeFromInitializer(
     return undefined;
   }
 
-  const deriveArgs = getDeriveInputAndCallbackArgument(initializer, checker);
+  const deriveArgs = resolveDeriveInputAndCallbackArgument(
+    initializer,
+    checker,
+    sourceFile,
+  );
   if (!deriveArgs) {
     return undefined;
   }
@@ -1390,10 +1399,10 @@ function isIntentionallyUnusedSchemaParameter(
     return false;
   }
 
-  // Synthetic CTS parameters use internal "__ct_*" and "__param*" prefixes.
+  // Synthetic CTS parameters use internal "__cf_*" and "__param*" prefixes.
   // They still carry meaningful structural types and must not collapse to
   // never/false just because they start with underscores.
-  if (name.startsWith("__ct_") || name.startsWith("__param")) {
+  if (name.startsWith("__cf_") || name.startsWith("__param")) {
     return false;
   }
 
@@ -1450,15 +1459,169 @@ function prependSchemaArguments(
  */
 function findFunctionArgument(
   argsArray: readonly ts.Expression[],
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  checker: ts.TypeChecker,
+  sourceFile?: ts.SourceFile,
+): {
+  expression: ts.Expression;
+  callback: ts.ArrowFunction | ts.FunctionExpression;
+} | undefined {
   for (let i = argsArray.length - 1; i >= 0; i--) {
     const arg = argsArray[i];
-    if (
-      arg &&
-      (ts.isFunctionExpression(arg) || ts.isArrowFunction(arg))
-    ) {
-      return arg;
+    const callback = arg &&
+      resolveFunctionLikeExpression(arg, checker, sourceFile);
+    if (arg && callback) {
+      return { expression: arg, callback };
     }
+  }
+  return undefined;
+}
+
+function resolveDeriveInputAndCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): {
+  input: ts.Expression;
+  callback: ts.ArrowFunction | ts.FunctionExpression;
+} | undefined {
+  const callKind = detectCallKind(call, checker);
+  if (callKind?.kind !== "derive") {
+    return undefined;
+  }
+
+  const callbackIndex = call.arguments.length - 1;
+  const callbackExpression = call.arguments[callbackIndex];
+  const callback = callbackExpression
+    ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
+    : undefined;
+  if (!callback) {
+    return undefined;
+  }
+
+  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
+  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  if (!input) {
+    return undefined;
+  }
+
+  return { input, callback };
+}
+
+function resolveFunctionLikeExpression(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+  sourceFile?: ts.SourceFile,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  return resolveFunctionLikeExpressionInner(
+    expression,
+    checker,
+    sourceFile,
+    new Set(),
+  );
+}
+
+function resolveFunctionLikeExpressionInner(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile | undefined,
+  seen: Set<ts.Node>,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  if (!expression) {
+    return undefined;
+  }
+
+  const unwrapped = unwrapExpression(expression);
+  if (seen.has(unwrapped)) {
+    return undefined;
+  }
+  seen.add(unwrapped);
+
+  if (isFunctionLikeExpression(unwrapped)) {
+    return unwrapped;
+  }
+
+  const hardened = unwrapHardenedFunctionExpression(unwrapped);
+  if (hardened) {
+    return resolveFunctionLikeExpressionInner(
+      hardened,
+      checker,
+      sourceFile,
+      seen,
+    );
+  }
+
+  const initializer = ts.isIdentifier(unwrapped)
+    ? getSyntheticModuleCallbackInitializer(unwrapped, sourceFile)
+    : undefined;
+  if (!initializer) {
+    return undefined;
+  }
+
+  return resolveFunctionLikeExpressionInner(
+    initializer,
+    checker,
+    sourceFile,
+    seen,
+  );
+}
+
+function unwrapHardenedFunctionExpression(
+  expression: ts.Expression,
+): ts.Expression | undefined {
+  if (!ts.isCallExpression(expression) || expression.arguments.length !== 1) {
+    return undefined;
+  }
+
+  const callee = unwrapExpression(expression.expression);
+  if (
+    !ts.isIdentifier(callee) ||
+    !callee.text.startsWith(FUNCTION_HARDENING_HELPER_NAME)
+  ) {
+    return undefined;
+  }
+
+  return expression.arguments[0];
+}
+
+function getSyntheticModuleCallbackInitializer(
+  identifier: ts.Identifier,
+  sourceFile: ts.SourceFile | undefined,
+): ts.Expression | undefined {
+  if (!identifier.text.startsWith("__cfModuleCallback")) {
+    return undefined;
+  }
+
+  const containingSourceFile = sourceFile ??
+    findContainingSourceFile(identifier);
+  if (!containingSourceFile) {
+    return undefined;
+  }
+
+  for (const statement of containingSourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) {
+      continue;
+    }
+
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        ts.isIdentifier(declaration.name) &&
+        declaration.name.text === identifier.text
+      ) {
+        return declaration.initializer;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function findContainingSourceFile(node: ts.Node): ts.SourceFile | undefined {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if (ts.isSourceFile(current)) {
+      return current;
+    }
+    current = current.parent ?? ts.getOriginalNode(current).parent;
   }
   return undefined;
 }
@@ -1559,10 +1722,15 @@ function handlePatternSchemaInjection(
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
-  const builderFunction = findFunctionArgument(argsArray);
-  if (!builderFunction) {
+  const builderFunctionArg = findFunctionArgument(
+    argsArray,
+    checker,
+    sourceFile,
+  );
+  if (!builderFunctionArg) {
     return undefined; // No function found - skip transformation
   }
+  const builderFunction = builderFunctionArg.callback;
 
   const argumentCapabilityMode: CapabilitySummaryApplicationMode =
     context.isArrayMethodCallback(builderFunction) ||
@@ -1576,7 +1744,7 @@ function handlePatternSchemaInjection(
     resultSchema: ts.Expression,
   ): ts.CallExpression => {
     return factory.createCallExpression(node.expression, undefined, [
-      builderFunction,
+      builderFunctionArg.expression,
       inputSchema,
       resultSchema,
     ]);
@@ -1651,7 +1819,10 @@ function handlePatternSchemaInjection(
     );
   } else {
     // Case 3: No type arguments - check for schema arguments
-    const schemaArgs = detectSchemaArguments(argsArray, builderFunction);
+    const schemaArgs = detectSchemaArguments(
+      argsArray,
+      builderFunctionArg.expression,
+    );
 
     if (schemaArgs.length >= 2) {
       // Already has two schemas (input + result) - skip transformation
@@ -1811,12 +1982,12 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           let eventTypeNode: ts.TypeNode = eventType;
           let stateTypeNode: ts.TypeNode = stateType;
           const handlerCandidate = node.arguments[0];
-          if (
-            handlerCandidate &&
-            (ts.isFunctionExpression(handlerCandidate) ||
-              ts.isArrowFunction(handlerCandidate))
-          ) {
-            const handlerFn = handlerCandidate;
+          const handlerFn = resolveFunctionLikeExpression(
+            handlerCandidate,
+            checker,
+            sourceFile,
+          );
+          if (handlerCandidate && handlerFn) {
             const eventTypeValue = getTypeFromTypeNodeWithFallback(
               eventType,
               checker,
@@ -1879,13 +2050,12 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
         if (node.arguments.length === 1) {
           const handlerCandidate = node.arguments[0];
-          if (
-            handlerCandidate &&
-            (ts.isFunctionExpression(handlerCandidate) ||
-              ts.isArrowFunction(handlerCandidate))
-          ) {
-            const handlerFn = handlerCandidate;
-
+          const handlerFn = resolveFunctionLikeExpression(
+            handlerCandidate,
+            checker,
+            sourceFile,
+          );
+          if (handlerCandidate && handlerFn) {
             // Infer types from the handler function for both parameters
             const inferred = collectFunctionSchemaTypeNodes(
               handlerFn,
@@ -1961,7 +2131,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             const updated = factory.createCallExpression(
               node.expression,
               undefined,
-              [toSchemaEvent, toSchemaState, handlerFn],
+              [toSchemaEvent, toSchemaState, handlerCandidate],
             );
 
             return ts.visitEachChild(updated, visit, transformation);
@@ -1971,7 +2141,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
       if (callKind?.kind === "derive") {
         const factory = transformation.factory;
-        const deriveArgs = getDeriveInputAndCallbackArgument(node, checker);
+        const deriveArgs = resolveDeriveInputAndCallbackArgument(
+          node,
+          checker,
+          sourceFile,
+        );
 
         if (node.typeArguments && node.typeArguments.length >= 2) {
           const [argumentType, resultType] = node.typeArguments;
@@ -2105,9 +2279,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
-          const liftCallback = isFunctionLikeExpression(node.arguments[0]!)
-            ? node.arguments[0]!
-            : undefined;
+          const liftCallback = resolveFunctionLikeExpression(
+            node.arguments[0],
+            checker,
+            sourceFile,
+          );
           const resolved = resolveDualSchemaBuilderTypes(
             liftCallback,
             checker,
@@ -2147,12 +2323,12 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
-          const liftCallback = node.arguments[0];
-          if (
-            !liftCallback ||
-            (!ts.isArrowFunction(liftCallback) &&
-              !ts.isFunctionExpression(liftCallback))
-          ) {
+          const liftCallback = resolveFunctionLikeExpression(
+            node.arguments[0],
+            checker,
+            sourceFile,
+          );
+          if (!liftCallback) {
             return ts.visitEachChild(node, visit, transformation);
           }
 
@@ -2193,12 +2369,16 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         }
 
         if (
-          node.arguments.length === 1 &&
-          isFunctionLikeExpression(node.arguments[0]!)
+          node.arguments.length === 1
         ) {
-          const callback = node.arguments[0] as
-            | ts.ArrowFunction
-            | ts.FunctionExpression;
+          const callback = resolveFunctionLikeExpression(
+            node.arguments[0],
+            checker,
+            sourceFile,
+          );
+          if (!callback) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
           const resolved = resolveDualSchemaBuilderTypes(
             callback,
             checker,

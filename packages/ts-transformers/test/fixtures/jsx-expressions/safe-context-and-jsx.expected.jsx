@@ -1,6 +1,17 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 // deno-lint-ignore-file no-unused-vars
 import { handler, computed } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: safe-context-and-jsx
 // Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
 //   computed(() => show) && <span> → when(computed(() => show), <span>)
@@ -220,5 +231,4 @@ const MyHandler2 = handler({
 });
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

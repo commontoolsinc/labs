@@ -9,6 +9,10 @@ Start with the shared pattern development guidance in:
 
 Read that guide first. It is the canonical reference.
 
+Pay special attention to its SES authoring section before adding module-scope
+setup, timers, or time/random helpers. The current authored escape hatches are
+`safeDateNow()` and `nonPrivateRandom()`.
+
 Runtime notes:
 
 - Use the `cf` skill, or read `skills/cf/SKILL.md`, when you need CLI command

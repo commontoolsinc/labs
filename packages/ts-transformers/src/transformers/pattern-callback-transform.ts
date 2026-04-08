@@ -162,7 +162,7 @@ export function transformPatternCallback(
         hasUnsupportedDestructuring = true;
       }
 
-      const inputIdentifier = factory.createIdentifier("__ct_pattern_input");
+      const inputIdentifier = factory.createIdentifier("__cf_pattern_input");
       opaqueRoots.add(inputIdentifier.text);
       const inputSymbol = context.checker.getSymbolAtLocation(firstParam.name);
       if (inputSymbol) {

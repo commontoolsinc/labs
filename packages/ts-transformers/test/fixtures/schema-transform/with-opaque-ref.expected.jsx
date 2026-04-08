@@ -1,9 +1,20 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, derive, pattern, toSchema, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     value: Cell<number>;
 }
-const model = {
+const model = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         value: {
@@ -15,7 +26,7 @@ const model = {
     "default": {
         value: 0
     }
-} as const satisfies __cfHelpers.JSONSchema;
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: with-opaque-ref
 // Verifies: Cell<> fields generate asCell in schema and derive() gets input/output type schemas injected
 //   Cell<number> → { type: "number", asCell: true }
@@ -55,5 +66,4 @@ export default pattern((cell) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

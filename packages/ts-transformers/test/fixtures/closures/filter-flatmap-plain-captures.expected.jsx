@@ -1,40 +1,48 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { suffix } }) => __cfHelpers.derive({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, { item: {
+        label: item.label
+    } }, ({ item }) => item.label.endsWith(suffix)));
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become
 // params values, not reactive key(...) lookups
-//   suffix/prefix literals -> __ct_pattern_input.params.{suffix,prefix}
+//   suffix/prefix literals -> __cf_pattern_input.params.{suffix,prefix}
 //   items.filter(fn).flatMap(fn) -> filterWithPattern(...).flatMapWithPattern(...)
 // Context: the captures are plain strings, so the lowered callbacks should not
 // route them through key() ownership paths.
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     const suffix = "!";
     const prefix = "#";
     return {
-        labels: items.filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            const suffix = __ct_pattern_input.params.suffix;
-            return __cfHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            label: {
-                                type: "string"
-                            }
-                        },
-                        required: ["label"]
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, { item: {
-                    label: item.key("label")
-                } }, ({ item }) => item.label.endsWith(suffix));
-        }, {
+        labels: items.filterWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
             type: "object",
             properties: {
                 element: {
@@ -42,34 +50,19 @@ export default pattern((__ct_pattern_input) => {
                     properties: {
                         label: {
                             type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
                         }
                     },
-                    required: ["label", "tags"]
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        suffix: {
-                            type: "string"
-                        }
-                    },
-                    required: ["suffix"]
+                    required: ["label"]
                 }
             },
-            required: ["element", "params"]
+            required: ["element"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {
             suffix: suffix
-        }).flatMapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            const prefix = __ct_pattern_input.params.prefix;
+        }).flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            const prefix = __cf_pattern_input.params.prefix;
             return __cfHelpers.ifElse({
                 type: "number"
             } as const satisfies __cfHelpers.JSONSchema, {
@@ -185,5 +178,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

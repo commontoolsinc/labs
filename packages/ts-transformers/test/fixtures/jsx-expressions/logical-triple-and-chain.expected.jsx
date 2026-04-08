@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or derive the entire chain
 // FIXTURE: logical-triple-and-chain
@@ -53,9 +64,12 @@ export default pattern((_state) => {
                         },
                         verified: {
                             type: "boolean"
+                        },
+                        name: {
+                            type: "string"
                         }
                     },
-                    required: ["active", "verified"],
+                    required: ["active", "verified", "name"],
                     asCell: true
                 }
             },
@@ -68,11 +82,17 @@ export default pattern((_state) => {
                 user: {
                     type: "object",
                     properties: {
+                        active: {
+                            type: "boolean"
+                        },
+                        verified: {
+                            type: "boolean"
+                        },
                         name: {
                             type: "string"
                         }
                     },
-                    required: ["name"],
+                    required: ["active", "verified", "name"],
                     asCell: true
                 }
             },
@@ -114,5 +134,4 @@ export default pattern((_state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

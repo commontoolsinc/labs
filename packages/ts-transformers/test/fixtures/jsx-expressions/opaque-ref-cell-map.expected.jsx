@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, pattern, UI, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
     [NAME]: "Some Simple Pattern",
@@ -175,9 +186,9 @@ export default pattern(() => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, { cellRef: cellRef }, ({ cellRef }) => !cellRef?.length), <div>No charms created yet</div>, <ul>
-            {cellRef.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const charm = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
+            {cellRef.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const charm = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
                 return (<li>
                 <cf-button onClick={goToCharm({ charm })}>
                   Go to Charm {__cfHelpers.derive({
@@ -262,5 +273,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

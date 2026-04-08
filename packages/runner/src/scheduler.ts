@@ -32,7 +32,6 @@ import type {
   IStorageSubscription,
   MediaType,
   MemoryAddressPathComponent,
-  Metadata,
 } from "./storage/interface.ts";
 import {
   addressesToPathByEntity,
@@ -41,6 +40,16 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionWriteDetails,
+} from "./storage/transaction-inspection.ts";
+import {
+  allowMutableTransactionRead,
+  ignoreReadForScheduling,
+  markReadAsPotentialWrite,
+  reactivityLogFromActivities,
+} from "./storage/reactivity-log.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
@@ -142,21 +151,10 @@ function filterIgnoredAddresses(
     !ignoredWrites.some((link) => addressMatchesLinkPrefix(address, link))
   );
 }
-
-const ignoreReadForSchedulingMarker: unique symbol = Symbol(
-  "ignoreReadForSchedulingMarker",
-);
-
-const markReadAsPotentialWriteMarker: unique symbol = Symbol(
-  "markReadAsPotentialWriteMarker",
-);
-
-export const ignoreReadForScheduling: Metadata = {
-  [ignoreReadForSchedulingMarker]: true,
-};
-
-export const markReadAsPotentialWrite: Metadata = {
-  [markReadAsPotentialWriteMarker]: true,
+export {
+  allowMutableTransactionRead,
+  ignoreReadForScheduling,
+  markReadAsPotentialWrite,
 };
 
 export type SpaceAndURI = `${MemorySpace}/${URI}`;
@@ -439,6 +437,7 @@ export class Scheduler {
   private pendingDependencyCollection = new Set<Action>();
 
   private idlePromises: (() => void)[] = [];
+  private backgroundTasks = new Set<Promise<unknown>>();
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
@@ -580,21 +579,41 @@ export class Scheduler {
     log: ReactivityLog,
   ): Map<string, unknown> {
     const writes = new Map<string, unknown>();
+    const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
     for (const write of log.writes) {
       const key = this.makeAddressKey(write);
-      for (const att of tx.journal.novelty(write.space)) {
-        if (att.address.id === write.id) {
-          // Normalize: post-commit journals wrap values in {value: ...},
-          // pre-commit journals store raw values. Unwrap for consistency.
-          const raw = att.value;
+      let details = writeDetailsBySpace.get(write.space);
+      if (!details) {
+        details = new Map<string, unknown>();
+        for (const detail of getTransactionWriteDetails(tx, write.space)) {
+          const raw = detail.value;
           const value = isRecord(raw) && "value" in raw ? raw.value : raw;
-          writes.set(key, value);
-          break;
+          details.set(this.makeAddressKey(detail.address), value);
         }
+        writeDetailsBySpace.set(write.space, details);
       }
+      writes.set(key, this.lookupComparableWriteValue(details, write));
       if (!writes.has(key)) writes.set(key, undefined);
     }
     return writes;
+  }
+
+  private lookupComparableWriteValue(
+    details: Map<string, unknown>,
+    write: IMemorySpaceAddress,
+  ): unknown {
+    const exactKey = this.makeAddressKey(write);
+    if (details.has(exactKey)) {
+      return details.get(exactKey);
+    }
+    const valueKey = this.makeAddressKey({
+      ...write,
+      path: ["value", ...write.path],
+    });
+    if (details.has(valueKey)) {
+      return details.get(valueKey);
+    }
+    return undefined;
   }
 
   private runIdempotencyRecheck(
@@ -1194,7 +1213,7 @@ export class Scheduler {
         this.executingAction = action;
         this.currentActionId = actionId;
         logger.timeStart("scheduler", "run", "action");
-        Promise.resolve(action(tx))
+        Promise.resolve(this.runtime.harness.invoke(() => action(tx)))
           .then((actionResult) => {
             logger.timeEnd("scheduler", "run", "action");
             result = actionResult;
@@ -1234,6 +1253,12 @@ export class Scheduler {
       if (this.runningPromise) {
         // Something is currently running - wait for it then check again
         this.runningPromise.then(() => this.idle().then(resolve));
+      } else if (this.backgroundTasks.size > 0) {
+        // Async scheduler work, such as event-triggered auto-start, is still in
+        // flight. Wait for it to settle and then re-check the scheduler state.
+        Promise.allSettled([...this.backgroundTasks]).then(() =>
+          this.idle().then(resolve)
+        );
       } else if (!this.scheduled) {
         // Nothing is scheduled to run - we're idle.
         // In pull mode, pending computations won't run without an effect to pull them,
@@ -1271,8 +1296,7 @@ export class Scheduler {
 
     // If no handler was found, try to start the piece that should handle this event
     if (!handlerFound && !doNotLoadPieceIfNotRunning) {
-      // Use an async IIFE to handle the async operation without blocking
-      (async () => {
+      const startTask = (async () => {
         const started = await ensurePieceRunning(this.runtime, eventLink);
         if (started) {
           // Piece was started, re-queue the event. Don't trigger loading again
@@ -1281,6 +1305,10 @@ export class Scheduler {
           this.queueEvent(eventLink, event, retries, onCommit, true);
         }
       })();
+      this.backgroundTasks.add(startTask);
+      startTask.finally(() => {
+        this.backgroundTasks.delete(startTask);
+      });
     }
   }
 
@@ -2651,6 +2679,10 @@ export class Scheduler {
     // Check if action has opted out of auto-debounce
     if (this.noDebounce.get(action)) return;
 
+    // Auto-debouncing computations in push mode makes observable derived state
+    // lag behind writes. Keep auto-debounce for effects only.
+    if (!this.effects.has(action)) return;
+
     // Check if already has a manual debounce set
     if (this.actionDebounce.has(action)) return;
 
@@ -2977,18 +3009,25 @@ export class Scheduler {
 
     // Capture write values from the action's transaction journal
     const writeValues = new Map<string, unknown>();
+    const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
     for (const write of log.writes) {
       const key = makeKey(write);
       try {
-        for (const att of tx.journal.novelty(write.space)) {
-          if (att.address.id === write.id) {
-            writeValues.set(key, att.value);
-            break;
+        let details = writeDetailsBySpace.get(write.space);
+        if (!details) {
+          details = new Map<string, unknown>();
+          for (const detail of getTransactionWriteDetails(tx, write.space)) {
+            const raw = detail.value;
+            const value = isRecord(raw) && "value" in raw ? raw.value : raw;
+            details.set(makeKey(detail.address), value);
           }
+          writeDetailsBySpace.set(write.space, details);
         }
-        if (!writeValues.has(key)) {
-          writeValues.set(key, undefined);
-        }
+        writeValues.set(
+          key,
+          this.lookupComparableWriteValue(details, write),
+        );
+        if (!writeValues.has(key)) writeValues.set(key, undefined);
       } catch {
         writeValues.set(key, "[write-error]");
       }
@@ -3143,6 +3182,7 @@ export class Scheduler {
     );
 
     // Transform stack trace to show original source locations
+    materializeHostVisibleStack(error);
     if (error.stack) {
       error.stack = this.runtime.harness.parseStack(error.stack);
     }
@@ -3980,39 +4020,11 @@ function topologicalSort(
 export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
-  const log: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
-  for (const activity of tx.journal.activity()) {
-    if ("read" in activity && activity.read) {
-      if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
-      const address = {
-        space: activity.read.space,
-        id: activity.read.id,
-        type: activity.read.type,
-        path: activity.read.path.slice(1), // Remove the "value" prefix
-      };
-      if (activity.read.nonRecursive === true) {
-        log.shallowReads.push(address);
-      } else {
-        log.reads.push(address);
-      }
-      // If marked as potential write, also add to potentialWrites
-      if (activity.read.meta?.[markReadAsPotentialWriteMarker]) {
-        if (!log.potentialWrites) {
-          log.potentialWrites = [];
-        }
-        log.potentialWrites.push(address);
-      }
-    }
-    if ("write" in activity && activity.write) {
-      log.writes.push({
-        space: activity.write.space,
-        id: activity.write.id,
-        type: activity.write.type,
-        path: activity.write.path.slice(1),
-      });
-    }
+  const direct = getDirectTransactionReactivityLog(tx);
+  if (direct) {
+    return direct;
   }
-  return log;
+  return reactivityLogFromActivities(tx.journal.activity());
 }
 
 function summarizeTriggerTraceValue(value: unknown): TriggerTraceValueSummary {
@@ -4070,6 +4082,23 @@ function getPieceMetadataFromFrame(frame?: Frame): {
     JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;
+}
+
+function materializeHostVisibleStack(error: Error): void {
+  if (typeof error.stack === "string" && error.stack.length > 0) {
+    return;
+  }
+  const getStackString = (globalThis as {
+    getStackString?: (error: Error) => string;
+  }).getStackString;
+  if (typeof getStackString !== "function") {
+    return;
+  }
+  const frames = getStackString(error);
+  if (!frames) {
+    return;
+  }
+  error.stack = `${error}${frames.startsWith("\n") ? frames : `\n${frames}`}`;
 }
 
 function queueTask(fn: () => void): ReturnType<typeof setTimeout> {

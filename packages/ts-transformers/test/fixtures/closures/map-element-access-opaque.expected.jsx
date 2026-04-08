@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     sortedTags: string[];
     tagCounts: Record<string, number>;
@@ -12,9 +23,9 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("sortedTags").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const tag = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
+        {state.key("sortedTags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const tag = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
                 return (<span>
             {tag}: {__cfHelpers.derive({
                     type: "object",
@@ -150,5 +161,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

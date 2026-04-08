@@ -3,25 +3,33 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { JSONSchema } from "@commonfabric/runner";
 import { Runtime } from "../src/runtime.ts";
-import { type Provider, StorageManager } from "../src/storage/cache.deno.ts";
+import {
+  type Provider,
+  StorageManager,
+  type StorageManagerEmulator,
+} from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("Provider Subscriptions", () => {
   let runtime: Runtime;
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: StorageManagerEmulator;
   let provider: Provider;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: "v1",
     });
 
-    provider = storageManager.open(space) as Provider;
+    provider = storageManager.open(space);
   });
 
   afterEach(async () => {

@@ -2,7 +2,14 @@
 // WARNING: This pattern is INTENTIONALLY non-idempotent.
 // It exists to test detectNonIdempotent() diagnosis tooling.
 // Do NOT use as a reference for correct pattern development.
-import { computed, Default, pattern, UI, Writable } from "commonfabric";
+import {
+  computed,
+  Default,
+  pattern,
+  safeDateNow,
+  UI,
+  Writable,
+} from "commonfabric";
 
 interface Item {
   title: string;
@@ -22,13 +29,13 @@ const preset: Item[] = [
 export default pattern<{
   items: Writable<Default<Item[], typeof preset>>;
 }>(({ items }) => {
-  // Anti-pattern: Date.now() in computed() — every run produces different timestamps
+  // Anti-pattern: safeDateNow() in computed() — every run produces different timestamps
   const processed = Writable.of<ProcessedItem[]>([]);
   computed(() => {
     processed.set(
       items.get().map((i) => ({
         title: i.title,
-        processedAt: Date.now(),
+        processedAt: safeDateNow(),
       })),
     );
   });
@@ -56,7 +63,7 @@ export default pattern<{
         </div>
         <div style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;">
           <strong>Anti-pattern:</strong>{" "}
-          Date.now() inside computed() — each run produces different values.
+          safeDateNow() inside computed() — each run produces different values.
           <br />
           <strong>Fix:</strong>{" "}
           Use timestamps only in handlers, not in computed().

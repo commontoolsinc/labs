@@ -1,5 +1,41 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ element: value, params: { state } }) => (<span>{__cfHelpers.derive({
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["value", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, {
+    value: value,
+    state: {
+        multiplier: state.multiplier
+    }
+}, ({ value, state }) => value * state.multiplier)}</span>));
 interface State {
     values: number[];
     multiplier: number;
@@ -21,35 +57,7 @@ export default pattern((state) => {
     } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
-        {typedValues.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const value = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
-                return (<span>{__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                multiplier: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["multiplier"]
-                        }
-                    },
-                    required: ["value", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    value: value,
-                    state: {
-                        multiplier: state.key("multiplier")
-                    }
-                }, ({ value, state }) => value * state.multiplier)}</span>);
-            }, {
+        {typedValues.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -145,5 +153,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

@@ -13,7 +13,11 @@ import {
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { getLogger } from "@commonfabric/utils/logger";
 import { AppView, navigate } from "../../shared/mod.ts";
-import { COMPILATION_CACHE_CLIENT, EXPERIMENTAL } from "./env.ts";
+import {
+  COMPILATION_CACHE_CLIENT,
+  EXPERIMENTAL,
+  MEMORY_VERSION,
+} from "./env.ts";
 
 const logger = getLogger("shell.runtime", {
   enabled: false,
@@ -177,6 +181,11 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.synced();
   }
 
+  async idle(): Promise<void> {
+    this.#check();
+    await this.#client.idle();
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -196,6 +205,21 @@ export class RuntimeInternals extends EventTarget {
     }
   }
 
+  async registerNavigatedPiece(cell: CellHandle<unknown>): Promise<void> {
+    this.#check();
+    if (cell.space() !== this.#space) return;
+    try {
+      const spaceRoot = await this.getSpaceRootPattern();
+      const addPiece = spaceRoot.cell().key("addPiece" as any);
+      await (addPiece as any).send({ piece: cell });
+    } catch (e) {
+      console.error(
+        "[RuntimeInternals] Failed to register navigated piece:",
+        e,
+      );
+    }
+  }
+
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
     const { metadata, method, args } = e;
     if (metadata?.pieceId) {
@@ -205,18 +229,33 @@ export class RuntimeInternals extends EventTarget {
     }
   };
 
-  #onNavigateRequest = (e: RuntimeClientEvents["navigaterequest"][0]) => {
-    const { cell } = e;
-    const pieceId = cell.id();
-    logger.log("navigate", `Navigating to piece: ${pieceId}`);
+  #onNavigateRequest = async (
+    e: RuntimeClientEvents["navigaterequest"][0],
+  ) => {
+    try {
+      const { cell } = e;
+      const pieceId = cell.id();
+      logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
-    if (cell.space() === this.#space && this.#spaceName) {
-      navigate({
-        spaceName: this.#spaceName,
-        pieceId,
-      });
-    } else {
-      navigate({ spaceDid: cell.space(), pieceId: cell.id() });
+      const sameSpace = cell.space() === this.#space;
+
+      if (sameSpace) {
+        void this.registerNavigatedPiece(cell);
+      } else {
+        await this.#client.idle();
+        await this.#client.synced();
+      }
+
+      if (sameSpace && this.#spaceName) {
+        navigate({
+          spaceName: this.#spaceName,
+          pieceId,
+        });
+      } else {
+        navigate({ spaceDid: cell.space(), pieceId: cell.id() });
+      }
+    } catch (error) {
+      console.error("[RuntimeInternals] Failed to navigate:", error);
     }
   };
 
@@ -317,6 +356,7 @@ export class RuntimeInternals extends EventTarget {
       spaceIdentity: session.spaceIdentity,
       spaceDid: session.space,
       spaceName: session.spaceName,
+      memoryVersion: MEMORY_VERSION,
       experimental: EXPERIMENTAL,
       buildHash,
     });

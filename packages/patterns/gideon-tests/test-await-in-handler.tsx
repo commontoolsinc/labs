@@ -44,6 +44,7 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -89,7 +90,7 @@ const testWithoutAwait = handler<
 
   // Trigger by updating a cell - handler returns IMMEDIATELY
   // The actual async work happens in fetchData in the pattern body
-  state.fetchTrigger.set(Date.now());
+  state.fetchTrigger.set(safeDateNow());
 });
 
 // Simple counter increment to test UI responsiveness

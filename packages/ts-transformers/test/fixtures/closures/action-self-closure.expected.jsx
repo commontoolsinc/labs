@@ -1,9 +1,20 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Fixture: action closing over SELF requires inputs with defaults so the
  * piece data always satisfies the output schema's required properties.
  */
 import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface TestOutput {
     [NAME]: string;
     [UI]: VNode;
@@ -15,9 +26,9 @@ interface TestOutput {
 //   action(() => console.log(self.title)) → handler(eventSchema, { self: { title } }, (_, { self }) => ...)({ self: { title: self.key("title") } })
 //   action(() => { self; count.set(...) }) → handler(eventSchema, { self: TestOutput, count: asCell }, ...)({ self, count })
 // Context: SELF reference requires Default<> inputs so output schema is always satisfied
-export default pattern((__ct_pattern_input) => {
-    const title = __ct_pattern_input.key("title");
-    const self = __ct_pattern_input[__cfHelpers.SELF];
+export default pattern((__cf_pattern_input) => {
+    const title = __cf_pattern_input.key("title");
+    const self = __cf_pattern_input[__cfHelpers.SELF];
     const count = Writable.of(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -129,5 +140,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

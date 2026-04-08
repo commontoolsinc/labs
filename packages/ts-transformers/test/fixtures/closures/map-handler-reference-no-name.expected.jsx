@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI, handler, Cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -38,9 +49,9 @@ export default pattern((state: State) => {
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
                 return (<cf-button onClick={handleClick({ count: state.key("count") })}>
             {item.key("name")}
           </cf-button>);
@@ -170,5 +181,4 @@ export default pattern((state: State) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

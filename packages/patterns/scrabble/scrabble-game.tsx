@@ -16,7 +16,9 @@ import {
   handler,
   lift,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -263,7 +265,7 @@ const BONUS_LABELS: Record<BonusType, string> = {
 
 export function createTileBag(): Letter[] {
   const bag: Letter[] = [];
-  let tileId = Date.now();
+  let tileId = safeDateNow();
   for (const [letter, count] of Object.entries(TILE_DISTRIBUTION)) {
     for (let i = 0; i < count; i++) {
       const isBlank = letter === "";
@@ -277,7 +279,7 @@ export function createTileBag(): Letter[] {
   }
   // Fisher-Yates shuffle
   for (let i = bag.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(nonPrivateRandom() * (i + 1));
     [bag[i], bag[j]] = [bag[j], bag[i]];
   }
   return bag;
@@ -1065,11 +1067,11 @@ const submitTurn = handler<
   const bonusStr = turnScore.bingoBonus ? " + BINGO!" : "";
   const parsedEvents = parseGameEventsJson(gameEventsJson.get());
   parsedEvents.push({
-    id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `evt-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`,
     type: "word",
     player: myName,
     details: `${myName}: ${wordsStr} (+${turnScore.total}${bonusStr})`,
-    timestamp: Date.now(),
+    timestamp: safeDateNow(),
   });
   gameEventsJson.set(JSON.stringify(parsedEvents));
 

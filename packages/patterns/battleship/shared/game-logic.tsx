@@ -6,6 +6,7 @@
  * battleship patterns.
  */
 
+import { nonPrivateRandom } from "commonfabric";
 import type { Coordinate, Ship, ShipType, SquareState } from "./types.tsx";
 import { BOARD_SIZE, PLAYER_COLORS, SHIP_SIZES } from "./constants.tsx";
 
@@ -101,7 +102,7 @@ export function generateRandomShips(): Ship[] {
 
     while (!placed && attempts < maxAttempts) {
       attempts++;
-      const orientation: "horizontal" | "vertical" = Math.random() < 0.5
+      const orientation: "horizontal" | "vertical" = nonPrivateRandom() < 0.5
         ? "horizontal"
         : "vertical";
       const size = SHIP_SIZES[type];
@@ -113,8 +114,8 @@ export function generateRandomShips(): Ship[] {
         ? BOARD_SIZE - size
         : BOARD_SIZE - 1;
 
-      const row = Math.floor(Math.random() * (maxRow + 1));
-      const col = Math.floor(Math.random() * (maxCol + 1));
+      const row = Math.floor(nonPrivateRandom() * (maxRow + 1));
+      const col = Math.floor(nonPrivateRandom() * (maxCol + 1));
 
       const ship: Ship = { type, start: { row, col }, orientation };
 

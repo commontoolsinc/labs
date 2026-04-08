@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned handler with nested callback captures
  *
@@ -14,6 +22,9 @@ import * as __cfHelpers from "commonfabric";
  *   still uses the other captures inside the nested `setTimeout(...)` callback
  */
 import { action, Default, pattern, Stream, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Default<string, "">>, savedContent: Writable<Default<string, "">>, onSaveFile: Stream<{
     fileId: string;
     content: string;
@@ -25,6 +36,7 @@ function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Def
         return;
     onSaveFile.send({ fileId: targetFileId, content: nextContent });
 }
+__cfHardenFn(flushLater);
 interface Input {
     fileId: Writable<Default<string, "">>;
     content: Writable<Default<string, "">>;
@@ -37,11 +49,11 @@ interface Input {
 interface Output {
     trigger: Stream<void>;
 }
-export default pattern((__ct_pattern_input) => {
-    const fileId = __ct_pattern_input.key("fileId");
-    const content = __ct_pattern_input.key("content");
-    const savedContent = __ct_pattern_input.key("savedContent");
-    const onSaveFile = __ct_pattern_input.key("onSaveFile");
+export default pattern((__cf_pattern_input) => {
+    const fileId = __cf_pattern_input.key("fileId");
+    const content = __cf_pattern_input.key("content");
+    const savedContent = __cf_pattern_input.key("savedContent");
+    const onSaveFile = __cf_pattern_input.key("onSaveFile");
     const timer = Writable.of<ReturnType<typeof setTimeout> | null>(null, {
         anyOf: [{
                 type: "number"
@@ -149,5 +161,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

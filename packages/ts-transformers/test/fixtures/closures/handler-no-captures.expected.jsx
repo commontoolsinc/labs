@@ -1,18 +1,30 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { Cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn((__cf_handler_event, __cf_handler_params) => console.log("hi"));
 interface State {
     counter: Cell<number>;
 }
 // FIXTURE: handler-no-captures
 // Verifies: inline handler with no captured outer variables still gets wrapped with empty captures
-//   onClick={() => console.log("hi")) → handler(false, { properties: {} }, (_, __ct_handler_params) => ...)({})
+//   onClick={() => console.log("hi")) → handler(false, { properties: {} }, (_, __cf_handler_params) => ...)({})
 // Context: No closed-over state; capture object is empty
 export default pattern((_state) => {
     return {
         [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {}
-        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, __ct_handler_params) => console.log("hi"))({})}>
+        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({})}>
         Log
       </button>),
     };
@@ -57,5 +69,4 @@ export default pattern((_state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

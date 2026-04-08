@@ -93,6 +93,12 @@ export function assertEquals(a: unknown, b: unknown) {
 }
 
 const FIXTURE_ID = "common-iframe-csp-fixture-container";
+export function cleanupFixtures() {
+  for (const fixture of document.querySelectorAll(`[id^="${FIXTURE_ID}-"]`)) {
+    fixture.remove();
+  }
+}
+
 export function render(
   src: string,
   context = {},

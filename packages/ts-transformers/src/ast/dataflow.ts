@@ -9,6 +9,7 @@ import {
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { isSafeIdentifierText } from "../utils/identifiers.ts";
 import {
   detectCallKind,
   isReactiveValueExpression,
@@ -134,6 +135,10 @@ export function createDataFlowAnalyzer(
 
   const isSynthetic = (node: ts.Node): boolean => !node.getSourceFile();
 
+  type StaticBindingAccessSegment =
+    | { readonly kind: "property"; readonly text: string }
+    | { readonly kind: "index"; readonly text: string };
+
   const tryGetSymbol = (node: ts.Node): ts.Symbol | undefined => {
     try {
       return checker.getSymbolAtLocation(node) ?? undefined;
@@ -150,6 +155,146 @@ export function createDataFlowAnalyzer(
     }
   };
 
+  const isConstVariableDeclaration = (
+    declaration: ts.VariableDeclaration,
+  ): boolean => {
+    const declarationList = declaration.parent;
+    return !!(
+      declarationList &&
+      ts.isVariableDeclarationList(declarationList) &&
+      (declarationList.flags & ts.NodeFlags.Const) !== 0
+    );
+  };
+
+  const getEnclosingConstVariableDeclaration = (
+    node: ts.Node | undefined,
+  ): ts.VariableDeclaration | undefined => {
+    let current = node;
+    while (current) {
+      if (ts.isVariableDeclaration(current)) {
+        return isConstVariableDeclaration(current) ? current : undefined;
+      }
+      current = current.parent;
+    }
+    return undefined;
+  };
+
+  const getObjectBindingAccessSegment = (
+    element: ts.BindingElement,
+  ): StaticBindingAccessSegment | undefined => {
+    if (!element.propertyName) {
+      if (ts.isIdentifier(element.name)) {
+        return { kind: "property", text: element.name.text };
+      }
+      return undefined;
+    }
+
+    if (ts.isIdentifier(element.propertyName)) {
+      return { kind: "property", text: element.propertyName.text };
+    }
+
+    const propertyNameText = getStaticPropertyNameText(element.propertyName);
+    if (propertyNameText !== undefined) {
+      return { kind: "property", text: propertyNameText };
+    }
+
+    return undefined;
+  };
+
+  const getStaticPropertyNameText = (
+    name: ts.PropertyName,
+  ): string | undefined => {
+    if (ts.isIdentifier(name)) {
+      return name.text;
+    }
+
+    if (
+      ts.isStringLiteral(name) ||
+      ts.isNumericLiteral(name) ||
+      ts.isNoSubstitutionTemplateLiteral(name)
+    ) {
+      return name.text;
+    }
+
+    return undefined;
+  };
+
+  const getBindingElementStaticAccessPath = (
+    element: ts.BindingElement,
+  ): readonly StaticBindingAccessSegment[] | undefined => {
+    const path: StaticBindingAccessSegment[] = [];
+    let current: ts.BindingElement | undefined = element;
+
+    while (current) {
+      if (current.dotDotDotToken || current.initializer) {
+        return undefined;
+      }
+
+      const parentPattern: ts.Node = current.parent;
+      if (ts.isObjectBindingPattern(parentPattern)) {
+        const segment = getObjectBindingAccessSegment(current);
+        if (!segment) {
+          return undefined;
+        }
+        path.unshift(segment);
+      } else if (ts.isArrayBindingPattern(parentPattern)) {
+        const index = parentPattern.elements.indexOf(current);
+        if (index < 0) {
+          return undefined;
+        }
+        path.unshift({ kind: "index", text: String(index) });
+      } else {
+        return undefined;
+      }
+
+      const owner: ts.Node = parentPattern.parent;
+      if (ts.isVariableDeclaration(owner)) {
+        return path;
+      }
+      if (ts.isBindingElement(owner)) {
+        current = owner;
+        continue;
+      }
+      return undefined;
+    }
+
+    return undefined;
+  };
+
+  const createStaticBindingAccessExpression = (
+    root: ts.Expression,
+    path: readonly StaticBindingAccessSegment[],
+  ): ts.Expression => {
+    let current = unwrapStructuralDataFlowExpression(root);
+
+    for (const segment of path) {
+      if (segment.kind === "index") {
+        current = ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createNumericLiteral(segment.text),
+        );
+        continue;
+      }
+
+      current = isSafeIdentifierText(segment.text)
+        ? ts.factory.createPropertyAccessExpression(
+          current,
+          ts.factory.createIdentifier(segment.text),
+        )
+        : /^\d+$/.test(segment.text)
+        ? ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createNumericLiteral(segment.text),
+        )
+        : ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createStringLiteral(segment.text),
+        );
+    }
+
+    return current;
+  };
+
   const getStableConstAliasInitializer = (
     symbol: ts.Symbol | undefined,
   ): ts.Expression | undefined => {
@@ -158,25 +303,112 @@ export function createDataFlowAnalyzer(
     }
 
     const declaration = symbol.valueDeclaration;
-    if (
-      !declaration ||
-      !ts.isVariableDeclaration(declaration) ||
-      !ts.isIdentifier(declaration.name) ||
-      !declaration.initializer
-    ) {
+    if (!declaration) {
       return undefined;
     }
 
-    const declarationList = declaration.parent;
     if (
-      !declarationList ||
-      !ts.isVariableDeclarationList(declarationList) ||
-      (declarationList.flags & ts.NodeFlags.Const) === 0
+      ts.isVariableDeclaration(declaration) &&
+      ts.isIdentifier(declaration.name) &&
+      declaration.initializer &&
+      isConstVariableDeclaration(declaration)
     ) {
+      return declaration.initializer;
+    }
+
+    if (
+      ts.isBindingElement(declaration) &&
+      ts.isIdentifier(declaration.name)
+    ) {
+      const variableDeclaration = getEnclosingConstVariableDeclaration(
+        declaration,
+      );
+      if (!variableDeclaration?.initializer) {
+        return undefined;
+      }
+
+      const path = getBindingElementStaticAccessPath(declaration);
+      if (!path) {
+        return undefined;
+      }
+
+      return createStaticBindingAccessExpression(
+        variableDeclaration.initializer,
+        path,
+      );
+    }
+
+    return undefined;
+  };
+
+  const getStableConstAggregateInitializer = (
+    symbol: ts.Symbol | undefined,
+  ): ts.ObjectLiteralExpression | ts.ArrayLiteralExpression | undefined => {
+    const initializer = getStableConstAliasInitializer(symbol);
+    if (!initializer) {
       return undefined;
     }
 
-    return declaration.initializer;
+    const target = unwrapStructuralDataFlowExpression(initializer);
+    if (
+      ts.isObjectLiteralExpression(target) ||
+      ts.isArrayLiteralExpression(target)
+    ) {
+      return target;
+    }
+
+    return undefined;
+  };
+
+  const getStaticObjectLiteralPropertyInitializer = (
+    objectLiteral: ts.ObjectLiteralExpression,
+    propertyName: string,
+  ): ts.Expression | undefined => {
+    for (let index = objectLiteral.properties.length - 1; index >= 0; index--) {
+      const property = objectLiteral.properties[index];
+
+      if (
+        ts.isSpreadAssignment(property) ||
+        (ts.isPropertyAssignment(property) &&
+          ts.isComputedPropertyName(property.name)) ||
+        (ts.isMethodDeclaration(property) &&
+          ts.isComputedPropertyName(property.name)) ||
+        (ts.isGetAccessorDeclaration(property) &&
+          ts.isComputedPropertyName(property.name)) ||
+        (ts.isSetAccessorDeclaration(property) &&
+          ts.isComputedPropertyName(property.name))
+      ) {
+        return undefined;
+      }
+
+      if (ts.isPropertyAssignment(property)) {
+        const staticName = getStaticPropertyNameText(property.name);
+        if (staticName === propertyName) {
+          return property.initializer;
+        }
+        continue;
+      }
+
+      if (ts.isShorthandPropertyAssignment(property)) {
+        if (property.name.text === propertyName) {
+          return property.name;
+        }
+        continue;
+      }
+
+      if (
+        ts.isMethodDeclaration(property) ||
+        ts.isGetAccessorDeclaration(property) ||
+        ts.isSetAccessorDeclaration(property)
+      ) {
+        const staticName = getStaticPropertyNameText(property.name);
+        if (staticName === propertyName) {
+          return undefined;
+        }
+      }
+    }
+
+    return undefined;
   };
 
   const shouldPreserveConstAliasIdentity = (
@@ -184,23 +416,10 @@ export function createDataFlowAnalyzer(
   ): boolean => {
     const target = unwrapStructuralDataFlowExpression(initializer);
 
-    if (
-      ts.isIdentifier(target) ||
-      ts.isPropertyAccessExpression(target) ||
-      ts.isElementAccessExpression(target)
-    ) {
-      return false;
-    }
-
-    if (
+    return !(
       ts.isObjectLiteralExpression(target) ||
-      ts.isArrayLiteralExpression(target) ||
       isFunctionLikeExpression(target)
-    ) {
-      return false;
-    }
-
-    return true;
+    );
   };
 
   // Convert symbols to enriched parameters with name and declaration info
@@ -327,6 +546,51 @@ export function createDataFlowAnalyzer(
       ts.isExpression(argumentExpression) &&
       (ts.isLiteralExpression(argumentExpression) ||
         ts.isNoSubstitutionTemplateLiteral(argumentExpression));
+  };
+
+  const isStructuralOpaqueTargetExpression = (
+    expression: ts.Expression,
+    seenSymbols = new Set<ts.Symbol>(),
+  ): boolean => {
+    const target = unwrapStructuralDataFlowExpression(expression);
+
+    if (ts.isCallExpression(target)) {
+      return classifyOpaquePathTerminalCall(target) === "key";
+    }
+
+    if (ts.isPropertyAccessExpression(target)) {
+      return isStructuralOpaqueTargetExpression(target.expression, seenSymbols);
+    }
+
+    if (ts.isElementAccessExpression(target)) {
+      return isStaticElementAccess(target) &&
+        isStructuralOpaqueTargetExpression(target.expression, seenSymbols);
+    }
+
+    if (!ts.isIdentifier(target)) {
+      return false;
+    }
+
+    const symbol = tryGetSymbol(target);
+    if (
+      symbol &&
+      (isReactiveValueSymbol(symbol, checker) ||
+        symbolDeclaresCommonFabricDefault(symbol, checker))
+    ) {
+      return true;
+    }
+
+    if (!symbol || seenSymbols.has(symbol)) {
+      return false;
+    }
+
+    seenSymbols.add(symbol);
+    const initializer = getStableConstAliasInitializer(symbol);
+    if (!initializer) {
+      return false;
+    }
+
+    return isStructuralOpaqueTargetExpression(initializer, seenSymbols);
   };
 
   const analyzeExpression = (
@@ -515,6 +779,42 @@ export function createDataFlowAnalyzer(
 
     if (ts.isPropertyAccessExpression(expression)) {
       const target = analyzeExpression(expression.expression, scope, context);
+      if (ts.isIdentifier(expression.expression)) {
+        const targetSymbol = tryGetSymbol(expression.expression);
+        const aggregateInitializer = getStableConstAggregateInitializer(
+          targetSymbol,
+        );
+        if (
+          aggregateInitializer &&
+          ts.isObjectLiteralExpression(aggregateInitializer)
+        ) {
+          const propertyInitializer = getStaticObjectLiteralPropertyInitializer(
+            aggregateInitializer,
+            expression.name.text,
+          );
+          if (propertyInitializer) {
+            const propertyAnalysis = analyzeExpression(
+              propertyInitializer,
+              scope,
+              context,
+            );
+            if (
+              propertyAnalysis.containsOpaqueRef ||
+              propertyAnalysis.requiresRewrite ||
+              propertyAnalysis.dataFlows.length > 0
+            ) {
+              const parentId =
+                context.expressionToNodeId.get(expression.expression) ?? null;
+              recordDataFlow(expression, scope, parentId, true);
+              return {
+                containsOpaqueRef: true,
+                requiresRewrite: false,
+                dataFlows: [expression],
+              };
+            }
+          }
+        }
+      }
       const propertyType = tryGetType(expression);
 
       if (propertyType && isOpaqueRefType(propertyType, checker)) {
@@ -582,6 +882,20 @@ export function createDataFlowAnalyzer(
 
         // This is a direct property access on an OpaqueRef (like state.charms.length)
         // It should be its own explicit dependency
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+        };
+      }
+
+      if (isStructuralOpaqueTargetExpression(expression.expression)) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          context.expressionToNodeId.get(expression.expression) ?? null;
         recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,

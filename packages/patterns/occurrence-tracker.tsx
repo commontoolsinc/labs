@@ -14,6 +14,7 @@ import {
   lift,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -57,7 +58,7 @@ export interface OccurrenceTrackerInput {
 
 function formatRelativeTime(timestamp: string): string {
   if (!timestamp) return "";
-  const diffMs = Date.now() - new Date(timestamp).getTime();
+  const diffMs = safeDateNow() - new Date(timestamp).getTime();
   const mins = Math.floor(diffMs / 60000);
   const hours = Math.floor(diffMs / 3600000);
   const days = Math.floor(diffMs / 86400000);
@@ -131,8 +132,8 @@ const formatFrequencyFromList = lift((list: Occurrence[]): string => {
 
 // ===== Handlers =====
 
-// TODO(future): Replace Date.now()/new Date() with proper time service when available.
-// Date.now() will be blocked in patterns in the future. The wish({ query: "#now" }) mechanism
+// TODO(future): Replace safeDateNow()/new Date() with proper time service when available.
+// safeDateNow() will be blocked in patterns in the future. The wish({ query: "#now" }) mechanism
 // only captures time once at pattern creation, so it doesn't work for fresh timestamps
 // in handlers. When a handler-compatible time service is available (e.g., clock builtin
 // or transaction timestamp), update these handlers to use it instead.

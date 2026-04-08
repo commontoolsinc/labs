@@ -60,6 +60,25 @@ function filterOutCell(
   );
 }
 
+const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
+  Deno.env.get("CT_CLI_TRACE_TIMINGS") === "1";
+
+async function timePiecePhase<T>(
+  label: string,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  if (!PIECE_TRACE_TIMINGS) {
+    return await run();
+  }
+  const start = performance.now();
+  try {
+    return await run();
+  } finally {
+    const elapsed = Math.round(performance.now() - start);
+    console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
+  }
+}
+
 export class PieceManager {
   private space: MemorySpace;
 
@@ -140,15 +159,24 @@ export class PieceManager {
    * Get the default pattern cell from the space cell.
    * @returns The default pattern cell, or undefined if not set
    */
-  async getDefaultPattern(): Promise<Cell<NameSchema> | undefined> {
-    const cell = await this.spaceCell.key("defaultPattern").sync();
+  async getDefaultPattern(
+    runIt: boolean = true,
+  ): Promise<Cell<NameSchema> | undefined> {
+    const cell = await timePiecePhase(
+      "getDefaultPattern.spaceCell.sync",
+      () => this.spaceCell.key("defaultPattern").sync(),
+    );
     if (!cell.get().get()) {
       return undefined;
     }
-    return this.get(
-      cell.get(),
-      true,
-      nameSchema,
+    return await timePiecePhase(
+      `getDefaultPattern.get(runIt=${runIt})`,
+      () =>
+        this.get(
+          cell.get(),
+          runIt,
+          nameSchema,
+        ),
     );
   }
 
@@ -157,7 +185,7 @@ export class PieceManager {
    * Reads from the default pattern's allPieces export.
    */
   async getPieces(): Promise<Cell<Cell<unknown>[]>> {
-    const defaultPattern = await this.getDefaultPattern();
+    const defaultPattern = await this.getDefaultPattern(false);
     if (!defaultPattern) {
       // Return empty array cell if no default pattern
       return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
@@ -175,7 +203,10 @@ export class PieceManager {
   }
 
   async add(newPieces: Cell<unknown>[]): Promise<void> {
-    const defaultPattern = await this.getDefaultPattern();
+    const defaultPattern = await timePiecePhase(
+      "add.getDefaultPattern",
+      () => this.getDefaultPattern(false),
+    );
     if (!defaultPattern) {
       throw new Error("Cannot add pieces: default pattern not available");
     }
@@ -200,28 +231,32 @@ export class PieceManager {
     // distinguish the two — otherwise pieces are silently dropped.
     // Retries are handled by the scheduler internally.
     for (const piece of newPieces) {
-      await new Promise<void>((resolve, reject) => {
-        addPieceHandler.send({ piece }, (tx) => {
-          const txStatus = tx.status();
-          if (txStatus.status === "error") {
-            console.error(
-              "Piece registration failed: addPiece transaction error:",
-              txStatus.error,
-            );
-            reject(
-              new Error(
-                "Piece registration failed: addPiece transaction aborted after retries",
-              ),
-            );
-          } else {
-            resolve();
-          }
-        });
-      });
+      await timePiecePhase(
+        "add.send",
+        () =>
+          new Promise<void>((resolve, reject) => {
+            addPieceHandler.send({ piece }, (tx) => {
+              const txStatus = tx.status();
+              if (txStatus.status === "error") {
+                console.error(
+                  "Piece registration failed: addPiece transaction error:",
+                  txStatus.error,
+                );
+                reject(
+                  new Error(
+                    "Piece registration failed: addPiece transaction aborted after retries",
+                  ),
+                );
+              } else {
+                resolve();
+              }
+            });
+          }),
+      );
     }
 
-    await this.runtime.idle();
-    await this.synced();
+    await timePiecePhase("add.runtime.idle", () => this.runtime.idle());
+    await timePiecePhase("add.synced", () => this.synced());
   }
 
   syncPieces(cell: Cell<Cell<unknown>[]>) {
@@ -255,10 +290,13 @@ export class PieceManager {
     if (runIt) {
       // start() handles sync, pattern loading, and running
       // It's idempotent - no effect if already running
-      await this.runtime.start(piece);
+      await timePiecePhase(
+        "get.runtime.start",
+        () => this.runtime.start(piece),
+      );
     } else {
       // Just sync the cell if not running
-      await piece.sync();
+      await timePiecePhase("get.piece.sync", () => piece.sync());
     }
 
     // If caller provided a schema, use it
@@ -729,7 +767,7 @@ export class PieceManager {
     await this.syncPieces(piecesCell);
 
     // Check if this is the default pattern and clear the link
-    const defaultPattern = await this.getDefaultPattern();
+    const defaultPattern = await this.getDefaultPattern(false);
     if (
       defaultPattern &&
       piece.resolveAsCell().equals(defaultPattern.resolveAsCell())
@@ -788,10 +826,14 @@ export class PieceManager {
     });
     await piece.sync();
     const start = options?.start ?? true;
-    await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+    if (start) {
+      await this.runtime.runSynced(piece, pattern, inputs);
+    } else {
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+    }
     await this.syncPattern(piece);
     if (start) {
-      await this.startPiece(piece);
+      await this.getResult(piece).pull();
     }
 
     return piece;
@@ -807,14 +849,33 @@ export class PieceManager {
     cause?: unknown,
     llmRequestId?: string,
   ): Promise<Cell<T>> {
-    await this.runtime.idle();
+    await timePiecePhase(
+      "setupPersistent.runtime.idle",
+      () => this.runtime.idle(),
+    );
     const piece = this.runtime.getCell<T>(
       this.space,
       cause ?? { space: this.space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
-    await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
-    await this.syncPattern(piece);
+    await timePiecePhase(
+      "setupPersistent.runtime.setup",
+      () => this.runtime.setup(undefined, pattern, inputs ?? {}, piece),
+    );
+    const knownPatternId = (() => {
+      try {
+        return this.runtime.patternManager.getPatternMeta(pattern).id;
+      } catch {
+        return undefined;
+      }
+    })();
+    await timePiecePhase(
+      "setupPersistent.syncPattern",
+      () =>
+        knownPatternId
+          ? this.syncPatternById(knownPatternId)
+          : this.syncPattern(piece),
+    );
 
     if (llmRequestId) {
       this.runtime.editWithRetry((tx) => {
@@ -830,12 +891,18 @@ export class PieceManager {
   /** Start scheduling and running a prepared piece. */
   async startPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
     const piece = typeof pieceOrId === "string"
-      ? await this.get<T>(pieceOrId)
+      ? await timePiecePhase("startPiece.get", () => this.get<T>(pieceOrId))
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
-    await this.runtime.start(piece);
-    await this.getResult(piece).pull();
-    await this.synced();
+    await timePiecePhase(
+      "startPiece.runtime.start",
+      () => this.runtime.start(piece),
+    );
+    await timePiecePhase(
+      "startPiece.result.pull",
+      () => this.getResult(piece).pull(),
+    );
+    await timePiecePhase("startPiece.synced", () => this.synced());
   }
 
   /** Stop a running piece (no-op if not running). */
@@ -850,18 +917,33 @@ export class PieceManager {
 
   // FIXME(JA): this really really really needs to be revisited
   async syncPattern(piece: Cell<unknown>) {
-    await piece.sync();
+    await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
     // When we subscribe to a doc, our subscription includes the doc's source,
     // so get that.
     const sourceCell = piece.getSourceCell();
     if (!sourceCell) throw new Error("piece missing source cell");
-    await sourceCell.sync();
+    await timePiecePhase("syncPattern.source.sync", () => sourceCell.sync());
 
-    const patternId = sourceCell.get()?.[TYPE];
+    let patternId = sourceCell.get()?.[TYPE];
+    if (!patternId) {
+      // Under remote sync, the source cell can transiently lag the result cell
+      // even though setup just wrote both. Wait for storage to settle and retry
+      // once before treating the source metadata as missing.
+      await timePiecePhase("syncPattern.retry.synced", () => this.synced());
+      await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
+      await timePiecePhase(
+        "syncPattern.retry.source.sync",
+        () => sourceCell.sync(),
+      );
+      patternId = sourceCell.get()?.[TYPE];
+    }
     if (!patternId) throw new Error("piece missing pattern ID");
 
-    return await this.syncPatternById(patternId);
+    return await timePiecePhase(
+      "syncPattern.loadPattern",
+      () => this.syncPatternById(patternId),
+    );
   }
 
   async syncPatternById(patternId: string) {

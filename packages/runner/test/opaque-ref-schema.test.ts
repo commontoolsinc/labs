@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -23,7 +24,7 @@ describe("OpaqueRef Schema Support", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, cell } = commonfabric);
   });
 

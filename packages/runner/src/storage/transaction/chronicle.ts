@@ -1,9 +1,6 @@
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commonfabric/memory/fact";
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import type {
   Assertion,
   IAttestation,
@@ -20,6 +17,7 @@ import type {
   Result,
   State,
 } from "../interface.ts";
+import type { FabricValue } from "@commonfabric/memory/interface";
 import * as Address from "./address.ts";
 import {
   attest,
@@ -32,8 +30,34 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { refer } from "@commonfabric/memory/reference";
 import * as Edit from "./edit.ts";
+
+const isEmptyRecord = (
+  value: FabricValue | undefined,
+): value is Record<string, never> =>
+  value !== null &&
+  value !== undefined &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.keys(value).length === 0;
+
+const alignRootWriteWithLoadedShape = (
+  type: string,
+  _loaded: FabricValue | undefined,
+  merged: FabricValue | undefined,
+  options: {
+    isV2JsonRoot: boolean;
+  },
+): FabricValue | undefined => {
+  if (type !== "application/json") {
+    return merged;
+  }
+  if (options.isV2JsonRoot) {
+    return isEmptyRecord(merged) ? undefined : merged;
+  }
+  return merged;
+};
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
 
@@ -270,21 +294,32 @@ export class Chronicle {
         const normalizedMerged = fabricFromNativeValue(merged.value);
         const normalizedLoaded = fabricFromNativeValue(loaded.is);
 
-        if (deepEqual(normalizedMerged, normalizedLoaded)) {
+        const alignedMerged = alignRootWriteWithLoadedShape(
+          changes.address.type,
+          normalizedLoaded,
+          normalizedMerged,
+          {
+            isV2JsonRoot: changes.address.type === "application/json" &&
+              "getDocument" in replica &&
+              typeof replica.getDocument === "function",
+          },
+        );
+
+        if (deepEqual(alignedMerged, normalizedLoaded)) {
           // Values are deeply equal after normalization - no change needed.
           edit.claim(loaded);
-        } else if (normalizedMerged === undefined) {
+        } else if (alignedMerged === undefined) {
           // If the normalized value is `undefined`, retract the fact.
           edit.retract(loaded as Assertion);
         } else {
           // Create an assertion referring to the loaded fact in a causal
           // reference.
           const factToRefer = loaded.cause ? normalizeFact(loaded) : loaded;
-          const causeRef = hashOf(factToRefer);
+          const causeRef = refer(factToRefer);
 
           edit.assert({
             ...loaded,
-            is: normalizedMerged as FabricValue,
+            is: alignedMerged as FabricValue,
             cause: causeRef,
           });
         }

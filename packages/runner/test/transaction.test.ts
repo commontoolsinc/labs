@@ -14,8 +14,20 @@ describe("StorageTransaction", () => {
   let storage: ReturnType<typeof StorageManager.emulate>;
   let transaction: ReturnType<typeof Transaction.create>;
 
+  const legacyReplica = (spaceDid: typeof space) => {
+    const replica = storage.open(spaceDid).replica;
+    if (!replica.commit) {
+      throw new Error("Expected legacy replica to support commit()");
+    }
+    return replica as typeof replica & {
+      commit: NonNullable<typeof replica.commit>;
+    };
+  };
+
   beforeEach(() => {
-    storage = StorageManager.emulate({ as: signer });
+    // This suite asserts the legacy raw JSON replica shape. V2 coverage lives in
+    // the memory-v2-* tests that exercise the document-envelope model directly.
+    storage = StorageManager.emulate({ as: signer, memoryVersion: "v1" });
     transaction = Transaction.create(storage);
   });
 
@@ -461,7 +473,7 @@ describe("StorageTransaction", () => {
 
     it("should fail commit when replica is modified after read invariant is established", async () => {
       // Pre-populate replica with initial data
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       const v1 = assert({
         the: "application/json",
         of: "user:consistency",
@@ -529,7 +541,7 @@ describe("StorageTransaction", () => {
   describe("Pre-populated Replica Reads", () => {
     it("should read existing data from replica", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -559,7 +571,7 @@ describe("StorageTransaction", () => {
 
     it("should handle nested path reads from replica", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({

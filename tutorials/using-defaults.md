@@ -78,8 +78,7 @@ Let's build a complete counter with an increment button:
 ```{code-block} typescript
 :label: using_defaults_counter
 :linenos: true
-:emphasize-lines: 11-13,21,26,31
-/// <cts-enable />
+:emphasize-lines: 10-12,20,25,30
 import {
   Default,
   h,
@@ -114,18 +113,18 @@ export default pattern<CounterState>((state) => {
 });
 ```
 
-**Lines 11-13** define the input interface with `Default<number, 100>`. This
+**Lines 10-12** define the input interface with `Default<number, 100>`. This
 tells the runtime:
 
 - Create a Cell that holds a number
 - Initialize it to 100
 
-**Line 21** receives `state` which has a `count` property that's already a
+**Line 20** receives `state` which has a `count` property that's already a
 `Cell<number>`.
 
-**Line 26** passes the Cell to the handler, just like before.
+**Line 25** passes the Cell to the handler, just like before.
 
-**Line 31** exports the Cell so other patterns can use it.
+**Line 30** exports the Cell so other patterns can use it.
 
 :::{dropdown} View complete code :animate: fade-in
 
@@ -147,8 +146,7 @@ items already in it:
 ```{code-block} typescript
 :label: using_defaults_array
 :linenos: true
-:emphasize-lines: 11-13
-/// <cts-enable />
+:emphasize-lines: 10-12
 import {
   Default,
   h,
@@ -163,7 +161,7 @@ interface TodoListState {
 }
 ```
 
-**Line 12** specifies
+**Line 11** specifies
 `Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>`:
 
 - First parameter: The type is an array of strings
@@ -200,8 +198,7 @@ Here's the complete todo list pattern:
 ```{code-block} typescript
 :label: using_defaults_todo_complete
 :linenos: true
-:emphasize-lines: 11-13,28,33-36
-/// <cts-enable />
+:emphasize-lines: 10-12,27,32-35
 import {
   Default,
   h,
@@ -340,7 +337,6 @@ Here's the complete game stats pattern:
 :label: using_defaults_object_complete
 :linenos: true
 :emphasize-lines: 11-24,42-53
-/// <cts-enable />
 import {
   Default,
   h,

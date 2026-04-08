@@ -1,5 +1,53 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { state } }) => (<div>{__cfHelpers.derive({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                prefix: {
+                    type: "string"
+                },
+                suffix: {
+                    type: "string"
+                }
+            },
+            required: ["prefix", "suffix"]
+        },
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["state", "item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, {
+    state: {
+        prefix: state.prefix,
+        suffix: state.suffix
+    },
+    item: {
+        name: item.name
+    }
+}, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)}</div>));
 interface Item {
     id: number;
     name: string;
@@ -18,52 +66,9 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
-                return (<div>{__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                prefix: {
-                                    type: "string"
-                                },
-                                suffix: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["prefix", "suffix"]
-                        },
-                        item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["state", "item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    state: {
-                        prefix: state.key("prefix"),
-                        suffix: state.key("suffix")
-                    },
-                    item: {
-                        name: item.key("name")
-                    }
-                }, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)}</div>);
-            }, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
                     params: {
                         type: "object",
                         properties: {
@@ -81,23 +86,18 @@ export default pattern((state) => {
                             }
                         },
                         required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
+                    },
+                    element: {
                         type: "object",
                         properties: {
-                            id: {
-                                type: "number"
-                            },
                             name: {
                                 type: "string"
                             }
                         },
-                        required: ["id", "name"]
+                        required: ["name"]
                     }
-                }
+                },
+                required: ["params", "element"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -189,5 +189,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

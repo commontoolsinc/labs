@@ -6,6 +6,8 @@ import { extractAstralConfig } from "./config.ts";
 import { sleep } from "@commonfabric/utils/sleep";
 
 export class BrowserController extends EventTarget {
+  private static readonly HARNESS_READY_TIMEOUT_MS = 10_000;
+  private static readonly HARNESS_READY_POLL_MS = 200;
   private manifest: Manifest;
   private page: Page | null;
   private browser: Browser | null;
@@ -70,7 +72,11 @@ export class BrowserController extends EventTarget {
     if (!this.page) {
       throw new Error("No page loaded.");
     }
-    for (let i = 0; i < 10; i++) {
+    const attempts = Math.ceil(
+      BrowserController.HARNESS_READY_TIMEOUT_MS /
+        BrowserController.HARNESS_READY_POLL_MS,
+    );
+    for (let i = 0; i < attempts; i++) {
       const response = await this.page.evaluate(() =>
         // @ts-ignore This is defined in the JS harness
         globalThis.__denoWebTest && globalThis.__denoWebTest.isReady()
@@ -81,9 +87,11 @@ export class BrowserController extends EventTarget {
       if (response.error) {
         throw new Error(response.error?.message ?? response.error);
       }
-      await sleep(200);
+      await sleep(BrowserController.HARNESS_READY_POLL_MS);
     }
-    throw new Error("Test harness not ready in 2s.");
+    throw new Error(
+      `Test harness not ready in ${BrowserController.HARNESS_READY_TIMEOUT_MS}ms.`,
+    );
   }
 
   async close() {

@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { NAME, UI, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Entry {
     [NAME]: string;
     [UI]: string;
@@ -12,10 +23,10 @@ interface Input {
 //   .map(fn) → .mapWithPattern(pattern(...), {})
 //   item[NAME] → item.key(__cfHelpers.NAME), item[UI] → item.key(__cfHelpers.UI)
 // Context: Symbol-keyed property access (NAME, UI) is lowered to .key() with helper references
-const _p = pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    return items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const item = __ct_pattern_input.key("element");
+const _p = pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const item = __cf_pattern_input.key("element");
         return ({ n: item.key(__cfHelpers.NAME), u: item.key(__cfHelpers.UI) });
     }, {
         type: "object",
@@ -93,5 +104,4 @@ const _p = pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

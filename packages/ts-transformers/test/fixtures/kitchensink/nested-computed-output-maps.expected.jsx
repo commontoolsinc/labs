@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * FIXTURE: nested-computed-output-maps
  * Verifies: nested computed outputs can flow back into later pattern-owned
@@ -16,6 +24,9 @@ import * as __cfHelpers from "commonfabric";
  * - closures preserve thread/comment indices, state.lane, and local Writables
  */
 import { computed, handler, ifElse, lift, pattern, UI, Writable, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Comment {
     id: string;
     text: string;
@@ -438,11 +449,11 @@ export default pattern((state) => {
             </div>))}
           {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested derive() — reactive even inside outer derive */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {reboundComments.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const comment = __ct_pattern_input.key("element");
-                const reboundIndex = __ct_pattern_input.key("index");
-                const outerIndex = __ct_pattern_input.params.outerIndex;
-                const state = __ct_pattern_input.key("params", "state");
+          {reboundComments.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const comment = __cf_pattern_input.key("element");
+                const reboundIndex = __cf_pattern_input.key("index");
+                const outerIndex = __cf_pattern_input.params.outerIndex;
+                const state = __cf_pattern_input.key("params", "state");
                 return (<aside>
               {__cfHelpers.ifElse({
                     type: "boolean"
@@ -582,11 +593,11 @@ export default pattern((state) => {
             })}
           {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer derive */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {liftedSeparators.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const edge = __ct_pattern_input.key("element");
-                const edgeIndex = __ct_pattern_input.key("index");
-                const outerIndex = __ct_pattern_input.params.outerIndex;
-                const state = __ct_pattern_input.key("params", "state");
+          {liftedSeparators.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const edge = __cf_pattern_input.key("element");
+                const edgeIndex = __cf_pattern_input.key("index");
+                const outerIndex = __cf_pattern_input.params.outerIndex;
+                const state = __cf_pattern_input.key("params", "state");
                 return (<small>
               {__cfHelpers.ifElse({
                     type: "boolean"
@@ -701,10 +712,10 @@ export default pattern((state) => {
         [UI]: (<div>
         {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
         {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(derive(cond), derive(true-branch), label) */}
-        {laneLabels.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const label = __ct_pattern_input.key("element");
-                const labelIndex = __ct_pattern_input.key("index");
-                const state = __ct_pattern_input.key("params", "state");
+        {laneLabels.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const label = __cf_pattern_input.key("element");
+                const labelIndex = __cf_pattern_input.key("index");
+                const state = __cf_pattern_input.key("params", "state");
                 return (<header data-lane-label={labelIndex}>
             {__cfHelpers.ifElse({
                     type: "boolean"
@@ -802,9 +813,9 @@ export default pattern((state) => {
                 }
             })}
         {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of derive() — reactive, back in pattern-owned UI */}
-        {threadRows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const row = __ct_pattern_input.key("element");
-                const rowIndex = __ct_pattern_input.key("index");
+        {threadRows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const row = __cf_pattern_input.key("element");
+                const rowIndex = __cf_pattern_input.key("index");
                 return (<section data-row={rowIndex}>{row}</section>);
             }, {
                 type: "object",
@@ -954,5 +965,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);

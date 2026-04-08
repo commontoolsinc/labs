@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Spot {
     spotNumber: string;
 }
@@ -22,8 +33,8 @@ export default pattern((state) => {
     return {
         [UI]: (<section>
         <ul>
-          {state.key("spots").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const spot = __ct_pattern_input.key("element");
+          {state.key("spots").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const spot = __cf_pattern_input.key("element");
                 const sn = spot.key("spotNumber");
                 return <li>{sn}</li>;
             }, {
@@ -69,14 +80,54 @@ export default pattern((state) => {
         </ul>
 
         <ul>
-          {state.key("people").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const person = __ct_pattern_input.key("element");
+          {state.key("people").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const person = __cf_pattern_input.key("element");
                 const name = person.key("name"), spotPreferences = person.key("spotPreferences");
                 return (<li>
                 <span>{name}</span>
-                {spotPreferences.key("length") > 0
-                        ? <span>{spotPreferences.map((n) => "#" + n).join(", ")}</span>
-                        : null}
+                {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "null"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "null"
+                        }, {}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        spotPreferences: {
+                            type: "array",
+                            items: {
+                                type: "unknown"
+                            }
+                        }
+                    },
+                    required: ["spotPreferences"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.length > 0), <span>{__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        spotPreferences: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    },
+                    required: ["spotPreferences"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))}</span>, null)}
               </li>);
             }, {
                 type: "object",
@@ -202,5 +253,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__cfHardenFn(h);
