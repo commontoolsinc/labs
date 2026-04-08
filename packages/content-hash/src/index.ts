@@ -8,6 +8,7 @@
  * 2. `hash-wasm` (browser) -- WASM, ~3x faster than pure JS
  * 3. `merkle-reference`'s `sha256` (fallback) -- pure JS via @noble/hashes
  */
+
 import { isDeno } from "@commonfabric/utils/env";
 import { createSHA256, type IHasher } from "hash-wasm";
 import { sha256 as nobleSha256 } from "merkle-reference";
@@ -17,21 +18,16 @@ import type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
 let sha256Fn: Sha256Fn = nobleSha256;
-let createHasher: () => IncrementalHasher;
+let createHasher: (() => IncrementalHasher);
+let setupComplete: boolean = false;
 
-// -- node:crypto (Deno/server) --
-// deno-lint-ignore no-explicit-any
-let nodeCrypto: any = null;
-
+// Try the Deno setup, if we seem to be running in a Deno environment.
 if (isDeno()) {
   try {
-    nodeCrypto = await import("node:crypto");
-    sha256Fn = (payload: Uint8Array): Uint8Array => {
-      // node:crypto digest() returns Buffer (a Uint8Array subclass); normalize
-      // to plain Uint8Array so downstream equality checks work correctly.
-      const buf = nodeCrypto.createHash("sha256").update(payload).digest();
-      return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-    };
+    const denoVersion = await import("./sha256-deno.ts");
+    sha256Fn = denoVersion.sha256Deno;
+    createHasher = denoVersion.createHasherDeno;
+    setupComplete = true;
   } catch {
     // node:crypto not available
   }
@@ -40,7 +36,8 @@ if (isDeno()) {
 // -- hash-wasm (browser) --
 let wasmHasher: IHasher | null = null;
 
-if (!nodeCrypto) {
+// Try `hash-wasm` if we didn't succeed in getting the Deno setup to work.
+if (!setupComplete) {
   try {
     wasmHasher = await createSHA256();
     sha256Fn = (payload: Uint8Array): Uint8Array => {
@@ -55,38 +52,8 @@ if (!nodeCrypto) {
 
 // -- Build the incremental hasher factory --
 
-if (nodeCrypto) {
-  class NodeHasher implements IncrementalHasher {
-    #hasher = nodeCrypto.createHash("sha256");
-    update(data: Uint8Array) {
-      this.#hasher.update(data);
-    }
-    digest(): Uint8Array;
-    digest(encoding: "base64url"): string;
-    digest(encoding?: string): Uint8Array | string {
-      switch (encoding) {
-        case "base64url": {
-          return this.#hasher.digest(encoding);
-        }
-        case undefined: {
-          // node:crypto digest() returns Buffer; normalize to plain Uint8Array.
-          const buf = this.#hasher.digest();
-          return new Uint8Array(
-            buf.buffer,
-            buf.byteOffset,
-            buf.byteLength,
-          );
-        }
-        default: {
-          throw new Error(`Unknown encoding: ${encoding}`);
-        }
-      }
-    }
-  }
-
-  createHasher = (): IncrementalHasher => {
-    return new NodeHasher();
-  };
+if (setupComplete) {
+  // Already set up. Nothing more to do.
 } else if (wasmHasher) {
   // hash-wasm's shared hasher is safe for synchronous sequential use.
   // But for incremental hashing we need a dedicated instance per hash
