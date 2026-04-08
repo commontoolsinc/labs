@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import {
   enqueueSinkRequestPostCommitEffect,
+  createSinkRequestPolicyInput,
   verifySinkRequestRelease,
 } from "../src/cfc/sink-request.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -97,7 +98,93 @@ describe("CFC sink request policy", () => {
     );
 
     const result = await tx.commit();
-    expect(result.ok).toBeDefined();
+    expect(result.error).toBeUndefined();
+    expect(flushCount).toBe(1);
+
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
+  it("releases sink requests from the prepared snapshot even if live tx state changes later", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+
+    const request = createFrozenRequestSnapshot({
+      url: "https://example.com/prepared-snapshot",
+    });
+
+    let flushCount = 0;
+    tx.setCfcEnforcementMode("observe");
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "fetchData",
+      "fetchData:prepared-snapshot",
+      request,
+      "fetchData-start",
+      () => {
+        flushCount++;
+      },
+    );
+
+    tx.prepareCfc();
+
+    const state = tx.getCfcState() as {
+      writePolicyInputs: ReturnType<typeof createSinkRequestPolicyInput>[];
+    };
+    state.writePolicyInputs[0] = createSinkRequestPolicyInput(
+      "fetchData",
+      "fetchData:prepared-snapshot",
+      createFrozenRequestSnapshot({
+        url: "https://example.com/mutated-state",
+      }),
+    );
+
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    expect(flushCount).toBe(1);
+
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
+  it("does not double-send sink requests across a retry that aborts before commit", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+
+    const request = createFrozenRequestSnapshot({
+      url: "https://example.com/retry",
+    });
+
+    let flushCount = 0;
+    let attempts = 0;
+
+    const result = await runtime.editWithRetry((tx) => {
+      attempts++;
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchData",
+        "fetchData:retry-effect",
+        request,
+        "fetchData-start",
+        () => {
+          flushCount++;
+        },
+      );
+
+      if (attempts === 1) {
+        tx.abort("force retry");
+      }
+    }, 1);
+
+    expect(result.error).toBeUndefined();
+    expect(attempts).toBe(2);
     expect(flushCount).toBe(1);
 
     await runtime.dispose();

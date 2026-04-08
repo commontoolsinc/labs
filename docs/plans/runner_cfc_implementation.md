@@ -765,8 +765,8 @@ Acceptance:
 - [x] Failed prepare or failed commit never issues a network call from
       `fetchData`, `fetchProgram`, `streamData`, `llm`, `llmDialog`,
       `generateText`, or `generateObject`
-- [ ] Retried attempts reuse the winning committed effect and do not double-send
-- [ ] Request release rules are evaluated from the prepared request snapshot and
+- [x] Retried attempts reuse the winning committed effect and do not double-send
+- [x] Request release rules are evaluated from the prepared request snapshot and
       committed CFC metadata, not ad hoc runtime state
 
 ### 11. UI Provenance and Trusted Events
@@ -843,7 +843,7 @@ The test matrix should be built in the same order as the implementation:
       dereferencing, and non-exposure
 - [x] scheduler and runtime-owned direct-commit tests for retry and outbox
       behavior
-- [ ] sink tests for commit-gated network execution and idempotency
+- [x] sink tests for commit-gated network execution and idempotency
 - [ ] UI tests for provenance-backed trusted event delivery
 - [ ] fresh-runtime restart tests for persisted metadata, schema hashes, trust
       snapshots, and sink results

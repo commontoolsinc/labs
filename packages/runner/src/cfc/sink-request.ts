@@ -2,7 +2,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { createFrozenRequestSnapshot } from "./request-snapshot.ts";
-import type { WritePolicyInput } from "./types.ts";
+import type { CfcPrepareState, WritePolicyInput } from "./types.ts";
 
 type SinkRequestPolicyInput = Extract<
   WritePolicyInput,
@@ -10,11 +10,19 @@ type SinkRequestPolicyInput = Extract<
 >;
 type SinkRequestPolicyState = {
   writePolicyInputs: readonly WritePolicyInput[];
+  prepare?: CfcPrepareState;
 };
 
 const isSinkRequestPolicyInput = (
   input: WritePolicyInput,
 ): input is SinkRequestPolicyInput => input.kind === "sink-request";
+
+const preparedSinkRequestInputs = (
+  state: SinkRequestPolicyState,
+): readonly WritePolicyInput[] =>
+  state.prepare?.status === "prepared"
+    ? state.prepare.input.writePolicyInputs
+    : state.writePolicyInputs;
 
 export function createSinkRequestPolicyInput(
   sink: string,
@@ -45,12 +53,22 @@ export function verifySinkRequestRelease(
   sink: string,
   effectId: string,
   request: FabricValue,
+  preparedInput?: SinkRequestPolicyInput,
 ): string | undefined {
-  const match = tx.getCfcState().writePolicyInputs.find((input) =>
-    isSinkRequestPolicyInput(input) &&
-    input.sink === sink &&
-    input.effectId === effectId
-  ) as SinkRequestPolicyInput | undefined;
+  const state = tx.getCfcState();
+  const match = state.prepare?.status === "prepared"
+    ? preparedSinkRequestInputs(state).find((input) =>
+      isSinkRequestPolicyInput(input) &&
+      input.sink === sink &&
+      input.effectId === effectId
+    ) as SinkRequestPolicyInput | undefined
+    : preparedInput?.sink === sink && preparedInput.effectId === effectId
+    ? preparedInput
+    : preparedSinkRequestInputs(state).find((input) =>
+      isSinkRequestPolicyInput(input) &&
+      input.sink === sink &&
+      input.effectId === effectId
+    ) as SinkRequestPolicyInput | undefined;
 
   if (match === undefined) {
     return `missing sink-request policy input for ${sink}`;
@@ -74,7 +92,8 @@ export function enqueueSinkRequestPostCommitEffect(
   kind: string,
   flush: (tx: IExtendedStorageTransaction) => void | Promise<void>,
 ): void {
-  recordSinkRequestPolicyInput(tx, sink, effectId, request);
+  const policyInput = createSinkRequestPolicyInput(sink, effectId, request);
+  tx.recordCfcWritePolicyInput(policyInput);
   tx.enqueuePostCommitEffect({
     id: effectId,
     idempotencyKey: effectId,
@@ -85,6 +104,7 @@ export function enqueueSinkRequestPostCommitEffect(
         sink,
         effectId,
         request,
+        policyInput,
       );
       if (reason !== undefined) {
         console.warn(`[CFC sink-request] ${reason}`);
