@@ -689,7 +689,7 @@ Tasks:
       `codeCID` as only one possible component or hint rather than a complete
       identity
 - [x] Define canonical ids for built-ins
-- [ ] Mark verified compiled-code policy identity as blocked on extending
+- [x] Mark verified compiled-code policy identity as blocked on extending
       memory-v2 commit/transport/storage surfaces beyond bare `codeCID` so the
       richer bundle/path/location/hash identity can be carried or rebound
       deterministically
@@ -709,7 +709,7 @@ Tasks:
 Acceptance:
 
 - [x] Built-ins produce stable policy-facing implementation identities
-- [ ] Verified compiled user-code policy identities remain blocked until v2
+- [x] Verified compiled user-code policy identities remain blocked until v2
       carries the richer bundle/path/location/hash identity surface
 - [ ] Unsupported identity classes fail closed for trust-sensitive checks
 - [x] Changing the trust snapshot between prepare and commit invalidates prepare

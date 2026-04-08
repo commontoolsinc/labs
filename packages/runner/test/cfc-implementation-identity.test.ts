@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { raw } from "../src/module.ts";
 import { Runtime } from "../src/runtime.ts";
+import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-implementation-identity",
@@ -91,5 +92,19 @@ describe("CFC builtin implementation identity", () => {
 
     expect(captured[0]).toBeUndefined();
     tx.abort("test-complete");
+  });
+
+  it("treats verified compiled modules as unsupported until richer policy ids land", () => {
+    const module = { type: "javascript" as const };
+    expect(
+      resolvePolicyFacingImplementationIdentity(module, {
+        verifiedLoadId: "verified-load-1",
+      }),
+    ).toEqual({
+      kind: "unsupported",
+      className: "verified",
+      reason:
+        "verified compiled policy identity is blocked until the richer bundle/path/location/hash identity lands",
+    });
   });
 });

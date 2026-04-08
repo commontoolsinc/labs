@@ -72,7 +72,10 @@ import {
   setRunnableName,
   validateAndCheckOpaqueRefs,
 } from "./runner-utils.ts";
-import { resolveBuiltinImplementationIdentity } from "./cfc/implementation-identity.ts";
+import {
+  resolveBuiltinImplementationIdentity,
+  resolvePolicyFacingImplementationIdentity,
+} from "./cfc/implementation-identity.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 export {
   cellAwareDeepCopy,
@@ -1705,6 +1708,12 @@ export class Runner {
         verifiedLoadId,
       );
 
+      const policyFacingIdentity =
+        resolvePolicyFacingImplementationIdentity(module, { verifiedLoadId });
+      if (policyFacingIdentity) {
+        tx.setCfcImplementationIdentity(policyFacingIdentity);
+      }
+
       try {
         const inputsCell = this.runtime.getImmutableCell(
           processCell.space,
@@ -1869,6 +1878,12 @@ export class Runner {
         verifiedLoadId,
       );
       (action as Action & { lastFrame?: Frame }).lastFrame = frame;
+
+      const policyFacingIdentity =
+        resolvePolicyFacingImplementationIdentity(module, { verifiedLoadId });
+      if (policyFacingIdentity) {
+        tx.setCfcImplementationIdentity(policyFacingIdentity);
+      }
 
       const handleErrorOutput = (error: unknown) => {
         if (
