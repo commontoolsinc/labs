@@ -2,7 +2,7 @@
  * TRANSFORM REPRO: helper-owned JSX IIFE drops captured reactive inputs
  *
  * Compare on main vs transformer branch:
- *   deno task ct check packages/patterns/gideon-tests/test-helper-owned-jsx-iife-captures.tsx --show-transformed --no-run
+ *   deno task cf check packages/patterns/gideon-tests/test-helper-owned-jsx-iife-captures.tsx --show-transformed --no-run
  *
  * Expected main shape:
  * - the second helper-owned JSX closure captures `path`, `entries`, and

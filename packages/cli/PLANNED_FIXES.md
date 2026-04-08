@@ -4,7 +4,7 @@
 
 ### CT-1399
 
-- Fix `ct piece call` and `ct exec` handler invocation so handler failures
+- Fix `cf piece call` and `cf exec` handler invocation so handler failures
   propagate as non-zero exits instead of reporting success.
 - Route handler execution through stream `send(..., onCommit)` and inspect the
   committed transaction status after scheduler retries are exhausted.

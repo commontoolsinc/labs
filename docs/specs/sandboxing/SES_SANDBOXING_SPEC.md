@@ -1319,7 +1319,7 @@ Implementation guidance:
 - the same mapper supports direct `parseStack()` and `mapPosition()` calls for
   both the module-load and lazy-callback SES paths
 - after source-map parsing, runner-internal SES plumbing frames should collapse
-  to `<CT_INTERNAL>` so user-facing errors show authored code first without
+  to `<CF_INTERNAL>` so user-facing errors show authored code first without
   leaking harness implementation details
 
 #### 8.4.2 ErrorMappingOptions and MappedError
@@ -1513,7 +1513,7 @@ const RUNTIME_PATTERNS = [
   /\/harness\//,
   /\/scheduler\//,
   /AMDLoader/,
-  /<CT_INTERNAL>/,
+  /<CF_INTERNAL>/,
   /\beval\b/,
 ];
 

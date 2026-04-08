@@ -66,7 +66,7 @@ export interface ExecutedPieceCallable {
   resolved: ResolvedPieceCallable;
 }
 
-const CLI_TRACE_TIMINGS = Deno.env.get("CT_CLI_TRACE_TIMINGS") === "1";
+const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
 async function timeCliPhase<T>(
   label: string,

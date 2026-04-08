@@ -19,7 +19,7 @@ FUSE mounting, filesystem layout, and low-level read/write mechanics, see the
 
 ```bash
 cd ~/code/labs
-export CT_IDENTITY=./shared.key CT_API_URL=http://localhost:8000
+export CF_IDENTITY=./shared.key CF_API_URL=http://localhost:8000
 
 # 1. Deploy and capture piece ID
 ID=$(cf piece new packages/patterns/<path>.tsx \

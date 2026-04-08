@@ -9,7 +9,7 @@ import {
 } from "../lib/piece.ts";
 import { cf } from "./utils.ts";
 
-const INTEGRATION = Deno.env.get("CT_INTEGRATION") === "1";
+const INTEGRATION = Deno.env.get("CF_INTEGRATION") === "1";
 
 const REPO_ROOT = resolve(import.meta.dirname!, "../../..");
 const NOTE_PATTERN = `${REPO_ROOT}/packages/patterns/notes/note.tsx`;

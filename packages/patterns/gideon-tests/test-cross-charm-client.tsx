@@ -9,7 +9,7 @@
  *    - The blessed doc's "auto-unwrap via Stream<T> signature" explanation is WRONG
  *    - Event must be an object (runtime calls preventDefault), can have data props but NO functions
  *
- * 2. ct.render Forces Piece Execution - VERIFIED
+ * 2. <cf-render> Forces Piece Execution - VERIFIED
  *    - Just wishing for a piece doesn't make it run
  *    - Use <cf-render $cell={...} /> to force execution
  *
@@ -20,7 +20,7 @@
  * TESTING:
  *    1. Deploy server piece first, favorite it
  *    2. Deploy this client piece
- *    3. Toggle to Mode B (ct.render active)
+ *    3. Toggle to Mode B (<cf-render> active)
  *    4. Click "Invoke Server Stream" - server counter should increment
  */
 import {
@@ -36,8 +36,8 @@ import {
 } from "commonfabric";
 
 interface Input {
-  // Toggle between Mode A (wish only) and Mode B (wish + ct.render)
-  useCtRender: Default<boolean, false>;
+  // Toggle between Mode A (wish only) and Mode B (wish + <cf-render>)
+  useCfRender: Default<boolean, false>;
 
   // Track last invocation result
   lastInvocationStatus: Default<string, "Not invoked yet">;
@@ -47,7 +47,7 @@ interface Input {
 }
 
 interface Output {
-  useCtRender: boolean;
+  useCfRender: boolean;
   lastInvocationStatus: string;
   invocationCount: number;
 }
@@ -88,14 +88,14 @@ const invokeServerStream = handler<
 });
 
 // Handler for toggling the render mode
-const toggleMode = handler<unknown, { useCtRender: Writable<boolean> }>(
-  (_event, { useCtRender }) => {
-    useCtRender.set(!useCtRender.get());
+const toggleMode = handler<unknown, { useCfRender: Writable<boolean> }>(
+  (_event, { useCfRender }) => {
+    useCfRender.set(!useCfRender.get());
   },
 );
 
 export default pattern<Input, Output>(
-  ({ useCtRender, lastInvocationStatus, invocationCount }) => {
+  ({ useCfRender, lastInvocationStatus, invocationCount }) => {
     // Wish for the server piece by tag
     const wishResult = wish<{
       counter: number;
@@ -136,18 +136,18 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ marginTop: 0 }}>
-              Claim 2 Test: ct.render Forces Execution
+              Claim 2 Test: {"<cf-render>"} Forces Execution
             </h3>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span>Current Mode:</span>
-              <strong style={{ color: useCtRender ? "#4CAF50" : "#FF9800" }}>
-                {useCtRender
-                  ? "Mode B: Wish + ct.render"
-                  : "Mode A: Wish Only (no ct.render)"}
+              <strong style={{ color: useCfRender ? "#4CAF50" : "#FF9800" }}>
+                {useCfRender
+                  ? "Mode B: Wish + <cf-render>"
+                  : "Mode A: Wish Only (no <cf-render>)"}
               </strong>
             </div>
             <cf-button
-              onClick={toggleMode({ useCtRender })}
+              onClick={toggleMode({ useCfRender })}
               style="margin-top: 8px;"
             >
               Toggle Mode
@@ -168,13 +168,13 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ marginTop: 0 }}>Server Piece Status</h3>
-            {useCtRender
+            {useCfRender
               ? (
                 <div>
                   <p style={{ color: "#4CAF50", fontWeight: "bold" }}>
-                    Mode B Active: Rendering server piece with ct.render
+                    Mode B Active: Rendering server piece with {"<cf-render>"}
                   </p>
-                  {/* Use ct.render to force execution - even hidden, this makes the piece active */}
+                  {/* Use <cf-render> to force execution, even when hidden. */}
                   <div
                     style={{
                       border: "1px dashed #999",
@@ -239,7 +239,7 @@ export default pattern<Input, Output>(
               <pre style={{ fontSize: "10px", overflow: "auto" }}>
               {JSON.stringify(
                 {
-                  useCtRender,
+                  useCfRender,
                   invocationCount,
                   lastInvocationStatus,
                   serverPieceExists: serverPiece !== undefined && serverPiece !== null,
@@ -253,7 +253,7 @@ export default pattern<Input, Output>(
           </div>
         </div>
       ),
-      useCtRender,
+      useCfRender,
       lastInvocationStatus,
       invocationCount,
     };

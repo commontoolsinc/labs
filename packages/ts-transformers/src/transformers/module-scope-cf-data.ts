@@ -10,7 +10,7 @@ import {
 } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
-const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set"]);
+const CF_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set"]);
 
 export class ModuleScopeCfDataTransformer extends HelpersOnlyTransformer {
   override transform(context: TransformationContext): ts.SourceFile {
@@ -156,7 +156,7 @@ function shouldWrapTopLevelExpression(
   }
 
   if (ts.isNewExpression(expr)) {
-    return hasNamedTarget(expr.expression, CT_DATA_CONSTRUCTOR_NAMES);
+    return hasNamedTarget(expr.expression, CF_DATA_CONSTRUCTOR_NAMES);
   }
 
   if (

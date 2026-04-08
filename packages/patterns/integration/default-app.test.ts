@@ -31,56 +31,56 @@ type BrowserActionRunTraceAddress = {
 const { FRONTEND_URL, SPACE_NAME } = env;
 const CAPTURE_TRIGGER_TRACE = (() => {
   try {
-    return Deno.env.get("CT_CAPTURE_TRIGGER_TRACE") === "1";
+    return Deno.env.get("CF_CAPTURE_TRIGGER_TRACE") === "1";
   } catch {
     return false;
   }
 })();
 const CAPTURE_WRITE_TRACE_ORDER = (() => {
   try {
-    return Deno.env.get("CT_CAPTURE_WRITE_TRACE_ORDER") === "1";
+    return Deno.env.get("CF_CAPTURE_WRITE_TRACE_ORDER") === "1";
   } catch {
     return false;
   }
 })();
 const CAPTURE_RUNNER_TRIGGER_LOG = (() => {
   try {
-    return Deno.env.get("CT_CAPTURE_RUNNER_TRIGGER_LOG") === "1";
+    return Deno.env.get("CF_CAPTURE_RUNNER_TRIGGER_LOG") === "1";
   } catch {
     return false;
   }
 })();
 const CAPTURE_RUNNER_TRIGGER_COUNTS = (() => {
   try {
-    return Deno.env.get("CT_CAPTURE_RUNNER_TRIGGER_COUNTS") === "1";
+    return Deno.env.get("CF_CAPTURE_RUNNER_TRIGGER_COUNTS") === "1";
   } catch {
     return false;
   }
 })();
 const CAPTURE_WISH_FLOW_LOG = (() => {
   try {
-    return Deno.env.get("CT_CAPTURE_WISH_FLOW_LOG") === "1";
+    return Deno.env.get("CF_CAPTURE_WISH_FLOW_LOG") === "1";
   } catch {
     return false;
   }
 })();
 const CAPTURE_WISH_FLOW_COUNTS = (() => {
   try {
-    return Deno.env.get("CT_CAPTURE_WISH_FLOW_COUNTS") === "1";
+    return Deno.env.get("CF_CAPTURE_WISH_FLOW_COUNTS") === "1";
   } catch {
     return false;
   }
 })();
 const CAPTURE_SOURCE_LOCATION_LOG = (() => {
   try {
-    return Deno.env.get("CT_CAPTURE_SOURCE_LOCATION_LOG") === "1";
+    return Deno.env.get("CF_CAPTURE_SOURCE_LOCATION_LOG") === "1";
   } catch {
     return false;
   }
 })();
 const CAPTURE_ACTION_RUN_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CT_CAPTURE_ACTION_RUN_SERIES");
+    const raw = Deno.env.get("CF_CAPTURE_ACTION_RUN_SERIES");
     return raw ? Number(raw) : 0;
   } catch {
     return 0;
@@ -88,7 +88,7 @@ const CAPTURE_ACTION_RUN_SERIES = (() => {
 })();
 const CAPTURE_HOME_LOAD_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CT_CAPTURE_HOME_LOAD_SERIES");
+    const raw = Deno.env.get("CF_CAPTURE_HOME_LOAD_SERIES");
     return raw ? Number(raw) : 0;
   } catch {
     return 0;
@@ -107,7 +107,7 @@ describe("default-app flow test", () => {
 
     const page = shell.page();
 
-    // Navigate directly to the new space (no piece creation via ct tools)
+    // Navigate directly to the new space (no piece creation via cf tools)
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       view: { spaceName },

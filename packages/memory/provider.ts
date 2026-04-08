@@ -69,7 +69,7 @@ const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const SCHEMA_FLUSH_LOG_INTERVAL_MS = 60_000;
 const MEMORY_QUERY_STATS = typeof Deno !== "undefined" &&
-  Deno.env.get("CT_MEMORY_QUERY_STATS") === "1";
+  Deno.env.get("CF_MEMORY_QUERY_STATS") === "1";
 
 /** Tracks schema flush statistics across all sessions. */
 const schemaFlushStats = {

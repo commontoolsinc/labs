@@ -314,7 +314,7 @@ default-app integration flow now supports this:
 HEADLESS=true \
 API_URL=http://localhost:8000 \
 FRONTEND_URL=http://localhost:5173 \
-CT_CAPTURE_TRIGGER_TRACE=1 \
+CF_CAPTURE_TRIGGER_TRACE=1 \
 deno test -A packages/patterns/integration/default-app.test.ts
 ```
 
@@ -787,7 +787,7 @@ output with:
 HEADLESS=true \
 API_URL=http://localhost:8000 \
 FRONTEND_URL=http://localhost:5173 \
-CT_CAPTURE_TRIGGER_TRACE=1 \
+CF_CAPTURE_TRIGGER_TRACE=1 \
 deno test -A packages/patterns/integration/default-app.test.ts
 ```
 
@@ -834,7 +834,7 @@ HEADLESS=true \
 API_URL=http://localhost:8000 \
 FRONTEND_URL=http://localhost:5173 \
 SPACE_NAME=settle-wave-order-space \
-CT_CAPTURE_ACTION_RUN_SERIES=3 \
+CF_CAPTURE_ACTION_RUN_SERIES=3 \
 deno test -A packages/patterns/integration/default-app.test.ts
 ```
 

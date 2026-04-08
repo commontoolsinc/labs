@@ -15,18 +15,18 @@ type ProfileOptions = {
 const DEFAULT_SUMMARY_PATTERN = String.raw`\d+ passed, \d+ failed`;
 const DISABLED_SUMMARY_PATTERN = String.raw`(?!)`;
 const DEBUGGER_WAITING_MESSAGE = "Waiting for the debugger to disconnect...";
-const DEFAULT_PROFILE_DONE_MARKER = "__ct_profile_done__";
+const DEFAULT_PROFILE_DONE_MARKER = "__cf_profile_done__";
 const encoder = new TextEncoder();
 
 function parseArgs(args: string[]): {
   options: ProfileOptions;
-  ctArgs: string[];
+  cliArgs: string[];
 } {
   const options: ProfileOptions = {
     timeoutMs: 120_000,
     connectTimeoutMs: 30_000,
   };
-  const ctArgs: string[] = [];
+  const cliArgs: string[] = [];
 
   for (const arg of args) {
     if (arg.startsWith("--profile-output=")) {
@@ -54,7 +54,7 @@ function parseArgs(args: string[]): {
         arg.slice("--profile-connect-timeout-ms=".length),
       );
     } else {
-      ctArgs.push(arg);
+      cliArgs.push(arg);
     }
   }
 
@@ -80,13 +80,13 @@ function parseArgs(args: string[]): {
     );
   }
 
-  return { options, ctArgs };
+  return { options, cliArgs };
 }
 
 function slugify(parts: string[]): string {
   const joined = parts.join("-").replaceAll(/[^\w.-]+/g, "-");
   const collapsed = joined.replaceAll(/-+/g, "-").replace(/^-|-$/g, "");
-  return collapsed.length > 0 ? collapsed.slice(0, 80) : "ct";
+  return collapsed.length > 0 ? collapsed.slice(0, 80) : "cf";
 }
 
 function timestamp(): string {
@@ -115,27 +115,35 @@ function pickInspectPort(requested?: number): number {
 
 async function mirrorOutput(
   stream: ReadableStream<Uint8Array> | null,
-  sink: Deno.Writer,
+  sink: { write(data: Uint8Array): Promise<number> | number },
   onText?: (text: string) => void,
 ): Promise<void> {
   if (stream === null) return;
-  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (value.length === 0) continue;
-      onText?.(value);
-      await sink.write(encoder.encode(value));
+      const text = decoder.decode(value, { stream: true });
+      if (text.length === 0) continue;
+      onText?.(text);
+      await sink.write(encoder.encode(text));
+    }
+    const tail = decoder.decode();
+    if (tail.length > 0) {
+      onText?.(tail);
+      await sink.write(encoder.encode(tail));
     }
   } finally {
     reader.releaseLock();
   }
 }
 
-const { options, ctArgs } = parseArgs(Deno.args);
-if (ctArgs.length === 0) {
-  throw new Error("ct-profile requires a Common Tools CLI command");
+const { options, cliArgs } = parseArgs(Deno.args);
+if (cliArgs.length === 0) {
+  throw new Error("cf-profile requires a Common Fabric CLI command");
 }
 
 const repoRoot = resolve(fromFileUrl(new URL("..", import.meta.url)));
@@ -143,8 +151,8 @@ const inspectPort = pickInspectPort(options.inspectPort);
 const defaultOutputDir = join(
   repoRoot,
   "tmp",
-  "ct-profile",
-  `${timestamp()}-${slugify(ctArgs)}`,
+  "cf-profile",
+  `${timestamp()}-${slugify(cliArgs)}`,
 );
 const requestedOutputPath = options.outputPath
   ? resolve(Deno.cwd(), options.outputPath)
@@ -161,9 +169,9 @@ await Deno.mkdir(outputDir, { recursive: true });
 const consolePath = `${profileStem}.console.log`;
 const metaPath = `${profileStem}.meta.json`;
 const summaryPattern = options.summaryPattern ??
-  (ctArgs[0] === "test" ? DEFAULT_SUMMARY_PATTERN : DISABLED_SUMMARY_PATTERN);
+  (cliArgs[0] === "test" ? DEFAULT_SUMMARY_PATTERN : DISABLED_SUMMARY_PATTERN);
 const summaryRegex = new RegExp(summaryPattern);
-const profileDoneMarker = Deno.env.get("CT_PROFILE_DONE_MARKER") ??
+const profileDoneMarker = Deno.env.get("CF_PROFILE_DONE_MARKER") ??
   DEFAULT_PROFILE_DONE_MARKER;
 const profileStopPattern = options.profileStopPattern
   ? `(?:${options.profileStopPattern})|(?:${escapeRegex(profileDoneMarker)})`
@@ -176,9 +184,9 @@ const capturePath = join(
   "capture-deno-inspector-profile.ts",
 );
 
-console.log(`ct-profile: writing CPU profile to ${cpuPath}`);
+console.log(`cf-profile: writing CPU profile to ${cpuPath}`);
 
-const ct = new Deno.Command(Deno.execPath(), {
+const cliCommand = new Deno.Command(Deno.execPath(), {
   args: [
     "run",
     `--inspect=127.0.0.1:${inspectPort}`,
@@ -189,12 +197,12 @@ const ct = new Deno.Command(Deno.execPath(), {
     "--allow-env",
     "--allow-run",
     cliPath,
-    ...ctArgs,
+    ...cliArgs,
   ],
   cwd: Deno.cwd(),
   env: {
     ...Deno.env.toObject(),
-    CT_PROFILE_DONE_MARKER: profileDoneMarker,
+    CF_PROFILE_DONE_MARKER: profileDoneMarker,
   },
   stdin: "inherit",
   stdout: "piped",
@@ -238,7 +246,7 @@ const stopCapture = () => {
   }
 };
 
-const onCtOutput = (text: string) => {
+const onCliOutput = (text: string) => {
   recentOutput = (recentOutput + text).slice(-8192);
   if (
     recentOutput.includes(profileDoneMarker) ||
@@ -248,15 +256,23 @@ const onCtOutput = (text: string) => {
     stopCapture();
   }
 };
-const stdoutDone = mirrorOutput(ct.stdout, Deno.stdout, onCtOutput);
-const stderrDone = mirrorOutput(ct.stderr, Deno.stderr, onCtOutput);
+const stdoutDone = mirrorOutput(
+  cliCommand.stdout,
+  Deno.stdout,
+  onCliOutput,
+);
+const stderrDone = mirrorOutput(
+  cliCommand.stderr,
+  Deno.stderr,
+  onCliOutput,
+);
 
 const captureStatusPromise = (async () => {
   const status = await capture.status;
   captureStopSent = true;
   return status;
 })();
-const ctStatus = await ct.status;
+const cliStatus = await cliCommand.status;
 await Promise.all([stdoutDone, stderrDone]);
 if (!captureStopSent) {
   stopCapture();
@@ -267,7 +283,7 @@ await Deno.writeTextFile(
   metaPath,
   JSON.stringify(
     {
-      command: ctArgs,
+      command: cliArgs,
       cwd: Deno.cwd(),
       outputDir,
       cpuPath,
@@ -278,7 +294,7 @@ await Deno.writeTextFile(
       profileDoneMarker,
       targetUrlPattern,
       inspectPort,
-      ctStatus,
+      cliStatus,
       captureStatus,
     },
     null,
@@ -286,13 +302,13 @@ await Deno.writeTextFile(
   ),
 );
 
-console.log(`ct-profile: CPU profile ${cpuPath}`);
-console.log(`ct-profile: console log ${consolePath}`);
-console.log(`ct-profile: metadata ${metaPath}`);
+console.log(`cf-profile: CPU profile ${cpuPath}`);
+console.log(`cf-profile: console log ${consolePath}`);
+console.log(`cf-profile: metadata ${metaPath}`);
 
 if (!captureStatus.success) {
   Deno.exit(captureStatus.code);
 }
-if (!ctStatus.success) {
-  Deno.exit(ctStatus.code);
+if (!cliStatus.success) {
+  Deno.exit(cliStatus.code);
 }

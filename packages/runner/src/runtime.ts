@@ -179,7 +179,7 @@ export interface RuntimeOptions {
   /** Optional compilation cache for persistent caching of compiled JS.
    *  If absent, no persistent caching is performed (same as before). */
   cachedCompiler?: CachedCompiler;
-  /** Replace runner-owned frames with `<CT_INTERNAL>` in surfaced stacks. */
+  /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
   hideInternalStackFrames?: boolean;
 }
 

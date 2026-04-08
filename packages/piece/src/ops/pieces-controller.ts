@@ -16,7 +16,7 @@ import { ACLManager } from "./acl-manager.ts";
 import { homeSchema } from "@commonfabric/home-schemas";
 
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
-  Deno.env.get("CT_CLI_TRACE_TIMINGS") === "1";
+  Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
 async function timePiecesPhase<T>(
   label: string,

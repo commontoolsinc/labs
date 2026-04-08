@@ -79,7 +79,7 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: lift value too large");
   assertEquals(
-    stack.includes("<CT_INTERNAL>"),
+    stack.includes("<CF_INTERNAL>"),
     false,
     `stack should preserve runner internal frames by default:\n${stack}`,
   );
@@ -163,7 +163,7 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: handler crash on purpose");
   assertEquals(
-    stack.includes("<CT_INTERNAL>"),
+    stack.includes("<CF_INTERNAL>"),
     false,
     `stack should preserve runner internal frames by default:\n${stack}`,
   );

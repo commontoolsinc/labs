@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env
 /**
- * .claude/scripts/block-ct.ts
+ * .claude/scripts/block-legacy-cli.ts
  *
  * Claude Code Pre-Tool hook.
  * - Blocks shell commands that invoke `ct` binary directly.
@@ -17,7 +17,7 @@ if (!cmd) Deno.exit(0);
 // Don't inspect git commit message content for command patterns
 if (isGitCommit(cmd)) Deno.exit(0);
 
-// Remove quoted strings and heredoc content before checking for ct commands
+// Remove quoted strings and heredoc content before checking for legacy ct commands
 // This prevents false positives from file paths or heredocs containing "ct"
 let cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, "");
 // Remove heredoc content: <<'EOF' ... EOF or <<EOF ... EOF
@@ -26,7 +26,7 @@ cmdWithoutQuotes = cmdWithoutQuotes.replace(
   "",
 );
 
-// Match `ct` as a standalone command (not `deno task cf` or part of another word)
+// Match legacy `ct` as a standalone command (not `deno task cf` or part of another word)
 // Matches: ct, ./ct, /path/to/ct but not `deno task cf` or `select`
 if (/(?:^|[\s;|&])(?:\.\/)?ct(?:\s|$)/.test(cmdWithoutQuotes)) {
   // Allow if it's already using deno task cf

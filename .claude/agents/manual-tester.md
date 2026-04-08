@@ -93,7 +93,7 @@ For each handler in the spec:
 ### 4. Browser Verification (agent-browser)
 
 **IMPORTANT: Clear the browser profile before testing.** The headless browser
-uses a persistent profile at `/tmp/ct-browser-profile` that may contain cached
+uses a persistent profile at `/tmp/cf-browser-profile` that may contain cached
 JavaScript from a previous dev server session (possibly running at a different
 port). Stale cached JS will cause the browser to silently fail to connect to
 the correct API. Always run this before opening:
@@ -101,7 +101,7 @@ the correct API. Always run this before opening:
 ```bash
 # Close any existing browser and clear stale cache
 agent-browser close 2>/dev/null
-rm -rf /tmp/ct-browser-profile
+rm -rf /tmp/cf-browser-profile
 ```
 
 Then open the pattern in the browser. Use `--headed` if a human is watching

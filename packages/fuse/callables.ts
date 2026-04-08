@@ -107,7 +107,7 @@ export function buildCallableScript(
   typeStr?: string,
 ): Uint8Array {
   const shim = execCli || "/usr/bin/false";
-  // Comments are readable via `cat` and `head`; ct exec handles --help and
+  // Comments are readable via `cat` and `head`; cf exec handles --help and
   // flag-based invocation (--value <x> for scalars, --flag <v> for objects).
   const schemaComment = schema !== undefined
     ? `# schema: ${JSON.stringify(schema)}\n`

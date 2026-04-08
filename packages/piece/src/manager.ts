@@ -61,7 +61,7 @@ function filterOutCell(
 }
 
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
-  Deno.env.get("CT_CLI_TRACE_TIMINGS") === "1";
+  Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
 async function timePiecePhase<T>(
   label: string,
