@@ -23,3 +23,8 @@ export {
   preparedDigestFor,
 } from "./canonical.ts";
 export { prepareBoundaryCommit } from "./prepare.ts";
+export {
+  INITIAL_SINK_INVENTORY,
+  INITIAL_SINK_ROLLOUT_GATE,
+  isInitialSinkInventoryName,
+} from "./sink-inventory.ts";

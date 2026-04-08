@@ -751,7 +751,7 @@ Primary files:
 Tasks:
 
 - [x] Introduce a stable, immutable request snapshot for external sink calls
-- [ ] Include `streamData`, `llm`, `llmDialog`, `generateText`, and
+- [x] Include `streamData`, `llm`, `llmDialog`, `generateText`, and
       `generateObject` alongside `fetchData` and `fetchProgram` in the initial
       sink inventory and rollout gate
 - [ ] Move network side effects behind the transaction outbox
