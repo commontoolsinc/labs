@@ -1405,6 +1405,8 @@ export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
  */
 export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
 
+export type * from "./cfc.ts";
+
 /**
  * Selects a sub-path within a document, optionally paired with a schema
  * that describes the value at that path. Used by the storage/sync layer

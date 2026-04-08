@@ -1,0 +1,132 @@
+import { assertEquals } from "@std/assert";
+import type { Cfc as RootCfc } from "@commonfabric/api";
+import type {
+  AddIntegrity,
+  CanonicalPointer,
+  Cfc,
+  Classified,
+  ExactCopy,
+  FilteredFrom,
+  Integrity,
+  LengthPreservedFrom,
+  MaxConfidentiality,
+  OpaqueInput,
+  PathValue,
+  PermutationOf,
+  Projection,
+  ProjectionOf,
+  ProjectionPath,
+  Ref,
+  RefValue,
+  RequiresIntegrity,
+  SubsetOf,
+  WriteAuthorizedBy,
+} from "@commonfabric/api/cfc";
+
+Deno.test("CFC API surface preserves the authored runtime value shape", () => {
+  const classified: Classified<{ title: string }, readonly ["secret"]> = {
+    title: "alpha",
+  };
+  const integrity: Integrity<{ title: string }, readonly ["trusted"]> = {
+    title: "beta",
+  };
+  const addIntegrity: AddIntegrity<{ title: string }, readonly ["added"]> = {
+    title: "gamma",
+  };
+  const requiresIntegrity: RequiresIntegrity<
+    { title: string },
+    readonly ["required"]
+  > = {
+    title: "delta",
+  };
+  const maxConfidentiality: MaxConfidentiality<
+    { title: string },
+    readonly ["secret"]
+  > = {
+    title: "epsilon",
+  };
+  const exactCopy: ExactCopy<{ title: string }, readonly ["source", "title"]> =
+    {
+      title: "zeta",
+    };
+  const lengthPreserved: LengthPreservedFrom<
+    { items: string[] },
+    readonly ["source", "items"]
+  > = {
+    items: [],
+  };
+  const filtered: FilteredFrom<{ items: string[] }, readonly ["source"]> = {
+    items: [],
+  };
+  const subset: SubsetOf<{ items: string[] }, readonly ["source"]> = {
+    items: [],
+  };
+  const permutation: PermutationOf<{ items: string[] }, readonly ["source"]> = {
+    items: [],
+  };
+  const opaque: OpaqueInput<{ token: string }> = {
+    token: "eta",
+  };
+  const cfcCarrier: Cfc<
+    { title: string },
+    { classification: readonly ["secret"] }
+  > = {
+    title: "theta",
+  };
+  const rootCfcCarrier: RootCfc<
+    { title: string },
+    { classification: readonly ["secret"] }
+  > = {
+    title: "theta-root",
+  };
+  const projectionPath: ProjectionPath<
+    { title: string },
+    "/",
+    readonly ["title"]
+  > = {
+    title: "iota",
+  };
+  const projectionOf: ProjectionOf<
+    { title: string },
+    readonly ["title"]
+  > = {
+    title: "kappa",
+  };
+  const ref: Ref<{ title: string }, readonly ["title"]> = {};
+  const projection: Projection<typeof ref> = {
+    title: "lambda",
+  };
+  const pointer: CanonicalPointer<readonly ["a/b", "c~d"]> = "/a~1b/c~0d";
+  const pathValue: PathValue<{ title: string }, readonly ["title"]> =
+    undefined as never;
+  const refValue: RefValue<typeof ref> = undefined as never;
+
+  function localBinding() {}
+  const writeAuthorizedBy: WriteAuthorizedBy<
+    { title: string },
+    typeof localBinding
+  > = {
+    title: "mu",
+  };
+
+  assertEquals(classified, { title: "alpha" });
+  assertEquals(integrity, { title: "beta" });
+  assertEquals(addIntegrity, { title: "gamma" });
+  assertEquals(requiresIntegrity, { title: "delta" });
+  assertEquals(maxConfidentiality, { title: "epsilon" });
+  assertEquals(exactCopy, { title: "zeta" });
+  assertEquals(lengthPreserved, { items: [] });
+  assertEquals(filtered, { items: [] });
+  assertEquals(subset, { items: [] });
+  assertEquals(permutation, { items: [] });
+  assertEquals(opaque, { token: "eta" });
+  assertEquals(cfcCarrier, { title: "theta" });
+  assertEquals(rootCfcCarrier, { title: "theta-root" });
+  assertEquals(projectionPath, { title: "iota" });
+  assertEquals(projectionOf, { title: "kappa" });
+  assertEquals(projection, { title: "lambda" });
+  assertEquals(pointer, "/a~1b/c~0d");
+  assertEquals(pathValue, undefined);
+  assertEquals(refValue, undefined);
+  assertEquals(writeAuthorizedBy, { title: "mu" });
+});

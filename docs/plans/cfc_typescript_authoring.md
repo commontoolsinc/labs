@@ -149,13 +149,13 @@ to keep that boundary clear:
 
 - [ ] Freeze the canonical alias set across `packages/api`,
       `packages/ts-transformers`, and `packages/schema-generator`
-- [ ] Define the supported metadata keys for the TypeScript surface:
+- [x] Define the supported metadata keys for the TypeScript surface:
       `classification`, `integrity`, `addIntegrity`, `requiredIntegrity`,
       `maxConfidentiality`, `writeAuthorizedBy`, `exactCopyOf`, `projection`,
       `collection`, and `opaque`
-- [ ] Define the path-bearing helper contract for `Ref`, `PathValue`,
+- [x] Define the path-bearing helper contract for `Ref`, `PathValue`,
       `RefValue`, and `CanonicalPointer`
-- [ ] Define the projection helper contract for `ProjectionPath`,
+- [x] Define the projection helper contract for `ProjectionPath`,
       `ProjectionOf`, and `Projection`
 - [ ] Lock the supported `WriteAuthorizedBy` declaration forms and the required
       `cfc-write-authorized-by` diagnostic
@@ -164,10 +164,10 @@ to keep that boundary clear:
 
 ### 2. Add The Public API Surface
 
-- [ ] Export `Cfc<T, Meta>` from `packages/api`
-- [ ] Export the canonical alias set from `packages/api`
-- [ ] Export `OpaqueInput<T, Spec>` and keep its base schema shape equal to `T`
-- [ ] Keep friendly sugar as aliases over the canonical surface rather than
+- [x] Export `Cfc<T, Meta>` from `packages/api`
+- [x] Export the canonical alias set from `packages/api`
+- [x] Export `OpaqueInput<T, Spec>` and keep its base schema shape equal to `T`
+- [x] Keep friendly sugar as aliases over the canonical surface rather than
       separate lowering paths
 - [ ] Add author-facing examples for path-bearing projections, opaque inputs,
       and trusted write authorization annotations
