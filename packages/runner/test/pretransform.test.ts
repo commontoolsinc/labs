@@ -29,10 +29,13 @@ Deno.test("transformInjectHelperModule transforms by default and respects cf-dis
 
   assertMatch(
     main.contents,
-    /import \{ __ctHelpers as __cfHelpers \} from "commonfabric";/,
+    /import \{ __cfHelpers \} from "commonfabric";/,
   );
   assertNotMatch(main.contents, /cts-enable/);
 
-  assertNotMatch(plain.contents, /__ctHelpers as __cfHelpers/);
+  assertNotMatch(
+    plain.contents,
+    /import \{ __cfHelpers \} from "commonfabric";/,
+  );
   assertNotMatch(plain.contents, /cf-disable-transform/);
 });
