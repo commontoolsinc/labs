@@ -652,13 +652,13 @@ Tasks:
       they are internal-only, may run after failed commits, and must not
       perform external side effects; effectful work must use the outbox
 - [x] Keep retries fresh: new tx, new prepare, new trust snapshot
-- [ ] Audit `onCommit` and direct commit call sites and move effectful ones to
+- [x] Audit `onCommit` and direct commit call sites and move effectful ones to
       the outbox
 
 Acceptance:
 
 - [x] Failed commit does not emit side effects
-- [ ] Relevant transactions committed via the scheduler,
+- [x] Relevant transactions committed via the scheduler,
       `runtime.editWithRetry()`, or other runtime-owned direct callers are
       uniformly gated
 - [x] Retried handler emits side effects once, after the winning commit
