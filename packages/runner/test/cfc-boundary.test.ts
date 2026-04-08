@@ -823,6 +823,102 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("keeps derived read labels out of persisted label metadata", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: "of:cfc-derived-label-source",
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { classification: ["secret"] },
+            }],
+          },
+        },
+      });
+      const seedResult = await seed.commit();
+      expect(seedResult.ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-derived-label-source",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        tx,
+      );
+      source.get();
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-derived-label-output",
+        {
+          type: "string",
+          ifc: { classification: ["public"] },
+        },
+        tx,
+      );
+      output.set("visible");
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const persistedId = parseLink(output.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: {
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  classification?: string[];
+                  integrity?: string[];
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const persisted = replica.getDocument(persistedId);
+      expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
+        path: [],
+        label: {
+          classification: ["public"],
+        },
+      });
+      expect(persisted?.cfc?.labelMap?.entries).not.toContainEqual({
+        path: [],
+        label: {
+          classification: ["public", "secret"],
+        },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("merges canonical schema envelopes monotonically across writes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -1318,7 +1414,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("propagates consumed labels and addIntegrity into persisted output metadata", async () => {
+  it("persists only concrete evidence and addIntegrity in output metadata", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
@@ -1417,10 +1513,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["value"],
         label: {
-          classification: ["secret"],
           integrity: [
             "target-integrity",
-            "source-integrity",
             "derived-integrity",
           ],
         },

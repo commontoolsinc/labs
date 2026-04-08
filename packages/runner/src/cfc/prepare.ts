@@ -428,7 +428,6 @@ const verifyExactCopyRequirements = (
 const derivePersistedLabel = (
   schema: JSONSchema,
   schemaLabel: IFCLabel,
-  consumedInputLabel: IFCLabel,
   sourceEntryLabels?: Map<string, IFCLabel>,
 ): IFCLabel => {
   const ifc = isRecord(schema) ? schema.ifc : undefined;
@@ -440,17 +439,14 @@ const derivePersistedLabel = (
   return {
     classification: mergeLabelValues(
       schemaLabel.classification,
-      consumedInputLabel.classification,
       copiedInputLabel?.classification,
     ),
     confidentiality: mergeLabelValues(
       schemaLabel.confidentiality,
-      consumedInputLabel.confidentiality,
       copiedInputLabel?.confidentiality,
     ),
     integrity: mergeLabelValues(
       schemaLabel.integrity,
-      consumedInputLabel.integrity,
       copiedInputLabel?.integrity,
       Array.isArray(ifc?.addIntegrity) ? ifc.addIntegrity : undefined,
     ),
@@ -587,14 +583,13 @@ export const prepareBoundaryCommit = (
         version: 1,
         entries: mergedSchemaEntries.map((entry) => ({
           path: entry.path,
-          label: derivePersistedLabel(
-            entry.schema,
-            entry.label,
-            consumedInputLabel,
-            mergedSchemaEntryLabels,
-          ),
-        })),
-      },
+        label: derivePersistedLabel(
+          entry.schema,
+          entry.label,
+          mergedSchemaEntryLabels,
+        ),
+      })),
+    },
     };
 
     tx.writeOrThrow({
