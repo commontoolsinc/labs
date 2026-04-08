@@ -8,7 +8,6 @@ import {
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
-  AsCellType,
   JSONSchema,
   JSONSchemaMutable,
   JSONSchemaObjMutable,

@@ -1,4 +1,4 @@
-import { AsCellType, JSONSchemaObj } from "@commonfabric/api";
+import { JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
