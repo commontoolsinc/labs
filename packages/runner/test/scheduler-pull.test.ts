@@ -2533,33 +2533,36 @@ describe("inline idempotency check mode", () => {
   });
 
   it("detects non-idempotent via inline mode", async () => {
-    // Enable inline mode before subscribing
     runtime.scheduler.enableIdempotencyCheck();
 
-    // An accumulator: each run appends to the array
-    const log = runtime.getCell<string[]>(
+    const output = runtime.getCell<number>(
       space,
-      "inline-idempotency-accumulator",
+      "inline-random-output",
       undefined,
       tx,
     );
-    log.set([]);
+    output.set(0);
     await tx.commit();
     tx = runtime.edit();
 
-    const accumulator: Action = (tx) => {
-      const current = log.withTx(tx).get() ?? [];
-      log.withTx(tx).send([...current, "entry"]);
+    const randomWriter: Action = (tx) => {
+      output.withTx(tx).send(Math.random());
     };
+    (
+      randomWriter as Action & {
+        writes: ReturnType<typeof output.getAsNormalizedFullLink>[];
+      }
+    ).writes = [output.getAsNormalizedFullLink()];
     runtime.scheduler.subscribe(
-      accumulator,
-      { reads: [], shallowReads: [], writes: [] },
+      randomWriter,
+      () => {},
       {},
     );
-    await runtime.scheduler.idle();
+    await output.pull();
 
-    const violations = runtime.scheduler.getIdempotencyViolations();
-    expect(violations.length).toBeGreaterThan(0);
+    expect(runtime.scheduler.getIdempotencyViolations().length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("does not flag idempotent computations in inline mode", async () => {
@@ -2585,14 +2588,20 @@ describe("inline idempotency check mode", () => {
     const doubler: Action = (tx) => {
       output.withTx(tx).send(input.withTx(tx).get() * 2);
     };
-    runtime.scheduler.subscribe(doubler, {
-      reads: [],
-      shallowReads: [],
-      writes: [],
-    }, {});
-    await runtime.scheduler.idle();
+    (
+      doubler as Action & {
+        writes: ReturnType<typeof output.getAsNormalizedFullLink>[];
+      }
+    ).writes = [output.getAsNormalizedFullLink()];
+    runtime.scheduler.subscribe(
+      doubler,
+      (tx) => {
+        input.withTx(tx).get();
+      },
+      {},
+    );
+    expect(await output.pull()).toBe(10);
 
-    // Filter for our specific action
     const violations = runtime.scheduler.getIdempotencyViolations()
       .filter((r) =>
         r.runs.some((run) =>

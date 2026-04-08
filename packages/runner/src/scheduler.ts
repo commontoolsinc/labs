@@ -2521,23 +2521,21 @@ export class Scheduler {
   }
 
   /**
-   * In pull mode, pending/dirty effects are always runnable seeds.
-   * When inline idempotency mode is enabled, include computations too so
-   * diagnostics still execute even without an external effect.
+   * In pull mode, only effects are runnable seeds by default.
+   *
+   * Inline idempotency mode intentionally does not widen this to computations:
+   * it rechecks computations that already run due to explicit demand or an
+   * effect pull, rather than turning pull mode back into eager push mode.
    */
   private collectPullIterationSeeds(workSet: Set<Action>): void {
     for (const action of this.pending) {
       if (this.effects.has(action)) {
-        workSet.add(action);
-      } else if (this.idempotencyCheckMode && this.computations.has(action)) {
         workSet.add(action);
       }
     }
 
     for (const action of this.dirty) {
       if (this.effects.has(action)) {
-        workSet.add(action);
-      } else if (this.idempotencyCheckMode && this.computations.has(action)) {
         workSet.add(action);
       }
     }
