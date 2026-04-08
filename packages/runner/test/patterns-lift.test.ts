@@ -494,9 +494,9 @@ describe("Pattern Runner - Lift", () => {
     const value1 = await result1.pull();
     expect(value1).toMatchObject({ result: 10 });
 
-    // Both lifts run because the scheduler flushes everything
+    // Only the pulled pattern should run in pull mode.
     expect(lift1Runs).toBe(1);
-    expect(lift2Runs).toBe(1);
+    expect(lift2Runs).toBe(0);
 
     // Now pull on pattern 2's result
     const value2 = await result2.pull();

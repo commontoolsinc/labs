@@ -320,6 +320,7 @@ export class Runner {
     pattern: Pattern,
     processCell: Cell<any>,
     resultCell: Cell<R>,
+    options: { preserveName: boolean },
   ): void {
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       pattern.result as R,
@@ -328,7 +329,11 @@ export class Runner {
     const previousResult = resultCell.withTx(tx).getRaw({
       meta: ignoreReadForScheduling,
     });
-    if (isRecord(previousResult) && previousResult[NAME]) {
+    if (
+      options.preserveName &&
+      isRecord(previousResult) &&
+      previousResult[NAME]
+    ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
     if (!deepEqual(result, previousResult)) {
@@ -353,6 +358,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     patternId: string,
+    previousPatternId: string | undefined,
     argument: T,
     resultCell: Cell<R>,
     processCell: Cell<ProcessCellData<T>>,
@@ -403,7 +409,9 @@ export class Runner {
       this.updateProcessArgument(tx, processCell, nextArgument);
     }
 
-    this.updateResultProjection(tx, pattern, processCell, resultCell);
+    this.updateResultProjection(tx, pattern, processCell, resultCell, {
+      preserveName: previousPatternId === patternId,
+    });
     this.attachPatternMaterializer(pattern, processCell);
   }
 
@@ -483,6 +491,7 @@ export class Runner {
       tx,
       pattern,
       patternId,
+      previousPatternId,
       argument,
       resultCell,
       processCell,

@@ -3329,21 +3329,20 @@ export class Scheduler {
       this.scheduleAffectedEffects(action);
     });
 
-    // Find computation actions with no dependencies. We run them on the first
-    // run to capture any writes they might perform to cells pass into them.
+    // Find computation actions whose writes are still unknown. We run them on
+    // the first cycle to capture writes that cannot be inferred from declared
+    // outputs or populateDependencies() potential writes.
     //
     // TODO(seefeld): Once we more reliably capture what they can write via
     // WriteableCell or so, then we can treat this more deliberately via the
     // dependency collection process above. We'll have to re-run it whenever
     // inputs change, as they might change what they can write to. We hope that
     // for now this will be sufficiently captured in mightWrite.
-    // NOTE: Use .writes (current run) not mightWrite (historical) here.
-    // We want to know if action currently writes, not if it ever wrote.
     const newActionsWithoutDependencies = [...this.pendingDependencyCollection]
       .filter(
         (action) =>
-          !this.dependencies.get(action)?.writes.length &&
-          !this.effects.has(action),
+          !this.effects.has(action) &&
+          (this.mightWrite.get(action)?.length ?? 0) === 0,
       );
 
     // Clear the pending collection set - dependencies have been collected

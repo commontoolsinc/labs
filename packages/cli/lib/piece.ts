@@ -1,7 +1,14 @@
 import { createSession, isDID, Session } from "@commonfabric/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import { Runtime, RuntimeProgram, UI, VNode } from "@commonfabric/runner";
+import {
+  Cell,
+  NAME,
+  Runtime,
+  RuntimeProgram,
+  UI,
+  VNode,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { extractUserCode, pieceId, PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -206,10 +213,14 @@ export async function listPieces(
   return Promise.all(
     allPieces.map(async (piece) => {
       try {
+        const livePiece = await pieces.get(piece.id, true);
+        const name = await (livePiece.getCell().key(NAME) as Cell<unknown>)
+          .pull() as string | undefined;
+        const patternMeta = await livePiece.getPatternMeta();
         return {
           id: piece.id,
-          name: piece.name(),
-          patternName: (await piece.getPatternMeta()).patternName,
+          name,
+          patternName: patternMeta.patternName,
         };
       } catch (err) {
         return {
