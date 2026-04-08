@@ -713,7 +713,7 @@ Acceptance:
       carries the richer bundle/path/location/hash identity surface
 - [ ] Unsupported identity classes fail closed for trust-sensitive checks
 - [x] Changing the trust snapshot between prepare and commit invalidates prepare
-- [ ] Unknown implementation identity is treated as untrusted
+- [x] Unknown implementation identity is treated as untrusted
 
 ### 9. Flow-Precision and Structural Claims
 

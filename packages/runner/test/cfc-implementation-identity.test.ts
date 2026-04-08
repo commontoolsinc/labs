@@ -107,4 +107,9 @@ describe("CFC builtin implementation identity", () => {
         "verified compiled policy identity is blocked until the richer bundle/path/location/hash identity lands",
     });
   });
+
+  it("treats unknown implementation identities as untrusted", () => {
+    const module = { type: "javascript" as const };
+    expect(resolvePolicyFacingImplementationIdentity(module)).toBeUndefined();
+  });
 });
