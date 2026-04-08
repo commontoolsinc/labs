@@ -18,6 +18,7 @@ const defaultPatternProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
+        "/// <cf-disable-transform />",
         "import { handler, pattern } from 'commonfabric';",
         "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
         "  ({ piece }, { allPieces }) => {",

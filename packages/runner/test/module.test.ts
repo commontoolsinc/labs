@@ -259,14 +259,16 @@ describe("module", () => {
   });
 
   describe("action function", () => {
-    it("throws error when called without CTS enabled", () => {
-      // action() should only be used with CTS enabled, which rewrites it to handler()
-      // When called directly at runtime (without CTS), it should throw an error
+    it("throws error when called directly without CTS transforms", () => {
+      // action() is only valid once CTS transforms rewrite it to handler().
+      // A direct runtime call should still fail and point callers at the opt-out flag.
       expect(() => {
         action<{ data: string }>(({ data }) => {
           void data;
         });
-      }).toThrow("action() must be used with CTS enabled");
+      }).toThrow(
+        "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
+      );
     });
 
     it("infers Stream<void> for zero-parameter callbacks (type test)", () => {

@@ -629,6 +629,7 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/main.ts",
           contents: [
+            "/// <cf-disable-transform />",
             "export default {",
             "  nested: { count: 1 },",
             "};",
@@ -647,6 +648,7 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/main.ts",
           contents: [
+            "/// <cf-disable-transform />",
             "function build() {",
             "  return { count: 1 };",
             "}",
@@ -661,7 +663,7 @@ ${FACTORY_SHADOW_GUARDS}
     );
   });
 
-  it("compiles non-CTS default export calls that evaluate to primitive snapshots", async () => {
+  it("compiles default export calls that evaluate to primitive snapshots through __ct_data", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -684,6 +686,7 @@ ${FACTORY_SHADOW_GUARDS}
     };
 
     const { jsScript, id } = await engine.compile(program);
+<<<<<<< HEAD
     expect(jsScript.js).toContain("__cf_data)(");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
@@ -735,6 +738,7 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/main.ts",
           contents: [
+            "/// <cf-disable-transform />",
             'import { handler } from "commonfabric";',
             "export default handler((_event: { count: number }, state: { count: number }) => {",
             "  state.count = state.count + 1;",
@@ -1181,6 +1185,7 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
+            "/// <cf-disable-transform />",
             "const state = (() => ({ count: 0 }))();",
             "export default 42;",
           ].join("\n"),
@@ -1267,6 +1272,7 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
+            "/// <cf-disable-transform />",
             'import { toSchema } from "commonfabric";',
             "export default toSchema<{ count: number }>({",
             "  default: { count: 0 },",
