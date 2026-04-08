@@ -7,6 +7,7 @@ import {
   clearMockResponses,
   enableMockMode,
 } from "@commonfabric/llm/client";
+import { LLMClient } from "@commonfabric/llm";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -89,6 +90,60 @@ describe("generateText", () => {
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe(expectedResponse);
+  });
+
+  it("starts the LLM request only after the transaction commits", async () => {
+    const testPrompt = "post-commit-gated-generateText";
+
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ),
+      {
+        role: "assistant",
+        content: "gated response",
+        id: "mock-post-commit",
+      },
+    );
+
+    const originalSendRequest = LLMClient.prototype.sendRequest;
+    const sendRequestCalls: number[] = [];
+    LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
+      sendRequestCalls.push(Date.now());
+      return await originalSendRequest.apply(this, args as never);
+    };
+
+    try {
+      const testPattern = pattern(() => {
+        return generateText({
+          prompt: testPrompt,
+        });
+      });
+
+      const resultCell = runtime.getCell(
+        space,
+        "generateText-post-commit-gated-test",
+        testPattern.resultSchema,
+        tx,
+      );
+
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+
+      expect(sendRequestCalls).toEqual([]);
+
+      const commitPromise = tx.commit();
+      expect(sendRequestCalls).toEqual([]);
+
+      await commitPromise;
+      await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+      await runtime.idle();
+
+      expect(sendRequestCalls.length).toBeGreaterThan(0);
+      expect(result.key("result").get()).toBe("gated response");
+    } finally {
+      LLMClient.prototype.sendRequest = originalSendRequest;
+    }
   });
 
   it("should generate text from messages", async () => {

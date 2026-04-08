@@ -232,7 +232,7 @@ const unsupportedTrustSensitiveReason = (
   ] as const;
   for (const key of unsupportedKeys) {
     const value = schema.ifc[key];
-    if (Array.isArray(value) && value.length > 0) {
+    if (value !== undefined) {
       return `unsupported trust-sensitive claim ${key} at /${path.join("/")}`;
     }
   }

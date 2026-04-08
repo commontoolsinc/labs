@@ -597,7 +597,7 @@ Tasks:
       `cid:<hash>`-backed schema documents; no coarse-label fallback
 - [x] Implement `classification`, `integrity`, `addIntegrity`,
       `requiredIntegrity`, and `maxConfidentiality`
-- [ ] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
+- [x] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
       collection-derived transition checks where they can be evaluated from
       consumed reads plus `potentialWrites`/`writes` plus explicit write-policy
       inputs; otherwise fail closed or remain conservative
@@ -616,7 +616,7 @@ Tasks:
       yields the existing `schemaHash`, treat it as a no-op; if merge yields a
       new `schemaHash`, replace the stored hash; if merge fails, reject and
       abort the transaction
-- [ ] Reject on missing schema, missing write-policy inputs, unreadable schema
+- [x] Reject on missing schema, missing write-policy inputs, unreadable schema
       hashes, or any unsupported trust-sensitive claim
 
 Acceptance:

@@ -1500,7 +1500,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             value: {
               type: "string",
-              ifc: { projection: ["public-subset"] },
+              ifc: {
+                projection: {
+                  from: ["input", "value"],
+                  path: ["value"],
+                } as any,
+              },
             },
           },
           required: ["value"],
@@ -1513,6 +1518,46 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.ok).toBeDefined();
       expect(tx.getCfcState().diagnostics).toContain(
         "unsupported trust-sensitive claim projection at /value",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("fails closed on object-shaped collection claims in enforcing modes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-unsupported-collection-claim",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "array",
+              items: { type: "string" },
+              ifc: {
+                collection: {
+                  subsetOf: ["input", "items"],
+                  memberIntegrity: "preserved",
+                } as any,
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: ["observed"] });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "unsupported trust-sensitive claim collection",
       );
     } finally {
       await runtime.dispose();
