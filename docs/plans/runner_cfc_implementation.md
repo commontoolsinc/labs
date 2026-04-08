@@ -513,7 +513,7 @@ Primary files:
 Tasks:
 
 - [x] Mark a transaction relevant when traversal encounters schema `ifc`
-- [ ] Mark a transaction relevant when existing stored CFC metadata applies to a
+- [x] Mark a transaction relevant when existing stored CFC metadata applies to a
       consumed read
 - [x] Mark write-only transactions relevant when the target path carries CFC
       obligations even if no read happened first
@@ -527,7 +527,7 @@ Acceptance:
 
 - [x] Reading a path with `ifc` marks the transaction relevant
 - [x] Reading unlabeled plain data does not mark it relevant
-- [ ] Writing to a path with stored or schema-derived CFC metadata marks it
+- [x] Writing to a path with stored or schema-derived CFC metadata marks it
       relevant
 - [ ] Attempting a no-op write to a path with stored or schema-derived CFC
       metadata still marks it relevant

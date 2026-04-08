@@ -1,6 +1,7 @@
 import { AnyCellWrapping } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Immutable, isRecord } from "@commonfabric/utils/types";
+import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
 import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
@@ -473,7 +474,10 @@ export function validateAndTransform(
       : resolvedSchema
     : resolvedLinkSchema;
   const filteredSchema = filterAsCell(effectiveSchema);
-  if (schemaHasIfc(effectiveSchema)) {
+  if (
+    schemaHasIfc(effectiveSchema) ||
+    storedCfcMetadataAppliesToPath(tx, resolvedLink)
+  ) {
     tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
   }
 

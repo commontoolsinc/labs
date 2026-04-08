@@ -355,6 +355,65 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("marks reads as CFC-relevant when stored metadata labels the consumed path", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seededId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-stored-read",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+
+      const seed = runtime.edit();
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: seededId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { classification: ["secret"] },
+            }],
+          },
+        },
+      });
+      const seedResult = await seed.commit();
+      expect(seedResult.ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-stored-read",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      expect(cell.key("secret").get()).toEqual("seed");
+      expect(tx.getCfcState().relevant).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("marks labeled writes as CFC-relevant", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -366,6 +425,65 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         tx,
       );
       cell.set("value");
+      expect(tx.getCfcState().relevant).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("marks writes as CFC-relevant when stored metadata labels the target path", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seededId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-stored-write",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+
+      const seed = runtime.edit();
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: seededId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { classification: ["secret"] },
+            }],
+          },
+        },
+      });
+      const seedResult = await seed.commit();
+      expect(seedResult.ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-stored-write",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      cell.key("secret").set("updated");
       expect(tx.getCfcState().relevant).toBe(true);
     } finally {
       await runtime.dispose();
