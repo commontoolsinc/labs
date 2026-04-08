@@ -36,6 +36,9 @@ const CFC_ALIAS_NAMES = new Set([
   "FilteredFrom",
   "SubsetOf",
   "PermutationOf",
+  "ProjectionPath",
+  "ProjectionOf",
+  "Projection",
 ]);
 
 /**
@@ -795,6 +798,41 @@ export class CommonFabricFormatter implements TypeFormatter {
             permutationOf: readValue(1),
           },
         };
+      case "ProjectionPath":
+        return {
+          projection: {
+            from: readValue(1),
+            path: this.encodeJsonPointerPath(readValue(2)),
+          },
+        };
+      case "ProjectionOf":
+        return {
+          projection: {
+            from: "/",
+            path: this.encodeJsonPointerPath(readValue(1)),
+          },
+        };
+      case "Projection": {
+        const refType = aliasArgs[0] as TypeWithInternals | undefined;
+        if (refType?.aliasSymbol?.name !== "Ref") {
+          return undefined;
+        }
+        const refArgs = refType.aliasTypeArguments ?? [];
+        const refNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
+        const refPathNode = this.getAliasTypeArgumentNode(refNode, 1);
+        return {
+          projection: {
+            from: "/",
+            path: this.encodeJsonPointerPath(
+              this.extractLiteralLikeValue(
+                refArgs[1],
+                refPathNode,
+                context,
+              ),
+            ),
+          },
+        };
+      }
       default:
         return undefined;
     }
@@ -826,6 +864,26 @@ export class CommonFabricFormatter implements TypeFormatter {
         ...ifc,
       },
     };
+  }
+
+  private encodeJsonPointerPath(value: unknown): string | undefined {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (
+      Array.isArray(value) &&
+      value.every((segment) => typeof segment === "string")
+    ) {
+      if (value.length === 0) {
+        return "/";
+      }
+      return `/${
+        value.map((segment) =>
+          segment.replaceAll("~", "~0").replaceAll("/", "~1")
+        ).join("/")
+      }`;
+    }
+    return undefined;
   }
 
   private extractLiteralLikeValue(
@@ -905,6 +963,19 @@ export class CommonFabricFormatter implements TypeFormatter {
         (typeText.startsWith("'") && typeText.endsWith("'")))
     ) {
       return typeText.slice(1, -1);
+    }
+
+    const objectFlags =
+      (type as { objectFlags?: ts.ObjectFlags }).objectFlags ??
+        0;
+    if ((objectFlags & ts.ObjectFlags.Tuple) !== 0) {
+      const tupleType = type as ts.TypeReference;
+      const elements = context.typeChecker.getTypeArguments(tupleType);
+      if (elements.length > 0) {
+        return elements.map((element) =>
+          this.extractLiteralLikeValue(element, undefined, context)
+        );
+      }
     }
 
     if ((type.flags & ts.TypeFlags.Object) !== 0) {
