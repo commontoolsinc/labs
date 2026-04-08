@@ -837,7 +837,7 @@ The test matrix should be built in the same order as the implementation:
       and required-field/default compatibility
 - [x] transaction tests for prepare gating and invalidation
 - [x] rollout-mode tests for `disabled`, `observe`, and enforcing modes
-- [ ] traversal tests for relevance detection
+- [x] traversal tests for relevance detection
 - [x] prepare-engine tests for input requirements and output transitions
 - [x] storage tests for embedded-metadata persistence, `schemaHash`
       dereferencing, and non-exposure

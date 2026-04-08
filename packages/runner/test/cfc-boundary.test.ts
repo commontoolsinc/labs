@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { raw } from "../src/module.ts";
+import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import {
@@ -598,6 +599,86 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       );
       expect(cell.key("secret").get()).toEqual("seed");
       expect(tx.getCfcState().relevant).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps source-cell traversal reads internal and out of consumed inputs", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const targetId = "of:cfc-internal-source-traversal-target";
+      seed.writeOrThrow(
+        {
+          space: signer.did(),
+          id: targetId,
+          type: "application/json",
+          path: [],
+        },
+        {
+          value: { source: "seed" },
+        },
+      );
+      seed.writeOrThrow(
+        {
+          space: signer.did(),
+          id: targetId,
+          type: "application/json",
+          path: ["cfc"],
+        },
+        {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["source"],
+              label: { classification: ["secret"] },
+            }],
+          },
+        },
+      );
+      const seedResult = await seed.commit();
+      expect(seedResult.ok).toBeDefined();
+
+      const metadataTx = runtime.edit();
+      const targetLink = {
+        space: signer.did(),
+        id: targetId,
+        type: "application/json",
+        path: [],
+      } as const;
+      expect(
+        storedCfcMetadataAppliesToPath(metadataTx, targetLink),
+      ).toBe(true);
+      expect(
+        storedCfcMetadataAppliesToPath(metadataTx, {
+          ...targetLink,
+          path: ["source"],
+        }),
+      ).toBe(true);
+
+      const readActivities = [...(metadataTx as unknown as {
+        getReadActivities(): Iterable<{ meta?: unknown }>;
+      }).getReadActivities()];
+      expect(readActivities).toContainEqual(
+        expect.objectContaining({
+          path: [],
+        }),
+      );
+
+      const digestInput = (
+        metadataTx as unknown as {
+          buildPreparedDigestInput(): { consumedReads: unknown[] };
+        }
+      ).buildPreparedDigestInput();
+      expect(digestInput.consumedReads).toEqual([]);
+      expect(metadataTx.getCfcState().relevant).toBe(false);
+
+      const result = await metadataTx.commit();
+      expect(result.ok).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
