@@ -37,9 +37,25 @@ import {
   getTransactionReadActivities,
   getTransactionWriteDetails,
 } from "./transaction-inspection.ts";
-import { reactivityLogFromActivities } from "./reactivity-log.ts";
+import {
+  isInternalVerifierRead,
+  reactivityLogFromActivities,
+} from "./reactivity-log.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
+import {
+  type AttemptedWrite,
+  canonicalizeLogicalPath,
+  type CfcEnforcementMode,
+  type CfcTxState,
+  type ConsumedRead,
+  type ImplementationIdentity,
+  type PostCommitSideEffect,
+  preparedDigestFor,
+  type PreparedDigestInput,
+  type TrustSnapshot,
+  type WritePolicyInput,
+} from "../cfc/mod.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -54,8 +70,128 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     ) => void
   >();
   private readOnlySource?: string;
+  private cfcState: CfcTxState = {
+    relevant: false,
+    enforcementMode: "disabled",
+    prepare: { status: "unprepared" },
+    writePolicyInputs: [],
+    outbox: [],
+    diagnostics: [],
+  };
 
   constructor(public tx: IStorageTransaction) {}
+
+  getCfcState(): Readonly<CfcTxState> {
+    return this.cfcState;
+  }
+
+  setCfcEnforcementMode(mode: CfcEnforcementMode): void {
+    this.cfcState.enforcementMode = mode;
+  }
+
+  markCfcRelevant(reason?: string): void {
+    this.cfcState.relevant = true;
+    if (reason) {
+      this.cfcState.diagnostics.push(reason);
+    }
+  }
+
+  invalidateCfc(reason: string): void {
+    const previousDigest = this.cfcState.prepare.status === "prepared"
+      ? this.cfcState.prepare.digest
+      : this.cfcState.prepare.status === "invalidated"
+      ? this.cfcState.prepare.digest
+      : undefined;
+    const reasons = this.cfcState.prepare.status === "invalidated"
+      ? [...this.cfcState.prepare.reasons, reason]
+      : [reason];
+    this.cfcState.prepare = {
+      status: "invalidated",
+      digest: previousDigest,
+      reasons,
+    };
+  }
+
+  setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
+    this.cfcState.trustSnapshot = snapshot;
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("trust-snapshot-changed");
+    }
+  }
+
+  setCfcImplementationIdentity(
+    identity: ImplementationIdentity | undefined,
+  ): void {
+    this.cfcState.implementationIdentity = identity;
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("implementation-identity-changed");
+    }
+  }
+
+  recordCfcWritePolicyInput(input: WritePolicyInput): void {
+    this.cfcState.writePolicyInputs.push(input);
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("write-policy-input-added");
+    }
+  }
+
+  enqueuePostCommitEffect(effect: PostCommitSideEffect): void {
+    this.cfcState.outbox.push(effect);
+  }
+
+  private buildPreparedDigestInput(): PreparedDigestInput {
+    const consumedReads: ConsumedRead[] = [];
+    for (const read of this.getReadActivities()) {
+      if (isInternalVerifierRead(read.meta)) {
+        continue;
+      }
+      consumedReads.push({
+        ...read,
+        path: canonicalizeLogicalPath(read.path),
+      });
+    }
+
+    const log = this.getReactivityLog();
+    const potentialWrites: AttemptedWrite[] = (log.potentialWrites ?? []).map(
+      (address) => ({
+        ...address,
+        path: canonicalizeLogicalPath(address.path),
+      }),
+    );
+
+    const writes: AttemptedWrite[] = [];
+    const seenWriteSpaces = new Set<MemorySpace>(
+      (log.writes ?? []).map((write) => write.space),
+    );
+    for (const space of seenWriteSpaces) {
+      for (const write of this.getWriteDetails(space)) {
+        writes.push({
+          ...write.address,
+          path: canonicalizeLogicalPath(write.address.path),
+        });
+      }
+    }
+
+    return {
+      consumedReads,
+      potentialWrites,
+      writes,
+      writePolicyInputs: [...this.cfcState.writePolicyInputs],
+      implementationIdentity: this.cfcState.implementationIdentity,
+      trustSnapshot: this.cfcState.trustSnapshot,
+    };
+  }
+
+  prepareCfc(input?: PreparedDigestInput): string {
+    const preparedInput = input ?? this.buildPreparedDigestInput();
+    const digest = preparedDigestFor(preparedInput);
+    this.cfcState.prepare = {
+      status: "prepared",
+      digest,
+      input: preparedInput,
+    };
+    return digest;
+  }
 
   setReadOnly(reason = "runtime.readTx()"): void {
     this.readOnlySource = reason;
@@ -109,6 +245,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("read-after-prepare");
+    }
     return this.tx.read(address, options);
   }
 
@@ -116,6 +255,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): Immutable<FabricValue> {
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("read-after-prepare");
+    }
     const readResult = this.tx.read(address, options);
     if (
       readResult.error &&
@@ -151,6 +293,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("write-after-prepare");
+    }
     return this.tx.write(address, value);
   }
 
@@ -159,6 +304,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue,
   ): void {
     this.assertWritable("writeOrThrow()");
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("write-after-prepare");
+    }
     const writeResult = this.tx.write(address, value);
     if (
       writeResult.error &&
@@ -266,15 +414,57 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   abort(reason?: any): Result<any, InactiveTransactionError> {
     this.assertWritable("abort()");
+    this.cfcState.outbox = [];
+    this.cfcState.prepare = { status: "unprepared" };
     return this.tx.abort(reason);
   }
 
-  commit(): Promise<Result<Unit, CommitError>> {
+  async commit(): Promise<Result<Unit, CommitError>> {
     if (this.isReadOnly()) {
       return Promise.reject(
         createReadOnlyTransactionError("commit()", this.readOnlySource),
       );
     }
+    if (
+      this.cfcState.relevant &&
+      this.cfcState.enforcementMode === "observe" &&
+      this.cfcState.prepare.status === "unprepared"
+    ) {
+      this.prepareCfc();
+    }
+    if (
+      this.cfcState.relevant &&
+      this.cfcState.enforcementMode !== "disabled" &&
+      this.cfcState.enforcementMode !== "observe" &&
+      this.cfcState.prepare.status !== "prepared"
+    ) {
+      return {
+        error: {
+          name: "StorageTransactionAborted",
+          message:
+            "CFC enforcement rejected commit: relevant transaction was not prepared",
+          reason: new Error("cfc-relevant-transaction-not-prepared"),
+        },
+      };
+    }
+
+    if (this.cfcState.prepare.status === "prepared") {
+      const currentDigest = preparedDigestFor(this.buildPreparedDigestInput());
+      if (currentDigest !== this.cfcState.prepare.digest) {
+        this.invalidateCfc("prepared-digest-mismatch");
+        if (this.cfcState.enforcementMode !== "observe") {
+          return {
+            error: {
+              name: "StorageTransactionAborted",
+              message:
+                "CFC enforcement rejected commit: prepared digest changed",
+              reason: new Error("cfc-prepared-digest-mismatch"),
+            },
+          };
+        }
+      }
+    }
+
     const promise = this.tx.commit();
 
     // Call commit callbacks after commit completes (success or failure) Note
@@ -299,7 +489,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       );
     });
 
-    return promise;
+    const result = await promise;
+    if (result.ok) {
+      for (const effect of this.cfcState.outbox) {
+        await effect.flush(this);
+      }
+    } else {
+      this.cfcState.outbox = [];
+    }
+
+    return result;
   }
 
   /**
@@ -366,6 +565,44 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   get tx(): IStorageTransaction {
     return this.wrapped.tx;
+  }
+
+  getCfcState(): Readonly<CfcTxState> {
+    return this.wrapped.getCfcState();
+  }
+
+  setCfcEnforcementMode(mode: CfcEnforcementMode): void {
+    this.wrapped.setCfcEnforcementMode(mode);
+  }
+
+  markCfcRelevant(reason?: string): void {
+    this.wrapped.markCfcRelevant(reason);
+  }
+
+  invalidateCfc(reason: string): void {
+    this.wrapped.invalidateCfc(reason);
+  }
+
+  prepareCfc(input?: PreparedDigestInput): string {
+    return this.wrapped.prepareCfc(input);
+  }
+
+  setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
+    this.wrapped.setCfcTrustSnapshot(snapshot);
+  }
+
+  setCfcImplementationIdentity(
+    identity: ImplementationIdentity | undefined,
+  ): void {
+    this.wrapped.setCfcImplementationIdentity(identity);
+  }
+
+  recordCfcWritePolicyInput(input: WritePolicyInput): void {
+    this.wrapped.recordCfcWritePolicyInput(input);
+  }
+
+  enqueuePostCommitEffect(effect: PostCommitSideEffect): void {
+    this.wrapped.enqueuePostCommitEffect(effect);
   }
 
   setReadOnly(reason?: string): void {

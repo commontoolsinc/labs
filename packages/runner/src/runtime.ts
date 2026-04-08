@@ -56,6 +56,7 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import type { CfcEnforcementMode } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -178,6 +179,8 @@ export interface RuntimeOptions {
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
+  /** Rollout mode for commit-boundary CFC enforcement. */
+  cfcEnforcementMode?: CfcEnforcementMode;
   /** Optional compilation cache for persistent caching of compiled JS.
    *  If absent, no persistent caching is performed (same as before). */
   cachedCompiler?: CachedCompiler;
@@ -261,6 +264,7 @@ export class Runtime {
   readonly navigateCallback?: NavigateCallback;
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
+  readonly cfcEnforcementMode: CfcEnforcementMode;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly memoryVersion: MemoryVersion;
@@ -362,6 +366,7 @@ export class Runtime {
     this.patternManager = new PatternManager(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
+    this.cfcEnforcementMode = options.cfcEnforcementMode ?? "disabled";
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -535,7 +540,9 @@ export class Runtime {
     if (debugActionId) {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
-    return new ExtendedStorageTransaction(tx);
+    const wrapped = new ExtendedStorageTransaction(tx);
+    wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
+    return wrapped;
   }
 
   getWriteDebugContext(): string | undefined {

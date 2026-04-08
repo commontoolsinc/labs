@@ -61,6 +61,7 @@ import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
   processDefaultValue,
   resolveSchema,
+  schemaHasIfc,
   validateAndTransform,
 } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
@@ -744,6 +745,11 @@ export class CellImpl<T extends FabricValue>
 
       // Looks for arrays and makes sure each object gets its own doc.
       const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
+      if (
+        schemaHasIfc(resolveSchema(resolvedToValueLink.schema ?? this.schema))
+      ) {
+        this.tx.markCfcRelevant(`schema-ifc-write:${resolvedToValueLink.id}`);
+      }
 
       // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
       diffAndUpdate(
@@ -799,6 +805,9 @@ export class CellImpl<T extends FabricValue>
 
     // Get current value, following aliases and references
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    if (schemaHasIfc(resolveSchema(resolvedLink.schema ?? this.schema))) {
+      this.tx.markCfcRelevant(`schema-ifc-write:${resolvedLink.id}`);
+    }
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
     // If there's no current value, initialize based on schema, even if there is
@@ -853,6 +862,9 @@ export class CellImpl<T extends FabricValue>
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    if (schemaHasIfc(resolveSchema(resolvedLink.schema ?? this.schema))) {
+      this.tx.markCfcRelevant(`schema-ifc-write:${resolvedLink.id}`);
+    }
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
     const cause = this._frame?.cause;
 
@@ -1241,6 +1253,9 @@ export class CellImpl<T extends FabricValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
+    if (schemaHasIfc(resolveSchema(this.link.schema ?? this.schema))) {
+      this.tx.markCfcRelevant(`schema-ifc-write:${this.link.id}`);
+    }
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 

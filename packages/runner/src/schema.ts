@@ -91,6 +91,57 @@ export function resolveSchema(
     : undefined;
 }
 
+export function schemaHasIfc(
+  schema: JSONSchema | undefined,
+  seen: Set<JSONSchema> = new Set(),
+): boolean {
+  if (schema === undefined || typeof schema === "boolean") {
+    return false;
+  }
+  if (seen.has(schema)) {
+    return false;
+  }
+  seen.add(schema);
+
+  const resolved = typeof schema.$ref === "string"
+    ? ContextualFlowControl.resolveSchemaRefs(schema)
+    : schema;
+  if (resolved === true || resolved === false || !isRecord(resolved)) {
+    return false;
+  }
+  if (resolved.ifc !== undefined) {
+    return true;
+  }
+
+  const compound = [
+    ...(resolved.anyOf ?? []),
+    ...(resolved.oneOf ?? []),
+    ...(resolved.allOf ?? []),
+  ];
+  if (compound.some((item) => schemaHasIfc(item, seen))) {
+    return true;
+  }
+  if (
+    resolved.properties !== undefined &&
+    Object.values(resolved.properties).some((item) => schemaHasIfc(item, seen))
+  ) {
+    return true;
+  }
+  if (
+    typeof resolved.additionalProperties === "object" &&
+    schemaHasIfc(resolved.additionalProperties, seen)
+  ) {
+    return true;
+  }
+  if (
+    typeof resolved.items === "object" &&
+    schemaHasIfc(resolved.items, seen)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
   if (!isNontrivialSchema(schema)) {
     return schema;
@@ -422,6 +473,9 @@ export function validateAndTransform(
       : resolvedSchema
     : resolvedLinkSchema;
   const filteredSchema = filterAsCell(effectiveSchema);
+  if (schemaHasIfc(effectiveSchema)) {
+    tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
+  }
 
   // Unlike the original, we have kept the asCell markers in the schema
   link = {

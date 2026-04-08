@@ -29,6 +29,15 @@ import {
 } from "@commonfabric/memory/interface";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
+import type {
+  CfcEnforcementMode,
+  CfcTxState,
+  ImplementationIdentity,
+  PostCommitSideEffect,
+  PreparedDigestInput,
+  TrustSnapshot,
+  WritePolicyInput,
+} from "../cfc/mod.ts";
 
 export type {
   Assertion,
@@ -607,6 +616,18 @@ export interface IStorageTransaction {
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
   tx: IStorageTransaction;
+
+  getCfcState(): Readonly<CfcTxState>;
+  setCfcEnforcementMode(mode: CfcEnforcementMode): void;
+  markCfcRelevant(reason?: string): void;
+  invalidateCfc(reason: string): void;
+  prepareCfc(input?: PreparedDigestInput): string;
+  setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void;
+  setCfcImplementationIdentity(
+    identity: ImplementationIdentity | undefined,
+  ): void;
+  recordCfcWritePolicyInput(input: WritePolicyInput): void;
+  enqueuePostCommitEffect(effect: PostCommitSideEffect): void;
 
   /**
    * Add a callback to be called when the transaction commit completes.

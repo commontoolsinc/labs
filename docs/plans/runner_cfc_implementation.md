@@ -11,6 +11,33 @@ It is intentionally self-contained. It describes:
 - the workstreams, files, and acceptance criteria
 - the rollout sequence
 
+## Implementation Guidance
+
+Use a disciplined per-slice workflow while executing this plan:
+
+- Work in red-green-refactor TDD loops: start by writing or extending the
+  smallest failing test that captures the next required behavior, implement
+  the minimum change to make it pass, then refactor with the suite green
+- Commit often. Prefer small, reviewable commits that each preserve a green
+  targeted test run and map to one vertical slice, invariant, or mechanical
+  refactor
+- Keep each landing slice mergeable and reversible. Avoid multi-workstream
+  branches that mix contract changes, policy behavior, persistence changes,
+  and sink integration unless the boundary is already proven by tests
+- After each slice, run the narrowest relevant tests first, then rerun the
+  broader package-level tests before moving to the next slice
+- Treat invariants in this document as executable requirements. When a bug
+  or ambiguity is found, add or tighten a test before adjusting the code
+- Use sub-agents only for bounded sidecar work that improves quality
+  without creating conflicting edits. Good uses include plan/spec
+  conformance review, test-gap review, and source-hunting for integration
+  points; avoid delegating overlapping code edits in the same files
+- For risky slices such as commit gating, retry behavior, trust-sensitive
+  relaxations, or sink deduplication, schedule an explicit review pass
+  before moving rollout forward. A sub-agent review is useful here as a
+  second set of eyes, but the main branch of truth remains the spec, the
+  tests, and the final human review
+
 ## Goal
 
 Move from schema-guided IFC propagation to a runner/storage boundary that
@@ -375,21 +402,21 @@ Primary files:
 
 Tasks:
 
-- [ ] Define `CfcTxState`, `ConsumedRead`, `AttemptedWrite`,
+- [x] Define `CfcTxState`, `ConsumedRead`, `AttemptedWrite`,
       `WritePolicyInput`, `PreparedDigestInput`, `ImplementationIdentity`,
       `TrustSnapshot`, `CfcEnforcementMode`, and `CfcMetadata`
-- [ ] Define a dedicated metadata marker for `internalVerifierRead`
-- [ ] Define a dedicated side-effect outbox entry type for post-commit effects
-- [ ] Define the reserved embedded `cfc` document shape and system-ownership
+- [x] Define a dedicated metadata marker for `internalVerifierRead`
+- [x] Define a dedicated side-effect outbox entry type for post-commit effects
+- [x] Define the reserved embedded `cfc` document shape and system-ownership
       rules for that metadata
-- [ ] Define a canonical code-identity shape that separates policy-facing code
+- [x] Define a canonical code-identity shape that separates policy-facing code
       identity from per-load runtime ids and can encode bundle/path/location/hash
       provenance without relying on bare memory-v2 `codeCID`
 
 Acceptance:
 
-- [ ] New types compile without changing behavior
-- [ ] Serialization tests cover `CfcMetadata`, `WritePolicyInput`, and digest
+- [x] New types compile without changing behavior
+- [x] Serialization tests cover `CfcMetadata`, `WritePolicyInput`, and digest
       input canonicalization
 
 ### 2. Transaction State and Commit Gate
@@ -403,28 +430,28 @@ Primary files:
 
 Tasks:
 
-- [ ] Add CFC state to the extended transaction wrapper and/or underlying
+- [x] Add CFC state to the extended transaction wrapper and/or underlying
       transaction implementation: relevance, preparation status, prepared
       digest, write-policy inputs, trust snapshot, outbox, and enforcement mode
-- [ ] Add helpers to mark a transaction relevant, prepared, invalidated, and to
+- [x] Add helpers to mark a transaction relevant, prepared, invalidated, and to
       enqueue post-commit side effects
-- [ ] Make the commit gate live in the transaction commit path so
+- [x] Make the commit gate live in the transaction commit path so
       scheduler-driven flows, `runtime.editWithRetry()`, and other
       runtime-owned commit callers use the same enforcement boundary
-- [ ] Support rollout modes:
+- [x] Support rollout modes:
       `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`
-- [ ] In `observe`, compute prepare state and diagnostics without blocking
-- [ ] In enforcing modes, enforce `relevant -> prepared` at commit
-- [ ] Recompute the digest immediately before commit and reject on mismatch
-- [ ] Reset CFC state on abort and on retry
+- [x] In `observe`, compute prepare state and diagnostics without blocking
+- [x] In enforcing modes, enforce `relevant -> prepared` at commit
+- [x] Recompute the digest immediately before commit and reject on mismatch
+- [x] Reset CFC state on abort and on retry
 
 Acceptance:
 
-- [ ] Observe mode records prepare state without blocking commit
-- [ ] Relevant transaction without prepare fails commit in enforcing modes
-- [ ] Prepared transaction with unchanged activity commits successfully
-- [ ] Post-prepare read, write, or write-policy input invalidates prepare
-- [ ] Abort clears outbox state
+- [x] Observe mode records prepare state without blocking commit
+- [x] Relevant transaction without prepare fails commit in enforcing modes
+- [x] Prepared transaction with unchanged activity commits successfully
+- [x] Post-prepare read, write, or write-policy input invalidates prepare
+- [x] Abort clears outbox state
 - [ ] Scheduler-owned and direct runtime-owned commit callers hit the same gate
 
 ### 3. Canonical Activity and Policy-Input Capture
@@ -439,9 +466,9 @@ Primary files:
 
 Tasks:
 
-- [ ] Build a canonical extractor over the v2 inspection APIs
-- [ ] Surface tx `potentialWrites` as the phase-1 maybe-write target set
-- [ ] Produce a deterministic final-per-path `writes` set for phase 1
+- [x] Build a canonical extractor over the v2 inspection APIs
+- [x] Surface tx `potentialWrites` as the phase-1 maybe-write target set
+- [x] Produce a deterministic final-per-path `writes` set for phase 1
 - [ ] Preserve no-op attempted-target coverage through `potentialWrites`
 - [ ] Add JSDoc and guardrails on internal `tx.write*` APIs explaining that
       phase-1 no-op attempted-target coverage relies on higher-level diff paths
@@ -451,11 +478,11 @@ Tasks:
       sites and either ensure they establish `potentialWrites` coverage before
       same-value short-circuiting or explicitly keep them out of phase-1 CFC
       scope
-- [ ] Add explicit APIs to record canonical `WritePolicyInput` entries at
+- [x] Add explicit APIs to record canonical `WritePolicyInput` entries at
       mutation time; do not rely on generic tx read/write inspection alone for
       schema hashes or structural provenance claims
 - [ ] Keep scheduler metadata and verifier metadata distinct
-- [ ] Exclude only `internalVerifierRead` from the consumed-read set
+- [x] Exclude only `internalVerifierRead` from the consumed-read set
 - [ ] Make the phase-1 prepare engine free to pessimistically treat all
       consumed reads as influencing all target paths in
       `potentialWrites ∪ writes`
@@ -464,13 +491,13 @@ Tasks:
 
 Acceptance:
 
-- [ ] Canonical path handling strips the `value` wrapper consistently
-- [ ] Phase-1 canonical `potentialWrites` extraction is deterministic across
+- [x] Canonical path handling strips the `value` wrapper consistently
+- [x] Phase-1 canonical `potentialWrites` extraction is deterministic across
       runs
-- [ ] Phase-1 canonical `writes` extraction is deterministic across runs
-- [ ] Canonical `WritePolicyInput` capture is deterministic across runs
+- [x] Phase-1 canonical `writes` extraction is deterministic across runs
+- [x] Canonical `WritePolicyInput` capture is deterministic across runs
 - [ ] Internal verifier reads remain visible for diagnostics but not policy
-- [ ] Final-per-path view is deterministic
+- [x] Final-per-path view is deterministic
 - [ ] Same-value direct writes are either covered by `potentialWrites` or
       explicitly out of phase-1 scope
 
@@ -485,10 +512,10 @@ Primary files:
 
 Tasks:
 
-- [ ] Mark a transaction relevant when traversal encounters schema `ifc`
+- [x] Mark a transaction relevant when traversal encounters schema `ifc`
 - [ ] Mark a transaction relevant when existing stored CFC metadata applies to a
       consumed read
-- [ ] Mark write-only transactions relevant when the target path carries CFC
+- [x] Mark write-only transactions relevant when the target path carries CFC
       obligations even if no read happened first
 - [ ] Treat attempted no-op writes as relevant when they appear in
       `potentialWrites` for a path carrying CFC obligations
@@ -498,8 +525,8 @@ Tasks:
 
 Acceptance:
 
-- [ ] Reading a path with `ifc` marks the transaction relevant
-- [ ] Reading unlabeled plain data does not mark it relevant
+- [x] Reading a path with `ifc` marks the transaction relevant
+- [x] Reading unlabeled plain data does not mark it relevant
 - [ ] Writing to a path with stored or schema-derived CFC metadata marks it
       relevant
 - [ ] Attempting a no-op write to a path with stored or schema-derived CFC
@@ -805,11 +832,11 @@ Acceptance:
 
 The test matrix should be built in the same order as the implementation:
 
-- [ ] unit tests for types, path canonicalization, write-policy input
+- [x] unit tests for types, path canonicalization, write-policy input
       canonicalization, and digest stability
 - [ ] unit tests for merged-schema monotonicity, branch-external IFC placement,
       and required-field/default compatibility
-- [ ] transaction tests for prepare gating and invalidation
+- [x] transaction tests for prepare gating and invalidation
 - [ ] rollout-mode tests for `disabled`, `observe`, and enforcing modes
 - [ ] traversal tests for relevance detection
 - [ ] prepare-engine tests for input requirements and output transitions
@@ -824,37 +851,10 @@ The test matrix should be built in the same order as the implementation:
 
 Every phase should land with tests before the next phase starts.
 
-## Implementation Guidance
-
-Use a disciplined per-slice workflow while executing this plan:
-
-- [ ] Work in red-green-refactor TDD loops: start by writing or extending the
-      smallest failing test that captures the next required behavior, implement
-      the minimum change to make it pass, then refactor with the suite green
-- [ ] Commit often. Prefer small, reviewable commits that each preserve a green
-      targeted test run and map to one vertical slice, invariant, or mechanical
-      refactor
-- [ ] Keep each landing slice mergeable and reversible. Avoid multi-workstream
-      branches that mix contract changes, policy behavior, persistence changes,
-      and sink integration unless the boundary is already proven by tests
-- [ ] After each slice, run the narrowest relevant tests first, then rerun the
-      broader package-level tests before moving to the next slice
-- [ ] Treat invariants in this document as executable requirements. When a bug
-      or ambiguity is found, add or tighten a test before adjusting the code
-- [ ] Use sub-agents only for bounded sidecar work that improves quality
-      without creating conflicting edits. Good uses include plan/spec
-      conformance review, test-gap review, and source-hunting for integration
-      points; avoid delegating overlapping code edits in the same files
-- [ ] For risky slices such as commit gating, retry behavior, trust-sensitive
-      relaxations, or sink deduplication, schedule an explicit review pass
-      before moving rollout forward. A sub-agent review is useful here as a
-      second set of eyes, but the main branch of truth remains the spec, the
-      tests, and the final human review
-
 ## Rollout and Guardrails
 
-- [ ] Add a runtime feature flag for commit-boundary CFC enforcement
-- [ ] Define rollout modes:
+- [x] Add a runtime feature flag for commit-boundary CFC enforcement
+- [x] Define rollout modes:
       `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`
 - [ ] Default phase 1 to unlabeled-permissive behavior; switching unlabeled
       paths away from permissive defaults is a separate rollout gate
@@ -879,9 +879,9 @@ Use a disciplined per-slice workflow while executing this plan:
 
 Land the work in mergeable vertical slices:
 
-1. [ ] Types, canonical path helpers, write-policy input helpers, and digest
+1. [x] Types, canonical path helpers, write-policy input helpers, and digest
        helpers
-2. [ ] Transaction CFC state and rollout modes with observe-mode prepare
+2. [x] Transaction CFC state and rollout modes with observe-mode prepare
 3. [ ] V2 consumed-read, `potentialWrites`, compact final-write extraction, and
        write-policy input capture APIs
 4. [ ] Relevance detection and merged-schema envelope implementation
