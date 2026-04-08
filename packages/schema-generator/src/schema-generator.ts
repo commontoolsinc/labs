@@ -730,6 +730,12 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Resolve by name from source scope as a fallback (e.g., CharmEntry in
     // Cell<CharmEntry[]>).
     if (ts.isTypeReferenceNode(typeNode)) {
+      if (detectWrapperViaNode(typeNode, checker)) {
+        const wrapperType = typeRegistry?.get(typeNode) ??
+          checker.getTypeFromTypeNode(typeNode);
+        return this.formatChildType(wrapperType, context, typeNode);
+      }
+
       const resolved = this.resolveTypeReferenceFromScope(
         typeNode,
         checker,

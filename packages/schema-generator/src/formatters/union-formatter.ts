@@ -7,6 +7,7 @@ import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   cloneSchemaDefinition,
+  detectWrapperViaNode,
   getNativeTypeSchema,
   TypeWithInternals,
 } from "../type-utils.ts";
@@ -14,6 +15,52 @@ import { isRecord } from "@commonfabric/utils/types";
 
 // Simple primitive schemas only have these keys (possibly just one)
 const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);
+
+function getTypeNodeMemberType(
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  try {
+    return checker.getTypeFromTypeNode(node);
+  } catch {
+    return undefined;
+  }
+}
+
+function unionMemberTypesMatch(
+  left: ts.Type,
+  right: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  return checker.typeToString(left) === checker.typeToString(right);
+}
+
+function orderMemberNodesBySemanticType(
+  members: readonly ts.Type[],
+  memberNodes: readonly ts.TypeNode[],
+  checker: ts.TypeChecker,
+): Array<ts.TypeNode | undefined> {
+  const remaining = memberNodes.map((node) => ({
+    node,
+    type: getTypeNodeMemberType(node, checker),
+  }));
+
+  return members.map((member) => {
+    const matchIndex = remaining.findIndex(({ type }) =>
+      type !== undefined && unionMemberTypesMatch(type, member, checker)
+    );
+    if (matchIndex === -1) {
+      return undefined;
+    }
+
+    const [match] = remaining.splice(matchIndex, 1);
+    return match?.node;
+  });
+}
 
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -35,6 +82,13 @@ export class UnionFormatter implements TypeFormatter {
     const memberNodes = unionNode && ts.isUnionTypeNode(unionNode)
       ? unionNode.types
       : undefined;
+    const orderedMemberNodes = memberNodes
+      ? orderMemberNodesBySemanticType(
+        members,
+        memberNodes,
+        context.typeChecker,
+      )
+      : undefined;
 
     if (members.length === 0) {
       throw new Error("UnionFormatter received empty union type");
@@ -51,14 +105,21 @@ export class UnionFormatter implements TypeFormatter {
       memberIndex: number,
       typeNode?: ts.TypeNode,
     ): JSONSchemaMutable => {
-      const native = getNativeTypeSchema(t, context.typeChecker);
+      const memberNode = typeNode ?? orderedMemberNodes?.[memberIndex];
+      const wrapperKind = detectWrapperViaNode(
+        memberNode,
+        context.typeChecker,
+      );
+      const native = wrapperKind === undefined
+        ? getNativeTypeSchema(t, context.typeChecker)
+        : undefined;
       if (native !== undefined) {
         return cloneSchemaDefinition(native);
       }
       return this.schemaGenerator.formatChildType(
         t,
         context,
-        typeNode ?? memberNodes?.[memberIndex],
+        memberNode,
       );
     };
 

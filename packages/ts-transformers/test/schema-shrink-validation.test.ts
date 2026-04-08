@@ -1318,6 +1318,49 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "lift preserves inherited interface fields used after ?? fallback",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "interface LeadState {",
+        "  id: string;",
+        "  name: string;",
+        "}",
+        "interface LeadScoreSummary extends LeadState {",
+        "  score: number;",
+        "  unused: string;",
+        "}",
+        "const liftScoreByLead = lift((list: LeadScoreSummary[] | undefined) => {",
+        "  const record: Record<string, number> = {};",
+        "  for (const entry of list ?? []) {",
+        "    record[entry.id] = entry.score;",
+        "  }",
+        "  return record;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "id");
+      assertStringIncludes(inputSchema, "score");
+      assertEquals(inputSchema.includes("name"), false);
+      assertEquals(inputSchema.includes("unused"), false);
+    },
+  );
+
+  await t.step(
     "lift preserves plain array callback item fields in shrunk schemas",
     async () => {
       const source = [
@@ -1921,6 +1964,34 @@ Deno.test("Schema Shrink Validation", async (t) => {
       assertEquals(inputSchema.includes("name"), false);
       assertEquals(inputSchema.includes("extra"), false);
       assertEquals(inputSchema.includes("nested"), false);
+    },
+  );
+
+  await t.step(
+    "derive preserves nullable cell wrappers for equals-only root inputs",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, equals, type Writable } from "commonfabric";',
+        "const state = {} as (Writable<number> | undefined);",
+        "const same = derive(state, (state) => equals(state, state));",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, 'type: "undefined"');
+      assertStringIncludes(inputSchema, "asOpaque: true");
     },
   );
 

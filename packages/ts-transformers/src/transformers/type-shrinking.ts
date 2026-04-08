@@ -116,6 +116,14 @@ function typeIncludesUndefined(type: ts.Type): boolean {
   return false;
 }
 
+function isNullishType(type: ts.Type): boolean {
+  return !!(type.flags & (
+    ts.TypeFlags.Undefined |
+    ts.TypeFlags.Null |
+    ts.TypeFlags.Void
+  ));
+}
+
 function isPrimitiveScalarLikeType(type: ts.Type): boolean {
   return !!(type.flags & (
     ts.TypeFlags.StringLike |
@@ -864,17 +872,126 @@ function resolveTypeReferenceMembers(
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): readonly ts.TypeElement[] | undefined {
   const type = getTypeFromTypeNodeWithFallback(node, checker, typeRegistry);
+  return resolveDeclaredObjectMembers(type, checker, typeRegistry);
+}
+
+function resolveDeclaredObjectMembers(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): readonly ts.TypeElement[] | undefined {
+  return resolveDeclaredObjectMembersWithSeen(
+    type,
+    checker,
+    typeRegistry,
+    new Set<ts.Declaration>(),
+  );
+}
+
+function resolveDeclaredObjectMembersWithSeen(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
+  seen: Set<ts.Declaration>,
+): readonly ts.TypeElement[] | undefined {
   const symbol = type.aliasSymbol ?? type.symbol;
   if (!symbol?.declarations?.length) return undefined;
+
+  const resolvedMembers: ts.TypeElement[][] = [];
   for (const decl of symbol.declarations) {
-    if (ts.isTypeAliasDeclaration(decl) && ts.isTypeLiteralNode(decl.type)) {
-      return decl.type.members;
-    }
-    if (ts.isInterfaceDeclaration(decl)) {
-      return decl.members;
+    const members = resolveMembersFromDeclaration(
+      decl,
+      checker,
+      typeRegistry,
+      seen,
+    );
+    if (members && members.length > 0) {
+      resolvedMembers.push([...members]);
     }
   }
-  return undefined;
+
+  if (resolvedMembers.length === 0) {
+    return undefined;
+  }
+
+  return mergeResolvedMembers(resolvedMembers, checker);
+}
+
+function resolveMembersFromDeclaration(
+  decl: ts.Declaration,
+  checker: ts.TypeChecker,
+  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
+  seen: Set<ts.Declaration>,
+): readonly ts.TypeElement[] | undefined {
+  if (seen.has(decl)) {
+    return undefined;
+  }
+  seen.add(decl);
+
+  if (ts.isTypeAliasDeclaration(decl) && ts.isTypeLiteralNode(decl.type)) {
+    return decl.type.members;
+  }
+
+  if (!ts.isInterfaceDeclaration(decl)) {
+    return undefined;
+  }
+
+  const inheritedMembers: ts.TypeElement[][] = [];
+  for (const clause of decl.heritageClauses ?? []) {
+    if (clause.token !== ts.SyntaxKind.ExtendsKeyword) {
+      continue;
+    }
+
+    for (const heritageType of clause.types) {
+      const inheritedType = getTypeFromTypeNodeWithFallback(
+        heritageType,
+        checker,
+        typeRegistry,
+      );
+      const members = resolveDeclaredObjectMembersWithSeen(
+        inheritedType,
+        checker,
+        typeRegistry,
+        seen,
+      );
+      if (members && members.length > 0) {
+        inheritedMembers.push([...members]);
+      }
+    }
+  }
+
+  return mergeResolvedMembers(
+    [...inheritedMembers, [...decl.members]],
+    checker,
+  );
+}
+
+function mergeResolvedMembers(
+  memberSets: readonly (readonly ts.TypeElement[])[],
+  checker: ts.TypeChecker,
+): readonly ts.TypeElement[] {
+  const merged: ts.TypeElement[] = [];
+  const propertyIndexes = new Map<string, number>();
+
+  for (const members of memberSets) {
+    for (const member of members) {
+      if (ts.isPropertySignature(member) && member.name) {
+        const name = getRequestedPropertyNameText(member.name, checker);
+        if (name) {
+          const existingIndex = propertyIndexes.get(name);
+          if (existingIndex !== undefined) {
+            merged[existingIndex] = member;
+            continue;
+          }
+          propertyIndexes.set(name, merged.length);
+        }
+      }
+
+      merged.push(member);
+    }
+  }
+
+  return merged;
 }
 
 /**
@@ -1415,6 +1532,104 @@ function createIdentityOnlyReplacementTypeNode(
   return unknownNode;
 }
 
+function createIdentityOnlyNullishTypeNode(
+  type: ts.Type,
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+  factory: ts.NodeFactory,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
+    ts.NodeBuilderFlags.UseStructuralFallback;
+  const nullishNode = checker.typeToTypeNode(
+    type,
+    node.getSourceFile(),
+    typeToNodeFlags,
+  ) ?? (
+    (type.flags & ts.TypeFlags.Null) !== 0
+      ? factory.createLiteralTypeNode(factory.createNull())
+      : factory.createKeywordTypeNode(ts.SyntaxKind.UndefinedKeyword)
+  );
+  typeRegistry?.set(nullishNode, type);
+  return nullishNode;
+}
+
+function createIdentityOnlyRootTypeNode(
+  node: ts.TypeNode,
+  semanticType: ts.Type | undefined,
+  forceOpaque: boolean,
+  checker: ts.TypeChecker,
+  factory: ts.NodeFactory,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  const resolvedType = semanticType ??
+    resolveIdentitySemanticType(node, checker, typeRegistry);
+
+  if (!resolvedType) {
+    return createIdentityOnlyReplacementTypeNode(
+      node,
+      resolvedType,
+      forceOpaque,
+      checker,
+      factory,
+      typeRegistry,
+    );
+  }
+
+  if (isNullishType(resolvedType)) {
+    return createIdentityOnlyNullishTypeNode(
+      resolvedType,
+      node,
+      checker,
+      factory,
+      typeRegistry,
+    );
+  }
+
+  if (resolvedType.isUnion()) {
+    const members = resolvedType.types.map((memberType) =>
+      isNullishType(memberType)
+        ? createIdentityOnlyNullishTypeNode(
+          memberType,
+          node,
+          checker,
+          factory,
+          typeRegistry,
+        )
+        : createIdentityOnlyReplacementTypeNode(
+          checker.typeToTypeNode(
+            memberType,
+            node.getSourceFile(),
+            ts.NodeBuilderFlags.NoTruncation |
+              ts.NodeBuilderFlags.UseStructuralFallback,
+          ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+          memberType,
+          forceOpaque,
+          checker,
+          factory,
+          typeRegistry,
+        )
+    );
+
+    if (members.length === 1) {
+      return members[0]!;
+    }
+
+    const unionNode = factory.createUnionTypeNode(members);
+    ensureTypeNodeRegistered(unionNode, checker, typeRegistry);
+    return unionNode;
+  }
+
+  return createIdentityOnlyReplacementTypeNode(
+    node,
+    resolvedType,
+    forceOpaque,
+    checker,
+    factory,
+    typeRegistry,
+  );
+}
+
 function getIdentityChildSemanticType(
   type: ts.Type | undefined,
   head: string,
@@ -1469,7 +1684,7 @@ function applyIdentityOnlyPathsToTypeNode(
   const resolvedSemanticType = semanticType ??
     resolveIdentitySemanticType(node, checker, typeRegistry);
   if (normalized.some((path) => path.length === 0)) {
-    return createIdentityOnlyReplacementTypeNode(
+    return createIdentityOnlyRootTypeNode(
       node,
       resolvedSemanticType,
       normalizedCellLikePaths.some((path) => path.length === 0),
@@ -1979,9 +2194,13 @@ export function applyShrinkAndWrap(
   const identityPaths = uniquePaths(paramSummary.identityPaths ?? []);
   const identityCellPaths = uniquePaths(paramSummary.identityCellPaths ?? []);
   const retainedPaths = uniquePaths([...paths, ...identityPaths]);
-  const identityOnlyUnknown = !!paramSummary.identityOnly &&
+  const identityOnlyRoot = !!paramSummary.identityOnly &&
     !paramSummary.wildcard &&
     paths.length === 0;
+  const effectiveIdentityPaths = identityOnlyRoot &&
+      !identityPaths.some((path) => path.length === 0)
+    ? uniquePaths([[], ...identityPaths])
+    : identityPaths;
 
   if (mode === "defaults_only") {
     if (context && fnNode) {
@@ -1997,8 +2216,16 @@ export function applyShrinkAndWrap(
       );
     }
 
-    const next = identityOnlyUnknown
-      ? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword)
+    const next = identityOnlyRoot
+      ? applyIdentityOnlyPathsToTypeNode(
+        baseTypeNode,
+        effectiveIdentityPaths,
+        identityCellPaths,
+        factory,
+        checker,
+        baseType,
+        context?.options.typeRegistry,
+      )
       : applyCapabilityDefaultsToTypeNode(
         baseTypeNode,
         paramSummary.defaults,
@@ -2021,12 +2248,20 @@ export function applyShrinkAndWrap(
     return wrapTypeNodeWithCapability(next, wrapCapability, factory);
   }
 
-  let next = identityOnlyUnknown
-    ? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword)
+  let next = identityOnlyRoot
+    ? applyIdentityOnlyPathsToTypeNode(
+      baseTypeNode,
+      effectiveIdentityPaths,
+      identityCellPaths,
+      factory,
+      checker,
+      baseType,
+      context?.options.typeRegistry,
+    )
     : baseTypeNode;
   let shrunk: ts.TypeNode | undefined;
   if (
-    !identityOnlyUnknown &&
+    !identityOnlyRoot &&
     !paramSummary.wildcard &&
     retainedPaths.length > 0
   ) {
@@ -2140,7 +2375,7 @@ export function applyShrinkAndWrap(
       next = shrunk;
     }
   }
-  if (!identityOnlyUnknown && identityPaths.length > 0) {
+  if (!identityOnlyRoot && identityPaths.length > 0) {
     next = applyIdentityOnlyPathsToTypeNode(
       next,
       identityPaths,

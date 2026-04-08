@@ -587,6 +587,10 @@ function normalizeSchemaInjectionTypeNode(
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
 ): ts.TypeNode {
+  if (typeNodeContainsWrapperSemantics(typeNode)) {
+    return typeNode;
+  }
+
   try {
     const type = getTypeFromTypeNodeWithFallback(
       typeNode,
@@ -601,6 +605,20 @@ function normalizeSchemaInjectionTypeNode(
   }
 
   return typeNode;
+}
+
+function typeNodeContainsWrapperSemantics(typeNode: ts.TypeNode): boolean {
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return typeNodeContainsWrapperSemantics(typeNode.type);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    return typeNode.types.some((member) =>
+      typeNodeContainsWrapperSemantics(member)
+    );
+  }
+
+  return isCellLikeTypeNode(typeNode);
 }
 
 function inferSchemaContextualType(
@@ -897,6 +915,35 @@ function resolveDualSchemaBuilderTypes(
       checker,
       sourceFile,
     ) ?? argumentTypeNode;
+  }
+
+  if (
+    callback &&
+    !callback.parameters[0]?.type &&
+    options?.fallbackArgumentType &&
+    isCellLikeType(options.fallbackArgumentType, checker) &&
+    containsAnyOrUnknownTypeNode(argumentTypeNode)
+  ) {
+    const fallbackArgumentNode = typeToSchemaTypeNode(
+      options.fallbackArgumentType,
+      checker,
+      sourceFile,
+    );
+    if (fallbackArgumentNode) {
+      ({
+        argumentTypeNode,
+        argumentTypeValue,
+      } = applyCallbackBuilderArgumentCapabilitySummary(
+        callback,
+        fallbackArgumentNode,
+        options.fallbackArgumentType,
+        checker,
+        sourceFile,
+        factory,
+        capabilityRegistry,
+        context,
+      ));
+    }
   }
 
   const resultTypeNode = options?.explicitResultTypeNode ??

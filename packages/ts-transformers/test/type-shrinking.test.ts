@@ -404,6 +404,42 @@ Deno.test("applyShrinkAndWrap shrinks direct array parameters to used item field
   assertEquals(printed.includes("nested"), false);
 });
 
+Deno.test("applyShrinkAndWrap preserves inherited interface fields in array unions", () => {
+  const { sourceFile, checker } = createProgram(`
+    interface LeadState {
+      id: string;
+      name: string;
+    }
+
+    interface LeadScoreSummary extends LeadState {
+      score: number;
+      unused: string;
+    }
+
+    type Input = LeadScoreSummary[] | undefined;
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["0", "id"], ["0", "score"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "id: string;");
+  assertStringIncludes(printed, "score: number;");
+  assertEquals(printed.includes("name"), false);
+  assertEquals(printed.includes("unused"), false);
+});
+
 Deno.test("applyShrinkAndWrap preserves aliased fixed-symbol keys in node-driven shrinking", () => {
   const { sourceFile, checker } = createProgramWithFiles({
     "/test.ts": `
