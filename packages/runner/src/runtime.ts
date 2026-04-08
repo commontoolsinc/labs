@@ -56,7 +56,7 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import type { CfcEnforcementMode } from "./cfc/mod.ts";
+import type { CfcEnforcementMode, TrustSnapshot } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -181,6 +181,8 @@ export interface RuntimeOptions {
   experimental?: ExperimentalOptions;
   /** Rollout mode for commit-boundary CFC enforcement. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /** Deterministic provider for the trust snapshot attached to each new tx. */
+  trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Optional compilation cache for persistent caching of compiled JS.
    *  If absent, no persistent caching is performed (same as before). */
   cachedCompiler?: CachedCompiler;
@@ -267,6 +269,7 @@ export class Runtime {
   readonly cfcEnforcementMode: CfcEnforcementMode;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
+  readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly memoryVersion: MemoryVersion;
   readonly telemetry: RuntimeTelemetry;
   readonly cachedCompiler?: CachedCompiler;
@@ -361,6 +364,12 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    const actingPrincipal = options.storageManager.as.did() as DID;
+    this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
+      id: `principal:${actingPrincipal}`,
+      actingPrincipal,
+      revision: this.id,
+    }));
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
@@ -542,6 +551,7 @@ export class Runtime {
     }
     const wrapped = new ExtendedStorageTransaction(tx);
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
+    wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }
 

@@ -214,6 +214,62 @@ describe("Runtime.editWithRetry", () => {
     expect(attempts[1].getCfcState().prepare.status).toBe("prepared");
   });
 
+  it("recomputes trust snapshots on each retry with fresh transactions", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    let snapshotCalls = 0;
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: `trust-${++snapshotCalls}`,
+        actingPrincipal: signer.did(),
+        revision: `rev-${snapshotCalls}`,
+      }),
+    });
+
+    const snapshots: string[] = [];
+    let attempts = 0;
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      attempts++;
+      snapshots.push(t.getCfcState().trustSnapshot?.id ?? "");
+      const cell = runtime.getCell(
+        space,
+        "editWithRetry-trust-snapshot",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        t,
+      );
+      if (attempts === 1) {
+        t.abort("force retry");
+        return false;
+      }
+      cell.set({ secret: "value" });
+      return true;
+    }, 2);
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(attempts).toBe(2);
+    expect(snapshotCalls).toBe(2);
+    expect(snapshots).toEqual(["trust-1", "trust-2"]);
+  });
+
   it("fires success callbacks once after the winning retry commit", async () => {
     const cell = runtime.getCell<number>(
       space,

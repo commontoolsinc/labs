@@ -651,7 +651,7 @@ Tasks:
 - [x] Add JSDoc on internal commit-callback / `onCommit` hooks explaining that
       they are internal-only, may run after failed commits, and must not
       perform external side effects; effectful work must use the outbox
-- [ ] Keep retries fresh: new tx, new prepare, new trust snapshot
+- [x] Keep retries fresh: new tx, new prepare, new trust snapshot
 - [ ] Audit `onCommit` and direct commit call sites and move effectful ones to
       the outbox
 
@@ -700,7 +700,7 @@ Tasks:
       execution where possible; built-ins can land earlier, while verified
       compiled user code remains observe-only/fail-closed until the v2
       extension lands
-- [ ] Define a trust-snapshot provider interface that is deterministic and easy
+- [x] Define a trust-snapshot provider interface that is deterministic and easy
       to test
 - [ ] Bind prepare success to the acting principal, trust snapshot identity,
       and resolved policy-facing implementation identity
