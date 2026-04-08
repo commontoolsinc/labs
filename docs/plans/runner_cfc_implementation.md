@@ -824,6 +824,33 @@ The test matrix should be built in the same order as the implementation:
 
 Every phase should land with tests before the next phase starts.
 
+## Implementation Guidance
+
+Use a disciplined per-slice workflow while executing this plan:
+
+- [ ] Work in red-green-refactor TDD loops: start by writing or extending the
+      smallest failing test that captures the next required behavior, implement
+      the minimum change to make it pass, then refactor with the suite green
+- [ ] Commit often. Prefer small, reviewable commits that each preserve a green
+      targeted test run and map to one vertical slice, invariant, or mechanical
+      refactor
+- [ ] Keep each landing slice mergeable and reversible. Avoid multi-workstream
+      branches that mix contract changes, policy behavior, persistence changes,
+      and sink integration unless the boundary is already proven by tests
+- [ ] After each slice, run the narrowest relevant tests first, then rerun the
+      broader package-level tests before moving to the next slice
+- [ ] Treat invariants in this document as executable requirements. When a bug
+      or ambiguity is found, add or tighten a test before adjusting the code
+- [ ] Use sub-agents only for bounded sidecar work that improves quality
+      without creating conflicting edits. Good uses include plan/spec
+      conformance review, test-gap review, and source-hunting for integration
+      points; avoid delegating overlapping code edits in the same files
+- [ ] For risky slices such as commit gating, retry behavior, trust-sensitive
+      relaxations, or sink deduplication, schedule an explicit review pass
+      before moving rollout forward. A sub-agent review is useful here as a
+      second set of eyes, but the main branch of truth remains the spec, the
+      tests, and the final human review
+
 ## Rollout and Guardrails
 
 - [ ] Add a runtime feature flag for commit-boundary CFC enforcement
