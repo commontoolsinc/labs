@@ -563,12 +563,12 @@ Acceptance:
 - [x] A successful prepared write persists embedded CFC metadata and
       `schemaHash`
       in the v2 document
-- [ ] Loading the stored canonical schema by `schemaHash` after a fresh runtime
+- [x] Loading the stored canonical schema by `schemaHash` after a fresh runtime
       restart reads `cid:<schemaHash>` and reproduces the canonical merged
       schema envelope
 - [x] Existing untrusted value-surface reads and materialized values do not
       surface the reserved `cfc` sibling
-- [ ] Missing or unreadable `schemaHash` rejects later writes unless recovery
+- [x] Missing or unreadable `schemaHash` rejects later writes unless recovery
       is on
 
 ### 6. Prepare Engine
@@ -839,7 +839,7 @@ The test matrix should be built in the same order as the implementation:
 - [ ] rollout-mode tests for `disabled`, `observe`, and enforcing modes
 - [ ] traversal tests for relevance detection
 - [x] prepare-engine tests for input requirements and output transitions
-- [ ] storage tests for embedded-metadata persistence, `schemaHash`
+- [x] storage tests for embedded-metadata persistence, `schemaHash`
       dereferencing, and non-exposure
 - [ ] scheduler and runtime-owned direct-commit tests for retry and outbox
       behavior

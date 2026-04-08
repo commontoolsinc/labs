@@ -520,6 +520,163 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("reloads stored schema envelopes after a fresh runtime restart", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    const runtime1 = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      memoryVersion: "v2",
+    });
+    try {
+      const firstTx = runtime1.edit();
+      firstTx.setCfcEnforcementMode("enforce-explicit");
+      const firstCell = runtime1.getCell(
+        signer.did(),
+        "cfc-schema-restart",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        firstTx,
+      );
+      firstCell.set({ secret: "hello" });
+      firstTx.prepareCfc();
+      const firstResult = await firstTx.commit();
+      expect(firstResult.ok).toBeDefined();
+
+      const persistedId = parseLink(firstCell.getAsLink()).id!;
+      await runtime1.dispose();
+
+      const runtime2 = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        memoryVersion: "v2",
+      });
+      try {
+        const secondTx = runtime2.edit();
+        secondTx.setCfcEnforcementMode("enforce-explicit");
+        const secondCell = runtime2.getCell(
+          signer.did(),
+          "cfc-schema-restart",
+          {
+            type: "object",
+            properties: {
+              secret: {
+                type: "string",
+                ifc: { classification: ["secret"] },
+              },
+              title: {
+                type: "string",
+                default: "",
+              },
+            },
+            required: ["secret", "title"],
+          },
+          secondTx,
+        );
+        secondCell.set({ secret: "hello", title: "restarted" });
+        secondTx.prepareCfc();
+        const secondResult = await secondTx.commit();
+        expect(secondResult.ok).toBeDefined();
+
+        const replica = storageManager.open(signer.did())
+          .replica as unknown as {
+            getDocument(id: string): {
+              value?: unknown;
+              cfc?: { schemaHash: string };
+            } | undefined;
+          };
+        const persisted = replica.getDocument(persistedId);
+        const schemaDoc = replica.getDocument(
+          `cid:${persisted!.cfc!.schemaHash}`,
+        );
+        expect(schemaDoc?.value).toMatchObject({
+          type: "object",
+          required: ["secret", "title"],
+        });
+      } finally {
+        await runtime2.dispose();
+      }
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("rejects later writes when stored schemaHash documents are missing", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const seededId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-missing-schema-doc",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: seededId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "missing-hash",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { classification: ["secret"] },
+            }],
+          },
+        },
+      });
+      const seedResult = await seed.commit();
+      expect(seedResult.ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-missing-schema-doc",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        tx,
+      );
+      cell.set({ secret: "updated" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("missing or unreadable");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects writes when requiredIntegrity is not satisfied by consumed input labels", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
