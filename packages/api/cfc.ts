@@ -10,6 +10,28 @@ export type Cfc<T, Meta> = T & {
   readonly __ct_cfc__?: Meta;
 };
 
+export const CFC_CANONICAL_ALIAS_NAMES = [
+  "Cfc",
+  "Classified",
+  "Integrity",
+  "AddIntegrity",
+  "RequiresIntegrity",
+  "MaxConfidentiality",
+  "OpaqueInput",
+  "WriteAuthorizedBy",
+  "ExactCopy",
+  "ProjectionPath",
+  "ProjectionOf",
+  "Projection",
+  "LengthPreservedFrom",
+  "FilteredFrom",
+  "SubsetOf",
+  "PermutationOf",
+] as const;
+
+export type CfcCanonicalAliasName =
+  typeof CFC_CANONICAL_ALIAS_NAMES[number];
+
 export type Ref<Root, Path extends readonly string[]> = {
   readonly __ct_ref_root__?: Root;
   readonly __ct_ref_path__?: Path;

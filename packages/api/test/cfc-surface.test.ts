@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import type { Cfc as RootCfc } from "@commonfabric/api";
+import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api";
 import type {
   AddIntegrity,
   CanonicalPointer,
@@ -24,6 +25,7 @@ import type {
 } from "@commonfabric/api/cfc";
 
 Deno.test("CFC API surface preserves the authored runtime value shape", () => {
+  const aliasNames = CFC_CANONICAL_ALIAS_NAMES;
   const classified: Classified<{ title: string }, readonly ["secret"]> = {
     title: "alpha",
   };
@@ -129,4 +131,22 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(pathValue, undefined);
   assertEquals(refValue, undefined);
   assertEquals(writeAuthorizedBy, { title: "mu" });
+  assertEquals(aliasNames, [
+    "Cfc",
+    "Classified",
+    "Integrity",
+    "AddIntegrity",
+    "RequiresIntegrity",
+    "MaxConfidentiality",
+    "OpaqueInput",
+    "WriteAuthorizedBy",
+    "ExactCopy",
+    "ProjectionPath",
+    "ProjectionOf",
+    "Projection",
+    "LengthPreservedFrom",
+    "FilteredFrom",
+    "SubsetOf",
+    "PermutationOf",
+  ]);
 });

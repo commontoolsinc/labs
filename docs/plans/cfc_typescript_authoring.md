@@ -147,7 +147,7 @@ to keep that boundary clear:
 
 ### 1. Lock The Contract Surface
 
-- [ ] Freeze the canonical alias set across `packages/api`,
+- [x] Freeze the canonical alias set across `packages/api`,
       `packages/ts-transformers`, and `packages/schema-generator`
 - [x] Define the supported metadata keys for the TypeScript surface:
       `classification`, `integrity`, `addIntegrity`, `requiredIntegrity`,

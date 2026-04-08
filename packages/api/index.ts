@@ -1406,6 +1406,7 @@ export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
 export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
 
 export type * from "./cfc.ts";
+export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
 
 /**
  * Selects a sub-path within a document, optionally paired with a schema

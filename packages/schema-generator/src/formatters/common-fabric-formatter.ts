@@ -21,25 +21,10 @@ import {
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
+import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api/cfc";
 
 type WrapperKind = CellWrapperKind;
-const CFC_ALIAS_NAMES = new Set([
-  "Cfc",
-  "Classified",
-  "Integrity",
-  "AddIntegrity",
-  "RequiresIntegrity",
-  "MaxConfidentiality",
-  "OpaqueInput",
-  "ExactCopy",
-  "LengthPreservedFrom",
-  "FilteredFrom",
-  "SubsetOf",
-  "PermutationOf",
-  "ProjectionPath",
-  "ProjectionOf",
-  "Projection",
-]);
+const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
 
 /**
  * Formatter for Common Fabric-specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
@@ -812,27 +797,6 @@ export class CommonFabricFormatter implements TypeFormatter {
             path: this.encodeJsonPointerPath(readValue(1)),
           },
         };
-      case "Projection": {
-        const refType = aliasArgs[0] as TypeWithInternals | undefined;
-        if (refType?.aliasSymbol?.name !== "Ref") {
-          return undefined;
-        }
-        const refArgs = refType.aliasTypeArguments ?? [];
-        const refNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
-        const refPathNode = this.getAliasTypeArgumentNode(refNode, 1);
-        return {
-          projection: {
-            from: "/",
-            path: this.encodeJsonPointerPath(
-              this.extractLiteralLikeValue(
-                refArgs[1],
-                refPathNode,
-                context,
-              ),
-            ),
-          },
-        };
-      }
       default:
         return undefined;
     }
