@@ -31,7 +31,7 @@ describe("CLI naming", () => {
   });
 
   it("ignores unsupported CF_CLI_NAME values", () => {
-    expect(cliName({ envName: " ct " })).toBe("cf");
+    expect(cliName({ envName: "legacy" })).toBe("cf");
     expect(cliName({ envName: "cf.exe" })).toBe("cf");
     expect(cliName({ envName: "$(touch /tmp/pwned)" })).toBe("cf");
     expect(cliName({ envName: "`touch /tmp/pwned`" })).toBe("cf");

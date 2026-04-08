@@ -3,7 +3,7 @@
  * .claude/scripts/pattern-user-post-bash.ts
  *
  * Claude Code PostToolUse hook for Bash on pattern-user subagent.
- * - Parses legacy ct command output and suggests next steps.
+ * - Parses cf command output and suggests next steps.
  */
 
 const rawInput = await new Response(Deno.stdin.readable).text();
@@ -20,8 +20,8 @@ try {
 
 const command = input.tool_input?.command || "";
 
-// Only process cf commands and legacy ct commands
-if (!command.includes("cf piece") && !command.includes("ct ")) {
+// Only process cf commands.
+if (!command.includes("cf piece")) {
   Deno.exit(0);
 }
 

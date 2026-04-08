@@ -3,8 +3,8 @@
  * .claude/scripts/block-legacy-cli.ts
  *
  * Claude Code Pre-Tool hook.
- * - Blocks shell commands that invoke `ct` binary directly.
- * - Redirects to `deno task cf` instead.
+ * - Blocks legacy `ct` shell commands.
+ * - Fails hard so only `cf` remains supported.
  * - Exits 2 so Claude blocks the tool call and shows the message.
  */
 
@@ -26,15 +26,11 @@ cmdWithoutQuotes = cmdWithoutQuotes.replace(
   "",
 );
 
-// Match legacy `ct` as a standalone command (not `deno task cf` or part of another word)
-// Matches: ct, ./ct, /path/to/ct but not `deno task cf` or `select`
+// Match legacy `ct` as a standalone command (not part of another word).
+// Matches: ct, ./ct, /path/to/ct, deno task ct.
 if (/(?:^|[\s;|&])(?:\.\/)?ct(?:\s|$)/.test(cmdWithoutQuotes)) {
-  // Allow if it's already using deno task cf
-  if (/deno\s+task\s+ct/.test(cmdWithoutQuotes)) {
-    Deno.exit(0);
-  }
   console.error(
-    "Use `deno task cf` instead of `ct` binary directly. Try `deno task cf --help` first.",
+    "Legacy `ct` commands are no longer supported. Use `deno task cf` instead.",
   );
   Deno.exit(2); // Claude interprets exit-code 2 as "block & surface stderr"
 }
