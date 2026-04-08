@@ -144,6 +144,28 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("allows relevant unprepared commits when enforcement is disabled", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("disabled");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        id: "of:cfc-disabled",
+        type: "application/json",
+        path: [],
+      }, { ok: true });
+
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+      expect(tx.getCfcState().prepare.status).toBe("unprepared");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("allows observe-mode commits without blocking", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -160,6 +182,29 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
       expect(tx.getCfcState().prepare.status).toBe("prepared");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects relevant unprepared commits in enforce-strict mode", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        id: "of:cfc-enforce-strict",
+        type: "application/json",
+        path: [],
+      }, { ok: true });
+
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "relevant transaction was not prepared",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

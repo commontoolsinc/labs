@@ -836,7 +836,7 @@ The test matrix should be built in the same order as the implementation:
 - [x] unit tests for merged-schema monotonicity, branch-external IFC placement,
       and required-field/default compatibility
 - [x] transaction tests for prepare gating and invalidation
-- [ ] rollout-mode tests for `disabled`, `observe`, and enforcing modes
+- [x] rollout-mode tests for `disabled`, `observe`, and enforcing modes
 - [ ] traversal tests for relevance detection
 - [x] prepare-engine tests for input requirements and output transitions
 - [x] storage tests for embedded-metadata persistence, `schemaHash`
