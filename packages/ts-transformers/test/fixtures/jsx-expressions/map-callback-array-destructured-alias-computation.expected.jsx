@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -31,13 +31,13 @@ interface Input {
 interface Output {
     [UI]: VNode;
 }
-export default pattern((__ct_pattern_input) => {
-    const files = __ct_pattern_input.key("files");
+export default pattern((__cf_pattern_input) => {
+    const files = __cf_pattern_input.key("files");
     return {
         [UI]: (<div>
-        {files.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const file = __ct_pattern_input.key("element");
-                const __ct_destructure_1 = file.key("tags"), kind = __ct_destructure_1.key("0");
+        {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const file = __cf_pattern_input.key("element");
+                const __cf_destructure_1 = file.key("tags"), kind = __cf_destructure_1.key("0");
                 const isFolder = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -147,4 +147,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);
