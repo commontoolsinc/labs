@@ -16,7 +16,7 @@ import { canUseWasm, createHasherWasm, sha256Wasm } from "./sha256-wasm.ts";
 
 export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
-let sha256Fn: Sha256Fn;
+let sha256: Sha256Fn;
 let createHasher: () => IncrementalHasher;
 let setupComplete: boolean = false;
 
@@ -24,7 +24,7 @@ let setupComplete: boolean = false;
 if (isDeno()) {
   try {
     const denoVersion = await import("./sha256-deno.ts");
-    sha256Fn = denoVersion.sha256Deno;
+    sha256 = denoVersion.sha256Deno;
     createHasher = denoVersion.createHasherDeno;
     setupComplete = true;
   } catch {
@@ -34,14 +34,14 @@ if (isDeno()) {
 
 // Try `hash-wasm` if we didn't succeed in getting the Deno setup to work.
 if (!setupComplete && canUseWasm()) {
-  sha256Fn = sha256Wasm;
+  sha256 = sha256Wasm;
   createHasher = createHasherWasm;
   setupComplete = true;
 }
 
 // Use Noble if none of the previous were successfully set up.
 if (!setupComplete) {
-  sha256Fn = sha256Noble;
+  sha256 = sha256Noble;
   createHasher = createHasherNoble;
   setupComplete = true;
 }
@@ -49,7 +49,7 @@ if (!setupComplete) {
 /**
  * All-at-once SHA-256 hash.
  */
-export { sha256Fn as sha256 };
+export { sha256 };
 
 /**
  * Create a new incremental SHA-256 hasher.
