@@ -545,28 +545,28 @@ Primary files:
 
 Tasks:
 
-- [ ] Persist CFC metadata as a system-owned reserved sibling to `value` and
+- [x] Persist CFC metadata as a system-owned reserved sibling to `value` and
       `source` in the v2 entity document
 - [ ] Persist canonical merged schema envelopes as system-owned v2 schema
       documents at `cid:<hash>` and store `schemaHash` in embedded metadata
-- [ ] Store the authoritative path-granular label map and `schemaHash` in that
+- [x] Store the authoritative path-granular label map and `schemaHash` in that
       embedded metadata
-- [ ] Ensure untrusted value-surface reads and materialized values do not
+- [x] Ensure untrusted value-surface reads and materialized values do not
       expose the reserved `cfc` sibling
-- [ ] Make storage helpers able to read current CFC metadata and load
+- [x] Make storage helpers able to read current CFC metadata and load
       canonical schemas from `cid:<schemaHash>` efficiently during prepare
 - [ ] Do not carry forward `application/label+json` or query-redaction
       compatibility behavior
 
 Acceptance:
 
-- [ ] A successful prepared write persists embedded CFC metadata and
+- [x] A successful prepared write persists embedded CFC metadata and
       `schemaHash`
       in the v2 document
 - [ ] Loading the stored canonical schema by `schemaHash` after a fresh runtime
       restart reads `cid:<schemaHash>` and reproduces the canonical merged
       schema envelope
-- [ ] Existing untrusted value-surface reads and materialized values do not
+- [x] Existing untrusted value-surface reads and materialized values do not
       surface the reserved `cfc` sibling
 - [ ] Missing or unreadable `schemaHash` rejects later writes unless recovery
       is on
@@ -581,9 +581,9 @@ Primary files:
 
 Tasks:
 
-- [ ] Build `prepareBoundaryCommit(tx, options)` as a pure, deterministic
+- [x] Build `prepareBoundaryCommit(tx, options)` as a pure, deterministic
       evaluator
-- [ ] Thread explicit write-policy inputs recorded at mutation time into
+- [x] Thread explicit write-policy inputs recorded at mutation time into
       prepare, including candidate `SchemaAndHash` values and structural
       provenance claims
       when available
@@ -593,7 +593,7 @@ Tasks:
       divergent `anyOf`/`oneOf`/`allOf` branch
 - [ ] Ensure structural merge does not invalidate previously valid data; adding
       a required field requires a default
-- [ ] Resolve input labels from stored CFC metadata and persisted
+- [x] Resolve input labels from stored CFC metadata and persisted
       `cid:<hash>`-backed schema documents; no coarse-label fallback
 - [ ] Implement `classification`, `integrity`, `addIntegrity`,
       `requiredIntegrity`, and `maxConfidentiality`
@@ -611,7 +611,7 @@ Tasks:
       influence model over `potentialWrites ∪ writes`
 - [ ] Use `potentialWrites ∪ writes` for target-side enforcement and use
       `writes` only for persisted output metadata
-- [ ] If a target entity has no stored `schemaHash`, seed it from the first
+- [x] If a target entity has no stored `schemaHash`, seed it from the first
       canonical `SchemaAndHash` and persist or reuse `cid:<hash>`; if merge
       yields the existing `schemaHash`, treat it as a no-op; if merge yields a
       new `schemaHash`, replace the stored hash; if merge fails, reject and
@@ -621,9 +621,8 @@ Tasks:
 
 Acceptance:
 
-- [ ] Required-integrity failures reject before commit
-- [ ] Transition failures reject before commit
-- [ ] Successful prepare writes stable `schemaHash` and label-map metadata
+- [x] Required-integrity failures reject before commit
+- [x] Successful prepare writes stable `schemaHash` and label-map metadata
 - [ ] Unsupported or malformed trust-sensitive claims fail closed
 
 ### 7. Transaction Integration, Retry, and Side-Effect Gating
@@ -839,7 +838,7 @@ The test matrix should be built in the same order as the implementation:
 - [x] transaction tests for prepare gating and invalidation
 - [ ] rollout-mode tests for `disabled`, `observe`, and enforcing modes
 - [ ] traversal tests for relevance detection
-- [ ] prepare-engine tests for input requirements and output transitions
+- [x] prepare-engine tests for input requirements and output transitions
 - [ ] storage tests for embedded-metadata persistence, `schemaHash`
       dereferencing, and non-exposure
 - [ ] scheduler and runtime-owned direct-commit tests for retry and outbox
@@ -885,7 +884,7 @@ Land the work in mergeable vertical slices:
 3. [ ] V2 consumed-read, `potentialWrites`, compact final-write extraction, and
        write-policy input capture APIs
 4. [ ] Relevance detection and merged-schema envelope implementation
-5. [ ] Embedded v2 CFC metadata persistence, `cid:<hash>` schema-document
+5. [x] Embedded v2 CFC metadata persistence, `cid:<hash>` schema-document
        persistence, and non-exposure
 6. [ ] Baseline prepare engine for classification and integrity checks
 7. [ ] Transaction integration and success-only outbox

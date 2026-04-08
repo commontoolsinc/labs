@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { parseLink } from "../src/link-utils.ts";
 import {
   canonicalizeCfcMetadata,
   canonicalizePreparedDigestInput,
@@ -366,6 +367,148 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       );
       cell.set("value");
       expect(tx.getCfcState().relevant).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists cfc metadata and canonical schema documents for prepared writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-persisted-write",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"], integrity: ["trusted"] },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ secret: "hello" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+      const persistedId = parseLink(cell.getAsLink()).id!;
+
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: unknown;
+          cfc?: { schemaHash: string; labelMap?: { entries: unknown[] } };
+        } | undefined;
+      };
+      const persisted = replica.getDocument(persistedId);
+      expect(persisted?.value).toEqual({ secret: "hello" });
+      expect(persisted?.cfc?.schemaHash).toBeDefined();
+      expect(persisted?.cfc?.labelMap?.entries.length).toBeGreaterThan(0);
+
+      const schemaDoc = replica.getDocument(
+        `cid:${persisted!.cfc!.schemaHash}`,
+      );
+      expect(schemaDoc?.value).toBeDefined();
+
+      const readTx = runtime.edit();
+      const readCell = runtime.getCell(
+        signer.did(),
+        "cfc-persisted-write",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"], integrity: ["trusted"] },
+            },
+          },
+        },
+        readTx,
+      );
+      expect(readCell.get()).toEqual({ secret: "hello" });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects writes when requiredIntegrity is not satisfied by consumed input labels", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-input",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: sourceId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { integrity: ["untrusted"] },
+            }],
+          },
+        },
+      });
+      const seedResult = await seed.commit();
+      expect(seedResult.ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-input",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      expect(source.get()).toEqual({ secret: "seed" });
+      tx.markCfcRelevant("stored-input-metadata");
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-output",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { requiredIntegrity: ["trusted"] },
+            },
+          },
+        },
+        tx,
+      );
+      output.set({ value: "result" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("requiredIntegrity");
     } finally {
       await runtime.dispose();
       await storageManager.close();

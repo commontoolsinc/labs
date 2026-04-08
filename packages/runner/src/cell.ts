@@ -10,6 +10,8 @@ import {
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
@@ -111,6 +113,32 @@ let flatMapFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
+
+const recordSchemaWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void => {
+  const resolvedSchema = resolveSchema(schema);
+  if (resolvedSchema === undefined) {
+    return;
+  }
+  const schemaAndHash = internSchema(
+    toDeepFrozenSchema(resolvedSchema, true),
+    true,
+  );
+  tx.recordCfcWritePolicyInput({
+    kind: "schema",
+    target: {
+      space: link.space,
+      id: link.id,
+      type: link.type,
+      path: [...link.path],
+    },
+    schemaHash: schemaAndHash.hashString,
+    schema: schemaAndHash.schema,
+  });
+};
 
 /**
  * Module augmentation for runtime-specific cell methods.
@@ -750,6 +778,11 @@ export class CellImpl<T extends FabricValue>
       ) {
         this.tx.markCfcRelevant(`schema-ifc-write:${resolvedToValueLink.id}`);
       }
+      recordSchemaWritePolicyInput(
+        this.tx,
+        resolvedToValueLink,
+        resolvedToValueLink.schema ?? this.schema,
+      );
 
       // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
       diffAndUpdate(
@@ -808,6 +841,11 @@ export class CellImpl<T extends FabricValue>
     if (schemaHasIfc(resolveSchema(resolvedLink.schema ?? this.schema))) {
       this.tx.markCfcRelevant(`schema-ifc-write:${resolvedLink.id}`);
     }
+    recordSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
     // If there's no current value, initialize based on schema, even if there is
@@ -865,6 +903,11 @@ export class CellImpl<T extends FabricValue>
     if (schemaHasIfc(resolveSchema(resolvedLink.schema ?? this.schema))) {
       this.tx.markCfcRelevant(`schema-ifc-write:${resolvedLink.id}`);
     }
+    recordSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
     const cause = this._frame?.cause;
 
@@ -1256,6 +1299,11 @@ export class CellImpl<T extends FabricValue>
     if (schemaHasIfc(resolveSchema(this.link.schema ?? this.schema))) {
       this.tx.markCfcRelevant(`schema-ifc-write:${this.link.id}`);
     }
+    recordSchemaWritePolicyInput(
+      this.tx,
+      this.link,
+      this.link.schema ?? this.schema,
+    );
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 

@@ -22,3 +22,4 @@ export {
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";
+export { prepareBoundaryCommit } from "./prepare.ts";

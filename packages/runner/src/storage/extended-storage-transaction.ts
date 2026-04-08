@@ -51,6 +51,7 @@ import {
   type ConsumedRead,
   type ImplementationIdentity,
   type PostCommitSideEffect,
+  prepareBoundaryCommit,
   preparedDigestFor,
   type PreparedDigestInput,
   type TrustSnapshot,
@@ -183,6 +184,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   prepareCfc(input?: PreparedDigestInput): string {
+    if (input === undefined) {
+      const reasons = prepareBoundaryCommit(this);
+      if (reasons.length > 0) {
+        this.cfcState.prepare = {
+          status: "invalidated",
+          reasons,
+        };
+        this.cfcState.diagnostics.push(...reasons);
+        return "";
+      }
+    }
     const preparedInput = input ?? this.buildPreparedDigestInput();
     const digest = preparedDigestFor(preparedInput);
     this.cfcState.prepare = {
@@ -438,11 +450,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.cfcState.enforcementMode !== "observe" &&
       this.cfcState.prepare.status !== "prepared"
     ) {
+      const detail = this.cfcState.prepare.status === "invalidated"
+        ? `: ${this.cfcState.prepare.reasons[0]}`
+        : "";
       return {
         error: {
           name: "StorageTransactionAborted",
           message:
-            "CFC enforcement rejected commit: relevant transaction was not prepared",
+            `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`,
           reason: new Error("cfc-relevant-transaction-not-prepared"),
         },
       };

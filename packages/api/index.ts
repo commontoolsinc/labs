@@ -1366,6 +1366,13 @@ export type JSONSchemaObj = {
   readonly ifc?: {
     readonly classification?: readonly string[];
     readonly integrity?: readonly string[];
+    readonly addIntegrity?: readonly string[];
+    readonly requiredIntegrity?: readonly string[];
+    readonly maxConfidentiality?: readonly string[];
+    readonly writeAuthorizedBy?: readonly string[];
+    readonly exactCopyOf?: readonly string[];
+    readonly projection?: readonly string[];
+    readonly collection?: readonly string[];
   };
 };
 
