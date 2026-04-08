@@ -464,7 +464,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
 
       if (this.cfcState.prepare.status === "prepared") {
-        const currentDigest = preparedDigestFor(this.buildPreparedDigestInput());
+        const currentDigest = preparedDigestFor(
+          this.buildPreparedDigestInput(),
+        );
         if (currentDigest !== this.cfcState.prepare.digest) {
           this.invalidateCfc("prepared-digest-mismatch");
           if (this.cfcState.enforcementMode !== "observe") {

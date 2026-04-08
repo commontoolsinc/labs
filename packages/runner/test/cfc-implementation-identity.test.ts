@@ -5,7 +5,9 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { raw } from "../src/module.ts";
 import { Runtime } from "../src/runtime.ts";
 
-const signer = await Identity.fromPassphrase("runner-cfc-implementation-identity");
+const signer = await Identity.fromPassphrase(
+  "runner-cfc-implementation-identity",
+);
 
 describe("CFC builtin implementation identity", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;

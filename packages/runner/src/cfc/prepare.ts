@@ -58,10 +58,14 @@ const labelAtPath = (
   return match?.label;
 };
 
-const mergeLabelValues = (...sources: Array<readonly unknown[] | undefined>) => {
-  const merged = [...new Set(
-    sources.flatMap((source) => source ? [...source] : []),
-  )];
+const mergeLabelValues = (
+  ...sources: Array<readonly unknown[] | undefined>
+) => {
+  const merged = [
+    ...new Set(
+      sources.flatMap((source) => source ? [...source] : []),
+    ),
+  ];
   return merged.length > 0 ? merged : undefined;
 };
 
