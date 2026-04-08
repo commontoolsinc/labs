@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -39,8 +39,8 @@ const handleClick = handler({
 //   handleClick({ count }) (inside .map())    → left as-is (not wrapped in derive)
 //   pattern<{ count: Default<number, 0> }>    → pattern(fn, inputSchema, outputSchema)
 // Context: Negative test ensuring handler calls in event attributes and inside .map() are not derive-wrapped
-export default pattern((__ct_pattern_input) => {
-    const count = __ct_pattern_input.key("count");
+export default pattern((__cf_pattern_input) => {
+    const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}
@@ -112,4 +112,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

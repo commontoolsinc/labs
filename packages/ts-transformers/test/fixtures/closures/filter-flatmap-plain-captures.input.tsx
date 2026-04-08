@@ -4,7 +4,7 @@ import { pattern } from "commonfabric";
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become
 // params values, not reactive key(...) lookups
-//   suffix/prefix literals -> __ct_pattern_input.params.{suffix,prefix}
+//   suffix/prefix literals -> __cf_pattern_input.params.{suffix,prefix}
 //   items.filter(fn).flatMap(fn) -> filterWithPattern(...).flatMapWithPattern(...)
 // Context: the captures are plain strings, so the lowered callbacks should not
 // route them through key() ownership paths.

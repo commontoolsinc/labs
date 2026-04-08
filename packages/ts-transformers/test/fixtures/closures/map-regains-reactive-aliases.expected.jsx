@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { Default, computed, lift, pattern, wish } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(() => {
+const __cfModuleCallback_1 = __cfHardenFn(() => {
     const foo = wish<Default<string[], [
     ]>>({ query: "#items" }, {
         type: "array",
@@ -20,8 +20,8 @@ const __ctModuleCallback_1 = __ctHardenFn(() => {
         },
         "default": []
     } as const satisfies __cfHelpers.JSONSchema).result!;
-    return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const item = __ct_pattern_input.key("element");
+    return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const item = __cf_pattern_input.key("element");
         return item + "!";
     }, {
         type: "object",
@@ -35,7 +35,7 @@ const __ctModuleCallback_1 = __ctHardenFn(() => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema), {});
 });
-const __ctModuleCallback_2 = __ctHardenFn(({ element: item, params: {} }) => __cfHelpers.derive({
+const __cfModuleCallback_2 = __cfHardenFn(({ element: item, params: {} }) => __cfHelpers.derive({
     type: "object",
     properties: {
         item: {
@@ -129,8 +129,8 @@ export default pattern((state) => {
                 type: "string"
             }
         } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item + "!";
         }, {
             type: "object",
@@ -162,8 +162,8 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
         const foo = passthrough(inner);
-        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item + "!";
         }, {
             type: "object",
@@ -185,7 +185,7 @@ export default pattern((state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, {}, __ctModuleCallback_1);
+    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1);
     const fromFiltered = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -220,8 +220,8 @@ export default pattern((state) => {
                 type: "string"
             }
         } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item.key("length") > 1;
         }, {
             type: "object",
@@ -234,8 +234,8 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {});
-        return filtered.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item + "!";
         }, {
             type: "object",
@@ -283,8 +283,8 @@ export default pattern((state) => {
                 type: "string"
             }
         } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return item.key("length") > 1;
         }, {
             type: "object",
@@ -297,7 +297,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {});
-        return filtered.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_2, {
+        return filtered.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
             type: "object",
             properties: {
                 element: {
@@ -365,4 +365,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

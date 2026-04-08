@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -27,9 +27,9 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with common shorthand index parameter names */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const i = __ct_pattern_input.key("index");
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const i = __cf_pattern_input.key("index");
                 return (<div key={i}>
             Item #{i}: {item.key("name")}
           </div>);
@@ -81,9 +81,9 @@ export default pattern((state) => {
             } as const satisfies __cfHelpers.JSONSchema), {})}
 
         {/* Map with idx as index parameter */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const idx = __ct_pattern_input.key("index");
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const idx = __cf_pattern_input.key("index");
                 return (<div key={idx}>
             Position {idx}: {item.key("name")}
           </div>);
@@ -192,4 +192,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

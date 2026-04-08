@@ -1,5 +1,6 @@
-import { assertEquals } from "@std/assert";
+import { assertAlmostEquals, assertEquals } from "@std/assert";
 import {
+  computeBaseline,
   extractMetrics,
   type Job,
   type Step,
@@ -83,4 +84,20 @@ Deno.test("extractMetrics keeps CLI core and fuse timings separate", () => {
   );
   assertEquals(metrics.has("job: CLI Integration Tests"), false);
   assertEquals(metrics.has("step: CLI integration"), false);
+});
+
+Deno.test("computeBaseline enforces the 15 percent floor for low-variance samples", () => {
+  const baseline = computeBaseline([100, 100, 100, 100, 100]);
+
+  assertEquals(baseline?.median, 100);
+  assertEquals(baseline?.stddev, 0);
+  assertAlmostEquals(baseline?.threshold ?? 0, 115, 1e-9);
+});
+
+Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 15 percent", () => {
+  const baseline = computeBaseline([100, 100, 100, 100, 150]);
+
+  assertEquals(baseline?.median, 100);
+  assertAlmostEquals(baseline?.stddev ?? 0, 20, 1e-9);
+  assertEquals(baseline?.threshold, 160);
 });

@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -115,12 +115,12 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, hasSections, <div>
             {/* [TRANSFORM] .map() → mapWithPattern: state.sections is Writable<Section[]> — reactive, pattern context */}
             {/* [TRANSFORM] closure captures: state (reactive), selectedTaskId (Writable), hoveredSectionId (Writable) */}
-            {state.key("sections").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const section = __ct_pattern_input.key("element");
-                const sectionIndex = __ct_pattern_input.key("index");
-                const state = __ct_pattern_input.key("params", "state");
-                const selectedTaskId = __ct_pattern_input.key("params", "selectedTaskId");
-                const hoveredSectionId = __ct_pattern_input.key("params", "hoveredSectionId");
+            {state.key("sections").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const section = __cf_pattern_input.key("element");
+                const sectionIndex = __cf_pattern_input.key("index");
+                const state = __cf_pattern_input.key("params", "state");
+                const selectedTaskId = __cf_pattern_input.key("params", "selectedTaskId");
+                const hoveredSectionId = __cf_pattern_input.key("params", "hoveredSectionId");
                 return (<section>
                 <h2 style={{
                     // [TRANSFORM] ternary lowered: section.accent ? section.accent : state.globalAccent → ifElse(...)
@@ -152,14 +152,14 @@ export default pattern((state) => {
                     } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, section.key("expanded"), <div>
                     {/* [TRANSFORM] .map() → mapWithPattern: section.tasks is reactive pattern-owned data */}
                     {/* [TRANSFORM] closure captures: selectedTaskId, hoveredSectionId, section, sectionIndex, state (all via params) */}
-                    {section.key("tasks").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                            const task = __ct_pattern_input.key("element");
-                            const taskIndex = __ct_pattern_input.key("index");
-                            const selectedTaskId = __ct_pattern_input.key("params", "selectedTaskId");
-                            const hoveredSectionId = __ct_pattern_input.key("params", "hoveredSectionId");
-                            const section = __ct_pattern_input.key("params", "section");
-                            const sectionIndex = __ct_pattern_input.key("params", "sectionIndex");
-                            const state = __ct_pattern_input.key("params", "state");
+                    {section.key("tasks").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                            const task = __cf_pattern_input.key("element");
+                            const taskIndex = __cf_pattern_input.key("index");
+                            const selectedTaskId = __cf_pattern_input.key("params", "selectedTaskId");
+                            const hoveredSectionId = __cf_pattern_input.key("params", "hoveredSectionId");
+                            const section = __cf_pattern_input.key("params", "section");
+                            const sectionIndex = __cf_pattern_input.key("params", "sectionIndex");
+                            const state = __cf_pattern_input.key("params", "state");
                             return (<div>
                         <button type="button" onClick={selectTask({
                                     selectedTaskId,
@@ -239,13 +239,13 @@ export default pattern((state) => {
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
                         {/* [TRANSFORM] ternary lowered: tagIndex===taskIndex ? `${section.title}:${tag}` : (showCompleted||!task.done ? tag : "") */}
-                        {task.key("tags").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                                    const tag = __ct_pattern_input.key("element");
-                                    const tagIndex = __ct_pattern_input.key("index");
-                                    const taskIndex = __ct_pattern_input.key("params", "taskIndex");
-                                    const section = __ct_pattern_input.key("params", "section");
-                                    const state = __ct_pattern_input.key("params", "state");
-                                    const task = __ct_pattern_input.key("params", "task");
+                        {task.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                                    const tag = __cf_pattern_input.key("element");
+                                    const tagIndex = __cf_pattern_input.key("index");
+                                    const taskIndex = __cf_pattern_input.key("params", "taskIndex");
+                                    const section = __cf_pattern_input.key("params", "section");
+                                    const state = __cf_pattern_input.key("params", "state");
+                                    const task = __cf_pattern_input.key("params", "task");
                                     return (<span>
                             {__cfHelpers.ifElse({
                                             type: "boolean"
@@ -801,4 +801,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -106,10 +106,10 @@ interface Item {
 //     -> params captures survive inside lowered branches
 //   computed(() => entry?.note ? "700" : "400") / title computed(...)
 //     -> authored compute wrappers still coexist with the preserved captures
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    const subPieces = __ct_pattern_input.key("subPieces");
-    const trashedSubPieces = __ct_pattern_input.key("trashedSubPieces");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    const subPieces = __cf_pattern_input.key("subPieces");
+    const trashedSubPieces = __cf_pattern_input.key("trashedSubPieces");
     const editingNoteIndex = Writable.of<number | undefined>(undefined, {
         type: ["number", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema);
@@ -205,18 +205,18 @@ export default pattern((__ct_pattern_input) => {
     })));
     return {
         [UI]: (<div>
-        {allEntries.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const entry = __ct_pattern_input.key("element", "entry");
-                const index = __ct_pattern_input.key("element", "index");
-                const isExpanded = __ct_pattern_input.key("element", "isExpanded");
-                const isPinned = __ct_pattern_input.key("element", "isPinned");
-                const allowMultiple = __ct_pattern_input.key("element", "allowMultiple");
-                const subPieces = __ct_pattern_input.key("params", "subPieces");
-                const editingNoteIndex = __ct_pattern_input.key("params", "editingNoteIndex");
-                const editingNoteText = __ct_pattern_input.key("params", "editingNoteText");
-                const settingsModuleIndex = __ct_pattern_input.key("params", "settingsModuleIndex");
-                const expandedIndex = __ct_pattern_input.key("params", "expandedIndex");
-                const trashedSubPieces = __ct_pattern_input.key("params", "trashedSubPieces");
+        {allEntries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const entry = __cf_pattern_input.key("element", "entry");
+                const index = __cf_pattern_input.key("element", "index");
+                const isExpanded = __cf_pattern_input.key("element", "isExpanded");
+                const isPinned = __cf_pattern_input.key("element", "isPinned");
+                const allowMultiple = __cf_pattern_input.key("element", "allowMultiple");
+                const subPieces = __cf_pattern_input.key("params", "subPieces");
+                const editingNoteIndex = __cf_pattern_input.key("params", "editingNoteIndex");
+                const editingNoteText = __cf_pattern_input.key("params", "editingNoteText");
+                const settingsModuleIndex = __cf_pattern_input.key("params", "settingsModuleIndex");
+                const expandedIndex = __cf_pattern_input.key("params", "expandedIndex");
+                const trashedSubPieces = __cf_pattern_input.key("params", "trashedSubPieces");
                 return ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -576,4 +576,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

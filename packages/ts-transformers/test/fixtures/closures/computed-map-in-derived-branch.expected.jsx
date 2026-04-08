@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -26,8 +26,8 @@ interface PatternInput {
 //   adminData.map((entry) => <li>...) → stays plain .map() inside the derive callback
 // Context: opposite of computed-map-in-ternary-branch; no JSX-local rewrite is
 //   available for the hoisted `peopleCount` initializer.
-export default pattern((__ct_pattern_input) => {
-    const people = __ct_pattern_input.key("people");
+export default pattern((__cf_pattern_input) => {
+    const people = __cf_pattern_input.key("people");
     const showAdmin = Writable.of(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -246,4 +246,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

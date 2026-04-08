@@ -73,7 +73,7 @@ async function withPhase<T>(
   keys: readonly string[],
   fn: () => Promise<T> | T,
 ): Promise<T> {
-  const label = `ct-test/${keys.join("/")}`;
+  const label = `cf-test/${keys.join("/")}`;
   const startMark = markPhaseBoundary(label, "start");
   phaseLogger.timeStart(...keys);
   try {

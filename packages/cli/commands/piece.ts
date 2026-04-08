@@ -30,7 +30,7 @@ import { cliText } from "../lib/cli-name.ts";
 import { absPath } from "../lib/utils.ts";
 import { parsePath } from "@commonfabric/piece/ops";
 import { UI } from "@commonfabric/runner";
-import ports from "@commontools/ports" with { type: "json" };
+import ports from "@commonfabric/ports" with { type: "json" };
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;

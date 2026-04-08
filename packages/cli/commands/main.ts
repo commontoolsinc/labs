@@ -8,7 +8,7 @@ import { init } from "./init.ts";
 import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test.ts";
-import ports from "@commontools/ports" with { type: "json" };
+import ports from "@commonfabric/ports" with { type: "json" };
 import { cliName, cliText } from "../lib/cli-name.ts";
 
 function envStatus(): string {

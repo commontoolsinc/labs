@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -18,11 +18,11 @@ interface Item {
 // Verifies: authored ifElse in JSX lowers both conditions and reactive branches correctly
 //   ifElse(limit > 0, items.map(...), <span>Hidden</span>) → derived condition + pattern-lowered map branch
 //   ifElse(show, count.get(), 0) in JSX                     → derived reactive branch, not raw count.get()
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    const limit = __ct_pattern_input.key("limit");
-    const count = __ct_pattern_input.key("count");
-    const show = __ct_pattern_input.key("show");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    const limit = __cf_pattern_input.key("limit");
+    const count = __cf_pattern_input.key("count");
+    const show = __cf_pattern_input.key("show");
     return ({
         [UI]: (<div>
       {ifElse({
@@ -70,8 +70,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["limit"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { limit: limit }, ({ limit }) => limit > 0), items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        } as const satisfies __cfHelpers.JSONSchema, { limit: limit }, ({ limit }) => limit > 0), items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return <span>{item.key("name")}</span>;
         }, {
             type: "object",
@@ -199,4 +199,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

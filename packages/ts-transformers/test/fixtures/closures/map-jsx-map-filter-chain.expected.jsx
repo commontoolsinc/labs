@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -21,12 +21,12 @@ interface Item {
 //   .filter(fn) → .filterWithPattern(pattern(...), {})
 //   .map(fn)    → .mapWithPattern(pattern(...), {})
 // Context: Three-step chain; no outer captures in any callback
-export default pattern((__ct_pattern_input) => {
-    const list = __ct_pattern_input.key("list");
+export default pattern((__cf_pattern_input) => {
+    const list = __cf_pattern_input.key("list");
     return {
         [UI]: (<div>
-        {list.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
+        {list.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
                 return ({
                     name: item.key("name"),
                     active: item.key("active"),
@@ -64,8 +64,8 @@ export default pattern((__ct_pattern_input) => {
                     }
                 },
                 required: ["name", "active"]
-            } as const satisfies __cfHelpers.JSONSchema), {}).filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const entry = __ct_pattern_input.key("element");
+            } as const satisfies __cfHelpers.JSONSchema), {}).filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const entry = __cf_pattern_input.key("element");
                 return entry.key("active");
             }, {
                 type: "object",
@@ -86,8 +86,8 @@ export default pattern((__ct_pattern_input) => {
                 required: ["element"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema), {}).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const entry = __ct_pattern_input.key("element");
+            } as const satisfies __cfHelpers.JSONSchema), {}).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const entry = __cf_pattern_input.key("element");
                 return <span>{entry.key("name")}</span>;
             }, {
                 type: "object",
@@ -186,4 +186,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

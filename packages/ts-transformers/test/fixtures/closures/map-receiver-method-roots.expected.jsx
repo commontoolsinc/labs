@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: {} }) => <span>{__cfHelpers.derive({
+const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: {} }) => <span>{__cfHelpers.derive({
     type: "object",
     properties: {
         item: {
@@ -22,7 +22,7 @@ const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: {} }) => <sp
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase())}</span>);
-const __ctModuleCallback_2 = __ctHardenFn(({ element: item, params: {} }) => <span>{__cfHelpers.derive({
+const __cfModuleCallback_2 = __cfHardenFn(({ element: item, params: {} }) => <span>{__cfHelpers.derive({
     type: "object",
     properties: {
         item: {
@@ -33,16 +33,16 @@ const __ctModuleCallback_2 = __ctHardenFn(({ element: item, params: {} }) => <sp
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase()))}</span>);
-const identity = __ctHardenFn(<T,>(value: T) => value);
+const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-receiver-method-roots
 // Verifies: receiver-method roots inside pattern-owned map callbacks lower reactively
 //   item.toUpperCase()            → callback-local derive
 //   identity(item.toUpperCase())  → call-argument receiver-method root lowered reactively
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     return ({
         [UI]: (<div>
-      {items.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
+      {items.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
             type: "object",
             properties: {
                 element: {
@@ -71,7 +71,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             }
         } as const satisfies __cfHelpers.JSONSchema), {})}
-      {items.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_2, {
+      {items.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
             type: "object",
             properties: {
                 element: {
@@ -145,4 +145,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

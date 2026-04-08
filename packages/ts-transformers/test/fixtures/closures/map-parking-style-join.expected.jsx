@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -41,9 +41,9 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("people").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const person = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
+        {state.key("people").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const person = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
                 const personName = person.key("name"), email = person.key("email"), commuteMode = person.key("commuteMode"), priorityRank = person.key("priorityRank"), defaultSpot = person.key("defaultSpot"), spotPreferences = person.key("spotPreferences"), isFirst = person.key("isFirst"), isLast = person.key("isLast");
                 const isEditing = __cfHelpers.derive({
                     type: "object",
@@ -164,9 +164,57 @@ export default pattern((state) => {
               <span>{email}</span>
               <span>{commuteMode}</span>
               <span>{priorityRank}</span>
-              {defaultSpot ? <span>{defaultSpot}</span> : null}
-              {isFirst ? <span>first</span> : null}
-              {isLast ? <span>last</span> : null}
+              {__cfHelpers.ifElse({
+                    type: ["string", "undefined"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "null"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "null"
+                        }, {}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, defaultSpot, <span>{defaultSpot}</span>, null)}
+              {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "null"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "null"
+                        }, {}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, isFirst, <span>first</span>, null)}
+              {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "null"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "null"
+                        }, {}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, isLast, <span>last</span>, null)}
               {__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -236,11 +284,51 @@ export default pattern((state) => {
                 } as const satisfies __cfHelpers.JSONSchema, { activeSpotOpts: {
                         length: activeSpotOpts.key("length")
                     } }, ({ activeSpotOpts }) => activeSpotOpts.length > 0), <span>spots</span>, null)}
-              {spotPreferences.key("length") > 0
-                        ? (<span>
-                    Prefers: {spotPreferences.map((n) => "#" + n).join(", ")}
-                  </span>)
-                        : null}
+              {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "null"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "null"
+                        }, {}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        spotPreferences: {
+                            type: "array",
+                            items: {
+                                type: "unknown"
+                            }
+                        }
+                    },
+                    required: ["spotPreferences"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.length > 0), <span>
+                    Prefers: {__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        spotPreferences: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    },
+                    required: ["spotPreferences"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))}
+                  </span>, null)}
             </section>);
             }, {
                 type: "object",
@@ -474,4 +562,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

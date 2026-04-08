@@ -14,9 +14,9 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
-        {typedItems.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
+        {typedItems.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
                 return (<div>
             {state.key("prefix")}: {item.key("name")}
           </div>);

@@ -3,10 +3,11 @@ name: fuse-workflow
 description: >
   Guide for hybrid workflows using CF FUSE filesystem mounting alongside the
   browser and CLI. Use when mounting spaces, editing cells via the filesystem,
-  developing patterns for filesystem interaction, running agents against mounted
-  spaces, or combining browser + filesystem + CLI workflows. Triggers include
-  "mount a space", "edit cells from filesystem", "use FUSE", "hybrid workflow",
-  "filesystem sync", or working with pieces across both browser and CLI.
+  developing patterns for filesystem interaction, or combining browser +
+  filesystem + CLI workflows. Triggers include "mount a space", "edit cells from
+  filesystem", "use FUSE", "hybrid workflow", "filesystem sync", or working with
+  pieces across both browser and CLI. For agent-specific patterns (deploying,
+  activity logs, annotations), see the fuse-agent skill.
 user-invocable: false
 ---
 
@@ -232,6 +233,119 @@ deno task cf fuse mount /tmp/cf
 
 Finder and some macOS tools create `._` resource fork files. The FUSE mount
 rejects these with EACCES. Use CLI tools, not Finder, to browse mounted spaces.
+
+### Handler Invocation via FUSE
+
+```bash
+"MOUNT/SPACE/pieces/📝 Note Name/setTitle.handler" --value "New Title"
+```
+
+**Void handlers can be invoked with no args:**
+
+```bash
+"MOUNT/SPACE/pieces/Contact Book/result/onAddContact.handler"
+```
+
+Use `--value null` only if you specifically need the older explicit form.
+
+**After ANY handler call — re-read pieces.json immediately:**
+
+```bash
+cat "MOUNT/SPACE/pieces/pieces.json"
+# Piece names include count suffixes that update on every mutation:
+# Reading List (0) → Reading List (1) → Reading List (2)
+# All previously constructed FUSE paths are invalid after a mutation.
+```
+
+### Writing to `[FS]` note pieces
+
+Use Read/Write/Edit tools directly on `index.md`. Never use handler invocation
+for notes.
+
+```
+1. Read  "MOUNT/SPACE/pieces/📝 Note Name/index.md"  — capture frontmatter
+2. Edit  targeted changes to body only, leaving frontmatter intact
+   OR
+   Write  full replacement — must include frontmatter (entityId + title from step 1)
+```
+
+**Preserve the frontmatter.** Losing `entityId` corrupts the piece.
+
+### Input cell writes (Python pattern)
+
+For bulk writes to input cell arrays (e.g. populating a Contact Book):
+
+```python
+import json
+
+contacts = [
+    {"name": "Alice", "email": "alice@example.com", "phone": "", "company": "",
+     "tags": ["team"], "notes": "Context here", "createdAt": 1234567890000},
+    # ...
+]
+
+try:
+    open("MOUNT/SPACE/pieces/Contact Book/input/contacts.json", "w").write(
+        json.dumps(contacts)
+    )
+except FileNotFoundError:
+    pass  # FUSE close quirk — write succeeded despite the error
+
+# Verify success:
+import subprocess
+result = subprocess.run(
+    ["cat", "MOUNT/SPACE/pieces/Contact Book/result/contacts.json"],
+    capture_output=True, text=True
+)
+data = json.loads(result.stdout)
+print(f"{len(data)} contacts written")
+```
+
+**`input/` directory layout** — two things coexist, only one is the write
+target:
+
+- `input/contacts.json` — writable flat JSON array (**correct write target**)
+- `input/contacts/` — directory of individual cell-slot files (read-only view)
+- Writing to `input/contacts/N` does not work as expected
+
+---
+
+## Pattern Source: `.src/` Directory
+
+Every piece exposes its pattern source under `.src/` in the FUSE mount. Read to
+understand how a piece works; write to modify it live.
+
+```
+MOUNT/SPACE/pieces/My Piece/
+  .src/
+    main.tsx       ← pattern source — readable and writable
+    error.log      ← synthetic, read-only — pattern execution errors
+```
+
+**Read source:**
+
+```bash
+cat "MOUNT/SPACE/pieces/My Piece/.src/main.tsx"
+```
+
+**Modify source** (use Python — shell redirect fails on FUSE):
+
+```python
+path = "MOUNT/SPACE/pieces/My Piece/.src/main.tsx"
+src = open(path).read()
+# ... modify src ...
+open(path, "w").write(modified_src)
+# Write triggers setsrc automatically — no ct piece setsrc needed
+```
+
+**Check for errors after modifying:**
+
+```bash
+cat "MOUNT/SPACE/pieces/My Piece/.src/error.log"
+# Empty = no errors; non-empty = compile or runtime error in new source
+```
+
+---
 
 ## Reference
 

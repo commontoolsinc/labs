@@ -1399,10 +1399,10 @@ function isIntentionallyUnusedSchemaParameter(
     return false;
   }
 
-  // Synthetic CTS parameters use internal "__ct_*" and "__param*" prefixes.
+  // Synthetic CTS parameters use internal "__cf_*" and "__param*" prefixes.
   // They still carry meaningful structural types and must not collapse to
   // never/false just because they start with underscores.
-  if (name.startsWith("__ct_") || name.startsWith("__param")) {
+  if (name.startsWith("__cf_") || name.startsWith("__param")) {
     return false;
   }
 
@@ -1587,7 +1587,7 @@ function getSyntheticModuleCallbackInitializer(
   identifier: ts.Identifier,
   sourceFile: ts.SourceFile | undefined,
 ): ts.Expression | undefined {
-  if (!identifier.text.startsWith("__ctModuleCallback")) {
+  if (!identifier.text.startsWith("__cfModuleCallback")) {
     return undefined;
   }
 

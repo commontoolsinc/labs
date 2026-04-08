@@ -15,7 +15,7 @@ interface State {
 // Verifies: Writable.of() gets schema annotation, and action() with .set() becomes handler()
 //   Writable.of(0) → Writable.of(0, { type: "number" })
 //   action(() => { counter.set(0); label.set("Count"); }) → handler(false, captureSchema, (_, { counter, label }) => ...)
-//   ({ title }) → (__ct_pattern_input) => { title = __ct_pattern_input.key("title"); }
+//   ({ title }) → (__cf_pattern_input) => { title = __cf_pattern_input.key("title"); }
 // Context: Writable.of() produces opaque cells. The .set() calls inside
 //   action() are terminal methods that require the action to be rewritten as a
 //   handler with captured cell references (counter, label) in its schema.

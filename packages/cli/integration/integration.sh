@@ -62,7 +62,7 @@ ct() {
   local status=$?
   local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
   local elapsed_ms=$((end_ms - start_ms))
-  >&2 echo "[ct-timing] ${elapsed_ms}ms :: ct $*"
+  >&2 echo "[cf-timing] ${elapsed_ms}ms :: ct $*"
   return $status
 }
 
@@ -77,7 +77,7 @@ cf() {
   local status=$?
   local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
   local elapsed_ms=$((end_ms - start_ms))
-  >&2 echo "[ct-timing] ${elapsed_ms}ms :: cf $*"
+  >&2 echo "[cf-timing] ${elapsed_ms}ms :: cf $*"
   return $status
 }
 

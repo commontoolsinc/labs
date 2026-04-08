@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,17 +11,31 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: { settings } }) => (<span>{__cfHelpers.derive({
+const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { settings } }) => (<span>{__cfHelpers.derive({
     type: "object",
     properties: {
         item: {
             type: "number"
+        },
+        settings: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["multiplier"]
         }
     },
-    required: ["item"]
+    required: ["item", "settings"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item * settings.multiplier)}</span>));
+} as const satisfies __cfHelpers.JSONSchema, {
+    item: item,
+    settings: {
+        multiplier: settings.multiplier
+    }
+}, ({ item, settings }) => item * settings.multiplier)}</span>));
 interface State {
     items: number[];
     settings: {
@@ -36,14 +50,29 @@ export default pattern((state) => {
     const settings = state.key("settings");
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
                         type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            settings: {
+                                type: "object",
+                                properties: {
+                                    multiplier: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["multiplier"]
+                            }
+                        },
+                        required: ["settings"]
                     }
                 },
-                required: ["element"]
+                required: ["element", "params"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -123,4 +152,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

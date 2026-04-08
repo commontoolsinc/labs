@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -33,9 +33,9 @@ interface PatternInput {
 // Context: when(condition, value) returns value if condition is truthy, else
 //   condition. The value branch contains a reactive .map() that must be
 //   transformed to mapWithPattern with proper schema injection.
-export default pattern((__ct_pattern_input) => {
-    const showItems = __ct_pattern_input.key("showItems");
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const showItems = __cf_pattern_input.key("showItems");
+    const items = __cf_pattern_input.key("items");
     return {
         [UI]: (<div>
         {/* when(condition, value) where value is a reactive map */}
@@ -51,8 +51,8 @@ export default pattern((__ct_pattern_input) => {
                     type: "array",
                     items: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, showItems, items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        } as const satisfies __cfHelpers.JSONSchema, showItems, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return <li>{item.key("label")}</li>;
         }, {
             type: "object",
@@ -155,4 +155,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -19,7 +19,7 @@ function nextKey(): string {
     counter += 1;
     return `key-${counter}`;
 }
-__ctHardenFn(nextKey);
+__cfHardenFn(nextKey);
 // FIXTURE: handler-computed-key
 // Verifies: handler capturing a Record with computed (dynamic) key access is transformed correctly
 //   onClick={() => recordMap[nextKey()]!.set(counter)) → handler(false, { recordMap: { additionalProperties, asOpaque } }, ...)({ recordMap })
@@ -40,7 +40,7 @@ export default pattern((state) => {
                 }
             },
             required: ["recordMap"]
-        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter))({
+        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter))({
             recordMap: recordMap
         })}>
         Step
@@ -91,4 +91,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

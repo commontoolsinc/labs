@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -72,8 +72,8 @@ export default pattern((state) => {
         } }, ({ state }) => state.items);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const row = __ct_pattern_input.key("element");
+        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const row = __cf_pattern_input.key("element");
                 const view = { status: __cfHelpers.ifElse({
                         type: "boolean"
                     } as const satisfies __cfHelpers.JSONSchema, {
@@ -180,4 +180,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

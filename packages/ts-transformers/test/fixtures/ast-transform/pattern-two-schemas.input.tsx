@@ -9,7 +9,7 @@ interface Result { doubled: number }
 // FIXTURE: pattern-two-schemas
 // Verifies: pattern with both input and output schemas already present preserves them
 //   pattern<Input, Result>(fn, inputSchema, outputSchema) → pattern(fn, inputSchema, outputSchema) (schemas kept)
-//   ({ count }) destructuring                              → __ct_pattern_input.key("count")
+//   ({ count }) destructuring                              → __cf_pattern_input.key("count")
 // Context: Schemas are user-provided, not generated; type args are stripped but schemas remain
 export default pattern<Input, Result>(
   ({ count }) => {

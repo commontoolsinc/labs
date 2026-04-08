@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -49,7 +49,7 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { state }) => {
+        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => {
             const scaled = state.items.map((item) => item.value * state.multiplier);
             console.log(scaled);
         })({
@@ -113,4 +113,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

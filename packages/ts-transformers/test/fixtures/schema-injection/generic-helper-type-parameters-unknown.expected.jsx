@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -21,7 +21,7 @@ export function buildWishExplicit<T>(path: string) {
         type: "unknown"
     } as const satisfies __cfHelpers.JSONSchema);
 }
-__ctHardenFn(buildWishExplicit);
+__cfHardenFn(buildWishExplicit);
 export function buildObjectExplicit<T>(prompt: string) {
     return generateObject<T>({
         model: "gpt-4o-mini",
@@ -31,13 +31,13 @@ export function buildObjectExplicit<T>(prompt: string) {
         } as const satisfies __cfHelpers.JSONSchema
     });
 }
-__ctHardenFn(buildObjectExplicit);
+__cfHardenFn(buildObjectExplicit);
 export function buildCellExplicit<T>(value: T) {
     return Cell.of<T>(value, {
         type: "unknown"
     } as const satisfies __cfHelpers.JSONSchema);
 }
-__ctHardenFn(buildCellExplicit);
+__cfHardenFn(buildCellExplicit);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

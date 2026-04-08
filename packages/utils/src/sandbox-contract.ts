@@ -38,7 +38,7 @@ export function isTrustedDataHelper(
   return TRUSTED_DATA_HELPER_SET.has(name);
 }
 
-export const FUNCTION_HARDENING_HELPER_NAME = "__ctHardenFn";
+export const FUNCTION_HARDENING_HELPER_NAME = "__cfHardenFn";
 
 export const RESERVED_FACTORY_BINDINGS = [
   ...SHADOWED_FACTORY_BINDINGS,

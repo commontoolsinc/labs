@@ -107,6 +107,10 @@ export class CFChip extends BaseElement {
           line-height: 1;
         }
 
+        :host:not(:has([slot="icon"])) .chip-icon {
+          display: none;
+        }
+
         .chip-label {
           max-width: 200px;
           overflow: hidden;

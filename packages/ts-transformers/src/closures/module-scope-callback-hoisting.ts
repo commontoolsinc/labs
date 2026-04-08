@@ -46,7 +46,7 @@ export function hoistModuleScopedBuilderCallbacks(
 
       changed = true;
       const callbackName = context.factory.createUniqueName(
-        "__ctModuleCallback",
+        "__cfModuleCallback",
       );
       hoistedStatements.push(
         context.factory.createVariableStatement(

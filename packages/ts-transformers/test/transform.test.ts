@@ -116,12 +116,12 @@ export default function next(value: number) {
     });
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(main, "function __ctHardenFn");
+    assertStringIncludes(main, "function __cfHardenFn");
     assertStringIncludes(
       main,
-      "const step = __ctHardenFn((value: number) => value + 1);",
+      "const step = __cfHardenFn((value: number) => value + 1);",
     );
-    assertStringIncludes(main, "__ctHardenFn(next);");
+    assertStringIncludes(main, "__cfHardenFn(next);");
   });
 
   it("wraps explicit snapshot helpers with __cfHelpers.__ct_data", async () => {
@@ -159,7 +159,7 @@ export default function probe() {
     );
   });
 
-  it("injects __ctDataHelper on demand for non-CTS top-level snapshots", async () => {
+  it("injects __cfDataHelper on demand for non-CTS top-level snapshots", async () => {
     const output = await transformFiles({
       "/main.ts": `
 function pow(x: number): number {
@@ -174,11 +174,11 @@ export default pow(5);
 
     assertStringIncludes(
       main,
-      'import { __ct_data as __ctDataHelper } from "commonfabric";',
+      'import { __ct_data as __cfDataHelper } from "commonfabric";',
     );
     assertStringIncludes(
       main,
-      "export default __ctDataHelper(pow(5));",
+      "export default __cfDataHelper(pow(5));",
     );
   });
 });

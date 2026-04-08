@@ -65,7 +65,7 @@ function buildElementBindingPlan(
             const symbol = checker.getSymbolAtLocation(element.name);
             if (symbol) {
               const aliasName = element.name.text;
-              const keyBase = `__ct_${aliasName}_key`;
+              const keyBase = `__cf_${aliasName}_key`;
               const unique = getUniqueIdentifier(keyBase, keyNames, {
                 fallback: keyBase,
               });
@@ -86,7 +86,7 @@ function buildElementBindingPlan(
         if (propertyName && ts.isIdentifier(propertyName)) {
           nextPath = [...path, propertyName.text];
           const base = nextTemplate ??
-            factory.createIdentifier("__ct_placeholder");
+            factory.createIdentifier("__cf_placeholder");
           nextTemplate = factory.createPropertyAccessExpression(
             base,
             factory.createIdentifier(propertyName.text),
@@ -94,7 +94,7 @@ function buildElementBindingPlan(
         } else if (propertyName && ts.isStringLiteral(propertyName)) {
           nextPath = [...path, propertyName.text];
           const base = nextTemplate ??
-            factory.createIdentifier("__ct_placeholder");
+            factory.createIdentifier("__cf_placeholder");
           nextTemplate = factory.createElementAccessExpression(
             base,
             factory.createStringLiteral(propertyName.text),
@@ -102,7 +102,7 @@ function buildElementBindingPlan(
         } else if (!propertyName && ts.isIdentifier(element.name)) {
           nextPath = [...path, element.name.text];
           const base = nextTemplate ??
-            factory.createIdentifier("__ct_placeholder");
+            factory.createIdentifier("__cf_placeholder");
           nextTemplate = factory.createPropertyAccessExpression(
             base,
             factory.createIdentifier(element.name.text),
@@ -181,7 +181,7 @@ export function analyzeElementBinding(
 
   if (!elemParam) {
     const identifier = createBindingIdentifier(
-      captureTree.has("element") ? "__ct_element" : "element",
+      captureTree.has("element") ? "__cf_element" : "element",
     );
     return {
       bindingName: identifier,
@@ -217,7 +217,7 @@ export function analyzeElementBinding(
   }
 
   const elementIdentifier = createBindingIdentifier(
-    captureTree.has("element") ? "__ct_element" : "element",
+    captureTree.has("element") ? "__cf_element" : "element",
   );
 
   let destructureStatement: ts.Statement | undefined;

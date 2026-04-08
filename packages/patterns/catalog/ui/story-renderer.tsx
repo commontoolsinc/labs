@@ -48,6 +48,8 @@ import KbdStory from "../stories/cf-kbd-story.tsx";
 import CopyButtonStory from "../stories/cf-copy-button-story.tsx";
 import TagsStory from "../stories/cf-tags-story.tsx";
 import GridStory from "../stories/cf-grid-story.tsx";
+import VignetteRecipeStory from "../stories/vignette-recipe-story.tsx";
+import VignetteFinanceStory from "../stories/vignette-finance-story.tsx";
 
 interface StoryRendererInput {
   selected: string;
@@ -163,6 +165,10 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return TagsStory({});
         case "grid":
           return GridStory({});
+        case "vignette-recipe":
+          return VignetteRecipeStory({});
+        case "vignette-finance":
+          return VignetteFinanceStory({});
         default:
           return null;
       }

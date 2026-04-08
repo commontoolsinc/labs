@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -21,8 +21,8 @@ interface State {
 // Verifies: action() with an inline-annotated event parameter generates a typed event schema
 //   action((e: MyEvent) => value.set(e.data)) → handler(MyEvent schema, captureSchema, (e, { value }) => ...)({ value })
 // Context: Event type from inline annotation (e: MyEvent) rather than generic type parameter
-export default pattern((__ct_pattern_input) => {
-    const value = __ct_pattern_input.key("value");
+export default pattern((__cf_pattern_input) => {
+    const value = __cf_pattern_input.key("value");
     return {
         update: __cfHelpers.handler({
             type: "object",
@@ -77,4 +77,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

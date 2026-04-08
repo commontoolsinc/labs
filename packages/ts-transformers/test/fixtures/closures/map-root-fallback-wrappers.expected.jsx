@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -20,8 +20,8 @@ interface Item {
 //   ((items as Item[] | undefined) ?? []).map(fn)     -> cast-wrapped fallback still lowers
 //   ((items satisfies Item[] | undefined) ?? []).map  -> satisfies-wrapped fallback still lowers
 // Context: All three forms are direct JSX roots rather than nested property fallback receivers
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     return {
         [UI]: (<div>
         {(__cfHelpers.derive({
@@ -61,8 +61,8 @@ export default pattern((__ct_pattern_input) => {
                     required: ["id"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items ?? [])).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return <span data-inline-id={item.key("id")}>{item.key("id")}</span>;
         }, {
             type: "object",
@@ -141,8 +141,8 @@ export default pattern((__ct_pattern_input) => {
                     required: ["id"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => (items as Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => (items as Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return (<span data-cast-id={item.key("id")}>{item.key("id")}</span>);
         }, {
             type: "object",
@@ -221,8 +221,8 @@ export default pattern((__ct_pattern_input) => {
                     required: ["id"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => (items satisfies Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => (items satisfies Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return (<span data-satisfies-id={item.key("id")}>{item.key("id")}</span>);
         }, {
             type: "object",
@@ -319,4 +319,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

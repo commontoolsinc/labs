@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { computed, generateText, pattern, patternTool, type PatternToolResult, W
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ language, content }: {
+const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
     language: string;
     content: string;
 }) => {
@@ -86,7 +86,7 @@ type Output = {
 //   must not be hoisted into extraParams. Only module-scoped reactive bindings
 //   (here, `content` from Writable.of) should be captured.
 export default pattern(() => {
-    const tool = patternTool(__ctModuleCallback_1, { content });
+    const tool = patternTool(__cfModuleCallback_1, { content });
     return { tool };
 }, {
     type: "object",
@@ -128,4 +128,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

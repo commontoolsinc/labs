@@ -1,10 +1,17 @@
 import ts from "typescript";
-import { detectCallKind, visitEachChildWithJsx } from "../ast/mod.ts";
+import {
+  detectCallKind,
+  isFunctionLikeExpression,
+  visitEachChildWithJsx,
+} from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
+import { shouldTransformArrayMethod } from "../closures/strategies/array-method-policy.ts";
+import { transformArrayMethodCallback } from "../closures/strategies/array-method-transform.ts";
 import {
   classifyExpressionSiteHandling,
   containsLogicalBinaryOperator,
   findLowerableExpressionSite,
+  findPreferredNestedLowerableExpressionSite,
   getExpressionContainerKind,
   isControlFlowRewriteExpression,
   isDirectArrayMethodRootExpression,
@@ -25,31 +32,47 @@ interface RewriteExpressionSiteParams {
   readonly preferDeriveWrappers?: boolean;
 }
 
+function getReactiveHelperWrapperKind(
+  expression: ts.Expression,
+  context: TransformationContext,
+): "derive" | "ifElse" | "when" | "unless" | undefined {
+  if (!ts.isCallExpression(expression)) {
+    return undefined;
+  }
+
+  const callKind = detectCallKind(expression, context.checker)?.kind;
+  if (
+    callKind === "derive" ||
+    callKind === "ifElse" ||
+    callKind === "when" ||
+    callKind === "unless"
+  ) {
+    return callKind;
+  }
+
+  return undefined;
+}
+
 function isDirectDeriveCall(
   expression: ts.Expression,
   context: TransformationContext,
 ): expression is ts.CallExpression {
-  if (!ts.isCallExpression(expression)) {
-    return false;
-  }
+  return getReactiveHelperWrapperKind(expression, context) === "derive";
+}
 
-  return detectCallKind(expression, context.checker)?.kind === "derive";
+function isReactiveHelperWrapperCall(
+  expression: ts.Expression,
+  context: TransformationContext,
+): expression is ts.CallExpression {
+  return getReactiveHelperWrapperKind(expression, context) !== undefined;
 }
 
 function isSyntheticHelperWrapperInArrayMethodCallback(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  if (!ts.isCallExpression(expression) || expression.pos >= 0) {
-    return false;
-  }
-
-  const callKind = detectCallKind(expression, context.checker)?.kind;
   if (
-    callKind !== "derive" &&
-    callKind !== "ifElse" &&
-    callKind !== "when" &&
-    callKind !== "unless"
+    expression.pos >= 0 || !isReactiveHelperWrapperCall(expression, context)
   ) {
     return false;
   }
@@ -63,6 +86,74 @@ function isSyntheticHelperWrapperInArrayMethodCallback(
   }
 
   return false;
+}
+
+function isArrayLikeReceiverType(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const type = checker.getTypeAtLocation(expression);
+  if (checker.isArrayType(type) || checker.isTupleType(type)) {
+    return true;
+  }
+
+  return type.isUnion() &&
+    type.types.length > 0 &&
+    type.types.every((member) =>
+      checker.isArrayType(member) || checker.isTupleType(member)
+    );
+}
+
+function markSyntheticReactiveCollectionDeclarationIfNeeded(
+  original: ts.VariableDeclaration,
+  rewritten: ts.VariableDeclaration,
+  context: TransformationContext,
+): void {
+  const rewrittenOriginal = rewritten.initializer
+    ? ts.getOriginalNode(rewritten.initializer)
+    : undefined;
+  if (
+    !rewritten.initializer ||
+    (
+      rewrittenOriginal === rewritten.initializer &&
+      rewritten.initializer.pos >= 0
+    ) ||
+    !isReactiveHelperWrapperCall(
+      rewritten.initializer,
+      context,
+    ) ||
+    !ts.isIdentifier(original.name) ||
+    !isArrayLikeReceiverType(original.name, context.checker)
+  ) {
+    return;
+  }
+  context.markSyntheticReactiveCollectionDeclaration(original);
+  context.markSyntheticReactiveCollectionDeclaration(rewritten);
+}
+
+function rewriteLateArrayMethodCallbackCall(
+  node: ts.CallExpression,
+  context: TransformationContext,
+  visit: ts.Visitor,
+): ts.CallExpression | undefined {
+  const callback = node.arguments[0];
+  if (!callback || !isFunctionLikeExpression(callback)) {
+    return undefined;
+  }
+
+  if (!shouldTransformArrayMethod(node, context)) {
+    return undefined;
+  }
+
+  return transformArrayMethodCallback(
+    node,
+    callback,
+    context,
+    visit,
+    {
+      rewriteTransformedBody: rewriteArrayMethodCallbackExpressionSites,
+    },
+  );
 }
 
 export function rewriteExpressionSite(
@@ -208,7 +299,27 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
   const visit: ts.Visitor = (node) => {
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
 
+    if (ts.isVariableDeclaration(node) && ts.isVariableDeclaration(visited)) {
+      markSyntheticReactiveCollectionDeclarationIfNeeded(
+        node,
+        visited,
+        context,
+      );
+      return visited;
+    }
+
     if (ts.isExpression(visited)) {
+      if (ts.isCallExpression(visited)) {
+        const rewrittenArrayMethod = rewriteLateArrayMethodCallbackCall(
+          visited,
+          context,
+          visit,
+        );
+        if (rewrittenArrayMethod) {
+          return rewrittenArrayMethod;
+        }
+      }
+
       const containerKind = getExpressionContainerKind(visited);
       if (containerKind) {
         const handling = classifyExpressionSiteHandling(
@@ -246,7 +357,27 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
     return visited;
   };
 
-  return ts.visitNode(root, visit) as T;
+  const rewritten = ts.visitNode(root, visit) as T;
+
+  const lateArrayMethodVisit: ts.Visitor = (node) => {
+    const visited = visitEachChildWithJsx(
+      node,
+      lateArrayMethodVisit,
+      context.tsContext,
+    );
+
+    if (ts.isCallExpression(visited)) {
+      return rewriteLateArrayMethodCallbackCall(
+        visited,
+        context,
+        lateArrayMethodVisit,
+      ) ?? visited;
+    }
+
+    return visited;
+  };
+
+  return ts.visitNode(rewritten, lateArrayMethodVisit) as T;
 }
 
 export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
@@ -256,6 +387,18 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
   const analyze = context.getDataFlowAnalyzer();
 
   const visit: ts.Visitor = (node) => {
+    if (ts.isVariableDeclaration(node)) {
+      const visited = visitEachChildWithJsx(node, visit, context.tsContext);
+      if (ts.isVariableDeclaration(visited)) {
+        markSyntheticReactiveCollectionDeclarationIfNeeded(
+          node,
+          visited,
+          context,
+        );
+      }
+      return visited;
+    }
+
     if (
       (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
       context.isArrayMethodCallback(node) &&
@@ -302,6 +445,17 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
     }
 
     if (ts.isExpression(node)) {
+      if (ts.isCallExpression(node)) {
+        const rewrittenArrayMethod = rewriteLateArrayMethodCallbackCall(
+          node,
+          context,
+          visit,
+        );
+        if (rewrittenArrayMethod) {
+          return rewrittenArrayMethod;
+        }
+      }
+
       const containerKind = getExpressionContainerKind(node);
       if (containerKind) {
         if (containerKind === "jsx-expression") {
@@ -394,6 +548,73 @@ export function rewriteArrayMethodCallbackExpressionSites(
     );
   };
 
+  const wrapArrayMethodCallbackLocalExpression = (
+    expression: ts.Expression,
+    options: {
+      allowDirectExpressionWrap?: boolean;
+    } = {},
+  ): ts.Expression | undefined => {
+    const analysis = analyze(expression);
+    if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+      const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
+        analysis,
+      );
+      if (relevantDataFlows.length === 0) {
+        return undefined;
+      }
+
+      return createReactiveWrapperForExpression(
+        expression,
+        relevantDataFlows,
+        context,
+        {
+          allowDirectExpressionWrap: options.allowDirectExpressionWrap,
+          preferDeriveWrapper: true,
+        },
+      );
+    }
+
+    return undefined;
+  };
+
+  const rewriteArrayMethodCallbackExpressionStatement = (
+    expression: ts.Expression,
+  ): ts.Expression | undefined => {
+    if (isDirectArrayMethodRootExpression(expression)) {
+      return undefined;
+    }
+
+    return wrapArrayMethodCallbackLocalExpression(expression);
+  };
+
+  const rewriteSkippedArrayMethodCallbackInitializer = (
+    expression: ts.Expression,
+  ): ts.Expression | undefined => {
+    if (isControlFlowRewriteExpression(expression)) {
+      return undefined;
+    }
+
+    const handling = classifyExpressionSiteHandling(
+      expression,
+      "variable-initializer",
+      context,
+      analyze,
+    );
+    if (handling.kind !== "skip" || handling.reason !== "not-lowerable") {
+      return undefined;
+    }
+
+    if (
+      findPreferredNestedLowerableExpressionSite(expression, context, analyze)
+    ) {
+      return undefined;
+    }
+
+    return wrapArrayMethodCallbackLocalExpression(expression, {
+      allowDirectExpressionWrap: true,
+    });
+  };
+
   const visit: ts.Visitor = (node) => {
     if (
       node !== body &&
@@ -438,6 +659,32 @@ export function rewriteArrayMethodCallbackExpressionSites(
       }
 
       return visitEachChildWithJsx(node, visit, context.tsContext);
+    }
+
+    if (ts.isExpressionStatement(node)) {
+      const rewritten = rewriteArrayMethodCallbackExpressionStatement(
+        node.expression,
+      );
+      if (rewritten) {
+        return context.factory.updateExpressionStatement(node, rewritten);
+      }
+
+      return visitEachChildWithJsx(node, visit, context.tsContext);
+    }
+
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const rewritten = rewriteSkippedArrayMethodCallbackInitializer(
+        node.initializer,
+      );
+      if (rewritten) {
+        return context.factory.updateVariableDeclaration(
+          node,
+          node.name,
+          node.exclamationToken,
+          node.type,
+          rewritten,
+        );
+      }
     }
 
     if (ts.isExpression(node)) {

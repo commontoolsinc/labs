@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -18,10 +18,10 @@ const __ctAmdHooks = undefined;
 // Verifies: .get() calls on Cell refs inside ifElse predicates are preserved within derive()
 //   showHistory && messageCount !== dismissedIndex.get() → derive(..., ({...}) => showHistory && messageCount !== dismissedIndex.get())
 // Context: Bug repro -- predicate wrapped in derive() which unwraps Cells, but .get() must remain
-export default pattern((__ct_pattern_input) => {
-    const showHistory = __ct_pattern_input.key("showHistory");
-    const messageCount = __ct_pattern_input.key("messageCount");
-    const dismissedIndex = __ct_pattern_input.key("dismissedIndex");
+export default pattern((__cf_pattern_input) => {
+    const showHistory = __cf_pattern_input.key("showHistory");
+    const messageCount = __cf_pattern_input.key("messageCount");
+    const dismissedIndex = __cf_pattern_input.key("dismissedIndex");
     return {
         [UI]: (<div>
         {ifElse({
@@ -107,4 +107,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

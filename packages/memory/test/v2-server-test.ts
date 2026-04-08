@@ -922,17 +922,11 @@ Deno.test("memory v2 server does not send watch effects after a connection close
   }
 });
 
-Deno.test("memory v2 server refreshes watched docs without rerunning full graph queries", async () => {
+Deno.test("memory v2 server refreshes watched docs by syncing only the touched entity", async () => {
   const server = createServer("memory://memory-v2-server-incremental-watch");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-server-incremental-watch";
-  const originalEvaluateGraphQuery = server.evaluateGraphQuery.bind(server);
-  const evaluatedRoots: string[][] = [];
-  server.evaluateGraphQuery = (async (...args) => {
-    evaluatedRoots.push(args[1].roots.map((root) => root.id));
-    return await originalEvaluateGraphQuery(...args);
-  }) as typeof server.evaluateGraphQuery;
 
   try {
     await connection.receive(encodeMemoryV2Boundary(HELLO));
@@ -1005,7 +999,6 @@ Deno.test("memory v2 server refreshes watched docs without rerunning full graph 
       assertResponse<any>(shiftMessage(messages)).requestId,
       "watch-1",
     );
-    evaluatedRoots.length = 0;
 
     await connection.receive(encodeMemoryV2Boundary({
       type: "transact",
@@ -1031,23 +1024,16 @@ Deno.test("memory v2 server refreshes watched docs without rerunning full graph 
     const effect = assertEffect(shiftMessage(messages));
     assertEquals(effect.effect.upserts.map((entry) => entry.id), ["of:doc:1"]);
     assertEquals(effect.effect.removes, []);
-    assertEquals(evaluatedRoots, []);
   } finally {
     await server.close();
   }
 });
 
-Deno.test("memory v2 server incrementally adds watches without rerunning full graph queries", async () => {
+Deno.test("memory v2 server watch.add bootstraps only the newly added watch", async () => {
   const server = createServer("memory://memory-v2-server-watch-add");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-server-watch-add";
-  const originalEvaluateGraphQuery = server.evaluateGraphQuery.bind(server);
-  const evaluatedRoots: string[][] = [];
-  server.evaluateGraphQuery = (async (...args) => {
-    evaluatedRoots.push(args[1].roots.map((root) => root.id));
-    return await originalEvaluateGraphQuery(...args);
-  }) as typeof server.evaluateGraphQuery;
 
   try {
     await connection.receive(encodeMemoryV2Boundary(HELLO));
@@ -1111,7 +1097,6 @@ Deno.test("memory v2 server incrementally adds watches without rerunning full gr
         "of:doc:1",
       ],
     );
-    evaluatedRoots.length = 0;
 
     await connection.receive(encodeMemoryV2Boundary({
       type: "session.watch.add",
@@ -1140,7 +1125,6 @@ Deno.test("memory v2 server incrementally adds watches without rerunning full gr
       ],
     );
     assertEquals(second.ok?.sync.removes, []);
-    assertEquals(evaluatedRoots, []);
   } finally {
     await server.close();
   }

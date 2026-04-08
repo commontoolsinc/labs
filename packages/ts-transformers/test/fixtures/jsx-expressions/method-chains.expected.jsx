@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ element: name, params: {} }) => (<li>{__cfHelpers.derive({
+const __cfModuleCallback_1 = __cfHardenFn(({ element: name, params: {} }) => (<li>{__cfHelpers.derive({
     type: "object",
     properties: {
         name: {
@@ -161,9 +161,9 @@ export default pattern((state) => {
 
         {/* Filter then map */}
         <ul>
-          {state.key("items").filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const x = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
+          {state.key("items").filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const x = __cf_pattern_input.key("element");
+            const state = __cf_pattern_input.key("params", "state");
             return __cfHelpers.derive({
                 type: "object",
                 properties: {
@@ -218,9 +218,9 @@ export default pattern((state) => {
             state: {
                 threshold: state.key("threshold")
             }
-        }).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const x = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
+        }).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const x = __cf_pattern_input.key("element");
+            const state = __cf_pattern_input.key("params", "state");
             return (<li>Value: {__cfHelpers.derive({
                 type: "object",
                 properties: {
@@ -430,7 +430,7 @@ export default pattern((state) => {
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.key("names").mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
+          {state.key("names").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -657,8 +657,8 @@ export default pattern((state) => {
 
         {/* Map with conditional logic */}
         <ul>
-          {state.key("users").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const u = __ct_pattern_input.key("element");
+          {state.key("users").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const u = __cf_pattern_input.key("element");
                 return (<li>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -1044,4 +1044,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

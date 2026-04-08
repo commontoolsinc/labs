@@ -9,11 +9,16 @@ Start with the shared critique guidance in:
 
 Read that guide first. It is the canonical reference.
 
+Be explicit about SES and determinism issues: direct `Date.now()` or
+`Math.random()`, authored timers, and non-idempotent `computed()` use of
+`safeDateNow()` or `nonPrivateRandom()` should all be flagged.
+
 Then use the detailed references already maintained in the repo for:
 
 - `docs/development/debugging/README.md`
 - `docs/development/debugging/gotchas/`
 - `docs/common/components/COMPONENTS.md`
+- `docs/common/patterns/ui-cookbook.md`
 - `docs/common/capabilities/llm.md` - LLM integration
 
 ## Quick Patterns
@@ -90,12 +95,11 @@ return <>{showDetails ? <div>Details content</div> : null}</>;
 return <>{ifElse(showDetails, <div>Details content</div>, null)}</>;
 ```
 
-### Correct Style Syntax
+### Visual Review Reminder
 
-```typescript
-<div style={{ display: "flex", gap: "1rem" }}>
-  <cf-vstack style="flex: 1; padding: 1rem;">
-    Content
-  </cf-vstack>
-</div>;
-```
+When UI is important to the pattern, also look for:
+
+- weak visual hierarchy
+- poor grouping or spacing rhythm
+- neglected empty or first-run states
+- styling that ignores available public component affordances

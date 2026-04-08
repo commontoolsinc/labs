@@ -1,5 +1,6 @@
 import {
   DIR_MODE,
+  DIR_MODE_RW,
   FILE_MODE,
   FILE_MODE_RW,
   FILE_MODE_RWX,
@@ -40,7 +41,7 @@ export function getMountOwnership(
 }
 
 export function nodeMode(node: FsNode, isWritable = false): number {
-  if (node.kind === "dir") return DIR_MODE;
+  if (node.kind === "dir") return isWritable ? DIR_MODE_RW : DIR_MODE;
   if (node.kind === "symlink") return SYMLINK_MODE;
   if (node.kind === "callable") {
     return node.callableKind === "handler" ? FILE_MODE_RWX : FILE_MODE_RX;

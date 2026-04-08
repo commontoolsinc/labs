@@ -75,10 +75,21 @@ conventions over that same stored document:
 **Deletion is explicit**: removing an entity is represented only by a `Delete`
 fact (section 2.2). A missing `value` field is NOT used as a tombstone in v2.
 Supporting a live "undefined" cell value is deferred; if we need it later, it
-should use an explicit sentinel rather than overloading deletion semantics. An
-empty JSON object `{}` is still an ordinary live value, not a delete. A marked
-document may also omit `value` entirely for metadata-only cases such as
-source-only documents; that is still not a tombstone.
+should use an explicit sentinel rather than overloading deletion semantics.
+There are two layers to keep separate here:
+
+- the logical cell value `{}` is stored as the document `{ value: {} }`
+- a stored document may omit `value` entirely for metadata-only cases, and even
+  the degenerate stored document `{}` is still a live document, not a tombstone
+
+Canonical examples:
+
+| Case | Stored representation | Meaning |
+| ---- | --------------------- | ------- |
+| Empty object payload | `{ value: {} }` | Live cell whose payload is the empty object |
+| Source-only / metadata-only document | `{ source: { "/": "abc123" } }` | Live document with no payload, but with metadata |
+| Empty document envelope | `{}` | Live document with no payload and no metadata set yet |
+| Explicit deletion | `Delete { type: "delete", id, parent }` | Tombstone; the entity is removed from the visible head |
 
 **Source links**: The `source` property uses the short-link form
 `{"/":"<short-id>"}`. The runtime resolves this to `of:<short-id>` in the same
@@ -290,6 +301,13 @@ A **blob** is immutable, write-once binary data identified by its content hash.
 Blobs are separate from entities — they never change after creation. They are
 used for storing images, files, compiled artifacts, or any data that is
 referenced by entities but should not be duplicated or versioned the same way.
+
+Current-pass scope: the rewrite only needs immutable content-addressed blob
+storage and reference plumbing so runner-facing entity history can point at
+large payloads without inlining them. Richer blob delivery, authenticated
+download/upload APIs, URL issuance, and product-facing policy are deferred to a
+later layer and are not part of the MVP acceptance bar for the core
+seq/revision rewrite.
 
 ```typescript
 interface Blob {

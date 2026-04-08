@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -29,8 +29,8 @@ interface Item {
 //   so `result.tasks` is a plain array. The .map() must remain untransformed.
 //   This is a negative test for reactive .map() detection on property access paths.
 //   Note the captures use result.key("tasks") to extract the needed sub-property.
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -211,4 +211,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

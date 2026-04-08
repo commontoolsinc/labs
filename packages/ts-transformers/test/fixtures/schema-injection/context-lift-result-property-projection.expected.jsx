@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -51,9 +51,9 @@ const liftSummary = lift({
 // Verifies: derive() preserves projected property schemas when the input comes
 // from a typed lift() result rather than falling back to unknown
 //   derive(summary, (snapshot) => snapshot.difference) → derive({ difference: number }, number, ...)
-export default pattern((__ct_pattern_input) => {
-    const primary = __ct_pattern_input.key("primary");
-    const secondary = __ct_pattern_input.key("secondary");
+export default pattern((__cf_pattern_input) => {
+    const primary = __cf_pattern_input.key("primary");
+    const secondary = __cf_pattern_input.key("secondary");
     const summary = liftSummary({ primary, secondary });
     const difference = derive({
         type: "object",
@@ -109,4 +109,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -35,7 +35,7 @@ function findChildren(tree: Writable<Entry[]>, path: readonly string[]): readonl
     }
     return current;
 }
-__ctHardenFn(findChildren);
+__cfHardenFn(findChildren);
 interface Input {
     entries: Writable<Default<Entry[], [
     ]>>;
@@ -43,8 +43,8 @@ interface Input {
 interface Output {
     [UI]: VNode;
 }
-export default pattern((__ct_pattern_input) => {
-    const entries = __ct_pattern_input.key("entries");
+export default pattern((__cf_pattern_input) => {
+    const entries = __cf_pattern_input.key("entries");
     const path = Writable.of<string[]>([], {
         type: "array",
         items: {
@@ -253,7 +253,9 @@ export default pattern((__ct_pattern_input) => {
                         }
                     }
                 } as const satisfies __cfHelpers.JSONSchema, { unsorted: unsorted }, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => a.name.localeCompare(b.name)));
-                return items.map((item: Entry) => {
+                return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const item = __cf_pattern_input.key("element");
+                    const pushPath = __cf_pattern_input.key("params", "pushPath");
                     return (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                         type: "object",
                         properties: {
@@ -281,11 +283,83 @@ export default pattern((__ct_pattern_input) => {
                     } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, item }) => pushPath.send({ name: item.name }))({
                         pushPath: pushPath,
                         item: {
-                            name: item.name
+                            name: item.key("name")
                         }
                     })}>
-                {item.name}
+                {item.key("name")}
               </button>);
+                }, {
+                    type: "object",
+                    properties: {
+                        element: {
+                            $ref: "#/$defs/Entry"
+                        },
+                        params: {
+                            type: "object",
+                            properties: {
+                                pushPath: {
+                                    type: "object",
+                                    properties: {
+                                        name: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["name"],
+                                    asStream: true
+                                }
+                            },
+                            required: ["pushPath"]
+                        }
+                    },
+                    required: ["element", "params"],
+                    $defs: {
+                        Entry: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "string"
+                                },
+                                name: {
+                                    type: "string"
+                                },
+                                type: {
+                                    "enum": ["file", "folder"]
+                                },
+                                children: {
+                                    $ref: "#/$defs/AnonymousType_1"
+                                }
+                            },
+                            required: ["id", "name", "type"]
+                        },
+                        AnonymousType_1: {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Entry"
+                            }
+                        }
+                    }
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
+                            type: "object",
+                            properties: {}
+                        }],
+                    $defs: {
+                        UIRenderable: {
+                            type: "object",
+                            properties: {
+                                $UI: {
+                                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                                }
+                            },
+                            required: ["$UI"]
+                        }
+                    }
+                } as const satisfies __cfHelpers.JSONSchema), {
+                    pushPath: pushPath
                 });
             })()}
       </div>),
@@ -337,4 +411,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

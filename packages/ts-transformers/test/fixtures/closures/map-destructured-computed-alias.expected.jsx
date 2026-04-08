@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -21,28 +21,28 @@ interface State {
 }
 // FIXTURE: map-destructured-computed-alias
 // Verifies: computed property key with a const-asserted identifier is lowered via derive()
-//   { [dynamicKey]: val } → __ct_val_key = dynamicKey; derive(...element[__ct_val_key])
+//   { [dynamicKey]: val } → __cf_val_key = dynamicKey; derive(...element[__cf_val_key])
 //   .map(fn) → .mapWithPattern(pattern(...), {})
 // Context: dynamicKey is a const-asserted string, not a function call — still uses derive() pattern
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const element = __ct_pattern_input.key("element");
-                const __ct_val_key = dynamicKey;
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const element = __cf_pattern_input.key("element");
+                const __cf_val_key = dynamicKey;
                 const val = __cfHelpers.derive({
                     type: "object",
                     properties: {
                         element: true,
-                        __ct_val_key: true
+                        __cf_val_key: true
                     },
-                    required: ["element", "__ct_val_key"]
+                    required: ["element", "__cf_val_key"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     element: element,
-                    __ct_val_key: __ct_val_key
-                }, ({ element, __ct_val_key }) => element[__ct_val_key]);
+                    __cf_val_key: __cf_val_key
+                }, ({ element, __cf_val_key }) => element[__cf_val_key]);
                 return (<span>{val}</span>);
             }, {
                 type: "object",
@@ -146,4 +146,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

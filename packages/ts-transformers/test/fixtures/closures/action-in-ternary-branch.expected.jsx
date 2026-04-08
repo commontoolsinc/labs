@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -31,8 +31,8 @@ interface Input {
 //   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
 //   nested hasDescription ternary → local ifElse(...) inside the JSX branch
 // Context: Regression coverage for JSX-local rewriting with action references in the same branch
-export default pattern((__ct_pattern_input) => {
-    const card = __ct_pattern_input.key("card");
+export default pattern((__cf_pattern_input) => {
+    const card = __cf_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -187,4 +187,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

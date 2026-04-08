@@ -63,6 +63,21 @@ const resetGame = action(() => {
 });
 ```
 
+## SES Notes
+
+Actions are still the default place for event-driven mutations, timestamps, and
+one-off IDs.
+
+- Keep action bodies simple and straight-line. Prefer `const` plus direct cell
+  operations over `let`, `var`, reassignment, or loops.
+- If the logic starts becoming imperative, move the heavy lifting into
+  `computed()`, `derive()`, or a module-scope helper and keep the action as the
+  trigger.
+- Use `safeDateNow()` and `nonPrivateRandom()` instead of `Date.now()` and
+  `Math.random()` in authored pattern code.
+- Prefer capturing time/random snapshots in the action itself rather than
+  inside a `computed()` that may re-run many times.
+
 ## When to Use `handler()` Instead
 
 Use `action()` for most cases. Switch to `handler()` when you need to:

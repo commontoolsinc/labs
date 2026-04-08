@@ -80,7 +80,7 @@ async function timeCliPhase<T>(
     return await run();
   } finally {
     const elapsed = Math.round(performance.now() - start);
-    console.error(`[ct-phase] ${elapsed}ms :: ${label}`);
+    console.error(`[cf-phase] ${elapsed}ms :: ${label}`);
   }
 }
 

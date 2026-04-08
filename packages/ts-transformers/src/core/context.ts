@@ -204,6 +204,21 @@ export class TransformationContext {
     );
   }
 
+  markSyntheticReactiveCollectionDeclaration(node: ts.Node): void {
+    const symbol = ts.isVariableDeclaration(node)
+      ? (ts.isIdentifier(node.name)
+        ? this.checker.getSymbolAtLocation(node.name)
+        : undefined)
+      : ts.isIdentifier(node)
+      ? this.checker.getSymbolAtLocation(node)
+      : undefined;
+    if (!symbol) {
+      return;
+    }
+    this.options.syntheticReactiveCollectionRegistry?.add(symbol);
+    this.invalidateReactiveAnalysisCaches();
+  }
+
   getDataFlowAnalyzer(): ReturnType<typeof createDataFlowAnalyzer> {
     this.#dataFlowAnalyzer ??= createDataFlowAnalyzer(this.checker);
     return this.#dataFlowAnalyzer;

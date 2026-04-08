@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -15,9 +15,9 @@ const __ctAmdHooks = undefined;
 // Verifies: outer branch lowering does not structurally lower nested ternaries inside computed callbacks
 //   show ? computed(() => bar ? "B" : "C") : "D" → outer branch lowers, inner ternary stays authored
 //   ifElse(show, computed(() => foo ? "A" : bar ? "B" : "C"), "D") → helper-owned branch lowering still preserves the inner ternaries
-export const OuterTernary = pattern((__ct_pattern_input) => {
-    const show = __ct_pattern_input.key("show");
-    const bar = __ct_pattern_input.key("bar");
+export const OuterTernary = pattern((__cf_pattern_input) => {
+    const show = __cf_pattern_input.key("show");
+    const bar = __cf_pattern_input.key("bar");
     return (<div>{__cfHelpers.ifElse({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
@@ -69,10 +69,10 @@ export const OuterTernary = pattern((__ct_pattern_input) => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-export const AuthoredIfElse = pattern((__ct_pattern_input) => {
-    const show = __ct_pattern_input.key("show");
-    const foo = __ct_pattern_input.key("foo");
-    const bar = __ct_pattern_input.key("bar");
+export const AuthoredIfElse = pattern((__cf_pattern_input) => {
+    const show = __cf_pattern_input.key("show");
+    const foo = __cf_pattern_input.key("foo");
+    const bar = __cf_pattern_input.key("bar");
     return ifElse({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
@@ -117,4 +117,4 @@ export const AuthoredIfElse = pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

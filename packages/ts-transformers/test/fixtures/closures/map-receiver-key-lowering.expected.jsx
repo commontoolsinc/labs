@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,8 +11,8 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: {} }) => item.key("subItems").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-    const subItem = __ct_pattern_input.key("element");
+const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: {} }) => item.key("subItems").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+    const subItem = __cf_pattern_input.key("element");
     return subItem.key("value");
 }, {
     type: "object",
@@ -44,9 +44,9 @@ interface Input {
 //   items.map(fn) → items.mapWithPattern(pattern(...), {})
 //   item.subItems.map(fn) → item.key("subItems").mapWithPattern(pattern(...), {})
 // Context: No captures; receiver expression item.subItems is lowered to item.key("subItems")
-const _p = pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    return items.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
+const _p = pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    return items.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
         type: "object",
         properties: {
             element: {
@@ -117,4 +117,4 @@ const _p = pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

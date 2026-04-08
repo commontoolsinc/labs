@@ -50,6 +50,7 @@ export type CapabilitySummaryRegistry = WeakMap<
   ts.Node,
   FunctionCapabilitySummary
 >;
+export type SyntheticReactiveCollectionRegistry = WeakSet<ts.Symbol>;
 
 export interface TransformationOptions {
   readonly mode?: TransformMode;
@@ -59,6 +60,8 @@ export interface TransformationOptions {
   readonly mapCallbackRegistry?: WeakSet<ts.Node>;
   readonly syntheticComputeCallbackRegistry?: WeakSet<ts.Node>;
   readonly syntheticComputeOwnedNodeRegistry?: WeakSet<ts.Node>;
+  readonly syntheticReactiveCollectionRegistry?:
+    SyntheticReactiveCollectionRegistry;
   readonly schemaHints?: SchemaHints;
   readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
   /**

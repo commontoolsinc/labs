@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { FILE_MODE_RWX } from "./platform.ts";
-import { buildNodeStat, getMountOwnership } from "./stat.ts";
+import { DIR_MODE, DIR_MODE_RW, FILE_MODE_RWX } from "./platform.ts";
+import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 import type { FsNode } from "./types.ts";
 
 Deno.test("getMountOwnership uses the current process ids when available", () => {
@@ -54,4 +54,22 @@ Deno.test("buildNodeStat assigns mounted handler files to the current user", () 
       gid: 20,
     },
   );
+});
+
+Deno.test("nodeMode exposes directories as read-only", () => {
+  const node: FsNode = {
+    kind: "dir",
+    children: new Map(),
+  };
+
+  assertEquals(nodeMode(node), DIR_MODE);
+});
+
+Deno.test("nodeMode exposes writable directories with write bits", () => {
+  const node: FsNode = {
+    kind: "dir",
+    children: new Map(),
+  };
+
+  assertEquals(nodeMode(node, true), DIR_MODE_RW);
 });

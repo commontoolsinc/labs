@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -19,8 +19,8 @@ declare function fetchAny(): any;
 //   pattern<Input, { [UI]: VNode }>() → output schema with $UI vnode $ref
 // Context: simulates `any` leaking through generic functions; two named exports, no default
 // Case 1: Explicit Output type overrides inferred `any` return
-export const TypedFromAny = pattern((__ct_pattern_input) => {
-    const prompt = __ct_pattern_input.key("prompt");
+export const TypedFromAny = pattern((__cf_pattern_input) => {
+    const prompt = __cf_pattern_input.key("prompt");
     const result = fetchAny();
     return __cfHelpers.derive({
         type: "object",
@@ -50,8 +50,8 @@ export const TypedFromAny = pattern((__ct_pattern_input) => {
 type Entry = {
     name: string;
 };
-export const TypedUIOutput = pattern((__ct_pattern_input) => {
-    const name = __ct_pattern_input.key("name");
+export const TypedUIOutput = pattern((__cf_pattern_input) => {
+    const name = __cf_pattern_input.key("name");
     return {
         [UI]: (<div>{name}</div>),
     };
@@ -74,4 +74,4 @@ export const TypedUIOutput = pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

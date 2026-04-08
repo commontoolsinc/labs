@@ -165,7 +165,7 @@ export async function executeMountedCallableFile(
   const resolved = await resolveMountedCallableFile(filePath, deps);
   const invocationStyle = deps.invocationStyle ??
     (Deno.env.get("CF_EXEC_SHEBANG") === "1" ? "direct" : "cf");
-  return await executeCallableCommand({
+  const result = await executeCallableCommand({
     resolved,
     execution: {
       callableCell: resolved.callableCell,
@@ -186,4 +186,17 @@ export async function executeMountedCallableFile(
           invocationStyle,
         }),
   });
+
+  // Auto-step: trigger reactive recomputation after handler execution.
+  // Skip if --help was shown — no mutation occurred.
+  if (!result.helpText && typeof resolved.piece?.getCell === "function") {
+    try {
+      await resolved.piece.getCell().pull();
+      await resolved.manager.synced();
+    } catch {
+      // Auto-step is best-effort; the handler already executed successfully.
+    }
+  }
+
+  return result;
 }

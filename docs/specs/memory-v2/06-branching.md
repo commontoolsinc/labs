@@ -282,6 +282,14 @@ Timeline:
 
 ## 6.7 Merging
 
+Status note: sections 6.1-6.6 describe the branch-scoped visibility model that
+the current rewrite relies on. The merge and lifecycle material from here down
+is target-design guidance, not the current-pass acceptance bar. Public branch
+lifecycle commands on the v2 wire, merge proposal generation/conflict workflow,
+and broader product-facing branch tooling remain deferred; see
+`10-implementation-guidance.md` and `implementation-plan.md` for the current
+implementation authority.
+
 Merging integrates changes from a source branch into a target branch. The merge
 operates at the **entity level** -- each entity is considered independently.
 

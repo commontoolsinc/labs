@@ -17,7 +17,7 @@
  */
 
 import * as path from "@std/path";
-import ports from "@commontools/ports" with { type: "json" };
+import ports from "@commonfabric/ports" with { type: "json" };
 
 // Packages with integration tests that need a running server
 const PACKAGES_WITH_SERVER = [

@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -22,9 +22,9 @@ function regularFunction() {
     } as const satisfies __cfHelpers.JSONSchema);
     return _inFunction;
 }
-__ctHardenFn(regularFunction);
+__cfHardenFn(regularFunction);
 // 3. Inside arrow function
-const arrowFunction = __ctHardenFn(() => {
+const arrowFunction = __cfHardenFn(() => {
     const _inArrow = cell(30, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -71,7 +71,7 @@ export default function TestContextVariations() {
         testHandler,
     };
 }
-__ctHardenFn(TestContextVariations);
+__cfHardenFn(TestContextVariations);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

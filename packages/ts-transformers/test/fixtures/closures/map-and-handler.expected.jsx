@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -26,10 +26,10 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
-                const state = __ct_pattern_input.key("params", "state");
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
+                const state = __cf_pattern_input.key("params", "state");
                 return (<div>
             <span>{__cfHelpers.derive({
                     type: "object",
@@ -82,7 +82,7 @@ export default pattern((state) => {
                         }
                     },
                     required: ["index", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.selectedIndex.set(index))({
+                } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state, index }) => state.selectedIndex.set(index))({
                     state: {
                         selectedIndex: state.key("selectedIndex")
                     },
@@ -283,4 +283,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

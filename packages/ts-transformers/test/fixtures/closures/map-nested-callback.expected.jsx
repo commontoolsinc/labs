@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -33,15 +33,15 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
                 return (<div>
             {state.key("prefix")}: {item.key("name")}
             <ul>
-              {item.key("tags").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                        const tag = __ct_pattern_input.key("element");
-                        const item = __ct_pattern_input.key("params", "item");
+              {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                        const tag = __cf_pattern_input.key("element");
+                        const item = __cf_pattern_input.key("params", "item");
                         return (<li>{item.key("name")} - {tag.key("name")}</li>);
                     }, {
                         type: "object",
@@ -267,4 +267,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

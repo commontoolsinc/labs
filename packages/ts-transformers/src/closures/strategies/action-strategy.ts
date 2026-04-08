@@ -149,7 +149,7 @@ function transformActionCall(
     context,
     {
       eventParamName,
-      paramsParamName: "__ct_action_params",
+      paramsParamName: "__cf_action_params",
     },
   );
 

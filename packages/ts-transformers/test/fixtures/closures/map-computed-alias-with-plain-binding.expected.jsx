@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,22 +11,22 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ element, params: {} }) => {
-    const __ct_val_key = dynamicKey();
+const __cfModuleCallback_1 = __cfHardenFn(({ element, params: {} }) => {
+    const __cf_val_key = dynamicKey();
     const { foo } = element;
     const val = __cfHelpers.derive({
         type: "object",
         properties: {
             element: true,
-            __ct_val_key: true
+            __cf_val_key: true
         },
-        required: ["element", "__ct_val_key"]
+        required: ["element", "__cf_val_key"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
         element: element,
-        __ct_val_key: __ct_val_key
-    }, ({ element, __ct_val_key }) => element[__ct_val_key]);
+        __cf_val_key: __cf_val_key
+    }, ({ element, __cf_val_key }) => element[__cf_val_key]);
     return (<span>{__cfHelpers.derive({
         type: "object",
         properties: {
@@ -48,7 +48,7 @@ const __ctModuleCallback_1 = __ctHardenFn(({ element, params: {} }) => {
 function dynamicKey(): "value" {
     return "value";
 }
-__ctHardenFn(dynamicKey);
+__cfHardenFn(dynamicKey);
 interface Item {
     foo: number;
     value: number;
@@ -64,7 +64,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -166,4 +166,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);
