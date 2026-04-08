@@ -63,6 +63,15 @@ const logger = getLogger("extended-storage-transaction", {
   level: "error",
 });
 
+type CfcInstrumentationHooks = {
+  onRelevantTx?(): void;
+  onPreparedTx?(): void;
+  onPrepareReject?(reasons: readonly string[]): void;
+  onDigestInvalidation?(reason: string): void;
+  onOutboxFlush?(effect: PostCommitSideEffect): void;
+  onSinkDedupHit?(key: string): void;
+};
+
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<
     (
@@ -80,8 +89,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     outbox: [],
     diagnostics: [],
   };
+  private reportedCfcRelevant = false;
+  private reportedCfcPrepared = false;
 
-  constructor(public tx: IStorageTransaction) {}
+  constructor(
+    public tx: IStorageTransaction,
+    private cfcInstrumentation: CfcInstrumentationHooks = {},
+  ) {}
 
   getCfcState(): Readonly<CfcTxState> {
     return this.cfcState;
@@ -93,12 +107,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   markCfcRelevant(reason?: string): void {
     this.cfcState.relevant = true;
+    if (!this.reportedCfcRelevant) {
+      this.reportedCfcRelevant = true;
+      this.cfcInstrumentation.onRelevantTx?.();
+    }
     if (reason) {
       this.cfcState.diagnostics.push(reason);
     }
   }
 
   invalidateCfc(reason: string): void {
+    const wasPrepared = this.cfcState.prepare.status === "prepared";
     const previousDigest = this.cfcState.prepare.status === "prepared"
       ? this.cfcState.prepare.digest
       : this.cfcState.prepare.status === "invalidated"
@@ -112,6 +131,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       digest: previousDigest,
       reasons,
     };
+    if (wasPrepared) {
+      this.cfcInstrumentation.onDigestInvalidation?.(reason);
+    }
   }
 
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
@@ -140,6 +162,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {
     const key = effect.idempotencyKey ?? effect.id;
     if (this.outboxIdempotencyKeys.has(key)) {
+      this.cfcInstrumentation.onSinkDedupHit?.(key);
       return;
     }
     this.outboxIdempotencyKeys.add(key);
@@ -193,6 +216,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (input === undefined) {
       const reasons = prepareBoundaryCommit(this);
       if (reasons.length > 0) {
+        this.cfcInstrumentation.onPrepareReject?.(reasons);
         this.cfcState.prepare = {
           status: "invalidated",
           reasons,
@@ -208,6 +232,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       digest,
       input: preparedInput,
     };
+    if (!this.reportedCfcPrepared) {
+      this.reportedCfcPrepared = true;
+      this.cfcInstrumentation.onPreparedTx?.();
+    }
     return digest;
   }
 
@@ -518,6 +546,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (result.ok && !readOnly) {
       for (const effect of this.cfcState.outbox) {
         await effect.flush(this);
+        this.cfcInstrumentation.onOutboxFlush?.(effect);
       }
       this.outboxIdempotencyKeys.clear();
     } else {

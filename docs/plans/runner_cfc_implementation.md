@@ -857,7 +857,7 @@ Every phase should land with tests before the next phase starts.
       `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`
 - [x] Default phase 1 to unlabeled-permissive behavior; switching unlabeled
       paths away from permissive defaults is a separate rollout gate
-- [ ] Emit counters for:
+- [x] Emit counters for:
       `cfcRelevantTx`, `cfcPreparedTx`, `cfcPrepareRejects`,
       `cfcDigestInvalidations`, `cfcOutboxFlushes`, and sink dedup hits
 - [ ] Keep sensitive values out of logs; log only rule ids, paths, schema

@@ -190,6 +190,24 @@ export interface RuntimeOptions {
   hideInternalStackFrames?: boolean;
 }
 
+export interface CfcRuntimeStats {
+  cfcRelevantTx: number;
+  cfcPreparedTx: number;
+  cfcPrepareRejects: number;
+  cfcDigestInvalidations: number;
+  cfcOutboxFlushes: number;
+  sinkDedupHits: number;
+}
+
+const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
+  cfcRelevantTx: 0,
+  cfcPreparedTx: 0,
+  cfcPrepareRejects: 0,
+  cfcDigestInvalidations: 0,
+  cfcOutboxFlushes: 0,
+  sinkDedupHits: 0,
+});
+
 /**
  * For these schema, we use type object with empty properties, so that we
  * will fetch the objects and consider them valid, but will not walk into
@@ -280,6 +298,7 @@ export class Runtime {
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
+  private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
 
   constructor(options: RuntimeOptions) {
     const defaultMemoryVersion = getDefaultMemoryVersion();
@@ -549,10 +568,37 @@ export class Runtime {
     if (debugActionId) {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
-    const wrapped = new ExtendedStorageTransaction(tx);
+    const wrapped = new ExtendedStorageTransaction(tx, {
+      onRelevantTx: () => {
+        this.cfcStats.cfcRelevantTx += 1;
+      },
+      onPreparedTx: () => {
+        this.cfcStats.cfcPreparedTx += 1;
+      },
+      onPrepareReject: () => {
+        this.cfcStats.cfcPrepareRejects += 1;
+      },
+      onDigestInvalidation: () => {
+        this.cfcStats.cfcDigestInvalidations += 1;
+      },
+      onOutboxFlush: () => {
+        this.cfcStats.cfcOutboxFlushes += 1;
+      },
+      onSinkDedupHit: () => {
+        this.cfcStats.sinkDedupHits += 1;
+      },
+    });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
+  }
+
+  getCfcStats(): Readonly<CfcRuntimeStats> {
+    return { ...this.cfcStats };
+  }
+
+  resetCfcStats(): void {
+    this.cfcStats = initialCfcRuntimeStats();
   }
 
   getWriteDebugContext(): string | undefined {
