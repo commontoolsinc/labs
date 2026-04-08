@@ -1,4 +1,5 @@
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 
@@ -12,6 +13,7 @@ const IFC_KEYS = [
   "exactCopyOf",
   "projection",
   "collection",
+  "flowPrecisionClaim",
 ] as const;
 
 const asSchemaObject = (
@@ -31,9 +33,9 @@ const arraySubsetOf = (
 
 const mergeSetLikeIfcArray = (
   key: string,
-  existing: readonly string[] | undefined,
-  candidate: readonly string[] | undefined,
-): readonly string[] | undefined => {
+  existing: unknown,
+  candidate: unknown,
+): unknown => {
   if (existing === undefined) {
     return candidate;
   }
@@ -45,28 +47,37 @@ const mergeSetLikeIfcArray = (
     case "requiredIntegrity":
     case "classification":
     case "addIntegrity":
-      if (!arraySubsetOf(existing, candidate)) {
+    {
+      const existingArray = existing as readonly string[];
+      const candidateArray = candidate as readonly string[];
+      if (!arraySubsetOf(existingArray, candidateArray)) {
         throw new Error(`${key} cannot be weakened`);
       }
-      return [...new Set([...existing, ...candidate])];
+      return [...new Set([...existingArray, ...candidateArray])];
+    }
     case "integrity":
     case "maxConfidentiality":
     case "writeAuthorizedBy":
-      if (!arraySubsetOf(candidate, existing)) {
+    {
+      const existingArray = existing as readonly string[];
+      const candidateArray = candidate as readonly string[];
+      if (!arraySubsetOf(candidateArray, existingArray)) {
         throw new Error(`${key} cannot be weakened`);
       }
-      return [...candidate];
+      return [...candidateArray];
+    }
     case "exactCopyOf":
     case "projection":
     case "collection":
-      if (
-        existing.length !== candidate.length ||
-        !arraySubsetOf(existing, candidate) ||
-        !arraySubsetOf(candidate, existing)
-      ) {
+      if (!deepEqual(existing, candidate)) {
         throw new Error(`${key} must remain stable`);
       }
-      return [...existing];
+      return existing;
+    case "flowPrecisionClaim":
+      if (!deepEqual(existing, candidate)) {
+        throw new Error(`${key} must remain stable`);
+      }
+      return existing;
     default:
       return candidate;
   }
@@ -83,11 +94,13 @@ const mergeIfc = (
     return existing;
   }
 
-  const merged: Record<string, readonly string[] | undefined> = {};
+  const existingIfc = existing as Record<string, unknown>;
+  const candidateIfc = candidate as Record<string, unknown>;
+  const merged: Record<string, unknown> = {};
   for (const key of IFC_KEYS) {
-    merged[key] = mergeSetLikeIfcArray(key, existing[key], candidate[key]);
+    merged[key] = mergeSetLikeIfcArray(key, existingIfc[key], candidateIfc[key]);
   }
-  return merged;
+  return merged as JSONSchemaObj["ifc"];
 };
 
 const branchContainsIfc = (schema: JSONSchema): boolean => {

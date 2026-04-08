@@ -98,6 +98,7 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 ensureNotRenderThread();
@@ -1605,14 +1606,17 @@ export class CellImpl<T extends FabricValue>
         implementation: "map",
       });
     }
-
-    // Use the cell directly as an OpaqueRef (since cells are now also OpaqueRefs)
-    return mapFactory({
+    const result = mapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: pattern(
         ({ element, index, array }: Opaque<any>) => fn(element, index, array),
       ),
     });
+    const schema = flowPrecisionSchemaForBuiltin("map");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1632,11 +1636,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return mapFactory({
+    const result = mapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    const schema = flowPrecisionSchemaForBuiltin("map");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1708,12 +1717,17 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return filterFactory({
+    const result = filterFactory({
       list: this as unknown as OpaqueRef<T>,
       op: pattern(
         ({ element, index, array }: Opaque<any>) => fn(element, index, array),
       ),
     });
+    const schema = flowPrecisionSchemaForBuiltin("filter");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1732,11 +1746,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return filterFactory({
+    const result = filterFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    const schema = flowPrecisionSchemaForBuiltin("filter");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1758,12 +1777,17 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return flatMapFactory({
+    const result = flatMapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: pattern(
         ({ element, index, array }: Opaque<any>) => fn(element, index, array),
       ),
     });
+    const schema = flowPrecisionSchemaForBuiltin("flatMap");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1782,11 +1806,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return flatMapFactory({
+    const result = flatMapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    const schema = flowPrecisionSchemaForBuiltin("flatMap");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   toJSON(): SigilLink | null {

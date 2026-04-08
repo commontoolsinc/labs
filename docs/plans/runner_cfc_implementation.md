@@ -725,17 +725,17 @@ Primary files:
 
 Tasks:
 
-- [ ] Define the supported structural claim set for the first pass
-- [ ] Implement conservative defaults for collection transforms
-- [ ] Allow less-restrictive structural claims only when explicitly trusted
-- [ ] Start with the built-ins that already shape collections in the runtime:
+- [x] Define the supported structural claim set for the first pass
+- [x] Implement conservative defaults for collection transforms
+- [x] Allow less-restrictive structural claims only when explicitly trusted
+- [x] Start with the built-ins that already shape collections in the runtime:
       `map`, `filter`, and `flatMap`
 
 Acceptance:
 
-- [ ] Untrusted structural relaxations fall back to conservative labels
-- [ ] Trusted structural claims can narrow labels only where the claim proves it
-- [ ] Unsupported collection operators remain conservative
+- [x] Untrusted structural relaxations fall back to conservative labels
+- [x] Trusted structural claims can narrow labels only where the claim proves it
+- [x] Unsupported collection operators remain conservative
 
 ### 10. Sink Enforcement
 
