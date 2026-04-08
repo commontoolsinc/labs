@@ -436,6 +436,90 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("merges canonical schema envelopes monotonically across writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const firstTx = runtime.edit();
+      firstTx.setCfcEnforcementMode("enforce-explicit");
+      const firstCell = runtime.getCell(
+        signer.did(),
+        "cfc-schema-merge",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        firstTx,
+      );
+      firstCell.set({ secret: "hello" });
+      firstTx.prepareCfc();
+      const firstResult = await firstTx.commit();
+      expect(firstResult.ok).toBeDefined();
+
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: unknown;
+          cfc?: { schemaHash: string };
+        } | undefined;
+      };
+      const persistedId = parseLink(firstCell.getAsLink()).id!;
+      const before = replica.getDocument(persistedId);
+      expect(before?.cfc?.schemaHash).toBeDefined();
+
+      const secondTx = runtime.edit();
+      secondTx.setCfcEnforcementMode("enforce-explicit");
+      const secondCell = runtime.getCell(
+        signer.did(),
+        "cfc-schema-merge",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+            title: {
+              type: "string",
+              default: "",
+            },
+          },
+          required: ["secret", "title"],
+        },
+        secondTx,
+      );
+      secondCell.set({ secret: "hello", title: "updated" });
+      secondTx.prepareCfc();
+      const secondResult = await secondTx.commit();
+      expect(secondResult.ok).toBeDefined();
+
+      const after = replica.getDocument(persistedId);
+      expect(after?.cfc?.schemaHash).toBeDefined();
+      expect(after?.cfc?.schemaHash).not.toEqual(before?.cfc?.schemaHash);
+
+      const schemaDoc = replica.getDocument(`cid:${after!.cfc!.schemaHash}`);
+      expect(schemaDoc?.value).toMatchObject({
+        type: "object",
+        required: ["secret", "title"],
+      });
+      expect(
+        (schemaDoc?.value as { properties?: { title?: unknown } }).properties
+          ?.title,
+      )
+        .toMatchObject({
+          type: "string",
+          default: "",
+        });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects writes when requiredIntegrity is not satisfied by consumed input labels", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

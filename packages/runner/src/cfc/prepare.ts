@@ -17,6 +17,7 @@ import {
   isInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import type { CfcMetadata, IFCLabel, WritePolicyInput } from "./types.ts";
 
 const INTERNAL_VERIFIER_META = {
@@ -195,6 +196,26 @@ const ensureSchemaDocument = (
   });
 };
 
+const loadSchemaDocument = (
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
+  schemaHash: string,
+): JSONSchema => {
+  const id = `cid:${schemaHash}`;
+  const existing = tx.readOrThrow({
+    space,
+    id: id as URI,
+    type: "application/json",
+    path: [],
+  }, {
+    meta: INTERNAL_VERIFIER_META,
+  });
+  if (!isRecord(existing) || existing.value === undefined) {
+    throw new Error(`stored schemaHash ${schemaHash} is missing or unreadable`);
+  }
+  return existing.value as JSONSchema;
+};
+
 export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
 ): string[] => {
@@ -209,7 +230,6 @@ export const prepareBoundaryCommit = (
       MediaType,
     ];
     const frozen = toDeepFrozenSchema(schema, true) as JSONSchema;
-    const schemaAndHash = internSchema(frozen, true);
 
     const requirementFailure = verifyInputRequirements(tx, frozen);
     if (requirementFailure) {
@@ -218,15 +238,24 @@ export const prepareBoundaryCommit = (
     }
 
     const existing = storedMetadataFor(tx, space, id, type);
-    if (
-      existing !== undefined &&
-      existing.schemaHash !== schemaAndHash.hashString
-    ) {
-      reasons.push(
-        `schema merge not yet supported for ${id}: ${existing.schemaHash} -> ${schemaAndHash.hashString}`,
-      );
-      continue;
+    let mergedSchema = frozen;
+    if (existing !== undefined) {
+      try {
+        const storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
+        mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, frozen);
+      } catch (error) {
+        reasons.push(
+          error instanceof Error
+            ? error.message
+            : `schema merge failed for ${id}`,
+        );
+        continue;
+      }
     }
+    const schemaAndHash = internSchema(
+      toDeepFrozenSchema(mergedSchema, true) as JSONSchema,
+      true,
+    );
 
     ensureSchemaDocument(
       tx,
@@ -239,7 +268,7 @@ export const prepareBoundaryCommit = (
       schemaHash: schemaAndHash.hashString,
       labelMap: {
         version: 1,
-        entries: walkIfcSchema(frozen).map((entry) => ({
+        entries: walkIfcSchema(mergedSchema).map((entry) => ({
           path: entry.path,
           label: entry.label,
         })),

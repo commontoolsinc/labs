@@ -547,7 +547,7 @@ Tasks:
 
 - [x] Persist CFC metadata as a system-owned reserved sibling to `value` and
       `source` in the v2 entity document
-- [ ] Persist canonical merged schema envelopes as system-owned v2 schema
+- [x] Persist canonical merged schema envelopes as system-owned v2 schema
       documents at `cid:<hash>` and store `schemaHash` in embedded metadata
 - [x] Store the authoritative path-granular label map and `schemaHash` in that
       embedded metadata
@@ -587,11 +587,11 @@ Tasks:
       prepare, including candidate `SchemaAndHash` values and structural
       provenance claims
       when available
-- [ ] Implement a canonical merged-schema envelope operator for the supported
+- [x] Implement a canonical merged-schema envelope operator for the supported
       subset
-- [ ] Ensure IFC keys never weaken under merge and never appear only inside a
+- [x] Ensure IFC keys never weaken under merge and never appear only inside a
       divergent `anyOf`/`oneOf`/`allOf` branch
-- [ ] Ensure structural merge does not invalidate previously valid data; adding
+- [x] Ensure structural merge does not invalidate previously valid data; adding
       a required field requires a default
 - [x] Resolve input labels from stored CFC metadata and persisted
       `cid:<hash>`-backed schema documents; no coarse-label fallback
@@ -833,7 +833,7 @@ The test matrix should be built in the same order as the implementation:
 
 - [x] unit tests for types, path canonicalization, write-policy input
       canonicalization, and digest stability
-- [ ] unit tests for merged-schema monotonicity, branch-external IFC placement,
+- [x] unit tests for merged-schema monotonicity, branch-external IFC placement,
       and required-field/default compatibility
 - [x] transaction tests for prepare gating and invalidation
 - [ ] rollout-mode tests for `disabled`, `observe`, and enforcing modes
