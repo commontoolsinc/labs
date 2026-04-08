@@ -168,7 +168,9 @@ describe("SES security regressions", () => {
   it("runs untrusted self-contained direct builder callbacks through the SES fallback", async () => {
     const { commonfabric } = createBuilder();
     const probe = commonfabric.lift((_value: number) => typeof Proxy);
-    const testPattern = commonfabric.pattern<{ value: number }>(({ value }) => ({
+    const testPattern = commonfabric.pattern<{ value: number }>((
+      { value },
+    ) => ({
       environment: probe(value),
     }));
 
@@ -188,7 +190,9 @@ describe("SES security regressions", () => {
     const { commonfabric } = createBuilder();
     const secret = { factor: 2 };
     const double = commonfabric.lift((value: number) => value * secret.factor);
-    const testPattern = commonfabric.pattern<{ value: number }>(({ value }) => ({
+    const testPattern = commonfabric.pattern<{ value: number }>((
+      { value },
+    ) => ({
       total: double(value),
     }));
     const errors: Error[] = [];
@@ -218,7 +222,9 @@ describe("SES security regressions", () => {
     });
     const factor = 2;
     const double = commonfabric.lift((value: number) => value * factor);
-    const testPattern = commonfabric.pattern<{ value: number }>(({ value }) => ({
+    const testPattern = commonfabric.pattern<{ value: number }>((
+      { value },
+    ) => ({
       total: double(value),
     }));
 
