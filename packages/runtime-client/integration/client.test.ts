@@ -23,7 +23,7 @@ import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transpor
 
 const { API_URL } = env;
 const INTEGRATION_MEMORY_VERSION = (() => {
-  const value = Deno.env.get("CT_INTEGRATION_MEMORY_VERSION");
+  const value = Deno.env.get("CF_INTEGRATION_MEMORY_VERSION");
   return value === "v1" || value === "v2" ? value : undefined;
 })();
 

@@ -283,7 +283,7 @@ jobs:
 
       - name: 📋 FUSE daemon log (on failure)
         if: ${{ failure() && matrix.suite_name == 'fuse' }}
-        run: cat ~/.ct/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
+        run: cat ~/.cf/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
 
   pattern-integration-test:
     name: "Pattern Integration Tests"
@@ -481,13 +481,6 @@ jobs:
           cp ./dist/cf ./signed/
           cp ./dist/cf.sig ./signed/
 
-          # Keep a ct-named copy in the release bundle until the bastion deploy
-          # scripts stop expecting that filename.
-          cp ./dist/cf ./dist/ct
-          cp ./dist/cf.sig ./dist/ct.sig
-          cp ./dist/ct ./signed/
-          cp ./dist/ct.sig ./signed/
-
           # Create a single tarball with all binaries and signatures
           tar -czf release/labs-${{ github.sha }}.tar.gz -C signed .
 
@@ -626,7 +619,7 @@ jobs:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
+          script: /opt/cf/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
 
   # Deploy shell static assets to staging GCS bucket
   deploy-shell-staging:
@@ -696,7 +689,7 @@ jobs:
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           command_timeout: 20m
           script: |
-            /opt/ct/run-pattern-tests-against-toolshed.sh ${{ github.sha }} \
+            /opt/cf/run-pattern-tests-against-toolshed.sh ${{ github.sha }} \
               https://toolshed.saga-castor.ts.net \
               https://toolshed.saga-castor.ts.net
 

@@ -182,8 +182,8 @@ async function runPatternTests(
   const patternsDir = path.join(rootDir, "packages/patterns");
   const cfCmd = getCfCommand(rootDir);
   const testFiles = await findPatternTests(rootDir, patternsDir, filter);
-  const memoryVersion = Deno.env.get("CT_TEST_MEMORY_VERSION") ??
-    Deno.env.get("CT_INTEGRATION_MEMORY_VERSION");
+  const memoryVersion = Deno.env.get("CF_TEST_MEMORY_VERSION") ??
+    Deno.env.get("CF_INTEGRATION_MEMORY_VERSION");
 
   if (testFiles.length === 0) {
     console.log("No pattern test files found.");
@@ -195,7 +195,7 @@ async function runPatternTests(
     `Found ${testFiles.length} pattern test(s), running ${concurrency} at a time`,
   );
   if (memoryVersion === "v1" || memoryVersion === "v2") {
-    console.log(`Using ct test memory version: ${memoryVersion}`);
+    console.log(`Using cf test memory version: ${memoryVersion}`);
   }
 
   const failed: string[] = [];
@@ -476,9 +476,9 @@ Examples:
 Environment:
   CF_BINARY      - Path to the cf binary (for pattern-tests target).
                    Falls back to running packages/cli/mod.ts via deno.
-  CT_TEST_MEMORY_VERSION - Force v1 or v2 for ct-based pattern tests.
-  CT_INTEGRATION_MEMORY_VERSION - Force v1 or v2 across integration harnesses,
-                   including ct-based pattern tests.
+  CF_TEST_MEMORY_VERSION - Force v1 or v2 for cf-based pattern tests.
+  CF_INTEGRATION_MEMORY_VERSION - Force v1 or v2 across integration harnesses,
+                   including cf-based pattern tests.
 
 Server ports (with offset):
   Toolshed:  ${ports.toolshed} + offset

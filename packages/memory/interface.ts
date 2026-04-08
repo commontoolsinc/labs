@@ -13,7 +13,7 @@ export type { FabricValue };
 export type { JSONValue };
 export type MemoryVersion = "v1" | "v2";
 export const DEFAULT_MEMORY_VERSION: MemoryVersion = "v2";
-export const INTEGRATION_MEMORY_VERSION_ENV = "CT_INTEGRATION_MEMORY_VERSION";
+export const INTEGRATION_MEMORY_VERSION_ENV = "CF_INTEGRATION_MEMORY_VERSION";
 
 type MaybeDeno = {
   env?: {
