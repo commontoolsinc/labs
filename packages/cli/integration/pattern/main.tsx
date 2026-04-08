@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive, NAME, pattern, str, UI } from "commonfabric";
 import "commonfabric/schema";
 import { decrement, increment, model } from "./utils.ts";

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Location Track Module - GPS coordinate tracking over time
  *

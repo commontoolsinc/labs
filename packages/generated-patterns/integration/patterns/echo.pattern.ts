@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { lift, pattern } from "commonfabric";
 
 interface EchoArgs {

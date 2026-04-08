@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Extractor Module - Controller sub-piece for LLM-assisted field extraction
  *

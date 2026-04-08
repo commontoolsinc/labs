@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commonfabric";
 
 // FIXTURE: cell-like-classes

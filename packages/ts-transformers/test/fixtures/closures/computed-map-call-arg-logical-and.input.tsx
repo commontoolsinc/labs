@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, pattern, UI } from "commonfabric";
 
 const identity = (x: unknown) => x;

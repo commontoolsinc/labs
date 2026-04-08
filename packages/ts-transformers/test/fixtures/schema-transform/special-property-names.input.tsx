@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { toSchema } from "commonfabric";
 
 interface LinkedData {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Idempotent Side Effects in computed()
  *

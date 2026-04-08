@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: bgUpdater Server vs Browser Execution
  *

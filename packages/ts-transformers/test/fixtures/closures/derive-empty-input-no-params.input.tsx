@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Writable, derive, pattern } from "commonfabric";
 
 // FIXTURE: derive-empty-input-no-params

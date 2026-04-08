@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, derive, lift, pattern, Writable } from "commonfabric";
 
 const liftSummary = lift<

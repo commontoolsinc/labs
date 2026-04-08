@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test case for nested map transformation inside ternary.
  *

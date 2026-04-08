@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Social Module - Pattern for social media profiles
  *

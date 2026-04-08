@@ -36,8 +36,7 @@ const keyConfig: IdentityCreateConfig = {
 
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
-const TEST_PROGRAM = `/// <cts-enable />
-import { Cell, NAME, pattern, UI } from "commonfabric";
+const TEST_PROGRAM = `import { Cell, NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
   const cell = Cell.of("hello");
   return {
@@ -50,8 +49,7 @@ export default pattern((_) => {
   };
 });`;
 
-const TEMP_PATTERN = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commonfabric";
+const TEMP_PATTERN = `import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface PatternState {
   count: Default<number, 0>;
@@ -388,8 +386,7 @@ describe("RuntimeClient", () => {
 
   describe("events", () => {
     it("emits console events from page execution", async () => {
-      const consolePattern = `/// <cts-enable />
-import { NAME, pattern, UI } from "commonfabric";
+      const consolePattern = `import { NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
   console.log('hello');
   return {
@@ -533,8 +530,8 @@ export default pattern((_) => {
 
     it("renders cell values in VNode children", async () => {
       // Pattern that renders a state value in the UI
-      const valuePattern = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commonfabric";
+      const valuePattern =
+        `import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface State {
   value: Default<number, 10>;
@@ -583,8 +580,8 @@ export default pattern<State>(({ value }) => {
 
     it("renders derived cell values (like nth function)", async () => {
       // Pattern that uses a derived expression similar to counter's nth(state.value)
-      const derivedPattern = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commonfabric";
+      const derivedPattern =
+        `import { Default, NAME, pattern, UI } from "commonfabric";
 
 function formatValue(n: number): string {
   return "number-" + n;
@@ -636,8 +633,8 @@ export default pattern<State>(({ value }) => {
     });
 
     it("dispatches click events through rendered page handlers", async () => {
-      const clickPattern = `/// <cts-enable />
-import { action, Default, NAME, pattern, UI, Writable } from "commonfabric";
+      const clickPattern =
+        `import { action, Default, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface State {
   value: Writable<Default<number, 0>>;

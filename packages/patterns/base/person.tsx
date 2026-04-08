@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Person - Canonical base pattern for person data.
  *

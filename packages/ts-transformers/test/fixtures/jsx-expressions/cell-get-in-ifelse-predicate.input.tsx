@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, ifElse, pattern, UI } from "commonfabric";
 
 // Reproduction of bug: .get() called on Cell inside ifElse predicate

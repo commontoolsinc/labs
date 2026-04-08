@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, Default, handler, lift, pattern, str } from "commonfabric";
 import type { Cell } from "commonfabric";
 

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Imported Calendar Pattern
  *

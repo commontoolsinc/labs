@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed } from "commonfabric";
 
 // FIXTURE: computed-reassigned-alias-no-rewrite

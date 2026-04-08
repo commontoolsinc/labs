@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, derive, handler, NAME, pattern, str, UI } from "commonfabric";
 
 const adder = handler((_, state: { values: Cell<string[]> }) => {

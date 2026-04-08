@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, pattern } from "commonfabric";
 
 // FIXTURE: cell-pattern-input-structure-recovery

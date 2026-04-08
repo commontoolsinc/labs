@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, NAME, pattern, Stream, UI } from "commonfabric";
 import { getValue, roll } from "./dice-handlers.ts";
 

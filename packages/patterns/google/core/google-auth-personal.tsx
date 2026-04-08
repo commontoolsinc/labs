@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Personal Google Auth Wrapper
  *

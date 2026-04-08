@@ -20,8 +20,6 @@ without rereading the whole branch history
 - CTS activation is now default-on.
 - Files can explicitly opt out with first-line
   `/// <cf-disable-transform />`.
-- Legacy `/// <cts-enable />` remains accepted for compatibility, but should be
-  treated as redundant rather than required.
 
 ## Migration Doctrine
 
@@ -131,7 +129,7 @@ Primary proof surface:
 
 ## Explicitly Not In This PR
 
-- removing legacy `/// <cts-enable />` compatibility entirely
+- removing `/// <cf-disable-transform />` as an explicit opt-out
 - call-site specialization for generic helpers
 - broader interprocedural capability-analysis expansion beyond the current
   same-source-file concrete-helper slice

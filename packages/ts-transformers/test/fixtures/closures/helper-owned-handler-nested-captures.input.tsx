@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TRANSFORM REPRO: helper-owned handler with nested callback captures
  *

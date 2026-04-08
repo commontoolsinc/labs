@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { handler, pattern, UI } from "commonfabric";
 
 declare global {

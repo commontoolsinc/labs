@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test: wish("#default") in pattern test harness
  *

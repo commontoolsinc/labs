@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface Item {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * FUTURE REPRO: patternized map callbacks should follow object-destructured aliases
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * computed() result used as derive capture should use .key("count"),
  * not plain property access. The computed() return value is an

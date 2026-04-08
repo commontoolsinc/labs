@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { ifElse, pattern, UI, Writable } from "commonfabric";
 
 interface Item {

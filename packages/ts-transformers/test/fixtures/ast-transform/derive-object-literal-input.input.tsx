@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, derive, lift } from "commonfabric";
 
 const stage = cell<string>("initial");

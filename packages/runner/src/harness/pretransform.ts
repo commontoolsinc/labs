@@ -1,9 +1,4 @@
-import {
-  injectCfHelpers,
-  sourceDisablesCfTransform,
-  sourceUsesCfDirective,
-  transformCfDirective,
-} from "@commonfabric/ts-transformers";
+import { transformCfDirective } from "@commonfabric/ts-transformers";
 import ts from "typescript";
 import { RuntimeProgram } from "./types.ts";
 
@@ -17,7 +12,7 @@ export function pretransformProgram(
 }
 
 // For each source file in the program, inject the internal helper import used
-// by the AST transformer unless the file explicitly opts out with
+// by the AST transformer by default. Files can explicitly opt out with
 // `/// <cf-disable-transform />`.
 export function transformInjectHelperModule(
   program: RuntimeProgram,
@@ -28,13 +23,7 @@ export function transformInjectHelperModule(
       name: source.name,
       contents: source.name.endsWith(".d.ts")
         ? source.contents
-        : normalizeMixedModuleImports(
-          sourceDisablesCfTransform(source.contents)
-            ? transformCfDirective(source.contents)
-            : sourceUsesCfDirective(source.contents)
-            ? transformCfDirective(source.contents)
-            : injectCfHelpers(source.contents),
-        ),
+        : normalizeMixedModuleImports(transformCfDirective(source.contents)),
     })),
     mainExport: program.mainExport,
   };

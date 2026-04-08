@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * USPS Informed Delivery Mail Analyzer
  *

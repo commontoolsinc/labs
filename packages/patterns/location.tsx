@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Location Module - Pattern for places/venues
  *

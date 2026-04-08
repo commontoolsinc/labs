@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: map-nested-conditional-no-name

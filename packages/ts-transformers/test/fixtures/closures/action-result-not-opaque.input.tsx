@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * action() results used as event handlers in JSX. action() is an
  * opaque origin but handler results are typically used directly

@@ -232,7 +232,6 @@ describe("Engine.compile()", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'const lookup = (() => ({ open: "Open" }))();',
             "export default lookup.open;",
           ].join("\n"),
@@ -255,7 +254,6 @@ describe("Engine.compile()", () => {
         {
           name: "/main.ts",
           contents: [
-            "/// <cts-enable />",
             'import { nonPrivateRandom, safeDateNow } from "commonfabric";',
             "const startedAt = safeDateNow();",
             "const seed = nonPrivateRandom();",
@@ -448,7 +446,6 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             "import { pattern, lift } from 'commonfabric';",
             "const doubled = lift((value: number) => value * 2);",
             "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
@@ -494,7 +491,6 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             "import { pattern, lift } from 'commonfabric';",
             "const doubled = lift((value: number) => value * 2);",
             "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
@@ -699,7 +695,6 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/helpers.ts",
           contents: [
-            "/// <cts-enable />",
             'import { lift } from "commonfabric";',
             "export const increment = lift((value: number) => value + 1);",
           ].join("\n"),
@@ -874,7 +869,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { lift } from "commonfabric";',
             'const labels = (() => ({ open: "Open" }))();',
             "export default lift(() => labels.open);",
@@ -897,7 +891,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { lift } from "commonfabric";',
             "const lookup = {",
             '  get open() { return "Open"; },',
@@ -922,7 +915,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { lift } from "commonfabric";',
             'const lookup = new Proxy({ open: "Open" }, {',
             "  get(target, key) {",
@@ -947,7 +939,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { lift } from "commonfabric";',
             "const lookup = (() => {",
             '  const tag = Symbol("open");',
@@ -973,7 +964,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { pattern } from "commonfabric";',
             "export default pattern(() => ({",
             "  ui: <>Hello</>,",
@@ -999,7 +989,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { safeDateNow } from "commonfabric";',
             "function buildYears() {",
             "  const currentYear = new Date(safeDateNow()).getFullYear();",
@@ -1031,7 +1020,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'const scopeMap = { gmail: "gmail.readonly" } as const;',
             "const scopes = Object.fromEntries(",
             "  Object.entries(scopeMap).map(([key, value]) => [key, { value }]),",
@@ -1058,7 +1046,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             "const matcher = /^[a-z]+$/;",
             "export default matcher;",
           ].join("\n"),
@@ -1104,7 +1091,6 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { TEMPLATE_REGISTRY } from "./template-registry.ts";',
             'export { INTERNAL_MODULE_TYPES } from "./schema-utils-pure.ts";',
             "export default TEMPLATE_REGISTRY.person.label;",

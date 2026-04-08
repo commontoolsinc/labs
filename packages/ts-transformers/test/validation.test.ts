@@ -231,8 +231,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   await t.step(
     "allows property access in JSX (transformer handles it)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+      const source = `      import { pattern, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -251,8 +250,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   await t.step(
     "allows passing property to function (pass-through)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+      const source = `      import { pattern, h } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -278,8 +276,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   await t.step(
     "allows optional chaining inside JSX expressions",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+      const source = `      import { pattern, h } from "commonfabric";
 
       interface Item { name?: string; nested?: { value: number } }
 
@@ -302,8 +299,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   await t.step(
     "errors on top-level optional call in pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern((input) => input?.foo());
     `;
@@ -324,8 +320,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   await t.step(
     "errors on statement-position optional call in pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern((input) => {
         input?.foo();
@@ -344,8 +339,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   await t.step(
     "errors on spread of pattern input outside computed()",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+      const source = `      import { pattern, h } from "commonfabric";
 
       interface State {
         name: string;
@@ -377,8 +371,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   );
 
   await t.step("allows .get() calls inside JSX expressions", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, Cell, h } from "commonfabric";
+    const source = `      import { pattern, Cell, h } from "commonfabric";
 
       export default pattern<{ count: Cell<number> }>(({ count }) => {
         return <div>Count: {count.get()}</div>;
@@ -402,8 +395,7 @@ Deno.test(
     await t.step(
       "errors on rest destructuring in pattern params",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       const p = pattern(({ foo, ...rest }) => <div>{foo}</div>);
     `;
@@ -426,8 +418,7 @@ Deno.test(
     await t.step(
       "allows array destructuring in pattern params",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       const p = pattern(([first]) => <div>{first}</div>);
     `;
@@ -446,8 +437,7 @@ Deno.test(
     await t.step(
       "errors on Object.keys/values/entries over pattern input",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       const p = pattern((input) => {
         Object.keys(input);
@@ -471,8 +461,7 @@ Deno.test(
     await t.step(
       "errors on dynamic key access over pattern input",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       const p = pattern((input, key: string) => input[key]);
     `;
@@ -489,8 +478,7 @@ Deno.test(
     );
 
     await t.step("allows known symbol key access", async () => {
-      const source = `/// <cts-enable />
-      import { NAME, UI, pattern } from "commonfabric";
+      const source = `      import { NAME, UI, pattern } from "commonfabric";
 
       const p = pattern(({ items }) =>
         items.map((item) => ({ n: item[NAME], u: item[UI] }))
@@ -508,8 +496,7 @@ Deno.test(
     });
 
     await t.step("allows SELF destructuring key", async () => {
-      const source = `/// <cts-enable />
-      import { SELF, pattern } from "commonfabric";
+      const source = `      import { SELF, pattern } from "commonfabric";
 
       const p = pattern(({ [SELF]: self, value }) => self);
     `;
@@ -525,8 +512,7 @@ Deno.test(
     });
 
     await t.step("errors on for..in over pattern input", async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       const p = pattern((input) => {
         for (const key in input) {
@@ -549,8 +535,7 @@ Deno.test(
     await t.step(
       "allows JSON.stringify over pattern input in return position",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       const p = pattern((input) => JSON.stringify(input));
     `;
@@ -572,8 +557,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on let declaration in top-level pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ count: number }>(({ count }) => {
         let display = count;
@@ -592,8 +576,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on loop in top-level pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern(() => {
         const values: number[] = [];
@@ -615,8 +598,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on early return in top-level pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ flag: boolean }>(({ flag }) => {
         if (flag) {
@@ -637,8 +619,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on let declaration in pattern-owned map callback",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         return items.map((item) => {
@@ -659,8 +640,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on loop in pattern-owned map callback",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         return items.map((item) => {
@@ -684,8 +664,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "allows early return inside computed callback",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ flag: boolean }>(({ flag }) => {
         return computed(() => {
@@ -711,8 +690,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on reassignment in top-level pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       let lastSeen = "";
 
@@ -733,8 +711,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "allows let and loops inside computed map callback",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         return computed(() =>
@@ -763,8 +740,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "allows let inside plain array callback in pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern(() => {
         const items = ["a", "b"];
@@ -789,8 +765,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "allows reassignment inside computed callback",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ count: number }>(({ count }) => {
         const next = computed(() => {
@@ -816,8 +791,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on var declaration in top-level pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ count: number }>(({ count }) => {
         var display = count;
@@ -836,8 +810,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on block-scoped early return inside pattern-owned nested map callback",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface State {
         sections: { tasks: { label: string }[]; tags: { name: string }[] }[];
@@ -879,8 +852,7 @@ Deno.test(
     await t.step(
       "allows top-level call-argument ternary in pattern body",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -900,8 +872,7 @@ Deno.test(
     await t.step(
       "allows top-level object-property logical-or in pattern body",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ label?: string }>((state) => ({
         label: state.label || "Pending",
@@ -918,8 +889,7 @@ Deno.test(
     await t.step(
       "allows top-level call-argument property access in pattern body",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -939,8 +909,7 @@ Deno.test(
     await t.step(
       "allows top-level object-property arithmetic in pattern body",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ count: number }>((state) => ({
         next: state.count + 1,
@@ -957,8 +926,7 @@ Deno.test(
     await t.step(
       "allows top-level object-property nullish coalescing in pattern body",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ label?: string | null }>((state) => ({
         label: state.label ?? "Pending",
@@ -975,8 +943,7 @@ Deno.test(
     await t.step(
       "allows top-level return-expression optional property access in pattern body",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ user?: { name: string } }>((state) =>
         state.user?.name
@@ -993,8 +960,7 @@ Deno.test(
     await t.step(
       "allows top-level call-argument optional property access in pattern body",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -1014,8 +980,7 @@ Deno.test(
     await t.step(
       "allows top-level object-property optional element access in pattern body",
       async () => {
-        const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+        const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ items?: string[] }>((state) => ({
         first: state.items?.[0],
@@ -1035,8 +1000,7 @@ Deno.test("Pattern Context Validation - Destructuring Defaults", async (t) => {
   await t.step(
     "errors on non-static default initializer destructuring",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       const fallback = "fallback";
 
@@ -1061,8 +1025,8 @@ Deno.test("Pattern Context Validation - Destructuring Defaults", async (t) => {
   await t.step(
     "errors on opaque local default destructuring",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, generateObject, pattern } from "commonfabric";
+      const source =
+        `      import { computed, generateObject, pattern } from "commonfabric";
 
       export default pattern<{ messages: string[] }>(({ messages }) => {
         const preview = computed(() => messages[0] ?? "");
@@ -1100,8 +1064,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "allows top-level object-property receiver method call in pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ name: string }>((state) => ({
         upper: state.name.toUpperCase(),
@@ -1118,8 +1081,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "allows top-level call-argument receiver method call in pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -1137,8 +1099,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   );
 
   await t.step("allows receiver method call inside JSX", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+    const source = `      import { pattern, h } from "commonfabric";
 
       export default pattern<{ name: string }>((state) => {
         return <div>{state.name.toUpperCase()}</div>;
@@ -1152,8 +1113,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   });
 
   await t.step("allows receiver method call inside computed()", async () => {
-    const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+    const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ name: string }>((state) => {
         const upper = computed(() => state.name.toUpperCase());
@@ -1170,8 +1130,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "allows receiver method call inside authored ifElse branch",
     async () => {
-      const source = `/// <cts-enable />
-      import { ifElse, pattern } from "commonfabric";
+      const source = `      import { ifElse, pattern } from "commonfabric";
 
       export default pattern<{ name: string; show: boolean }>((state) => ({
         value: ifElse(state.show, state.name.trim(), "fallback"),
@@ -1188,8 +1147,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "allows direct receiver-method root inside pattern-owned array-method callbacks",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         return items.map((item) => item.toUpperCase());
@@ -1206,8 +1164,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "allows call-argument receiver-method root inside pattern-owned array-method callbacks",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -1226,8 +1183,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "allows receiver-method roots through aliased reactive array-method chains",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>((state) => {
         const inner = computed(() => state.items);
@@ -1250,8 +1206,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "allows opaque array receiver-method calls nested inside array-callback expressions when the enclosing expression is lowerable",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Person {
         name: string;
@@ -1282,8 +1237,8 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "allows the same opaque array receiver-method call when wrapped in computed()",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern, UI } from "commonfabric";
+      const source =
+        `      import { computed, pattern, UI } from "commonfabric";
 
       interface Person {
         spotPreferences: string[];
@@ -1307,8 +1262,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
     "still errors on optional receiver-call root inside pattern-owned array-method callbacks",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ items: Array<string | undefined> }>(({ items }) => {
         return items.map((item) => item?.toUpperCase());
@@ -1326,8 +1280,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
 
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step("allows reading opaques inside computed()", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, computed, h } from "commonfabric";
+    const source = `      import { pattern, computed, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1348,8 +1301,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   });
 
   await t.step("allows reading opaques inside action()", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, action, h } from "commonfabric";
+    const source = `      import { pattern, action, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1372,8 +1324,8 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   });
 
   await t.step("allows reading opaques inside derive()", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, derive, Cell, h } from "commonfabric";
+    const source =
+      `      import { pattern, derive, Cell, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1396,8 +1348,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step(
     "allows reading opaques inside standalone derive()",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, derive, h } from "commonfabric";
+      const source = `      import { pattern, derive, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1423,8 +1374,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step(
     "errors on lift() inside pattern (must be at module scope)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, lift, h } from "commonfabric";
+      const source = `      import { pattern, lift, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1449,8 +1399,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step(
     "errors on handler() inside pattern (must be at module scope)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, handler, h } from "commonfabric";
+      const source = `      import { pattern, handler, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1479,8 +1428,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step(
     "allows reading opaques inside inline JSX event handlers",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, Cell, h } from "commonfabric";
+      const source = `      import { pattern, Cell, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1514,8 +1462,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step(
     "errors on standalone function declarations in pattern (must be at module scope)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, computed, h } from "commonfabric";
+      const source = `      import { pattern, computed, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1545,8 +1492,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step(
     "errors on standalone arrow functions in pattern (must be at module scope)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, computed, h } from "commonfabric";
+      const source = `      import { pattern, computed, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
@@ -1576,8 +1522,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
   await t.step(
     "errors on truthiness checks of locally created computed results",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
         const outer = computed(() => {
@@ -1603,8 +1548,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
   await t.step(
     "errors on arithmetic using a locally created computed result",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
         const outer = computed(() => {
@@ -1627,8 +1571,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
   await t.step(
     "allows nested computed callbacks to use locally created computed results",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
         const outer = computed(() => {
@@ -1651,8 +1594,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
   await t.step(
     "allows later computed callbacks to use outer computed results",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
         const foo = computed(() => 21);
@@ -1697,8 +1639,7 @@ Deno.test("Diagnostic output format", async (t) => {
 
 Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   await t.step("errors on arrow function in pattern body", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+    const source = `      import { pattern, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -1716,8 +1657,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("errors on function expression in pattern body", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+    const source = `      import { pattern, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -1735,8 +1675,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("errors on function declaration in pattern body", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+    const source = `      import { pattern, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -1754,8 +1693,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows arrow function inside computed()", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, computed, h } from "commonfabric";
+    const source = `      import { pattern, computed, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -1779,8 +1717,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows arrow function inside action()", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, action, h } from "commonfabric";
+    const source = `      import { pattern, action, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -1804,8 +1741,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows inline JSX event handler", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+    const source = `      import { pattern, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -1825,8 +1761,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows map callback inside JSX", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, h, OpaqueRef } from "commonfabric";
+    const source = `      import { pattern, h, OpaqueRef } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -1842,8 +1777,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows value-returning array callback inside JSX", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+    const source = `      import { pattern, h } from "commonfabric";
 
       interface Item { id: number; name: string; }
 
@@ -1863,8 +1797,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("errors on foreign callback container inside JSX", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+    const source = `      import { pattern, h } from "commonfabric";
 
       export default pattern<{ list: string[] }>(({ list }) => {
         return <div>{[0, 1].forEach(() => list.map((item) => item))}</div>;
@@ -1879,8 +1812,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows map callback outside JSX in pattern body", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, OpaqueRef } from "commonfabric";
+    const source = `      import { pattern, OpaqueRef } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -1908,8 +1840,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   await t.step(
     "allows arithmetic computation inside authored ifElse branches",
     async () => {
-      const source = `/// <cts-enable />
-      import { ifElse, pattern } from "commonfabric";
+      const source = `      import { ifElse, pattern } from "commonfabric";
 
       export default pattern<{ count: number; show: boolean }>(({ count, show }) => {
         return {
@@ -1932,8 +1863,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   await t.step(
     "allows nested map/filter callbacks inside module-scope helpers",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       interface Entry {
         label: string;
@@ -1971,8 +1901,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
 Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   await t.step("errors on lift() inside pattern body", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, lift, h } from "commonfabric";
+    const source = `      import { pattern, lift, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -1992,8 +1921,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   await t.step(
     "errors on lift() immediately invoked with computed suggestion",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, lift, h } from "commonfabric";
+      const source = `      import { pattern, lift, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -2017,8 +1945,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   );
 
   await t.step("errors on handler() inside pattern body", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, handler, h } from "commonfabric";
+    const source = `      import { pattern, handler, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -2038,8 +1965,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   await t.step(
     "does not report builder placement for shadowed lift helper",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, h } from "commonfabric";
+      const source = `      import { pattern, h } from "commonfabric";
 
       const lift = (fn: () => number) => fn();
 
@@ -2063,8 +1989,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   );
 
   await t.step("errors on aliased lift() inside pattern body", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, lift, h } from "commonfabric";
+    const source = `      import { pattern, lift, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -2090,8 +2015,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   });
 
   await t.step("allows lift() at module scope", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, lift, h } from "commonfabric";
+    const source = `      import { pattern, lift, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -2110,8 +2034,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   });
 
   await t.step("allows handler() at module scope", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, handler, h } from "commonfabric";
+    const source = `      import { pattern, handler, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -2133,8 +2056,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   });
 
   await t.step("allows computed() inside pattern", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, computed, h } from "commonfabric";
+    const source = `      import { pattern, computed, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -2155,8 +2077,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   });
 
   await t.step("allows action() inside pattern", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, action, h } from "commonfabric";
+    const source = `      import { pattern, action, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -2173,8 +2094,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   });
 
   await t.step("allows derive() inside pattern", async () => {
-    const source = `/// <cts-enable />
-      import { pattern, derive, h } from "commonfabric";
+    const source = `      import { pattern, derive, h } from "commonfabric";
 
       interface Item { price: number; }
 
@@ -2195,8 +2115,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "errors on .get() called on computed result",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, computed } from "commonfabric";
+      const source = `      import { pattern, computed } from "commonfabric";
 
       export default pattern<{ foo: number }>(({ foo }) => {
         const bar = computed(() => foo + 1);
@@ -2231,8 +2150,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "errors on .get() called on pattern input without Writable",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, computed } from "commonfabric";
+      const source = `      import { pattern, computed } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         const count = computed(() => items.get().length);
@@ -2251,8 +2169,8 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "allows .get() on Writable pattern input",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, computed, Writable } from "commonfabric";
+      const source =
+        `      import { pattern, computed, Writable } from "commonfabric";
 
       export default pattern<{ count: Writable<number> }>(({ count }) => {
         const doubled = computed(() => count.get() * 2);
@@ -2274,8 +2192,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "errors on top-level .get() on Writable path in pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, Writable } from "commonfabric";
+      const source = `      import { pattern, Writable } from "commonfabric";
 
       export default pattern((input: Writable<{ count: number; label: string }>) =>
         input.key("count").get()
@@ -2293,8 +2210,8 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "allows .get() on Cell pattern input",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, computed, Cell } from "commonfabric";
+      const source =
+        `      import { pattern, computed, Cell } from "commonfabric";
 
       export default pattern<{ count: Cell<number> }>(({ count }) => {
         const doubled = computed(() => count.get() * 2);
@@ -2316,8 +2233,8 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "allows .get() on Writable inside authored ifElse branch",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, ifElse, Writable } from "commonfabric";
+      const source =
+        `      import { pattern, ifElse, Writable } from "commonfabric";
 
       export default pattern<{ count: Writable<number>; show: boolean }>((
         { count, show },
@@ -2340,8 +2257,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "still errors on opaque .get() inside authored ifElse branch",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, ifElse } from "commonfabric";
+      const source = `      import { pattern, ifElse } from "commonfabric";
 
       export default pattern<{ items: string[]; show: boolean }>((
         { items, show },
@@ -2362,8 +2278,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "errors on statement-position .get() in pattern body",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         items.get();
@@ -2382,8 +2297,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "allows direct access on computed result (correct usage)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, computed } from "commonfabric";
+      const source = `      import { pattern, computed } from "commonfabric";
 
       export default pattern<{ foo: number }>(({ foo }) => {
         const bar = computed(() => foo + 1);
@@ -2406,8 +2320,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "does not report opaque-get on Cell lift callback input",
     async () => {
-      const source = `/// <cts-enable />
-      import { lift, Cell } from "commonfabric";
+      const source = `      import { lift, Cell } from "commonfabric";
 
       const readCount = lift<{ count: Cell<number> }>(({ count }) => {
         return count.get();
@@ -2430,8 +2343,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "does not report opaque-get on Cell handler callback state",
     async () => {
-      const source = `/// <cts-enable />
-      import { handler, Cell } from "commonfabric";
+      const source = `      import { handler, Cell } from "commonfabric";
 
       const increment = handler<unknown, { count: Cell<number> }>((
         _,
@@ -2457,8 +2369,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "errors on .get() called on lifted factory result",
     async () => {
-      const source = `/// <cts-enable />
-      import { lift } from "commonfabric";
+      const source = `      import { lift } from "commonfabric";
 
       const addOne = lift<{ count: number }>(({ count }) => count + 1);
       const result = addOne({ count: 1 });
@@ -2478,8 +2389,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "errors on .get() called on generateText result",
     async () => {
-      const source = `/// <cts-enable />
-      import { generateText } from "commonfabric";
+      const source = `      import { generateText } from "commonfabric";
 
       const text = generateText({ prompt: "hi" });
       const value = text.get();
@@ -2498,8 +2408,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   await t.step(
     "does not report opaque-get on same-named local helper result",
     async () => {
-      const source = `/// <cts-enable />
-      function generateText() {
+      const source = `      function generateText() {
         return { get: () => "hi" };
       }
 
@@ -2525,8 +2434,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .map() after ?? [] fallback with reactive left side",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -2551,8 +2459,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .map() after ?? [] fallback with cast-wrapped reactive left side",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Item {
         id: string;
@@ -2577,8 +2484,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .map() after ?? [] fallback with satisfies-wrapped reactive left side",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Item {
         id: string;
@@ -2603,8 +2509,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .map() after || [] fallback with reactive left side",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -2629,8 +2534,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .map() after ?? [] fallback without fallback-specific diagnostics",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -2657,8 +2561,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .filter() after ?? [] fallback with reactive left side",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -2686,8 +2589,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .flatMap() after ?? [] fallback with reactive left side",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -2715,8 +2617,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .map() on direct property access (correct usage)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -2745,8 +2646,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
     "allows .map() on non-reactive fallback (plain arrays)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commonfabric";
+      const source = `      import { pattern, UI } from "commonfabric";
 
       export default pattern<{}>(({}) => {
         const items: string[] | undefined = undefined;
@@ -2776,8 +2676,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
   await t.step(
     "errors when pattern return type infers as any (one type arg)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       declare function fetchAny(): any;
 
@@ -2797,8 +2696,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
   await t.step(
     "errors when pattern return type infers as any (no type args)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       declare function fetchAny(): any;
 
@@ -2818,8 +2716,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
   await t.step(
     "errors when pattern return type infers as unknown",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       declare function fetchUnknown(): unknown;
 
@@ -2839,8 +2736,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
   await t.step(
     "no error when pattern has explicit Output type",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       declare function fetchAny(): any;
 
@@ -2864,8 +2760,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
   await t.step(
     "no error when pattern returns a concrete type",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ count: number }>(({ count }) => {
         return { doubled: count * 2 };
@@ -2888,8 +2783,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "errors on computed() inside standalone function",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, Cell } from "commonfabric";
+      const source = `      import { computed, Cell } from "commonfabric";
 
       const count = {} as Cell<number>;
 
@@ -2914,8 +2808,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "errors on derive() inside standalone function",
     async () => {
-      const source = `/// <cts-enable />
-      import { derive, Cell } from "commonfabric";
+      const source = `      import { derive, Cell } from "commonfabric";
 
       const value = {} as Cell<number>;
 
@@ -2940,8 +2833,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "errors on .map() on reactive type inside standalone function",
     async () => {
-      const source = `/// <cts-enable />
-      import { cell } from "commonfabric";
+      const source = `      import { cell } from "commonfabric";
 
       const items = cell(["a", "b", "c"]);
 
@@ -2971,8 +2863,8 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "allows reactive operations in functions passed to patternTool()",
     async () => {
-      const source = `/// <cts-enable />
-      import { patternTool, derive, Cell } from "commonfabric";
+      const source =
+        `      import { patternTool, derive, Cell } from "commonfabric";
 
       const multiplier = {} as Cell<number>;
 
@@ -2995,8 +2887,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "keeps unresolved patternTool callbacks in compute context",
     async () => {
-      const source = `/// <cts-enable />
-      const helpers: Record<string, unknown> = {};
+      const source = `      const helpers: Record<string, unknown> = {};
 
       const tool = (helpers.patternTool as (fn: (input: { value?: string }) => string | undefined) => unknown)(
         (input) => input?.value,
@@ -3021,8 +2912,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "does not treat shadowed local patternTool helpers as safe wrappers in pattern context",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern } from "commonfabric";
+      const source = `      import { pattern } from "commonfabric";
 
       const patternTool = <T,>(fn: T) => fn;
 
@@ -3042,8 +2932,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "allows plain array .map() inside standalone function",
     async () => {
-      const source = `/// <cts-enable />
-      const helper = () => {
+      const source = `      const helper = () => {
         const items = ["a", "b", "c"];
         return items.map((item) => item.toUpperCase());
       };
@@ -3063,8 +2952,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "allows standalone function without reactive operations",
     async () => {
-      const source = `/// <cts-enable />
-      const helper = (x: number) => {
+      const source = `      const helper = (x: number) => {
         return x * 2 + 10;
       };
     `;
@@ -3083,8 +2971,8 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "allows reactive operations inside pattern body (not standalone)",
     async () => {
-      const source = `/// <cts-enable />
-      import { pattern, computed, Cell } from "commonfabric";
+      const source =
+        `      import { pattern, computed, Cell } from "commonfabric";
 
       export default pattern<{ count: Cell<number> }>(({ count }) => {
         const doubled = computed(() => count.get() * 2);
@@ -3106,8 +2994,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "errors only on inner function, not outer, when nested function has reactive ops",
     async () => {
-      const source = `/// <cts-enable />
-      import { computed, Cell } from "commonfabric";
+      const source = `      import { computed, Cell } from "commonfabric";
 
       const count = {} as Cell<number>;
 

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Chase Bill Tracker Pattern
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: handler capture rehydration with `.key(...).equals(...)`
  *

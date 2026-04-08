@@ -4,7 +4,7 @@ import type { PatternIntegrationScenario } from "../pattern-harness.ts";
 
 // CT-1334: fetchData() + derive() inside sub-pattern causes callback:error
 //
-// This test goes through the full ts-transformer pipeline (via cts-enable)
+// This test goes through the full ts-transformer pipeline (via default-on CTS transforms)
 // to verify that computed() closures capturing pattern params in template
 // literals are properly transformed and execute without callback:error.
 

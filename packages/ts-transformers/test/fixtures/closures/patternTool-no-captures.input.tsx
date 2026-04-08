@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
 
 type Output = {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { handler, Cell } from "commonfabric";
 
 interface CounterEvent {

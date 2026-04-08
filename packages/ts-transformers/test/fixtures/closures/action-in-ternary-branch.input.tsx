@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Regression test: action() result used in same ternary branch as computed()
  *

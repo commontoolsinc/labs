@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: computed() and derive() equivalence
  *

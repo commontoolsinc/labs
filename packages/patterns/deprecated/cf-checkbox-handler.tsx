@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, ifElse, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface CheckboxSimpleInput {

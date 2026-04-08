@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Folksonomy Stress Test - Performance Testing at Scale
  *

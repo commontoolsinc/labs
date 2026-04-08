@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Birthday Module - Pattern for birthday/date of birth tracking
  *

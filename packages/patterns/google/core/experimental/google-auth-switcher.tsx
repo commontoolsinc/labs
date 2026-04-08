@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Google Auth Switcher - Post-hoc Classification
  *

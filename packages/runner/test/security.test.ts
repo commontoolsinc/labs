@@ -247,7 +247,6 @@ describe("SES security regressions", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { type Cell, computed, Default, handler, pattern } from "commonfabric";',
             "",
             "interface Args {",
@@ -305,7 +304,6 @@ describe("SES security regressions", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             'import { computed, handler } from "commonfabric";',
             "",
             "const format = (value: string): string => value.toUpperCase();",

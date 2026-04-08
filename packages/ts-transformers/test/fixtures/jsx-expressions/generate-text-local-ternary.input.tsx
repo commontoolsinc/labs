@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { generateText, pattern, UI } from "commonfabric";
 
 // FIXTURE: generate-text-local-ternary

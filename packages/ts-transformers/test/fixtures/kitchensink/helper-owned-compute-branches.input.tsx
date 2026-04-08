@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * FIXTURE: helper-owned-compute-branches
  * Verifies: helper-owned branches inside computed() can mix compute-owned array

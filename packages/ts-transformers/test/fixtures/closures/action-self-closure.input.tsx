@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Fixture: action closing over SELF requires inputs with defaults so the
  * piece data always satisfies the output schema's required properties.

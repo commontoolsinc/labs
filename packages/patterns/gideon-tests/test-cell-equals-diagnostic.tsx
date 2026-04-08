@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * DIAGNOSTIC PATTERN: Understanding Cell.get() array access behavior
  *

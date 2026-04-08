@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, derive, fetchData, pattern } from "commonfabric";
 
 // CT-1334: Sub-pattern combining fetchData() + derive() with computed()

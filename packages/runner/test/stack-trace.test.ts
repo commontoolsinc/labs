@@ -317,7 +317,7 @@ describe("Stack trace source mapping", () => {
 
 describe("Stack trace source mapping with CTS transformer", () => {
   // Full CTS pattern transformation + source map integration tests are in
-  // stack-trace-patterns.test.ts which uses /// <cts-enable /> to run through
+  // stack-trace-patterns.test.ts which runs through
   // the real pattern compilation pipeline with full runtime types.
 
   it("preserves source positions for non-reactive code through CTS pipeline", async () => {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: $checked on computed results
  *

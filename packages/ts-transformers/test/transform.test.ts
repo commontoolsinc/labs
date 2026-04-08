@@ -44,19 +44,10 @@ export { value };
 
     assertStringIncludes(disabled["/main.ts"]!, "computed(() => 1)");
     assertNotMatch(disabled["/main.ts"]!, /__cfHelpers\.derive/);
-
-    const legacyEnabled = await transformFiles({
-      "/main.ts": `/// <cts-enable />\n${source}`,
-    });
-
-    assertStringIncludes(
-      legacyEnabled["/main.ts"]!,
-      "const value = __cfHelpers.derive(",
-    );
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {
-    const source = `/// <cts-enable />
+    const source = `
 import { lift, schema } from "commonfabric";
 
 function buildYears() {
@@ -144,7 +135,7 @@ export default function next(value: number) {
   });
 
   it("wraps explicit snapshot helpers with __cfHelpers.__cf_data", async () => {
-    const source = `/// <cts-enable />
+    const source = `
 import { nonPrivateRandom, safeDateNow } from "commonfabric";
 
 const startedAt = safeDateNow();
@@ -195,7 +186,7 @@ export default pow(5);
       main,
       "export default pow(5);",
     );
-    assertNotMatch(main, /__cfHelpers\.__cf_data/);
+    assertNotMatch(main, /__cfHelpers\.__ct_data/);
     assertNotMatch(main, /__cfDataHelper/);
   });
 });

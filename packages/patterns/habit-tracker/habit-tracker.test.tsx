@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Habit Tracker Pattern Tests
  *

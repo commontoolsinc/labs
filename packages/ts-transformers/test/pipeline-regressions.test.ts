@@ -10,8 +10,7 @@ import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 Deno.test(
   "Pipeline regression: manual mapWithPattern preserves computed plain-capture keys",
   async () => {
-    const source = `/// <cts-enable />
-import { pattern, UI } from "commonfabric";
+    const source = `import { pattern, UI } from "commonfabric";
 const key = "small" as const;
 const p = pattern<{ items: string[] }>((state) => ({
   [UI]: (
@@ -48,8 +47,8 @@ const p = pattern<{ items: string[] }>((state) => ({
 Deno.test(
   "Pipeline regression: nested authored ifElse predicate in helper-owned branch lowers to derive",
   async () => {
-    const source = `/// <cts-enable />
-import { computed, ifElse, pattern, UI } from "commonfabric";
+    const source =
+      `import { computed, ifElse, pattern, UI } from "commonfabric";
 
 interface ValidationIssue {
   message: string;
@@ -174,8 +173,8 @@ export default pattern<{
 Deno.test(
   "Pipeline regression: dynamic key access in helper-owned map callback initializer lowers without computation diagnostics",
   async () => {
-    const source = `/// <cts-enable />
-import { computed, ifElse, pattern, UI } from "commonfabric";
+    const source =
+      `import { computed, ifElse, pattern, UI } from "commonfabric";
 
 interface Field {
   targetModule: string;
@@ -285,8 +284,8 @@ Deno.test(
 Deno.test(
   "Pipeline regression: imported pattern factory calls with local cells stay structural",
   async () => {
-    const source = `/// <cts-enable />
-import { Writable, pattern, type PatternFactory } from "commonfabric";
+    const source =
+      `import { Writable, pattern, type PatternFactory } from "commonfabric";
 
 declare const Child: PatternFactory<{ value: number }, { value: number }>;
 
@@ -316,8 +315,7 @@ export default pattern(() => {
 Deno.test(
   "Pipeline regression: opaque-returning factory helpers with local cells stay structural",
   async () => {
-    const source = `/// <cts-enable />
-import { pattern, Writable } from "commonfabric";
+    const source = `import { pattern, Writable } from "commonfabric";
 
 function createAuthManager(input: { accountType: string }) {
   return pattern<{ accountType: string }, {
@@ -349,7 +347,7 @@ export default pattern(() => {
     assertStringIncludes(output, "const authManager = createAuthManager({");
     assertStringIncludes(output, "accountType: selectedAccountType,");
     assert(
-      !/__cfHelpers\.derive\([\s\S]{0,280}createAuthManager\(\{[\s\S]{0,120}accountType: selectedAccountType[\s\S]{0,120}\}\)\)/
+      !/__ctHelpers\.derive\([\s\S]{0,280}createAuthManager\(\{[\s\S]{0,120}accountType: selectedAccountType[\s\S]{0,120}\}\)\)/
         .test(
           output,
         ),
@@ -361,8 +359,7 @@ export default pattern(() => {
 Deno.test(
   "Pipeline regression: derive callbacks that rely on contextual typing still receive injected schemas",
   async () => {
-    const source = `/// <cts-enable />
-import { derive, pattern } from "commonfabric";
+    const source = `import { derive, pattern } from "commonfabric";
 
 const summarize = (values: string[]) => values.length;
 

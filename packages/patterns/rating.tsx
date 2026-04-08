@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Rating Module - Pattern for 1-5 star ratings
  *

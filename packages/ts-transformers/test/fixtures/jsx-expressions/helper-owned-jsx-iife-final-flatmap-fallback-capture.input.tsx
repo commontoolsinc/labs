@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE final flatMap callback captures reactive state
  * after the local receiver has been rewritten through a synthetic fallback wrapper.

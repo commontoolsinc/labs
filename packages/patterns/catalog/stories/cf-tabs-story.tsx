@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
 // deno-lint-ignore no-empty-interface

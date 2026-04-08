@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, NAME, pattern, UI, Writable } from "commonfabric";
 import { type CategoryBudget, type Expense } from "./schemas.tsx";
 import DataView from "./data-view.tsx";

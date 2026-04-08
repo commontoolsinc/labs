@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Regression: .map() on a property access of a computed result inside
  * another computed() should NOT be transformed to .mapWithPattern().

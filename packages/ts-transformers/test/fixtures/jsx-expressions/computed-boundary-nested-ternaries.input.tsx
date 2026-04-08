@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, ifElse, pattern } from "commonfabric";
 
 // FIXTURE: computed-boundary-nested-ternaries

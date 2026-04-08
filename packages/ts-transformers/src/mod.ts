@@ -10,7 +10,6 @@ export {
   injectCfHelpers,
   Pipeline,
   sourceDisablesCfTransform,
-  sourceUsesCfDirective,
   transformCfDirective,
   Transformer,
 } from "./core/mod.ts";

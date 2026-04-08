@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gender Module - Pattern for gender identity selection
  *

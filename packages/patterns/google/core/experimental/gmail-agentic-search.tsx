@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gmail Agentic Search - Base Pattern
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { NAME, pattern, Stream, UI, type VNode } from "commonfabric";
 import { Category } from "../../catalog.tsx";
 import { CategoryRow } from "./category-row.tsx";

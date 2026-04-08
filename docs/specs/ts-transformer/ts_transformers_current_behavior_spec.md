@@ -34,12 +34,11 @@ Before AST transforms, `transformCfDirective()`:
    - `import * as __cfHelpers from "commonfabric";`
    - helper `h(...)` forwarding to `__cfHelpers.h`.
 3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
-4. Strips either legacy `/// <cts-enable />` or opt-out
-   `/// <cf-disable-transform />` from the source before later stages.
+4. Strips opt-out `/// <cf-disable-transform />` from the source before later
+   stages.
 
-Legacy compatibility note:
+Opt-out note:
 
-- `/// <cts-enable />` is still accepted as a legacy no-op enable marker.
 - `/// <cf-disable-transform />` is the explicit opt-out.
 
 ### 2.2 Pipeline object

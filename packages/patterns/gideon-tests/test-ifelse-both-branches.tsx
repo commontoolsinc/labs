@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: ifElse Evaluates BOTH Branches
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: onClick Handler Inside derive() - VERIFIED BROKEN
  *

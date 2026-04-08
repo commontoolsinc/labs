@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { when, pattern, UI, NAME } from "commonfabric";
 
 interface State {

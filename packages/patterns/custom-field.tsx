@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Custom Field Module - Generic property/value pairs for structured data
  *

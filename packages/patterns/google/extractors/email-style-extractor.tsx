@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Email Style Extractor Pattern
  *

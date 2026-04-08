@@ -1,4 +1,3 @@
-/// <cts-enable />
 // Teaching example: CTS (Common Fabric TypeScript) generates JSON Schemas from
 // the
 // TypeScript types below. Patterns use typed inputs/outputs, and handlers take

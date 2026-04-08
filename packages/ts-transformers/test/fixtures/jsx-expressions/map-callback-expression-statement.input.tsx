@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TRANSFORM REPRO: patternized map callback should lower reactive expression statements
  *

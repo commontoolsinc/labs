@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern for Superstition #33
  *

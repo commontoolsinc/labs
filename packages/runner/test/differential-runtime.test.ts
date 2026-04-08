@@ -13,7 +13,6 @@ Deno.test("SES runtime matches legacy exports for valid authored programs", asyn
       {
         name: "/util.ts",
         contents: [
-          "/// <cts-enable />",
           "export function double(value: number) { return value * 2; }",
           "export const answer = 42;",
         ].join("\n"),
@@ -21,7 +20,6 @@ Deno.test("SES runtime matches legacy exports for valid authored programs", asyn
       {
         name: "/main.tsx",
         contents: [
-          "/// <cts-enable />",
           "import { answer } from './util.ts';",
           "export default answer;",
         ].join("\n"),
@@ -37,7 +35,6 @@ Deno.test("SES runtime matches legacy exports for top-level regex and IIFE-compu
       {
         name: "/main.tsx",
         contents: [
-          "/// <cts-enable />",
           "const matcher = /^[a-z.]+$/i;",
           "const label = ['clusters', 'north', 'alpha'].map((part) => String(part)).join('.');",
           "const summary = (() => ({ label, matches: matcher.test(label) }))();",
@@ -55,7 +52,6 @@ Deno.test("SES runtime matches legacy exports for bracket-accessed top-level dat
       {
         name: "/main.tsx",
         contents: [
-          "/// <cts-enable />",
           "const priorityOrder = { low: 2, medium: 1, high: 0 } as const;",
           "const criticalRank = priorityOrder['high'];",
           "export default criticalRank;",
@@ -72,7 +68,6 @@ Deno.test("SES runtime matches legacy exports for top-level Map and Set data", a
       {
         name: "/main.tsx",
         contents: [
-          "/// <cts-enable />",
           "const priorityByName = new Map([['low', 2], ['high', 0]]);",
           "const enabledChannels = new Set(['email', 'sms']);",
           "export default { priorityByName, enabledChannels };",
@@ -90,7 +85,6 @@ Deno.test("SES runtime preserves mapped authored error locations against legacy 
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             "export default function boom(): never {",
             "  throw new Error('boom');",
             "}",
@@ -110,14 +104,12 @@ Deno.test("SES runtime matches legacy pattern outputs for hoisted lift and local
         {
           name: "/math.ts",
           contents: [
-            "/// <cts-enable />",
             "export const bias = 3;",
           ].join("\n"),
         },
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             "import { lift, pattern } from 'commonfabric';",
             "import { bias } from './math.ts';",
             "const project = lift((value: number) => value * 2 + bias);",
@@ -138,7 +130,6 @@ Deno.test("SES runtime matches legacy pattern behavior for hoisted handler and i
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             "import { Cell, computed, derive, handler, lift, pattern } from 'commonfabric';",
             "const scale = 2;",
             "const double = lift((value: number) => value * scale);",
@@ -175,7 +166,6 @@ Deno.test("SES runtime matches legacy mapped named-export helper failures", asyn
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             "export function fail(event: { value?: string }) {",
             "  throw new Error(`boom:${event?.value ?? 'none'}`);",
             "}",
@@ -197,7 +187,6 @@ Deno.test("SES runtime preserves mapped hoisted handler failures against legacy 
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
             "import { Cell, handler, pattern } from 'commonfabric';",
             "const explode = handler((_event: unknown, context: { value: Cell<number> }) => {",
             "  throw new Error(`boom:${context.value.get() ?? 0}`);",

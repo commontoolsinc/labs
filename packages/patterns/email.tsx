@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Email Module - Pattern for a single email address with customizable label
  *

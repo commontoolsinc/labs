@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Regression: .map() on a computed result assigned to a local variable
  * inside another computed() should NOT be transformed to .mapWithPattern().

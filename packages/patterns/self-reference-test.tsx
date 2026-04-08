@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, pattern, SELF, UI, Writable } from "commonfabric";
 
 interface Input {

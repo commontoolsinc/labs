@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { lift } from "commonfabric";
 
 interface Person {

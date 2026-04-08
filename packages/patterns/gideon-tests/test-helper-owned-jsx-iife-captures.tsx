@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE drops captured reactive inputs
  *

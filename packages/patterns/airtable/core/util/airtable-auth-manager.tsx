@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Airtable Auth Manager - Unified auth management utility
  *

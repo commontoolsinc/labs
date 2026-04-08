@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, NAME, pattern, UI, type VNode, wish } from "commonfabric";
 
 // ===== Types =====

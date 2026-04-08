@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Simple List Module - A checklist with indent support
  *

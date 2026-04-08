@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, OpaqueCell, Stream } from "commonfabric";
 
 // FIXTURE: cell-static-factories

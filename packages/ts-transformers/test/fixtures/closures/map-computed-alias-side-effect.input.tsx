@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { pattern, UI } from "commonfabric";
 
 let keyCounter = 0;

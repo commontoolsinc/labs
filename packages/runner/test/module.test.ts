@@ -394,7 +394,6 @@ describe("module", () => {
 
     it("maps computed callsites through the CTS pipeline", async () => {
       const source = [
-        "/// <cts-enable />",
         'import { computed, pattern } from "commonfabric";',
         "export default pattern<{ items: boolean[] }>(({ items }) => {",
         "  const visible = computed(() => items.filter(Boolean));",
@@ -418,7 +417,6 @@ describe("module", () => {
 
     it("maps action callsites through the CTS pipeline", async () => {
       const source = [
-        "/// <cts-enable />",
         'import { action, pattern } from "commonfabric";',
         "export default pattern<{ value: number }>(({ value }) => {",
         "  const inc = action(() => value + 1);",
@@ -439,7 +437,6 @@ describe("module", () => {
 
     it("maps synthetic JSX compute callsites through the CTS pipeline", async () => {
       const source = [
-        "/// <cts-enable />",
         'import { pattern, UI } from "commonfabric";',
         "export default pattern<{ value: number }>(({ value }) => ({",
         "  [UI]: <div>{value + 1}</div>,",
@@ -459,7 +456,6 @@ describe("module", () => {
         {
           label: "lift",
           source: [
-            "/// <cts-enable />",
             'import { lift, pattern } from "commonfabric";',
             "const doubler = lift((value: number) => value * 2);",
             "export default pattern<{ value: number }>(({ value }) => ({ doubled: doubler(value) }));",
@@ -471,7 +467,6 @@ describe("module", () => {
         {
           label: "handler",
           source: [
-            "/// <cts-enable />",
             'import { handler, pattern } from "commonfabric";',
             "const click = handler((event: { delta: number }, state: { value: number }) => state.value + event.delta);",
             "export default pattern<{ value: number }>(({ value }) => ({ click: click({ value }) }));",
@@ -484,7 +479,6 @@ describe("module", () => {
         {
           label: "pattern",
           source: [
-            "/// <cts-enable />",
             'import { computed, pattern } from "commonfabric";',
             "export const Child = pattern<{ value: number }>(({ value }) => ({ doubled: computed(() => value * 2) }));",
             "export default pattern<{ value: number }>(({ value }) => ({ child: Child({ value }) }));",

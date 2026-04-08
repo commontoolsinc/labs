@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, cell, ComparableCell } from "commonfabric";
 
 // FIXTURE: cell-of-no-value

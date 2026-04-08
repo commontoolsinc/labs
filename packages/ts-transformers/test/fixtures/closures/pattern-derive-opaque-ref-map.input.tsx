@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive, pattern } from "commonfabric";
 
 // FIXTURE: pattern-derive-opaque-ref-map

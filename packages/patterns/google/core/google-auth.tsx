@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   __cf_data,
   computed,

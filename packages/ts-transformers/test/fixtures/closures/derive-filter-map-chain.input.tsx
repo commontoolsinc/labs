@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive, pattern } from "commonfabric";
 
 interface Preference {

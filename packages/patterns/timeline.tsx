@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Timeline Module - Pattern for project dates (start, target, completed)
  *

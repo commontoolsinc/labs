@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, computed, lift, pattern, wish } from "commonfabric";
 
 const passthrough = lift((items: string[]) => items);

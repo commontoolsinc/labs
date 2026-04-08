@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * ProcessingStatus - Reusable loading/progress indicator for previewUI
  *

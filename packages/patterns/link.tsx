@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Link Module - Pattern for web links/resources
  *

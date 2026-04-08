@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { handler } from "commonfabric";
 
 interface IncrementEvent {

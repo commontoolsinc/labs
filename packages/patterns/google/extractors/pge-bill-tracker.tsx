@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * PGE Bill Tracker Pattern
  *

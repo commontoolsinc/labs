@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, handler, nonPrivateRandom, Writable } from "commonfabric";
 
 export const roll = handler<

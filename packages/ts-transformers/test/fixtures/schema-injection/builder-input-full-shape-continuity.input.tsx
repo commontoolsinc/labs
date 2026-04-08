@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { lift, pattern, type Writable } from "commonfabric";
 
 // FIXTURE: builder-input-full-shape-continuity

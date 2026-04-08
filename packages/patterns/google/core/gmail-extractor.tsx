@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * GmailExtractor Building Block
  *

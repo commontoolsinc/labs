@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 
 const multiplier = Writable.of(2);

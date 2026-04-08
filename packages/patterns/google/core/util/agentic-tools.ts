@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Agentic Tools - Elegant utilities for creating LLM tool handlers
  *

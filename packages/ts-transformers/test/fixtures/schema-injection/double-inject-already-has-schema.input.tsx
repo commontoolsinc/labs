@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell } from "commonfabric";
 
 const existingSchema = { type: "number" } as const;

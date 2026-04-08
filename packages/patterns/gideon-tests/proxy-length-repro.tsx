@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Minimal pattern exposing a computed array and a string output.
  * Used to reproduce the .length bug on reactive proxy values.

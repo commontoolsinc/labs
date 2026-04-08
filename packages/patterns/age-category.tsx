@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Age Category Module - Pattern for categorizing age groups
  *

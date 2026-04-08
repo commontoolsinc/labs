@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive, JSONSchema, NAME, pattern, UI } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 

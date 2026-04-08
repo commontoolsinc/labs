@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Flight Calendar Bridge
  *

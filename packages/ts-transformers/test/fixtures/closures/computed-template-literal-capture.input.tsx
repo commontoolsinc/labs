@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, pattern } from "commonfabric";
 
 // CT-1334: computed() with template literal capturing pattern parameter.

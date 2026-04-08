@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * FIXTURE: nested-writable-pattern-branches
  * Verifies: pattern-owned maps on explicit Writable inputs stay pattern-lowered

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 import { Controls, SelectControl } from "../ui/controls/index.ts";
 

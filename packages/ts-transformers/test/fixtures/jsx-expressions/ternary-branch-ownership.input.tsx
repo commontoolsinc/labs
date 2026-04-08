@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, pattern, UI, Writable } from "commonfabric";
 
 interface TagEvent {

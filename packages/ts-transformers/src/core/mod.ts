@@ -73,6 +73,5 @@ export {
   injectCfDataHelper,
   injectCfHelpers,
   sourceDisablesCfTransform,
-  sourceUsesCfDirective,
   transformCfDirective,
 } from "./cf-helpers.ts";

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, pattern, UI } from "commonfabric";
 
 interface State {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Calendar Change Detector Pattern
  *

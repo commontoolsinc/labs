@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { handler, Writable } from "commonfabric";
 
 interface CounterEvent {

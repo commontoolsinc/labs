@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Tags Module - Pattern for tag/label management
  *

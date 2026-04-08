@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Berkeley Public Library Email Pattern
  *

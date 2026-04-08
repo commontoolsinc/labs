@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * FamilyMember - Sub-type pattern extending PersonLike.
  *

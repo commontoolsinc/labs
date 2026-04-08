@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 interface CategoryRowInput {

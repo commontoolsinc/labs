@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Record Icon Module - Pattern for manually setting a record's emoji icon
  *

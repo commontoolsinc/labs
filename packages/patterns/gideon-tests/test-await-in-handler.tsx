@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Verify "Never use await in handlers" claim
  *

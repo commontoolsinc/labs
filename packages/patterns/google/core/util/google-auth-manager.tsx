@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Google Auth Manager - Unified auth management utility
  *

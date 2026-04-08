@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test pattern to validate generateObject error handling snippet for LLM.md
  *

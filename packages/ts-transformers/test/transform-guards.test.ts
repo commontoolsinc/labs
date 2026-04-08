@@ -6,8 +6,7 @@ import { transformSource } from "./utils.ts";
 Deno.test(
   "Transform guards: nested block shadowing does not leak opaque alias roots",
   async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commonfabric";
+    const source = `import { pattern } from "commonfabric";
 const p = pattern((input: { user: { name: string }; value: { foo: number } }) => {
   const value = { foo: 1 };
   {
@@ -29,8 +28,7 @@ const p = pattern((input: { user: { name: string }; value: { foo: number } }) =>
 Deno.test(
   "Transform guards: plain callback parameter map is not rewritten in pattern",
   async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commonfabric";
+    const source = `import { pattern } from "commonfabric";
 const p = pattern((input: { ok: boolean }) => {
   const out = ((arr: number[]) => arr.map((x) => x + 1))([1, 2]);
   return <div>{out.length}</div>;
@@ -47,8 +45,7 @@ const p = pattern((input: { ok: boolean }) => {
 Deno.test(
   "Transform guards: rewritten mapWithPattern callback uses key(...) canonicalization",
   async () => {
-    const source = `/// <cts-enable />
-import { pattern, derive } from "commonfabric";
+    const source = `import { pattern, derive } from "commonfabric";
 const p = pattern((input: { list: Array<{ name: string; age: number }> }) => <div>{derive(input.list, (v) => v).map(({ name }) => <span>{name}</span>)}</div>);
 `;
 
@@ -76,8 +73,7 @@ Deno.test(
         { property: "set", extraAssert: (_output: string) => {} },
       ]
     ) {
-      const source = `/// <cts-enable />
-import { pattern, UI } from "commonfabric";
+      const source = `import { pattern, UI } from "commonfabric";
 interface State { ${property}: string; items?: string[] }
 const p = pattern<State>((state) => ({
   [UI]: <div>{state.${property}}</div>,
@@ -95,8 +91,7 @@ const p = pattern<State>((state) => ({
 Deno.test(
   "Transform guards: numeric element-access receiver keys use canonical numeric values",
   async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commonfabric";
+    const source = `import { pattern } from "commonfabric";
 interface Item { name: string }
 interface Group { items: Item[] }
 const p = pattern((input: { groups: Group[] }) =>
@@ -117,8 +112,7 @@ const p = pattern((input: { groups: Group[] }) =>
 Deno.test(
   "Transform guards: unsupported reactive array find() does not lower to findWithPattern",
   async () => {
-    const source = `/// <cts-enable />
-import { pattern, UI } from "commonfabric";
+    const source = `import { pattern, UI } from "commonfabric";
 interface Item { id: number; name: string }
 interface State { items: Item[] }
 const p = pattern<State>((state) => ({
@@ -135,8 +129,7 @@ const p = pattern<State>((state) => ({
 Deno.test(
   "Transform guards: aliased get-result callbacks inside computed stay plain",
   async () => {
-    const source = `/// <cts-enable />
-import { computed, pattern, UI } from "commonfabric";
+    const source = `import { computed, pattern, UI } from "commonfabric";
 
 interface Habit {
   name: string;
@@ -191,8 +184,7 @@ export default pattern<Input>(({ habits, logs, todayDate }) => {
 Deno.test(
   "Transform guards: ternary branch derive absorbs inner arithmetic instead of nesting",
   async () => {
-    const source = `/// <cts-enable />
-import { pattern, UI } from "commonfabric";
+    const source = `import { pattern, UI } from "commonfabric";
 
 interface Item {
   id: number;
@@ -236,8 +228,7 @@ export default pattern<State>((state) => ({
 Deno.test(
   "Transform guards: ifElse predicate binary is not treated as a pattern-owned branch",
   async () => {
-    const source = `/// <cts-enable />
-import { ifElse, pattern, UI } from "commonfabric";
+    const source = `import { ifElse, pattern, UI } from "commonfabric";
 
 interface Field {
   name: string;
@@ -273,8 +264,7 @@ export default pattern<{ fields: Field[] }>((state) => ({
 Deno.test(
   "Transform guards: helper-owned non-cell get() calls are not force-wrapped",
   async () => {
-    const source = `/// <cts-enable />
-import { ifElse, pattern, UI } from "commonfabric";
+    const source = `import { ifElse, pattern, UI } from "commonfabric";
 
 interface State {
   show: boolean;
@@ -312,8 +302,8 @@ export default pattern<State>((state) => {
 Deno.test(
   "Transform guards: helper-owned child key references stay structural",
   async () => {
-    const source = `/// <cts-enable />
-import { Cell, Default, handler, lift, pattern, Stream } from "commonfabric";
+    const source =
+      `import { Cell, Default, handler, lift, pattern, Stream } from "commonfabric";
 
 const childIncrement = handler(
   (event: { amount?: number } | undefined, context: { value: Cell<number> }) => {
@@ -376,8 +366,8 @@ export default pattern<{ left: Default<number, 0>; right: Default<number, 0> }>(
 Deno.test(
   "Transform guards: ordinary helper calls with child key references stay structural",
   async () => {
-    const source = `/// <cts-enable />
-import { Cell, Default, handler, pattern, type Stream } from "commonfabric";
+    const source =
+      `import { Cell, Default, handler, pattern, type Stream } from "commonfabric";
 
 const asIncrementStream = (
   ref: unknown,

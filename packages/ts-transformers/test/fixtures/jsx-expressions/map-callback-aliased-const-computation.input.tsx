@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TRANSFORM REPRO: patternized map callback should compute-wrap uses of aliased field refs
  *

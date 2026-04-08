@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Integration test pattern for when/unless operators.
  *

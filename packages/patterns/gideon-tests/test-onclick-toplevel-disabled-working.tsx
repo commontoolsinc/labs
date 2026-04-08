@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Top-Level Button with Disabled Attribute - WORKING
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Folksonomy Tags - Community-Enabled Tag List Sub-Pattern
  *

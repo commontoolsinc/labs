@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: JSX is Automatically Reactive
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Factory for creating OAuth auth manager patterns.
  *

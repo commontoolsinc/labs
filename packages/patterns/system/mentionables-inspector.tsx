@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, NAME, pattern, UI, wish } from "commonfabric";
 
 export default pattern<Record<string, never>>((_) => {

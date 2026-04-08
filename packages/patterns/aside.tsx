@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { NAME, pattern, UI } from "commonfabric";
 
 // note: you may need to zoom in our out in the browser to see the

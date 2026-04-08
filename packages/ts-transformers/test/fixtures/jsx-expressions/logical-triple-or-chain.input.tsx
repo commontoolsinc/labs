@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, pattern, UI } from "commonfabric";
 
 // Tests triple || chain: a || b || c

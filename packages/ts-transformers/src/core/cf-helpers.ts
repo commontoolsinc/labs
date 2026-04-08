@@ -144,7 +144,6 @@ export class CFHelpers {
   }
 }
 
-const CTS_ENABLE_DIRECTIVE_RE = /^\/\/\/\s*<cts-enable\s*\/>/m;
 const CF_DISABLE_TRANSFORM_DIRECTIVE_RE =
   /^\/\/\/\s*<cf-disable-transform\s*\/>/m;
 
@@ -183,15 +182,6 @@ export function transformCfDirective(
     ].join("\n");
   }
 
-  if (sourceUsesCfDirective(source)) {
-    return [
-      ...lines.slice(0, firstContentLineIndex),
-      HELPERS_STMT,
-      ...lines.slice(firstContentLineIndex + 1),
-      HELPERS_USED_STMT,
-    ].join("\n");
-  }
-
   return injectCfHelpers(source);
 }
 
@@ -214,22 +204,11 @@ export function injectCfDataHelper(source: string): string {
   ].join("\n");
 }
 
-export function sourceUsesCfDirective(source: string): boolean {
-  const lines = source.split("\n");
-  const firstContentLineIndex = findFirstContentLineIndex(lines);
-  return firstContentLineIndex !== null &&
-    isCTSEnabled(lines[firstContentLineIndex]!);
-}
-
 export function sourceDisablesCfTransform(source: string): boolean {
   const lines = source.split("\n");
   const firstContentLineIndex = findFirstContentLineIndex(lines);
   return firstContentLineIndex !== null &&
     isCFTransformDisabled(lines[firstContentLineIndex]!);
-}
-
-function isCTSEnabled(line: string) {
-  return CTS_ENABLE_DIRECTIVE_RE.test(line);
 }
 
 function isCFTransformDisabled(line: string) {

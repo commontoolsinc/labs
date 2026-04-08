@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell } from "commonfabric";
 
 declare function fetchAny(): any;

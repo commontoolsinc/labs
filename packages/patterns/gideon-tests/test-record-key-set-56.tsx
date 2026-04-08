@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Superstition #56 - Record .key().set() in handlers
  *

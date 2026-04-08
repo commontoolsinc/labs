@@ -56,8 +56,7 @@ export interface PromptContext {
 // ---------------------------------------------------------------------------
 
 // Read from: packages/patterns/airtable/core/airtable-auth.tsx
-const AIRTABLE_AUTH_SOURCE = `/// <cts-enable />
-import {
+const AIRTABLE_AUTH_SOURCE = `import {
   computed,
   Default,
   handler,
@@ -933,8 +932,7 @@ export default pattern<Input, Output>(
 `;
 
 // Read from: packages/patterns/airtable/core/util/airtable-auth-manager.tsx
-const AIRTABLE_AUTH_MANAGER_SOURCE = `/// <cts-enable />
-/**
+const AIRTABLE_AUTH_MANAGER_SOURCE = `/**
  * Airtable Auth Manager - Unified auth management utility
  *
  * Encapsulates Airtable Auth best practices:
@@ -1351,8 +1349,7 @@ export class AirtableClient {
 }`;
 
 // Read from: packages/patterns/airtable/airtable-importer.tsx
-const AIRTABLE_IMPORTER_SOURCE = `/// <cts-enable />
-import {
+const AIRTABLE_IMPORTER_SOURCE = `import {
   computed,
   Default,
   handler,
@@ -2049,7 +2046,6 @@ components.
 
 All patterns start with:
 \`\`\`tsx
-/// <cts-enable />
 import {
   computed, Default, handler, ifElse, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
@@ -2278,7 +2274,7 @@ A thin auth pattern that wraps the \`<cf-oauth>\` component. Follow the Airtable
 auth reference exactly, adapting for ${providerLabel}. Uses shared utilities
 from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 
-- First line: \`/// <cts-enable />\`
+- CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
 - Export a type \`${pascalName}Auth\` with fields:
   - \`accessToken: Default<Secret<string>, "">\`  (or \`token\` if the provider uses that convention)
   - \`tokenType: Default<string, "">\`
@@ -2309,7 +2305,7 @@ ${
 
 Auth manager utility pattern. Uses the shared \`createAuthManager()\` factory — follow the Airtable auth manager reference exactly:
 
-- First line: \`/// <cts-enable />\`
+- CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
 - Import \`createAuthManager\` from \`"../../../auth/create-auth-manager.tsx"\`
 - Import \`AuthManagerDescriptor\` type from \`"../../../auth/auth-manager-descriptor.ts"\`
 - Import the auth pattern: \`import ${pascalName}Auth from "../${providerName}-auth.tsx";\`
@@ -2351,7 +2347,7 @@ ${
 
 Main importer pattern. Follow the Airtable importer reference:
 
-- First line: \`/// <cts-enable />\`
+- CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
 - Import from \`"commonfabric"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable, safeDateNow, nonPrivateRandom (only when needed)
 - Import the auth manager and client
 - Define module-scope \`handler()\` functions for each API call:
@@ -2385,7 +2381,7 @@ Main importer pattern. Follow the Airtable importer reference:
 6. **Token refresh on 401** — Client auto-refreshes via server endpoint
 7. **No React patterns** — No useState, useEffect, hooks, or re-rendering
 8. **Data in <table>** — Use standard HTML table with inline styles for data display
-9. **First line: \`/// <cts-enable />\`** — Required for all .tsx pattern files
+9. **CTS transforms are enabled by default** — Do not add \`/// <cf-disable-transform />\` unless you are intentionally opting out
 10. **Import from "commonfabric"** — Not from individual packages
 </instructions>`);
 

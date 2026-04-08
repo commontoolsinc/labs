@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * United Airlines Flight Tracker
  *

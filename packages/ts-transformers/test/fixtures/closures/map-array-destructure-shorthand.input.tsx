@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { pattern, UI } from "commonfabric";
 
 type ItemTuple = [item: string, count: number];

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Text Swapper
  *

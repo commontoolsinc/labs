@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { fetchData, pattern, UI } from "commonfabric";
 
 interface Item {

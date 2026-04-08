@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test that exercises a non-idempotent Set-to-Array computation.
  * Random sort before Set insertion changes iteration order each run.

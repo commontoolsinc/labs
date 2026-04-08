@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, pattern, UI } from "commonfabric";
 
 // FIXTURE: computed-jsx-local-function

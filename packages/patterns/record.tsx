@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Record Pattern v2 - True Sub-Piece Architecture
  *

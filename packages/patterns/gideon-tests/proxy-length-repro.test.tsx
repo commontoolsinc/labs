@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test: .length on reactive proxy values from pattern instances.
  *
