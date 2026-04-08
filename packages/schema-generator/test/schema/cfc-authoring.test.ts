@@ -166,4 +166,25 @@ describe("Schema: CFC authoring aliases", () => {
       "string",
     );
   });
+
+  it("falls back to ordinary schema generation when a canonical alias expansion cannot be resolved", async () => {
+    const code = `
+      type OpaqueInput<T, Spec extends true | { schema?: unknown; allowPassThrough?: boolean } = true> = MaybeOpaque<T>;
+      type MaybeOpaque<T> = T;
+
+      interface SchemaRoot {
+        value: OpaqueInput<{ title: string }>;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const value = schema.properties?.value as any;
+    expect(value.type).toBe("object");
+    expect(value.properties?.title?.type).toBe("string");
+    expect(value.ifc).toBeUndefined();
+  });
 });

@@ -186,7 +186,7 @@ to keep that boundary clear:
 - [x] Lower `OpaqueInput<T, Spec>` to the schema of `T` plus `ifc.opaque`
 - [x] Preserve `WriteAuthorizedBy` binding identity through a cross-stage
       marker that can be rehydrated during schema emission
-- [ ] Fall back to ordinary schema generation when unsupported alias expansion
+- [x] Fall back to ordinary schema generation when unsupported alias expansion
       cannot be resolved, except for required hard diagnostics such as invalid
       `WriteAuthorizedBy`
 - [ ] Prove deterministic output across inferred and explicit schema paths so
