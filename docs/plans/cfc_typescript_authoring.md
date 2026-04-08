@@ -246,7 +246,7 @@ to keep that boundary clear:
 
 - [ ] Add transformer tests for alias expansion, projection path encoding,
       `OpaqueInput`, JSX helper rewriting, and `WriteAuthorizedBy` diagnostics
-- [ ] Add schema-generator tests for every canonical alias and metadata merge
+- [x] Add schema-generator tests for every canonical alias and metadata merge
       path
 - [ ] Add parity tests proving identical CFC output for:
       inferred schemas, explicit `toSchema<T>()`, and explicit output schema

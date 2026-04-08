@@ -88,4 +88,82 @@ describe("Schema: CFC authoring aliases", () => {
     expect(secret.properties?.value?.type).toBe("string");
     expect(secret.ifc?.classification).toEqual(["secret"]);
   });
+
+  it("lowers the remaining canonical metadata aliases and merges nested Cfc metadata", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+      type Classified<T, X extends readonly string[]> = Cfc<T, { classification: X }>;
+      type Integrity<T, X extends readonly string[]> = Cfc<T, { integrity: X }>;
+      type AddIntegrity<T, X extends readonly string[]> = Cfc<T, { addIntegrity: X }>;
+      type RequiresIntegrity<T, X extends readonly string[]> = Cfc<T, { requiredIntegrity: X }>;
+      type MaxConfidentiality<T, X extends readonly string[]> = Cfc<T, { maxConfidentiality: X }>;
+      type ExactCopy<T, P extends string> = Cfc<T, { exactCopyOf: P }>;
+      type LengthPreservedFrom<T, P extends string> = Cfc<T, { collection: { sourceCollection: P; lengthPreserved: true } }>;
+      type FilteredFrom<T, P extends string> = Cfc<T, { collection: { filteredFrom: P } }>;
+      type SubsetOf<T, P extends string> = Cfc<T, { collection: { subsetOf: P } }>;
+      type PermutationOf<T, P extends string> = Cfc<T, { collection: { permutationOf: P } }>;
+      type OpaqueInput<T, Spec extends true | { schema?: unknown; allowPassThrough?: boolean } = true> = Cfc<T, { opaque: Spec }>;
+
+      interface SchemaRoot {
+        classified: Classified<string, readonly ["classified"]>;
+        integrity: Integrity<string, readonly ["integrity"]>;
+        addIntegrity: AddIntegrity<string, readonly ["add-integrity"]>;
+        requiresIntegrity: RequiresIntegrity<string, readonly ["required-integrity"]>;
+        maxConfidentiality: MaxConfidentiality<string, readonly ["max-confidentiality"]>;
+        exactCopy: ExactCopy<string, "/source">;
+        lengthPreserved: LengthPreservedFrom<string[], "/collection">;
+        filteredFrom: FilteredFrom<string[], "/filtered">;
+        subsetOf: SubsetOf<string[], "/subset">;
+        permutationOf: PermutationOf<string[], "/permutation">;
+        opaque: OpaqueInput<string, { schema: { type: "string" }; allowPassThrough: false }>;
+        merged: Cfc<Classified<{ value: string }, readonly ["nested"]>, { integrity: readonly ["outer"] }>;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    expect((schema.properties?.classified as any).ifc?.classification).toEqual([
+      "classified",
+    ]);
+    expect((schema.properties?.integrity as any).ifc?.integrity).toEqual([
+      "integrity",
+    ]);
+    expect((schema.properties?.addIntegrity as any).ifc?.addIntegrity)
+      .toEqual(["add-integrity"]);
+    expect((schema.properties?.requiresIntegrity as any).ifc?.requiredIntegrity)
+      .toEqual(["required-integrity"]);
+    expect((schema.properties?.maxConfidentiality as any).ifc?.maxConfidentiality)
+      .toEqual(["max-confidentiality"]);
+    expect((schema.properties?.exactCopy as any).ifc?.exactCopyOf)
+      .toBe("/source");
+    expect((schema.properties?.lengthPreserved as any).ifc?.collection).toEqual({
+      sourceCollection: "/collection",
+      lengthPreserved: true,
+    });
+    expect((schema.properties?.filteredFrom as any).ifc?.collection).toEqual({
+      filteredFrom: "/filtered",
+    });
+    expect((schema.properties?.subsetOf as any).ifc?.collection).toEqual({
+      subsetOf: "/subset",
+    });
+    expect((schema.properties?.permutationOf as any).ifc?.collection).toEqual({
+      permutationOf: "/permutation",
+    });
+    expect((schema.properties?.opaque as any).ifc?.opaque).toEqual({
+      schema: { type: "string" },
+      allowPassThrough: false,
+    });
+    expect((schema.properties?.merged as any).ifc?.classification).toEqual([
+      "nested",
+    ]);
+    expect((schema.properties?.merged as any).ifc?.integrity).toEqual([
+      "outer",
+    ]);
+    expect((schema.properties?.merged as any).properties?.value?.type).toBe(
+      "string",
+    );
+  });
 });
