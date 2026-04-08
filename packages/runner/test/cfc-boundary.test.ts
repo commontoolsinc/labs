@@ -491,6 +491,78 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("keeps no-op attempted targets in potentialWrites for labeled paths", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      const seededCell = runtime.getCell(
+        signer.did(),
+        "cfc-noop-potential-write",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        seed,
+      );
+      seededCell.set({ secret: "same" });
+      seed.prepareCfc();
+      const seedResult = await seed.commit();
+      expect(seedResult.ok).toBeDefined();
+      const seededId = parseLink(seededCell.getAsLink()).id!;
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-noop-potential-write",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        tx,
+      );
+      cell.key("secret").set("same");
+      expect(tx.getCfcState().relevant).toBe(true);
+
+      const digestInput = (
+        tx as unknown as {
+          buildPreparedDigestInput(): {
+            potentialWrites: Array<{
+              space: string;
+              id: string;
+              type: string;
+              path: string[];
+            }>;
+            writes: Array<unknown>;
+          };
+        }
+      ).buildPreparedDigestInput();
+      expect(digestInput.potentialWrites).toContainEqual({
+        space: signer.did(),
+        id: seededId,
+        type: "application/json",
+        path: ["secret"],
+      });
+      expect(digestInput.writes).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("persists cfc metadata and canonical schema documents for prepared writes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

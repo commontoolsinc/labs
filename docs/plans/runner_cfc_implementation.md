@@ -469,7 +469,7 @@ Tasks:
 - [x] Build a canonical extractor over the v2 inspection APIs
 - [x] Surface tx `potentialWrites` as the phase-1 maybe-write target set
 - [x] Produce a deterministic final-per-path `writes` set for phase 1
-- [ ] Preserve no-op attempted-target coverage through `potentialWrites`
+- [x] Preserve no-op attempted-target coverage through `potentialWrites`
 - [ ] Add JSDoc and guardrails on internal `tx.write*` APIs explaining that
       phase-1 no-op attempted-target coverage relies on higher-level diff paths
       using `markReadAsPotentialWrite`; blind same-value direct writes are not
@@ -517,7 +517,7 @@ Tasks:
       consumed read
 - [x] Mark write-only transactions relevant when the target path carries CFC
       obligations even if no read happened first
-- [ ] Treat attempted no-op writes as relevant when they appear in
+- [x] Treat attempted no-op writes as relevant when they appear in
       `potentialWrites` for a path carrying CFC obligations
 - [ ] Ensure dependency-discovery transactions and other non-committing
       inspection transactions do not trigger prepare
@@ -529,7 +529,7 @@ Acceptance:
 - [x] Reading unlabeled plain data does not mark it relevant
 - [x] Writing to a path with stored or schema-derived CFC metadata marks it
       relevant
-- [ ] Attempting a no-op write to a path with stored or schema-derived CFC
+- [x] Attempting a no-op write to a path with stored or schema-derived CFC
       metadata still marks it relevant
 - [ ] Dependency-collection transactions remain unaffected
 
