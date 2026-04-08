@@ -881,21 +881,21 @@ Land the work in mergeable vertical slices:
 1. [x] Types, canonical path helpers, write-policy input helpers, and digest
        helpers
 2. [x] Transaction CFC state and rollout modes with observe-mode prepare
-3. [ ] V2 consumed-read, `potentialWrites`, compact final-write extraction, and
+3. [x] V2 consumed-read, `potentialWrites`, compact final-write extraction, and
        write-policy input capture APIs
-4. [ ] Relevance detection and merged-schema envelope implementation
+4. [x] Relevance detection and merged-schema envelope implementation
 5. [x] Embedded v2 CFC metadata persistence, `cid:<hash>` schema-document
        persistence, and non-exposure
-6. [ ] Baseline prepare engine for classification and integrity checks
+6. [x] Baseline prepare engine for classification and integrity checks
 7. [x] Transaction integration and success-only outbox
-8. [ ] Enforcing commit gate for state-only transactions for the
+8. [x] Enforcing commit gate for state-only transactions for the
        non-trust-sensitive rule subset once extraction/prepare slices are green
 9. [ ] Stable built-in implementation identity and trust snapshotting; richer
        verified-code identity and trust-sensitive rule enforcement remain
        blocked on extending v2 code-identity surfaces
-10. [ ] Structural flow-precision claims for core built-ins
-11. [ ] Fetch, `streamData`, `llm`, and other external sink enforcement
-12. [ ] UI provenance and trusted-event path
+10. [x] Structural flow-precision claims for core built-ins
+11. [x] Fetch, `streamData`, `llm`, and other external sink enforcement
+12. [x] UI provenance and trusted-event path
 13. [ ] Content-addressed side-path hardening
 
 Step 8 is the first safe enablement point for non-trust-sensitive,
