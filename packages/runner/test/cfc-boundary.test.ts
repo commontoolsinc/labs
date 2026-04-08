@@ -753,6 +753,59 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("evaluates target-side policy for no-op attempted writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      const seededCell = runtime.getCell(
+        signer.did(),
+        "cfc-noop-policy-target",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["value"],
+        },
+        seed,
+      );
+      seededCell.set({ value: "same" });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-noop-policy-target",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { writeAuthorizedBy: ["trusted-handler"] },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "same" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("persists cfc metadata and canonical schema documents for prepared writes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

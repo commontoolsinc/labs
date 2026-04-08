@@ -38,6 +38,7 @@ import {
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
 import { Runtime } from "../runtime.ts";
+import type { ImplementationIdentity } from "../cfc/types.ts";
 import {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -389,6 +390,9 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
     opaqueRefs: new Set(),
     generatedIdCounter: 0,
     ...(parent?.verifiedLoadId && { verifiedLoadId: parent.verifiedLoadId }),
+    ...(parent?.implementationIdentity && {
+      implementationIdentity: parent.implementationIdentity,
+    }),
     ...(parent?.runtime && { runtime: parent.runtime }),
     ...(parent?.tx && { tx: parent.tx }),
     ...(parent?.space && { space: parent.space }),
@@ -408,6 +412,7 @@ export function pushFrameFromCause(
     unsafe_binding?: UnsafeBinding;
     inHandler?: boolean;
     verifiedLoadId?: string;
+    implementationIdentity?: ImplementationIdentity;
     runtime?: Runtime;
     tx?: IExtendedStorageTransaction;
     space?: MemorySpace;
@@ -428,7 +433,13 @@ export function pushFrameFromCause(
     generatedIdCounter: 0,
     opaqueRefs: new Set(),
     ...(parent?.verifiedLoadId && { verifiedLoadId: parent.verifiedLoadId }),
+    ...(parent?.implementationIdentity && {
+      implementationIdentity: parent.implementationIdentity,
+    }),
     ...(verifiedLoadId && { verifiedLoadId }),
+    ...(props.implementationIdentity && {
+      implementationIdentity: props.implementationIdentity,
+    }),
     ...(frameRuntime && { runtime: frameRuntime }),
     ...(frameSpace && { space: frameSpace }),
     ...(frameTx && { tx: frameTx }),

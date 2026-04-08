@@ -696,7 +696,7 @@ Tasks:
 - [x] In phase 1, treat direct-eval and unsafe-host/test helpers as untrusted
       for trust-sensitive relaxations unless a later explicit stable-id path is
       added
-- [ ] Thread the resulting implementation identity through action and handler
+- [x] Thread the resulting implementation identity through action and handler
       execution where possible; built-ins can land earlier, while verified
       compiled user code remains observe-only/fail-closed until the v2
       extension lands

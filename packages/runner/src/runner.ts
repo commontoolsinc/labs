@@ -76,6 +76,7 @@ import {
   resolveBuiltinImplementationIdentity,
   resolvePolicyFacingImplementationIdentity,
 } from "./cfc/implementation-identity.ts";
+import type { ImplementationIdentity } from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 export {
   cellAwareDeepCopy,
@@ -1460,6 +1461,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     inHandler: boolean,
     verifiedLoadId?: string,
+    implementationIdentity?: ImplementationIdentity,
   ): Frame {
     return pushFrameFromCause(cause, {
       unsafe_binding: {
@@ -1474,6 +1476,7 @@ export class Runner {
       space: processCell.space,
       tx,
       ...(verifiedLoadId ? { verifiedLoadId } : {}),
+      ...(implementationIdentity ? { implementationIdentity } : {}),
     });
   }
 
@@ -1699,6 +1702,10 @@ export class Runner {
         ...(inputs as Record<string, any>),
         $event: crypto.randomUUID(),
       };
+      const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
+        module,
+        { verifiedLoadId },
+      );
       const frame = this.createPatternFrame(
         cause,
         pattern,
@@ -1706,11 +1713,7 @@ export class Runner {
         tx,
         true,
         verifiedLoadId,
-      );
-
-      const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
-        module,
-        { verifiedLoadId },
+        policyFacingIdentity,
       );
       if (policyFacingIdentity) {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
@@ -1871,6 +1874,10 @@ export class Runner {
     } = (tx: IExtendedStorageTransaction) => {
       action.ignoredSchedulingWrites = [];
       const resultFor = { inputs, outputs, fn: fnSource };
+      const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
+        module,
+        { verifiedLoadId },
+      );
       const frame = this.createPatternFrame(
         resultFor,
         pattern,
@@ -1878,13 +1885,9 @@ export class Runner {
         tx,
         false,
         verifiedLoadId,
+        policyFacingIdentity,
       );
       (action as Action & { lastFrame?: Frame }).lastFrame = frame;
-
-      const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
-        module,
-        { verifiedLoadId },
-      );
       if (policyFacingIdentity) {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }
@@ -2191,21 +2194,34 @@ export class Runner {
       tx,
     );
 
-    const builtinResult: RawBuiltinReturnType = module.implementation(
-      inputsCell,
-      (tx: IExtendedStorageTransaction, result: any) => {
-        sendValueToBinding(
-          tx,
-          processCell,
-          mappedOutputBindings,
-          result,
-        );
-      },
-      addCancel,
-      { inputs: inputsCell, parents: processCell.entityId },
-      processCell,
-      this.runtime,
-    );
+    const builtinFrame = builtinIdentity
+      ? pushFrameFromCause(undefined, {
+        runtime: this.runtime,
+        tx,
+        space: processCell.space,
+        implementationIdentity: builtinIdentity,
+      })
+      : undefined;
+    let builtinResult: RawBuiltinReturnType;
+    try {
+      builtinResult = module.implementation(
+        inputsCell,
+        (tx: IExtendedStorageTransaction, result: any) => {
+          sendValueToBinding(
+            tx,
+            processCell,
+            mappedOutputBindings,
+            result,
+          );
+        },
+        addCancel,
+        { inputs: inputsCell, parents: processCell.entityId },
+        processCell,
+        this.runtime,
+      );
+    } finally {
+      popFrame(builtinFrame);
+    }
 
     // Handle both legacy (just Action) and new (RawBuiltinResult) return formats
     const action = isRawBuiltinResult(builtinResult)

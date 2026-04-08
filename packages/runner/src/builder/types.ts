@@ -51,6 +51,7 @@ import type {
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import { toSchema } from "@commonfabric/api";
+import type { ImplementationIdentity } from "../cfc/types.ts";
 import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 import {
   type IExtendedStorageTransaction,
@@ -244,6 +245,7 @@ export type Frame = {
   cause?: unknown;
   generatedIdCounter: number;
   verifiedLoadId?: string;
+  implementationIdentity?: ImplementationIdentity;
   runtime?: Runtime;
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;

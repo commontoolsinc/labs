@@ -5,6 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { raw } from "../src/module.ts";
 import { Runtime } from "../src/runtime.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import { getTopFrame } from "../src/builder/pattern.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-implementation-identity",
@@ -61,6 +62,49 @@ describe("CFC builtin implementation identity", () => {
       builtinId: "test-builtin",
     });
     tx.abort("test-complete");
+  });
+
+  it("threads builtin implementation identity through the active execution frame", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "observe",
+    });
+
+    const captured: Array<unknown> = [];
+    runtime.moduleRegistry.addModuleByRef(
+      "frame-builtin",
+      raw((inputsCell) => {
+        captured.push(getTopFrame()?.implementationIdentity);
+        return () => undefined;
+      }),
+    );
+
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell(
+      signer.did(),
+      "cfc-builtin-frame-identity",
+      undefined,
+      tx,
+    );
+    runtime.runner.run(
+      tx,
+      runtime.moduleRegistry.getModule("frame-builtin"),
+      {},
+      resultCell,
+    );
+    await tx.commit();
+    await runtime.idle();
+
+    expect(captured[0]).toEqual({
+      kind: "builtin",
+      builtinId: "frame-builtin",
+    });
   });
 
   it("leaves unregistered raw modules without a builtin identity", async () => {
