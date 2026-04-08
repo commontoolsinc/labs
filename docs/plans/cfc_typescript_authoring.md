@@ -1,518 +1,289 @@
-# CFC TypeScript Authoring Spec
+# CFC TypeScript Authoring Implementation Plan
 
-This document proposes a TypeScript authoring surface for CFC annotations that
-lowers into JSON Schema `ifc` metadata through the existing
-`ts-transformers`/`schema-generator` pipeline.
+This document is the forward-looking implementation plan for the CFC-aware
+TypeScript and JSX authoring surface. It defines the execution plan for turning
+author-authored types and UI helpers into deterministic schema `ifc` metadata
+and UI contract hints.
 
-It complements [runner_cfc_implementation.md](./runner_cfc_implementation.md)
-by specifying how authors should express CFC policy in types rather than
-hand-written schema literals.
+Normative contract details live in:
 
-## April 6 2026 Status Snapshot
+- [CFC Authoring Contract](../specs/ts-transformer/cfc_authoring_contract.md)
+- [CFC UI Helper Contract](../specs/ts-transformer/cfc_ui_helper_contract.md)
+- [CFC Runner Implementation Plan](./runner_cfc_implementation.md)
 
-A working prototype landed on `exp/cfc-impl-2`, primarily in commits
-`66fe257f2ba2861a6f0058cfe78c6a166c9e3b6b` and
-`dd7e1d3c01cee65681939c4735a3b27b43bdff96`. It is useful as a reference
-implementation, but it should be replayed onto current `main` in slices rather
-than merged wholesale.
+This plan is intentionally about the target system only.
 
-The important lesson is that "CFC authoring" is not one package change. It is a
-cross-package contract spanning:
+## Goal
+
+Deliver a small TypeScript authoring surface that:
+
+- keeps ordinary pattern code close to normal TypeScript and JSX
+- lowers deterministically into schema `ifc` metadata
+- preserves enough provenance for runner-side commit-boundary enforcement
+- keeps the canonical surface small and puts friendly sugar on top
+- keeps raw schema authoring available as an escape hatch
+
+At the end of this work, authors should be able to express the supported CFC
+metadata in types and UI helpers, and the emitted schemas should be stable
+enough for the runner plan to persist canonical `schemaHash` values and enforce
+transition rules at commit time.
+
+## Scope
+
+In scope:
 
 - `packages/api`
 - `packages/ts-transformers`
 - `packages/schema-generator`
-- `packages/runner` builder/runtime UI helpers
-
-For the replay, treat this document as restart guidance plus authoring intent.
-Use the more concrete transformer specs alongside it:
-
-- [CFC Authoring Contract](../specs/ts-transformer/cfc_authoring_contract.md)
-- [CFC UI Helper Contract](../specs/ts-transformer/cfc_ui_helper_contract.md)
-
-## Status
-
-Prototype implemented on `exp/cfc-impl-2`; replay on top of current `main`
-still pending.
-
-## Branch Learnings
-
-- Keep the canonical surface very small. `Cfc<T, Meta>` plus path-bearing
-  reference helpers (`Ref`, `ProjectionOf`, `Projection`) were enough to drive
-  the real lowering work; everything else should remain thin sugar.
-- Path identity matters more than value type identity. Projection helpers that
-  only preserve the value type are not sufficient because lowering needs the
-  originating path.
-- `WriteAuthorizedBy` is a compiler contract, not plain JSON metadata. The
-  prototype had to preserve AST/entity identity across the transformer and
-  schema-generator boundary, then rehydrate it back into source-level
-  expressions during schema emission.
-- UI helper support is a vertical slice. JSX rewriting, schema hints, schema
-  synthesis, builder helpers, and runner UI trust all move together.
-- The test surface is the best replay asset. The prototype already captured the
-  tricky cases in `packages/ts-transformers/test/cfc-authoring.test.ts` and
-  `packages/schema-generator/test/schema/cfc-type.test.ts`.
-
-## Late Surprises
-
-- Explicit pattern output schemas lost UI helper integrity hints until
-  `SchemaInjectionTransformer` learned to synthesize standalone `[UI]` schema
-  hints from the returned JSX tree. Without that, inferred schemas and explicit
-  schemas behaved differently.
-- `WriteAuthorizedBy<T, typeof binding>` could not be expressed by formatter
-  logic alone. It required a narrow diagnostic contract in the transformer and
-  a marker/rehydration path in `schema-generator`.
-- UI helper contracts are partly static and partly dynamic:
-  - the rewritten JSX always emits `data-ui-*` attributes when the props are
-    present
-  - schema-side `addIntegrity` can only be synthesized when the relevant props
-    are literal strings at compile time
-- The pipeline order matters. `CfcJsxTransformer` must run before schema
-  injection so the `[UI]` schema synthesizer sees rewritten nodes and attached
-  schema hints.
-
-## Recommended Replay Order
-
-1. Lock the authoring contract docs first.
-   - Alias set, lowering rules, diagnostics, and UI helper semantics should be
-     explicit before touching implementation again.
-2. Replay the API surface and pure schema-generator pieces.
-   - `Cfc`, path helpers, author-facing aliases, and `CfcFormatter` are easier
-     to port than the transformer pipeline.
-3. Replay transformer diagnostics and identity plumbing next.
-   - `WriteAuthorizedBy` validation, schema-generator AST rehydration, and
-     schema-hint threading are prerequisites for reliable end-to-end behavior.
-4. Replay `CfcJsxTransformer` and `[UI]` schema synthesis as one slice.
-   - Do not separate JSX helper rewriting from schema hint seeding; that split
-     created one of the late branch regressions.
-5. Only then port examples and runner-facing UI helpers.
-   - The examples are valuable acceptance tests, but they should consume a
-     stable authoring contract rather than define it implicitly.
-
-## Goals
-
-- Keep ordinary pattern code close to normal TypeScript.
-- Make CFC annotations live in the type system by default.
-- Preserve enough provenance information to lower transition annotations such as
-  `projection`, `exactCopyOf`, and collection relationships.
-- Allow higher-level sugar on top of a small canonical core.
-- Keep raw `JSONSchema` literals available as an escape hatch.
-
-## Non-Goals
-
-- Replace all manual schema authoring immediately.
-- Express every CFC concern directly as a plain value type without path or
-  source information.
-- Force JSX/UI authors to write raw JSON Pointer strings or raw VDOM path
-  schemas.
-
-## Design Principles
-
-### 1. `Cfc<T, Meta>` Is The Canonical Base Type
-
-The core type-level carrier is:
-
-```ts
-type Cfc<T, Meta> = T & {
-  readonly __ct_cfc__?: Meta;
-};
-```
-
-`Cfc<T, Meta>` is the canonical compiler-facing IR. All other author-facing
-types are aliases layered on top of it.
-
-### 2. Type Sugar Must Preserve Lowering Information
-
-Wrappers that need provenance, such as projections, must carry source-path
-identity, not only source value types.
+- builder and UI runtime helper parity needed for the closed helper set
+- acceptance tests that prove authoring parity across inferred and explicit
+  schema paths
 
-This is valid but insufficient:
+Out of scope:
 
-```ts
-type Bad = Projection<Input["source"]["email"], Input["from"]>;
-```
+- general policy evaluation in the runner
+- trust-graph semantics beyond the schema and identity handoff required here
+- broad UI ergonomics outside the closed CFC helper set
+- replacing raw `JSONSchema` authoring for advanced or unsupported cases
 
-Both sides may be `string`, which loses the path information needed for schema
-lowering.
+## Target Surface
 
-Instead, the canonical sugar must preserve source-path information:
+The implementation centers on a small canonical surface:
 
-```ts
-type Good = ProjectionOf<Input, ["source", "email"]>;
-```
-
-or:
-
-```ts
-type SourceEmail = Ref<Input, ["source", "email"]>;
-type Good = Projection<SourceEmail>;
-```
-
-### 3. Semantic Helpers Sit Above The Core
-
-User-friendly concepts such as `Sensitive<T>`, `UiAction<...>`, or
-`WriteAuthorizedBy<..., typeof submitHandler>` should be aliases or helper
-constructs over `Cfc<T, Meta>`, not parallel systems.
-
-## Core Vocabulary
-
-### Atom-Carrying Metadata
-
-The metadata payload attached through `Cfc<T, Meta>` maps directly to schema
-`ifc` fields.
-
-Representative shape:
-
-```ts
-type CfcMeta = {
-  classification?: readonly unknown[] | readonly (readonly unknown[])[];
-  integrity?: readonly unknown[];
-  addIntegrity?: readonly unknown[];
-  requiredIntegrity?: readonly unknown[];
-  maxConfidentiality?: readonly string[];
-  writeAuthorizedBy?: readonly unknown[];
-  exactCopyOf?: `/${string}`;
-  projection?: {
-    from: `/${string}`;
-    path: `/${string}`;
-  };
-  collection?: {
-    sourceCollection?: `/${string}`;
-    subsetOf?: `/${string}`;
-    permutationOf?: `/${string}`;
-    filteredFrom?: `/${string}`;
-    lengthPreserved?: true;
-  };
-  recomposeProjections?: {
-    from: `/${string}`;
-    baseIntegrityType: string;
-    parts: readonly {
-      outputPath: `/${string}`;
-      projectionPath: `/${string}`;
-    }[];
-  };
-};
-```
-
-The runtime may accept additional fields beyond this subset.
-
-## Path And Reference Model
-
-### `Ref<Root, Path>`
-
-The core path-bearing type is:
-
-```ts
-type Ref<Root, Path extends readonly string[]> = {
-  readonly __ct_ref_root__?: Root;
-  readonly __ct_ref_path__?: Path;
-};
-```
-
-`Ref<Root, Path>` is a type-level reference to a path inside a root input or
-object type. It exists so that lowering can recover both:
-
-- the value type at that path
-- the path itself
-
-### `PathValue<Root, Path>`
-
-The compiler should define a utility to recover the value type at a path:
-
-```ts
-type PathValue<Root, Path extends readonly string[]> = unknown;
-```
-
-This is a compile-time utility only. Its exact implementation can vary.
-
-### `CanonicalPointer<Path>`
-
-The compiler should also define a utility that maps a tuple path to a canonical
-JSON Pointer string:
-
-```ts
-type CanonicalPointer<Path extends readonly string[]> = `/${string}`;
-```
-
-### `ProjectionOf<Root, Path>`
-
-For the common case, authors should not need to write `Ref<...>` explicitly.
-
-```ts
-type ProjectionOf<
-  Root,
-  Path extends readonly string[],
-> = Cfc<
-  PathValue<Root, Path>,
-  {
-    projection: {
-      from: "/";
-      path: CanonicalPointer<Path>;
-    };
-  }
->;
-```
-
-Conceptually, `ProjectionOf<Input, ["source", "email"]>` means:
-
-- the field value type is `Input["source"]["email"]`
-- the field is a projection of `/source/email` from the root input
-
-### `Projection<Ref>`
-
-For reuse across multiple fields, authors may define a reusable source ref.
-
-The compiler should provide a helper to recover the pointed-to value type:
-
-```ts
-type RefValue<SourceRef> = unknown;
-```
-
-Then the reusable projection wrapper is:
-
-```ts
-type Projection<SourceRef> = Cfc<
-  RefValue<SourceRef>,
-  {
-    projection: {
-      from: "/";
-      path: CanonicalPointer<SourceRef extends Ref<any, infer P> ? P : never>;
-    };
-  }
->;
-```
-
-Example:
-
-```ts
-type SourceEmail = Ref<Input, ["source", "email"]>;
-
-interface Output {
-  from: Projection<SourceEmail>;
-}
-```
-
-Both forms are first-class and should lower identically.
-
-## Canonical Type Aliases
-
-These aliases should be provided by the core API or by a single shared CFC
-types module.
-
-### Label-Carrying Types
-
-```ts
-type Classified<T, Clauses> = Cfc<T, { classification: Clauses }>;
-
-type RequiresIntegrity<T, Atoms> = Cfc<T, {
-  requiredIntegrity: Atoms;
-}>;
-
-type AddIntegrity<T, Atoms> = Cfc<T, {
-  addIntegrity: Atoms;
-}>;
-
-type WriteAuthorizedBy<T, Impl> = Cfc<T, {
-  writeAuthorizedBy: [{ __implOf: Impl }];
-}>;
-```
-
-### Transition Types
-
-```ts
-type ExactCopy<T, From extends `/${string}`> = Cfc<T, {
-  exactCopyOf: From;
-}>;
-
-type ProjectionPath<
-  T,
-  From extends `/${string}`,
-  Path extends `/${string}`,
-> = Cfc<T, {
-  projection: { from: From; path: Path };
-}>;
-
-type LengthPreservedFrom<T, From extends `/${string}`> = Cfc<T, {
-  collection: {
-    sourceCollection: From;
-    lengthPreserved: true;
-  };
-}>;
-
-type FilteredFrom<T, From extends `/${string}`> = Cfc<T, {
-  collection: {
-    filteredFrom: From;
-  };
-}>;
-```
-
-`ProjectionPath<...>` is the raw pointer-oriented form.
-
-`ProjectionOf<...>` and `Projection<Ref<...>>` are the preferred author-facing
-forms.
-
-## Friendly Authoring Sugar
-
-Friendly sugar should remain thin aliases over the canonical core.
-
-Examples:
-
-```ts
-type Secret<T> = Classified<T, ["secret"]>;
-
-type TrustedSecretRead<T> = Cfc<T, {
-  requiredIntegrity: ["trusted-source"];
-  maxConfidentiality: ["secret"];
-}>;
-```
-
-For structured atoms:
-
-```ts
-type Sensitive<T, Class extends string, Subject> = Classified<T, [[{
-  type: "https://commonfabric.org/cfc/atom/Resource";
-  class: Class;
-  subject: Subject;
-}]]>;
-```
-
-## UI Semantics
-
-Plain field annotations should use `Cfc<T, Meta>`-based types directly.
-
-UI subtree annotations should usually be expressed through semantic helpers that
-lower into node-local `addIntegrity` metadata.
-
-Examples:
-
-```ts
-type UiActionNode<Action extends string> = AddIntegrity<VNode, [{
-  type: "https://commonfabric.org/cfc/atom/UiActionContract";
-  action: Action;
-}]>;
-
-type UiPromptSlotNode<
-  Surface extends string,
-  Role extends string,
-> = AddIntegrity<VNode, [{
-  type: "https://commonfabric.org/cfc/atom/UiPromptSlotContract";
-  surface: Surface;
-  role: Role;
-}]>;
-```
-
-In practice, authors should usually consume these through JSX-level helpers such
-as `UiAction`, `UiPromptSlot`, or `UiDisclosure` rather than by directly
-writing `VNode` intersection types.
-
-## Lowering Rules
-
-### Rule 1: `Cfc<T, Meta>` Does Not Change Runtime Value Shape
-
-`Cfc<T, Meta>` is compile-time metadata only. It must lower to the same schema
-shape as `T`, plus the corresponding `ifc` metadata.
-
-### Rule 2: Field Path Is The Target Path
-
-When a property is annotated with `Cfc<T, Meta>`, the property's own location in
-the enclosing object is the output path for schema emission.
-
-### Rule 3: `ProjectionOf<Root, Path>` Emits `projection`
-
-For:
-
-```ts
-interface Output {
-  from: ProjectionOf<Input, ["source", "email"]>;
-}
-```
-
-the compiler should emit the schema equivalent of:
-
-```json
-{
-  "type": "string",
-  "ifc": {
-    "projection": {
-      "from": "/",
-      "path": "/source/email"
-    }
-  }
-}
-```
-
-where `/` means the enclosing input root for that boundary.
-
-### Rule 4: `WriteAuthorizedBy<T, typeof handlerFn>` Emits `writeAuthorizedBy`
-
-When the implementation identity of `handlerFn` is derivable at compile time,
-the compiler lowers `WriteAuthorizedBy<...>` into the schema form already used
-by the runner. If it is not derivable, the compiler must emit a hard error or
-require an explicit escape hatch.
-
-### Rule 5: Friendly Sugar Lowers Through Canonical Aliases
-
-`Secret<T>`, `TrustedSecretRead<T>`, `Sensitive<T, ...>`, and similar aliases
-must lower exactly as their underlying `Cfc<T, Meta>` expansions.
-
-## Example
-
-```ts
-type SubmittedAction = {
-  command: string;
-  submittedBy: string;
-};
-
-interface Input {
-  source: {
-    email: string;
-    items: number[];
-  };
-}
-
-type SourceEmail = Ref<Input, ["source", "email"]>;
-
-interface Output {
-  from: Projection<SourceEmail>;
-  shifted: LengthPreservedFrom<number[], "/source/items">;
-}
-```
-
-Equivalent direct form:
-
-```ts
-interface Output {
-  from: ProjectionOf<Input, ["source", "email"]>;
-  shifted: LengthPreservedFrom<number[], "/source/items">;
-}
-```
-
-## Escape Hatch
-
-Raw schema authoring remains valid:
-
-```ts
-const outputSchema = toSchema<Output>({
-  ifc: {
-    exchange: { ... },
-  },
-});
-```
-
-This is required for:
-
-- early adoption before all wrappers exist
-- advanced policy constructs without first-class type sugar
-- debugging and fixture pinning
-
-## Open Questions
-
-- Whether pointer-oriented wrappers such as `LengthPreservedFrom<T, "/x">`
-  should also gain `Ref`-based author-facing forms.
-- Whether JSX/UI helpers should be implemented as components, macros, or
-  dedicated compiler-recognized intrinsics.
-- Whether `WriteAuthorizedBy<T, typeof handlerFn>` should lower directly from
-  function identity or through an explicit `ImplementationRef<typeof handlerFn>`
-  helper.
-- Whether object-root projection should always use `from: "/"` or allow named
-  boundary roots for multi-parameter handlers.
+- `Cfc<T, Meta>` as the compiler-facing carrier
+- path-bearing helpers: `Ref`, `PathValue`, `RefValue`, `CanonicalPointer`
+- projection helpers: `ProjectionPath`, `ProjectionOf`, `Projection`
+- simple wrapper aliases:
+  `Classified`, `Integrity`, `AddIntegrity`, `RequiresIntegrity`,
+  `MaxConfidentiality`, `ExactCopy`, `LengthPreservedFrom`, `FilteredFrom`,
+  `SubsetOf`, `PermutationOf`
+- `OpaqueInput<T, Spec>` for schema-level opacity with `OpaqueRef<T>` erasure
+- `WriteAuthorizedBy<T, typeof binding>` for trust-sensitive write policy
+- closed JSX helper set:
+  `UiAction`, `UiPromptSlot`, `UiDisclosure`
+
+Friendly sugar may exist, but it must remain a thin layer over this canonical
+surface. There should not be a second CFC DSL with different lowering rules.
+
+## Required Invariants
+
+The authoring implementation must preserve these invariants:
+
+- `Cfc<T, Meta>` never changes the runtime value shape of `T`
+- supported aliases lower by expanding back to the canonical surface
+- path-bearing helpers preserve source path identity, not only projected value
+  types
+- `ProjectionOf<Root, Path>` and `Projection<Ref<Root, Path>>` lower
+  identically
+- `WriteAuthorizedBy` accepts only the narrow supported `typeof` forms and
+  emits a hard diagnostic otherwise
+- JSX helpers rewrite to stable runtime `data-ui-*` attributes and compile-time
+  schema hints; they do not mint final integrity atoms themselves
+- inferred output schemas and explicit `toSchema<Output>()` paths produce the
+  same CFC-relevant schema output
+- transformer stage ordering remains:
+  `CfcJsxTransformer -> SchemaInjectionTransformer -> SchemaGeneratorTransformer`
+
+## Cross-Plan Alignment With The Runner Layer
+
+The authoring and runner plans meet at a few load-bearing seams. Those seams
+need to be explicit in this plan so implementation work does not drift.
+
+### Stable Canonical Schemas
+
+The runner persists canonical schema envelopes and `schemaHash` values. The
+authoring pipeline therefore needs deterministic CFC lowering across:
+
+- `toSchema<T>()`
+- inferred `pattern()` schemas
+- explicit output schema bindings
+
+Semantically equivalent authoring forms must converge on the same emitted IFC
+shape or the runner's schema merge and persistence model will drift.
+
+### `WriteAuthorizedBy` Identity Handoff
+
+`WriteAuthorizedBy` is authoring sugar for a runner-enforced trust-sensitive
+rule. The authoring pipeline must preserve local binding identity through the
+transformer and schema-generator boundary in a form that the runner can later
+map to its policy-facing `ImplementationIdentity`.
+
+This plan assumes phased availability:
+
+- authoring-time syntax and diagnostics can land first
+- runner enforcement for stable built-in identities can land next
+- runner enforcement for verified compiled user code remains blocked until the
+  lower-layer code-identity work in
+  [runner_cfc_implementation.md](./runner_cfc_implementation.md) is complete
+
+### Structural Provenance Handoff
+
+`projection`, `exactCopyOf`, and `collection` annotations only become
+enforceable when the runtime also records the write-policy inputs described in
+the runner plan. Authoring work must therefore standardize the emitted schema
+shapes that those runtime write-policy inputs are checked against.
+
+### UI Contract Handoff
+
+UI helpers are only useful if the compile-time and runtime halves agree:
+
+- compile time emits `ifc.uiContract` hints and `data-ui-*` attributes
+- builder and renderer emit the same runtime node shape
+- the runner's trusted-event and provenance path consumes those hints without
+  inventing a second helper-specific policy format
+
+### `OpaqueInput` Boundary
+
+`OpaqueInput<T, Spec>` is part of the authoring surface, but it is not itself a
+commit-boundary enforcement rule in the runner plan. The implementation needs
+to keep that boundary clear:
+
+- authoring/schema generation owns `ifc.opaque` lowering
+- builder/runtime input handling owns opaque read restrictions
+- runner boundary enforcement is driven by the supported IFC rule set, not by
+  treating `opaque` as a transition rule
+
+## Workstreams
+
+### 1. Lock The Contract Surface
+
+- [ ] Freeze the canonical alias set across `packages/api`,
+      `packages/ts-transformers`, and `packages/schema-generator`
+- [ ] Define the supported metadata keys for the TypeScript surface:
+      `classification`, `integrity`, `addIntegrity`, `requiredIntegrity`,
+      `maxConfidentiality`, `writeAuthorizedBy`, `exactCopyOf`, `projection`,
+      `collection`, and `opaque`
+- [ ] Define the path-bearing helper contract for `Ref`, `PathValue`,
+      `RefValue`, and `CanonicalPointer`
+- [ ] Define the projection helper contract for `ProjectionPath`,
+      `ProjectionOf`, and `Projection`
+- [ ] Lock the supported `WriteAuthorizedBy` declaration forms and the required
+      `cfc-write-authorized-by` diagnostic
+- [ ] Document the literal-only limits for metadata payload evaluation and UI
+      helper schema hint synthesis
+
+### 2. Add The Public API Surface
+
+- [ ] Export `Cfc<T, Meta>` from `packages/api`
+- [ ] Export the canonical alias set from `packages/api`
+- [ ] Export `OpaqueInput<T, Spec>` and keep its base schema shape equal to `T`
+- [ ] Keep friendly sugar as aliases over the canonical surface rather than
+      separate lowering paths
+- [ ] Add author-facing examples for path-bearing projections, opaque inputs,
+      and trusted write authorization annotations
+
+### 3. Implement Schema Lowering In `schema-generator`
+
+- [ ] Expand nested aliases recursively before deciding whether a type is
+      CFC-aware
+- [ ] Substitute type parameters through alias expansion
+- [ ] Evaluate literal-like metadata payloads and merge the result into
+      `schema.ifc`
+- [ ] Preserve the base schema of `T` when stripping the `Cfc<T, Meta>`
+      carrier
+- [ ] Lower `ProjectionPath`, `ProjectionOf`, and `Projection` to canonical
+      JSON Pointer metadata
+- [ ] Lower `OpaqueInput<T, Spec>` to the schema of `T` plus `ifc.opaque`
+- [ ] Preserve `WriteAuthorizedBy` binding identity through a cross-stage
+      marker that can be rehydrated during schema emission
+- [ ] Fall back to ordinary schema generation when unsupported alias expansion
+      cannot be resolved, except for required hard diagnostics such as invalid
+      `WriteAuthorizedBy`
+- [ ] Prove deterministic output across inferred and explicit schema paths so
+      runner `schemaHash` persistence remains stable
+
+### 4. Implement Transformer Pipeline Support
+
+- [ ] Keep the CFC stage order fixed:
+      `CfcJsxTransformer -> SchemaInjectionTransformer -> SchemaGeneratorTransformer`
+- [ ] Add validation for `WriteAuthorizedBy<T, typeof binding>` in the
+      transformer pipeline
+- [ ] Ensure the pipeline preserves enough AST identity for schema-generator to
+      rehydrate local binding references
+- [ ] Ensure `SchemaInjectionTransformer` preserves CFC-aware type identity in
+      generated `toSchema<...>()` calls
+- [ ] Add guardrail tests so pipeline reordering fails loudly
+
+### 5. Land The UI Helper Vertical Slice
+
+- [ ] Export the closed helper set:
+      `UiAction`, `UiPromptSlot`, `UiDisclosure`
+- [ ] Rewrite recognized helper elements to intrinsic tags using `as` or the
+      helper default
+- [ ] Strip helper-only props from the residual prop bag
+- [ ] Re-emit semantic props as `data-ui-*` attributes on the rewritten node
+- [ ] Attach node-local `cfcUiContract` hints only when the relevant helper
+      props are compile-time string literals
+- [ ] Synthesize `[UI]` member schemas from returned JSX trees
+- [ ] Copy node-local UI contract hints onto the synthesized schema as
+      `ifc.uiContract`
+- [ ] Ensure explicit output schemas receive the same `[UI]` helper hints as
+      inferred output schemas
+- [ ] Mirror the same runtime helper shape in builder and renderer code so
+      transformed JSX and direct helper usage converge
+
+### 6. Close The Runner Handoff Gaps
+
+- [ ] Add explicit acceptance criteria that compare the normalized IFC output
+      from inferred and explicit schema paths to protect stable runner
+      `schemaHash` values
+- [ ] Define the emitted schema shape that the runner prepare engine will read
+      for `writeAuthorizedBy`, `exactCopyOf`, `projection`, and `collection`
+- [ ] Align the `WriteAuthorizedBy` handoff with the runner's
+      `ImplementationIdentity` model instead of treating schema emission as the
+      end of the feature
+- [ ] Document that trust-sensitive enforcement for verified compiled user code
+      remains gated on the lower-layer identity work
+- [ ] Document that structural claims are not enforceable unless runtime
+      mutation paths also record the required write-policy inputs
+- [ ] Align `ifc.uiContract` output with the runner's trusted-event and UI
+      provenance path in workstream 11 of
+      [runner_cfc_implementation.md](./runner_cfc_implementation.md)
+- [ ] Keep `OpaqueInput` documented as an authoring/runtime feature rather than
+      a commit-boundary transition rule
+
+### 7. Testing And Acceptance Coverage
+
+- [ ] Add transformer tests for alias expansion, projection path encoding,
+      `OpaqueInput`, JSX helper rewriting, and `WriteAuthorizedBy` diagnostics
+- [ ] Add schema-generator tests for every canonical alias and metadata merge
+      path
+- [ ] Add parity tests proving identical CFC output for:
+      inferred schemas, explicit `toSchema<T>()`, and explicit output schema
+      bindings
+- [ ] Add integration tests for UI helper parity across compile-time rewriting,
+      builder/runtime helper rendering, and `[UI]` schema synthesis
+- [ ] Add end-to-end tests that exercise runner observe-mode and fail-closed
+      behavior for trust-sensitive claims emitted by the authoring surface
+- [ ] Add fixture coverage for `OpaqueInput<T, Spec>` lowering to `ifc.opaque`
+
+### 8. Rollout Order
+
+- [ ] Land the contract docs and public API surface first
+- [ ] Land schema-generator lowering for the canonical alias set next
+- [ ] Land `WriteAuthorizedBy` diagnostics and cross-stage identity plumbing
+- [ ] Land the UI helper vertical slice as one coordinated transformer,
+      schema-injection, and runtime-helper change
+- [ ] Land runner-aligned acceptance tests before treating the authoring surface
+      as complete
+- [ ] Publish author guidance only after the inferred and explicit schema paths
+      are demonstrably equivalent
+
+## Done Means
+
+This plan is complete when all of the following are true:
+
+- authors can express the supported CFC schema metadata using the canonical
+  TypeScript surface
+- friendly sugar expands back to the canonical surface without changing
+  semantics
+- JSX helpers lower to deterministic runtime `data-ui-*` attributes and schema
+  `ifc.uiContract` hints
+- `WriteAuthorizedBy` has a strict diagnostic contract and a defined handoff to
+  the runner's identity model
+- inferred and explicit schema authoring paths produce stable, equivalent CFC
+  output
+- the emitted schema shapes align with the runner plan's persistence,
+  enforcement, and provenance requirements
+- tests cover both authoring-time behavior and the lower-layer integration
+  points this plan depends on

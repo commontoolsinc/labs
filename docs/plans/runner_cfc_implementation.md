@@ -72,6 +72,9 @@ current implementation shape:
   surface for richer `ifc` keys such as `integrity`, `addIntegrity`,
   `requiredIntegrity`, `maxConfidentiality`, `writeAuthorizedBy`, `projection`,
   and collection rules
+- `docs/specs/ts-transformer/cfc_ui_helper_contract.md` defines the UI-helper
+  authoring surface that lowers into `ifc.uiContract` hints plus runtime
+  `data-ui-*` markers consumed by the trusted UI provenance path
 - `docs/specs/memory-v2/README.md` and
   `docs/specs/memory-v2/03-commit-model.md` define the seq-addressed JSON write
   path and the adjunct/system-entity surfaces we should reuse for schema
@@ -780,17 +783,20 @@ Primary files:
 
 Tasks:
 
-  - [x] Define an internal event envelope that can carry provenance and integrity
+- [x] Define an internal event envelope that can carry provenance and integrity
       hints
-  - [x] Add renderer-generated provenance for user-initiated events
-  - [x] Carry event provenance through scheduler delivery and handler execution
-  - [x] Add the minimum authoring/schema hooks needed to declare trusted UI event
-      outputs
+- [x] Add renderer-generated provenance for user-initiated events
+- [x] Carry event provenance through scheduler delivery and handler execution
+- [x] Consume the authoring pipeline's `ifc.uiContract` hints and aligned
+      runtime `data-ui-*` markers as the schema/runtime declaration surface for
+      trusted UI event outputs
 
 Acceptance:
 
 - [x] User-originated events can be distinguished from untrusted synthetic input
 - [x] Boundary evaluation can consume event provenance without ambient globals
+- [x] Trusted UI event delivery consumes `ifc.uiContract` without inventing a
+      second helper-specific policy format
 - [x] Untrusted UI-origin claims fail closed
 
 ### 12. Content-Addressed Side-Path Hardening
