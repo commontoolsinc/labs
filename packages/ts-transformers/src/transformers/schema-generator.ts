@@ -20,6 +20,20 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
     const visit: ts.Visitor = (node) => {
       if (isToSchemaNode(node)) {
         const typeArg = node.typeArguments[0]!;
+        const typeArguments = ts.isTypeReferenceNode(typeArg)
+          ? typeArg.typeArguments
+          : undefined;
+        const writeAuthorizedByIdentity = extractWriteAuthorizedByIdentity(
+          typeArg,
+        );
+        let schemaTypeArg: ts.TypeNode = typeArg;
+        if (
+          writeAuthorizedByIdentity &&
+          isWriteAuthorizedByType(typeArg) &&
+          typeArguments?.length
+        ) {
+          schemaTypeArg = typeArguments[0]!;
+        }
 
         // First check if we have a registered Type for this node or the typeArg
         // (from schema-injection when synthetic TypeNodes were created)
@@ -29,7 +43,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         } else {
           // Use fallback to handle synthetic TypeNodes that may be in the registry
           type = getTypeFromTypeNodeWithFallback(
-            typeArg,
+            schemaTypeArg,
             checker,
             typeRegistry,
           );
@@ -38,7 +52,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         if (logger) {
           let typeText = "unknown";
           try {
-            typeText = typeArg.getText();
+            typeText = schemaTypeArg.getText();
           } catch {
             // synthetic nodes may not support getText(); ignore
           }
@@ -71,7 +85,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         ) {
           // Synthetic TypeNode path - use new method that shares context properly
           schema = schemaTransformer.generateSchemaFromSyntheticTypeNode(
-            typeArg,
+            schemaTypeArg,
             checker,
             typeRegistry,
             schemaHints,
@@ -81,17 +95,26 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           schema = schemaTransformer.generateSchema(
             type,
             checker,
-            typeArg,
+            schemaTypeArg,
             generationOptions,
             schemaHints,
           );
         }
 
         // Handle boolean schemas (true/false) - can't spread them
-        const finalSchema = typeof schema === "boolean"
+        let finalSchema: unknown = typeof schema === "boolean"
           ? schema
           : { ...(schema as Record<string, unknown>), ...optionsObj };
-        const schemaAst = createSchemaAst(finalSchema, context.factory);
+        if (writeAuthorizedByIdentity && typeof finalSchema !== "boolean") {
+          finalSchema = attachWriteAuthorizedByMarker(
+            finalSchema as Record<string, unknown>,
+            writeAuthorizedByIdentity,
+          );
+        }
+        const emittedSchema = typeof finalSchema === "boolean"
+          ? finalSchema
+          : { ...(finalSchema as Record<string, unknown>), ...optionsObj };
+        const schemaAst = createSchemaAst(emittedSchema, context.factory);
 
         // Wrap in `as const satisfies JSONSchema` so that schema-inference
         // overloads (e.g. CellTypeConstructor.of, WishFunction) can infer
@@ -126,6 +149,15 @@ function createSchemaAst(
   schema: unknown,
   factory: ts.NodeFactory,
 ): ts.Expression {
+  if (
+    isWriteAuthorizedByMarker(schema) &&
+    typeof schema.__ctWriterIdentityOf === "string"
+  ) {
+    return factory.createAsExpression(
+      factory.createIdentifier(schema.__ctWriterIdentityOf),
+      factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
+    );
+  }
   if (schema === null) return factory.createNull();
   if (typeof schema === "string") return factory.createStringLiteral(schema);
   if (typeof schema === "number") return factory.createNumericLiteral(schema);
@@ -153,6 +185,59 @@ function createSchemaAst(
     return factory.createObjectLiteralExpression(properties, true);
   }
   return factory.createIdentifier("undefined");
+}
+
+function attachWriteAuthorizedByMarker(
+  schema: boolean | Record<string, unknown>,
+  identity: string,
+): boolean | Record<string, unknown> {
+  if (typeof schema === "boolean") return schema;
+  const ifc = schema.ifc && typeof schema.ifc === "object"
+    ? schema.ifc as Record<string, unknown>
+    : {};
+  return {
+    ...schema,
+    ifc: {
+      ...ifc,
+      writeAuthorizedBy: {
+        __ctWriterIdentityOf: identity,
+      },
+    },
+  };
+}
+
+function extractWriteAuthorizedByIdentity(
+  typeNode: ts.TypeNode,
+): string | undefined {
+  if (!isWriteAuthorizedByType(typeNode)) {
+    return undefined;
+  }
+  const bindingNode = typeNode.typeArguments?.[1];
+  if (!bindingNode || !ts.isTypeQueryNode(bindingNode)) {
+    return undefined;
+  }
+  if (!ts.isIdentifier(bindingNode.exprName)) {
+    return undefined;
+  }
+  return bindingNode.exprName.text;
+}
+
+function isWriteAuthorizedByType(
+  typeNode: ts.TypeNode,
+): typeNode is ts.TypeReferenceNode {
+  return ts.isTypeReferenceNode(typeNode) &&
+    ts.isIdentifier(typeNode.typeName) &&
+    typeNode.typeName.text === "WriteAuthorizedBy" &&
+    !!typeNode.typeArguments &&
+    typeNode.typeArguments.length >= 2;
+}
+
+function isWriteAuthorizedByMarker(
+  schema: unknown,
+): schema is { __ctWriterIdentityOf: unknown } {
+  return !!schema && typeof schema === "object" &&
+    "__ctWriterIdentityOf" in schema &&
+    Object.keys(schema as Record<string, unknown>).length === 1;
 }
 
 function evaluateObjectLiteral(

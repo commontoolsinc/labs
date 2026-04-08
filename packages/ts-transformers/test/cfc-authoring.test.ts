@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { validateSource } from "./utils.ts";
+import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
 
@@ -48,6 +48,32 @@ Deno.test("WriteAuthorizedBy accepts a local function binding", async () => {
     false,
   );
 });
+
+Deno.test(
+  "WriteAuthorizedBy preserves the local binding identity through schema emission",
+  async () => {
+    const source = `/// <cts-enable />
+      import { toSchema, WriteAuthorizedBy } from "commonfabric";
+
+      function localFunction() {}
+
+      const functionSchema = toSchema<
+        WriteAuthorizedBy<{ title: string }, typeof localFunction>
+      >();
+
+      export { functionSchema };
+    `;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertEquals(
+      output.includes("writeAuthorizedBy: localFunction as any"),
+      true,
+    );
+  },
+);
 
 Deno.test("WriteAuthorizedBy rejects unsupported binding declarations", async () => {
   const source = `/// <cts-enable />

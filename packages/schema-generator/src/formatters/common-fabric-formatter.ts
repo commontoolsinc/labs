@@ -900,6 +900,8 @@ export class CommonFabricFormatter implements TypeFormatter {
         return {
           opaque: aliasArgs.length > 1 ? readValue(1) : true,
         };
+      case "WriteAuthorizedBy":
+        return this.buildWriteAuthorizedByMetadata(context);
       case "LengthPreservedFrom":
         return {
           collection: {
@@ -993,6 +995,24 @@ export class CommonFabricFormatter implements TypeFormatter {
       projection: {
         from,
         path: nestedPath,
+      },
+    };
+  }
+
+  private buildWriteAuthorizedByMetadata(
+    context: GenerationContext,
+  ): Record<string, unknown> | undefined {
+    const bindingNode = this.getAliasTypeArgumentNode(context.typeNode, 1);
+    if (!bindingNode || !ts.isTypeQueryNode(bindingNode)) {
+      return undefined;
+    }
+    if (!ts.isIdentifier(bindingNode.exprName)) {
+      return undefined;
+    }
+
+    return {
+      writeAuthorizedBy: {
+        __ctWriterIdentityOf: bindingNode.exprName.text,
       },
     };
   }

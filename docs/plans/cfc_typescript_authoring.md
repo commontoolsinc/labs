@@ -157,7 +157,7 @@ to keep that boundary clear:
       `RefValue`, and `CanonicalPointer`
 - [x] Define the projection helper contract for `ProjectionPath`,
       `ProjectionOf`, and `Projection`
-- [ ] Lock the supported `WriteAuthorizedBy` declaration forms and the required
+- [x] Lock the supported `WriteAuthorizedBy` declaration forms and the required
       `cfc-write-authorized-by` diagnostic
 - [ ] Document the literal-only limits for metadata payload evaluation and UI
       helper schema hint synthesis
@@ -184,7 +184,7 @@ to keep that boundary clear:
 - [x] Lower `ProjectionPath`, `ProjectionOf`, and `Projection` to canonical
       JSON Pointer metadata
 - [x] Lower `OpaqueInput<T, Spec>` to the schema of `T` plus `ifc.opaque`
-- [ ] Preserve `WriteAuthorizedBy` binding identity through a cross-stage
+- [x] Preserve `WriteAuthorizedBy` binding identity through a cross-stage
       marker that can be rehydrated during schema emission
 - [ ] Fall back to ordinary schema generation when unsupported alias expansion
       cannot be resolved, except for required hard diagnostics such as invalid
@@ -196,9 +196,9 @@ to keep that boundary clear:
 
 - [ ] Keep the CFC stage order fixed:
       `CfcJsxTransformer -> SchemaInjectionTransformer -> SchemaGeneratorTransformer`
-- [ ] Add validation for `WriteAuthorizedBy<T, typeof binding>` in the
+- [x] Add validation for `WriteAuthorizedBy<T, typeof binding>` in the
       transformer pipeline
-- [ ] Ensure the pipeline preserves enough AST identity for schema-generator to
+- [x] Ensure the pipeline preserves enough AST identity for schema-generator to
       rehydrate local binding references
 - [ ] Ensure `SchemaInjectionTransformer` preserves CFC-aware type identity in
       generated `toSchema<...>()` calls
