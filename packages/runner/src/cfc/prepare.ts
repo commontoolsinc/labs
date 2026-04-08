@@ -90,6 +90,38 @@ const candidateSchemasByTarget = (
   return result;
 };
 
+const valueWriteTargets = (
+  tx: IExtendedStorageTransaction,
+): Map<string, { space: MemorySpace; id: URI; type: MediaType }> => {
+  const result = new Map<
+    string,
+    { space: MemorySpace; id: URI; type: MediaType }
+  >();
+  const log = tx.getReactivityLog?.();
+  const seenWriteSpaces = new Set<MemorySpace>(
+    (log?.writes ?? []).map((write) => write.space),
+  );
+  for (const space of seenWriteSpaces) {
+    for (const write of tx.getWriteDetails?.(space) ?? []) {
+      if (
+        write.address.id.startsWith("cid:") ||
+        write.address.path[0] === "cfc" ||
+        write.address.path[0] === "source"
+      ) {
+        continue;
+      }
+      const key =
+        `${write.address.space}\u0000${write.address.id}\u0000${write.address.type}`;
+      result.set(key, {
+        space: write.address.space,
+        id: write.address.id as URI,
+        type: write.address.type as MediaType,
+      });
+    }
+  }
+  return result;
+};
+
 const walkIfcSchema = (
   schema: JSONSchema,
   path: string[] = [],
@@ -225,6 +257,14 @@ export const prepareBoundaryCommit = (
   const candidates = candidateSchemasByTarget(
     tx.getCfcState().writePolicyInputs,
   );
+  for (const [key, target] of valueWriteTargets(tx)) {
+    if (candidates.has(key)) {
+      continue;
+    }
+    reasons.push(
+      `missing schema write-policy input for ${target.id}`,
+    );
+  }
   for (const [key, schema] of candidates) {
     const [space, id, type] = key.split("\u0000") as [
       MemorySpace,

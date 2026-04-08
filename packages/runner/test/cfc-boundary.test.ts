@@ -181,7 +181,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
-      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      expect(tx.getCfcState().prepare.status).toBe("invalidated");
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -243,13 +243,22 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     try {
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
-      tx.markCfcRelevant("test");
-      tx.writeValueOrThrow({
-        space: signer.did(),
-        id: "of:cfc-prepared-success",
-        type: "application/json",
-        path: [],
-      }, { count: 1 });
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-prepared-success",
+        {
+          type: "object",
+          properties: {
+            count: {
+              type: "number",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["count"],
+        },
+        tx,
+      );
+      cell.set({ count: 1 });
 
       tx.prepareCfc();
       const result = await tx.commit();
@@ -985,6 +994,30 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error?.message).toContain("requiredIntegrity");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects relevant direct writes that lack schema policy inputs", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("direct-write-without-schema-input");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        id: "of:cfc-missing-schema-input",
+        type: "application/json",
+        path: [],
+      }, { secret: "value" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "missing schema write-policy input",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
