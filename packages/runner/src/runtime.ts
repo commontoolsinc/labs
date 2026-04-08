@@ -626,6 +626,7 @@ export class Runtime {
         },
       });
     }
+    this.prepareTxForCommit(tx);
     return tx.commit().then(({ error }) => {
       if (error) {
         if (maxRetries > 0) {
@@ -644,6 +645,16 @@ export class Runtime {
         },
       };
     });
+  }
+
+  prepareTxForCommit(tx: IExtendedStorageTransaction): void {
+    const state = tx.getCfcState();
+    if (!state.relevant || state.enforcementMode === "disabled") {
+      return;
+    }
+    if (state.prepare.status === "unprepared") {
+      tx.prepareCfc();
+    }
   }
 
   /**

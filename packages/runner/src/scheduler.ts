@@ -1131,6 +1131,7 @@ export class Scheduler {
           // retry logic below will have re-scheduled this action, so
           // topological sorting should move it before the dependencies.
           logger.timeStart("scheduler", "run", "commit");
+          this.runtime.prepareTxForCommit(tx);
           const commitPromise = tx.commit();
           logger.timeEnd("scheduler", "run", "commit");
           commitPromise.then(({ error }) => {
@@ -3559,6 +3560,7 @@ export class Scheduler {
             try {
               if (error) this.handleError(error as Error, action);
             } finally {
+              this.runtime.prepareTxForCommit(tx);
               tx.commit().then(({ error }) => {
                 // If the transaction failed, and we have retries left, queue the
                 // event again at the beginning of the queue. This isn't guaranteed

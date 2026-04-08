@@ -122,4 +122,95 @@ describe("Runtime.editWithRetry", () => {
     expect(attempts).toBe(DEFAULT_MAX_RETRIES + 1);
     expect(cell.get()).toBe(0);
   });
+
+  it("prepares relevant transactions before committing in enforcing modes", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    let committedTx: IExtendedStorageTransaction | undefined;
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      committedTx = t;
+      const cell = runtime.getCell(
+        space,
+        "editWithRetry-cfc-prepare",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        t,
+      );
+      cell.set({ secret: "value" });
+      return true;
+    });
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(committedTx?.getCfcState().prepare.status).toBe("prepared");
+  });
+
+  it("recomputes prepare on each retry with fresh transactions", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const attempts: IExtendedStorageTransaction[] = [];
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      attempts.push(t);
+      const cell = runtime.getCell(
+        space,
+        "editWithRetry-cfc-retry",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        t,
+      );
+      if (attempts.length === 1) {
+        t.abort("force retry");
+        return false;
+      }
+      cell.set({ secret: "value" });
+      return true;
+    }, 2);
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(attempts.length).toBe(2);
+    expect(attempts[0]).not.toBe(attempts[1]);
+    expect(attempts[0].getCfcState().prepare.status).not.toBe("prepared");
+    expect(attempts[1].getCfcState().prepare.status).toBe("prepared");
+  });
 });
