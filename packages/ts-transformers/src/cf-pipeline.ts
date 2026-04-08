@@ -13,6 +13,7 @@ import {
   ReactiveVariableForTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
+  WriteAuthorizedByValidationTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
 import { ComputedTransformer } from "./computed/transformer.ts";
@@ -52,6 +53,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
       new EmptyArrayOfValidationTransformer(sharedOps),
       new OpaqueGetValidationTransformer(sharedOps),
       new PatternContextValidationTransformer(sharedOps),
+      new WriteAuthorizedByValidationTransformer(sharedOps),
     ];
 
     transformers.push(
