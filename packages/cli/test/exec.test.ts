@@ -813,6 +813,56 @@ describe("mounted callable resolution and execution", () => {
     ).rejects.toThrow(/mounted callable file not found/i);
   });
 
+  it("tolerates transient mounted callable ENOENT during FUSE invalidation", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const pieceDir = join(mountpoint, "home/pieces/notes-2");
+    const filePath = join(pieceDir, "result", "search.tool");
+    await Deno.mkdir(join(pieceDir, "result"), { recursive: true });
+    await Deno.writeTextFile(
+      join(pieceDir, "meta.json"),
+      JSON.stringify({
+        id: "of:piece-123",
+        entityId: "of:piece-123",
+        name: "Fixture Piece",
+        patternName: "fixture",
+      }),
+    );
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+        resultSchema: {
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+        },
+      },
+    });
+    await writeLiveMountState(stateDir, mountpoint);
+
+    setTimeout(() => {
+      void Deno.writeTextFile(filePath, "");
+    }, 50);
+
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+    });
+
+    expect(resolved.absPath).toBe(filePath);
+    expect(resolved.pieceId).toBe("of:piece-123");
+  });
+
   it("resolves the correct mount by longest-prefix lookup", async () => {
     const parentMount = join(tmpDir, "mount");
     const nestedMount = join(parentMount, "nested");

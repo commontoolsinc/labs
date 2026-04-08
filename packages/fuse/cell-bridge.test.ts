@@ -1268,6 +1268,54 @@ Deno.test({
   },
 });
 
+Deno.test({
+  name:
+    "CellBridge.subscribePiece falls back to a pulled value when sink updates are undefined",
+  sanitizeOps: false,
+  fn: async () => {
+    const tree = new FsTree();
+    const bridge = new CellBridge(tree, "/tmp/cf-exec");
+    const state = buildTestSpace(bridge, "home", []);
+
+    const inputCell = new SinkableCell({});
+    const resultCell = new SinkableCell({ content: "Initial" });
+
+    const piece = {
+      id: "of:undefined-sink-piece",
+      name: () => "Undefined Sink Piece",
+      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      input: {
+        getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+        get: () => Promise.resolve(inputCell.get()),
+      },
+      result: {
+        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        get: () => Promise.resolve({ content: "Pulled fallback" }),
+      },
+    };
+
+    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+      .addPieceToSpace.bind(bridge);
+    await addPiece(state, piece, "home");
+
+    const pieceIno = tree.lookup(state.piecesIno, "Undefined-Sink-Piece")!;
+    await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+      .hydratePieceProp.call(bridge, pieceIno, "result");
+    resultCell.set(undefined);
+    await new Promise((r) => setTimeout(r, 250));
+
+    const resultIno = tree.lookup(pieceIno, "result");
+    assertEquals(resultIno !== undefined, true);
+    assertEquals(
+      getFileContent(tree, resultIno!, "content"),
+      "Pulled fallback",
+    );
+
+    const subs = state.pieceSubs.get("Undefined-Sink-Piece");
+    if (subs) { for (const cancel of subs) cancel(); }
+  },
+});
+
 Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");

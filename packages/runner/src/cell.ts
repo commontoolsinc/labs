@@ -640,7 +640,7 @@ export class CellImpl<T extends FabricValue>
    * registers a temporary effect that reads the cell's value, triggering the
    * scheduler to compute all transitive dependencies first.
    *
-   * In push-based mode (the default), this is equivalent to `await idle()`
+   * In push-based mode, this is equivalent to `await idle()`
    * followed by `get()`, but ensures consistent behavior across both modes.
    *
    * Use this in tests or when you need to ensure a computed value is up-to-date

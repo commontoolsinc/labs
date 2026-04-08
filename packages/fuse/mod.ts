@@ -272,10 +272,12 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       if (bridge && bridge.shouldPrepareLookup(parent, name)) {
+        const mustSynchronize = bridge.shouldSynchronizeLookup?.(parent) ??
+          false;
         // Fast path: if entry is already in the tree (stubs, meta.json,
         // previously hydrated data), reply immediately and trigger
         // hydration in the background for not-yet-populated entries.
-        if (replyLookupFromTree(req, parent, name)) {
+        if (!mustSynchronize && replyLookupFromTree(req, parent, name)) {
           bridge.prepareLookup(parent, name).catch(() => {});
           return;
         }
