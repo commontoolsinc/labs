@@ -39,7 +39,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     $ref: "#/$defs/Person"
                 },
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["people"],
@@ -85,7 +85,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     $ref: "#/$defs/Person"
                 },
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["people"],
@@ -110,7 +110,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {__cfHelpers.ifElse({
             type: "boolean",
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
@@ -197,7 +197,7 @@ export default pattern((__cf_pattern_input) => {
                 $ref: "#/$defs/Person"
             },
             "default": [],
-            asCell: true
+            asCell: ["cell"]
         }
     },
     $defs: {

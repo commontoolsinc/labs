@@ -65,7 +65,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: true
+                            asCell: ["cell"]
                         }
                     },
                     required: ["path"]
@@ -83,7 +83,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 $ref: "#/$defs/Entry"
                             },
-                            asCell: true
+                            asCell: ["cell"]
                         },
                         p: {
                             type: "array",
@@ -132,7 +132,7 @@ export default pattern((__cf_pattern_input) => {
                         properties: {
                             labelPrefix: {
                                 type: "string",
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["labelPrefix"]
@@ -150,7 +150,7 @@ export default pattern((__cf_pattern_input) => {
                             properties: {
                                 labelPrefix: {
                                     type: "string",
-                                    asCell: true
+                                    asCell: ["cell"]
                                 }
                             },
                             required: ["labelPrefix"]
@@ -228,7 +228,7 @@ export default pattern((__cf_pattern_input) => {
                 $ref: "#/$defs/Entry"
             },
             "default": [],
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["entries"],

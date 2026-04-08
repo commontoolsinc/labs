@@ -47,7 +47,7 @@ export default pattern((state) => {
                         properties: {
                             count: {
                                 type: "number",
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["count"]

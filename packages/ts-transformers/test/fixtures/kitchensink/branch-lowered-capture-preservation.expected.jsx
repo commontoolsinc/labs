@@ -427,19 +427,19 @@ export default pattern((__cf_pattern_input) => {
                             },
                             editingNoteIndex: {
                                 type: ["number", "undefined"],
-                                asCell: true
+                                asCell: ["cell"]
                             },
                             editingNoteText: {
                                 type: "string",
-                                asCell: true
+                                asCell: ["cell"]
                             },
                             settingsModuleIndex: {
                                 type: ["number", "undefined"],
-                                asCell: true
+                                asCell: ["cell"]
                             },
                             expandedIndex: {
                                 type: ["number", "undefined"],
-                                asCell: true
+                                asCell: ["cell"]
                             },
                             trashedSubPieces: {
                                 type: "array",

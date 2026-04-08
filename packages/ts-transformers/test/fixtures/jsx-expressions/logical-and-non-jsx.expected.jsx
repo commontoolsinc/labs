@@ -55,7 +55,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["name", "age"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]
@@ -75,7 +75,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["name", "age"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]
@@ -104,7 +104,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["name", "age"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]
@@ -124,7 +124,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["name", "age"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]

@@ -41,11 +41,11 @@ export default pattern((__cf_pattern_input) => {
         properties: {
             counter: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             label: {
                 type: "string",
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["counter", "label"]
@@ -80,11 +80,11 @@ export default pattern((__cf_pattern_input) => {
         },
         counter: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         },
         label: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["$UI", "counter", "label"],

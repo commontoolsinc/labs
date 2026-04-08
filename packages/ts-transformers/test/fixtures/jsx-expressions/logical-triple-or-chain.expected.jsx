@@ -43,11 +43,11 @@ export default pattern((_state) => {
             properties: {
                 primary: {
                     type: "string",
-                    asCell: true
+                    asCell: ["cell"]
                 },
                 secondary: {
                     type: "string",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["primary", "secondary"]
@@ -73,7 +73,7 @@ export default pattern((_state) => {
                     items: {
                         type: "string"
                     },
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["items"]

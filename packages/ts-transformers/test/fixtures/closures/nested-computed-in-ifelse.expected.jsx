@@ -44,7 +44,7 @@ export default pattern(() => {
                 properties: {
                     secondToggle: {
                         type: "boolean",
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 },
                 required: ["secondToggle"]
@@ -64,7 +64,7 @@ export default pattern(() => {
         {/* Case B: Computed inside ifElse - this was the bug */}
         {ifElse({
                 type: "boolean",
-                asCell: true
+                asCell: ["cell"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{}, {
                         type: "object",
@@ -80,7 +80,7 @@ export default pattern(() => {
                     properties: {
                         secondToggle: {
                             type: "boolean",
-                            asCell: true
+                            asCell: ["cell"]
                         }
                     },
                     required: ["secondToggle"]

@@ -253,7 +253,7 @@ export default pattern((state) => {
             },
             selectedCommentId: {
                 type: ["string", "undefined"],
-                asCell: true
+                asCell: ["cell"]
             },
             state: {
                 type: "object",

@@ -53,7 +53,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     $ref: "#/$defs/Item"
                 },
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["items"],
@@ -287,7 +287,7 @@ export default pattern((__cf_pattern_input) => {
                 $ref: "#/$defs/Item"
             },
             "default": [],
-            asCell: true
+            asCell: ["cell"]
         }
     },
     $defs: {

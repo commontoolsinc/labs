@@ -27,7 +27,7 @@ const removeItem = handler({
             items: {
                 $ref: "#/$defs/Item"
             },
-            asCell: true
+            asCell: ["cell"]
         },
         item: {
             $ref: "#/$defs/Item"

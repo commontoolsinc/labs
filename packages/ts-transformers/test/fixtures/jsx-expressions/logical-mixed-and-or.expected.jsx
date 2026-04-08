@@ -60,7 +60,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["name", "age"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]
@@ -76,7 +76,7 @@ export default pattern((_state) => {
             properties: {
                 defaultMessage: {
                     type: "string",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["defaultMessage"]
@@ -105,7 +105,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["name", "age"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]
@@ -131,7 +131,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["name", "age"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]
@@ -161,7 +161,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["name", "age"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]

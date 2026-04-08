@@ -68,7 +68,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 cell: {
                     type: "number",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["cell"]
@@ -121,7 +121,7 @@ export default pattern((__cf_pattern_input) => {
         },
         cell: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["count", "show", "name", "cell"]

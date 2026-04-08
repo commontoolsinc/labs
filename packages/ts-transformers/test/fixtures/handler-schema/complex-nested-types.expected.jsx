@@ -70,15 +70,15 @@ const userHandler = handler({
                 },
                 required: ["id", "name", "email"]
             },
-            asCell: true
+            asCell: ["cell"]
         },
         lastAction: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         },
         count: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["users", "lastAction", "count"]
@@ -118,7 +118,7 @@ const _updateTags = handler({
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["tags"]

@@ -30,7 +30,7 @@ const increment = handler(false as const satisfies __cfHelpers.JSONSchema, {
     properties: {
         state: {
             $ref: "#/$defs/NestedOptionalState",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["state"],
@@ -130,7 +130,7 @@ export default pattern((__cf_pattern_input) => {
         },
         increment: {
             type: "unknown",
-            asStream: true
+            asCell: ["stream"]
         }
     },
     required: ["state", "increment"],

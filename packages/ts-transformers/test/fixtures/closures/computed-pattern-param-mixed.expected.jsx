@@ -33,7 +33,7 @@ export default pattern((config: {
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             config: {
                 type: "object",
@@ -52,7 +52,7 @@ export default pattern((config: {
             },
             threshold: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["value", "config", "offset", "threshold"]

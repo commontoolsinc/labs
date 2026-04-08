@@ -70,22 +70,22 @@ export default pattern((__cf_pattern_input) => {
                     }, {
                         type: "null"
                     }],
-                asCell: true
+                asCell: ["cell"]
             },
             fileId: {
                 type: "string",
                 "default": "",
-                asCell: true
+                asCell: ["cell"]
             },
             content: {
                 type: "string",
                 "default": "",
-                asCell: true
+                asCell: ["cell"]
             },
             savedContent: {
                 type: "string",
                 "default": "",
-                asCell: true
+                asCell: ["cell"]
             },
             onSaveFile: {
                 type: "object",
@@ -98,7 +98,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 },
                 required: ["fileId", "content"],
-                asStream: true
+                asCell: ["stream"]
             }
         },
         required: ["timer", "fileId", "content", "savedContent", "onSaveFile"]
@@ -123,17 +123,17 @@ export default pattern((__cf_pattern_input) => {
         fileId: {
             type: "string",
             "default": "",
-            asCell: true
+            asCell: ["cell"]
         },
         content: {
             type: "string",
             "default": "",
-            asCell: true
+            asCell: ["cell"]
         },
         savedContent: {
             type: "string",
             "default": "",
-            asCell: true
+            asCell: ["cell"]
         },
         onSaveFile: {
             type: "object",
@@ -146,7 +146,7 @@ export default pattern((__cf_pattern_input) => {
                 }
             },
             required: ["fileId", "content"],
-            asStream: true
+            asCell: ["stream"]
         }
     },
     required: ["fileId", "content", "savedContent", "onSaveFile"]
@@ -154,7 +154,7 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         trigger: {
-            asStream: true
+            asCell: ["stream"]
         }
     },
     required: ["trigger"]

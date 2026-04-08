@@ -33,7 +33,7 @@ const addTodo = handler({
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["items"]
@@ -99,7 +99,7 @@ export default pattern((state) => {
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["items"]

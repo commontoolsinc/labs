@@ -13,11 +13,16 @@ Deno.test("detects opaque brand", () => {
 });
 
 Deno.test("detects cell brand variants", () => {
-  const variants: Array<[string, "cell" | "stream"]> = [
+  const variants: Array<
+    [
+      string,
+      "cell" | "stream" | "opaque" | "comparable" | "readonly" | "writeonly",
+    ]
+  > = [
     ["cells.cell", "cell"],
-    ["cells.comparable", "cell"],
-    ["cells.readonly", "cell"],
-    ["cells.writeonly", "cell"],
+    ["cells.comparable", "comparable"],
+    ["cells.readonly", "readonly"],
+    ["cells.writeonly", "writeonly"],
     ["cells.stream", "stream"],
   ];
 

@@ -27,7 +27,7 @@ export default pattern((__cf_pattern_input) => {
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             multiplier: {
                 type: "number"

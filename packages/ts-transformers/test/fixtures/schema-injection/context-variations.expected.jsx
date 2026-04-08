@@ -47,7 +47,7 @@ const testPattern = pattern(() => {
     return _inPattern;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number",
-    asCell: true
+    asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
 // 6. Inside handler
 const testHandler = handler(false as const satisfies __cfHelpers.JSONSchema, false as const satisfies __cfHelpers.JSONSchema, () => {

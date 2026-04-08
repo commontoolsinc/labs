@@ -33,7 +33,7 @@ export default pattern((_state) => {
     properties: {
         counter: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["counter"]

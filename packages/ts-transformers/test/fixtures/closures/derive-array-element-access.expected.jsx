@@ -25,7 +25,7 @@ export default pattern(() => {
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             factors: {
                 type: "array",

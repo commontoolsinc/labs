@@ -28,11 +28,11 @@ export default pattern(() => {
         properties: {
             a: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             b: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["a", "b"]

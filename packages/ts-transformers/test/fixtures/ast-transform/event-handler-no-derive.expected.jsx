@@ -25,7 +25,7 @@ const handleClick = handler({
     properties: {
         count: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["count"]

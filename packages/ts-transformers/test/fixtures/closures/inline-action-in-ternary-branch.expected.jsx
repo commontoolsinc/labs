@@ -36,7 +36,7 @@ export default pattern((state) => {
         [UI]: (<cf-card>
         {__cfHelpers.ifElse({
             type: "boolean",
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
@@ -64,7 +64,7 @@ export default pattern((state) => {
                         properties: {
                             isEditing: {
                                 type: "boolean",
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["isEditing"]
@@ -101,7 +101,7 @@ export default pattern((state) => {
                         properties: {
                             isEditing: {
                                 type: "boolean",
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["isEditing"]
@@ -125,7 +125,7 @@ export default pattern((state) => {
         },
         isEditing: {
             type: "boolean",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["card", "isEditing"],

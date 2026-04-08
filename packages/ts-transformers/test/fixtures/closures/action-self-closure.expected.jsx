@@ -71,7 +71,7 @@ export default pattern((__cf_pattern_input) => {
             },
             count: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["self", "count"],

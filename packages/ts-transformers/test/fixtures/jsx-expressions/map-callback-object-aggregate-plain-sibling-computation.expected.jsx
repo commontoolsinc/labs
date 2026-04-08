@@ -91,7 +91,7 @@ export default pattern((__cf_pattern_input) => {
                 $ref: "#/$defs/FileEntry"
             },
             "default": [],
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["files"],

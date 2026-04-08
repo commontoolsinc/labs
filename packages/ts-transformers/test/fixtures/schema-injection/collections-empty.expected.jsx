@@ -40,12 +40,12 @@ export default pattern(() => {
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["cell"]
         },
         emptyObject: {
             type: "object",
             properties: {},
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["emptyArray", "emptyObject"]

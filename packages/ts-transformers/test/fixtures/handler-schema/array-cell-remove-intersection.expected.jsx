@@ -27,7 +27,7 @@ const removeItem = handler({
             items: {
                 $ref: "#/$defs/Item"
             },
-            asCell: true
+            asCell: ["cell"]
         },
         index: {
             type: "number"
@@ -65,7 +65,7 @@ const removeItemAlias = handler({
             items: {
                 $ref: "#/$defs/Item"
             },
-            asCell: true
+            asCell: ["cell"]
         },
         index: {
             type: "number"

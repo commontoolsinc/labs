@@ -28,7 +28,7 @@ export default pattern((config: Config) => {
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             config: {
                 type: "object",

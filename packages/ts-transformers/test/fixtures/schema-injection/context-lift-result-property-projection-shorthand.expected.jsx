@@ -16,11 +16,11 @@ const liftSummary = lift({
     properties: {
         primary: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         },
         secondary: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["primary", "secondary"]
@@ -71,11 +71,11 @@ export default pattern((__cf_pattern_input) => {
     properties: {
         primary: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         },
         secondary: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["primary", "secondary"]

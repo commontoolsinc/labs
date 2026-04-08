@@ -37,7 +37,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 value: {
                     type: "string",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["value"]
@@ -50,7 +50,7 @@ export default pattern((__cf_pattern_input) => {
     properties: {
         value: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"]
@@ -59,7 +59,7 @@ export default pattern((__cf_pattern_input) => {
     properties: {
         update: {
             $ref: "#/$defs/MyEvent",
-            asStream: true
+            asCell: ["stream"]
         }
     },
     required: ["update"],

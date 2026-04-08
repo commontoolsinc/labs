@@ -25,13 +25,13 @@ const removeItem = handler({
             type: "array",
             items: {
                 $ref: "#/$defs/Item",
-                asCell: true
+                asCell: ["cell"]
             },
-            asCell: true
+            asCell: ["cell"]
         },
         item: {
             $ref: "#/$defs/Item",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["items", "item"],
