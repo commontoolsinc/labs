@@ -101,6 +101,7 @@ export async function ensurePieceRunning(
       const resultCell = runtime.getCellFromLink(resultLink, undefined, tx);
 
       // Commit the read transaction before starting the piece
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       // Load the pattern
@@ -131,6 +132,7 @@ export async function ensurePieceRunning(
     } catch (error) {
       // Make sure to commit/rollback the transaction on error
       try {
+        runtime.prepareTxForCommit(tx);
         await tx.commit();
       } catch {
         // Ignore commit errors on cleanup

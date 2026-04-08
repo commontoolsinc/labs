@@ -610,7 +610,10 @@ export class Runner {
           );
         }
       } finally {
-        if (shouldCommit) actualTx.commit();
+        if (shouldCommit) {
+          this.runtime.prepareTxForCommit(actualTx);
+          actualTx.commit();
+        }
       }
     };
 
@@ -922,7 +925,10 @@ export class Runner {
       this.startWithTx(tx, resultCell, pattern, options);
     }
 
-    if (!providedTx) tx.commit();
+    if (!providedTx) {
+      this.runtime.prepareTxForCommit(tx);
+      tx.commit();
+    }
 
     return resultCell;
   }
@@ -985,6 +991,7 @@ export class Runner {
       if (!givenTx) {
         // Should be unnecessary as the start itself is read-only
         // TODO(seefeld): Enforce this by adding a read-only flag for tx
+        this.runtime.prepareTxForCommit(tx);
         await tx.commit().then(({ error }) => {
           if (error) {
             logger.error(

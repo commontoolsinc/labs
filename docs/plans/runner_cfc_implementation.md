@@ -637,12 +637,12 @@ Primary files:
 
 Tasks:
 
-- [ ] Make prepare invocation explicit for all runtime-owned writable
+- [x] Make prepare invocation explicit for all runtime-owned writable
       transaction paths; scheduler integration is one path, but the commit gate
       remains in the transaction commit path
 - [x] Insert prepare between action/handler execution and commit in
       scheduler-managed flows
-- [ ] Integrate generic `runtime.editWithRetry()` and other direct commit
+- [x] Integrate generic `runtime.editWithRetry()` and other direct commit
       callers with the same prepare-or-observe path
 - [x] Replace effectful use of generic commit callbacks with a success-only
       outbox

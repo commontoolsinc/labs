@@ -112,6 +112,7 @@ export function fetchData(
 
       // Since we're aborting, don't retry. If the above fails, it's because the
       // requestId was already changing under us.
+      runtime.prepareTxForCommit(tx);
       tx.commit();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down

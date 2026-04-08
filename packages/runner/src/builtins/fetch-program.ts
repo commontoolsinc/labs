@@ -144,6 +144,7 @@ export function fetchProgram(
         cache.withTx(tx).update(updates);
       }
 
+      runtime.prepareTxForCommit(tx);
       tx.commit();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down

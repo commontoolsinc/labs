@@ -1847,6 +1847,7 @@ function subscribeToReferencedDocs<T>(
     // no async await here, but that also means no retry. TODO(seefeld): Should
     // we add a retry? So far all sinks are read-only, so they get re-triggered
     // on changes already.
+    runtime.prepareTxForCommit(extraTx);
     extraTx.commit();
   };
   // Name the action for debugging
@@ -1867,6 +1868,7 @@ function subscribeToReferencedDocs<T>(
   // Technically unnecessary since we don't expect/allow callbacks to sink to
   // write to other cells, and we retry by design anyway below when read data
   // changed. But ideally we enforce read-only as well.
+  runtime.prepareTxForCommit(tx);
   tx.commit();
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
