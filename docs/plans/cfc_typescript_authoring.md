@@ -181,7 +181,7 @@ to keep that boundary clear:
       `schema.ifc`
 - [x] Preserve the base schema of `T` when stripping the `Cfc<T, Meta>`
       carrier
-- [ ] Lower `ProjectionPath`, `ProjectionOf`, and `Projection` to canonical
+- [x] Lower `ProjectionPath`, `ProjectionOf`, and `Projection` to canonical
       JSON Pointer metadata
 - [x] Lower `OpaqueInput<T, Spec>` to the schema of `T` plus `ifc.opaque`
 - [ ] Preserve `WriteAuthorizedBy` binding identity through a cross-stage

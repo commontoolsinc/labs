@@ -784,22 +784,75 @@ export class CommonFabricFormatter implements TypeFormatter {
           },
         };
       case "ProjectionPath":
-        return {
-          projection: {
-            from: readValue(1),
-            path: this.encodeJsonPointerPath(readValue(2)),
-          },
-        };
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 2,
+          defaultFrom: undefined,
+        });
       case "ProjectionOf":
-        return {
-          projection: {
-            from: "/",
-            path: this.encodeJsonPointerPath(readValue(1)),
-          },
-        };
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 1,
+          defaultFrom: "/",
+        });
+      case "Projection":
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 1,
+          defaultFrom: "/",
+        });
       default:
         return undefined;
     }
+  }
+
+  private buildProjectionMetadata(
+    aliasArgs: readonly ts.Type[],
+    context: GenerationContext,
+    options: {
+      readonly fromIndex: number;
+      readonly pathIndex: number;
+      readonly defaultFrom: string | undefined;
+    },
+  ): Record<string, unknown> | undefined {
+    const readValue = (index: number): unknown => {
+      return this.extractLiteralLikeValue(
+        aliasArgs[index],
+        this.getAliasTypeArgumentNode(context.typeNode, index),
+        context,
+      );
+    };
+
+    const from = options.defaultFrom ?? readValue(options.fromIndex);
+    const directPath = this.encodeJsonPointerPath(readValue(options.pathIndex));
+    if (directPath !== undefined) {
+      return {
+        projection: {
+          from,
+          path: directPath,
+        },
+      };
+    }
+
+    const sourceRefType = aliasArgs[0] as TypeWithInternals | undefined;
+    const sourceRefNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
+    const nestedPathType = sourceRefType?.aliasTypeArguments?.[1];
+    const nestedPathNode = sourceRefNode && ts.isTypeReferenceNode(sourceRefNode)
+      ? sourceRefNode.typeArguments?.[1]
+      : undefined;
+    const nestedPath = this.encodeJsonPointerPath(
+      this.extractLiteralLikeValue(nestedPathType, nestedPathNode, context),
+    );
+    if (nestedPath === undefined) {
+      return undefined;
+    }
+
+    return {
+      projection: {
+        from,
+        path: nestedPath,
+      },
+    };
   }
 
   private getAliasTypeArgumentNode(

@@ -11,12 +11,21 @@ describe("Schema: CFC authoring aliases", () => {
       type OpaqueInput<T, Spec extends true | { schema?: unknown; allowPassThrough?: boolean } = true> = Cfc<T, { opaque: Spec }>;
       type ProjectionPath<T, From extends string, Path extends readonly string[]> = Cfc<T, { projection: { from: From; path: Path } }>;
       type ProjectionOf<Root, PathTuple extends readonly string[]> = ProjectionPath<Root, "/", PathTuple>;
+      type Ref<Root, Path extends readonly string[]> = {
+        readonly __ct_ref_root__?: Root;
+        readonly __ct_ref_path__?: Path;
+      };
+      type Projection<SourceRef> = SourceRef extends Ref<
+        infer Root,
+        infer Path extends readonly string[]
+      > ? ProjectionOf<Root, Path> : never;
 
       interface SchemaRoot {
         secret: Classified<string, readonly ["secret"]>;
         token: OpaqueInput<string>;
         projectionOf: ProjectionOf<{ title: string }, readonly ["title"]>;
         projectionPath: ProjectionPath<{ title: string }, "/source", readonly ["nested", "path"]>;
+        projection: Projection<Ref<{ title: string }, readonly ["nested", "path"]>>;
       }
     `;
 
@@ -46,6 +55,14 @@ describe("Schema: CFC authoring aliases", () => {
     expect(projectionPath.properties?.title?.type).toBe("string");
     expect(projectionPath.ifc?.projection).toEqual({
       from: "/source",
+      path: "/nested/path",
+    });
+
+    const projection = schema.properties?.projection as any;
+    expect(projection.type).toBe("object");
+    expect(projection.properties?.title?.type).toBe("string");
+    expect(projection.ifc?.projection).toEqual({
+      from: "/",
       path: "/nested/path",
     });
   });
