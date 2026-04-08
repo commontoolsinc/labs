@@ -2836,6 +2836,10 @@ type CFThemeInput = Partial<CFThemeDef> & Record<string, unknown>;
 
 type CFEvent<T> = {
   detail: T;
+  provenance?: {
+    origin: "dom";
+    trusted: boolean;
+  };
 };
 
 type EventHandler<T> =

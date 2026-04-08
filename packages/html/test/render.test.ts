@@ -165,9 +165,12 @@ describe("sanitizeEvent", () => {
   }
 
   it("serializes a basic Event", () => {
-    const event = new Event("test");
+    const event = { type: "test", isTrusted: true } as Event;
     const result = sanitizeEvent(event);
-    assert.matchObject(result, { type: "test" });
+    assert.matchObject(result, {
+      type: "test",
+      provenance: { origin: "dom", trusted: true },
+    });
     assert.equal(
       isPlainSerializableObject(result),
       true,

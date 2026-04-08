@@ -780,18 +780,18 @@ Primary files:
 
 Tasks:
 
-- [ ] Define an internal event envelope that can carry provenance and integrity
+  - [x] Define an internal event envelope that can carry provenance and integrity
       hints
-- [ ] Add renderer-generated provenance for user-initiated events
-- [ ] Carry event provenance through scheduler delivery and handler execution
-- [ ] Add the minimum authoring/schema hooks needed to declare trusted UI event
+  - [x] Add renderer-generated provenance for user-initiated events
+  - [x] Carry event provenance through scheduler delivery and handler execution
+  - [x] Add the minimum authoring/schema hooks needed to declare trusted UI event
       outputs
 
 Acceptance:
 
-- [ ] User-originated events can be distinguished from untrusted synthetic input
-- [ ] Boundary evaluation can consume event provenance without ambient globals
-- [ ] Untrusted UI-origin claims fail closed
+- [x] User-originated events can be distinguished from untrusted synthetic input
+- [x] Boundary evaluation can consume event provenance without ambient globals
+- [x] Untrusted UI-origin claims fail closed
 
 ### 12. Content-Addressed Side-Path Hardening
 
@@ -855,7 +855,7 @@ Every phase should land with tests before the next phase starts.
 - [x] Add a runtime feature flag for commit-boundary CFC enforcement
 - [x] Define rollout modes:
       `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`
-- [ ] Default phase 1 to unlabeled-permissive behavior; switching unlabeled
+- [x] Default phase 1 to unlabeled-permissive behavior; switching unlabeled
       paths away from permissive defaults is a separate rollout gate
 - [ ] Emit counters for:
       `cfcRelevantTx`, `cfcPreparedTx`, `cfcPrepareRejects`,

@@ -5,6 +5,7 @@ import {
   UI,
   type VNode,
 } from "@commonfabric/runtime-client";
+import { getEventProvenance } from "./event-provenance.ts";
 
 export type SetPropHandler = <T>(
   target: T,
@@ -236,6 +237,10 @@ const allowListedEventTargetProperties = [
  */
 export function sanitizeEvent(event: Event): object {
   const eventObject: Record<string, unknown> = {};
+  const provenance = getEventProvenance(event);
+  if (provenance) {
+    eventObject.provenance = provenance;
+  }
   for (const property of allowListedEventProperties) {
     eventObject[property] = event[property as keyof Event];
   }

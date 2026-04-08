@@ -353,13 +353,17 @@ Deno.test("DomApplicator - event handling", async (t) => {
 
     // Simulate a click
     const node = applicator.getNode(1) as any;
-    node.dispatchEvent({ type: "click", target: node });
+    node.dispatchEvent({ type: "click", target: node, isTrusted: true });
 
     assertEquals(events.length, 1);
     assertEquals(events[0].type, "dom-event");
     assertEquals(events[0].handlerId, 42);
     assertEquals(events[0].nodeId, 1);
     assertEquals(events[0].event.type, "click");
+    assertEquals(events[0].event.provenance, {
+      origin: "dom",
+      trusted: true,
+    });
   });
 
   await t.step("removes event listener", () => {

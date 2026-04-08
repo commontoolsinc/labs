@@ -6,6 +6,10 @@
  */
 
 import type { JSONValue } from "@commonfabric/runtime-client";
+import {
+  getEventProvenance,
+  type EventProvenance,
+} from "../event-provenance.ts";
 
 /**
  * Serialized DOM event data.
@@ -14,6 +18,8 @@ import type { JSONValue } from "@commonfabric/runtime-client";
 export interface SerializedEvent {
   /** Event type (e.g., "click", "input", "change") */
   type: string;
+  /** Internal provenance hint from the renderer */
+  provenance?: EventProvenance;
 
   // Keyboard event properties
   key?: string;
@@ -40,6 +46,8 @@ export interface SerializedEvent {
   // Custom event detail
   detail?: JSONValue;
 }
+
+export type { EventProvenance };
 
 /**
  * Serialized event target data.
@@ -126,6 +134,10 @@ export function serializeEvent(event: Event): SerializedEvent {
   const serialized: SerializedEvent = {
     type: event.type,
   };
+  const provenance = getEventProvenance(event);
+  if (provenance) {
+    serialized.provenance = provenance;
+  }
 
   // Copy allowlisted event properties
   for (const prop of ALLOWLISTED_EVENT_PROPERTIES) {

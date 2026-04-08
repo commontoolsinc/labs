@@ -546,6 +546,80 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("keeps unlabeled writes permissive in phase 1 even after a relevant read", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-unlabeled-permissive-source",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: sourceId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { classification: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-unlabeled-permissive-source",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      expect(source.get()).toEqual({ secret: "seed" });
+      expect(tx.getCfcState().relevant).toBe(true);
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-unlabeled-permissive-target",
+        {
+          type: "object",
+          properties: {
+            value: { type: "string" },
+          },
+        },
+        tx,
+      );
+      output.set({ value: "result" });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("marks reads as CFC-relevant when stored metadata labels the consumed path", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

@@ -13,13 +13,15 @@ import {
 class MockEvent {
   type: string;
   target: unknown;
+  isTrusted: boolean;
 
   constructor(
     type: string,
-    init?: { target?: unknown },
+    init?: { target?: unknown; isTrusted?: boolean },
   ) {
     this.type = type;
     this.target = init?.target;
+    this.isTrusted = init?.isTrusted ?? false;
   }
 }
 
@@ -170,6 +172,15 @@ Deno.test("events - serializeEvent", async (t) => {
     const event = new MockEvent("click") as unknown as Event;
     const serialized = serializeEvent(event);
     assertEquals(serialized.type, "click");
+  });
+
+  await t.step("captures trusted provenance", () => {
+    const event = new MockEvent("click", { isTrusted: true }) as unknown as Event;
+    const serialized = serializeEvent(event);
+    assertEquals(serialized.provenance, {
+      origin: "dom",
+      trusted: true,
+    });
   });
 
   await t.step("serializes keyboard event properties", () => {
