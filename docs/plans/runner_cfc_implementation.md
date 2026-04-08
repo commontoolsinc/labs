@@ -481,7 +481,7 @@ Tasks:
 - [x] Add explicit APIs to record canonical `WritePolicyInput` entries at
       mutation time; do not rely on generic tx read/write inspection alone for
       schema hashes or structural provenance claims
-- [ ] Keep scheduler metadata and verifier metadata distinct
+- [x] Keep scheduler metadata and verifier metadata distinct
 - [x] Exclude only `internalVerifierRead` from the consumed-read set
 - [ ] Make the phase-1 prepare engine free to pessimistically treat all
       consumed reads as influencing all target paths in
@@ -496,7 +496,7 @@ Acceptance:
       runs
 - [x] Phase-1 canonical `writes` extraction is deterministic across runs
 - [x] Canonical `WritePolicyInput` capture is deterministic across runs
-- [ ] Internal verifier reads remain visible for diagnostics but not policy
+- [x] Internal verifier reads remain visible for diagnostics but not policy
 - [x] Final-per-path view is deterministic
 - [x] Same-value direct writes are either covered by `potentialWrites` or
       explicitly out of phase-1 scope
