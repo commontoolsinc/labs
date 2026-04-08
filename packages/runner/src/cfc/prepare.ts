@@ -89,6 +89,41 @@ const claimPathToLogicalPath = (
   return undefined;
 };
 
+const writeAuthorizedByReason = (
+  tx: IExtendedStorageTransaction,
+  schema: JSONSchema,
+  path: readonly string[],
+): string | undefined => {
+  if (!isRecord(schema) || !isRecord(schema.ifc)) {
+    return undefined;
+  }
+  const claim = schema.ifc.writeAuthorizedBy;
+  if (claim === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(claim) || !claim.every((entry) => typeof entry === "string")) {
+    return `unsupported trust-sensitive claim writeAuthorizedBy at /${
+      path.join("/")
+    }`;
+  }
+
+  const trustSnapshot = tx.getCfcState().trustSnapshot;
+  if (!trustSnapshot?.id || !trustSnapshot?.actingPrincipal) {
+    return `writeAuthorizedBy requires a trust snapshot at /${path.join("/")}`;
+  }
+
+  const identity = tx.getCfcState().implementationIdentity;
+  if (!identity || identity.kind !== "builtin") {
+    return `writeAuthorizedBy requires a trusted builtin identity at /${
+      path.join("/")
+    }`;
+  }
+  if (!claim.includes(identity.builtinId)) {
+    return `writeAuthorizedBy failed at /${path.join("/")}`;
+  }
+  return undefined;
+};
+
 const collectConsumedInputLabel = (
   tx: IExtendedStorageTransaction,
 ): IFCLabel => {
@@ -226,7 +261,6 @@ const unsupportedTrustSensitiveReason = (
     return undefined;
   }
   const unsupportedKeys = [
-    "writeAuthorizedBy",
     "projection",
     "collection",
   ] as const;
@@ -324,6 +358,14 @@ const verifyInputRequirements = (
     );
     if (unsupportedTrustSensitive !== undefined) {
       return unsupportedTrustSensitive;
+    }
+    const writeAuthorizedByFailure = writeAuthorizedByReason(
+      tx,
+      entry.schema,
+      entry.path,
+    );
+    if (writeAuthorizedByFailure !== undefined) {
+      return writeAuthorizedByFailure;
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     if (requiredIntegrity.length > 0 && consumed.length > 0) {

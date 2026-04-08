@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { raw } from "../src/module.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import {
@@ -1454,7 +1455,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("fails closed on unsupported trust-sensitive claims in enforcing modes", async () => {
+  it("fails closed on writeAuthorizedBy without a trusted implementation identity", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
@@ -1479,7 +1480,61 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error?.message).toContain("unsupported trust-sensitive");
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("allows writeAuthorizedBy when the builtin identity matches", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      runtime.moduleRegistry.addModuleByRef(
+        "trusted-handler",
+        raw((inputsCell) => {
+          const tx = inputsCell.tx;
+          if (!tx) {
+            throw new Error("missing tx");
+          }
+          const cell = runtime.getCell(
+            signer.did(),
+            "cfc-authorized-write",
+            {
+              type: "object",
+              properties: {
+                value: {
+                  type: "string",
+                  ifc: { writeAuthorizedBy: ["trusted-handler"] },
+                },
+              },
+              required: ["value"],
+            },
+            tx,
+          );
+          cell.set({ value: "authorized" });
+          return () => undefined;
+        }),
+      );
+
+      const tx = runtime.edit();
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "cfc-authorized-write-result",
+        undefined,
+        tx,
+      );
+      runtime.runner.run(
+        tx,
+        runtime.moduleRegistry.getModule("trusted-handler"),
+        {},
+        resultCell,
+      );
+
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

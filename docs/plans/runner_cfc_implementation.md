@@ -702,9 +702,9 @@ Tasks:
       extension lands
 - [x] Define a trust-snapshot provider interface that is deterministic and easy
       to test
-- [ ] Bind prepare success to the acting principal, trust snapshot identity,
+- [x] Bind prepare success to the acting principal, trust snapshot identity,
       and resolved policy-facing implementation identity
-- [ ] Gate trust-sensitive flow relaxations on that snapshot
+- [x] Gate trust-sensitive flow relaxations on that snapshot
 
 Acceptance:
 
