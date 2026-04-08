@@ -10,10 +10,10 @@
  */
 
 import { isDeno } from "@commonfabric/utils/env";
-import { createSHA256, type IHasher } from "hash-wasm";
 import { sha256 as nobleSha256 } from "merkle-reference";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { IncrementalHasher, Sha256Fn } from "./interface.ts";
+import { canUseWasm, createHasherWasm, sha256Wasm } from "./sha256-wasm.ts";
 
 export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
@@ -33,67 +33,15 @@ if (isDeno()) {
   }
 }
 
-// -- hash-wasm (browser) --
-let wasmHasher: IHasher | null = null;
-
 // Try `hash-wasm` if we didn't succeed in getting the Deno setup to work.
-if (!setupComplete) {
-  try {
-    wasmHasher = await createSHA256();
-    sha256Fn = (payload: Uint8Array): Uint8Array => {
-      wasmHasher!.init();
-      wasmHasher!.update(payload);
-      return wasmHasher!.digest("binary");
-    };
-  } catch {
-    // hash-wasm not available
-  }
+if (!setupComplete && canUseWasm()) {
+  sha256Fn = sha256Wasm;
+  createHasher = createHasherWasm;
+  setupComplete = true;
 }
 
-// -- Build the incremental hasher factory --
-
-if (setupComplete) {
-  // Already set up. Nothing more to do.
-} else if (wasmHasher) {
-  // hash-wasm's shared hasher is safe for synchronous sequential use.
-  // But for incremental hashing we need a dedicated instance per hash
-  // computation. Unfortunately createSHA256() is async. We work around
-  // this by buffering chunks and using the shared hasher at digest time.
-  const shared = wasmHasher;
-
-  class WasmHasher implements IncrementalHasher {
-    #chunks: Uint8Array[] = [];
-    update(data: Uint8Array) {
-      // Copy to avoid aliasing shared scratch buffers.
-      this.#chunks.push(new Uint8Array(data));
-    }
-    digest(): Uint8Array;
-    digest(encoding: "base64url"): string;
-    digest(encoding?: string): Uint8Array | string {
-      shared.init();
-      for (const chunk of this.#chunks) {
-        shared.update(chunk);
-      }
-      const result: Uint8Array = shared.digest("binary");
-
-      switch (encoding) {
-        case "base64url": {
-          return toUnpaddedBase64url(result);
-        }
-        case undefined: {
-          return result;
-        }
-        default: {
-          throw new Error(`Unknown encoding: ${encoding}`);
-        }
-      }
-    }
-  }
-
-  createHasher = (): IncrementalHasher => {
-    return new WasmHasher();
-  };
-} else {
+// Fallback on Noble if all the previous stuff failed.
+if (!setupComplete) {
   // Fallback: buffer chunks and hash all at once via noble.
   class NobleHasher implements IncrementalHasher {
     #chunks: Uint8Array[] = [];
