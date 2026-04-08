@@ -601,7 +601,7 @@ Tasks:
       collection-derived transition checks where they can be evaluated from
       consumed reads plus `potentialWrites`/`writes` plus explicit write-policy
       inputs; otherwise fail closed or remain conservative
-- [ ] Until stable implementation identities and trust snapshots land, treat
+- [x] Until stable implementation identities and trust snapshots land, treat
       trust-sensitive claims such as `writeAuthorizedBy` as non-enforceable:
       allow diagnostics in `observe`, but hard-reject them in enforcing modes
 - [ ] Compute output label maps from `writes`
@@ -623,7 +623,7 @@ Acceptance:
 
 - [x] Required-integrity failures reject before commit
 - [x] Successful prepare writes stable `schemaHash` and label-map metadata
-- [ ] Unsupported or malformed trust-sensitive claims fail closed
+- [x] Unsupported or malformed trust-sensitive claims fail closed
 
 ### 7. Transaction Integration, Retry, and Side-Effect Gating
 

@@ -1109,4 +1109,70 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await storageManager.close();
     }
   });
+
+  it("fails closed on unsupported trust-sensitive claims in enforcing modes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-unsupported-trust-claim",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { writeAuthorizedBy: ["trusted-handler"] },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "secret" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("unsupported trust-sensitive");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("records diagnostics for unsupported trust-sensitive claims in observe mode", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("observe");
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-observe-unsupported-trust-claim",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { projection: ["public-subset"] },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "observed" });
+
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+      expect(tx.getCfcState().diagnostics).toContain(
+        "unsupported trust-sensitive claim projection at /value",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

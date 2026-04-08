@@ -157,6 +157,28 @@ const walkIfcSchema = (
   return entries;
 };
 
+const unsupportedTrustSensitiveReason = (
+  schema: JSONSchema,
+  path: readonly string[],
+): string | undefined => {
+  if (!isRecord(schema) || !isRecord(schema.ifc)) {
+    return undefined;
+  }
+  const unsupportedKeys = [
+    "writeAuthorizedBy",
+    "exactCopyOf",
+    "projection",
+    "collection",
+  ] as const;
+  for (const key of unsupportedKeys) {
+    const value = schema.ifc[key];
+    if (Array.isArray(value) && value.length > 0) {
+      return `unsupported trust-sensitive claim ${key} at /${path.join("/")}`;
+    }
+  }
+  return undefined;
+};
+
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -174,6 +196,13 @@ const verifyInputRequirements = (
 
   for (const entry of walkIfcSchema(schema)) {
     const ifc = isRecord(entry.schema) ? entry.schema.ifc : undefined;
+    const unsupportedTrustSensitive = unsupportedTrustSensitiveReason(
+      entry.schema,
+      entry.path,
+    );
+    if (unsupportedTrustSensitive !== undefined) {
+      return unsupportedTrustSensitive;
+    }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     if (requiredIntegrity.length > 0 && consumed.length > 0) {
       const ok = consumed.every((read) =>
