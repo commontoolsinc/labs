@@ -85,6 +85,18 @@ const logger = getLogger("storage.v2", {
   level: "error",
 });
 
+function withCommitTiming<T>(
+  keys: string[],
+  fn: () => T,
+): T {
+  logger.timeStart(...keys);
+  try {
+    return fn();
+  } finally {
+    logger.timeEnd(...keys);
+  }
+}
+
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
@@ -932,30 +944,37 @@ class SpaceReplica implements ISpaceReplica {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const operations = transaction.operations
-      .filter((operation) => operation.type === DOCUMENT_MIME)
-      .map((operation) =>
-        operation.op === "delete"
-          ? { op: "delete" as const, id: operation.id }
-          : operation.op === "patch"
-          ? {
-            op: "patch" as const,
-            id: operation.id,
-            patches: operation.patches,
-            value: toExplicitDocument(operation.value),
-          }
-          : {
-            op: "set" as const,
-            id: operation.id,
-            value: toExplicitDocument(operation.value),
-          }
-      );
+    const operations = withCommitTiming(
+      ["commitNative", "normalize"],
+      () =>
+        transaction.operations
+          .filter((operation) => operation.type === DOCUMENT_MIME)
+          .map((operation) =>
+            operation.op === "delete"
+              ? { op: "delete" as const, id: operation.id }
+              : operation.op === "patch"
+              ? {
+                op: "patch" as const,
+                id: operation.id,
+                patches: operation.patches,
+                value: toExplicitDocument(operation.value),
+              }
+              : {
+                op: "set" as const,
+                id: operation.id,
+                value: toExplicitDocument(operation.value),
+              }
+          ),
+    );
 
     if (operations.length === 0) {
       return { ok: {} };
     }
 
-    return await this.commitOperations(operations, source);
+    return await withCommitTiming(
+      ["commitNative", "commitOperations"],
+      () => this.commitOperations(operations, source),
+    );
   }
 
   reset(): void {
@@ -1085,62 +1104,77 @@ class SpaceReplica implements ISpaceReplica {
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const localSeq = this.#nextLocalSeq++;
-    const commit = {
-      localSeq,
-      reads: this.buildReads(source, localSeq),
-      operations: operations.map((operation) => {
-        switch (operation.op) {
-          case "delete":
-            return operation;
-          case "patch":
-            return {
-              op: "patch" as const,
-              id: operation.id,
-              patches: operation.patches,
-            };
-          case "set":
-            return {
-              op: "set" as const,
-              id: operation.id,
-              value: operation.value,
-            };
-        }
+    const commit = withCommitTiming(
+      ["commitOperations", "buildCommit"],
+      () => ({
+        localSeq,
+        reads: this.buildReads(source, localSeq),
+        operations: operations.map((operation) => {
+          switch (operation.op) {
+            case "delete":
+              return operation;
+            case "patch":
+              return {
+                op: "patch" as const,
+                id: operation.id,
+                patches: operation.patches,
+              };
+            case "set":
+              return {
+                op: "set" as const,
+                id: operation.id,
+                value: operation.value,
+              };
+          }
+        }),
       }),
-    };
+    );
     const touched = operations.map((operation) => operation.id);
     const shouldNotifySubscribers = this.hasNotificationSubscribers();
     const shouldNotifySinks = this.hasSinkSubscribers(touched);
-    const before = shouldNotifySubscribers
-      ? Differential.checkout(
-        this,
-        touched.map((id) => snapshotState(this, id)),
-      )
-      : undefined;
+    const before = withCommitTiming(
+      ["commitOperations", "snapshotBefore"],
+      () =>
+        shouldNotifySubscribers
+          ? Differential.checkout(
+            this,
+            touched.map((id) => snapshotState(this, id)),
+          )
+          : undefined,
+    );
 
-    for (const operation of operations) {
-      this.applyPending(operation, localSeq);
-    }
-
-    if (before !== undefined) {
-      const optimistic = before.compare(this);
-      this.#subscription.next({
-        type: "commit",
-        space: this.#space,
-        changes: optimistic,
-        source,
-      });
-      if (shouldNotifySinks) {
-        this.notifySinks(optimistic);
+    withCommitTiming(["commitOperations", "applyPending"], () => {
+      for (const operation of operations) {
+        this.applyPending(operation, localSeq);
       }
-    } else if (shouldNotifySinks) {
-      this.notifySinksForIds(touched);
-    }
+    });
 
-    const promise = this.pushCommit(
-      localSeq,
-      operations,
-      commit as any,
-      source,
+    withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
+      if (before !== undefined) {
+        const optimistic = before.compare(this);
+        this.#subscription.next({
+          type: "commit",
+          space: this.#space,
+          changes: optimistic,
+          source,
+        });
+        if (shouldNotifySinks) {
+          this.notifySinks(optimistic);
+        }
+      } else if (shouldNotifySinks) {
+        this.notifySinksForIds(touched);
+      }
+    });
+
+    const promise = withCommitTiming(
+      ["commitOperations", "pushCommitStart"],
+      () =>
+        this.pushCommit(
+          localSeq,
+          operations,
+          commit as any,
+          source,
+        ),
     );
     this.#commitPromises.add(promise);
     const result = await promise;
