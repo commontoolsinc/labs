@@ -21,6 +21,7 @@ import { getValueAtPath } from "../path-utils.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import type { CfcMetadata, IFCLabel, WritePolicyInput } from "./types.ts";
+import { uiContractFromSchema } from "./ui-contract.ts";
 
 const INTERNAL_VERIFIER_META = {
   ...ignoreReadForScheduling,
@@ -369,6 +370,33 @@ const verifyInputRequirements = (
   return undefined;
 };
 
+const verifyTrustedEventRequirements = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    type: MediaType;
+  },
+  schema: JSONSchema,
+): string | undefined => {
+  const contract = uiContractFromSchema(schema);
+  if (contract === undefined) {
+    return undefined;
+  }
+  const matched = tx.getCfcState().writePolicyInputs.some((input) =>
+    input.kind === "trusted-event" &&
+    input.target.space === target.space &&
+    input.target.id === target.id &&
+    input.target.type === target.type &&
+    isRecord(input.provenance) &&
+    input.provenance.origin === "dom" &&
+    input.provenance.trusted === true
+  );
+  return matched
+    ? undefined
+    : `missing trusted-event policy input for ${target.id}`;
+};
+
 const verifyExactCopyRequirements = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -503,6 +531,15 @@ export const prepareBoundaryCommit = (
     const requirementFailure = verifyInputRequirements(tx, frozen);
     if (requirementFailure) {
       reasons.push(requirementFailure);
+      continue;
+    }
+    const trustedEventFailure = verifyTrustedEventRequirements(tx, {
+      space,
+      id,
+      type,
+    }, frozen);
+    if (trustedEventFailure) {
+      reasons.push(trustedEventFailure);
       continue;
     }
 

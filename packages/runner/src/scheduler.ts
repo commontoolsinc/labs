@@ -51,6 +51,7 @@ import {
   markReadAsPotentialWrite,
   reactivityLogFromActivities,
 } from "./storage/reactivity-log.ts";
+import { recordTrustedEventPolicyInputs } from "./cfc/ui-contract.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
@@ -104,6 +105,12 @@ export type EventHandler =
     ) => void;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
+
+function hasAnnotatedWrites(
+  handler: EventHandler,
+): handler is AnnotatedEventHandler {
+  return "writes" in handler && Array.isArray(handler.writes);
+}
 
 /**
  * Callback to populate a transaction with an action's read dependencies.
@@ -3616,10 +3623,20 @@ export class Scheduler {
                   error,
                 );
               });
+              }).catch((error) => {
+                logger.error(
+                  "schedule-error",
+                  "Event handler commit promise rejected:",
+                  error,
+                );
+              });
             }
           };
 
           try {
+            if (hasAnnotatedWrites(handler)) {
+              recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
+            }
             const actionStartTime = performance.now();
             this.runningPromise = Promise.resolve(
               this.runtime.harness.invoke(() => action(tx)),

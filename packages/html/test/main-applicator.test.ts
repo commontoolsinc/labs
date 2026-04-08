@@ -36,6 +36,19 @@ function createMockDocument() {
       nodeType: 1, // ELEMENT_NODE
       parentNode: null,
       childNodes,
+      get dataset() {
+        const dataset: Record<string, string> = {};
+        for (const [name, value] of attributes.entries()) {
+          if (!name.startsWith("data-")) {
+            continue;
+          }
+          const key = name.slice(5).replace(/-([a-z])/g, (_, char: string) =>
+            char.toUpperCase()
+          );
+          dataset[key] = value;
+        }
+        return dataset;
+      },
 
       setAttribute(name: string, value: string) {
         attributes.set(name, value);
@@ -363,6 +376,49 @@ Deno.test("DomApplicator - event handling", async (t) => {
     assertEquals(events[0].event.provenance, {
       origin: "dom",
       trusted: true,
+    });
+  });
+
+  await t.step("serializes data-ui dataset markers with trusted events", () => {
+    const doc = createMockDocument();
+    const events: DomEventMessage[] = [];
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: (msg) => events.push(msg),
+      setProp: (target, key, value) => {
+        if (
+          key.startsWith("data-") &&
+          typeof target === "object" &&
+          target !== null &&
+          "setAttribute" in target &&
+          typeof target.setAttribute === "function"
+        ) {
+          target.setAttribute(key, String(value));
+          return;
+        }
+        (target as Record<string, unknown>)[key] = value;
+      },
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "button" },
+        {
+          op: "set-attrs",
+          nodeId: 1,
+          attrs: { "data-ui-action": "SubmitDirectCommand" },
+        },
+        { op: "set-event", nodeId: 1, eventType: "click", handlerId: 42 },
+      ],
+    });
+
+    const node = applicator.getNode(1) as any;
+    node.dispatchEvent({ type: "click", target: node, isTrusted: true });
+
+    assertEquals(events[0].event.target?.dataset, {
+      uiAction: "SubmitDirectCommand",
     });
   });
 

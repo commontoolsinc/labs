@@ -1373,6 +1373,13 @@ export type JSONSchemaObj = {
     readonly exactCopyOf?: readonly string[];
     readonly projection?: readonly string[];
     readonly collection?: readonly string[];
+    readonly uiContract?: {
+      readonly helper?: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+      readonly action?: string;
+      readonly surface?: string;
+      readonly role?: string;
+      readonly kind?: string;
+    };
   };
 };
 
