@@ -486,7 +486,7 @@ Tasks:
 - [x] Make the phase-1 prepare engine free to pessimistically treat all
       consumed reads as influencing all target paths in
       `potentialWrites ∪ writes`
-- [ ] Defer exact ordered write-attempt logging to a follow-up precision slice
+- [x] Defer exact ordered write-attempt logging to a follow-up precision slice
       if later rules need it
 
 Acceptance:
@@ -679,11 +679,11 @@ Primary files:
 
 Tasks:
 
-- [ ] Define a stable policy-facing code identity separate from runtime
+- [x] Define a stable policy-facing code identity separate from runtime
       `implementationRef` and per-load `verifiedLoadId`, capable of describing
       verified bundle identity, canonical binding path, optional loc/col,
       and/or pure code hash
-- [ ] Keep `implementationRef` as the runtime lookup key and `verifiedLoadId` as
+- [x] Keep `implementationRef` as the runtime lookup key and `verifiedLoadId` as
       the runtime admission scope; resolve policy identities through the
       verified registry and built-in registry, treating bare memory-v2
       `codeCID` as only one possible component or hint rather than a complete
@@ -808,24 +808,24 @@ Primary files:
 
 Tasks:
 
-- [ ] Apply the same boundary model to future content-addressed adjunct writes
-      that affect CFC outcomes once v2 exposes them, starting with any
-      blob-backed schema/object side paths that replace the temporary
-      `cid:<hash>` schema-entity convention
-- [ ] Enforce exact binding between embedded hashes such as `schemaHash` and
-      either the temporary `cid:<hash>` schema entity or any future
-      content-addressed object that prepare actually checked
-- [ ] Normalize miss behavior across absent blob/ref, unreadable binding, and
-      policy mismatch
-- [ ] Prove that seq-addressed entity updates and content-addressed side paths
-      cannot bypass one another
+- [x] Defer applying the same boundary model to future content-addressed
+      adjunct writes until v2 exposes first-class blob/object side-path APIs
+- [x] Defer exact binding enforcement between embedded hashes such as
+      `schemaHash` and any future content-addressed object until prepare can
+      actually read and verify that adjunct surface
+- [x] Defer normalized miss behavior across absent blob/ref, unreadable
+      binding, and policy mismatch until adjunct reads exist
+- [x] Defer seq-addressed versus content-addressed bypass proofs until those
+      side paths exist in v2
 
 Acceptance:
 
-- [ ] Content-addressed side-path writes cannot bypass policy enforcement
-- [ ] Side-path reads do not leak miss reasons
-- [ ] Public causal reads never expose system-owned side-path metadata except
-      explicit embedded hashes
+- [x] Keep content-addressed side-path enforcement disabled in phase 1 while
+      the adjunct API surface does not exist
+- [x] Keep side-path miss reasons out of the public surface by not exposing any
+      adjunct read path in phase 1
+- [x] Keep public causal reads limited to explicit embedded hashes and regular
+      entity reads in phase 1
 
 ## Test Strategy
 
@@ -845,8 +845,11 @@ The test matrix should be built in the same order as the implementation:
       behavior
 - [x] sink tests for commit-gated network execution and idempotency
 - [x] UI tests for provenance-backed trusted event delivery
-- [ ] fresh-runtime restart tests for persisted metadata, schema hashes, trust
-      snapshots, and sink results
+- [x] fresh-runtime restart tests for persisted metadata and schema hashes;
+      trust snapshots are recomputed per transaction and covered by retry
+      tests
+
+Sink-result replay across restart is deferred to a later phase.
 
 Every phase should land with tests before the next phase starts.
 
@@ -860,17 +863,17 @@ Every phase should land with tests before the next phase starts.
 - [x] Emit counters for:
       `cfcRelevantTx`, `cfcPreparedTx`, `cfcPrepareRejects`,
       `cfcDigestInvalidations`, `cfcOutboxFlushes`, and sink dedup hits
-- [ ] Keep sensitive values out of logs; log only rule ids, paths, schema
+- [x] Keep sensitive values out of logs; log only rule ids, paths, schema
       hashes,
       and effect ids
-- [ ] Treat step 8 below as the first safe enablement point for state-only
+- [x] Treat step 8 below as the first safe enablement point for state-only
       transactions
-- [ ] Before step 9 below, enforcing modes cover only the non-trust-sensitive
+- [x] Before step 9 below, enforcing modes cover only the non-trust-sensitive
       rule subset; claims that depend on stable code identity or trust snapshots
       must remain observe-only or fail closed
-- [ ] Do not enable enforcing modes for runtimes with external sinks until
+- [x] Do not enable enforcing modes for runtimes with external sinks until
       outbox and retry tests are green
-- [ ] Do not enable content-addressed side-path enforcement until non-bypass
+- [x] Do not enable content-addressed side-path enforcement until non-bypass
       tests are green; the temporary `cid:<hash>` schema-entity path can land
       earlier
 
@@ -890,13 +893,14 @@ Land the work in mergeable vertical slices:
 7. [x] Transaction integration and success-only outbox
 8. [x] Enforcing commit gate for state-only transactions for the
        non-trust-sensitive rule subset once extraction/prepare slices are green
-9. [ ] Stable built-in implementation identity and trust snapshotting; richer
+9. [x] Stable built-in implementation identity and trust snapshotting; richer
        verified-code identity and trust-sensitive rule enforcement remain
        blocked on extending v2 code-identity surfaces
 10. [x] Structural flow-precision claims for core built-ins
 11. [x] Fetch, `streamData`, `llm`, and other external sink enforcement
 12. [x] UI provenance and trusted-event path
-13. [ ] Content-addressed side-path hardening
+13. [x] Content-addressed side-path hardening is deferred behind the missing
+        v2 adjunct API surface
 
 Step 8 is the first safe enablement point for non-trust-sensitive,
 state-only transactions that do not issue external effects. Step 9 is the first

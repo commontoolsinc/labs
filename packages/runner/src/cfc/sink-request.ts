@@ -107,7 +107,12 @@ export function enqueueSinkRequestPostCommitEffect(
         policyInput,
       );
       if (reason !== undefined) {
-        console.warn(`[CFC sink-request] ${reason}`);
+        console.warn("[CFC sink-request]", {
+          ruleId: "sink-request-release",
+          sink,
+          effectId,
+          detail: reason,
+        });
         return;
       }
       await flush(committedTx as IExtendedStorageTransaction);
