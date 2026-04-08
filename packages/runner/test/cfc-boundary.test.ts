@@ -1373,6 +1373,127 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("treats unrelated consumed reads as influencing every target path in phase 1", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const trustedSourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-phase1-trusted-source",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: trustedSourceId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "trusted" },
+        cfc: {
+          version: 1,
+          schemaHash: "trusted-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { integrity: ["trusted"] },
+            }],
+          },
+        },
+      });
+      const untrustedSourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-phase1-unrelated-source",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: untrustedSourceId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "untrusted" },
+        cfc: {
+          version: 1,
+          schemaHash: "untrusted-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { integrity: ["untrusted"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const trustedSource = runtime.getCell(
+        signer.did(),
+        "cfc-phase1-trusted-source",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      const unrelatedSource = runtime.getCell(
+        signer.did(),
+        "cfc-phase1-unrelated-source",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      expect(trustedSource.get()).toEqual({ secret: "trusted" });
+      expect(unrelatedSource.get()).toEqual({ secret: "untrusted" });
+      tx.markCfcRelevant("stored-input-metadata");
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-phase1-target",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { requiredIntegrity: ["trusted"] },
+            },
+          },
+        },
+        tx,
+      );
+      output.set({ value: "result" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("requiredIntegrity");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects writes when maxConfidentiality is not satisfied by consumed input labels", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

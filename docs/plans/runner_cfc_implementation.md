@@ -483,7 +483,7 @@ Tasks:
       schema hashes or structural provenance claims
 - [x] Keep scheduler metadata and verifier metadata distinct
 - [x] Exclude only `internalVerifierRead` from the consumed-read set
-- [ ] Make the phase-1 prepare engine free to pessimistically treat all
+- [x] Make the phase-1 prepare engine free to pessimistically treat all
       consumed reads as influencing all target paths in
       `potentialWrites ∪ writes`
 - [ ] Defer exact ordered write-attempt logging to a follow-up precision slice
