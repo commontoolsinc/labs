@@ -136,7 +136,8 @@ describe("generateText", () => {
       expect(sendRequestCalls).toEqual([]);
 
       await commitPromise;
-      await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+      await expect(waitForPendingToBecomeFalse(result)).resolves
+        .toBeUndefined();
       await runtime.idle();
 
       expect(sendRequestCalls.length).toBeGreaterThan(0);

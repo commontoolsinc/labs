@@ -2,7 +2,9 @@ export function createFrozenRequestSnapshot<T>(value: T): T {
   const snapshot = structuredClone(value);
 
   const freeze = (target: unknown, seen = new Set<object>()): unknown => {
-    if (!target || (typeof target !== "object" && typeof target !== "function")) {
+    if (
+      !target || (typeof target !== "object" && typeof target !== "function")
+    ) {
       return target;
     }
     if (seen.has(target as object)) {
