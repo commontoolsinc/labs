@@ -4,6 +4,7 @@ import {
   assertMatch,
   assertStringIncludes,
 } from "@std/assert";
+import { CFC_TRANSFORMER_STAGE_NAMES } from "../src/cf-pipeline.ts";
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
@@ -87,6 +88,30 @@ const p = pattern<{ items: string[] }>((state) => ({
       "const fontSize = __cf_pattern_input.params.style[key];",
     );
     assert(!output.includes("__cf_pattern_input.params.style.small"));
+  },
+);
+
+Deno.test(
+  "Pipeline regression: CFC transformer stages stay in the fixed order",
+  () => {
+    assertEquals(CFC_TRANSFORMER_STAGE_NAMES, [
+      "CastValidationTransformer",
+      "EmptyArrayOfValidationTransformer",
+      "OpaqueGetValidationTransformer",
+      "PatternContextValidationTransformer",
+      "WriteAuthorizedByValidationTransformer",
+      "JsxExpressionSiteRouterTransformer",
+      "ComputedTransformer",
+      "ClosureTransformer",
+      "PatternOwnedExpressionSiteLoweringTransformer",
+      "HelperOwnedExpressionSiteLoweringTransformer",
+      "PatternCallbackLoweringTransformer",
+      "SchemaInjectionTransformer",
+      "SchemaGeneratorTransformer",
+      "ModuleScopeShadowingTransformer",
+      "ModuleScopeCfDataTransformer",
+      "ModuleScopeFunctionHardeningTransformer",
+    ]);
   },
 );
 

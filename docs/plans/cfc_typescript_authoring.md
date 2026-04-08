@@ -194,7 +194,7 @@ to keep that boundary clear:
 
 ### 4. Implement Transformer Pipeline Support
 
-- [ ] Keep the CFC stage order fixed:
+- [x] Keep the CFC stage order fixed:
       `CfcJsxTransformer -> SchemaInjectionTransformer -> SchemaGeneratorTransformer`
 - [x] Add validation for `WriteAuthorizedBy<T, typeof binding>` in the
       transformer pipeline
@@ -202,7 +202,7 @@ to keep that boundary clear:
       rehydrate local binding references
 - [ ] Ensure `SchemaInjectionTransformer` preserves CFC-aware type identity in
       generated `toSchema<...>()` calls
-- [ ] Add guardrail tests so pipeline reordering fails loudly
+- [x] Add guardrail tests so pipeline reordering fails loudly
 
 ### 5. Land The UI Helper Vertical Slice
 
