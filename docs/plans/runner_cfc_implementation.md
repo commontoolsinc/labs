@@ -452,7 +452,7 @@ Acceptance:
 - [x] Prepared transaction with unchanged activity commits successfully
 - [x] Post-prepare read, write, or write-policy input invalidates prepare
 - [x] Abort clears outbox state
-- [ ] Scheduler-owned and direct runtime-owned commit callers hit the same gate
+- [x] Scheduler-owned and direct runtime-owned commit callers hit the same gate
 
 ### 3. Canonical Activity and Policy-Input Capture
 
@@ -640,7 +640,7 @@ Tasks:
 - [ ] Make prepare invocation explicit for all runtime-owned writable
       transaction paths; scheduler integration is one path, but the commit gate
       remains in the transaction commit path
-- [ ] Insert prepare between action/handler execution and commit in
+- [x] Insert prepare between action/handler execution and commit in
       scheduler-managed flows
 - [ ] Integrate generic `runtime.editWithRetry()` and other direct commit
       callers with the same prepare-or-observe path

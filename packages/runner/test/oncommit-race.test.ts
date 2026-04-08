@@ -127,4 +127,74 @@ describe("onCommit callback as success signal (race condition)", () => {
     expect(statuses).toEqual(["done"]);
     expect(streamCell.get()).toBe(2);
   });
+
+  it("prepares scheduler-managed relevant writes before commit", async () => {
+    const streamCell = runtime.getCell<number>(
+      space,
+      "cfc-scheduler-prepare-stream",
+      undefined,
+      tx,
+    );
+    streamCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const guardedCell = runtime.getCell<{ value: string }>(
+      space,
+      "cfc-scheduler-prepare-output",
+      {
+        type: "object",
+        properties: {
+          value: {
+            type: "string",
+            ifc: { classification: ["secret"] },
+          },
+        },
+        required: ["value"],
+      },
+      tx,
+    );
+    guardedCell.set({ value: "seed" });
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.addEventHandler(
+      (handlerTx, event) => {
+        guardedCell.withTx(handlerTx).set({ value: `event-${event}` });
+      },
+      streamCell.getAsNormalizedFullLink(),
+    );
+
+    const statuses: string[] = [];
+    runtime.scheduler.queueEvent(
+      streamCell.getAsNormalizedFullLink(),
+      1,
+      0,
+      (committedTx) => {
+        statuses.push(committedTx.status().status);
+      },
+    );
+
+    await runtime.idle();
+    await runtime.storageManager.synced();
+
+    expect(statuses).toEqual(["done"]);
+    const readTx = runtime.edit();
+    const refreshed = runtime.getCell<{ value: string }>(
+      space,
+      "cfc-scheduler-prepare-output",
+      {
+        type: "object",
+        properties: {
+          value: {
+            type: "string",
+            ifc: { classification: ["secret"] },
+          },
+        },
+        required: ["value"],
+      },
+      readTx,
+    );
+    expect(refreshed.get()).toEqual({ value: "event-1" });
+  });
 });
