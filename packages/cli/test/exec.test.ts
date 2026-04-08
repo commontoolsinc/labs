@@ -1208,6 +1208,87 @@ describe("mounted callable resolution and execution", () => {
     });
   });
 
+  it("pulls mounted tool result cells before serializing output", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          help: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            help: { type: "string" },
+            source: { type: "string" },
+          },
+          required: ["query", "source"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            help: { type: "string" },
+            source: { type: "string" },
+            summary: { type: "string" },
+          },
+        },
+      },
+      extraParams: {
+        source: "bound-source",
+      },
+      toolResultGetValue: {
+        query: "explicit",
+        help: "schema-field",
+        source: "bound-source",
+        summary: "bound-source:explicit:undefined",
+      },
+      toolResultPullValue: {
+        query: "explicit",
+        help: "schema-field",
+        source: "bound-source",
+        summary: "bound-source:explicit:schema-field",
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--query", "explicit", "--help", "schema-field"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+      },
+    );
+
+    expect(harness.tracker.toolRunInput).toEqual({
+      query: "explicit",
+      help: "schema-field",
+      source: "bound-source",
+    });
+    expect(JSON.parse(result.outputText!)).toEqual({
+      query: "explicit",
+      help: "schema-field",
+      source: "bound-source",
+      summary: "bound-source:explicit:schema-field",
+    });
+  });
+
   it("allocates tool result cells in the resolved space DID", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -1667,6 +1748,8 @@ function createExecHarness(options: {
   };
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
+  toolResultGetValue?: unknown;
+  toolResultPullValue?: unknown;
   handlerFailureMessage?: string;
 }) {
   const tracker = {
@@ -1750,9 +1833,14 @@ function createExecHarness(options: {
     },
   );
 
-  const state = { value: options.toolResult };
+  const state = {
+    value: options.toolResult,
+    getValue: options.toolResultGetValue,
+    pullValue: options.toolResultPullValue,
+  };
   const resultCell = {
-    get: () => state.value,
+    get: () => state.getValue ?? state.value,
+    pull: () => Promise.resolve(state.pullValue ?? state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
   };
@@ -1800,6 +1888,8 @@ function createExecHarness(options: {
       ) => {
         tracker.toolRunInput = input;
         state.value = options.toolResult;
+        state.getValue = options.toolResultGetValue ?? options.toolResult;
+        state.pullValue = options.toolResultPullValue ?? options.toolResult;
         return {
           sink: () => () => {},
         };

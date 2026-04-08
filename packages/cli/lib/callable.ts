@@ -121,12 +121,12 @@ function mergeToolInput(
 }
 
 async function defaultWaitForResult(
-  resultCell: { get: () => unknown },
+  resultCell: { pull: () => Promise<unknown> },
   timeoutMs: number,
 ): Promise<unknown> {
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
-    const value = resultCell.get();
+    const value = await resultCell.pull();
     if (value !== undefined) {
       return value;
     }

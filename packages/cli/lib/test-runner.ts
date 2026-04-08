@@ -132,6 +132,17 @@ const testStepListSchema = toDeepFrozenSchema(
   true,
 );
 
+function actionStreamForStep(stepCell: HarnessTestStepCell): Stream<unknown> {
+  const actionCell = stepCell.key("action") as unknown;
+  if (
+    typeof actionCell !== "object" || actionCell === null ||
+    typeof (actionCell as { send?: unknown }).send !== "function"
+  ) {
+    throw new Error("Test step action is not a stream");
+  }
+  return actionCell as Stream<unknown>;
+}
+
 export interface TestResult {
   name: string;
   passed: boolean;
@@ -1127,7 +1138,7 @@ export async function runTestPattern(
         // Get the action stream via .key()
         const actionStream = await withPhase(
           ["runTestPattern", "step", actionName, "stream"],
-          () => stepCell.key("action") as Stream<unknown>,
+          () => actionStreamForStep(stepCell),
         );
 
         // Send undefined for void streams
