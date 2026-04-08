@@ -879,6 +879,8 @@ export class CellImpl<T extends FabricValue>
         );
       }
 
+      // This initialization write only occurs after the read above proved the
+      // value is absent, so no-op attempted-target coverage is not relevant.
       this.tx.writeValueOrThrow(resolvedLink, {});
     }
 
@@ -1306,6 +1308,9 @@ export class CellImpl<T extends FabricValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
+    // Raw writes bypass diff-based attempted-target capture. Same-value direct
+    // writes through this internal path are therefore outside phase-1 CFC
+    // attempted-target coverage unless a caller establishes it separately.
     if (
       schemaHasIfc(resolveSchema(this.link.schema ?? this.schema)) ||
       storedCfcMetadataAppliesToPath(this.tx, this.link)
@@ -1380,6 +1385,7 @@ export class CellImpl<T extends FabricValue>
     if (sourceLink.path.length > 0) {
       throw new Error("Source cell must have empty path for now");
     }
+    // System-owned provenance metadata, not user-surface value data.
     this.tx.writeOrThrow(
       { ...this.link, path: ["source"] },
       // TODO(@ubik2): Transition source links to sigil links?

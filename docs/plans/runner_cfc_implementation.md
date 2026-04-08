@@ -470,11 +470,11 @@ Tasks:
 - [x] Surface tx `potentialWrites` as the phase-1 maybe-write target set
 - [x] Produce a deterministic final-per-path `writes` set for phase 1
 - [x] Preserve no-op attempted-target coverage through `potentialWrites`
-- [ ] Add JSDoc and guardrails on internal `tx.write*` APIs explaining that
+- [x] Add JSDoc and guardrails on internal `tx.write*` APIs explaining that
       phase-1 no-op attempted-target coverage relies on higher-level diff paths
       using `markReadAsPotentialWrite`; blind same-value direct writes are not
       surfaced through `potentialWrites`
-- [ ] Audit existing internal direct `tx.write*` / `writeValueOrThrow()` call
+- [x] Audit existing internal direct `tx.write*` / `writeValueOrThrow()` call
       sites and either ensure they establish `potentialWrites` coverage before
       same-value short-circuiting or explicitly keep them out of phase-1 CFC
       scope
@@ -498,7 +498,7 @@ Acceptance:
 - [x] Canonical `WritePolicyInput` capture is deterministic across runs
 - [ ] Internal verifier reads remain visible for diagnostics but not policy
 - [x] Final-per-path view is deterministic
-- [ ] Same-value direct writes are either covered by `potentialWrites` or
+- [x] Same-value direct writes are either covered by `potentialWrites` or
       explicitly out of phase-1 scope
 
 ### 4. Relevance Detection

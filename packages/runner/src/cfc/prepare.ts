@@ -192,6 +192,8 @@ const ensureSchemaDocument = (
     type: "application/json",
     path: [],
   }, {
+    // System-owned canonical schema document. This is intentionally outside the
+    // phase-1 value-surface attempted-target model.
     value: schema as unknown as FabricValue,
   });
 };
@@ -280,6 +282,9 @@ export const prepareBoundaryCommit = (
       id,
       type,
       path: ["cfc"],
+      // System-owned embedded metadata write. Boundary evaluation is driven by
+      // user-surface reads/writes plus explicit policy inputs, not by recursive
+      // attempted-target tracking of this internal metadata update.
     }, metadata as unknown as FabricValue);
   }
   return reasons;

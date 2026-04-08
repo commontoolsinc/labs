@@ -677,6 +677,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Writes a value into a storage at a given address, including creating parent
    * entries in the document if a path is provided or throws an error.
    *
+   * Internal runner API. Phase-1 CFC no-op attempted-target coverage is not
+   * derived from blind direct `write*()` calls. Callers that need attempted
+   * target coverage before same-value short-circuiting must first establish it
+   * through a higher-level diff path such as `markReadAsPotentialWrite`.
+   * Runner-owned system metadata writes may also use this directly when they
+   * are intentionally out of phase-1 value-surface CFC scope.
+   *
    * @param address - Memory address to write to.
    * @param value - Value to write.
    */
@@ -691,6 +698,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * Thin convenience wrapper over `writeOrThrow()` that prepends `"value"` to
    * the supplied path.
+   *
+   * Internal runner API with the same phase-1 CFC caveat as `writeOrThrow()`:
+   * blind same-value direct writes do not by themselves establish attempted
+   * target coverage. Use higher-level diff paths when no-op attempted writes
+   * need to appear in `potentialWrites`.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
