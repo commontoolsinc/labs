@@ -12,7 +12,7 @@ export interface ContentHashTuple extends NumbersHashTuple {
 }
 
 const BIG_TEXT_FILE = Deno.readTextFileSync(
-  new URL("fixture-frank.txt", import.meta.url).pathname,
+  new URL("fixture-frank.txt", import.meta.url),
 );
 
 const NUMBERS_FIXTURES: readonly NumbersHashTuple[] = [
