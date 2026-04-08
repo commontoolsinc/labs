@@ -75,6 +75,7 @@ export function enqueueSinkRequestPostCommitEffect(
   recordSinkRequestPolicyInput(tx, sink, effectId, request);
   tx.enqueuePostCommitEffect({
     id: effectId,
+    idempotencyKey: effectId,
     kind,
     flush: async (committedTx) => {
       const reason = verifySinkRequestRelease(

@@ -107,6 +107,7 @@ export type PreparedDigestInput = {
 export type PostCommitSideEffect = {
   id: string;
   kind: string;
+  idempotencyKey?: string;
   flush(tx: unknown): void | Promise<void>;
 };
 

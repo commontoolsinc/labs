@@ -757,7 +757,7 @@ Tasks:
 - [x] Move network side effects behind the transaction outbox
 - [x] Verify sink-specific policy from the prepared request snapshot and
       committed CFC state before issuing the request
-- [ ] Add idempotency keys so retries do not reissue the same committed effect
+- [x] Add idempotency keys so retries do not reissue the same committed effect
 - [x] Keep request authorization and request execution as separate steps
 
 Acceptance:

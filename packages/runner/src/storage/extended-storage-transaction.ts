@@ -70,6 +70,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void
   >();
+  private outboxIdempotencyKeys = new Set<string>();
   private readOnlySource?: string;
   private cfcState: CfcTxState = {
     relevant: false,
@@ -137,6 +138,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {
+    const key = effect.idempotencyKey ?? effect.id;
+    if (this.outboxIdempotencyKeys.has(key)) {
+      return;
+    }
+    this.outboxIdempotencyKeys.add(key);
     this.cfcState.outbox.push(effect);
   }
 
@@ -427,6 +433,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   abort(reason?: any): Result<any, InactiveTransactionError> {
     this.assertWritable("abort()");
     this.cfcState.outbox = [];
+    this.outboxIdempotencyKeys.clear();
     this.cfcState.prepare = { status: "unprepared" };
     return this.tx.abort(reason);
   }
@@ -512,8 +519,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       for (const effect of this.cfcState.outbox) {
         await effect.flush(this);
       }
+      this.outboxIdempotencyKeys.clear();
     } else {
       this.cfcState.outbox = [];
+      this.outboxIdempotencyKeys.clear();
     }
 
     return result;
