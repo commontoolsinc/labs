@@ -463,7 +463,13 @@ const createHarness = () => {
       confirmed: ConfirmedRead[];
       pending: PendingRead[];
     };
-    get(address: { id: URI; type: MIME }): { since?: number } | undefined;
+    get(address: {
+      id: URI;
+      type: MIME;
+    }): {
+      since?: number;
+      is?: FabricValue;
+    } | undefined;
   };
 
   let nextLocalSeq = 1;
@@ -1607,6 +1613,174 @@ Deno.test("memory v2 stacked commits: pending-read compaction keeps localSeq bou
     );
     await assertResultOk(c1.promise);
     await assertResultOk(c2.promise);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: repeated pending reads reuse the latest materialized state", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      left: 0,
+      right: 0,
+    });
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const left = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/left",
+        value: 1,
+      }],
+      {
+        left: 1,
+        right: 0,
+      },
+    );
+
+    harness.model.setOutcome(3, { kind: "accept" });
+    const right = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      {
+        left: 1,
+        right: 2,
+      },
+    );
+
+    const firstDocument = harness.provider.get(DOCS.A);
+    const secondDocument = harness.provider.get(DOCS.A);
+    assertExists(firstDocument);
+    assertStrictEquals(secondDocument, firstDocument);
+
+    const firstState = harness.replica.get({
+      id: DOCS.A,
+      type: DOCUMENT_MIME,
+    });
+    const secondState = harness.replica.get({
+      id: DOCS.A,
+      type: DOCUMENT_MIME,
+    });
+    assertExists(firstState);
+    assertExists(secondState);
+    assertStrictEquals(secondState.is, firstState.is);
+
+    await assertResultOk(left);
+    await assertResultOk(right);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: confirming the head pending write promotes the cached materialization", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      count: 0,
+    });
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const commit = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/count",
+        value: 1,
+      }],
+      {
+        count: 1,
+      },
+    );
+
+    const pendingDocument = harness.provider.get(DOCS.A);
+    const pendingState = harness.replica.get({
+      id: DOCS.A,
+      type: DOCUMENT_MIME,
+    });
+    assertExists(pendingDocument);
+    assertExists(pendingState);
+
+    await assertResultOk(commit);
+
+    const confirmedDocument = harness.provider.get(DOCS.A);
+    const confirmedState = harness.replica.get({
+      id: DOCS.A,
+      type: DOCUMENT_MIME,
+    });
+    assertExists(confirmedDocument);
+    assertExists(confirmedState);
+    assertStrictEquals(confirmedDocument, pendingDocument);
+    assertStrictEquals(confirmedState.is, pendingState.is);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: dropping an earlier pending write invalidates cached suffixes", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      left: 0,
+      right: 0,
+    });
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const left = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/left",
+        value: 1,
+      }],
+      {
+        left: 1,
+        right: 0,
+      },
+    );
+
+    harness.model.setOutcome(3, { kind: "accept" });
+    const right = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      {
+        left: 1,
+        right: 2,
+      },
+    );
+
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, {
+      left: 1,
+      right: 2,
+    });
+
+    await assertConflict(left);
+
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assert(afterDrop !== beforeDrop);
+    assertEquals(afterDrop.value, {
+      left: 0,
+      right: 2,
+    });
+
+    await assertResultOk(right);
   } finally {
     await harness.close();
   }
