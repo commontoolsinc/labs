@@ -143,6 +143,39 @@ describe("Cell success callbacks", () => {
     expect(callbackCalled).toBe(false);
   });
 
+  it("should not call callback when commit returns an error", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    tx = runtime.edit();
+
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-commit-error-test",
+      { type: "number", ifc: { classification: ["secret"] } } as JSONSchema,
+      tx,
+    );
+
+    let callbackCalled = false;
+    cell.set(42, () => {
+      callbackCalled = true;
+    });
+
+    const result = await tx.commit();
+    expect(result.error).toBeDefined();
+    expect(callbackCalled).toBe(false);
+  });
+
   it("should handle errors in callback gracefully", async () => {
     const cell = runtime.getCell<number>(
       space,
@@ -184,7 +217,7 @@ describe("Cell success callbacks", () => {
     expect(cell.get()).toBe(42);
   });
 
-  it("should call onCommit callback even when transaction commit fails", async () => {
+  it("should not call onCommit callback when transaction commit fails", async () => {
     const cell = runtime.getCell<number>(
       space,
       "callback-commit-fail-test",
@@ -204,13 +237,24 @@ describe("Cell success callbacks", () => {
     tx.abort("intentional abort for test");
     await tx.commit();
 
-    // Even though aborted, callback should still be called after commit
-    expect(callbackCalled).toBe(true);
-    expect(receivedTx).toBe(tx);
+    expect(callbackCalled).toBe(false);
+    expect(receivedTx).toBeUndefined();
 
     // Verify the transaction actually failed
     const status = tx.status();
     expect(status.status).toBe("error");
+  });
+
+  it("should still run generic commit callbacks for diagnostics on failure", async () => {
+    const callbackStatuses: string[] = [];
+    tx.addCommitCallback((_committedTx, result) => {
+      callbackStatuses.push(result.error ? "error" : "ok");
+    });
+
+    tx.abort("diagnostic failure");
+    await tx.commit();
+
+    expect(callbackStatuses).toEqual(["error"]);
   });
 
   describe("set operations with arrays", () => {

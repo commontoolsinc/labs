@@ -804,7 +804,20 @@ export class CellImpl<T extends FabricValue>
 
       // Register commit callback if provided
       if (onCommit) {
-        this.tx.addCommitCallback(onCommit);
+        this.tx.enqueuePostCommitEffect({
+          id:
+            `cell-onCommit:${resolvedToValueLink.space}:${resolvedToValueLink.id}:${
+              resolvedToValueLink.path.join("/")
+            }:${crypto.randomUUID()}`,
+          kind: "cell-onCommit",
+          flush: (committedTx) => {
+            try {
+              onCommit(committedTx as IExtendedStorageTransaction);
+            } catch (error) {
+              console.error("Error in cell onCommit callback:", error);
+            }
+          },
+        });
       }
     }
 

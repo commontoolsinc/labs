@@ -3496,6 +3496,7 @@ export class Scheduler {
       ) {
         this.scheduleEventQueueWake(queuedEvent.notBefore);
       } else {
+<<<<<<< HEAD
         delete queuedEvent.notBefore;
 
         const { action, handler, event: eventValue, retriesLeft, onCommit } =
@@ -3559,17 +3560,33 @@ export class Scheduler {
           });
           this.eventQueue.shift();
 
+          const tx = this.runtime.edit();
+          tx.tx.immediate = true;
+          const actionId = this.getActionId(action);
+
           const finalize = (error?: unknown) => {
             try {
               if (error) this.handleError(error as Error, action);
             } finally {
+              if (onCommit) {
+                tx.enqueuePostCommitEffect({
+                  id: `event-onCommit:${handlerId}:${crypto.randomUUID()}`,
+                  kind: "event-onCommit",
+                  flush: (committedTx) => {
+                    try {
+                      onCommit(committedTx as IExtendedStorageTransaction);
+                    } catch (callbackError) {
+                      logger.error(
+                        "schedule-error",
+                        "Error in event commit callback:",
+                        callbackError,
+                      );
+                    }
+                  },
+                });
+              }
               this.runtime.prepareTxForCommit(tx);
               tx.commit().then(({ error }) => {
-                // If the transaction failed, and we have retries left, queue the
-                // event again at the beginning of the queue. This isn't guaranteed
-                // to be the same order as the original event, but it's close
-                // enough, especially for a series of event that act on the same
-                // conflicting data.
                 if (error && retriesLeft > 0) {
                   logger.warn(
                     "scheduler",
@@ -3583,31 +3600,13 @@ export class Scheduler {
                     retriesLeft: retriesLeft - 1,
                     onCommit,
                   });
-                  // Ensure the re-queued event gets processed even if the scheduler
-                  // finished this cycle before the commit completed.
                   this.queueExecution();
-                } else {
-                  if (error) {
-                    logger.error(
-                      "schedule-error",
-                      "Event handler transaction failed after exhausting all retries",
-                      { error, handlerId },
-                    );
-                  }
-                  if (onCommit) {
-                    // Call commit callback when:
-                    // - Commit succeeds (!error), OR
-                    // - Commit fails but we're out of retries (retriesLeft === 0)
-                    try {
-                      onCommit(tx);
-                    } catch (callbackError) {
-                      logger.error(
-                        "schedule-error",
-                        "Error in event commit callback:",
-                        callbackError,
-                      );
-                    }
-                  }
+                } else if (error) {
+                  logger.error(
+                    "schedule-error",
+                    "Event handler transaction failed after exhausting all retries",
+                    { error, handlerId },
+                  );
                 }
               }).catch((error) => {
                 logger.error(
@@ -3618,9 +3617,6 @@ export class Scheduler {
               });
             }
           };
-          const tx = this.runtime.edit();
-          tx.tx.immediate = true;
-          const actionId = this.getActionId(action);
 
           try {
             const actionStartTime = performance.now();

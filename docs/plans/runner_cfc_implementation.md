@@ -644,9 +644,9 @@ Tasks:
       scheduler-managed flows
 - [ ] Integrate generic `runtime.editWithRetry()` and other direct commit
       callers with the same prepare-or-observe path
-- [ ] Replace effectful use of generic commit callbacks with a success-only
+- [x] Replace effectful use of generic commit callbacks with a success-only
       outbox
-- [ ] Migrate stream sends, queued events, and other runner-managed side
+- [x] Migrate stream sends, queued events, and other runner-managed side
       effects to the outbox
 - [x] Add JSDoc on internal commit-callback / `onCommit` hooks explaining that
       they are internal-only, may run after failed commits, and must not
@@ -657,12 +657,12 @@ Tasks:
 
 Acceptance:
 
-- [ ] Failed commit does not emit side effects
+- [x] Failed commit does not emit side effects
 - [ ] Relevant transactions committed via the scheduler,
       `runtime.editWithRetry()`, or other runtime-owned direct callers are
       uniformly gated
-- [ ] Retried handler emits side effects once, after the winning commit
-- [ ] Non-effectful commit callbacks used for diagnostics still work
+- [x] Retried handler emits side effects once, after the winning commit
+- [x] Non-effectful commit callbacks used for diagnostics still work
 - [x] Internal callback docs make the non-effectful restriction explicit
 
 ### 8. Implementation Identity and Trust
@@ -841,7 +841,7 @@ The test matrix should be built in the same order as the implementation:
 - [x] prepare-engine tests for input requirements and output transitions
 - [x] storage tests for embedded-metadata persistence, `schemaHash`
       dereferencing, and non-exposure
-- [ ] scheduler and runtime-owned direct-commit tests for retry and outbox
+- [x] scheduler and runtime-owned direct-commit tests for retry and outbox
       behavior
 - [ ] sink tests for commit-gated network execution and idempotency
 - [ ] UI tests for provenance-backed trusted event delivery
@@ -887,7 +887,7 @@ Land the work in mergeable vertical slices:
 5. [x] Embedded v2 CFC metadata persistence, `cid:<hash>` schema-document
        persistence, and non-exposure
 6. [ ] Baseline prepare engine for classification and integrity checks
-7. [ ] Transaction integration and success-only outbox
+7. [x] Transaction integration and success-only outbox
 8. [ ] Enforcing commit gate for state-only transactions for the
        non-trust-sensitive rule subset once extraction/prepare slices are green
 9. [ ] Stable built-in implementation identity and trust snapshotting; richer

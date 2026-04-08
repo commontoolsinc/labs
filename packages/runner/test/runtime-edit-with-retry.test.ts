@@ -213,4 +213,36 @@ describe("Runtime.editWithRetry", () => {
     expect(attempts[0].getCfcState().prepare.status).not.toBe("prepared");
     expect(attempts[1].getCfcState().prepare.status).toBe("prepared");
   });
+
+  it("fires success callbacks once after the winning retry commit", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "editWithRetry-oncommit-once",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const statuses: string[] = [];
+    let attempts = 0;
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      attempts++;
+      if (attempts === 1) {
+        t.abort("force retry");
+        return false;
+      }
+      cell.withTx(t).set(1, (committedTx) => {
+        statuses.push(committedTx.status().status);
+      });
+      return true;
+    }, 2);
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(attempts).toBe(2);
+    expect(statuses).toEqual(["done"]);
+    expect(cell.get()).toBe(1);
+  });
 });
