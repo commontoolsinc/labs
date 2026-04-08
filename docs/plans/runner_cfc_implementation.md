@@ -688,7 +688,7 @@ Tasks:
       verified registry and built-in registry, treating bare memory-v2
       `codeCID` as only one possible component or hint rather than a complete
       identity
-- [ ] Define canonical ids for built-ins
+- [x] Define canonical ids for built-ins
 - [ ] Mark verified compiled-code policy identity as blocked on extending
       memory-v2 commit/transport/storage surfaces beyond bare `codeCID` so the
       richer bundle/path/location/hash identity can be carried or rebound

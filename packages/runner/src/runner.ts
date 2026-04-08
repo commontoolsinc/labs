@@ -72,6 +72,7 @@ import {
   setRunnableName,
   validateAndCheckOpaqueRefs,
 } from "./runner-utils.ts";
+import { resolveBuiltinImplementationIdentity } from "./cfc/implementation-identity.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 export {
   cellAwareDeepCopy,
@@ -2127,6 +2128,11 @@ export class Runner {
       throw new Error(
         `Raw module is not a function, got: ${module.implementation}`,
       );
+    }
+
+    const builtinIdentity = resolveBuiltinImplementationIdentity(module);
+    if (builtinIdentity) {
+      tx.setCfcImplementationIdentity(builtinIdentity);
     }
 
     // CT-1230: Pass bindPatterns: false to prevent premature alias binding in pattern
