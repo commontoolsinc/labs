@@ -4,10 +4,11 @@ import {
   isCellLikeType,
   isWildcardTraversalCall,
 } from "../ast/mod.ts";
-import type {
-  CapabilityParamSummary,
-  FunctionCapabilitySummary,
-  ReactiveCapability,
+import {
+  type CapabilityParamSummary,
+  type FunctionCapabilitySummary,
+  type ReactiveCapability,
+  resolvesToCommonFabricSymbol,
 } from "../core/mod.ts";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
@@ -437,21 +438,19 @@ function isKnownIdentityEqualsCallee(
   const current = unwrapExpression(expr);
 
   if (ts.isIdentifier(current)) {
-    if (current.text === "equals") {
-      return true;
-    }
     if (!checker) {
-      return false;
+      return current.text === "equals";
     }
     const symbol = checker.getSymbolAtLocation(current);
-    const aliasName = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0
-      ? checker.getAliasedSymbol(symbol).getName()
-      : undefined;
-    return aliasName === "equals" || symbol?.getName() === "equals";
+    return resolvesToCommonFabricSymbol(symbol, checker, "equals");
   }
 
   if (ts.isPropertyAccessExpression(current)) {
-    return current.name.text === "equals";
+    if (current.name.text !== "equals") {
+      return false;
+    }
+    return !checker ||
+      isCellLikeType(checker.getTypeAtLocation(current.expression), checker);
   }
 
   if (
@@ -459,7 +458,11 @@ function isKnownIdentityEqualsCallee(
     current.argumentExpression &&
     isLiteralElement(current.argumentExpression)
   ) {
-    return getLiteralElementText(current.argumentExpression) === "equals";
+    if (getLiteralElementText(current.argumentExpression) !== "equals") {
+      return false;
+    }
+    return !checker ||
+      isCellLikeType(checker.getTypeAtLocation(current.expression), checker);
   }
 
   return false;
@@ -873,16 +876,19 @@ export function analyzeFunctionCapabilities(
             ? buildAliasBindingFromExpression(current.expression)
             : undefined);
         if (innerBinding) {
-          if (ts.isCallExpression(current.expression)) {
-            resolvedGetCalls.add(current.expression);
-          }
           if (ts.isPropertyAccessExpression(current)) {
+            if (ts.isCallExpression(current.expression)) {
+              resolvedGetCalls.add(current.expression);
+            }
             return resolveShapePath(innerBinding, [current.name.text]);
           }
           if (
             ts.isElementAccessExpression(current) &&
             isLiteralElement(current.argumentExpression)
           ) {
+            if (ts.isCallExpression(current.expression)) {
+              resolvedGetCalls.add(current.expression);
+            }
             return resolveShapePath(innerBinding, [
               getLiteralElementText(current.argumentExpression),
             ]);

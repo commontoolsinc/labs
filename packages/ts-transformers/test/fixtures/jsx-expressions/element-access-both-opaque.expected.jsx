@@ -31,12 +31,19 @@ export default pattern((_state) => {
         <p>Selected item: {__cfHelpers.derive({
             type: "object",
             properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    },
+                    asCell: true
+                },
                 index: {
                     type: "number",
                     asCell: ["cell"]
                 }
             },
-            required: ["index"]
+            required: ["items", "index"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
         } as const satisfies __cfHelpers.JSONSchema, {

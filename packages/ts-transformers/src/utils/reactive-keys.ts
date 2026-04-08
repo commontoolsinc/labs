@@ -13,6 +13,30 @@ const COMMON_FABRIC_KEY_NAME_SET = new Set<CommonFabricKeyName>(
 
 export type CommonFabricKeyName = typeof COMMON_FABRIC_KEY_NAMES[number];
 
+function getLiteralComputedKeyValue(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): string | number | undefined {
+  if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
+    return expr.text;
+  }
+  if (ts.isNumericLiteral(expr)) {
+    return Number(expr.text);
+  }
+  if (!checker) {
+    return undefined;
+  }
+
+  const type = checker.getTypeAtLocation(expr);
+  if (type.flags & ts.TypeFlags.StringLiteral) {
+    return (type as ts.StringLiteralType).value;
+  }
+  if (type.flags & ts.TypeFlags.NumberLiteral) {
+    return (type as ts.NumberLiteralType).value;
+  }
+  return undefined;
+}
+
 export function getCommonFabricKeyName(
   expr: ts.Expression,
   checker?: ts.TypeChecker,
@@ -105,6 +129,10 @@ export function getKnownComputedKeyPathSegment(
   expr: ts.Expression,
   checker?: ts.TypeChecker,
 ): string | undefined {
+  const literalValue = getLiteralComputedKeyValue(expr, checker);
+  if (literalValue !== undefined) {
+    return String(literalValue);
+  }
   const keyName = getCommonFabricKeyName(expr, checker);
   return keyName ? `$${keyName}` : undefined;
 }
@@ -113,6 +141,12 @@ export function getKnownComputedKeyExpression(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.Expression | undefined {
+  const literalValue = getLiteralComputedKeyValue(expr, context.checker);
+  if (literalValue !== undefined) {
+    return typeof literalValue === "number"
+      ? context.factory.createNumericLiteral(literalValue)
+      : context.factory.createStringLiteral(literalValue);
+  }
   const keyName = getCommonFabricKeyName(expr, context.checker);
   if (keyName) {
     return context.cfHelpers.getHelperExpr(keyName);

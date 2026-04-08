@@ -2,6 +2,31 @@ import ts from "typescript";
 
 const COMMON_FABRIC_KEY_NAMES = new Set(["NAME", "UI", "SELF", "FS"]);
 
+function getLiteralComputedKeyName(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): string | undefined {
+  if (
+    ts.isStringLiteral(expr) ||
+    ts.isNumericLiteral(expr) ||
+    ts.isNoSubstitutionTemplateLiteral(expr)
+  ) {
+    return expr.text;
+  }
+  if (!checker) {
+    return undefined;
+  }
+
+  const type = checker.getTypeAtLocation(expr);
+  if (type.flags & ts.TypeFlags.StringLiteral) {
+    return (type as ts.StringLiteralType).value;
+  }
+  if (type.flags & ts.TypeFlags.NumberLiteral) {
+    return String((type as ts.NumberLiteralType).value);
+  }
+  return undefined;
+}
+
 function getCommonFabricComputedKeyName(
   expr: ts.Expression,
   checker?: ts.TypeChecker,
@@ -46,12 +71,9 @@ export function getPropertyNameText(
 
   if (ts.isComputedPropertyName(name)) {
     const expr = name.expression;
-    if (
-      ts.isStringLiteral(expr) ||
-      ts.isNumericLiteral(expr) ||
-      ts.isNoSubstitutionTemplateLiteral(expr)
-    ) {
-      return expr.text;
+    const literalKeyName = getLiteralComputedKeyName(expr, checker);
+    if (literalKeyName !== undefined) {
+      return literalKeyName;
     }
     return getCommonFabricComputedKeyName(expr, checker);
   }

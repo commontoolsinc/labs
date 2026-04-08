@@ -1125,6 +1125,32 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis resolves shadowed fixed-key identifiers to local const strings",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      const UI = "title" as const;
+
+      const fn = (input: {
+        title: string;
+        extra: number;
+      }) => input[UI];
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("title"));
+    assertEquals(input.readPaths.includes("$UI"), false);
+    assertEquals(input.readPaths.includes("extra"), false);
+  },
+);
+
+Deno.test(
   "Capability analysis tracks known fixed-symbol destructuring without wildcard",
   () => {
     const { program, sourceFile } = createProgramWithSource(
@@ -1170,6 +1196,63 @@ Deno.test(
     assertEquals(input.wildcard, false);
     assert(input.readPaths.includes("$SELF.id"));
     assert(input.readPaths.includes("value"));
+  },
+);
+
+Deno.test(
+  "Capability analysis does not treat arbitrary .equals() methods as identity-only",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      type Person = {
+        name: string;
+        active: boolean;
+        equals(other: string): boolean;
+      };
+
+      const fn = (input: { person: Person }) => input.person.equals("Alice");
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityOnly, false);
+    assertEquals(input.passthrough, false);
+    assertEquals(input.identityPaths.length, 0);
+    assert(input.readPaths.includes("person"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps dynamic element access after .get() reading both captures",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Writable<T> = {
+        readonly [CELL_BRAND]: "cell";
+        get(): T;
+      };
+
+      const fn = ({ items, index }: {
+        items: Writable<string[]>;
+        index: Writable<number>;
+      }) => items.get()[index.get()];
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "__param0");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("index"));
   },
 );
 

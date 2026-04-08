@@ -241,6 +241,29 @@ type Output = { [UI]: VNode };
       });
       expect(schema.required).toEqual(["$UI"]);
     });
+
+    it("preserves local const string computed keys in synthetic type literals", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+const UI = "title" as const;
+type Output = { [UI]: string; metadata: number };
+`;
+      const { checker, typeNode } = await getTypeFromCode(code, "Output");
+      if (!typeNode) {
+        throw new Error("Expected Output type node.");
+      }
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({
+        title: { type: "string" },
+        metadata: { type: "number" },
+      });
+      expect(schema.required).toEqual(["title", "metadata"]);
+    });
   });
 
   describe("union members", () => {

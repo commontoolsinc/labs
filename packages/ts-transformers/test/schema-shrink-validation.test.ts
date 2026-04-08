@@ -1936,6 +1936,40 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "derive resolves local const string keys instead of fixed-key name fallbacks",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive } from "commonfabric";',
+        'const UI = "title" as const;',
+        "type Piece = {",
+        "  title: string;",
+        "  metadata: { author: string; tags: string[] };",
+        "};",
+        "const piece = {} as Piece;",
+        "const label = derive({ piece }, ({ piece }) => piece[UI]);",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "title");
+      assertEquals(inputSchema.includes("$UI"), false);
+      assertEquals(inputSchema.includes("metadata"), false);
+    },
+  );
+
+  await t.step(
     "derive shrinks equals-only cell inputs to opaque unknown cells",
     async () => {
       const source = [
@@ -1992,6 +2026,42 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const inputSchema = extractSchemas(result.output)[0] ?? "";
       assertStringIncludes(inputSchema, 'type: "undefined"');
       assertStringIncludes(inputSchema, "asOpaque: true");
+    },
+  );
+
+  await t.step(
+    "derive keeps both array and index cells for dynamic element access",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { cell, derive } from "commonfabric";',
+        'const items = cell(["apple", "banana", "cherry"]);',
+        "const index = cell(1);",
+        "const selected = derive({ items, index }, ({ items, index }) =>",
+        "  items.get()[index.get()]",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema =
+        extractSchemas(result.output).find((schema) =>
+          schema.includes("items") && schema.includes("index")
+        ) ?? "";
+      assertStringIncludes(inputSchema, "items");
+      assertStringIncludes(inputSchema, "index");
+      assertStringIncludes(inputSchema, 'type: "array"');
+      assertStringIncludes(inputSchema, 'type: "number"');
     },
   );
 
