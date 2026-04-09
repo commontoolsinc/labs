@@ -164,7 +164,20 @@ When to use `handler()`:
 | visual hierarchy | important content and actions read clearly at a glance |
 | spacing and grouping | related elements are grouped; the layout does not collapse into a raw form dump |
 | empty and first-run states | zero-data flows are understandable and actionable |
-| theme/styling stance | theme hooks, custom properties, or parts are used intentionally when relevant |
+| visual point of view | the UI has a deliberate tone rather than a generic default shell |
+| theme/styling stance | `cf-theme`, theme hooks, custom properties, or parts are used intentionally when relevant |
+| typography | type choices and scale support the concept instead of defaulting to generic stacks without reason |
+| atmosphere and surface treatment | color, borders, shadows, gradients, or textures feel coherent with the chosen direction |
+
+For UI-heavy patterns, design review is not optional polish. It should answer:
+
+- Is there a clear aesthetic direction?
+- Does the implementation use `cf-theme` or public component styling hooks when
+  those are available?
+- Does the layout feel composed, or does it read like a raw form dump?
+- Are empty, loading, and first-run states treated as designed screens rather
+  than leftover placeholders?
+- Is the UI memorable for a reason beyond "it technically works"?
 
 ### 13. Regression Check
 
@@ -227,6 +240,18 @@ Every non-trivial finding should include:
 - line number or precise location
 - why it matters
 - what to change
+
+For UI findings, prefer language that distinguishes:
+
+- `MUST-FIX`
+  - broken hierarchy or unreadable contrast
+  - missing or confusing empty / first-run states
+  - obvious misuse or omission of available theme hooks that leaves the UI
+    incoherent
+- `NOTED`
+  - a weaker aesthetic direction than desired
+  - opportunities to strengthen theme coherence, typography, or composition
+  - local visual rough edges that do not block usability
 
 ## Useful References
 

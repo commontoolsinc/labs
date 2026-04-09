@@ -18,6 +18,7 @@ Then use the detailed references already maintained in the repo for:
 - `docs/development/debugging/README.md`
 - `docs/development/debugging/gotchas/`
 - `docs/common/components/COMPONENTS.md`
+- `docs/common/patterns/style.md`
 - `docs/common/patterns/ui-cookbook.md`
 - `docs/common/capabilities/llm.md` - LLM integration
 
@@ -99,7 +100,12 @@ return <>{ifElse(showDetails, <div>Details content</div>, null)}</>;
 
 When UI is important to the pattern, also look for:
 
+- generic default-shell styling with no clear visual direction
+- failure to use `cf-theme` or public theme/component hooks when they are
+  available and clearly relevant
 - weak visual hierarchy
 - poor grouping or spacing rhythm
 - neglected empty or first-run states
+- typography choices that feel accidental rather than intentional
 - styling that ignores available public component affordances
+- surface treatment that feels incoherent with the chosen tone
