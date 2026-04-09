@@ -3,7 +3,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { Immutable, isRecord } from "@commonfabric/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
-import type { CellKind, JSONSchemaObj, JSONValue } from "@commonfabric/api";
+import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   type FabricValue,
