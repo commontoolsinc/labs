@@ -1671,7 +1671,11 @@ Deno.test("memory v2 stacked commits: repeated pending reads reuse the latest ma
     });
     assertExists(firstState);
     assertExists(secondState);
-    assertStrictEquals(secondState.is, firstState.is);
+    const firstMaterialized = firstState.is;
+    const secondMaterialized = secondState.is;
+    assertExists(firstMaterialized);
+    assertExists(secondMaterialized);
+    assertStrictEquals(secondMaterialized, firstMaterialized);
 
     await assertResultOk(left);
     await assertResultOk(right);
@@ -1718,8 +1722,12 @@ Deno.test("memory v2 stacked commits: confirming the head pending write promotes
     });
     assertExists(confirmedDocument);
     assertExists(confirmedState);
+    const pendingMaterialized = pendingState.is;
+    const confirmedMaterialized = confirmedState.is;
+    assertExists(pendingMaterialized);
+    assertExists(confirmedMaterialized);
     assertStrictEquals(confirmedDocument, pendingDocument);
-    assertStrictEquals(confirmedState.is, pendingState.is);
+    assertStrictEquals(confirmedMaterialized, pendingMaterialized);
   } finally {
     await harness.close();
   }
