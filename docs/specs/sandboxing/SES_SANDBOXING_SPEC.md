@@ -858,9 +858,9 @@ In the current implementation, the trusted runtime module identifiers are:
 - `commonfabric`
 - `commonfabric/schema`
 - `turndown`
-- `@commonfabric/html`
-- `@commonfabric/builder`
-- `@commonfabric/runner`
+
+Other internal `@commonfabric/*` packages exist in the monorepo, but they are
+not currently exposed to authored SES modules through `runtimeDeps`.
 
 These runtime modules may export:
 
