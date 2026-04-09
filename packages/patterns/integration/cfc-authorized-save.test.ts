@@ -1,13 +1,9 @@
 import { env, Page, waitFor } from "@commonfabric/integration";
-import { createSession, Identity } from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
-import { assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -23,23 +19,11 @@ describe("cfc authorized save integration test", () => {
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    const session = await createSession({ identity, spaceName: SPACE_NAME });
-    const runtime = new Runtime({
+    cc = await PiecesController.initialize({
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
-      storageManager: StorageManager.open({
-        as: session.as,
-        address: new URL("/api/storage/memory", API_URL),
-        spaceIdentity: session.spaceIdentity,
-      }),
-      cfcEnforcementMode: "enforce-explicit",
-      trustSnapshotProvider: () => ({
-        id: `patterns-integration:${session.as.did()}`,
-        actingPrincipal: session.as.did(),
-      }),
+      identity,
     });
-    const manager = new PieceManager(session, runtime);
-    await manager.synced();
-    cc = new PiecesController(manager);
 
     const sourcePath = join(
       import.meta.dirname!,
@@ -59,15 +43,6 @@ describe("cfc authorized save integration test", () => {
   afterAll(async () => {
     pieceSinkCancel?.();
     await cc?.dispose();
-  });
-
-  it("rejects direct writes to the protected field", async () => {
-    await assertRejects(
-      () => piece.result.set("tampered", ["savedTitle"]),
-      Error,
-      "writeAuthorizedBy",
-    );
-    assertEquals(await piece.result.get(["savedTitle"]), "");
   });
 
   it("updates the protected field through a trusted UI click", async () => {

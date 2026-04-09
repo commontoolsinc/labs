@@ -129,6 +129,18 @@ export interface InitializationData {
     modernDataModel?: boolean;
     unifiedJsonEncoding?: boolean;
   };
+  // Commit-boundary CFC mode for the worker runtime.
+  cfcEnforcementMode?:
+    | "disabled"
+    | "observe"
+    | "enforce-explicit"
+    | "enforce-strict";
+  // Static trust snapshot applied to worker-owned transactions.
+  trustSnapshot?: {
+    id: string;
+    actingPrincipal?: string;
+    revision?: string;
+  };
   // Content hash of the worker bundle, used for compilation cache
   // invalidation. If absent, the compilation cache is disabled.
   // See docs/specs/compilation-cache.md Phase 3.

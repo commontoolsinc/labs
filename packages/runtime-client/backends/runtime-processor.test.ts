@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  runtimeOptionsFromInitializationData,
   RuntimeProcessor,
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
@@ -376,5 +377,38 @@ describe("RuntimeProcessor diagnosis helpers", () => {
       },
     );
     expect(writeTraceMatchers).toEqual([[]]);
+  });
+});
+
+describe("runtimeOptionsFromInitializationData", () => {
+  it("threads CFC initialization settings into runtime options", () => {
+    const telemetry = { marker() {} } as unknown as Parameters<
+      typeof runtimeOptionsFromInitializationData
+    >[2];
+    const storageManager = {
+      as: { did: () => "did:key:worker" },
+    } as unknown as Parameters<typeof runtimeOptionsFromInitializationData>[1];
+
+    const options = runtimeOptionsFromInitializationData(
+      {
+        apiUrl: "http://worker.test/",
+        identity: {} as never,
+        spaceDid: "did:key:space",
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: "principal:did:key:worker",
+          actingPrincipal: "did:key:worker",
+        },
+      },
+      storageManager,
+      telemetry,
+      undefined,
+    );
+
+    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.trustSnapshotProvider?.()).toEqual({
+      id: "principal:did:key:worker",
+      actingPrincipal: "did:key:worker",
+    });
   });
 });

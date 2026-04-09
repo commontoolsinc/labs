@@ -56,6 +56,32 @@ function fetchBuildHash(): Promise<string | undefined> {
   return buildHashPromise;
 }
 
+export function createRuntimeClientOptions({
+  session,
+  apiUrl,
+  buildHash,
+}: {
+  session: Session;
+  apiUrl: URL;
+  buildHash?: string;
+}) {
+  return {
+    apiUrl,
+    identity: session.as,
+    spaceIdentity: session.spaceIdentity,
+    spaceDid: session.space,
+    spaceName: session.spaceName,
+    memoryVersion: MEMORY_VERSION,
+    experimental: EXPERIMENTAL,
+    cfcEnforcementMode: "enforce-explicit" as const,
+    trustSnapshot: {
+      id: `principal:${session.as.did()}`,
+      actingPrincipal: session.as.did(),
+    },
+    buildHash,
+  };
+}
+
 /**
  * RuntimeInternals bundles all resources bound to an identity/host/space triplet.
  * Uses RuntimeClient to run the Runtime in a web client.
@@ -350,16 +376,10 @@ export class RuntimeInternals extends EventTarget {
         "Compilation cache disabled (client): COMPILATION_CACHE_CLIENT not set",
       );
     }
-    const client = await RuntimeClient.initialize(transport, {
-      apiUrl,
-      identity: session.as,
-      spaceIdentity: session.spaceIdentity,
-      spaceDid: session.space,
-      spaceName: session.spaceName,
-      memoryVersion: MEMORY_VERSION,
-      experimental: EXPERIMENTAL,
-      buildHash,
-    });
+    const client = await RuntimeClient.initialize(
+      transport,
+      createRuntimeClientOptions({ session, apiUrl, buildHash }),
+    );
 
     // Expose a usable RuntimeInternals immediately. Callers that need
     // storage/piece-manager convergence should await `rt.synced()` explicitly.

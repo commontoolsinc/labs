@@ -107,8 +107,31 @@ import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import { WorkerReconciler } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
+import type { RuntimeOptions } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
+
+export function runtimeOptionsFromInitializationData(
+  data: InitializationData,
+  storageManager: RuntimeOptions["storageManager"],
+  telemetry: RuntimeTelemetry,
+  cachedCompiler: CachedCompiler | undefined,
+): RuntimeOptions {
+  const apiUrlObj = new URL(data.apiUrl);
+  return {
+    apiUrl: apiUrlObj,
+    storageManager,
+    patternEnvironment: { apiUrl: apiUrlObj },
+    telemetry,
+    memoryVersion: data.memoryVersion,
+    experimental: data.experimental,
+    cfcEnforcementMode: data.cfcEnforcementMode,
+    trustSnapshotProvider: data.trustSnapshot
+      ? () => data.trustSnapshot
+      : undefined,
+    cachedCompiler,
+  };
+}
 
 /**
  * Formats a cell link for display in console output.
@@ -310,13 +333,12 @@ export class RuntimeProcessor {
 
     let pieceManager: PieceManager | undefined = undefined;
     const runtime = new Runtime({
-      apiUrl: apiUrlObj,
-      storageManager,
-      patternEnvironment: { apiUrl: apiUrlObj },
-      telemetry,
-      memoryVersion: data.memoryVersion,
-      experimental: data.experimental,
-      cachedCompiler,
+      ...runtimeOptionsFromInitializationData(
+        data,
+        storageManager,
+        telemetry,
+        cachedCompiler,
+      ),
       consoleHandler: ({ metadata, method, args }) => {
         // Deep-walk args to convert uncloneable objects (Cells, Proxies,
         // functions) into cloneable representations for postMessage.
