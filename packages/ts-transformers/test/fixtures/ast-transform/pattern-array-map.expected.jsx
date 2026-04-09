@@ -42,7 +42,9 @@ export default pattern((__cf_pattern_input) => {
         items: {
             type: "unknown"
         }
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, values, (values) => {
+    } as const satisfies __cfHelpers.JSONSchema, {
+        asCell: ["opaque"]
+    } as const satisfies __cfHelpers.JSONSchema, values, (values) => {
         console.log("values#", values?.length);
     });
     return {

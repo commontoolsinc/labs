@@ -86,7 +86,7 @@ export default pattern((__cf_pattern_input) => {
                         required: ["description"]
                     },
                     startEditing: {
-                        asCell: ["stream"]
+                        asCell: ["stream", "opaque"]
                     }
                 },
                 required: ["card", "startEditing"]

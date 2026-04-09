@@ -52,7 +52,9 @@ export default pattern((__cf_pattern_input) => {
                         }
                     },
                     required: ["file"]
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { file: {
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    asCell: ["opaque"]
+                } as const satisfies __cfHelpers.JSONSchema, { file: {
                         name: file.key("name"),
                         type: file.key("type")
                     } }, ({ file }) => console.log("mapping", file.name, file.type));

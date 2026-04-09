@@ -454,8 +454,11 @@ function isSchemaLessHandlerInput(schema: JSONSchema): boolean {
   if (!isSchemaObject(schema)) {
     return false;
   }
-  return schema.asStream === true && schema.type === undefined &&
-    schema.properties === undefined;
+  if (schema.type !== undefined || schema.properties !== undefined) {
+    return false;
+  }
+  return (schema.asStream === true ||
+    (Array.isArray(schema.asCell) && schema.asCell.at(0) === "stream"));
 }
 
 export function normalizeCallableInputForExecution(

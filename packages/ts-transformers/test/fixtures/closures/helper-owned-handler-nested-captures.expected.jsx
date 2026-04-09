@@ -154,7 +154,7 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         trigger: {
-            asCell: ["stream"]
+            asCell: ["stream", "opaque"]
         }
     },
     required: ["trigger"]

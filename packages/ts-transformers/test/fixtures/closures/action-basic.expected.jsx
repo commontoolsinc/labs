@@ -46,7 +46,7 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         inc: {
-            asCell: ["stream"]
+            asCell: ["stream", "opaque"]
         }
     },
     required: ["inc"]

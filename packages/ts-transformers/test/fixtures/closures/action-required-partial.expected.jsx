@@ -67,10 +67,10 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         setA: {
-            asCell: ["stream"]
+            asCell: ["stream", "opaque"]
         },
         setB: {
-            asCell: ["stream"]
+            asCell: ["stream", "opaque"]
         }
     },
     required: ["setA", "setB"]

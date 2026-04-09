@@ -421,16 +421,25 @@ export function validateAndTransform(
   ) {
     return createQueryResultProxy(runtime, tx, link);
   }
-
-  // Now resolve further links until we get the actual value.
-  // We'll use this for the value, and potentially merge the schema
-  // This gets me the result of following all the links, so I can get the value
-  const ref = resolveLink(runtime, tx, link);
   const objectCreator = new TransformObjectCreator(
     runtime,
     tx!,
     options?.synced ?? false,
   );
+
+  const asCellValues = ContextualFlowControl.getAsCellValues(effectiveSchema);
+  // For opaque cells, we want to create the cell with the schema we have,
+  // and we don't want to actually read from the tx.
+  // We don't even follow write-redirect links, since we can't write to
+  // these cells.
+  if (asCellValues.at(0) === "opaque") {
+    return objectCreator.createObject(link, undefined);
+  }
+
+  // Now resolve further links until we get the actual value.
+  // We'll use this for the value, and potentially merge the schema
+  // This gets me the result of following all the links, so I can get the value
+  const ref = resolveLink(runtime, tx, link);
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.

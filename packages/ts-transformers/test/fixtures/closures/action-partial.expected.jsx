@@ -64,10 +64,10 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         readA: {
-            asCell: ["stream"]
+            asCell: ["stream", "opaque"]
         },
         readB: {
-            asCell: ["stream"]
+            asCell: ["stream", "opaque"]
         }
     },
     required: ["readA", "readB"]
