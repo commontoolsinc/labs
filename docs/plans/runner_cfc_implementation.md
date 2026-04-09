@@ -205,16 +205,15 @@ Every trust-sensitive check uses an explicit implementation identity:
 reuses the verified-load registry for execution provenance, while policy
 references resolve against a separate stable code identity derived from one of:
 
-- verified compiled code: a richer verified bundle identity plus canonical
-  binding path within that bundle, and when needed source loc/col and/or a pure
-  code hash
+- verified compiled code: a stable verified bundle hash plus canonical binding
+  path within that bundle, and when needed source loc/col and/or a pure code
+  hash for sandbox-admitted self-contained functions
 - built-ins: canonical runtime-owned registry ids
 
 Phase 1 treats bare memory-v2 `codeCID` as at most one component or hint for
-that identity, not the identity itself. Trust-sensitive enforcement for
-verified compiled user code is therefore blocked on extending memory-v2
-commit/transport/storage surfaces to carry or rebind the richer
-bundle/path/location/hash identity deterministically.
+that identity, not the identity itself. Durable policy references must use the
+stable verified bundle hash and binding metadata rebound through the verified
+registry rather than the ephemeral `verifiedLoadId`.
 
 Phase 1 does not require stable policy identities for direct-eval,
 unsafe-host/test helpers, or any other unsupported identity class. Those paths
@@ -692,17 +691,19 @@ Tasks:
       `codeCID` as only one possible component or hint rather than a complete
       identity
 - [x] Define canonical ids for built-ins
-- [x] Mark verified compiled-code policy identity as blocked on extending
-      memory-v2 commit/transport/storage surfaces beyond bare `codeCID` so the
-      richer bundle/path/location/hash identity can be carried or rebound
-      deterministically
+- [x] Rebind verified compiled-code policy identity through a stable verified
+      bundle hash plus registry-owned binding metadata rather than persisting
+      the ephemeral `verifiedLoadId`
+- [x] Keep authored trust-sensitive matching on canonical binding identity
+      rather than runtime export shape; top-level supported bindings are
+      annotated directly and self-contained content-addressed functions remain
+      a separate verified-identity lane
 - [x] In phase 1, treat direct-eval and unsafe-host/test helpers as untrusted
       for trust-sensitive relaxations unless a later explicit stable-id path is
       added
 - [x] Thread the resulting implementation identity through action and handler
-      execution where possible; built-ins can land earlier, while verified
-      compiled user code remains observe-only/fail-closed until the v2
-      extension lands
+      execution where possible for both built-ins and verified compiled user
+      code; unsupported identity classes still remain observe-only/fail-closed
 - [x] Define a trust-snapshot provider interface that is deterministic and easy
       to test
 - [x] Bind prepare success to the acting principal, trust snapshot identity,
@@ -712,8 +713,12 @@ Tasks:
 Acceptance:
 
 - [x] Built-ins produce stable policy-facing implementation identities
-- [x] Verified compiled user-code policy identities remain blocked until v2
-      carries the richer bundle/path/location/hash identity surface
+- [x] Verified compiled user-code policy identities resolve to stable verified
+      bundle-hash identities and canonical binding paths when the verified
+      registry can rebind them safely
+- [x] Trust-sensitive authored `writeAuthorizedBy` claims match verified
+      compiled code through canonical binding identity rather than helper-
+      specific policy formats
 - [x] Unsupported identity classes fail closed for trust-sensitive checks
 - [x] Changing the trust snapshot between prepare and commit invalidates prepare
 - [x] Unknown implementation identity is treated as untrusted

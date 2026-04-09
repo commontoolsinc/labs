@@ -57,6 +57,16 @@ const mergeSetLikeIfcArray = (
     case "integrity":
     case "maxConfidentiality":
     case "writeAuthorizedBy": {
+      if (
+        !Array.isArray(existing) || !Array.isArray(candidate) ||
+        !existing.every((entry) => typeof entry === "string") ||
+        !candidate.every((entry) => typeof entry === "string")
+      ) {
+        if (!deepEqual(existing, candidate)) {
+          throw new Error(`${key} must remain stable`);
+        }
+        return existing;
+      }
       const existingArray = existing as readonly string[];
       const candidateArray = candidate as readonly string[];
       if (!arraySubsetOf(candidateArray, existingArray)) {

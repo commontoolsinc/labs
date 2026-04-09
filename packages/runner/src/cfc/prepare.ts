@@ -102,13 +102,6 @@ const writeAuthorizedByReason = (
   if (claim === undefined) {
     return undefined;
   }
-  if (
-    !Array.isArray(claim) || !claim.every((entry) => typeof entry === "string")
-  ) {
-    return `unsupported trust-sensitive claim writeAuthorizedBy at /${
-      path.join("/")
-    }`;
-  }
 
   const trustSnapshot = tx.getCfcState().trustSnapshot;
   if (!trustSnapshot?.id || !trustSnapshot?.actingPrincipal) {
@@ -116,15 +109,75 @@ const writeAuthorizedByReason = (
   }
 
   const identity = tx.getCfcState().implementationIdentity;
-  if (!identity || identity.kind !== "builtin") {
-    return `writeAuthorizedBy requires a trusted builtin identity at /${
+  if (
+    Array.isArray(claim) && claim.every((entry) => typeof entry === "string")
+  ) {
+    if (!identity || identity.kind !== "builtin") {
+      return `writeAuthorizedBy requires a trusted builtin identity at /${
+        path.join("/")
+      }`;
+    }
+    if (!claim.includes(identity.builtinId)) {
+      return `writeAuthorizedBy failed at /${path.join("/")}`;
+    }
+    return undefined;
+  }
+
+  const bindingIdentity = parseWriteAuthorizedByBindingIdentity(claim);
+  if (!bindingIdentity) {
+    return `unsupported trust-sensitive claim writeAuthorizedBy at /${
       path.join("/")
     }`;
   }
-  if (!claim.includes(identity.builtinId)) {
+  if (!identity || identity.kind !== "verified" || !identity.bindingPath) {
+    return `writeAuthorizedBy requires a trusted verified binding identity at /${
+      path.join("/")
+    }`;
+  }
+  if (
+    normalizeIdentitySource(identity.sourceFile) !==
+      normalizeIdentitySource(bindingIdentity.file) ||
+    !arraysEqual(identity.bindingPath, bindingIdentity.path)
+  ) {
     return `writeAuthorizedBy failed at /${path.join("/")}`;
   }
   return undefined;
+};
+
+const parseWriteAuthorizedByBindingIdentity = (
+  claim: unknown,
+): { file: string; path: string[] } | undefined => {
+  if (!isRecord(claim) || !isRecord(claim.__ctWriterIdentityOf)) {
+    return undefined;
+  }
+  const identity = claim.__ctWriterIdentityOf;
+  if (
+    typeof identity.file !== "string" ||
+    !Array.isArray(identity.path) ||
+    !identity.path.every((entry) => typeof entry === "string")
+  ) {
+    return undefined;
+  }
+  return {
+    file: identity.file,
+    path: [...identity.path],
+  };
+};
+
+const arraysEqual = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean =>
+  left.length === right.length &&
+  left.every((value, index) => value === right[index]);
+
+const normalizeIdentitySource = (
+  source: string | undefined,
+): string | undefined => {
+  if (typeof source !== "string" || source.length === 0) {
+    return undefined;
+  }
+  return source.startsWith("/") ? source : `/${source}`;
 };
 
 const storedMetadataFor = (

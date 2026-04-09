@@ -51,6 +51,7 @@ export type ImplementationIdentity =
   | {
     kind: "verified";
     bundleId?: string;
+    sourceFile?: string;
     bindingPath?: string[];
     sourceLocation?: { line: number; column: number };
     codeHash?: string;

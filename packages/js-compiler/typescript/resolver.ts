@@ -42,7 +42,10 @@ export async function resolveProgram(
           const typeDefIdentifier = `${identifier}.d.ts`;
           if (!sources.has(typeDefIdentifier)) {
             const typeDef = await graph.resolveSource(typeDefIdentifier);
-            if (typeDef) sources.set(typeDefIdentifier, typeDef);
+            if (typeDef) {
+              sources.set(typeDefIdentifier, typeDef);
+              toProcess.push(typeDefIdentifier);
+            }
           }
         }
         continue;

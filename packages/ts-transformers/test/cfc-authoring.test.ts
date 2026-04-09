@@ -238,10 +238,9 @@ Deno.test(
       types: COMMONFABRIC_TYPES,
     });
 
-    assertEquals(
-      output.includes("writeAuthorizedBy: localFunction as any"),
-      true,
-    );
+    assertEquals(output.includes("__ctWriterIdentityOf: {"), true);
+    assertEquals(output.includes('file: "/test.tsx"'), true);
+    assertEquals(output.includes('path: ["localFunction"]'), true);
   },
 );
 

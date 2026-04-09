@@ -25,6 +25,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           : undefined;
         const writeAuthorizedByIdentity = extractWriteAuthorizedByIdentity(
           typeArg,
+          sourceFile.fileName,
         );
         let schemaTypeArg: ts.TypeNode = typeArg;
         if (
@@ -157,14 +158,8 @@ function createSchemaAst(
   schema: unknown,
   factory: ts.NodeFactory,
 ): ts.Expression {
-  if (
-    isWriteAuthorizedByMarker(schema) &&
-    typeof schema.__ctWriterIdentityOf === "string"
-  ) {
-    return factory.createAsExpression(
-      factory.createIdentifier(schema.__ctWriterIdentityOf),
-      factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
-    );
+  if (isWriteAuthorizedByMarker(schema)) {
+    return createWriteAuthorizedByMarkerAst(schema, factory);
   }
   if (schema === null) return factory.createNull();
   if (typeof schema === "string") return factory.createStringLiteral(schema);
@@ -197,7 +192,7 @@ function createSchemaAst(
 
 function attachWriteAuthorizedByMarker(
   schema: boolean | Record<string, unknown>,
-  identity: string,
+  identity: { file: string; path: string[] },
 ): boolean | Record<string, unknown> {
   if (typeof schema === "boolean") return schema;
   const ifc = schema.ifc && typeof schema.ifc === "object"
@@ -314,7 +309,8 @@ function attachUiContractToSchemaRecord(
 
 function extractWriteAuthorizedByIdentity(
   typeNode: ts.TypeNode,
-): string | undefined {
+  sourceFileName: string,
+): { file: string; path: string[] } | undefined {
   if (!isWriteAuthorizedByType(typeNode)) {
     return undefined;
   }
@@ -325,7 +321,10 @@ function extractWriteAuthorizedByIdentity(
   if (!ts.isIdentifier(bindingNode.exprName)) {
     return undefined;
   }
-  return bindingNode.exprName.text;
+  return {
+    file: normalizeWriterIdentityFile(sourceFileName),
+    path: [bindingNode.exprName.text],
+  };
 }
 
 function isWriteAuthorizedByType(
@@ -340,10 +339,55 @@ function isWriteAuthorizedByType(
 
 function isWriteAuthorizedByMarker(
   schema: unknown,
-): schema is { __ctWriterIdentityOf: unknown } {
+): schema is { __ctWriterIdentityOf: { file: string; path: string[] } } {
   return !!schema && typeof schema === "object" &&
     "__ctWriterIdentityOf" in schema &&
-    Object.keys(schema as Record<string, unknown>).length === 1;
+    Object.keys(schema as Record<string, unknown>).length === 1 &&
+    isWriterIdentityPayload(
+      (schema as Record<string, unknown>).__ctWriterIdentityOf,
+    );
+}
+
+function isWriterIdentityPayload(
+  value: unknown,
+): value is { file: string; path: string[] } {
+  return !!value && typeof value === "object" &&
+    typeof (value as Record<string, unknown>).file === "string" &&
+    Array.isArray((value as Record<string, unknown>).path) &&
+    ((value as Record<string, unknown>).path as unknown[]).every((entry) =>
+      typeof entry === "string"
+    );
+}
+
+function createWriteAuthorizedByMarkerAst(
+  schema: { __ctWriterIdentityOf: { file: string; path: string[] } },
+  factory: ts.NodeFactory,
+): ts.Expression {
+  return factory.createObjectLiteralExpression([
+    factory.createPropertyAssignment(
+      createPropertyName("__ctWriterIdentityOf", factory),
+      factory.createObjectLiteralExpression([
+        factory.createPropertyAssignment(
+          createPropertyName("file", factory),
+          factory.createStringLiteral(schema.__ctWriterIdentityOf.file),
+        ),
+        factory.createPropertyAssignment(
+          createPropertyName("path", factory),
+          factory.createArrayLiteralExpression(
+            schema.__ctWriterIdentityOf.path.map((segment) =>
+              factory.createStringLiteral(segment)
+            ),
+          ),
+        ),
+      ], true),
+    ),
+  ], true);
+}
+
+function normalizeWriterIdentityFile(fileName: string): string {
+  const normalized = fileName.replace(/\\/g, "/");
+  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
+  return strippedPrefixed ?? normalized;
 }
 
 function evaluateObjectLiteral(

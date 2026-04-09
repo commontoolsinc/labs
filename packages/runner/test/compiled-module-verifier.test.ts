@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { createBindingIdentityHelperSource } from "@commonfabric/utils/sandbox-contract";
 import {
   parseCompiledBundleSource as parseCompiledBundleSourceRaw,
 } from "../src/sandbox/compiled-js-parser.ts";
@@ -86,6 +87,30 @@ describe("verifyCompiledBundleModuleFactories()", () => {
       return (value == null ? "" : value).trim();
     }
     exports.default = (0, commonfabric_1.lift)(sanitize);
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts canonical verified binding annotation statements at module scope", () => {
+    const bindingHelper = createBindingIdentityHelperSource()
+      .split("\n")
+      .map((line) => `    ${line}`)
+      .join("\n");
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+${bindingHelper}
+    function localFunction(value) { return value.toUpperCase(); }
+    __ctBindVerifiedBinding(localFunction, {
+      sourceFile: "/main.tsx",
+      bindingPath: ["localFunction"]
+    });
+    exports.default = (0, commontools_1.lift)(localFunction);
   });
 });
 `;
@@ -727,7 +752,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 `;
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+      "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
     );
   });
 
@@ -743,7 +768,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 `;
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+      "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
     );
   });
 });

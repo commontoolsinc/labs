@@ -34,6 +34,8 @@ export interface GenerationContext {
   // Optional context
   /** Type node for additional context */
   typeNode?: ts.TypeNode;
+  /** Source file name for authoring metadata that needs stable file identity */
+  sourceFileName?: string;
   /** Optional type registry for synthetic nodes */
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
   /** Widen literal types to base types during schema generation */

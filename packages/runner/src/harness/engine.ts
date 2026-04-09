@@ -64,16 +64,26 @@ export class EngineProgramResolver extends InMemoryProgram {
   override async resolveSource(
     identifier: string,
   ): Promise<Source | undefined> {
+    if (!this.runtimeModuleTypes) {
+      this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
+        this.cache,
+      );
+    }
+    if (
+      !isRuntimeModuleIdentifier(identifier) &&
+      identifier in this.runtimeModuleTypes &&
+      this.runtimeModuleTypes[identifier]
+    ) {
+      return {
+        name: identifier,
+        contents: this.runtimeModuleTypes[identifier],
+      };
+    }
     if (identifier.endsWith(".d.ts")) {
       const origSource = identifier.substring(0, identifier.length - 5);
       if (
         isRuntimeModuleIdentifier(origSource)
       ) {
-        if (!this.runtimeModuleTypes) {
-          this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
-            this.cache,
-          );
-        }
         if (
           origSource in this.runtimeModuleTypes &&
           this.runtimeModuleTypes[origSource]
@@ -216,6 +226,10 @@ export class Engine extends EventTarget implements Harness {
         .getInternals();
       const loadId = this.getLoadId(id, jsScript);
       this.executableRegistry.beginVerifiedLoad(loadId);
+      this.executableRegistry.setVerifiedLoadBundleId(
+        loadId,
+        hashOf(jsScript.js).toString(),
+      );
       this.executableRegistry.setVerifiedLoadSources(
         loadId,
         collectVerifiedLoadSources(id, jsScript, files),
@@ -332,6 +346,18 @@ export class Engine extends EventTarget implements Harness {
 
   isVerifiedSourceInLoad(loadId: string, source: string): boolean {
     return this.executableRegistry.isVerifiedSourceInLoad(loadId, source);
+  }
+
+  getVerifiedBundleId(loadId: string): string | undefined {
+    return this.executableRegistry.getVerifiedBundleId(loadId);
+  }
+
+  getVerifiedBindingMetadata(
+    implementationRef: string,
+  ): { sourceFile?: string; bindingPath?: string[] } | undefined {
+    return this.executableRegistry.getVerifiedBindingMetadata(
+      implementationRef,
+    );
   }
 
   getVerifiedLoadId(

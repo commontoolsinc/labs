@@ -88,6 +88,14 @@ export interface Harness extends EventTarget {
     source: string,
   ): boolean;
 
+  getVerifiedBundleId?(
+    loadId: string,
+  ): string | undefined;
+
+  getVerifiedBindingMetadata?(
+    implementationRef: string,
+  ): { sourceFile?: string; bindingPath?: string[] } | undefined;
+
   registerVerifiedFunction?(
     loadId: string,
     implementationRef: string,

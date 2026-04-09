@@ -185,9 +185,17 @@ describe("CFC builtin implementation identity", () => {
     const harness = {
       getVerifiedFunctionInLoad: () => implementation,
       isVerifiedSourceInLoad: () => true,
+      getVerifiedBundleId: () => "bundle-hash-1",
+      getVerifiedBindingMetadata: () => ({
+        sourceFile: "/main.tsx",
+        bindingPath: ["localFunction"],
+      }),
     } satisfies Pick<
       Harness,
-      "getVerifiedFunctionInLoad" | "isVerifiedSourceInLoad"
+      | "getVerifiedBindingMetadata"
+      | "getVerifiedBundleId"
+      | "getVerifiedFunctionInLoad"
+      | "isVerifiedSourceInLoad"
     >;
     const module = {
       type: "javascript" as const,
@@ -201,7 +209,9 @@ describe("CFC builtin implementation identity", () => {
       }),
     ).toEqual({
       kind: "verified",
-      bundleId: "verified-load-1",
+      bundleId: "bundle-hash-1",
+      sourceFile: "/main.tsx",
+      bindingPath: ["localFunction"],
       sourceLocation: { line: 4, column: 12 },
     });
   });

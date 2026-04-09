@@ -1019,7 +1019,12 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     return {
       writeAuthorizedBy: {
-        __ctWriterIdentityOf: bindingNode.exprName.text,
+        __ctWriterIdentityOf: {
+          file: normalizeWriterIdentityFile(
+            context.sourceFileName ?? bindingNode.getSourceFile().fileName,
+          ),
+          path: [bindingNode.exprName.text],
+        },
       },
     };
   }
@@ -1625,4 +1630,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     // This excludes mixed unions like `string | number | Cell | Stream | null`
     return hasWrapperMember && !hasNonWrapperMember;
   }
+}
+
+function normalizeWriterIdentityFile(fileName: string): string {
+  const normalized = fileName.replace(/\\/g, "/");
+  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
+  return strippedPrefixed ?? normalized;
 }

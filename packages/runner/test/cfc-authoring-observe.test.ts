@@ -44,7 +44,10 @@ describe("CFC authoring surface trust-sensitive claims", () => {
     );
 
     expect((schema.properties?.value as any)?.ifc?.writeAuthorizedBy).toEqual({
-      __ctWriterIdentityOf: "localFunction",
+      __ctWriterIdentityOf: {
+        file: "test.ts",
+        path: ["localFunction"],
+      },
     });
 
     const { runtime, storageManager } = createRuntime();
@@ -67,7 +70,7 @@ describe("CFC authoring surface trust-sensitive claims", () => {
       const observeResult = await observeTx.commit();
       expect(observeResult.ok).toBeDefined();
       expect(observeTx.getCfcState().diagnostics).toContain(
-        "unsupported trust-sensitive claim writeAuthorizedBy at /value",
+        "writeAuthorizedBy requires a trusted verified binding identity at /value",
       );
 
       const enforceTx = runtime.edit();
@@ -88,8 +91,81 @@ describe("CFC authoring surface trust-sensitive claims", () => {
 
       const enforceResult = await enforceTx.commit();
       expect(enforceResult.error?.message).toContain(
-        "unsupported trust-sensitive claim writeAuthorizedBy at /value",
+        "writeAuthorizedBy requires a trusted verified binding identity at /value",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("allows verified compiled writeAuthorizedBy claims when the binding identity matches", async () => {
+    const { runtime, storageManager } = (() => {
+      const storageManager = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v2",
+      });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        memoryVersion: "v2",
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshotProvider: () => ({
+          id: "trust-snapshot-1",
+          actingPrincipal: signer.did(),
+        }),
+      });
+      return { runtime, storageManager };
+    })();
+
+    try {
+      const program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: `/// <cts-enable />
+            import { lift, pattern } from "commontools";
+            type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+            type WriteAuthorizedBy<T, Binding> = Cfc<T, { writeAuthorizedBy: Binding }>;
+
+            function localFunction(value: string) {
+              return value.toUpperCase();
+            }
+
+            const toAuthorized = lift(localFunction);
+
+            interface Input {
+              title: string;
+            }
+
+            interface Output {
+              value: WriteAuthorizedBy<string, typeof localFunction>;
+            }
+
+            export default pattern<Input, Output>(({ title }) => ({
+              value: toAuthorized(title),
+            }));
+          `,
+        }],
+      };
+
+      const { id, jsScript } = await runtime.harness.compile(program);
+      const { main } = await runtime.harness.evaluate(
+        id,
+        jsScript,
+        program.files,
+      );
+      const pattern = main?.default;
+      const resultCell = runtime.getCell<{ value: string }>(
+        signer.did(),
+        "cfc-authoring-verified-write-authorized-by",
+      );
+
+      const result = await runtime.runSynced(resultCell, pattern, {
+        title: "verified",
+      });
+      await expect(result.pull()).resolves.toEqual({ value: "VERIFIED" });
+      await runtime.scheduler.idle();
     } finally {
       await runtime.dispose();
       await storageManager.close();

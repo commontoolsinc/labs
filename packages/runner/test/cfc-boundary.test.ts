@@ -1964,6 +1964,55 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("allows writeAuthorizedBy when a verified binding identity matches", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-1",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/main.tsx",
+        bindingPath: ["localFunction"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-authorized-verified-write",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/main.tsx",
+                    path: ["localFunction"],
+                  },
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "authorized" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("records diagnostics for unsupported trust-sensitive claims in observe mode", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

@@ -1,6 +1,7 @@
 import type { Module } from "../builder/types.ts";
 import type { Harness, HarnessedFunction } from "../harness/types.ts";
 import type { ImplementationIdentity } from "./types.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 export const resolvePolicyFacingImplementationIdentity = (
   module: Module,
@@ -8,7 +9,10 @@ export const resolvePolicyFacingImplementationIdentity = (
     verifiedLoadId?: string;
     harness?: Pick<
       Harness,
-      "getVerifiedFunctionInLoad" | "isVerifiedSourceInLoad"
+      | "getVerifiedBindingMetadata"
+      | "getVerifiedBundleId"
+      | "getVerifiedFunctionInLoad"
+      | "isVerifiedSourceInLoad"
     >;
     implementation?: HarnessedFunction;
   } = {},
@@ -44,7 +48,10 @@ const resolveVerifiedImplementationIdentity = (
     verifiedLoadId?: string;
     harness?: Pick<
       Harness,
-      "getVerifiedFunctionInLoad" | "isVerifiedSourceInLoad"
+      | "getVerifiedBindingMetadata"
+      | "getVerifiedBundleId"
+      | "getVerifiedFunctionInLoad"
+      | "isVerifiedSourceInLoad"
     >;
     implementation?: HarnessedFunction;
   },
@@ -71,6 +78,9 @@ const resolveVerifiedImplementationIdentity = (
     };
   }
 
+  const bindingMetadata = harness.getVerifiedBindingMetadata?.(
+    implementationRef,
+  );
   const sourceLocation = parseVerifiedSourceLocation(
     (implementation as { src?: string }).src,
   );
@@ -89,11 +99,21 @@ const resolveVerifiedImplementationIdentity = (
 
   return {
     kind: "verified",
-    bundleId: verifiedLoadId,
+    bundleId: harness.getVerifiedBundleId?.(verifiedLoadId) ?? verifiedLoadId,
+    ...(bindingMetadata?.sourceFile
+      ? { sourceFile: normalizeIdentitySource(bindingMetadata.sourceFile) }
+      : {}),
+    ...(bindingMetadata?.bindingPath
+      ? { bindingPath: [...bindingMetadata.bindingPath] }
+      : {}),
     sourceLocation: {
       line: sourceLocation.line,
       column: sourceLocation.column,
     },
+    ...(bindingMetadata?.bindingPath ? {} : {
+      codeHash: hashOf(Function.prototype.toString.call(implementation))
+        .toString(),
+    }),
   };
 };
 
@@ -111,8 +131,11 @@ const parseVerifiedSourceLocation = (
 
   const [, source, line, column] = match;
   return {
-    source: source.startsWith("/") ? source : `/${source}`,
+    source: normalizeIdentitySource(source),
     line: Number.parseInt(line, 10),
     column: Number.parseInt(column, 10),
   };
 };
+
+const normalizeIdentitySource = (source: string): string =>
+  source.startsWith("/") ? source : `/${source}`;

@@ -159,6 +159,9 @@ export class SchemaGenerator implements ISchemaGenerator {
 
       // Optional context
       ...(typeNode && { typeNode }),
+      ...(typeNode?.getSourceFile()?.fileName && {
+        sourceFileName: typeNode.getSourceFile().fileName,
+      }),
       ...(typeRegistry && { typeRegistry }),
       ...(options?.widenLiterals && { widenLiterals: true }),
       ...(schemaHints && { schemaHints }),

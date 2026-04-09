@@ -1369,7 +1369,14 @@ export type JSONSchemaObj = {
     readonly addIntegrity?: readonly string[];
     readonly requiredIntegrity?: readonly string[];
     readonly maxConfidentiality?: readonly string[];
-    readonly writeAuthorizedBy?: readonly string[];
+    readonly writeAuthorizedBy?:
+      | readonly string[]
+      | {
+        readonly __ctWriterIdentityOf?: {
+          readonly file?: string;
+          readonly path?: readonly string[];
+        };
+      };
     readonly exactCopyOf?: readonly string[];
     readonly projection?: readonly string[];
     readonly collection?: readonly string[];
