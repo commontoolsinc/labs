@@ -42,6 +42,9 @@ const config: Config = {
       "$API_URL": Deno.env.get("API_URL"),
       "$COMMIT_SHA": Deno.env.get("COMMIT_SHA"),
       "$MEMORY_VERSION": Deno.env.get("CF_INTEGRATION_MEMORY_VERSION"),
+      "$EXPERIMENTAL_MODERN_DATA_MODEL": Deno.env.get(
+        "EXPERIMENTAL_MODERN_DATA_MODEL",
+      ),
       "$EXPERIMENTAL_RICH_STORABLE_VALUES": Deno.env.get(
         "EXPERIMENTAL_RICH_STORABLE_VALUES",
       ),
@@ -50,6 +53,9 @@ const config: Config = {
       ),
       "$EXPERIMENTAL_UNIFIED_JSON_ENCODING": Deno.env.get(
         "EXPERIMENTAL_UNIFIED_JSON_ENCODING",
+      ),
+      "$EXPERIMENTAL_MODERN_HASH": Deno.env.get(
+        "EXPERIMENTAL_MODERN_HASH",
       ),
       "$EXPERIMENTAL_CANONICAL_HASHING": Deno.env.get(
         "EXPERIMENTAL_CANONICAL_HASHING",
