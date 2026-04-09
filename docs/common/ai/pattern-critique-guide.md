@@ -168,6 +168,7 @@ When to use `handler()`:
 | theme/styling stance | `cf-theme`, theme hooks, custom properties, or parts are used intentionally when relevant |
 | typography | type choices and scale support the concept instead of defaulting to generic stacks without reason |
 | atmosphere and surface treatment | color, borders, shadows, gradients, or textures feel coherent with the chosen direction |
+| scrollability of full-height layouts | if `cf-screen` or another full-height frame is used, below-the-fold content remains reachable through an explicit scroll region |
 
 For UI-heavy patterns, design review is not optional polish. It should answer:
 
@@ -175,6 +176,8 @@ For UI-heavy patterns, design review is not optional polish. It should answer:
 - Does the implementation use `cf-theme` or public component styling hooks when
   those are available?
 - Does the layout feel composed, or does it read like a raw form dump?
+- If the layout uses `cf-screen`, can a user actually reach content below the
+  fold?
 - Are empty, loading, and first-run states treated as designed screens rather
   than leftover placeholders?
 - Is the UI memorable for a reason beyond "it technically works"?

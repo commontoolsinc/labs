@@ -56,8 +56,11 @@ When polishing a non-trivial UI, default to this workflow:
 2. Wrap the main surface in `<cf-theme theme={theme}>`.
 3. Compose the layout with `cf-screen`, `cf-vstack`, `cf-hstack`, `cf-vgroup`,
    `cf-hgroup`, and `cf-card`.
-4. Let the theme carry most of the color / type / radius / density decisions.
-5. Use component-specific custom properties only for local emphasis or one-off
+4. If content can exceed one viewport, put the body content inside `cf-vscroll`
+   (or `cf-hscroll` for wide tabular content) rather than placing a long stack
+   directly under `cf-screen`.
+5. Let the theme carry most of the color / type / radius / density decisions.
+6. Use component-specific custom properties only for local emphasis or one-off
    refinement.
 
 If `cf-theme` is clearly unavailable in the environment, fall back gracefully.
@@ -99,11 +102,13 @@ defaults, or layouts that read like a raw form dump.
 
 ```tsx
 <cf-screen title="My Pattern">
-  <cf-vstack gap="4">
-    <cf-hstack gap="3">
-      {/* horizontal items */}
-    </cf-hstack>
-  </cf-vstack>
+  <cf-vscroll flex showScrollbar fadeEdges>
+    <cf-vstack gap="4" padding="4">
+      <cf-hstack gap="3">
+        {/* horizontal items */}
+      </cf-hstack>
+    </cf-vstack>
+  </cf-vscroll>
 </cf-screen>;
 ```
 
@@ -129,7 +134,11 @@ const theme = {
 };
 
 <cf-theme theme={theme}>
-  <cf-screen title="My Pattern">{/* ... */}</cf-screen>
+  <cf-screen title="My Pattern">
+    <cf-vscroll flex>
+      {/* ... */}
+    </cf-vscroll>
+  </cf-screen>
 </cf-theme>;
 ```
 
@@ -153,3 +162,4 @@ domain flow, not as the first place to copy styling from.
 - empty or first-run states are not neglected
 - a `cf-theme` strategy is used intentionally when available
 - the result has a clear visual idea rather than a generic default shell
+- full-height layouts remain scrollable when content exceeds one screen

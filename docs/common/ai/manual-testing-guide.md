@@ -52,6 +52,8 @@ Also verify:
 - the main screen has a readable hierarchy and grouping rhythm
 - `cf-theme`-driven styling or other public component styling hooks actually
   appear in the rendered result when they were part of the design intent
+- full-height layouts can actually reach below-the-fold content, either through
+  normal page scroll or an explicit inner scroll region such as `cf-vscroll`
 - text inputs, selections, and badges render expected user-facing values rather
   than raw object output or schema artifacts
 - empty, loading, and first-run states are understandable and feel designed

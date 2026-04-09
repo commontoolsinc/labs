@@ -106,6 +106,8 @@ When UI is important to the pattern, also look for:
 - weak visual hierarchy
 - poor grouping or spacing rhythm
 - neglected empty or first-run states
+- full-height `cf-screen` layouts that clip below-the-fold content instead of
+  providing an explicit scroll region
 - typography choices that feel accidental rather than intentional
 - styling that ignores available public component affordances
 - surface treatment that feels incoherent with the chosen tone

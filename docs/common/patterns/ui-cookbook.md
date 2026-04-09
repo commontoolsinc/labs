@@ -43,9 +43,11 @@ const theme = {
 
 <cf-theme theme={theme}>
   <cf-screen title="Pattern">
-    <cf-vstack gap="4" padding="4">
-      {/* main content */}
-    </cf-vstack>
+    <cf-vscroll flex showScrollbar fadeEdges>
+      <cf-vstack gap="4" padding="4">
+        {/* main content */}
+      </cf-vstack>
+    </cf-vscroll>
   </cf-screen>
 </cf-theme>;
 ```
@@ -54,6 +56,7 @@ Why this is the default:
 
 - one theme object establishes a visual system early
 - `cf-screen` gives a reliable full-surface container
+- `cf-vscroll` keeps full-height layouts usable when content grows
 - `cf-vstack` keeps spacing and grouping readable
 
 ## 2. Mobile App Vignette
@@ -110,6 +113,9 @@ Use this when you want:
 - a strong, self-contained aesthetic frame
 - a mobile-first hierarchy
 - a vignette that demonstrates the theme system clearly
+
+If you switch this vignette over to `cf-screen`, keep the scrollable body in
+`cf-vscroll` inside that frame.
 
 ## 3. Editorial Detail Layout
 

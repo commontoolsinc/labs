@@ -42,9 +42,11 @@ When polishing a non-trivial UI, default to this workflow:
 2. Wrap the main surface in `<cf-theme theme={theme}>`.
 3. Build the layout with `cf-screen`, `cf-vstack`, `cf-hstack`, `cf-vgroup`,
    `cf-hgroup`, `cf-card`, and other `cf-*` primitives.
-4. Let the theme carry most of the typography, color, radius, density, and
+4. When `cf-screen` is part of the layout, put overflow content in an inner
+   `cf-vscroll` instead of relying on document scroll.
+5. Let the theme carry most of the typography, color, radius, density, and
    motion decisions.
-5. Use component-specific CSS custom properties only for local emphasis or
+6. Use component-specific CSS custom properties only for local emphasis or
    targeted refinement.
 
 If `cf-theme` is unavailable in the environment, fall back gracefully. If it is
@@ -85,12 +87,25 @@ const theme = {
 
 <cf-theme theme={theme}>
   <cf-screen title="Budget tracker">
-    <cf-vstack gap="4" padding="4">
-      {/* themed UI */}
-    </cf-vstack>
+    <cf-vscroll flex showScrollbar fadeEdges>
+      <cf-vstack gap="4" padding="4">
+        {/* themed UI */}
+      </cf-vstack>
+    </cf-vscroll>
   </cf-screen>
 </cf-theme>;
 ```
+
+## Full-Height Layout Rule
+
+`cf-screen` is a full-surface frame, not an automatically scrolling page.
+
+- If the content can exceed one screen, wrap it in `cf-vscroll` inside
+  `cf-screen`.
+- If the layout is wider than one viewport, introduce a deliberate `cf-hscroll`
+  region.
+- Do not place a long `cf-vstack` directly under `cf-screen` and assume the
+  shell or document will scroll for you.
 
 Verified top-level theme fields:
 
@@ -209,6 +224,8 @@ not use them as a substitute for defining an overall theme.
 - Use layout primitives first: `cf-screen`, `cf-vstack`, `cf-hstack`,
   `cf-vgroup`, `cf-hgroup`, `cf-card`, `cf-vscroll`, `cf-hscroll`.
 - Group related information. Avoid raw form dumps.
+- Make overflow explicit. A polished full-height layout is still broken if the
+  lower sections cannot be reached.
 - Use whitespace, overlap, layered surfaces, or asymmetry when the concept
   calls for it.
 
