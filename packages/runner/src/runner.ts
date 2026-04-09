@@ -1704,7 +1704,11 @@ export class Runner {
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
-        { verifiedLoadId },
+        {
+          verifiedLoadId,
+          harness: this.runtime.harness,
+          implementation: fn,
+        },
       );
       const frame = this.createPatternFrame(
         cause,
@@ -1876,7 +1880,11 @@ export class Runner {
       const resultFor = { inputs, outputs, fn: fnSource };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
-        { verifiedLoadId },
+        {
+          verifiedLoadId,
+          harness: this.runtime.harness,
+          implementation: fn,
+        },
       );
       const frame = this.createPatternFrame(
         resultFor,

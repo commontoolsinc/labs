@@ -6,6 +6,7 @@ import { raw } from "../src/module.ts";
 import { Runtime } from "../src/runtime.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 import { getTopFrame } from "../src/builder/pattern.ts";
+import type { Harness } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-implementation-identity",
@@ -177,22 +178,96 @@ describe("CFC builtin implementation identity", () => {
     tx.abort("test-complete");
   });
 
-  it("treats verified compiled modules as unsupported until richer policy ids land", () => {
-    const module = { type: "javascript" as const };
+  it("resolves verified compiled modules through the current load and source location", () => {
+    const implementation = Object.assign(() => undefined, {
+      src: "/main.tsx:4:12",
+    });
+    const harness = {
+      getVerifiedFunctionInLoad: () => implementation,
+      isVerifiedSourceInLoad: () => true,
+    } satisfies Pick<
+      Harness,
+      "getVerifiedFunctionInLoad" | "isVerifiedSourceInLoad"
+    >;
+    const module = {
+      type: "javascript" as const,
+      implementationRef: "verified-implementation-ref",
+    };
     expect(
       resolvePolicyFacingImplementationIdentity(module, {
         verifiedLoadId: "verified-load-1",
+        harness,
+        implementation,
       }),
     ).toEqual({
-      kind: "unsupported",
-      className: "verified",
-      reason:
-        "verified compiled policy identity is blocked until the richer bundle/path/location/hash identity lands",
+      kind: "verified",
+      bundleId: "verified-load-1",
+      sourceLocation: { line: 4, column: 12 },
     });
   });
 
   it("treats unknown implementation identities as untrusted", () => {
     const module = { type: "javascript" as const };
     expect(resolvePolicyFacingImplementationIdentity(module)).toBeUndefined();
+  });
+
+  it("fails closed when a verified implementation cannot be rebound through the claimed load", () => {
+    const implementation = Object.assign(() => undefined, {
+      src: "/main.tsx:4:12",
+    });
+    const harness = {
+      getVerifiedFunctionInLoad: () => undefined,
+      isVerifiedSourceInLoad: () => true,
+    } satisfies Pick<
+      Harness,
+      "getVerifiedFunctionInLoad" | "isVerifiedSourceInLoad"
+    >;
+    const module = {
+      type: "javascript" as const,
+      implementationRef: "verified-implementation-ref",
+    };
+
+    expect(
+      resolvePolicyFacingImplementationIdentity(module, {
+        verifiedLoadId: "verified-load-1",
+        harness,
+        implementation,
+      }),
+    ).toEqual({
+      kind: "unsupported",
+      className: "verified",
+      reason:
+        "verified compiled policy identity must resolve through the current verified load",
+    });
+  });
+
+  it("fails closed when a verified source location resolves outside the current bundle", () => {
+    const implementation = Object.assign(() => undefined, {
+      src: "/other-bundle.tsx:4:12",
+    });
+    const harness = {
+      getVerifiedFunctionInLoad: () => implementation,
+      isVerifiedSourceInLoad: () => false,
+    } satisfies Pick<
+      Harness,
+      "getVerifiedFunctionInLoad" | "isVerifiedSourceInLoad"
+    >;
+    const module = {
+      type: "javascript" as const,
+      implementationRef: "verified-implementation-ref",
+    };
+
+    expect(
+      resolvePolicyFacingImplementationIdentity(module, {
+        verifiedLoadId: "verified-load-1",
+        harness,
+        implementation,
+      }),
+    ).toEqual({
+      kind: "unsupported",
+      className: "verified",
+      reason:
+        "verified compiled policy identity must map back into the current verified bundle",
+    });
   });
 });

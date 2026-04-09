@@ -83,6 +83,11 @@ export interface Harness extends EventTarget {
     implementationRef: string,
   ): HarnessedFunction | undefined;
 
+  isVerifiedSourceInLoad?(
+    loadId: string,
+    source: string,
+  ): boolean;
+
   registerVerifiedFunction?(
     loadId: string,
     implementationRef: string,

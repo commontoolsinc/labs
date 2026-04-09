@@ -216,6 +216,10 @@ export class Engine extends EventTarget implements Harness {
         .getInternals();
       const loadId = this.getLoadId(id, jsScript);
       this.executableRegistry.beginVerifiedLoad(loadId);
+      this.executableRegistry.setVerifiedLoadSources(
+        loadId,
+        collectVerifiedLoadSources(id, jsScript, files),
+      );
       const isolate = runtime.getIsolate(loadId);
       const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
@@ -324,6 +328,10 @@ export class Engine extends EventTarget implements Harness {
       loadId,
       implementationRef,
     );
+  }
+
+  isVerifiedSourceInLoad(loadId: string, source: string): boolean {
+    return this.executableRegistry.isVerifiedSourceInLoad(loadId, source);
   }
 
   getVerifiedLoadId(
@@ -457,6 +465,39 @@ export class Engine extends EventTarget implements Harness {
       }),
     });
   }
+}
+
+function collectVerifiedLoadSources(
+  id: string,
+  jsScript: JsScript,
+  files: Source[],
+): string[] {
+  const sources = new Set<string>();
+  const addSource = (value: string | undefined) => {
+    if (typeof value !== "string" || value.length === 0) {
+      return;
+    }
+    sources.add(normalizeVerifiedSource(value));
+    const prefixed = `/${id}/`;
+    if (value.startsWith(prefixed)) {
+      sources.add(normalizeVerifiedSource(value.slice(id.length + 1)));
+    }
+  };
+
+  for (const file of files) {
+    addSource(file.name);
+  }
+  for (const source of jsScript.sourceMap?.sources ?? []) {
+    addSource(source);
+  }
+
+  return [...sources];
+}
+
+function normalizeVerifiedSource(source: string): string {
+  const withoutFilePrefix = source.replace(/^file:\/\//, "");
+  const normalized = withoutFilePrefix.replace(/\\/g, "/");
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
 function computeId(program: Program): string {

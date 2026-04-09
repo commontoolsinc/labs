@@ -17,6 +17,7 @@ export class ExecutableRegistry {
     string,
     Map<string, HarnessedFunction>
   >();
+  private readonly verifiedLoadSources = new Map<string, Set<string>>();
   private readonly verifiedFunctionIndex = new Map<string, HarnessedFunction>();
   private readonly verifiedFunctionLoadIds = new Map<string, string>();
   private readonly verifiedPatternFunctions = new Map<
@@ -33,6 +34,7 @@ export class ExecutableRegistry {
 
   clear(): void {
     this.verifiedFunctions.clear();
+    this.verifiedLoadSources.clear();
     this.verifiedFunctionIndex.clear();
     this.verifiedFunctionLoadIds.clear();
     this.verifiedPatternFunctions.clear();
@@ -66,6 +68,14 @@ export class ExecutableRegistry {
       }
     }
     this.verifiedFunctions.set(loadId, new Map());
+    this.verifiedLoadSources.set(loadId, new Set());
+  }
+
+  setVerifiedLoadSources(
+    loadId: string,
+    sources: Iterable<string>,
+  ): void {
+    this.verifiedLoadSources.set(loadId, new Set(sources));
   }
 
   registerVerifiedFunction(
@@ -114,6 +124,10 @@ export class ExecutableRegistry {
     implementationRef: string,
   ): HarnessedFunction | undefined {
     return this.verifiedFunctions.get(loadId)?.get(implementationRef);
+  }
+
+  isVerifiedSourceInLoad(loadId: string, source: string): boolean {
+    return this.verifiedLoadSources.get(loadId)?.has(source) ?? false;
   }
 
   getVerifiedLoadId(
