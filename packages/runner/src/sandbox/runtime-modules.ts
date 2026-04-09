@@ -35,7 +35,8 @@ export const getRuntimeModuleTypes = (() => {
 })();
 
 export function getRuntimeModuleExports() {
-  const { commonfabric, commontools, exportsCallback } = createBuilder();
+  const { commonfabric, exportsCallback } = createBuilder();
+  const commontools = commonfabric;
   const runtimeExports = freezeSandboxValue({
     "commonfabric": commonfabric,
     // commonfabric/schema only exports types, no runtime values needed

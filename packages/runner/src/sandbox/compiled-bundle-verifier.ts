@@ -1386,7 +1386,7 @@ function isAllowedBindingIdentityStatementNormalized(
   return (
     (match[1] === BINDING_IDENTITY_HELPER_NAME ||
       callee?.bindingIdentityHelper === true) &&
-    target?.kind === "function"
+    (target?.kind === "function" || target?.kind === "builder")
   );
 }
 

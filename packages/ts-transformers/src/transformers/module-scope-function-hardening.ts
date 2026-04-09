@@ -78,7 +78,7 @@ function transformTopLevelStatement(
   }
 
   if (ts.isVariableStatement(statement)) {
-    return [transformVariableStatement(statement, sourceFile, factory, state)];
+    return transformVariableStatement(statement, sourceFile, factory, state);
   }
 
   if (
@@ -185,8 +185,9 @@ function transformVariableStatement(
   _sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   state: HardeningState,
-): ts.VariableStatement {
+): ts.Statement[] {
   let changed = false;
+  const postStatements: ts.Statement[] = [];
   const declarations = statement.declarationList.declarations.map(
     (declaration) => {
       if (
@@ -207,18 +208,27 @@ function transformVariableStatement(
 
       changed = true;
       state.useBindingHelper();
-      let rewritten = wrapWithBindingIdentity(
-        declaration.initializer,
-        declaration.name.text,
-        factory,
-        state,
+      postStatements.push(
+        factory.createExpressionStatement(
+          annotateBindingIdentifier(
+            factory.createIdentifier(declaration.name.text),
+            declaration.name.text,
+            factory,
+            state,
+          ),
+        ),
       );
+      const rewritten = declaration.initializer;
       if (isDirectFunctionExpression(initializer)) {
         state.useHelper();
-        rewritten = wrapWithFunctionHardener(
-          rewritten,
-          factory,
-          state.helperName,
+        postStatements.push(
+          factory.createExpressionStatement(
+            wrapWithFunctionHardener(
+              factory.createIdentifier(declaration.name.text),
+              factory,
+              state.helperName,
+            ),
+          ),
         );
       }
       return factory.updateVariableDeclaration(
@@ -232,17 +242,20 @@ function transformVariableStatement(
   );
 
   if (!changed) {
-    return statement;
+    return [statement];
   }
 
-  return factory.updateVariableStatement(
-    statement,
-    statement.modifiers,
-    factory.updateVariableDeclarationList(
-      statement.declarationList,
-      declarations,
+  return [
+    factory.updateVariableStatement(
+      statement,
+      statement.modifiers,
+      factory.updateVariableDeclarationList(
+        statement.declarationList,
+        declarations,
+      ),
     ),
-  );
+    ...postStatements,
+  ];
 }
 
 function wrapWithFunctionHardener(
@@ -254,22 +267,6 @@ function wrapWithFunctionHardener(
     factory.createIdentifier(helperName),
     undefined,
     [expression],
-  );
-}
-
-function wrapWithBindingIdentity(
-  expression: ts.Expression,
-  bindingName: string,
-  factory: ts.NodeFactory,
-  state: HardeningState,
-): ts.CallExpression {
-  return factory.createCallExpression(
-    factory.createIdentifier(state.bindingHelperName),
-    undefined,
-    [
-      expression,
-      createBindingIdentityMetadata(bindingName, factory, state),
-    ],
   );
 }
 
