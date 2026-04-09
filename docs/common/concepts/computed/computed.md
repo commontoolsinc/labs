@@ -72,10 +72,11 @@ export default pattern<Input>(({ deck }) => ({
 Static strings like `[NAME]: "My Pattern"` don't need `computed()`.
 
 **Never wrap JSX in `computed()`** — the transformer automatically handles
-reactivity in JSX expressions and many adjacent authored expression sites that
-feed JSX or returned pattern values. Ternaries in JSX children, prop values,
-style/object properties, local JSX-facing aliases, and returned object fields
-are lowered automatically. Nested ternaries work too. See
+reactivity in JSX expressions and in many supported lowered value-expression
+sites in pattern-owned code. Important non-JSX examples include returned object
+property values, variable initializers, call arguments, array elements, return
+expressions, and callback-local values inside supported collection callbacks.
+Nested ternaries work too. See
 `docs/common/patterns/conditional.md`.
 
 Inside a `computed()` body, ternaries are **not** transformed — they execute
@@ -105,7 +106,7 @@ the most common source of "conditional section always renders" bugs.
 // This "works" because .get() returns the actual boolean, but it's
 // still unnecessary — use a JSX ternary instead.
 
-// ✅ RIGHT - Use plain ternaries in authored expression positions.
+// ✅ RIGHT - Use plain ternaries at supported lowered sites.
 {adminMode
   ? (
     <>
@@ -118,9 +119,10 @@ the most common source of "conditional section always renders" bugs.
 ```
 
 **Rule of thumb:** `computed()` is for deriving data (strings, numbers,
-arrays, objects). For conditional rendering or simple conditional values that
-feed JSX, use plain ternaries. If you're unsure whether a site lowers, inspect
-it with `deno task cf check <pattern>.tsx --show-transformed`.
+arrays, objects). For conditional rendering or simple conditional values at
+supported lowered value-expression sites, use plain ternaries. If you're unsure
+whether a site lowers, inspect it with
+`deno task cf check <pattern>.tsx --show-transformed`.
 
 Example of correct usage:
 

@@ -197,18 +197,21 @@ callbacks.
 
 ### Conditional JSX
 
-Do not use `computed()` to gate JSX sections. Use plain authored ternaries
-instead.
+Do not use `computed()` to gate JSX sections. Use plain authored ternaries at
+supported lowered value-expression sites instead.
 
-The transformer now lowers ternaries across many common authored expression
-sites that feed JSX or returned pattern values, including:
+The transformer now lowers plain ternaries across three main author-facing
+buckets:
 
-- JSX children
-- prop values
-- inline text and template literals
-- style/object property values
-- local consts later consumed by JSX
-- returned object fields
+- JSX expressions
+- top-level pattern-body value-expression sites, such as:
+  - returned object property values
+  - variable initializers
+  - call arguments
+  - array elements
+  - return expressions
+- callback-local value-expression sites inside supported reactive collection
+  callbacks
 
 ```tsx
 // Wrong
@@ -226,6 +229,11 @@ sites that feed JSX or returned pattern values, including:
 Inside `computed()`, a `Writable<boolean>` is just a JS object and therefore
 truthy. That leads to subtle incorrect rendering because ternaries inside the
 `computed()` body are plain JS, not transformer-lowered conditionals.
+
+That distinction matters: explicit computation callbacks like `computed`,
+`derive`, `action`, `lift`, and `handler` are not blanket "rewrite everywhere"
+contexts. Inside those callback bodies, ternaries follow ordinary JavaScript
+rules unless they appear inside a nested supported lowered site such as JSX.
 
 ### CORS and `fetchData`
 

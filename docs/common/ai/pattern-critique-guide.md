@@ -58,9 +58,10 @@ Allowed inside patterns:
 |-----------|-----|
 | `onClick` or conditional UI inside `computed()` | Move the interactive element outside and use direct JSX conditionals |
 
-Plain ternaries are valid across common JSX-facing expression positions. The
-transformer lowers them automatically in JSX children, prop values, style/object
-properties, and similar authored sites.
+Plain ternaries are valid across supported lowered value-expression sites. The
+main author-facing buckets are JSX expressions, lowerable top-level
+pattern-body value-expression sites, and callback-local values inside supported
+collection callbacks.
 
 ### 4. Type System and Data Shape
 

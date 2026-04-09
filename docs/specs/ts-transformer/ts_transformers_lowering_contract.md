@@ -26,6 +26,9 @@ the divergence in descriptive docs rather than weakening the contract.
 This contract applies to lowering of supported reactive expression constructs,
 especially:
 
+- shared lowered value-expression sites (`jsx-expression`,
+  `return-expression`, `variable-initializer`, `call-argument`,
+  `object-property`, `array-element`)
 - reactive control flow
 - reactive collection operators
 - property/element access over reactive values

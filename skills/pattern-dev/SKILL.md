@@ -14,8 +14,11 @@ inspect the emitted source directly with:
 
 - `deno task cf check <pattern>.tsx --show-transformed`
 
-Current main lowers plain ternaries across many common authored expression
-sites, not just top-level JSX children.
+Current main lowers plain ternaries across multiple supported lowered
+value-expression sites, not just JSX expressions. Important examples include
+top-level object-property values, variable initializers, call arguments, array
+elements, return expressions, and callback-local values inside supported
+collection callbacks.
 
 Pay special attention to its SES authoring section before adding module-scope
 setup, timers, or time/random helpers. The current authored escape hatches are

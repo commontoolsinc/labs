@@ -66,11 +66,13 @@ export default pattern<Input>(({ count, items, user }) => ({
 }));
 ```
 
-### Conditional Expressions in JSX-Adjacent Sites
+### Conditional Expressions And Other Lowered Value Sites
 
-Plain ternaries work in more than just top-level JSX children. The transformer
-also lowers common authored expression sites such as prop values, style/object
-properties, and local aliases later consumed by JSX.
+Plain ternaries work in more than just JSX children. The transformer also
+lowers other supported value-expression sites in pattern-owned code, including
+returned object property values, variable initializers, call arguments, array
+elements, return expressions, and callback-local values inside supported
+collection callbacks.
 
 ```tsx
 export default pattern<Input>(({ count, items, user }) => {
