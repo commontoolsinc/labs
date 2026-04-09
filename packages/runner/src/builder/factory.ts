@@ -24,7 +24,7 @@ import {
   UI,
   WebhookConfigSchema,
 } from "./types.ts";
-import { h } from "@commonfabric/html";
+import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
 import { action, byRef, computed, derive, handler, lift } from "./module.ts";
 import {
@@ -202,6 +202,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Render utils
     h,
+    UiAction,
+    UiPromptSlot,
+    UiDisclosure,
 
     // Fabric value classes -- runtime values backing the type declarations
     // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`

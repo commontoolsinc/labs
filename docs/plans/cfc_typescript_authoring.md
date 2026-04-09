@@ -219,7 +219,7 @@ to keep that boundary clear:
       `ifc.uiContract`
 - [x] Ensure explicit output schemas receive the same `[UI]` helper hints as
       inferred output schemas
-- [ ] Mirror the same runtime helper shape in builder and renderer code so
+- [x] Mirror the same runtime helper shape in builder and renderer code so
       transformed JSX and direct helper usage converge
 
 ### 6. Close The Runner Handoff Gaps
@@ -251,7 +251,7 @@ to keep that boundary clear:
 - [ ] Add parity tests proving identical CFC output for:
       inferred schemas, explicit `toSchema<T>()`, and explicit output schema
       bindings
-- [ ] Add integration tests for UI helper parity across compile-time rewriting,
+- [x] Add integration tests for UI helper parity across compile-time rewriting,
       builder/runtime helper rendering, and `[UI]` schema synthesis
 - [ ] Add end-to-end tests that exercise runner observe-mode and fail-closed
       behavior for trust-sensitive claims emitted by the authoring surface

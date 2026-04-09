@@ -2,6 +2,9 @@ import {
   type HFunction,
   type JSXElement,
   type RenderNode,
+  type UiActionProps,
+  type UiDisclosureProps,
+  type UiPromptSlotProps,
   type VNode,
 } from "@commonfabric/api";
 import { isCell, isCellResult } from "@commonfabric/runner";
@@ -62,3 +65,60 @@ export const h: HFunction = Object.assign(
     },
   },
 ) as HFunction;
+
+function toChildArray(children: RenderNode | RenderNode[] | undefined): RenderNode[] {
+  if (children === undefined || children === null) {
+    return [];
+  }
+  return Array.isArray(children) ? children.flat() : [children];
+}
+
+function createUiHelper<Props extends {
+  readonly as?: string;
+  readonly children?: RenderNode;
+}>(
+  defaultTag: string,
+  dataAttrs: readonly [string, string][],
+  helperOnlyProps: readonly string[],
+) {
+  return (props: Props): JSXElement => {
+    const { as, children, ...rest } = props as Props & Record<string, unknown>;
+    const attrs: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(rest)) {
+      if (!helperOnlyProps.includes(key)) {
+        attrs[key] = value;
+      }
+    }
+
+    for (const [prop, attr] of dataAttrs) {
+      const value = (rest as Record<string, unknown>)[prop];
+      if (value !== undefined) {
+        attrs[attr] = value;
+      }
+    }
+
+    return h(as ?? defaultTag, attrs, ...toChildArray(children));
+  };
+}
+
+export const UiAction = createUiHelper(
+  "ct-button",
+  [["action", "data-ui-action"]],
+  ["as", "action"],
+) as (props: UiActionProps) => JSXElement;
+
+export const UiPromptSlot = createUiHelper(
+  "ct-textarea",
+  [
+    ["surface", "data-ui-surface"],
+    ["role", "data-ui-role"],
+  ],
+  ["as", "surface", "role"],
+) as (props: UiPromptSlotProps) => JSXElement;
+
+export const UiDisclosure = createUiHelper(
+  "ct-card",
+  [["kind", "data-ui-disclosure-kind"]],
+  ["as", "kind"],
+) as (props: UiDisclosureProps) => JSXElement;

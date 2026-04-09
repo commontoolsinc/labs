@@ -25,6 +25,7 @@ import type {
   GetPatternEnvironmentFunction,
   HandlerFunction,
   HFunction,
+  JSXElement,
   ID as IDSymbol,
   ID_FIELD as IDFieldSymbol,
   IfElseFunction,
@@ -45,6 +46,9 @@ import type {
   SELF as SELFSymbol,
   StreamDataFunction,
   StrFunction,
+  UiActionProps,
+  UiDisclosureProps,
+  UiPromptSlotProps,
   UnlessFunction,
   WhenFunction,
   WishFunction,
@@ -129,6 +133,9 @@ export type {
   PatternFunction,
   Props,
   RenderNode,
+  UiActionProps,
+  UiDisclosureProps,
+  UiPromptSlotProps,
   RequireDefaults,
   Stream,
   StripCell,
@@ -326,6 +333,9 @@ export interface BuilderFunctionsAndConstants {
 
   // Render utils
   h: HFunction;
+  UiAction: (props: UiActionProps) => JSXElement;
+  UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
+  UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
   // Fabric value classes
   FabricInstance:
