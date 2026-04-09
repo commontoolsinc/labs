@@ -1725,6 +1725,106 @@ Deno.test("memory v2 stacked commits: confirming the head pending write promotes
   }
 });
 
+Deno.test("memory v2 stacked commits: sibling patches reuse unchanged branches", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      left: {
+        stable: {
+          deep: true,
+        },
+      },
+      right: {
+        count: 0,
+      },
+    });
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const first = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/left/stable/deep",
+        value: false,
+      }],
+      {
+        left: {
+          stable: {
+            deep: false,
+          },
+        },
+        right: {
+          count: 0,
+        },
+      },
+    );
+
+    const firstDocument = harness.provider.get(DOCS.A);
+    assertExists(firstDocument);
+    const firstValue = firstDocument.value as Record<string, unknown>;
+    const firstLeft = firstValue.left;
+    const firstRight = firstValue.right;
+
+    harness.model.setOutcome(3, { kind: "accept" });
+    const second = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right/count",
+        value: 1,
+      }],
+      {
+        left: {
+          stable: {
+            deep: false,
+          },
+        },
+        right: {
+          count: 1,
+        },
+      },
+    );
+
+    const secondDocument = harness.provider.get(DOCS.A);
+    assertExists(secondDocument);
+    const secondValue = secondDocument.value as Record<string, unknown>;
+    assert(secondDocument !== firstDocument);
+    assertStrictEquals(secondValue.left, firstLeft);
+    assert(secondValue.right !== firstRight);
+    assertEquals(firstDocument, {
+      value: {
+        left: {
+          stable: {
+            deep: false,
+          },
+        },
+        right: {
+          count: 0,
+        },
+      },
+    });
+    assertEquals(secondDocument, {
+      value: {
+        left: {
+          stable: {
+            deep: false,
+          },
+        },
+        right: {
+          count: 1,
+        },
+      },
+    });
+
+    await assertResultOk(first);
+    await assertResultOk(second);
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: dropping an earlier pending write invalidates cached suffixes", async () => {
   const harness = await createHarness();
   try {
