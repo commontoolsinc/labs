@@ -422,18 +422,14 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
               {statsText}
             </span>
             <cf-button
-              variant={computed(() =>
-                viewMode.get() === "quick" ? "primary" : "secondary"
-              )}
+              variant={viewMode.get() === "quick" ? "primary" : "secondary"}
               size="sm"
               onClick={() => viewMode.set("quick")}
             >
               Quick
             </cf-button>
             <cf-button
-              variant={computed(() =>
-                viewMode.get() === "sorted" ? "primary" : "secondary"
-              )}
+              variant={viewMode.get() === "sorted" ? "primary" : "secondary"}
               size="sm"
               onClick={() => viewMode.set("sorted")}
             >
