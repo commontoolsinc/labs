@@ -94,6 +94,24 @@ const CAPTURE_HOME_LOAD_SERIES = (() => {
     return 0;
   }
 })();
+const NOTE_CREATE_TIMING_SERIES = (() => {
+  try {
+    const raw = Deno.env.get("CF_NOTE_CREATE_TIMING_SERIES");
+    return raw ? Number(raw) : 0;
+  } catch {
+    return 0;
+  }
+})();
+
+type NoteCreateTimingEntry = {
+  noteIndex: number;
+  noteTitle: string;
+  noteCountBefore: number;
+  noteCountAfter: number;
+  createToViewMs: number;
+  returnToHomeMs: number;
+  totalMs: number;
+};
 
 describe("default-app flow test", () => {
   const shell = new ShellIntegration();
@@ -165,9 +183,11 @@ describe("default-app flow test", () => {
 
     const actionRunSeries: unknown[] = [];
     const homeLoadSeries: unknown[] = [];
+    const noteCreateTimings: NoteCreateTimingEntry[] = [];
     const noteIterations = Math.max(
       CAPTURE_ACTION_RUN_SERIES > 0 ? CAPTURE_ACTION_RUN_SERIES : 1,
       CAPTURE_HOME_LOAD_SERIES,
+      NOTE_CREATE_TIMING_SERIES,
     );
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
@@ -194,6 +214,9 @@ describe("default-app flow test", () => {
     }
 
     for (let noteIndex = 1; noteIndex <= noteIterations; noteIndex++) {
+      const noteTitlesBefore = await collectNoteTitlesInList(page);
+      const noteCountBefore = noteTitlesBefore.length;
+
       if (CAPTURE_ACTION_RUN_SERIES > 0) {
         console.log(`Enable action run trace for note ${noteIndex}...`);
         await waitFor(async () => {
@@ -206,6 +229,7 @@ describe("default-app flow test", () => {
         return !!(await clickButtonWithText(page, "Notes"));
       });
 
+      const noteCreateStartedAt = performance.now();
       console.log(`Click 'New Note' (note ${noteIndex})...`);
       await waitFor(async () => {
         return !!(await clickButtonWithText(page, "New Note"));
@@ -227,6 +251,7 @@ describe("default-app flow test", () => {
       await waitFor(async () => {
         return await waitForRuntimeIdle(page);
       });
+      const noteViewReadyAt = performance.now();
 
       if (CAPTURE_ACTION_RUN_SERIES > 0) {
         const actionRunSummary = await collectActionRunSummary(page);
@@ -321,8 +346,42 @@ describe("default-app flow test", () => {
         return await waitForRuntimeIdle(page);
       });
 
-      console.log(`Wait for note in list (note ${noteIndex})...`);
-      await waitFor(() => findNoteInList(page));
+      console.log(`Wait for note count to increase (note ${noteIndex})...`);
+      await waitFor(async () => {
+        const noteTitles = await collectNoteTitlesInList(page);
+        return noteTitles.length > noteCountBefore;
+      });
+
+      const noteTitlesAfter = await collectNoteTitlesInList(page);
+      const newNoteTitles = noteTitlesAfter.filter((title) =>
+        !noteTitlesBefore.includes(title)
+      );
+      assert(
+        newNoteTitles.length > 0,
+        `Expected a new note title in the list for note ${noteIndex}`,
+      );
+
+      const noteCreateFinishedAt = performance.now();
+      const noteCreateTiming: NoteCreateTimingEntry = {
+        noteIndex,
+        noteTitle: newNoteTitles[0]!,
+        noteCountBefore,
+        noteCountAfter: noteTitlesAfter.length,
+        createToViewMs: Number(
+          (noteViewReadyAt - noteCreateStartedAt).toFixed(3),
+        ),
+        returnToHomeMs: Number(
+          (noteCreateFinishedAt - noteViewReadyAt).toFixed(3),
+        ),
+        totalMs: Number(
+          (noteCreateFinishedAt - noteCreateStartedAt).toFixed(3),
+        ),
+      };
+      noteCreateTimings.push(noteCreateTiming);
+      console.log(
+        `Note creation timing (note ${noteIndex}):`,
+        JSON.stringify(noteCreateTiming, null, 2),
+      );
 
       if (noteIndex <= CAPTURE_HOME_LOAD_SERIES) {
         console.log(
@@ -368,6 +427,13 @@ describe("default-app flow test", () => {
       console.log(
         "Home load series comparison:",
         JSON.stringify(compareHomeLoadSeries(homeLoadSeries), null, 2),
+      );
+    }
+
+    if (noteCreateTimings.length > 0) {
+      console.log(
+        "Note creation timing summary:",
+        JSON.stringify(summarizeNoteCreateTimings(noteCreateTimings), null, 2),
       );
     }
 
@@ -1008,6 +1074,38 @@ function compareActionRunSeries(series: unknown[]): unknown {
   };
 }
 
+function summarizeNoteCreateTimings(
+  series: NoteCreateTimingEntry[],
+): unknown {
+  const summarizeValues = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const percentile = (value: number) =>
+      sorted[
+        Math.min(
+          sorted.length - 1,
+          Math.max(0, Math.ceil(sorted.length * value) - 1),
+        )
+      ] ?? 0;
+
+    const sum = sorted.reduce((total, current) => total + current, 0);
+    return {
+      minMs: Number((sorted[0] ?? 0).toFixed(3)),
+      avgMs: Number((sum / Math.max(sorted.length, 1)).toFixed(3)),
+      p50Ms: Number(percentile(0.5).toFixed(3)),
+      p95Ms: Number(percentile(0.95).toFixed(3)),
+      maxMs: Number((sorted[sorted.length - 1] ?? 0).toFixed(3)),
+    };
+  };
+
+  return {
+    count: series.length,
+    totals: summarizeValues(series.map((entry) => entry.totalMs)),
+    createToView: summarizeValues(series.map((entry) => entry.createToViewMs)),
+    returnToHome: summarizeValues(series.map((entry) => entry.returnToHomeMs)),
+    notes: series,
+  };
+}
+
 async function collectHomeLoadSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
     const rt = globalThis.commonfabric?.rt;
@@ -1562,27 +1660,34 @@ async function clickPieceLinkWithText(
 
 // Helper to find note in list using regex pattern
 async function findNoteInList(page: Page): Promise<boolean> {
+  return (await collectNoteTitlesInList(page)).length > 0;
+}
+
+async function collectNoteTitlesInList(page: Page): Promise<string[]> {
   try {
     return await page.evaluate(() => {
-      function search(root: Document | ShadowRoot): boolean {
+      const titles = new Set<string>();
+
+      function search(root: Document | ShadowRoot): void {
         const allElements = root.querySelectorAll("*");
         for (const el of allElements) {
           const text = el.textContent;
-          // Match pattern: emoji + "New Note #" + hash chars
-          if (text && /📝 New Note #[a-z0-9]+/.test(text)) {
-            return true;
-          }
-          if (el.shadowRoot) {
-            if (search(el.shadowRoot)) {
-              return true;
+          if (text) {
+            for (
+              const match of text.matchAll(/📝 New Note #[a-z0-9]+/g)
+            ) {
+              titles.add(match[0]);
             }
           }
+          if (el.shadowRoot) {
+            search(el.shadowRoot);
+          }
         }
-        return false;
       }
-      return search(document);
+      search(document);
+      return [...titles].sort();
     });
   } catch (_) {
-    return false;
+    return [];
   }
 }
