@@ -9,7 +9,6 @@ import {
   type Stream,
   UI,
   type VNode,
-  wish,
   Writable,
 } from "commonfabric";
 import type { AgentPiece, AgentStatus } from "./schemas.tsx";
@@ -52,12 +51,6 @@ interface AgentOutput extends AgentPiece {
   markError: Stream<{ summary: string }>;
 }
 
-// ===== Activity Log Discovery Type =====
-
-interface ActivityLogPiece {
-  logEvent: Stream<{ agent: string; action: string; note?: string }>;
-}
-
 // ===== Module-scope Handlers =====
 
 const setDirectiveHandler = handler<
@@ -83,6 +76,40 @@ const appendLearnedHandler = handler<
   learned.set(`${current}${separator}${args.entry}`);
 });
 
+const markRunningHandler = handler<
+  void,
+  { status: Writable<string> }
+>((_, { status }) => {
+  status.set("running");
+});
+
+const markIdleHandler = handler<
+  { summary: string; learned?: string },
+  {
+    status: Writable<string>;
+    lastRun: Writable<string>;
+    lastRunSummary: Writable<string>;
+  }
+>((args, ctx) => {
+  ctx.lastRunSummary.set(String(args.summary ?? ""));
+  ctx.status.set("idle");
+  ctx.lastRun.set(new Date().toISOString());
+});
+
+const markErrorHandler = handler<
+  { summary: string },
+  {
+    status: Writable<string>;
+    lastRun: Writable<string>;
+    lastRunSummary: Writable<string>;
+  }
+>((args, ctx) => {
+  const sum = String(args.summary ?? "");
+  ctx.status.set("error");
+  ctx.lastRun.set(new Date().toISOString());
+  ctx.lastRunSummary.set(`ERROR: ${sum}`);
+});
+
 // ===== The Pattern =====
 
 export default pattern<AgentInput, AgentOutput>(
@@ -96,13 +123,6 @@ export default pattern<AgentInput, AgentOutput>(
     lastRunSummary,
     isAgent,
   }) => {
-    // Discover activity-log (optional — null-checked before use)
-    const activityLogWish = wish<ActivityLogPiece>({
-      query: "#activity-log",
-      headless: true,
-    });
-    const activityLog = activityLogWish.result;
-
     // Bind module-scope handlers
     const setDirective = setDirectiveHandler({ directive });
     const setLearned = setLearnedHandler({ learned });
@@ -113,51 +133,9 @@ export default pattern<AgentInput, AgentOutput>(
       enabled.set(!enabled.get());
     });
 
-    const markRunning = action(() => {
-      status.set("running");
-      if (activityLog) {
-        activityLog.logEvent.send({
-          agent: agentName.get(),
-          action: "started",
-        });
-      }
-    });
-
-    const markIdle = action(
-      ({ summary, learned: learnedEntry }: {
-        summary: string;
-        learned?: string;
-      }) => {
-        status.set("idle");
-        lastRun.set(new Date().toISOString());
-        lastRunSummary.set(summary);
-        if (learnedEntry) {
-          const current = learned.get() || "";
-          const separator = current && !current.endsWith("\n") ? "\n" : "";
-          learned.set(`${current}${separator}${learnedEntry}`);
-        }
-        if (activityLog) {
-          activityLog.logEvent.send({
-            agent: agentName.get(),
-            action: "completed",
-            note: summary,
-          });
-        }
-      },
-    );
-
-    const markError = action(({ summary }: { summary: string }) => {
-      status.set("error");
-      lastRun.set(new Date().toISOString());
-      lastRunSummary.set(`ERROR: ${summary}`);
-      if (activityLog) {
-        activityLog.logEvent.send({
-          agent: agentName.get(),
-          action: "errored",
-          note: summary,
-        });
-      }
-    });
+    const markRunning = markRunningHandler({ status });
+    const markIdle = markIdleHandler({ status, lastRun, lastRunSummary });
+    const markError = markErrorHandler({ status, lastRun, lastRunSummary });
 
     // UI state
     const isEditingName = Writable.of(false);
