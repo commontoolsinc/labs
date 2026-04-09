@@ -218,7 +218,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
   // Computed values
   const peopleCount = computed(() => people.get().length);
   const isEditMode = computed(() => editing.get().editing !== null);
-  const modalTitle = ifElse(isEditMode, "Edit Person", "Add Person");
+  const modalTitle = isEditMode ? "Edit Person" : "Add Person";
 
   const showModal = computed(() => modalOpen.get());
 
@@ -271,15 +271,15 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                         fontSize: "0.75rem",
                         padding: "2px 8px",
                         borderRadius: "4px",
-                        background: ifElse(
-                          computed(() => person.role === "admin"),
-                          "var(--cf-color-blue-100)",
-                          "var(--cf-color-gray-100)",
+                        background: computed(() =>
+                          person.role === "admin"
+                            ? "var(--cf-color-blue-100)"
+                            : "var(--cf-color-gray-100)"
                         ),
-                        color: ifElse(
-                          computed(() => person.role === "admin"),
-                          "var(--cf-color-blue-700)",
-                          "var(--cf-color-gray-700)",
+                        color: computed(() =>
+                          person.role === "admin"
+                            ? "var(--cf-color-blue-700)"
+                            : "var(--cf-color-gray-700)"
                         ),
                         width: "fit-content",
                       }}
