@@ -877,7 +877,7 @@ export default pattern<Input, Output>(
                 </div>
               )
               : null}
-            {!!previewState.scopeSummary
+            {previewState.scopeSummary
               ? (
                 <div
                   style={{
