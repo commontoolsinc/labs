@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { pattern } from "commonfabric";
 
 // FIXTURE: pattern-computed-literal-member-default

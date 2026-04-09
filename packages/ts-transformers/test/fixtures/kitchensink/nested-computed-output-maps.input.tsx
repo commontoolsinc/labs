@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * FIXTURE: nested-computed-output-maps
  * Verifies: nested computed outputs can flow back into later pattern-owned

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
 
 const content = cell("Hello world\nGoodbye world");

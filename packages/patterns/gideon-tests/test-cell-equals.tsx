@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: equals() vs Manual IDs
  *

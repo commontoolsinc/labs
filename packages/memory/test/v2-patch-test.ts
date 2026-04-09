@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStrictEquals } from "@std/assert";
 import { applyPatch } from "../v2/patch.ts";
 
 Deno.test("memory v2 patch applies multiple operations without mutating the input", () => {
@@ -122,5 +122,34 @@ Deno.test("memory v2 patch rejects missing array indices in parent traversal", (
   assertEquals(error?.message, "missing path /items/1/name");
   assertEquals(original, {
     items: [{}],
+  });
+});
+
+Deno.test("memory v2 patch reuses unchanged branches across sibling updates", () => {
+  const original = {
+    left: {
+      stable: {
+        deep: true,
+      },
+    },
+    right: {
+      count: 0,
+    },
+  };
+
+  const patched = applyPatch(original, [
+    { op: "replace", path: "/right/count", value: 1 },
+  ]) as typeof original;
+
+  assertStrictEquals(patched.left, original.left);
+  assertEquals(patched, {
+    left: {
+      stable: {
+        deep: true,
+      },
+    },
+    right: {
+      count: 1,
+    },
   });
 });

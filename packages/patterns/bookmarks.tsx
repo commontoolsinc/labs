@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Bookmarks - A pattern for collecting and browsing URLs/bookmarks.
  *

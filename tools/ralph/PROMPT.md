@@ -58,7 +58,7 @@ Steps:
        parameters
        ```tsx
        items.map((item, index) => (
-         <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
+         <cf-button onClick={removeItem({ items, index })}>Remove</cf-button>
        ));
        ```
 

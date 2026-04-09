@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: computed() and derive() Are The Same Thing
  *

@@ -14,11 +14,11 @@ directory.
 
 ## Declaring a Projection
 
-Import `FS` and `FsProjection` from `commontools` and add `[FS]` to the
+Import `FS` and `FsProjection` from `commonfabric` and add `[FS]` to the
 pattern's return object:
 
 ```tsx
-import { FS, type FsProjection, NAME, pattern, UI } from "commontools";
+import { FS, type FsProjection, NAME, pattern, UI } from "commonfabric";
 
 const MyPattern = pattern<Input, Output>(({ title, content }) => {
   // ...
@@ -145,10 +145,10 @@ createNewNote.handler  void
 Each `.handler` and `.tool` file embeds the input schema as readable comments:
 
 ```sh
-#!/path/to/ct-exec exec
+#!/path/to/cf-exec exec
 # schema: {"type":"string"}
 # input: string
-exec '/path/to/ct-exec' exec "$0" "$@"
+exec '/path/to/cf-exec' exec "$0" "$@"
 ```
 
 Use `cat setTitle.handler` or `head setTitle.handler` to see the expected
@@ -186,7 +186,7 @@ The `Note` pattern in `packages/patterns/notes/note.tsx` uses `[FS]`:
 ```tsx
 return {
   [NAME]: computed(() => `📝 ${title.get()}`),
-  [UI]: <ct-screen>...</ct-screen>,
+  [UI]: <cf-screen>...</cf-screen>,
   [FS]: {
     type: "text/markdown",
     frontmatter: { title },

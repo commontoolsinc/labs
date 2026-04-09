@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { type Cell, Default, handler, pattern } from "commonfabric";
 
 interface OptionalBranch {

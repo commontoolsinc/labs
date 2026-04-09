@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Bank of America Bill Tracker Pattern
  *

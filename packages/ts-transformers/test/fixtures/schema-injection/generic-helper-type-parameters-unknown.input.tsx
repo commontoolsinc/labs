@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, generateObject, wish } from "commonfabric";
 
 // FIXTURE: generic-helper-type-parameters-unknown

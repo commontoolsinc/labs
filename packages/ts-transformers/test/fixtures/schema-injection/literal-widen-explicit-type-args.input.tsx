@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell } from "commonfabric";
 
 // FIXTURE: literal-widen-explicit-type-args

@@ -11,4 +11,4 @@ npm run dev
 
 TODO:
 * Add document on how Input and Output schemas work for Patterns
-* Chapter on basic UI and existing ct components
+* Chapter on basic UI and existing cf components

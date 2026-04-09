@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TypePicker Module - Controller pattern for selecting record type
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TRANSFORM REPRO: patternized map callback may keep direct field aliases structural
  *

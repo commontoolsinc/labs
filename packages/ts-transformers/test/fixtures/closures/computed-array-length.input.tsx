@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Regression test for array.length access inside computed().
  *

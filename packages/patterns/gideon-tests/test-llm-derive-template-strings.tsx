@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Template Strings Require derive()
  *

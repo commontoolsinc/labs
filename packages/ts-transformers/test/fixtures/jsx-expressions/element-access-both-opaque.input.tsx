@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: element-access-both-opaque

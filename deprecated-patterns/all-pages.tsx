@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive, JSONSchema, NAME, pattern } from "commonfabric";
 
 const ExtractPagesInputSchema = {

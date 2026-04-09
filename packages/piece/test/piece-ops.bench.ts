@@ -38,8 +38,8 @@ async function createBenchEnv(): Promise<BenchEnv> {
   await manager.synced();
   const pieces = new PiecesController(manager);
 
-  const { commontools } = createBuilder();
-  const { handler, pattern } = commontools;
+  const { commonfabric } = createBuilder();
+  const { handler, pattern } = commonfabric;
 
   const addPiece = handler<
     { piece: Cell<unknown> },

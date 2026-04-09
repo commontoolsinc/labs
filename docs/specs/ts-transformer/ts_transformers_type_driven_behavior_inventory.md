@@ -30,7 +30,7 @@ It does not list pure schema-generation/type-emission code unless that code exis
   - cell/stream receivers that still require rewrite
 
 - `src/ast/dataflow.ts`
-  The dataflow analyzer uses `checker.getTypeAtLocation(...)`, `isOpaqueRefType(...)`, `isReactiveValueExpression(...)`, and `symbolDeclaresCommonToolsDefault(...)` to decide:
+  The dataflow analyzer uses `checker.getTypeAtLocation(...)`, `isOpaqueRefType(...)`, `isReactiveValueExpression(...)`, and `symbolDeclaresCommonFabricDefault(...)` to decide:
   - `containsOpaqueRef`
   - `requiresRewrite`
   - which expressions become explicit dependencies

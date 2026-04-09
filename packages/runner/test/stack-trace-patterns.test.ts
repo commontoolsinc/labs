@@ -33,7 +33,6 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   // Source maps correctly point to the original throw location.
   const THROW_LINE = 5;
   const source = [
-    "/// <cts-enable />", //                                  line 1
     'import { lift, pattern } from "commonfabric";', //        line 2
     "const double = lift((val: number) => {", //              line 3
     "  if (val > 10) {", //                                   line 4
@@ -80,7 +79,7 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: lift value too large");
   assertEquals(
-    stack.includes("<CT_INTERNAL>"),
+    stack.includes("<CF_INTERNAL>"),
     false,
     `stack should preserve runner internal frames by default:\n${stack}`,
   );
@@ -112,7 +111,6 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   // Source maps correctly point to the original throw location.
   const THROW_LINE = 6;
   const source = [
-    "/// <cts-enable />", //                                          line 1
     'import { type Cell, handler, pattern } from "commonfabric";', //  line 2
     "const clickHandler = handler(", //                               line 3
     "  (event: { action: string }, state: { status: Cell<string> }) => {", // line 4
@@ -165,7 +163,7 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: handler crash on purpose");
   assertEquals(
-    stack.includes("<CT_INTERNAL>"),
+    stack.includes("<CF_INTERNAL>"),
     false,
     `stack should preserve runner internal frames by default:\n${stack}`,
   );
@@ -197,7 +195,6 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   // Source maps correctly point to the original throw location.
   const THROW_LINE = 4;
   const source = [
-    "/// <cts-enable />", //                                  line 1
     'import { lift, pattern } from "commonfabric";', //        line 2
     "const double = lift((x: number) => {", //                line 3
     "  if (x < 0) throw new Error('negative not supported');", // line 4
@@ -268,7 +265,6 @@ Deno.test("mapWithPattern synthetic pattern callsite keeps authored source lines
   const MAP_LINE = 6;
   const THROW_LINE = 7;
   const source = [
-    "/// <cts-enable />",
     'import { pattern, UI } from "commonfabric";',
     "interface Item { id: string; }",
     "interface State { items: Item[]; }",

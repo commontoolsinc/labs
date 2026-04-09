@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Default, NAME, pattern, UI } from "commonfabric";
 
 type CFC<T, C extends string> = T;

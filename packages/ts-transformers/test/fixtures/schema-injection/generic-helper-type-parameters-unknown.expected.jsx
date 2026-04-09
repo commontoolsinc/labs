@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { Cell, generateObject, wish } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: generic-helper-type-parameters-unknown
 // Verifies: generic definition-site helper wrappers degrade injected schemas to unknown
 //   wish<T>({ query }) → wish<T>({ query }, { type: "unknown" })

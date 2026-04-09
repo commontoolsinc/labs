@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { pattern } from "commonfabric";
 
 const identity = <T,>(value: T) => value;

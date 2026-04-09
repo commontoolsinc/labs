@@ -257,7 +257,7 @@ export function evaluateCallbackSourceInSES(
 }
 
 let sesInitialized = false;
-const SES_RUNTIME_STATE = Symbol.for("@commontools/runner/ses-runtime-state");
+const SES_RUNTIME_STATE = Symbol.for("@commonfabric/runner/ses-runtime-state");
 
 function ensureSESInitialized(lockdownEnabled: boolean): void {
   if (!lockdownEnabled) {
@@ -431,11 +431,11 @@ function isPromiseLike(
 
 function sanitizeInternalFrames(stack: string): string {
   return stack.split("\n").map((line) =>
-    RUNNER_INTERNAL_FRAME_PATTERN.test(line) ? CT_INTERNAL : line
+    RUNNER_INTERNAL_FRAME_PATTERN.test(line) ? CF_INTERNAL : line
   ).join("\n");
 }
 
-const CT_INTERNAL = "    at <CT_INTERNAL>";
+const CF_INTERNAL = "    at <CF_INTERNAL>";
 const RUNNER_INTERNAL_FRAME_PATTERN =
   /^\s*at(?: .*?)? \(?(?:file:\/\/)?(?:[^)\n]*\/)?packages\/runner\/src\/[^)\n]+:\d+:\d+\)?$/;
 

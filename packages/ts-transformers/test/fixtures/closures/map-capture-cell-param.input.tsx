@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, Default, handler, pattern, UI } from "commonfabric";
 
 interface Item {

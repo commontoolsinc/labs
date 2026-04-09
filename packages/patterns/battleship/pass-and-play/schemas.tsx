@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Battleship Pass-and-Play - Schemas
  *

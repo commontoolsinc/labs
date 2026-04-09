@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Parking Coordinator Pattern Tests
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gmail Expect-Response Follow-up Pattern
  *

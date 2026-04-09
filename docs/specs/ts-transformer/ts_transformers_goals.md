@@ -246,9 +246,10 @@ take priority over opaque micro-optimizations.
 
 ## 6. Constraints And Invariants
 
-## C-001 Explicit Opt-In
+## C-001 Default-On With Explicit Opt-Out
 
-Transform-heavy behavior is opt-in via `/// <cts-enable />`.
+Transform-heavy behavior is enabled by default. Files can opt out explicitly via
+`/// <cf-disable-transform />`.
 
 ## C-002 Ordered Multi-Stage Pipeline
 

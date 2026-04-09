@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, handler, pattern, UI } from "commonfabric";
 
 type TodoState = {

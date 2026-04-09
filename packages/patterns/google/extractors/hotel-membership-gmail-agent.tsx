@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Hotel Membership Extractor (v2)
  *

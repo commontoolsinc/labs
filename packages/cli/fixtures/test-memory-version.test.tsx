@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 
 export default pattern(() => ({
   tests: [

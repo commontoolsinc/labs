@@ -67,12 +67,11 @@ export {
 } from "./transformers.ts";
 export * from "./common-fabric-symbols.ts";
 export {
+  CF_DATA_HELPER_IDENTIFIER,
   CF_HELPERS_IDENTIFIER,
   CFHelpers,
-  CT_DATA_HELPER_IDENTIFIER,
-  CT_HELPERS_IDENTIFIER,
+  injectCfDataHelper,
   injectCfHelpers,
-  injectCtDataHelper,
-  sourceUsesCfDirective,
+  sourceDisablesCfTransform,
   transformCfDirective,
 } from "./cf-helpers.ts";

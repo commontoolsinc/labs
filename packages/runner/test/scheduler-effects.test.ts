@@ -444,15 +444,6 @@ describe("effect/computation tracking", () => {
         write.id === childProcessId
       ),
     ).toBe(true);
-
-    const effect: Action = (effectTx) => {
-      childProcess.withTx(effectTx).key(TYPE).get();
-    };
-    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
-    await runtime.scheduler.idle();
-
-    expect(runtime.scheduler.getDependents(action).has(effect)).toBe(true);
-
     action.ignoredSchedulingWrites = [childProcess.getAsNormalizedFullLink()];
     await runtime.scheduler.run(action);
 
@@ -461,6 +452,95 @@ describe("effect/computation tracking", () => {
         write.id === childProcessId
       ),
     ).toBe(false);
-    expect(runtime.scheduler.getDependents(action).has(effect)).toBe(false);
+  });
+
+  it("should drop stale dependents when writes move to a different cell", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const cellA = runtime.getCell<number>(
+      space,
+      "write-switch-cell-a",
+      undefined,
+      tx,
+    );
+    cellA.set(0);
+    const cellB = runtime.getCell<number>(
+      space,
+      "write-switch-cell-b",
+      undefined,
+      tx,
+    );
+    cellB.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const effect: Action = (actionTx) => {
+      cellA.withTx(actionTx).get();
+    };
+    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    await runtime.scheduler.idle();
+
+    const computation: Action = () => {};
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [cellA.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(true);
+
+    runtime.scheduler.resubscribe(computation, {
+      reads: [],
+      shallowReads: [],
+      writes: [cellB.getAsNormalizedFullLink()],
+    });
+
+    expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(
+      false,
+    );
+  });
+
+  it("should keep dependents for potential writes without relying on historical writes", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const output = runtime.getCell<number>(
+      space,
+      "potential-write-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const effect: Action = (actionTx) => {
+      output.withTx(actionTx).get();
+    };
+    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    await runtime.scheduler.idle();
+
+    const computation: Action = () => {};
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [output.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    runtime.scheduler.resubscribe(computation, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+      potentialWrites: [output.getAsNormalizedFullLink()],
+    });
+
+    expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(true);
   });
 });

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Dietary Restrictions Module - Pattern for tracking all dietary needs
  *

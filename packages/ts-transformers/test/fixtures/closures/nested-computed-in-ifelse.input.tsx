@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Regression test: computed() inside ifElse branch should not double-wrap .get()
  *

@@ -9,11 +9,11 @@
  * produces its complex type error about the missing .get() method.
  */
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { getCellKind } from "@commonfabric/schema-generator/cell-brand";
 import { detectCallKind, isReactiveOriginCall } from "../ast/call-kind.ts";
 
-export class OpaqueGetValidationTransformer extends Transformer {
+export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
 

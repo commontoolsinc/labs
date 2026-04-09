@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * FUTURE REPRO: patternized map callbacks should lower helper calls over aliases
  *
@@ -16,7 +16,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface FileEntry {
     name: string;
     type: "file" | "folder";

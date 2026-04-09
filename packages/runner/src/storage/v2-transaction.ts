@@ -8,6 +8,7 @@ import type { PatchOp } from "@commonfabric/memory/v2";
 import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import type {
   Activity,
@@ -117,6 +118,23 @@ type DoneState = {
 };
 
 type TxState = ReadyState | DoneState | PendingState;
+
+const logger = getLogger("storage.v2.transaction", {
+  enabled: false,
+  level: "error",
+});
+
+function withCommitTiming<T>(
+  keys: string[],
+  fn: () => T,
+): T {
+  logger.timeStart(...keys);
+  try {
+    return fn();
+  } finally {
+    logger.timeEnd(...keys);
+  }
+}
 
 const isolateTransactionValue = <T>(
   value: T,
@@ -1580,7 +1598,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
-    const native = this.getNativeCommit(writeSpace);
+    const native = withCommitTiming(
+      ["commit", "getNativeCommit"],
+      () => this.getNativeCommit(writeSpace),
+    );
     const operations = native?.operations ?? [];
     if (operations.length === 0) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
@@ -1588,7 +1609,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
-    const validation = this.validate();
+    const validation = withCommitTiming(
+      ["commit", "validate"],
+      () => this.validate(),
+    );
     if (validation.error) {
       this.#state = {
         status: "done",
@@ -1601,7 +1625,11 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!replica.commitNative) {
       throw new Error("memory v2 replica does not support commitNative()");
     }
-    const promise = replica.commitNative(native!, this);
+    const commitNative = replica.commitNative.bind(replica);
+    const promise = withCommitTiming(
+      ["commit", "commitNative"],
+      () => commitNative(native!, this),
+    );
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;

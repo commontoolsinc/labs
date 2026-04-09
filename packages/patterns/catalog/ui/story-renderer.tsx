@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, NAME, pattern, UI, type VNode } from "commonfabric";
 
 import ButtonStory from "../stories/cf-button-story.tsx";

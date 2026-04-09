@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test: Does .length track reactively?
  *

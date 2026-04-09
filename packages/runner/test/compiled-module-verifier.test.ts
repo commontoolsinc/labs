@@ -33,10 +33,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled authored module factories", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.lift)(() => 42);
+    exports.default = (0, commonfabric_1.lift)(() => 42);
   });
 });
 `;
@@ -47,10 +47,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts a previously parsed compiled bundle", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.lift)(() => 42);
+    exports.default = (0, commonfabric_1.lift)(() => 42);
   });
 });
 `;
@@ -64,7 +64,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled dependencies from the shared runtime-module policy", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools/schema", "turndown"], function (require, exports, _schema, turndown_1) {
+  define("main", ["require", "exports", "commonfabric/schema", "turndown"], function (require, exports, _schema, turndown_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     turndown_1 = __importDefault(turndown_1);
@@ -79,13 +79,13 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts verified top-level function references for compiled trusted builders", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function sanitize(value) {
       return (value == null ? "" : value).trim();
     }
-    exports.default = (0, commontools_1.lift)(sanitize);
+    exports.default = (0, commonfabric_1.lift)(sanitize);
   });
 });
 `;
@@ -96,12 +96,12 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled JSX intrinsic tags inside trusted builder callbacks", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.pattern)(() => {
+    exports.default = (0, commonfabric_1.pattern)(() => {
       return {
-        ui: h("div", null, h("ct-screen", null, "Hello")),
+        ui: h("div", null, h("cf-screen", null, "Hello")),
       };
     });
   });
@@ -114,11 +114,11 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts destructured compiled builder callbacks with injected schema args", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const count = (0, commontools_1.schema)({ type: "number" });
-    exports.default = (0, commontools_1.pattern)(({ count: value }) => ({
+    const count = (0, commonfabric_1.schema)({ type: "number" });
+    exports.default = (0, commonfabric_1.pattern)(({ count: value }) => ({
       data: { value },
     }), false, {
       type: "object",
@@ -136,10 +136,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("rejects mutable compiled module state", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     let counter = 0;
-    exports.default = (0, commontools_1.lift)(() => ++counter);
+    exports.default = (0, commonfabric_1.lift)(() => ++counter);
   });
 });
 `;
@@ -238,13 +238,13 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts regex literals inside compiled helper functions", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function clean(content) {
       return content.replace(/\\n+/g, " ").trim();
     }
-    exports.default = (0, commontools_1.lift)(clean);
+    exports.default = (0, commonfabric_1.lift)(clean);
   });
 });
 `;
@@ -303,7 +303,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("rejects top-level class declarations in compiled authored modules", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     class Counter {
@@ -314,7 +314,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
         return this.value + parseInt("2", 10);
       }
     }
-    exports.default = (0, commontools_1.lift)(() => new Counter().next());
+    exports.default = (0, commonfabric_1.lift)(() => new Counter().next());
   });
 });
 `;
@@ -327,10 +327,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts pure ambient global helper captures in compiled callbacks", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.lift)(() => ({
+    exports.default = (0, commonfabric_1.lift)(() => ({
       parsed: parseInt("42", 10),
       float: parseFloat("3.14"),
       nan: isNaN(Number("x")),
@@ -346,10 +346,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts ambient fetch captures in compiled callbacks", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.lift)(() => typeof fetch !== "undefined");
+    exports.default = (0, commonfabric_1.lift)(() => typeof fetch !== "undefined");
   });
 });
 `;
@@ -360,10 +360,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts ambient base64 helpers in compiled callbacks", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.lift)(() => atob("YQ=="));
+    exports.default = (0, commonfabric_1.lift)(() => atob("YQ=="));
   });
 });
 `;
@@ -371,24 +371,24 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("accepts compiled __ct_data() with intrinsic collection helpers and local helpers", () => {
+  it("accepts compiled __cf_data() with intrinsic collection helpers and local helpers", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function buildYears() {
-      const currentYear = new Date((0, commontools_1.safeDateNow)()).getFullYear();
+      const currentYear = new Date((0, commonfabric_1.safeDateNow)()).getFullYear();
       const years = [];
       for (let year = currentYear; year >= currentYear - 2; year--) {
         years.push(String(year));
       }
       return years;
     }
-    const scopeMap = (0, commontools_1.__ct_data)({ gmail: "gmail.readonly" });
-    const years = (0, commontools_1.__ct_data)(buildYears());
-    const scopes = (0, commontools_1.__ct_data)(Object.fromEntries(Object.entries(scopeMap).map(([key, value]) => [key, { value }])));
-    const payload = (0, commontools_1.__ct_data)({ years, scopes });
+    const scopeMap = (0, commonfabric_1.__cf_data)({ gmail: "gmail.readonly" });
+    const years = (0, commonfabric_1.__cf_data)(buildYears());
+    const scopes = (0, commonfabric_1.__cf_data)(Object.fromEntries(Object.entries(scopeMap).map(([key, value]) => [key, { value }])));
+    const payload = (0, commonfabric_1.__cf_data)({ years, scopes });
     exports.default = payload;
   });
 });
@@ -397,15 +397,15 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("accepts compiled nested __ctHelpers.__ct_data() runtime helper calls", () => {
+  it("accepts compiled nested __cfHelpers.__cf_data() runtime helper calls", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const startedAt = commontools_1.__ctHelpers.__ct_data((0, commontools_1.safeDateNow)());
-    const seed = commontools_1.__ctHelpers.__ct_data((0, commontools_1.nonPrivateRandom)());
-    exports.default = (0, commontools_1.__ct_data)({ startedAt, seed });
+    const startedAt = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.safeDateNow)());
+    const seed = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.nonPrivateRandom)());
+    exports.default = (0, commonfabric_1.__cf_data)({ startedAt, seed });
   });
 });
 `;
@@ -413,15 +413,15 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("accepts compiled __ct_data() references rewritten through exports", () => {
+  it("accepts compiled __cf_data() references rewritten through exports", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.MODULE_METADATA = exports.STANDARD_LABELS = void 0;
-    exports.STANDARD_LABELS = (0, commontools_1.__ct_data)(["Personal", "Work"]);
-    exports.MODULE_METADATA = (0, commontools_1.__ct_data)({
+    exports.STANDARD_LABELS = (0, commonfabric_1.__cf_data)(["Personal", "Work"]);
+    exports.MODULE_METADATA = (0, commonfabric_1.__cf_data)({
       type: "email",
       label: "Email",
       schema: {
@@ -437,10 +437,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("accepts compiled __ct_data() helpers that use for...of iteration", () => {
+  it("accepts compiled __cf_data() helpers that use for...of iteration", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function buildIndex() {
@@ -452,7 +452,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
       }
       return index;
     }
-    const parentIndex = (0, commontools_1.__ct_data)(buildIndex());
+    const parentIndex = (0, commonfabric_1.__cf_data)(buildIndex());
     exports.default = parentIndex;
   });
 });
@@ -464,10 +464,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled callbacks that declare nested callback parameters", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.lift)((items) => items.map((_item) => _item + 1));
+    exports.default = (0, commonfabric_1.lift)((items) => items.map((_item) => _item + 1));
   });
 });
 `;
@@ -478,11 +478,11 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled trusted callbacks that contain nested handler parameters", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.pattern)(() => ({
-      addChild: (0, commontools_1.handler)(false, {
+    exports.default = (0, commonfabric_1.pattern)(() => ({
+      addChild: (0, commonfabric_1.handler)(false, {
         type: "object",
         properties: {
           children: { type: "array", items: { type: "number" }, asCell: true }
@@ -497,18 +497,18 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("accepts compiled helper functions that only close over __ct_data()", () => {
+  it("accepts compiled helper functions that only close over __cf_data()", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const STANDARD_LABELS = (0, commontools_1.__ct_data)({ email: ["Personal", "Work"] });
+    const STANDARD_LABELS = (0, commonfabric_1.__cf_data)({ email: ["Personal", "Work"] });
     function getNextUnusedLabel(type) {
       const standards = STANDARD_LABELS[type];
       return standards || undefined;
     }
-    exports.default = (0, commontools_1.lift)(() => getNextUnusedLabel("email"));
+    exports.default = (0, commonfabric_1.lift)(() => getNextUnusedLabel("email"));
   });
 });
 `;
@@ -516,13 +516,13 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("accepts compiled __ct_data() accessors with inert bodies", () => {
+  it("accepts compiled __cf_data() accessors with inert bodies", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const data = (0, commontools_1.__ct_data)({
+    const data = (0, commonfabric_1.__cf_data)({
       get value() {
         return 1;
       },
@@ -538,13 +538,13 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("accepts compiled __ct_data() accessors without inspecting captured bindings", () => {
+  it("accepts compiled __cf_data() accessors without inspecting captured bindings", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools", "./helper"], function (require, exports, commontools_1, helper_1) {
+  define("main", ["require", "exports", "commonfabric", "./helper"], function (require, exports, commonfabric_1, helper_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const data = (0, commontools_1.__ct_data)({
+    const data = (0, commonfabric_1.__cf_data)({
       get value() {
         return helper_1.state;
       },
@@ -560,11 +560,11 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled builder callbacks that capture top-level schema snapshots", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const state = (0, commontools_1.schema)({ type: "object", properties: { count: { type: "number" } } });
-    exports.default = (0, commontools_1.lift)(() => state.type);
+    const state = (0, commonfabric_1.schema)({ type: "object", properties: { count: { type: "number" } } });
+    exports.default = (0, commonfabric_1.lift)(() => state.type);
   });
 });
 `;
@@ -575,10 +575,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled builder callbacks that reference their own top-level binding", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const Note = (0, commontools_1.pattern)(() => ({
+    const Note = (0, commonfabric_1.pattern)(() => ({
       json: JSON.stringify(Note),
     }));
     exports.default = Note;
@@ -592,10 +592,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled callbacks that capture later const helper bindings", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const readValue = (0, commontools_1.lift)((value) => formatValue(value));
+    const readValue = (0, commonfabric_1.lift)((value) => formatValue(value));
     const formatValue = (value) => {
       return value;
     };
@@ -607,7 +607,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("rejects raw mutable compiled top-level exports without __ct_data()", () => {
+  it("rejects raw mutable compiled top-level exports without __cf_data()", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
   define("main", ["require", "exports"], function (require, exports) {
@@ -621,11 +621,11 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 `;
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Mutable top-level data must be wrapped in __ct_data() in SES mode",
+      "Mutable top-level data must be wrapped in __cf_data() in SES mode",
     );
   });
 
-  it("rejects raw top-level helper calls without __ct_data()", () => {
+  it("rejects raw top-level helper calls without __cf_data()", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
   define("main", ["require", "exports"], function (require, exports) {
@@ -640,7 +640,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 `;
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Top-level call results must be wrapped in __ct_data() in SES mode",
+      "Top-level call results must be wrapped in __cf_data() in SES mode",
     );
   });
 
@@ -685,7 +685,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("rejects compiled factories that rename the require capture", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (__ctRequire, exports) {
+  define("main", ["require", "exports"], function (__cfRequire, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.default = 42;
@@ -701,7 +701,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("rejects direct authored require() calls in compiled factories", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.default = require("./dep");
@@ -710,7 +710,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 `;
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Top-level call results must be wrapped in __ct_data() in SES mode",
+      "Top-level call results must be wrapped in __cf_data() in SES mode",
     );
   });
 
@@ -734,10 +734,10 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   it("rejects top-level patternTool() calls in compiled factories", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commontools_1.patternTool)(() => ({ ok: true }));
+    exports.default = (0, commonfabric_1.patternTool)(() => ({ ok: true }));
   });
 });
 `;

@@ -45,23 +45,23 @@ const CANONICAL_LOADER_BINDINGS = [
   normalizeExact(
     `const { define, require } = (${
       getAMDLoader.toString().replace(/\n/g, "")
-    })(__ctAmdHooks);`,
+    })(__cfAmdHooks);`,
   ),
   normalizeExact(
-    `const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {}; const { define, require } = (${
+    `const __cfAmdHooks = runtimeDeps.__cfAmdHooks ?? {}; const { define, require } = (${
       getAMDLoader.toString().replace(/\n/g, "")
-    })(__ctAmdHooks);`,
+    })(__cfAmdHooks);`,
   ),
 ];
 const CANONICAL_AMD_HOOKS_BINDINGS = [
-  normalizeExact(`const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};`),
+  normalizeExact(`const __cfAmdHooks = runtimeDeps.__cfAmdHooks ?? {};`),
 ];
 const CANONICAL_RUNTIME_DEPS_LOOPS = [
   normalizeExact(
     `for (const [name, dep] of Object.entries(runtimeDeps)) { define(name, ["exports"], exports => Object.assign(exports, dep)); }`,
   ),
   normalizeExact(
-    `for (const [name, dep] of Object.entries(runtimeDeps)) { if (name === "__ctAmdHooks") continue; define(name, ["exports"], exports => Object.assign(exports, dep)); }`,
+    `for (const [name, dep] of Object.entries(runtimeDeps)) { if (name === "__cfAmdHooks") continue; define(name, ["exports"], exports => Object.assign(exports, dep)); }`,
   ),
 ];
 const CANONICAL_CONSOLE_BINDING = normalizeExact(

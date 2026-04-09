@@ -37,7 +37,6 @@ We'll need the following imports for this pattern:
 :label: making_lists_imports
 :linenos: false
 :emphasize-lines:
-/// <cts-enable />
 import {
   Default,
   h,

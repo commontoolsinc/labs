@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: ifElse with Simple Cell - WORKING (with caveats)
  *

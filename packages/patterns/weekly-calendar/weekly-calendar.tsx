@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Weekly Calendar Pattern
  *

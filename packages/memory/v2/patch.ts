@@ -11,8 +11,7 @@ export const applyPatch = (
   state: FabricValue,
   ops: PatchOp[],
 ): FabricValue => {
-  // Clone once up front, then mutate the working copy per op.
-  let current = structuredClone(state);
+  let current = state;
   for (const op of ops) {
     current = applyOp(current, op);
   }
@@ -44,59 +43,154 @@ const replaceAtPath = (
   root: FabricValue,
   path: string[],
   value: FabricValue,
+  fullPath: string[] = path,
 ): FabricValue => {
   if (path.length === 0) {
     return structuredClone(value);
   }
 
-  const { parent, key } = getExistingParent(root, path);
-  if (Array.isArray(parent)) {
-    const index = parseArrayIndex(key);
-    parent[index] = structuredClone(value);
-  } else {
-    parent[key] = structuredClone(value);
+  if (Array.isArray(root)) {
+    const index = requireExistingArrayIndex(root, path[0]!, fullPath);
+    const next = shallowCloneContainer(root) as FabricValue[];
+    if (path.length === 1) {
+      next[index] = structuredClone(value);
+      return next;
+    }
+
+    const child = root[index];
+    if (!isContainer(child)) {
+      throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+    }
+    next[index] = replaceAtPath(child, path.slice(1), value, fullPath);
+    return next;
   }
-  return root;
+
+  if (!isPatchObject(root)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+
+  const next = shallowCloneContainer(root) as PatchObject;
+  const key = path[0]!;
+  if (path.length === 1) {
+    next[key] = structuredClone(value);
+    return next;
+  }
+
+  if (!Object.hasOwn(root, key)) {
+    throw new Error(`missing path ${encodePointer(fullPath)}`);
+  }
+
+  const child = root[key];
+  if (!isContainer(child)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+  next[key] = replaceAtPath(child, path.slice(1), value, fullPath);
+  return next;
 };
 
 const addAtPath = (
   root: FabricValue,
   path: string[],
   value: FabricValue,
+  fullPath: string[] = path,
 ): FabricValue => {
   if (path.length === 0) {
     return structuredClone(value);
   }
 
-  const { parent, key } = getCreatableParent(root, path);
-  if (Array.isArray(parent)) {
-    if (key === "-") {
-      parent.push(structuredClone(value));
-    } else {
-      const index = parseArrayInsertIndex(key, parent.length);
-      parent.splice(index, 0, structuredClone(value));
+  if (Array.isArray(root)) {
+    const next = shallowCloneContainer(root) as FabricValue[];
+    const segment = path[0]!;
+    if (path.length === 1) {
+      if (segment === "-") {
+        next.push(structuredClone(value));
+      } else {
+        const index = parseArrayInsertIndex(segment, root.length);
+        next.splice(index, 0, structuredClone(value));
+      }
+      return next;
     }
-  } else {
-    parent[key] = structuredClone(value);
+
+    const index = requireExistingArrayIndex(root, segment, fullPath);
+    const child = root[index];
+    if (!isContainer(child)) {
+      throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+    }
+    next[index] = addAtPath(child, path.slice(1), value, fullPath);
+    return next;
   }
-  return root;
+
+  if (!isPatchObject(root)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+
+  const next = shallowCloneContainer(root) as PatchObject;
+  const key = path[0]!;
+  if (path.length === 1) {
+    next[key] = structuredClone(value);
+    return next;
+  }
+
+  const child = Object.hasOwn(root, key)
+    ? root[key]
+    : createContainer(path[1]!);
+  if (!isContainer(child)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+
+  next[key] = addAtPath(child, path.slice(1), value, fullPath);
+  return next;
 };
 
-const removeAtPath = (root: FabricValue, path: string[]): FabricValue => {
+const removeAtPath = (
+  root: FabricValue,
+  path: string[],
+  fullPath: string[] = path,
+): FabricValue => {
   if (path.length === 0) {
     throw new Error("root remove must be represented as a delete operation");
   }
 
-  const { parent, key } = getExistingParent(root, path);
-  if (Array.isArray(parent)) {
-    const index = parseArrayIndex(key);
-    parent.splice(index, 1);
-  } else if (Object.hasOwn(parent, key)) {
-    delete parent[key];
-  } else {
-    throw new Error(`missing object key at ${encodePointer(path)}`);
+  if (Array.isArray(root)) {
+    const index = requireExistingArrayIndex(root, path[0]!, fullPath);
+    const next = shallowCloneContainer(root) as FabricValue[];
+    if (path.length === 1) {
+      next.splice(index, 1);
+      return next;
+    }
+
+    const child = root[index];
+    if (!isContainer(child)) {
+      throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+    }
+    next[index] = removeAtPath(child, path.slice(1), fullPath);
+    return next;
   }
-  return root;
+
+  if (!isPatchObject(root)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+
+  const next = shallowCloneContainer(root) as PatchObject;
+  const key = path[0]!;
+  if (path.length === 1) {
+    if (!Object.hasOwn(root, key)) {
+      throw new Error(`missing object key at ${encodePointer(fullPath)}`);
+    }
+    delete next[key];
+    return next;
+  }
+
+  if (!Object.hasOwn(root, key)) {
+    throw new Error(`missing path ${encodePointer(fullPath)}`);
+  }
+
+  const child = root[key];
+  if (!isContainer(child)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+  next[key] = removeAtPath(child, path.slice(1), fullPath);
+  return next;
 };
 
 const moveValue = (
@@ -111,9 +205,8 @@ const moveValue = (
     throw new Error("cannot move a value into its own descendant");
   }
 
-  const extracted = structuredClone(getAtPath(root, from));
-  removeAtPath(root, from);
-  return addAtPath(root, path, extracted);
+  const extracted = getAtPath(root, from);
+  return addAtPath(removeAtPath(root, from), path, extracted);
 };
 
 const spliceAtPath = (
@@ -122,20 +215,57 @@ const spliceAtPath = (
   index: number,
   remove: number,
   add: FabricValue[],
+  fullPath: string[] = path,
 ): FabricValue => {
-  const target = path.length === 0 ? root : getAtPath(root, path);
-  if (!Array.isArray(target)) {
-    throw new Error(`splice target is not an array at ${encodePointer(path)}`);
+  if (path.length === 0) {
+    if (!Array.isArray(root)) {
+      throw new Error(
+        `splice target is not an array at ${encodePointer(fullPath)}`,
+      );
+    }
+    if (index < 0 || remove < 0 || index > root.length) {
+      throw new Error(`invalid splice at ${encodePointer(fullPath)}`);
+    }
+    const next = shallowCloneContainer(root) as FabricValue[];
+    next.splice(index, remove, ...add.map((value) => structuredClone(value)));
+    return next;
   }
-  if (index < 0 || remove < 0 || index > target.length) {
-    throw new Error(`invalid splice at ${encodePointer(path)}`);
+
+  if (Array.isArray(root)) {
+    const next = shallowCloneContainer(root) as FabricValue[];
+    const pathIndex = requireExistingArrayIndex(root, path[0]!, fullPath);
+    const child = root[pathIndex];
+    if (!isContainer(child)) {
+      throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+    }
+    next[pathIndex] = spliceAtPath(
+      child,
+      path.slice(1),
+      index,
+      remove,
+      add,
+      fullPath,
+    );
+    return next;
   }
-  target.splice(
-    index,
-    remove,
-    ...add.map((value) => structuredClone(value)),
-  );
-  return root;
+
+  if (!isPatchObject(root)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+
+  const key = path[0]!;
+  if (!Object.hasOwn(root, key)) {
+    throw new Error(`missing path ${encodePointer(fullPath)}`);
+  }
+
+  const child = root[key];
+  if (!isContainer(child)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+
+  const next = shallowCloneContainer(root) as PatchObject;
+  next[key] = spliceAtPath(child, path.slice(1), index, remove, add, fullPath);
+  return next;
 };
 
 const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
@@ -152,74 +282,20 @@ const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
   return current;
 };
 
-const getExistingParent = (
-  root: FabricValue,
-  path: string[],
-): { parent: PatchContainer; key: string } => {
-  const key = path[path.length - 1]!;
-  let current: FabricValue = root;
-
-  for (const segment of path.slice(0, -1)) {
-    if (Array.isArray(current)) {
-      current = current[requireExistingArrayIndex(current, segment, path)];
-    } else if (isPatchObject(current) && Object.hasOwn(current, segment)) {
-      current = current[segment];
-    } else {
-      throw new Error(`missing path ${encodePointer(path)}`);
-    }
-
-    if (!isContainer(current)) {
-      throw new Error(`path is not traversable at ${encodePointer(path)}`);
-    }
-  }
-
-  if (!isContainer(current)) {
-    throw new Error(`path is not traversable at ${encodePointer(path)}`);
-  }
-
-  if (Array.isArray(current)) {
-    requireExistingArrayIndex(current, key, path);
-  }
-
-  return { parent: current, key };
-};
-
-const getCreatableParent = (
-  root: FabricValue,
-  path: string[],
-): { parent: PatchContainer; key: string } => {
-  const key = path[path.length - 1]!;
-  let current: FabricValue = root;
-
-  for (let index = 0; index < path.length - 1; index += 1) {
-    const segment = path[index]!;
-    const next = path[index + 1]!;
-
-    if (Array.isArray(current)) {
-      current = current[requireExistingArrayIndex(current, segment, path)];
-    } else if (isPatchObject(current)) {
-      if (!Object.hasOwn(current, segment)) {
-        current[segment] = createContainer(next);
-      }
-      current = current[segment];
-    } else {
-      throw new Error(`path is not traversable at ${encodePointer(path)}`);
-    }
-
-    if (!isContainer(current)) {
-      throw new Error(`path is not traversable at ${encodePointer(path)}`);
-    }
-  }
-
-  if (!isContainer(current)) {
-    throw new Error(`path is not traversable at ${encodePointer(path)}`);
-  }
-
-  return { parent: current, key };
-};
-
 const createContainer = (nextSegment: string): PatchContainer => {
   return isArraySegment(nextSegment) || nextSegment === "-" ? [] : {};
+};
+
+const shallowCloneContainer = (value: PatchContainer): PatchContainer => {
+  if (Array.isArray(value)) {
+    const copy = new Array(value.length);
+    Object.assign(copy, value);
+    return copy as FabricValue[];
+  }
+
+  const copy = Object.create(Object.getPrototypeOf(value)) as PatchObject;
+  Object.assign(copy, value);
+  return copy;
 };
 
 const parseArrayIndex = (segment: string): number => {

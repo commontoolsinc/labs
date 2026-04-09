@@ -74,28 +74,28 @@ function extractInjectedCallableExports(sourceText: string): string[] {
     }
   }
 
-  let commontoolsObject: ts.ObjectLiteralExpression | undefined;
+  let commonfabricObject: ts.ObjectLiteralExpression | undefined;
   ts.forEachChild(sourceFile, function visit(node) {
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
-      node.name.text === "commontools" &&
+      node.name.text === "commonfabric" &&
       node.initializer
     ) {
       const initializer = unwrapExpression(node.initializer);
       if (ts.isObjectLiteralExpression(initializer)) {
-        commontoolsObject = initializer;
+        commonfabricObject = initializer;
         return;
       }
     }
 
     if (
       ts.isPropertyAssignment(node) &&
-      getPropertyNameText(node.name) === "commontools"
+      getPropertyNameText(node.name) === "commonfabric"
     ) {
       const initializer = unwrapExpression(node.initializer);
       if (ts.isObjectLiteralExpression(initializer)) {
-        commontoolsObject = initializer;
+        commonfabricObject = initializer;
         return;
       }
       return;
@@ -104,12 +104,12 @@ function extractInjectedCallableExports(sourceText: string): string[] {
   });
 
   assert(
-    commontoolsObject,
-    "Failed to locate createBuilder().commontools object in runner builder factory",
+    commonfabricObject,
+    "Failed to locate createBuilder().commonfabric object in runner builder factory",
   );
 
   const injectedExports = new Set<string>();
-  for (const property of commontoolsObject.properties) {
+  for (const property of commonfabricObject.properties) {
     const exportName = ts.isShorthandPropertyAssignment(property)
       ? property.name.text
       : ts.isPropertyAssignment(property)

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   Default,
@@ -35,7 +34,7 @@ export interface Message {
   timestamp: number;
   type: "chat" | "system" | "image";
   imageUrl?: string;
-  reactions: Reaction[]; // Required - workaround for transformer bug
+  reactions: Reaction[];
 }
 
 export interface User {
@@ -431,9 +430,6 @@ export default pattern<RoomInput, RoomOutput>(
                     const isPickerOpen = computed(
                       () => msg.id && emojiPickerMessageId.get() === msg.id,
                     );
-
-                    // Note: Use direct property access to avoid transformer bug
-                    // with || [] fallback (see computed-var-then-map.issue.md)
 
                     return (
                       <div

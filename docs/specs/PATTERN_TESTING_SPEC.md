@@ -84,7 +84,6 @@ This format keeps `action()` streams and `computed()` cells separate in the type
 ### Example Test Pattern
 
 ```tsx
-/// <cts-enable />
 import { action, computed, pattern, Writable } from "commonfabric";
 import ExpenseTracker from "./expense-tracker.tsx";
 
@@ -499,7 +498,6 @@ The `@commonfabric/pattern-testing` package has been removed from the codebase.
 
 ```tsx
 // counter.tsx
-/// <cts-enable />
 import { Cell, Default, handler, NAME, pattern, UI, type Stream } from "commonfabric";
 
 const increment = handler<void, { value: Cell<number> }>(
@@ -526,7 +524,6 @@ export default pattern<Input, Output>(({ value }) => ({
 
 ```tsx
 // counter.test.tsx
-/// <cts-enable />
 import { Writable, action, computed, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 

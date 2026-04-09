@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { ifElse, pattern, UI } from "commonfabric";
 
 interface State {

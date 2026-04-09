@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * Test case for unless() with a reactive array map as the fallback.
  *
@@ -17,7 +17,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Cell, Default, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     label: string;
 }

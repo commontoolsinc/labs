@@ -17,13 +17,9 @@ without rereading the whole branch history
 
 ## Rollout Status
 
-- Current activation is still opt-in via first-line `/// <cts-enable />`.
-- This PR should be reviewed as a candidate **default path**, not as the
-  default-on rollout itself.
-- Default-on rollout should only happen after:
-  - contract/spec review is settled
-  - first-party migration expectations are explicit
-  - integration/performance rollout gates are defined outside this PR
+- CTS activation is now default-on.
+- Files can explicitly opt out with first-line
+  `/// <cf-disable-transform />`.
 
 ## Migration Doctrine
 
@@ -133,8 +129,7 @@ Primary proof surface:
 
 ## Explicitly Not In This PR
 
-- flipping CTS to default-on everywhere
-- removing the current `/// <cts-enable />` rollout gate
+- removing `/// <cf-disable-transform />` as an explicit opt-out
 - call-site specialization for generic helpers
 - broader interprocedural capability-analysis expansion beyond the current
   same-source-file concrete-helper slice

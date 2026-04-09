@@ -161,6 +161,8 @@ export interface ExperimentalOptions {
   modernSchemaHash?: boolean | undefined;
   /** Backward-compat alias for `modernHash`. */
   canonicalHashing?: boolean | undefined;
+  /** Preserve cumulative scheduler write history instead of using current-known writes. */
+  schedulerHistoricalMightWrite?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -179,7 +181,7 @@ export interface RuntimeOptions {
   /** Optional compilation cache for persistent caching of compiled JS.
    *  If absent, no persistent caching is performed (same as before). */
   cachedCompiler?: CachedCompiler;
-  /** Replace runner-owned frames with `<CT_INTERNAL>` in surfaced stacks. */
+  /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
   hideInternalStackFrames?: boolean;
 }
 
@@ -296,6 +298,7 @@ export class Runtime {
       modernHash: undefined,
       modernSchemaHash: undefined,
       canonicalHashing: undefined,
+      schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
 

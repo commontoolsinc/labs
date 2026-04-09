@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Journal viewer pattern.
  * Displays a rolling narrative stream of journal entries.

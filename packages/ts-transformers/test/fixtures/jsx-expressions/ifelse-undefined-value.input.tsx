@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
 
 // Tests ifElse where ifTrue is explicitly undefined

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Dumb Map Approach for generateObject
  *

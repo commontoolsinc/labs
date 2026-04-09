@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: patternized map callback may keep direct field aliases structural
  *
@@ -17,7 +17,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface FileEntry {
     name: string;
     type: "file" | "folder";

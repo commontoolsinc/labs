@@ -6,15 +6,15 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
-const multiplier = __cfHelpers.__ct_data(Writable.of(2, {
+const __cfAmdHooks = undefined;
+const multiplier = __cfHelpers.__cf_data(Writable.of(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema));
-const prefix = __cfHelpers.__ct_data(Writable.of("Result: ", {
+const prefix = __cfHelpers.__cf_data(Writable.of("Result: ", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema));
 type Output = {

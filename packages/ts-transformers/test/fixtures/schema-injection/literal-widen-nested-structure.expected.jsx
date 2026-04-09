@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { cell } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: literal-widen-nested-structure
 // Verifies: nested object+array literal produces a fully recursive schema with widened leaf types
 //   cell({ users: [{id, name, active}], count }) → cell(..., { type: "object", properties: { users: { type: "array", items: { type: "object", ... } }, count: { type: "number" } } })

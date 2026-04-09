@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, computed, Default, pattern, UI, Writable } from "commonfabric";
 
 interface Person {

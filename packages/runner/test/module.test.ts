@@ -259,14 +259,16 @@ describe("module", () => {
   });
 
   describe("action function", () => {
-    it("throws error when called without CTS enabled", () => {
-      // action() should only be used with CTS enabled, which rewrites it to handler()
-      // When called directly at runtime (without CTS), it should throw an error
+    it("throws error when called directly without CTS transforms", () => {
+      // action() is only valid once CTS transforms rewrite it to handler().
+      // A direct runtime call should still fail and point callers at the opt-out flag.
       expect(() => {
         action<{ data: string }>(({ data }) => {
           void data;
         });
-      }).toThrow("action() must be used with CTS enabled");
+      }).toThrow(
+        "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
+      );
     });
 
     it("infers Stream<void> for zero-parameter callbacks (type test)", () => {
@@ -392,7 +394,6 @@ describe("module", () => {
 
     it("maps computed callsites through the CTS pipeline", async () => {
       const source = [
-        "/// <cts-enable />",
         'import { computed, pattern } from "commonfabric";',
         "export default pattern<{ items: boolean[] }>(({ items }) => {",
         "  const visible = computed(() => items.filter(Boolean));",
@@ -416,7 +417,6 @@ describe("module", () => {
 
     it("maps action callsites through the CTS pipeline", async () => {
       const source = [
-        "/// <cts-enable />",
         'import { action, pattern } from "commonfabric";',
         "export default pattern<{ value: number }>(({ value }) => {",
         "  const inc = action(() => value + 1);",
@@ -437,7 +437,6 @@ describe("module", () => {
 
     it("maps synthetic JSX compute callsites through the CTS pipeline", async () => {
       const source = [
-        "/// <cts-enable />",
         'import { pattern, UI } from "commonfabric";',
         "export default pattern<{ value: number }>(({ value }) => ({",
         "  [UI]: <div>{value + 1}</div>,",
@@ -457,7 +456,6 @@ describe("module", () => {
         {
           label: "lift",
           source: [
-            "/// <cts-enable />",
             'import { lift, pattern } from "commonfabric";',
             "const doubler = lift((value: number) => value * 2);",
             "export default pattern<{ value: number }>(({ value }) => ({ doubled: doubler(value) }));",
@@ -469,7 +467,6 @@ describe("module", () => {
         {
           label: "handler",
           source: [
-            "/// <cts-enable />",
             'import { handler, pattern } from "commonfabric";',
             "const click = handler((event: { delta: number }, state: { value: number }) => state.value + event.delta);",
             "export default pattern<{ value: number }>(({ value }) => ({ click: click({ value }) }));",
@@ -482,7 +479,6 @@ describe("module", () => {
         {
           label: "pattern",
           source: [
-            "/// <cts-enable />",
             'import { computed, pattern } from "commonfabric";',
             "export const Child = pattern<{ value: number }>(({ value }) => ({ doubled: computed(() => value * 2) }));",
             "export default pattern<{ value: number }>(({ value }) => ({ child: Child({ value }) }));",

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface ContributionItemSeed {

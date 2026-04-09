@@ -1,5 +1,5 @@
 /**
- * Simple axis rendering for ct-chart.
+ * Simple axis rendering for cf-chart.
  *
  * Renders tick marks and labels for x and y axes as SVG groups.
  * Accepts AxisConfig for customization (label, tickFormat, grid, tickCount).

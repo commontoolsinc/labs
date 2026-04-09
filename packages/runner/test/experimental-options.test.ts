@@ -54,6 +54,7 @@ describe("ExperimentalOptions", () => {
         modernHash: false,
         modernSchemaHash: false,
         canonicalHashing: undefined,
+        schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
       await sm.close();
@@ -78,6 +79,7 @@ describe("ExperimentalOptions", () => {
         modernHash: true,
         modernSchemaHash: true,
         canonicalHashing: undefined,
+        schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
       await sm.close();
@@ -100,6 +102,7 @@ describe("ExperimentalOptions", () => {
         modernHash: true,
         modernSchemaHash: undefined,
         canonicalHashing: undefined,
+        schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
       await sm.close();
@@ -132,6 +135,20 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental.modernHash).toBe(true);
       expect(runtime.experimental.canonicalHashing).toBe(true);
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("preserves the schedulerHistoricalMightWrite flag", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          schedulerHistoricalMightWrite: true,
+        },
+      });
+      expect(runtime.experimental.schedulerHistoricalMightWrite).toBe(true);
       await runtime.dispose();
       await sm.close();
     });

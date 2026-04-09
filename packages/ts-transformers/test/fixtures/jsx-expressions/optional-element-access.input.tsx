@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, NAME, pattern, UI } from "commonfabric";
 
 // FIXTURE: optional-element-access

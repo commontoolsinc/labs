@@ -4,11 +4,11 @@
 
 ## Editors
 
-- [Irakli Gozalishvili], [Common Tools]
+- [Irakli Gozalishvili], [Common Fabric]
 
 ## Authors
 
-- [Bernhard Seefeld], [Common Tools]
+- [Bernhard Seefeld], [Common Fabric]
 
 ## Abstract
 
@@ -634,7 +634,7 @@ backward-compatible evolution:
 3. **Migration tools**: Implementations SHOULD provide utilities for upgrading
    sigil versions
 
-[Common Tools]: https://common.tools/
+[Common Fabric]: https://common.tools/
 [Irakli Gozalishvili]: https://github.com/gozala
 [Memory Protocol]: ./memory.md
 [Binary Data Support]: ./memory-blobs.md

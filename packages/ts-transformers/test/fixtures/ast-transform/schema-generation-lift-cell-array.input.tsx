@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, lift } from "commonfabric";
 
 interface CharmEntry {

@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE final flatMap callback captures reactive state
  * after the local receiver has been rewritten through a synthetic fallback wrapper.
@@ -14,7 +14,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { pattern, UI, VNode } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Entry {
     name: string;
 }

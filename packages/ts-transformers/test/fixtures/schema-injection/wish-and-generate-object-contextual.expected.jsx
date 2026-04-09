@@ -6,12 +6,12 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { generateObject, type WishState, wish, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
-const existingLabelSchema = __cfHelpers.__ct_data({
+const __cfAmdHooks = undefined;
+const existingLabelSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         label: { type: "string" },

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Store Mapper Pattern
  *

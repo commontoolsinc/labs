@@ -12,8 +12,7 @@ describe("OpaqueRef transformer (runtime-style API)", () => {
 
   describe("error mode", () => {
     it("reports errors instead of transforming", async () => {
-      const source = `/// <cts-enable />
-import { pattern, h, UI } from "commonfabric";
+      const source = `import { pattern, h, UI } from "commonfabric";
 
 export default pattern<{ count: number }>((state) => {
   return { [UI]: <div>{state.count + 1}</div> };
@@ -32,8 +31,7 @@ export default pattern<{ count: number }>((state) => {
     });
 
     it("reports multiple errors", async () => {
-      const source = `/// <cts-enable />
-import { pattern, h, UI } from "commonfabric";
+      const source = `import { pattern, h, UI } from "commonfabric";
 
 export default pattern<{ count: number; isActive: boolean }>((state) => {
   return {
@@ -59,8 +57,7 @@ export default pattern<{ count: number; isActive: boolean }>((state) => {
   describe("debug logging", () => {
     it("logs transformation details", async () => {
       const logs: string[] = [];
-      const source = `/// <cts-enable />
-import { pattern, derive, h, UI } from "commonfabric";
+      const source = `import { pattern, derive, h, UI } from "commonfabric";
 
 export default pattern<{ count: number }>((state) => {
   return { [UI]: <div>{state.count + 1}</div> };
@@ -81,8 +78,7 @@ export default pattern<{ count: number }>((state) => {
 
   describe("checkWouldTransform", () => {
     it("returns true when transformation is needed", async () => {
-      const source = `/// <cts-enable />
-import { pattern, h, UI } from "commonfabric";
+      const source = `import { pattern, h, UI } from "commonfabric";
 
 export default pattern<{ count: number }>((state) => {
   return { [UI]: <div>{state.count + 1}</div> };

@@ -7,7 +7,7 @@
  *
  * Usage:
  *   deno run -A scripts/fuse-bench.ts \
- *     --mount /tmp/ct-bench \
+ *     --mount /tmp/cf-bench \
  *     --space bench-20260327-143022 \
  *     --n 10 \
  *     [--timeout 5000] \
@@ -85,7 +85,7 @@ OPTIONS:
 
 EXAMPLE:
   deno run -A scripts/fuse-bench.ts \\
-    --mount /tmp/ct-bench \\
+    --mount /tmp/cf-bench \\
     --space bench-20260327-143022 \\
     --n 10 \\
     --ops readdir,stat,read_scalar,read_json \\

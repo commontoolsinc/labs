@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { pattern, Writable, UI } from "commonfabric";
 
 interface State {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Pattern Composition with Shared Cell References
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Battleship Pass-and-Play
  *

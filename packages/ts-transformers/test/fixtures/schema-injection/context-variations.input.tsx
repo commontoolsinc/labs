@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, pattern, handler } from "commonfabric";
 
 // 1. Top-level

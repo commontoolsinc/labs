@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Status Module - Pattern for project/task status tracking
  *

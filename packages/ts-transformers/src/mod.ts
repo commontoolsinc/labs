@@ -6,10 +6,10 @@ export type {
   TransformMode,
 } from "./core/mod.ts";
 export {
+  injectCfDataHelper,
   injectCfHelpers,
-  injectCtDataHelper,
   Pipeline,
-  sourceUsesCfDirective,
+  sourceDisablesCfTransform,
   transformCfDirective,
   Transformer,
 } from "./core/mod.ts";

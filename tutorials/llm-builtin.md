@@ -18,9 +18,8 @@ Let's first create a skeleton pattern. We'll need the basic imports. These are s
 ```{code-block} typescript
 :label: imports
 :linenos: true
-:emphasize-lines: 1
+:emphasize-lines: 1-13
 :caption: Imports for Pattern
-/// <cts-enable />
 import {
   BuiltInLLMContent,
   Cell,
@@ -36,9 +35,11 @@ import {
   UI,
 } from "commonfabric";
 ```
-Notice line 1 begins with `/// <cts-enable`, which is important because it enables the Common Fabric AST Transformer. This allows you to use TypeScript types for many of the function parameters instead of passing in JSONSchema which can be quite verbose and difficult to read; it also enables automatic transformation of patterns you write to forms that use the reactive wrappers `derive` and `ifElse` without you having to write them yourself. We generally have this at the start of all patterns.
+CTS transforms are enabled by default, so this import block is enough to get
+automatic schema inference and reactive rewrites such as `derive` and `ifElse`
+when they are needed.
 
-The next step is to append our pattern function to the code, right after the imports. You can see `pattern` imported on line 32 in the code snippet above ([](#imports)). This is the main entry point for your pattern, you can think of it like *main()* in many languages.
+The next step is to append our pattern function to the code, right after the imports. You can see `pattern` imported in the code snippet above ([](#imports)). This is the main entry point for your pattern, you can think of it like *main()* in many languages.
 Normally, the pattern function takes in extra arguments, but for now, we'll leave it empty.
 
 ```{code-block} typescript
@@ -210,7 +211,7 @@ content you're looking for.
 :::{dropdown} Detailed explanation
 :animate: fade-in
 
-The AST Transformer (enabled via `/// <cts-enable />`) rewrites that ternary expression into `{ifElse(llmResponse.result, derive(llmResponse.result, _v1 => JSON.stringify(_v1)), "")}`. You'll still need to import `ifElse` (even though you never call it yourself) alongside the existing `derive` import for the generated code to type-check.
+The AST Transformer rewrites that ternary expression into `{ifElse(llmResponse.result, derive(llmResponse.result, _v1 => JSON.stringify(_v1)), "")}`. You'll still need to import `ifElse` (even though you never call it yourself) alongside the existing `derive` import for the generated code to type-check.
 :::
 
 If you deploy and run it, you should be able to enter a message into the input form, then wait a few seconds and see a response from our friendly LLM. Here is what it looks like for me:
@@ -246,7 +247,6 @@ There's a lot more to discover with the llm() function call (such as sending a l
 :linenos: true
 :emphasize-lines:
 :caption: Full Code
-/// <cts-enable />
 import {
   BuiltInLLMContent,
   Cell,

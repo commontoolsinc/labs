@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Annotation Manager — lists all annotations in the space, grouped by status.
  *

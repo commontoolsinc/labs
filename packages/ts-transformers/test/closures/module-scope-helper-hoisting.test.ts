@@ -15,8 +15,7 @@ const options = {
 };
 
 Deno.test("Closure Transformer hoists nested derive callbacks that close over module-scoped helpers", async () => {
-  const source = `/// <cts-enable />
-    import { derive, pattern, UI } from "commonfabric";
+  const source = `    import { derive, pattern, UI } from "commonfabric";
 
     const formatDateShort = (dateStr: string) => dateStr.toUpperCase();
 
@@ -55,8 +54,7 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
 });
 
 Deno.test("Closure Transformer does not hoist nested handler callbacks that also capture factory parameters", async () => {
-  const source = `/// <cts-enable />
-    import { handler } from "commonfabric";
+  const source = `    import { handler } from "commonfabric";
 
     const normalize = (value: string) => value.trim();
 

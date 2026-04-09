@@ -19,8 +19,8 @@ type BenchEnv = {
 };
 
 const createDefaultPattern = () => {
-  const { commontools } = createBuilder();
-  const { handler, pattern } = commontools;
+  const { commonfabric } = createBuilder();
+  const { handler, pattern } = commonfabric;
   const addPiece = handler<
     { piece: Cell<unknown> },
     { allPieces: Cell<unknown>[] }
@@ -39,8 +39,8 @@ const createDefaultPattern = () => {
 };
 
 const createCounterPattern = () => {
-  const { commontools } = createBuilder();
-  const { handler, pattern } = commontools;
+  const { commonfabric } = createBuilder();
+  const { handler, pattern } = commonfabric;
   const increment = handler<void, { value: number }>(
     (_, { value }) => {
       value++;

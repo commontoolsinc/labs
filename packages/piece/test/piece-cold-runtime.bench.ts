@@ -16,7 +16,7 @@ const defaultPatternProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "import { handler, pattern } from 'commontools';",
+        "import { handler, pattern } from 'commonfabric';",
         "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
         "  ({ piece }, { allPieces }) => {",
         "    allPieces.push(piece);",
@@ -38,7 +38,7 @@ const persistedPieceProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "import { pattern } from 'commontools';",
+        "import { pattern } from 'commonfabric';",
         "export default pattern<{ value: number }>(({ value }) => ({ value }));",
       ].join("\n"),
     },

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive, handler, NAME, pattern, schema, str, UI } from "commonfabric";
 import "commonfabric/schema";
 

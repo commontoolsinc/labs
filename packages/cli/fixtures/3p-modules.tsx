@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { type JSONSchema, NAME, pattern, str, UI } from "commonfabric";
 import TurndownService from "turndown";
 

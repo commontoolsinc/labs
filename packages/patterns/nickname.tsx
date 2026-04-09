@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Nickname Module - Pattern for alternate names/aliases
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Budget Tracker - Shared Schemas
  *

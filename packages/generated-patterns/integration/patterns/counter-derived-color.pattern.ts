@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, Default, derive, handler, pattern } from "commonfabric";
 
 interface DerivedColorArgs {

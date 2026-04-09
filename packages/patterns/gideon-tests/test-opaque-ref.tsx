@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { generateObject, JSONSchema, OpaqueRef, pattern } from "commonfabric";
 
 interface Email {

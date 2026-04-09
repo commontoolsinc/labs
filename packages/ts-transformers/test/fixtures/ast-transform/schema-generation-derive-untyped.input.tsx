@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive } from "commonfabric";
 
 declare const total: number;

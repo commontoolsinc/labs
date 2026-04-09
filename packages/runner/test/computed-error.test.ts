@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { assertEquals } from "@std/assert";
 import { Runtime } from "../src/runtime.ts";
 import { lift } from "../src/builder/module.ts";

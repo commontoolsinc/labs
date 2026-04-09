@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
 
 const moduleHasSettings = lift(({ piece }: { piece: { settingsUI?: string } }) =>

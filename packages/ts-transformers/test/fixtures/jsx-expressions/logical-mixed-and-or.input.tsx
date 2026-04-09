@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell, pattern, UI } from "commonfabric";
 
 // Tests mixed && and || operators: (a && b) || c

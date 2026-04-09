@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Email Ticket Finder Pattern
  *

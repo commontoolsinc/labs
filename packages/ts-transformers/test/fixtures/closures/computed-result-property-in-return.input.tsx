@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * computed() result property access in derive captures should use
  * .key("length"). The computed() return is an OpaqueRef, so

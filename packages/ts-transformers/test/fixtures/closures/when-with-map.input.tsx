@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test case for when() with a reactive array map as the value.
  *

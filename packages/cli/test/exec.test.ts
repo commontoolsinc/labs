@@ -17,7 +17,7 @@ import {
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
-import { cf, withEnv } from "./utils.ts";
+import { cf } from "./utils.ts";
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -537,24 +537,6 @@ describe("renderExecHelp", () => {
     );
   });
 
-  it("renders ct exec help when the compatibility alias is active", async () => {
-    await withEnv("CF_CLI_NAME", "ct", () => {
-      const help = renderExecHelp(
-        "/tmp/search.tool",
-        makeSpec("tool", {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-          },
-          required: ["query"],
-        }),
-      );
-
-      expect(help).toContain("ct exec /tmp/search.tool [run] --query <string>");
-      expect(help).not.toContain("cf exec /tmp/search.tool [run]");
-    });
-  });
-
   it("mentions explicit invoke for handlers whose inputs are all optional", () => {
     const help = renderExecHelp(
       "./legacyWrite.handler",
@@ -829,6 +811,56 @@ describe("mounted callable resolution and execution", () => {
         loadPiece: () => Promise.resolve(harness.piece),
       }),
     ).rejects.toThrow(/mounted callable file not found/i);
+  });
+
+  it("tolerates transient mounted callable ENOENT during FUSE invalidation", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const pieceDir = join(mountpoint, "home/pieces/notes-2");
+    const filePath = join(pieceDir, "result", "search.tool");
+    await Deno.mkdir(join(pieceDir, "result"), { recursive: true });
+    await Deno.writeTextFile(
+      join(pieceDir, "meta.json"),
+      JSON.stringify({
+        id: "of:piece-123",
+        entityId: "of:piece-123",
+        name: "Fixture Piece",
+        patternName: "fixture",
+      }),
+    );
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+        resultSchema: {
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+        },
+      },
+    });
+    await writeLiveMountState(stateDir, mountpoint);
+
+    setTimeout(() => {
+      void Deno.writeTextFile(filePath, "");
+    }, 50);
+
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+    });
+
+    expect(resolved.absPath).toBe(filePath);
+    expect(resolved.pieceId).toBe("of:piece-123");
   });
 
   it("resolves the correct mount by longest-prefix lookup", async () => {
@@ -1223,6 +1255,87 @@ describe("mounted callable resolution and execution", () => {
     expect(JSON.parse(result.outputText!)).toEqual({
       echoed: "tea",
       source: "bound-source",
+    });
+  });
+
+  it("pulls mounted tool result cells before serializing output", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          help: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            help: { type: "string" },
+            source: { type: "string" },
+          },
+          required: ["query", "source"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            help: { type: "string" },
+            source: { type: "string" },
+            summary: { type: "string" },
+          },
+        },
+      },
+      extraParams: {
+        source: "bound-source",
+      },
+      toolResultGetValue: {
+        query: "explicit",
+        help: "schema-field",
+        source: "bound-source",
+        summary: "bound-source:explicit:undefined",
+      },
+      toolResultPullValue: {
+        query: "explicit",
+        help: "schema-field",
+        source: "bound-source",
+        summary: "bound-source:explicit:schema-field",
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--query", "explicit", "--help", "schema-field"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+      },
+    );
+
+    expect(harness.tracker.toolRunInput).toEqual({
+      query: "explicit",
+      help: "schema-field",
+      source: "bound-source",
+    });
+    expect(JSON.parse(result.outputText!)).toEqual({
+      query: "explicit",
+      help: "schema-field",
+      source: "bound-source",
+      summary: "bound-source:explicit:schema-field",
     });
   });
 
@@ -1685,6 +1798,8 @@ function createExecHarness(options: {
   };
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
+  toolResultGetValue?: unknown;
+  toolResultPullValue?: unknown;
   handlerFailureMessage?: string;
 }) {
   const tracker = {
@@ -1768,9 +1883,14 @@ function createExecHarness(options: {
     },
   );
 
-  const state = { value: options.toolResult };
+  const state = {
+    value: options.toolResult,
+    getValue: options.toolResultGetValue,
+    pullValue: options.toolResultPullValue,
+  };
   const resultCell = {
-    get: () => state.value,
+    get: () => state.getValue ?? state.value,
+    pull: () => Promise.resolve(state.pullValue ?? state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
   };
@@ -1798,6 +1918,9 @@ function createExecHarness(options: {
     synced: async () => {},
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
+      storageManager: {
+        synced: async () => {},
+      },
       edit: () => ({
         commit: async () => {},
       }),
@@ -1818,6 +1941,8 @@ function createExecHarness(options: {
       ) => {
         tracker.toolRunInput = input;
         state.value = options.toolResult;
+        state.getValue = options.toolResultGetValue ?? options.toolResult;
+        state.pullValue = options.toolResultPullValue ?? options.toolResult;
         return {
           sink: () => () => {},
         };

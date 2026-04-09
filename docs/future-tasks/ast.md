@@ -8,17 +8,17 @@ patterns:
 2. **Schema Transformer** - Converts TypeScript type definitions to JSON Schema
    at compile time
 
-## Core Concept: Opt-in Transformation
+## Core Concept: Default-On Transformation
 
-Both transformers require the `/// <cts-enable />` directive at the top of files
-to be transformed:
+Both transformers run by default. Use `/// <cf-disable-transform />` only when
+you need to opt out for a specific file:
 
 ```typescript
-/// <cts-enable />
 import { cell, derive, ifElse, toSchema } from "commonfabric";
 ```
 
-Without this directive, the transformers will not modify your code.
+With `/// <cf-disable-transform />`, the transformers will not modify your
+code.
 
 ## OpaqueRef Transformer
 
@@ -190,7 +190,6 @@ Each element/property is transformed independently when used in JSX:
 Transform TypeScript interfaces to JSON Schema at compile time:
 
 ```typescript
-/// <cts-enable />
 import { toSchema } from "commonfabric";
 
 interface User {
@@ -219,7 +218,6 @@ The schema transformer also converts `handler` and `pattern` calls with type
 arguments:
 
 ```typescript
-/// <cts-enable />
 import { Cell, handler, pattern } from "commonfabric";
 
 // Handler with type arguments
@@ -569,7 +567,6 @@ interface TransformerOptions {
 ## Complete Example
 
 ```typescript
-/// <cts-enable />
 import { Cell, cell, derive, ifElse, pattern, toSchema, UI } from "commonfabric";
 
 interface TodoItem {

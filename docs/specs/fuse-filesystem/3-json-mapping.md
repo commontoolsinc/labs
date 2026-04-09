@@ -352,10 +352,10 @@ can resolve the backing callable schema and execute it.
 Callable files also embed the handler's input schema as readable comments:
 
 ```sh
-#!/path/to/ct-exec exec
+#!/path/to/cf-exec exec
 # schema: {"type":"string"}
 # input: string
-exec '/path/to/ct-exec' exec "$0" "$@"
+exec '/path/to/cf-exec' exec "$0" "$@"
 ```
 
 Reading the file with `cat` or `head` reveals the expected input type before

@@ -112,7 +112,7 @@ than guessing at unsupported internals.
 | Violation | Fix |
 |-----------|-----|
 | array schema at the root of `generateObject` | Wrap it in an object such as `{ items: T[] }` |
-| missing `/// <cts-enable />` | Add it at the top of the file |
+| accidental `/// <cf-disable-transform />` in a file relying on CTS rewrites | Remove the opt-out or provide explicit runtime forms/schemas |
 | prompt derived from agent-written cells | Split the source cells to avoid loops |
 | invalid model-name format | Use `vendor:model` |
 

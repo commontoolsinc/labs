@@ -19,7 +19,7 @@ export function checkStderr(stderr: string[]) {
 }
 
 async function runCliTask(
-  task: "cli-no-pwd-override" | "ct-no-pwd-override",
+  task: "cli-no-pwd-override",
   command: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
   // Use a regex to split up spaces outside of quotes.
@@ -56,12 +56,6 @@ export async function cf(
   command: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
   return await runCliTask("cli-no-pwd-override", command);
-}
-
-export async function ct(
-  command: string,
-): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
-  return await runCliTask("ct-no-pwd-override", command);
 }
 
 export async function withEnv(

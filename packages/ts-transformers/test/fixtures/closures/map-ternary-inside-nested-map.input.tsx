@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test case for ternary transformation inside nested Cell.map callbacks.
  *

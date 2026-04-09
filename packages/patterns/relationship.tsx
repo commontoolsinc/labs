@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Relationship Module - Pattern for people connections
  *

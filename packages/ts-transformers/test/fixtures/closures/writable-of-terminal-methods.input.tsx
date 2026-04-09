@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Writable.of() result accessed via .get()/.set() in action
  * callbacks. These are terminal methods handled correctly regardless

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Shared type definitions for the contacts pattern family.
  *

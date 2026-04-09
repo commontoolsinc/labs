@@ -1,4 +1,3 @@
-/// <cts-enable />
 // deno-lint-ignore-file no-unused-vars
 import { handler, computed } from "commonfabric";
 

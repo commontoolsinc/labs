@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   derive,
   handler,

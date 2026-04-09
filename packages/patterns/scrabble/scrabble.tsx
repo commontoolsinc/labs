@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Multiplayer Free-for-All Scrabble - Lobby Pattern
  *

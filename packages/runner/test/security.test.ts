@@ -120,7 +120,7 @@ describe("SES security regressions", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { lift } from "commontools";',
+            'import { lift } from "commonfabric";',
             "export default lift(async () => {",
             '  const mod = await import("./helper.ts");',
             "  return mod.value;",
@@ -166,9 +166,11 @@ describe("SES security regressions", () => {
   });
 
   it("runs untrusted self-contained direct builder callbacks through the SES fallback", async () => {
-    const { commontools } = createBuilder();
-    const probe = commontools.lift((_value: number) => typeof Proxy);
-    const testPattern = commontools.pattern<{ value: number }>(({ value }) => ({
+    const { commonfabric } = createBuilder();
+    const probe = commonfabric.lift((_value: number) => typeof Proxy);
+    const testPattern = commonfabric.pattern<{ value: number }>((
+      { value },
+    ) => ({
       environment: probe(value),
     }));
 
@@ -185,10 +187,12 @@ describe("SES security regressions", () => {
   });
 
   it("fails closed when untrusted direct builder callbacks capture host state", async () => {
-    const { commontools } = createBuilder();
+    const { commonfabric } = createBuilder();
     const secret = { factor: 2 };
-    const double = commontools.lift((value: number) => value * secret.factor);
-    const testPattern = commontools.pattern<{ value: number }>(({ value }) => ({
+    const double = commonfabric.lift((value: number) => value * secret.factor);
+    const testPattern = commonfabric.pattern<{ value: number }>((
+      { value },
+    ) => ({
       total: double(value),
     }));
     const errors: Error[] = [];
@@ -211,14 +215,16 @@ describe("SES security regressions", () => {
   });
 
   it("allows explicitly trusted direct builder callbacks to preserve host closures", async () => {
-    const { commontools } = createBuilder({
+    const { commonfabric } = createBuilder({
       unsafeHostTrust: runtime.createUnsafeHostTrust({
         reason: "security regression fixture",
       }),
     });
     const factor = 2;
-    const double = commontools.lift((value: number) => value * factor);
-    const testPattern = commontools.pattern<{ value: number }>(({ value }) => ({
+    const double = commonfabric.lift((value: number) => value * factor);
+    const testPattern = commonfabric.pattern<{ value: number }>((
+      { value },
+    ) => ({
       total: double(value),
     }));
 
@@ -241,8 +247,7 @@ describe("SES security regressions", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
-            'import { type Cell, computed, Default, handler, pattern } from "commontools";',
+            'import { type Cell, computed, Default, handler, pattern } from "commonfabric";',
             "",
             "interface Args {",
             "  values: Default<number[], []>;",
@@ -299,8 +304,7 @@ describe("SES security regressions", () => {
         {
           name: "/main.tsx",
           contents: [
-            "/// <cts-enable />",
-            'import { computed, handler } from "commontools";',
+            'import { computed, handler } from "commonfabric";',
             "",
             "const format = (value: string): string => value.toUpperCase();",
             "",
@@ -568,7 +572,7 @@ describe("SES security regressions", () => {
         {
           name: "/poison.ts",
           contents: [
-            'import { safeDateNow } from "commontools";',
+            'import { safeDateNow } from "commonfabric";',
             "export default function poison() {",
             "  try {",
             "    (safeDateNow as typeof safeDateNow & { poisoned?: number }).poisoned = 123;",
@@ -587,7 +591,7 @@ describe("SES security regressions", () => {
         {
           name: "/probe.ts",
           contents: [
-            'import { safeDateNow } from "commontools";',
+            'import { safeDateNow } from "commonfabric";',
             "export default function probe() {",
             "  return (safeDateNow as typeof safeDateNow & { poisoned?: number }).poisoned ?? 0;",
             "}",
@@ -621,7 +625,7 @@ describe("SES security regressions", () => {
         {
           name: "/poison-env.ts",
           contents: [
-            'import { getPatternEnvironment } from "commontools";',
+            'import { getPatternEnvironment } from "commonfabric";',
             "export default function poison() {",
             "  const env = getPatternEnvironment();",
             '  env.apiUrl.href = "https://evil.example/";',
@@ -637,7 +641,7 @@ describe("SES security regressions", () => {
         {
           name: "/probe-env.ts",
           contents: [
-            'import { getPatternEnvironment } from "commontools";',
+            'import { getPatternEnvironment } from "commonfabric";',
             "export default function probe() {",
             "  return getPatternEnvironment().apiUrl.href;",
             "}",
@@ -672,10 +676,10 @@ describe("SES security regressions", () => {
             "      return {\n" +
             "        defineType: typeof define,\n" +
             "        runtimeDepsType: typeof runtimeDeps,\n" +
-            "        hooksType: typeof __ctAmdHooks,\n" +
+            "        hooksType: typeof __cfAmdHooks,\n" +
             "      };\n" +
             "    }\n" +
-            "    exports.default = (0, commontools_1.lift)(probe);",
+            "    exports.default = (0, commonfabric_1.lift)(probe);",
         ),
         filename: "guarded-loader-bindings.js",
       },
@@ -702,10 +706,10 @@ describe("SES security regressions", () => {
       {
         js: bundleWithGuardedFactory(
           "    function hiddenState() {\n" +
-            '      try { define("__ct_hidden_state", ["exports"], function () { return { value: 1 }; }); return 1; }\n' +
+            '      try { define("__cf_hidden_state", ["exports"], function () { return { value: 1 }; }); return 1; }\n' +
             "      catch { return 2; }\n" +
             "    }\n" +
-            "    exports.default = (0, commontools_1.lift)(hiddenState);",
+            "    exports.default = (0, commonfabric_1.lift)(hiddenState);",
         ),
         filename: "guarded-loader-state.js",
       },

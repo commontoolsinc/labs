@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, generateObject, pattern } from "commonfabric";
 
 // FIXTURE: pattern-opaque-destructure-temporary-root-names

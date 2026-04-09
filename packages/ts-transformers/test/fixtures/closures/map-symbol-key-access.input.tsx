@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { NAME, UI, pattern } from "commonfabric";
 
 interface Entry {

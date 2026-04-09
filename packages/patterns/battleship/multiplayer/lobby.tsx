@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Battleship Multiplayer - Lobby Pattern
  *

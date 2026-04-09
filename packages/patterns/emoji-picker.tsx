@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Emoji Picker Pattern - Reusable pattern for emoji selection
  *

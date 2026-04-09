@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Phone Module - Pattern for a single phone number with customizable label
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, Default, handler, NAME, pattern, UI } from "commonfabric";
 
 interface SubItem {

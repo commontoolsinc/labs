@@ -4,19 +4,15 @@ import {
   isTrustedDataHelper,
 } from "@commonfabric/utils/sandbox-contract";
 import {
-  CT_DATA_HELPER_IDENTIFIER,
+  CF_DATA_HELPER_IDENTIFIER,
+  HelpersOnlyTransformer,
   TransformationContext,
-  Transformer,
 } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
-const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set"]);
+const CF_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set"]);
 
-export class ModuleScopeCtDataTransformer extends Transformer {
-  override filter(_context: TransformationContext): boolean {
-    return true;
-  }
-
+export class ModuleScopeCfDataTransformer extends HelpersOnlyTransformer {
   override transform(context: TransformationContext): ts.SourceFile {
     const { factory, sourceFile } = context;
     const localCallableBindings = collectTopLevelCallableBindings(sourceFile);
@@ -39,7 +35,7 @@ export class ModuleScopeCtDataTransformer extends Transformer {
         context.cfHelpers.sourceHasDataHelper()
       )
       ? transformedStatements
-      : [createCtDataHelperImport(factory), ...transformedStatements];
+      : [createCfDataHelperImport(factory), ...transformedStatements];
     return factory.updateSourceFile(sourceFile, statements);
   }
 }
@@ -75,7 +71,7 @@ function transformTopLevelStatement(
           declaration.name,
           declaration.exclamationToken,
           declaration.type,
-          wrapWithCtData(declaration.initializer, context),
+          wrapWithCfData(declaration.initializer, context),
         );
       },
     );
@@ -102,22 +98,22 @@ function transformTopLevelStatement(
     return factory.updateExportAssignment(
       statement,
       statement.modifiers,
-      wrapWithCtData(statement.expression, context),
+      wrapWithCfData(statement.expression, context),
     );
   }
 
   return statement;
 }
 
-function wrapWithCtData(
+function wrapWithCfData(
   expression: ts.Expression,
   context: TransformationContext,
 ): ts.CallExpression {
   const helperExpr = context.cfHelpers.sourceHasHelpers()
-    ? context.cfHelpers.getHelperExpr("__ct_data")
+    ? context.cfHelpers.getHelperExpr("__cf_data")
     : context.cfHelpers.sourceHasDataHelper()
     ? context.cfHelpers.getDataHelperExpr(expression)
-    : context.factory.createIdentifier(CT_DATA_HELPER_IDENTIFIER);
+    : context.factory.createIdentifier(CF_DATA_HELPER_IDENTIFIER);
   return context.factory.createCallExpression(
     helperExpr,
     undefined,
@@ -160,7 +156,7 @@ function shouldWrapTopLevelExpression(
   }
 
   if (ts.isNewExpression(expr)) {
-    return hasNamedTarget(expr.expression, CT_DATA_CONSTRUCTOR_NAMES);
+    return hasNamedTarget(expr.expression, CF_DATA_CONSTRUCTOR_NAMES);
   }
 
   if (
@@ -174,7 +170,7 @@ function shouldWrapTopLevelExpression(
   return false;
 }
 
-function createCtDataHelperImport(
+function createCfDataHelperImport(
   factory: ts.NodeFactory,
 ): ts.ImportDeclaration {
   return factory.createImportDeclaration(
@@ -185,8 +181,8 @@ function createCtDataHelperImport(
       factory.createNamedImports([
         factory.createImportSpecifier(
           false,
-          factory.createIdentifier("__ct_data"),
-          factory.createIdentifier(CT_DATA_HELPER_IDENTIFIER),
+          factory.createIdentifier("__cf_data"),
+          factory.createIdentifier(CF_DATA_HELPER_IDENTIFIER),
         ),
       ]),
     ),

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { type Cell, cell, Default, handler, lift, pattern } from "commonfabric";
 
 type PublishInput = string | number | undefined;

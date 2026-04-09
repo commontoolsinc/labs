@@ -1,4 +1,3 @@
-/// <cts-enable />
 
 // FIXTURE: computed-shadowed-local-no-rewrite
 // Verifies: shadowed local helpers named `computed` are not rewritten.

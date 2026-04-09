@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Budget Tracker - Data View Sub-Pattern
  *

@@ -335,7 +335,7 @@ path = "MOUNT/SPACE/pieces/My Piece/.src/main.tsx"
 src = open(path).read()
 # ... modify src ...
 open(path, "w").write(modified_src)
-# Write triggers setsrc automatically — no ct piece setsrc needed
+# Write triggers setsrc automatically — no cf piece setsrc needed
 ```
 
 **Check for errors after modifying:**

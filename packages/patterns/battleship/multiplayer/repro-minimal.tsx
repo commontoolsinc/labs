@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * ============================================================================
  * BUG REPRO: Nested array elements are undefined when reading cross-session data

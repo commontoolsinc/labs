@@ -19,8 +19,8 @@
 import * as path from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 
-// Packages with integration tests that need a running server
-const PACKAGES_WITH_SERVER = [
+// Packages with integration tests that need a running server by default.
+const DEFAULT_PACKAGES_WITH_SERVER = [
   "runner",
   "runtime-client",
   "shell",
@@ -29,11 +29,25 @@ const PACKAGES_WITH_SERVER = [
   "cli",
 ];
 
+// Opt-in suites that mirror CI jobs but rely on more platform-specific setup.
+const OPTIONAL_PACKAGES_WITH_SERVER = ["cli-fuse"];
+
 // Packages with integration tests that DON'T need a running server
 const PACKAGES_WITHOUT_SERVER = ["generated-patterns", "pattern-tests"];
 
-// All packages with integration tests
-const ALL_PACKAGES = [...PACKAGES_WITH_SERVER, ...PACKAGES_WITHOUT_SERVER];
+// Default `deno task integration` coverage.
+const DEFAULT_PACKAGES = [
+  ...DEFAULT_PACKAGES_WITH_SERVER,
+  ...PACKAGES_WITHOUT_SERVER,
+];
+
+const ALL_PACKAGES_WITH_SERVER = [
+  ...DEFAULT_PACKAGES_WITH_SERVER,
+  ...OPTIONAL_PACKAGES_WITH_SERVER,
+];
+
+// All valid integration targets, including opt-in platform-specific suites.
+const ALL_PACKAGES = [...DEFAULT_PACKAGES, ...OPTIONAL_PACKAGES_WITH_SERVER];
 
 // Packages that need HEADLESS=1 for browser tests
 const HEADLESS_PACKAGES = ["shell", "background-charm-service", "patterns"];
@@ -182,8 +196,8 @@ async function runPatternTests(
   const patternsDir = path.join(rootDir, "packages/patterns");
   const cfCmd = getCfCommand(rootDir);
   const testFiles = await findPatternTests(rootDir, patternsDir, filter);
-  const memoryVersion = Deno.env.get("CT_TEST_MEMORY_VERSION") ??
-    Deno.env.get("CT_INTEGRATION_MEMORY_VERSION");
+  const memoryVersion = Deno.env.get("CF_TEST_MEMORY_VERSION") ??
+    Deno.env.get("CF_INTEGRATION_MEMORY_VERSION");
 
   if (testFiles.length === 0) {
     console.log("No pattern test files found.");
@@ -195,7 +209,7 @@ async function runPatternTests(
     `Found ${testFiles.length} pattern test(s), running ${concurrency} at a time`,
   );
   if (memoryVersion === "v1" || memoryVersion === "v2") {
-    console.log(`Using ct test memory version: ${memoryVersion}`);
+    console.log(`Using cf test memory version: ${memoryVersion}`);
   }
 
   const failed: string[] = [];
@@ -350,7 +364,11 @@ async function runPackageIntegration(
   filter?: string,
   junitDir?: string,
 ): Promise<boolean> {
-  const packageDir = path.join(rootDir, "packages", pkg);
+  const packageDir = path.join(
+    rootDir,
+    "packages",
+    pkg === "cli-fuse" ? "cli" : pkg,
+  );
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Running integration tests for: ${pkg}`);
   console.log(`${"=".repeat(60)}`);
@@ -372,7 +390,7 @@ async function runPackageIntegration(
   }
 
   // Add API_URL for packages that need it
-  if (PACKAGES_WITH_SERVER.includes(pkg)) {
+  if (ALL_PACKAGES_WITH_SERVER.includes(pkg)) {
     env.API_URL = apiUrl;
   }
 
@@ -398,6 +416,15 @@ async function runPackageIntegration(
     env.CF_CLI_INTEGRATION_USE_LOCAL = "1";
     result = await runCommand(
       ["bash", "./integration/integration.sh"],
+      { cwd: packageDir, env, inheritStdio: true },
+    );
+  } else if (pkg === "cli-fuse") {
+    // Mirror the dedicated GitHub Actions FUSE suite, but keep it opt-in
+    // locally because it depends on platform-specific FUSE setup.
+    env.CF_CLI_INTEGRATION_USE_LOCAL = "1";
+    env.FUSE_DEEP_ENTITY_PROBE = Deno.env.get("FUSE_DEEP_ENTITY_PROBE") ?? "0";
+    result = await runCommand(
+      ["bash", "./integration/fuse-exec.sh"],
       { cwd: packageDir, env, inheritStdio: true },
     );
   } else if (filter) {
@@ -463,22 +490,27 @@ Arguments:
   package   Optional. Run tests for a specific package only.
             Available: ${ALL_PACKAGES.join(", ")}
   filter    Optional. Filter test files by name pattern.
-            Only works with deno test packages (not cli).
+            Only works with deno test packages (not cli or cli-fuse).
 
 Examples:
   deno task integration                       # Run all, auto-cleanup
   deno task integration cli                   # Run only cli tests
+  deno task integration cli-fuse              # Run the opt-in CLI FUSE suite
   deno task integration patterns counter      # Filter by test name
   deno task integration pattern-tests         # Run .test.tsx pattern unit tests
   deno task integration --port-offset=500     # Use specific port offset
   deno task integration --port-offset=500 cli # Combine options
 
+Notes:
+  The default run omits platform-specific suites such as cli-fuse.
+  Use them explicitly when your machine is set up similarly to CI.
+
 Environment:
   CF_BINARY      - Path to the cf binary (for pattern-tests target).
                    Falls back to running packages/cli/mod.ts via deno.
-  CT_TEST_MEMORY_VERSION - Force v1 or v2 for ct-based pattern tests.
-  CT_INTEGRATION_MEMORY_VERSION - Force v1 or v2 across integration harnesses,
-                   including ct-based pattern tests.
+  CF_TEST_MEMORY_VERSION - Force v1 or v2 for cf-based pattern tests.
+  CF_INTEGRATION_MEMORY_VERSION - Force v1 or v2 across integration harnesses,
+                   including cf-based pattern tests.
 
 Server ports (with offset):
   Toolshed:  ${ports.toolshed} + offset
@@ -563,11 +595,11 @@ async function main(): Promise<void> {
   console.log();
 
   // Determine which packages to run
-  const packagesToRun = packageFilter ? [packageFilter] : ALL_PACKAGES;
+  const packagesToRun = packageFilter ? [packageFilter] : DEFAULT_PACKAGES;
 
   // Check if we need to start servers
   const needsServer = packagesToRun.some((pkg) =>
-    PACKAGES_WITH_SERVER.includes(pkg)
+    ALL_PACKAGES_WITH_SERVER.includes(pkg)
   );
 
   let serverStarted = false;
@@ -593,7 +625,9 @@ async function main(): Promise<void> {
 
     // Run packages that need server first
     for (
-      const pkg of packagesToRun.filter((p) => PACKAGES_WITH_SERVER.includes(p))
+      const pkg of packagesToRun.filter((p) =>
+        ALL_PACKAGES_WITH_SERVER.includes(p)
+      )
     ) {
       const success = await runPackageIntegration(
         pkg,

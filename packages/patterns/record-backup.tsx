@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Record Backup Pattern - Import/Export for Records
  *

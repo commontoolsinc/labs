@@ -443,7 +443,7 @@ export class Engine extends EventTarget implements Harness {
   ): Record<string, unknown> {
     return Object.freeze({
       ...runtimeExports,
-      __ctAmdHooks: Object.freeze({
+      __cfAmdHooks: Object.freeze({
         define: (moduleId: string) => {
           if (typeof moduleId !== "string" || moduleId.length === 0) {
             throw new Error("AMD define() requires a non-empty string id");

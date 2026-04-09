@@ -36,7 +36,7 @@ function isIgnorableRuntimeFrame(line: string): boolean {
 }
 
 function isInternalRuntimeFrame(line: string): boolean {
-  return line.includes("<CT_INTERNAL>") ||
+  return line.includes("<CF_INTERNAL>") ||
     line.includes("packages/runner/src/sandbox/ses-runtime.ts:") ||
     line.includes("packages/runner/src/runner.ts:") ||
     line.includes("packages/runner/src/harness/engine.ts:") ||

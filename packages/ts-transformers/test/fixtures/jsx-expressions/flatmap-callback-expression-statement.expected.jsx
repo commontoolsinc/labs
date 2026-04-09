@@ -6,14 +6,14 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: patternized flatMap callback should lower reactive expression statements
  */
 import { pattern, UI, VNode, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface FileEntry {
     name: string;
     type: "file" | "folder";

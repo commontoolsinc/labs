@@ -28,7 +28,7 @@ const benchProgram: RuntimeProgram = {
     {
       name: "/main.ts",
       contents: [
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "import defaultLabel from './labels.ts';",
         "export default pattern(() => ({",
         "  label: defaultLabel,",

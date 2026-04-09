@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, lift } from "commonfabric";
 
 // FIXTURE: map-cell-receiver-in-lift

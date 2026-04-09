@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-conditional-expression

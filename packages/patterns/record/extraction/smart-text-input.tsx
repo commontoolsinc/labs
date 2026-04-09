@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Smart Text Input - Multi-modal text input pattern
  *

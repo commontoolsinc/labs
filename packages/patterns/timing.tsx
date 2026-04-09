@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Timing Module - Pattern for cooking/prep times
  *

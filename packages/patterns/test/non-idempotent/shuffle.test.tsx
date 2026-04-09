@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test that exercises a non-idempotent nonPrivateRandom() shuffle computation.
  * The idempotency check in cf test should warn about it.

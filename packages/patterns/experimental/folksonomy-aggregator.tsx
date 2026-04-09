@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Folksonomy Aggregator - Community Tag Telemetry Charm
  *

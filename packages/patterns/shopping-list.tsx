@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Shopping List Pattern
  *

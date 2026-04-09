@@ -29,7 +29,7 @@ You may also be told:
 
 Load these skills at the start of your workflow:
 
-1. `Skill("ct")` — for deploying, inspecting, and calling handlers
+1. `Skill("cf")` — for deploying, inspecting, and calling handlers
 2. `Skill("agent-browser")` — for browser-based UI testing
 
 Also read:
@@ -93,7 +93,7 @@ For each handler in the spec:
 ### 4. Browser Verification (agent-browser)
 
 **IMPORTANT: Clear the browser profile before testing.** The headless browser
-uses a persistent profile at `/tmp/ct-browser-profile` that may contain cached
+uses a persistent profile at `/tmp/cf-browser-profile` that may contain cached
 JavaScript from a previous dev server session (possibly running at a different
 port). Stale cached JS will cause the browser to silently fail to connect to
 the correct API. Always run this before opening:
@@ -101,7 +101,7 @@ the correct API. Always run this before opening:
 ```bash
 # Close any existing browser and clear stale cache
 agent-browser close 2>/dev/null
-rm -rf /tmp/ct-browser-profile
+rm -rf /tmp/cf-browser-profile
 ```
 
 Then open the pattern in the browser. Use `--headed` if a human is watching
@@ -149,7 +149,7 @@ agent-browser get text @e3
 ### 5. Runtime Debugging (when things go wrong)
 
 When the UI doesn't behave as expected, use the runtime inspection utilities
-via `agent-browser eval`. These are available on `globalThis.commontools` in the
+via `agent-browser eval`. These are available on `globalThis.commonfabric` in the
 browser. Full reference: `docs/development/debugging/console-commands.md`.
 
 **Read cell values** (verify what data the piece actually holds):
@@ -157,13 +157,13 @@ browser. Full reference: `docs/development/debugging/console-commands.md`.
 ```bash
 # Read the full output of the current piece
 agent-browser eval "(async () => {
-  const v = await commontools.readCell();
+  const v = await commonfabric.readCell();
   return JSON.stringify(v).slice(0, 500);
 })()"
 
 # Read a specific field
 agent-browser eval "(async () => {
-  const v = await commontools.readArgumentCell({ path: ['items'] });
+  const v = await commonfabric.readArgumentCell({ path: ['items'] });
   return JSON.stringify(v).slice(0, 500);
 })()"
 ```
@@ -172,7 +172,7 @@ agent-browser eval "(async () => {
 
 ```bash
 agent-browser eval "(async () => {
-  await commontools.vdom.dump();
+  await commonfabric.vdom.dump();
   return 'dumped to console';
 })()"
 ```
@@ -181,7 +181,7 @@ agent-browser eval "(async () => {
 
 ```bash
 agent-browser eval "(async () => {
-  const r = await commontools.detectNonIdempotent(5000);
+  const r = await commonfabric.detectNonIdempotent(5000);
   return JSON.stringify({ nonIdempotent: r.nonIdempotent.length, cycles: r.cycles.length, busyTime: r.busyTime });
 })()"
 ```
@@ -189,13 +189,13 @@ agent-browser eval "(async () => {
 **Check for action schema mismatches** (if handlers seem to do nothing):
 
 ```bash
-agent-browser eval "JSON.stringify(commontools.getLoggerFlagsBreakdown())"
+agent-browser eval "JSON.stringify(commonfabric.getLoggerFlagsBreakdown())"
 ```
 
 **Subscribe to cell updates** (watch values change during interaction):
 
 ```bash
-agent-browser eval "window._cancel = commontools.subscribeToCell()"
+agent-browser eval "window._cancel = commonfabric.subscribeToCell()"
 agent-browser click @e5
 agent-browser console   # Check for "[debug] cell update" entries
 agent-browser eval "window._cancel()"

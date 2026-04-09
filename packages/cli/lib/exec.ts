@@ -94,17 +94,29 @@ async function readMountedPieceMeta(
 }
 
 async function assertMountedCallableFileExists(absPath: string): Promise<void> {
-  let stat: Deno.FileInfo;
-  try {
-    stat = await Deno.stat(absPath);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      throw new Error(`Mounted callable file not found: ${absPath}`);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    let stat: Deno.FileInfo;
+    try {
+      stat = await Deno.stat(absPath);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        if (attempt < 19) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          continue;
+        }
+        throw new Error(`Mounted callable file not found: ${absPath}`);
+      }
+      throw error;
     }
-    throw error;
-  }
 
-  if (!stat.isFile) {
+    if (stat.isFile) {
+      return;
+    }
+
+    if (attempt < 19) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      continue;
+    }
     throw new Error(`Mounted callable file not found: ${absPath}`);
   }
 }

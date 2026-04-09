@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { handler, NAME, Writable } from "commonfabric";
 import { MentionablePiece } from "./backlinks-index.tsx";
 

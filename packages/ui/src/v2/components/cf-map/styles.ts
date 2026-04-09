@@ -1,6 +1,6 @@
 /**
  * Styles for cf-map component
- * Includes Leaflet core CSS and ct-* theme integration
+ * Includes Leaflet core CSS and cf-* theme integration
  */
 
 import { css } from "lit";
@@ -730,7 +730,7 @@ export const styles = css`
 
     /* ================================================
     * Popup Theme Integration
-    * Override Leaflet popup styles with ct-* theme
+    * Override Leaflet popup styles with cf-* theme
     * ================================================ */
 
     .leaflet-popup-content-wrapper,

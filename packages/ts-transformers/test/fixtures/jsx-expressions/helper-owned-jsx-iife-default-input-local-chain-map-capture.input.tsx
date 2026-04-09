@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE with defaulted array input, local
  * initializer chain, and final map callback captures.

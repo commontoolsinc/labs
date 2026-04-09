@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { Cell } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: literal-widen-explicit-type-args
 // Verifies: Cell.of with explicit type arguments injects schema matching the type arg
 //   Cell.of<number>(10) → Cell.of<number>(10, { type: "number" })

@@ -320,6 +320,7 @@ export class Runner {
     pattern: Pattern,
     processCell: Cell<any>,
     resultCell: Cell<R>,
+    options: { preserveName: boolean },
   ): void {
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       pattern.result as R,
@@ -328,7 +329,11 @@ export class Runner {
     const previousResult = resultCell.withTx(tx).getRaw({
       meta: ignoreReadForScheduling,
     });
-    if (isRecord(previousResult) && previousResult[NAME]) {
+    if (
+      options.preserveName &&
+      isRecord(previousResult) &&
+      previousResult[NAME]
+    ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
     if (!deepEqual(result, previousResult)) {
@@ -353,6 +358,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     patternId: string,
+    previousPatternId: string | undefined,
     argument: T,
     resultCell: Cell<R>,
     processCell: Cell<ProcessCellData<T>>,
@@ -402,7 +408,9 @@ export class Runner {
       this.updateProcessArgument(tx, processCell, nextArgument);
     }
 
-    this.updateResultProjection(tx, pattern, processCell, resultCell);
+    this.updateResultProjection(tx, pattern, processCell, resultCell, {
+      preserveName: previousPatternId === patternId,
+    });
     this.attachPatternMaterializer(pattern, processCell);
   }
 
@@ -482,6 +490,7 @@ export class Runner {
       tx,
       pattern,
       patternId,
+      previousPatternId,
       argument,
       resultCell,
       processCell,
@@ -1737,16 +1746,22 @@ export class Runner {
             verifiedLoadId,
           )
           : undefined;
-        const postRun = (result: any) =>
-          this.handleJavaScriptHandlerResult(
-            tx,
-            result,
-            name,
-            frame,
-            processCell,
-            addCancel,
-            cause,
-          );
+        const postRun = (result: any) => {
+          logger.timeStart("stream", "postRun");
+          try {
+            return this.handleJavaScriptHandlerResult(
+              tx,
+              result,
+              name,
+              frame,
+              processCell,
+              addCancel,
+              cause,
+            );
+          } finally {
+            logger.timeEnd("stream", "postRun");
+          }
+        };
 
         return result instanceof Promise
           ? result.then(postRun)
@@ -1916,19 +1931,25 @@ export class Runner {
             verifiedLoadId,
           )
           : undefined;
-        const postRun = (result: any) =>
-          this.writeJavaScriptActionResult(
-            tx,
-            result,
-            name,
-            frame,
-            processCell,
-            outputs,
-            addCancel,
-            resultFor,
-            previousResultCellRef,
-            (link) => action.ignoredSchedulingWrites?.push(link),
-          );
+        const postRun = (result: any) => {
+          logger.timeStart("action", "postRun");
+          try {
+            return this.writeJavaScriptActionResult(
+              tx,
+              result,
+              name,
+              frame,
+              processCell,
+              outputs,
+              addCancel,
+              resultFor,
+              previousResultCellRef,
+              (link) => action.ignoredSchedulingWrites?.push(link),
+            );
+          } finally {
+            logger.timeEnd("action", "postRun");
+          }
+        };
 
         return result instanceof Promise
           ? result.then(postRun).catch(handleErrorOutput)

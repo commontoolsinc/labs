@@ -126,7 +126,7 @@ describe("Pattern Runner - Regressions", () => {
     expect(afterMapped[1]).toBe(null); // B was hidden, null preserved correctly
   });
 
-  it("keeps Notebook NAME current after createNote without an extra timer turn in v2", async () => {
+  it("keeps Notebook NAME current after createNote once pulled in v2", async () => {
     await tx.commit();
     await runtime.dispose();
     await storageManager.close();
@@ -196,6 +196,8 @@ describe("Pattern Runner - Regressions", () => {
     await storageManager.synced();
     await runtime.idle();
 
+    await result.pull();
+
     expect(result.key("noteCount").get()).toBe(0);
     expect(result.key(NAME).get()).toBe("📓 Test Notebook (0)");
 
@@ -204,6 +206,8 @@ describe("Pattern Runner - Regressions", () => {
     await runtime.idle();
     await storageManager.synced();
     await runtime.idle();
+
+    await result.pull();
 
     expect(result.key("noteCount").get()).toBe(1);
     expect(result.key(NAME).get()).toBe("📓 Test Notebook (1)");

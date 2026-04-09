@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Address Module - Pattern for physical address with customizable label
  *

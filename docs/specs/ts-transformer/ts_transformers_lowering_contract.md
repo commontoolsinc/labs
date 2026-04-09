@@ -1,7 +1,7 @@
 # TypeScript Transformers Lowering Contract
 
 **Status:** Candidate v1 (normative semantic contract for current hardening phase)\
-**Package:** `@commontools/ts-transformers`\
+**Package:** `@commonfabric/ts-transformers`\
 **Related:**
 
 - `docs/specs/ts-transformer/ts_transformers_target_pattern_language_spec.md`

@@ -1,5 +1,4 @@
 // Test file with named export instead of default export
-/// <cts-enable />
 import { pattern, schema } from "commonfabric";
 import "commonfabric/schema";
 

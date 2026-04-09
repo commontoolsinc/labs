@@ -75,12 +75,12 @@ export async function verifyWebhookSecret(
 
 // Compute entity ID for a webhook registration in toolshed's service space
 export async function webhookEntityId(webhookId: string): Promise<string> {
-  return `of:${await sha256("ct:webhook:" + webhookId)}`;
+  return `of:${await sha256("cf:webhook:" + webhookId)}`;
 }
 
 // Compute entity ID for a per-space webhook index in toolshed's service space
 async function spaceIndexEntityId(space: string): Promise<string> {
-  return `of:${await sha256("ct:webhooks-for:" + space)}`;
+  return `of:${await sha256("cf:webhooks-for:" + space)}`;
 }
 
 // Build a cell link targeting toolshed's own service space

@@ -45,7 +45,6 @@ The usual shape is:
 4. return the test sequence in order
 
 ```tsx
-/// <cts-enable />
 
 import { action, computed, pattern } from "commonfabric";
 import Pattern from "./pattern.tsx";

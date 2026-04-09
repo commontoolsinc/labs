@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Photo Module - Pattern for photo upload with optional label
  *

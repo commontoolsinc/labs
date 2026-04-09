@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { fetchData, lift, NAME, pattern, UI } from "commonfabric";
 
 /**

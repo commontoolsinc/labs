@@ -2,18 +2,17 @@ import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
 
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
-export const CT_HELPERS_IDENTIFIER = "__ctHelpers";
-export const CT_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
-const CT_DATA_HELPER_KEEP_IDENTIFIER = "__cfDataHelperKeep";
+export const CF_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
+const CF_DATA_HELPER_KEEP_IDENTIFIER = "__cfDataHelperKeep";
 
 const CF_HELPERS_SPECIFIER = "commonfabric";
 
 const HELPERS_STMT =
-  `import { ${CT_HELPERS_IDENTIFIER} as ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
-const CT_DATA_HELPER_STMT =
-  `import { __ct_data as ${CT_DATA_HELPER_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
-const CT_DATA_HELPER_USED_STMT = `// @ts-ignore: Internals
-const ${CT_DATA_HELPER_KEEP_IDENTIFIER} = ${CT_DATA_HELPER_IDENTIFIER};
+  `import { ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
+const CF_DATA_HELPER_STMT =
+  `import { __cf_data as ${CF_DATA_HELPER_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
+const CF_DATA_HELPER_USED_STMT = `// @ts-ignore: Internals
+const ${CF_DATA_HELPER_KEEP_IDENTIFIER} = ${CF_DATA_HELPER_IDENTIFIER};
 `;
 
 const HELPERS_USED_STMT = `// @ts-ignore: Internals
@@ -36,7 +35,7 @@ export class CFHelpers {
         this.#helperIdent = helperSymbol;
       }
 
-      const dataHelperSymbol = getCTDataHelperIdentifier(stmt);
+      const dataHelperSymbol = getCFDataHelperIdentifier(stmt);
       if (dataHelperSymbol) {
         this.#dataHelperIdent = dataHelperSymbol;
       }
@@ -145,9 +144,11 @@ export class CFHelpers {
   }
 }
 
-// Replace a `/// <cts-enable />` directive line with an
-// internal import statement for use by the AST transformer
-// to provide access to helpers like `derive`, etc.
+const CF_DISABLE_TRANSFORM_DIRECTIVE_RE =
+  /^\/\/\/\s*<cf-disable-transform\s*\/>/m;
+
+// Rewrite a leading transform directive line, or inject helpers by default,
+// so the AST transformer pipeline has access to helpers like `derive`.
 // This operates on strings, and to be used outside of
 // the TypeScript transformer pipeline, since symbol binding
 // occurs before transformers run.
@@ -168,14 +169,20 @@ export function transformCfDirective(
   checkCFHelperVar(source);
 
   const lines = source.split("\n");
-  if (!lines[0] || !sourceUsesCfDirective(source)) {
+  const firstContentLineIndex = findFirstContentLineIndex(lines);
+  if (firstContentLineIndex === null) {
     return source;
   }
-  return [
-    HELPERS_STMT,
-    ...lines.slice(1),
-    HELPERS_USED_STMT,
-  ].join("\n");
+
+  if (sourceDisablesCfTransform(source)) {
+    return [
+      ...lines.slice(0, firstContentLineIndex),
+      "",
+      ...lines.slice(firstContentLineIndex + 1),
+    ].join("\n");
+  }
+
+  return injectCfHelpers(source);
 }
 
 export function injectCfHelpers(source: string): string {
@@ -187,23 +194,34 @@ export function injectCfHelpers(source: string): string {
   ].join("\n");
 }
 
-export function injectCtDataHelper(source: string): string {
-  checkReservedHelperVar(source, CT_DATA_HELPER_IDENTIFIER);
-  checkReservedHelperVar(source, CT_DATA_HELPER_KEEP_IDENTIFIER);
+export function injectCfDataHelper(source: string): string {
+  checkReservedHelperVar(source, CF_DATA_HELPER_IDENTIFIER);
+  checkReservedHelperVar(source, CF_DATA_HELPER_KEEP_IDENTIFIER);
   return [
-    CT_DATA_HELPER_STMT,
+    CF_DATA_HELPER_STMT,
     source,
-    CT_DATA_HELPER_USED_STMT,
+    CF_DATA_HELPER_USED_STMT,
   ].join("\n");
 }
 
-export function sourceUsesCfDirective(source: string): boolean {
+export function sourceDisablesCfTransform(source: string): boolean {
   const lines = source.split("\n");
-  return !!lines[0] && isCTSEnabled(lines[0]);
+  const firstContentLineIndex = findFirstContentLineIndex(lines);
+  return firstContentLineIndex !== null &&
+    isCFTransformDisabled(lines[firstContentLineIndex]!);
 }
 
-function isCTSEnabled(line: string) {
-  return /^\/\/\/\s*<cts-enable\s*\/>/m.test(line);
+function isCFTransformDisabled(line: string) {
+  return CF_DISABLE_TRANSFORM_DIRECTIVE_RE.test(line);
+}
+
+function findFirstContentLineIndex(lines: readonly string[]): number | null {
+  for (const [index, line] of lines.entries()) {
+    if (line.trim().length > 0) {
+      return index;
+    }
+  }
+  return null;
 }
 
 // Throws if `__cfHelpers` was found as an Identifier
@@ -239,20 +257,20 @@ function getCFHelpersIdentifier(
   if (!ts.isStringLiteral(moduleSpecifier)) return;
   if (moduleSpecifier.text !== CF_HELPERS_SPECIFIER) return;
 
-  // Check it imports a named `__ctHelpers` binding aliased to `__cfHelpers`.
+  // Check it imports the internal `__cfHelpers` binding from commonfabric.
   if (!importClause || !ts.isImportClause(importClause)) return;
   const { namedBindings } = importClause;
   if (!namedBindings || !ts.isNamedImports(namedBindings)) return;
   for (const element of namedBindings.elements) {
     const bindingName = element.propertyName ?? element.name;
-    if (bindingName.text === CT_HELPERS_IDENTIFIER) {
+    if (bindingName.text === CF_HELPERS_IDENTIFIER) {
       return element.name;
     }
   }
   return;
 }
 
-function getCTDataHelperIdentifier(
+function getCFDataHelperIdentifier(
   statement: ts.Statement,
 ): ts.Identifier | undefined {
   if (!ts.isImportDeclaration(statement)) return;
@@ -265,10 +283,10 @@ function getCTDataHelperIdentifier(
   const { namedBindings } = importClause;
   if (!namedBindings || !ts.isNamedImports(namedBindings)) return;
   for (const element of namedBindings.elements) {
-    if (element.name.text !== CT_DATA_HELPER_IDENTIFIER) {
+    if (element.name.text !== CF_DATA_HELPER_IDENTIFIER) {
       continue;
     }
-    if ((element.propertyName ?? element.name).text !== "__ct_data") {
+    if ((element.propertyName ?? element.name).text !== "__cf_data") {
       continue;
     }
     return element.name;

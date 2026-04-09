@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * computed() result used as derive capture should use .key("count"),
  * not plain property access. The computed() return value is an
@@ -15,7 +15,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     items: Array<{
         name: string;

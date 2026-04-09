@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Regression test: action() referenced inside explicit computed() in JSX
  *

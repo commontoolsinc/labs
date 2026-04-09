@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * Fixture: action closing over SELF requires inputs with defaults so the
  * piece data always satisfies the output schema's required properties.
@@ -14,7 +14,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface TestOutput {
     [NAME]: string;
     [UI]: VNode;

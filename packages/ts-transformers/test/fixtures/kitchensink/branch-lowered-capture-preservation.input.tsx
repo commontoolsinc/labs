@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
 
 const openNoteEditor = handler<unknown, {

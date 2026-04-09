@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Regression test: inline arrow function inside explicit computed() in JSX
  *

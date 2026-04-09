@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Integration test example for cf-code-editor with Cell binding.
  * Used to test cursor stability when typing with Cell sync.

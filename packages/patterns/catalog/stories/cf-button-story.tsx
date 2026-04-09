@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { action, NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
 import {

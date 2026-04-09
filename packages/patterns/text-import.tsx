@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Text Import Module - Pattern for importing text files
  *

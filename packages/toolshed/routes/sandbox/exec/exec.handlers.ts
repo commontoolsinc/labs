@@ -99,7 +99,7 @@ export const sandboxExec: AppRouteHandler<SandboxExecRoute> = async (c) => {
 
   logger.info({ sandboxId, command }, "Sandbox exec request");
 
-  // Inject CF_API_URL so `ct` inside sandboxes can reach the toolshed
+  // Inject CF_API_URL so `cf` inside sandboxes can reach the toolshed
   const sandboxToolshedUrl = env.SANDBOX_TOOLSHED_URL || env.API_URL;
   const mergedEnv: Record<string, string> = {
     CF_API_URL: sandboxToolshedUrl,

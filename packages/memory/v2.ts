@@ -379,11 +379,21 @@ export const encodeMemoryV2Boundary = (value: unknown): string =>
 
 export const decodeMemoryV2Boundary = <Value = FabricValue>(
   source: string,
-): Value =>
-  cloneIfNecessary(
-    valueFromJson(source, memoryV2ReconstructionContext) as FabricValue,
+): Value => {
+  const decoded = valueFromJson(
+    source,
+    memoryV2ReconstructionContext,
+  ) as FabricValue;
+
+  if (!getJsonEncodingConfig()) {
+    return decoded as Value;
+  }
+
+  return cloneIfNecessary(
+    decoded,
     { frozen: false, deep: true, force: true },
   ) as Value;
+};
 
 export const toDocumentPath = (path: readonly string[]): DocumentPath =>
   path as DocumentPath;

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gift Preferences Module - Pattern for gift giving preferences
  *

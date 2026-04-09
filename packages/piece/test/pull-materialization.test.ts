@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Pattern, Runtime } from "@commonfabric/runner";
+import { NAME, Pattern, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
@@ -60,6 +60,39 @@ function tenfoldPattern(): Pattern {
         module: {
           type: "javascript",
           implementation: (input: number) => input * 10,
+        },
+        inputs: { $alias: { path: ["argument", "input"] } },
+        outputs: { $alias: { path: ["internal", "output"] } },
+      },
+    ],
+  };
+}
+
+function namedPattern(name: string, multiplier: number): Pattern {
+  return {
+    argumentSchema: {
+      type: "object",
+      properties: {
+        input: { type: "number" },
+      },
+    },
+    resultSchema: {
+      type: "object",
+      properties: {
+        [NAME]: { type: "string" },
+        output: { type: "number" },
+      },
+      required: [NAME, "output"],
+    },
+    result: {
+      [NAME]: name,
+      output: { $alias: { path: ["internal", "output"] } },
+    },
+    nodes: [
+      {
+        module: {
+          type: "javascript",
+          implementation: (input: number) => input * multiplier,
         },
         inputs: { $alias: { path: ["argument", "input"] } },
         outputs: { $alias: { path: ["internal", "output"] } },
@@ -240,5 +273,35 @@ describe("piece pull materialization", () => {
 
     expect(runtime.runner.cancels.size).toBe(1);
     expect(manager.getResult(piece).get()).toEqual({ output: 50 });
+  });
+
+  it("updates piece names when runWithPattern changes patterns", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, namedPattern("double", 2)),
+      { input: 5 },
+      undefined,
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    expect(controller.name()).toBe("double");
+    expect(manager.getResult(piece).get()).toEqual({
+      [NAME]: "double",
+      output: 10,
+    });
+
+    await manager.runWithPattern(
+      trustPattern(runtime, namedPattern("tenfold", 10)),
+      piece.entityId!["/"] as string,
+      { input: 5 },
+      { start: true },
+    );
+
+    expect(controller.name()).toBe("tenfold");
+    expect(manager.getResult(piece).get()).toEqual({
+      [NAME]: "tenfold",
+      output: 50,
+    });
   });
 });

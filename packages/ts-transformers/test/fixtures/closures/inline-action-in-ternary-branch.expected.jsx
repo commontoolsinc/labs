@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression test: inline arrow function inside explicit computed() in JSX
  *
@@ -18,7 +18,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Card {
     title: string;
     description: string;

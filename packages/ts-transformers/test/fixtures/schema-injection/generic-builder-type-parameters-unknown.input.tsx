@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { handler, lift } from "commonfabric";
 
 // FIXTURE: generic-builder-type-parameters-unknown

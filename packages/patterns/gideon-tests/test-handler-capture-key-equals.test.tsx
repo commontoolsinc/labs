@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: handler capture rehydration with `.key(...).equals(...)`
  *
@@ -10,7 +9,7 @@
  * binds the per-item handler from inside `.map(...)`.
  *
  * Run:
- *   deno task ct test packages/patterns/gideon-tests/test-handler-capture-key-equals.test.tsx --verbose
+ *   deno task cf test packages/patterns/gideon-tests/test-handler-capture-key-equals.test.tsx --verbose
  */
 import { action, computed, pattern } from "commonfabric";
 import {

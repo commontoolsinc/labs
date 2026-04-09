@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Writable, pattern } from "commonfabric";
 
 // FIXTURE: collections-empty

@@ -1090,7 +1090,7 @@ describe("generateObject with tools", () => {
       tx,
     );
 
-    runtime.run(
+    const result = runtime.run(
       tx,
       tool.pattern,
       {
@@ -1102,6 +1102,7 @@ describe("generateObject with tools", () => {
     );
     tx.commit();
 
+    await result.pull();
     await runtime.idle();
 
     expect(resultCell.get()).toEqual({

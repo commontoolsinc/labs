@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Cross-Piece Stream Server
  *

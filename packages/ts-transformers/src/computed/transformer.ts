@@ -3,7 +3,7 @@ import ts from "typescript";
 import { detectCallKind } from "../ast/call-kind.ts";
 import { setParentPointers } from "../ast/utils.ts";
 import { registerDeriveCallType } from "../ast/type-inference.ts";
-import { Transformer } from "../core/transformers.ts";
+import { HelpersOnlyTransformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
 /**
@@ -19,7 +19,7 @@ import type { TransformationContext } from "../core/mod.ts";
  *   [1] ComputedTransformer: computed(() => expr) → derive({}, (_input) => expr)
  *   [2] ClosureTransformer: derive({}, (_input) => expr) → derive(schema, schema, {input: {}, ...captures}, ({input: _input, ...captures}) => expr)
  */
-export class ComputedTransformer extends Transformer {
+export class ComputedTransformer extends HelpersOnlyTransformer {
   /**
    * Filter: Only run if the file contains 'computed' somewhere.
    * This is a quick optimization to skip files without computed calls.
@@ -27,6 +27,9 @@ export class ComputedTransformer extends Transformer {
    * created by other transformers).
    */
   override filter(context: TransformationContext): boolean {
+    if (!super.filter(context)) {
+      return false;
+    }
     if (context.sourceFile.text.includes("computed")) {
       return true;
     }
@@ -74,7 +77,8 @@ function createComputedToDeriveVisitor(
 
     // Transform: computed(() => expr) → derive({}, () => expr)
     // Keep the zero-parameter callback as-is
-    // Always use __cfHelpers.derive for safety (it's always available via cts-enable)
+    // Always use __cfHelpers.derive for safety (helper injection is the
+    // activation boundary for this transformer).
     const preservedDeriveCall = context.cfHelpers.createHelperCall(
       "derive",
       node,

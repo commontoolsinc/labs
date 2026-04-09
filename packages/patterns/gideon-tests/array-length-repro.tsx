@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Minimal reproduction: Does .length track reactively on arrays?
  *

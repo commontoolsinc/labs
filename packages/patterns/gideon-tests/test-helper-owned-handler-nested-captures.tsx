@@ -1,9 +1,8 @@
-/// <cts-enable />
 /**
  * TRANSFORM REPRO: helper-owned handler with nested callback captures
  *
  * Compare on main vs transformer branch:
- *   deno task ct check packages/patterns/gideon-tests/test-helper-owned-handler-nested-captures.tsx --show-transformed --no-run
+ *   deno task cf check packages/patterns/gideon-tests/test-helper-owned-handler-nested-captures.tsx --show-transformed --no-run
  *
  * Expected main shape:
  * - generated handler state includes `timer`, `fileId`, `content`,

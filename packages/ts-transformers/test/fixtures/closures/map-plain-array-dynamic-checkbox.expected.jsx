@@ -6,16 +6,16 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 type SelectedScopes = {
     gmail: boolean;
     calendar: boolean;
 };
-const SCOPE_DESCRIPTIONS = __cfHelpers.__ct_data({
+const SCOPE_DESCRIPTIONS = __cfHelpers.__cf_data({
     gmail: "Gmail",
     calendar: "Calendar",
 } as const);

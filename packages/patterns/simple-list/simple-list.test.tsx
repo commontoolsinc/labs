@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Simple List
  *

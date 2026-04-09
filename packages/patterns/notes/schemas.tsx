@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Shared types for the Notes pattern family.
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gmail Search Registry - Community Query Database
  *

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, pattern, type JSONSchema } from "commonfabric";
 import "commonfabric/schema";
 

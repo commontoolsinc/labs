@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { cell } from "commonfabric";
 
 // FIXTURE: literal-widen-object-properties

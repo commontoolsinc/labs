@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, pattern, UI, NAME } from "commonfabric";
 
 // Represents a question that may or may not exist

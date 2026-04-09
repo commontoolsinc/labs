@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TRUSTED FILE - Google Docs Comment Confirmation Handlers
  *

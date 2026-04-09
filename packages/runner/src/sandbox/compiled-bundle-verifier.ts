@@ -697,7 +697,7 @@ function classifyExpressionText(
         source,
         filename,
         inner.start,
-        "Mutable top-level data must be wrapped in __ct_data() in SES mode",
+        "Mutable top-level data must be wrapped in __cf_data() in SES mode",
       );
     }
 
@@ -879,7 +879,7 @@ function verifyTrustedDataCall(
   trustedName: string,
   argCount: number,
 ): void {
-  if (trustedName === "__ct_data" && argCount === 1) {
+  if (trustedName === "__cf_data" && argCount === 1) {
     return;
   }
 
@@ -1140,7 +1140,7 @@ function resolveTrustedCallName(
   const properties = ref.properties ?? (ref.property ? [ref.property] : []);
   const helperName = properties.length === 1
     ? properties[0]
-    : properties.length === 2 && properties[0] === "__ctHelpers"
+    : properties.length === 2 && properties[0] === "__cfHelpers"
     ? properties[1]
     : undefined;
 

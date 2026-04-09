@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * BAM School Dashboard Pattern
  *

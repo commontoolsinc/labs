@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { action, derive, handler, lift, pattern, type Writable } from "commonfabric";
 
 // FIXTURE: builder-input-path-shrink

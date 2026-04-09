@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Folksonomy Demo - Demonstration of the Folksonomy Tags System
  *

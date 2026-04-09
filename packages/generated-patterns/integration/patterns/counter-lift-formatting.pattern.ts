@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Cell, Default, handler, lift, pattern } from "commonfabric";
 
 interface LiftFormattingArgs {

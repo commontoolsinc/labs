@@ -66,7 +66,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when parameter is 'unknown' but code accesses properties",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: unknown) => {",
@@ -95,7 +94,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when declared type is missing an accessed property",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: { a: string }) => {",
@@ -124,7 +122,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors on interprocedural unknown-type access in lift callback",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const helper = (x: unknown) => (x as any).foo;",
@@ -150,7 +147,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors on interprocedural path-not-in-type via as-any cast in lift callback",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const helper = (x: { a: string }) => (x as any).b;",
@@ -176,7 +172,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when unknown parameter is passed to opaque function in lift",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: unknown) => console.log(state));",
@@ -200,7 +195,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when any parameter is passed to opaque function in lift",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: any) => console.log(state));",
@@ -226,7 +220,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when concrete type is passed to opaque function in lift",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: { a: string }) => console.log(state));",
@@ -252,7 +245,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when unknown parameter is passed to opaque function in pattern",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: unknown) => {",
@@ -279,7 +271,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when interface property is typed unknown in handler",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { handler } from "commonfabric";',
         "",
         "interface BatchEvent {",
@@ -313,7 +304,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when interface property is typed unknown in pattern",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "interface State {",
@@ -344,7 +334,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when interface property is typed any (not unknown)",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { handler } from "commonfabric";',
         "",
         "interface BatchEvent {",
@@ -379,7 +368,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when interface property is typed with concrete type",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { handler } from "commonfabric";',
         "",
         "interface BatchEvent {",
@@ -415,7 +403,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when handler parameter type is a type alias",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { handler } from "commonfabric";',
         "",
         "type Req = { item: string };",
@@ -447,7 +434,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no diagnostic when declared type matches all accessed paths",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: { a: string; b: number }) => {",
@@ -479,7 +465,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when handler parameter is T | undefined",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount?: number } | undefined, {}>(",
@@ -509,7 +494,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when handler parameter is a multi-member union",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { handler } from "commonfabric";',
         "",
         "export const h = handler<{ value?: number } | number | undefined, {}>(",
@@ -539,7 +523,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when handler parameter is TypeAlias | undefined",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { handler } from "commonfabric";',
         "",
         "interface Req { item: string }",
@@ -571,7 +554,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when lift accesses numeric index on array",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const fn = lift((items: number[]) => items[0]);",
@@ -599,7 +581,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when lift accesses .length on array type alias",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "type Items = Array<{ name: string }>;",
@@ -630,7 +611,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when lift accesses .length on numeric index signature object",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "type Indexed = { [index: number]: string };",
@@ -661,7 +641,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
       // Reproduces pattern-ingredient-scaler: handler() without type args
       // where the callback param is SomeType | undefined and accesses a property.
       const source = [
-        "/// <cts-enable />",
         'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ServingsEvent { servings?: number; delta?: number }",
@@ -699,7 +678,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "handler<E, T> generates same schemas as handler((e: E, t: T) => ...)",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
         'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount: number }, { total: Cell<number> }>(",
@@ -707,7 +685,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
         'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler(",
@@ -751,7 +728,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
       // Remaining divergence: optional property encoding differs
       // (type-arg: {type:"number"}, inline: {anyOf:[{type:"number"},{type:"undefined"}]}).
       const sourceTypeArgs = [
-        "/// <cts-enable />",
         'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount?: number } | undefined, { total: Cell<number> }>(",
@@ -759,7 +735,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
         'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler(",
@@ -814,7 +789,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "handler<TypeAlias | undefined, TypeAlias> preserves | undefined in both forms",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
         'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ScaleEvent { servings?: number; delta?: number }",
@@ -825,7 +799,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
         'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ScaleEvent { servings?: number; delta?: number }",
@@ -881,7 +854,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "lift<T, R> generates same schemas as lift((x: T): R => ...)",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const fn = lift<{ count: number }, string>(",
@@ -889,7 +861,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const fn = lift(",
@@ -927,7 +898,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       // Both forms now preserve `| undefined` in the input schema.
       const sourceTypeArgs = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const fn = lift<{ count: number } | undefined, number>(",
@@ -935,7 +905,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "const fn = lift(",
@@ -986,7 +955,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "lift<TypeAlias, R> generates same schemas as lift with inline alias",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "interface Item { name: string; price: number }",
@@ -996,7 +964,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
         'import { lift } from "commonfabric";',
         "",
         "interface Item { name: string; price: number }",
@@ -1037,7 +1004,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "pattern<T> and inline destructured form produce identical schemas",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "export default pattern<{ name: string; count: number }>(({ name, count }) => {",
@@ -1045,7 +1011,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "export default pattern(({ name, count }: { name: string; count: number }) => {",
@@ -1092,7 +1057,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "pattern<TypeAlias> and inline destructured alias form produce identical schemas",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "interface Args { name: string; count: number }",
@@ -1102,7 +1066,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
         'import { pattern } from "commonfabric";',
         "",
         "interface Args { name: string; count: number }",
@@ -1153,7 +1116,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "derive object-literal input preserves property schemas",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { cell, derive, lift } from "commonfabric";',
         "",
         'const stage = cell<string>("initial");',
@@ -1206,7 +1168,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "derive wildcard usage keeps conservative full-shape input schema",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { derive, type Writable } from "commonfabric";',
         "const input = {} as Writable<{ foo: string; bar: string }>;",
         "const d = derive(input, (v: Writable<{ foo: string; bar: string }>) => {",
@@ -1238,7 +1199,6 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "handler wildcard usage keeps conservative full-shape state schema",
     async () => {
       const source = [
-        "/// <cts-enable />",
         'import { handler, type Writable } from "commonfabric";',
         "const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {",
         '  const foo = state.key("foo").get();',

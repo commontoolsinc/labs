@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { computed, pattern } from "commonfabric";
 
 // FIXTURE: pattern-vs-computed-logical-and

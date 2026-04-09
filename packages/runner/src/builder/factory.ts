@@ -69,7 +69,7 @@ import {
 const toSchema: ToSchemaFunction = (_options?) => {
   throw new Error(
     "toSchema() must be transformed at compile time - transformer not running\n" +
-      "help: enable CTS with /// <cts-enable /> directive, ensure using correct build process",
+      "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> if present, or ensure you are using the Common Fabric build process",
   );
 };
 
@@ -85,7 +85,6 @@ export interface CreateBuilderOptions {
  */
 export const createBuilder = (options: CreateBuilderOptions = {}): {
   commonfabric: BuilderFunctionsAndConstants;
-  commontools: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
   const trustValue = <T>(value: T): T => {
@@ -133,7 +132,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     }
   };
 
-  const commontools = {
+  const commonfabric = {
     // Pattern creation
     pattern: trustedPattern,
     patternTool: trustedPatternTool,
@@ -197,7 +196,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // Schema utilities
     schema: runtimeSchema,
     toSchema,
-    __ct_data: freezeVerifiedPlainData,
+    __cf_data: freezeVerifiedPlainData,
     AuthSchema,
     WebhookConfigSchema,
 
@@ -213,13 +212,12 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricEpochDays,
     FabricHash,
   } as BuilderFunctionsAndConstants & {
-    __ctHelpers?: BuilderFunctionsAndConstants;
+    __cfHelpers?: BuilderFunctionsAndConstants;
   };
-  commontools.__ctHelpers = commontools;
+  commonfabric.__cfHelpers = commonfabric;
 
   return {
-    commonfabric: commontools,
-    commontools,
+    commonfabric,
     exportsCallback,
   };
 };

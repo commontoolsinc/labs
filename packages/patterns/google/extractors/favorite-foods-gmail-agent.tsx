@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Favorite Foods Extractor
  *

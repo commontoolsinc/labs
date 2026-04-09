@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { JSONSchema, NAME, pattern, UI } from "commonfabric";
 
 const InputSchema = {

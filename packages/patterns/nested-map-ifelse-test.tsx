@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * CT-1158 TEST: Nested map with ifElse null handling
  *

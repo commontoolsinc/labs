@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * BillExtractor Building Block
  *

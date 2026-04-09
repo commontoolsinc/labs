@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { pattern } from "commonfabric";
 
 // FIXTURE: filter-flatmap-plain-captures

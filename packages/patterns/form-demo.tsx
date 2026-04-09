@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Form Demo Pattern
  *

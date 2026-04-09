@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive } from "commonfabric";
 
 type DeriveInput = {

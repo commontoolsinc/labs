@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { Cell, cell, ComparableCell } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: cell-of-no-value
 // Verifies: Cell.of/cell with type arg but no value injects undefined as first arg plus schema
 //   Cell.of<string>() → Cell.of<string>(undefined, { type: "string" })

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { derive as deriveAlias } from "commonfabric";
 
 type AliasInput = {

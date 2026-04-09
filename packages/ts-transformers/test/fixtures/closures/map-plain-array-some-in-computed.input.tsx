@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { Writable, computed, pattern, UI } from "commonfabric";
 
 interface Habit {

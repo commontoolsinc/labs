@@ -6,7 +6,7 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 /**
  * FIXTURE: nested-writable-pattern-branches
  * Verifies: pattern-owned maps on explicit Writable inputs stay pattern-lowered
@@ -21,7 +21,7 @@ import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface Task {
     id: string;
     label: string;

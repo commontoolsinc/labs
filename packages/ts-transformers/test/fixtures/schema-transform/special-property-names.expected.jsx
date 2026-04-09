@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { toSchema } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 interface LinkedData {
     "@link": string;
     "@context": string;
@@ -23,7 +23,7 @@ interface LinkedData {
     "class": boolean;
     normalProperty: string;
 }
-const linkedDataSchema = __cfHelpers.__ct_data({
+const linkedDataSchema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         "@link": {

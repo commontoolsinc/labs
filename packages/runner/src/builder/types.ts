@@ -12,9 +12,9 @@ import type {
   ByRefFunction,
   Cell,
   CellTypeConstructor,
+  CfDataFunction,
   CompileAndRunFunction,
   ComputedFunction,
-  CtDataFunction,
   DeriveFunction,
   EqualsFunction,
   FetchDataFunction,
@@ -318,7 +318,7 @@ export interface BuilderFunctionsAndConstants {
   // Schema utilities
   schema: typeof schema;
   toSchema: typeof toSchema;
-  __ct_data: CtDataFunction;
+  __cf_data: CfDataFunction;
   AuthSchema: typeof AuthSchema;
   WebhookConfigSchema: typeof WebhookConfigSchema;
 

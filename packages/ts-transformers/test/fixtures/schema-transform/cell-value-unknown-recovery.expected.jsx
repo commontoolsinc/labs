@@ -6,11 +6,11 @@ function __cfHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
 import { cell } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 declare function fetchUnknown(): unknown;
 // FIXTURE: cell-value-unknown-recovery
 // Verifies: direct `unknown` cell values emit an explicit `{ type: "unknown" }` schema.

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Contacts - Master-detail container for PersonLike items.
  *

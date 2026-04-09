@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { pattern } from "commonfabric";
 
 // FIXTURE: pattern-underscore-param-never-input-schema

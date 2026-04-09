@@ -266,6 +266,7 @@ export class CellBridge {
   private hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
   private pendingHydrations = new Map<string, Promise<boolean>>();
+  private retainedSubtrees = new Map<bigint, number>();
   /** Monotonic invalidation epoch per hydration key. */
   private hydrationEpochs = new Map<string, number>();
   /**
@@ -549,6 +550,20 @@ export class CellBridge {
     this.hydratedPieceProps.get(pieceIno)?.delete(propName);
   }
 
+  private cleanupRetainedSubtrees(now = Date.now()): void {
+    for (const [ino, expiresAt] of this.retainedSubtrees) {
+      if (expiresAt > now) continue;
+      this.retainedSubtrees.delete(ino);
+      this.tree.clear(ino);
+    }
+  }
+
+  private retainDetachedSubtree(ino: bigint, ttlMs = 1000): void {
+    if (!this.tree.getNode(ino)) return;
+    this.tree.detach(ino);
+    this.retainedSubtrees.set(ino, Date.now() + ttlMs);
+  }
+
   private getPieceInfo(
     pieceIno: bigint,
   ): (PieceRootInfo & { state?: SpaceState }) | null {
@@ -569,7 +584,12 @@ export class CellBridge {
     return this.pieceRoots.has(ino) || this.piecePropRoots.has(ino);
   }
 
+  shouldSynchronizeLookup(parentIno: bigint): boolean {
+    return this.piecePropRoots.has(parentIno);
+  }
+
   async prepareLookup(parentIno: bigint, name: string): Promise<boolean> {
+    this.cleanupRetainedSubtrees();
     if (this.isEntitiesDir(parentIno)) {
       return await this.resolveEntity(parentIno, name);
     }
@@ -600,6 +620,7 @@ export class CellBridge {
   }
 
   async prepareDirectory(ino: bigint): Promise<boolean> {
+    this.cleanupRetainedSubtrees();
     const pieceInfo = this.getPieceInfo(ino);
     if (pieceInfo) {
       await this.hydratePieceProp(ino, "input");
@@ -942,6 +963,7 @@ export class CellBridge {
     resolveLink: ResolveLink;
     spaceName: string;
   }): Promise<void> {
+    this.cleanupRetainedSubtrees();
     const startedAt = Date.now();
     if (this.tree.getNode(args.pieceIno)?.kind !== "dir") {
       return;
@@ -959,16 +981,16 @@ export class CellBridge {
     } = args;
 
     const existingIno = this.tree.lookup(pieceIno, propName);
-    if (existingIno !== undefined) {
-      this.markPiecePropCleared(pieceIno, propName);
-      this.tree.clear(existingIno);
-    }
     const jsonIno = this.tree.lookup(pieceIno, `${propName}.json`);
-    if (jsonIno !== undefined) {
-      this.tree.clear(jsonIno);
+    const pendingPropName = `.${propName}.pending`;
+    const pendingJsonName = `${pendingPropName}.json`;
+    const pendingIno = this.tree.lookup(pieceIno, pendingPropName);
+    if (pendingIno !== undefined) {
+      this.tree.clear(pendingIno);
     }
-    if (propName === "result") {
-      this.clearFsProjectionEntries(pieceIno);
+    const pendingJsonIno = this.tree.lookup(pieceIno, pendingJsonName);
+    if (pendingJsonIno !== undefined) {
+      this.tree.clear(pendingJsonIno);
     }
 
     const treeValue = this.materializeTreeValue(cell, newValue);
@@ -986,6 +1008,14 @@ export class CellBridge {
       if (propName === "result") {
         const fsValue = this.readFsValue(cell, treeValue);
         if (fsValue !== null) {
+          this.markPiecePropCleared(pieceIno, propName);
+          if (existingIno !== undefined) {
+            this.tree.clear(existingIno);
+          }
+          if (jsonIno !== undefined) {
+            this.tree.clear(jsonIno);
+          }
+          this.clearFsProjectionEntries(pieceIno);
           const indexName = this.buildFsProjectionTree(
             pieceIno,
             pieceId,
@@ -1020,10 +1050,13 @@ export class CellBridge {
         }
       }
 
+      const buildRootName = existingIno !== undefined || jsonIno !== undefined
+        ? pendingPropName
+        : propName;
       const propIno = await buildJsonTreeAsync(
         this.tree,
         pieceIno,
-        propName,
+        buildRootName,
         treeValue,
         undefined,
         resolveLink,
@@ -1035,9 +1068,41 @@ export class CellBridge {
       if (propName === "result") {
         this.addVNodeJsonFiles(propIno, treeValue);
       }
+      if (buildRootName === pendingPropName) {
+        this.markPiecePropCleared(pieceIno, propName);
+        if (existingIno !== undefined) {
+          this.retainDetachedSubtree(existingIno);
+        }
+        if (jsonIno !== undefined) {
+          this.retainDetachedSubtree(jsonIno);
+        }
+        if (propName === "result") {
+          this.clearFsProjectionEntries(pieceIno);
+        }
+        this.tree.rename(pieceIno, pendingPropName, pieceIno, propName);
+        if (this.tree.lookup(pieceIno, pendingJsonName) !== undefined) {
+          this.tree.rename(
+            pieceIno,
+            pendingJsonName,
+            pieceIno,
+            `${propName}.json`,
+          );
+        }
+      } else if (propName === "result") {
+        this.clearFsProjectionEntries(pieceIno);
+      }
       this.markPiecePropHydrated(pieceIno, propName);
     } else {
       this.markPiecePropCleared(pieceIno, propName);
+      if (existingIno !== undefined) {
+        this.retainDetachedSubtree(existingIno);
+      }
+      if (jsonIno !== undefined) {
+        this.retainDetachedSubtree(jsonIno);
+      }
+      if (propName === "result") {
+        this.clearFsProjectionEntries(pieceIno);
+      }
     }
     if (propName === "result") {
       this.buildHandlersFile(pieceIno, callables);
@@ -1893,7 +1958,27 @@ export class CellBridge {
     skipEntry: (value: unknown) => boolean;
     classifyEntry: (key: string, value: unknown) => CallableKind | null;
   } {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    const schema = rootCell.asSchemaFromLinks().schema as
+      | Record<string, unknown>
+      | undefined;
+    const schemaProperties = schema?.properties as
+      | Record<string, unknown>
+      | undefined;
+    const valueObject = typeof value === "object" && value !== null &&
+        !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+    const candidateKeys = new Set<string>([
+      ...Object.keys(valueObject ?? {}),
+      ...Object.keys(
+        schemaProperties &&
+          typeof schemaProperties === "object" &&
+          !Array.isArray(schemaProperties)
+          ? schemaProperties
+          : {},
+      ),
+    ]);
+    if (candidateKeys.size === 0) {
       return {
         callables: [],
         skipEntry: () => false,
@@ -1906,11 +1991,8 @@ export class CellBridge {
     const callables: Array<
       { key: string; callableKind: CallableKind; schema?: JSONSchema }
     > = [];
-    for (
-      const [key, candidate] of Object.entries(
-        value as Record<string, unknown>,
-      )
-    ) {
+    for (const key of candidateKeys) {
+      const candidate = valueObject?.[key];
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let resolvedCandidate = candidate;
       try {
@@ -2229,20 +2311,37 @@ export class CellBridge {
           if (debounceTimer !== undefined) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             debounceTimer = undefined;
-            this.invalidateRootPropCache(pieceIno, propName);
-            // Eagerly rebuild using the value from the sink (which IS the
-            // latest cell value). Lazy re-hydration via piece.result.get()
-            // may return a stale cached snapshot.
-            this.rebuildPieceProp({
-              cell,
-              newValue,
-              pieceId: piece.id,
-              pieceIno,
-              pieceName: piece.name() || pieceName,
-              propName,
-              resolveLink,
-              spaceName,
-            }).catch((e) => {
+            void (async () => {
+              let rebuildValue = newValue;
+              if (rebuildValue === undefined) {
+                if (typeof cell.pull === "function") {
+                  await cell.pull().catch(() => undefined);
+                }
+                rebuildValue = await piece[propName].get().catch(() =>
+                  undefined
+                );
+              }
+              if (rebuildValue === undefined) {
+                return;
+              }
+              // Eagerly rebuild using the sink payload when available. Under
+              // pull mode the sink can briefly report undefined before an
+              // explicit pull materializes the latest result, so fall back to
+              // the piece getter in that case. If the value is still
+              // undefined, keep the current mounted tree intact until a
+              // concrete replacement arrives.
+              this.invalidateRootPropCache(pieceIno, propName);
+              await this.rebuildPieceProp({
+                cell,
+                newValue: rebuildValue,
+                pieceId: piece.id,
+                pieceIno,
+                pieceName: piece.name() || pieceName,
+                propName,
+                resolveLink,
+                spaceName,
+              });
+            })().catch((e) => {
               console.error(
                 `[${spaceName}] Error rebuilding ${pieceName}/${propName}: ${e}`,
               );

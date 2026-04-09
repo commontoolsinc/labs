@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Occurrence Tracker Module - Track timestamped events
  *

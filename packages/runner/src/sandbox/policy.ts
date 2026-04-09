@@ -54,4 +54,4 @@ export const SAFE_GLOBAL_IDENTIFIERS = new Set([
 ]);
 
 export const TOP_LEVEL_CALL_RESULT_ERROR =
-  "Top-level call results must be wrapped in __ct_data() in SES mode";
+  "Top-level call results must be wrapped in __cf_data() in SES mode";
