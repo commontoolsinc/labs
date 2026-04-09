@@ -45,8 +45,6 @@ describe("shell felt config", () => {
       EXPERIMENTAL_MODERN_DATA_MODEL: "true",
       EXPERIMENTAL_MODERN_HASH: "true",
       EXPERIMENTAL_MODERN_SCHEMA_HASH: "true",
-      EXPERIMENTAL_RICH_STORABLE_VALUES: undefined,
-      EXPERIMENTAL_CANONICAL_HASHING: undefined,
     }, importFreshConfig);
 
     expect(config.esbuild?.define).toMatchObject({

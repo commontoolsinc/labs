@@ -45,9 +45,6 @@ const config: Config = {
       "$EXPERIMENTAL_MODERN_DATA_MODEL": Deno.env.get(
         "EXPERIMENTAL_MODERN_DATA_MODEL",
       ),
-      "$EXPERIMENTAL_RICH_STORABLE_VALUES": Deno.env.get(
-        "EXPERIMENTAL_RICH_STORABLE_VALUES",
-      ),
       "$EXPERIMENTAL_STORABLE_PROTOCOL": Deno.env.get(
         "EXPERIMENTAL_STORABLE_PROTOCOL",
       ),
@@ -56,9 +53,6 @@ const config: Config = {
       ),
       "$EXPERIMENTAL_MODERN_HASH": Deno.env.get(
         "EXPERIMENTAL_MODERN_HASH",
-      ),
-      "$EXPERIMENTAL_CANONICAL_HASHING": Deno.env.get(
-        "EXPERIMENTAL_CANONICAL_HASHING",
       ),
       "$EXPERIMENTAL_MODERN_SCHEMA_HASH": Deno.env.get(
         "EXPERIMENTAL_MODERN_SCHEMA_HASH",
