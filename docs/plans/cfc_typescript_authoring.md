@@ -189,7 +189,7 @@ to keep that boundary clear:
 - [x] Fall back to ordinary schema generation when unsupported alias expansion
       cannot be resolved, except for required hard diagnostics such as invalid
       `WriteAuthorizedBy`
-- [ ] Prove deterministic output across inferred and explicit schema paths so
+- [x] Prove deterministic output across inferred and explicit schema paths so
       runner `schemaHash` persistence remains stable
 
 ### 4. Implement Transformer Pipeline Support
@@ -224,7 +224,7 @@ to keep that boundary clear:
 
 ### 6. Close The Runner Handoff Gaps
 
-- [ ] Add explicit acceptance criteria that compare the normalized IFC output
+- [x] Add explicit acceptance criteria that compare the normalized IFC output
       from inferred and explicit schema paths to protect stable runner
       `schemaHash` values
 - [ ] Define the emitted schema shape that the runner prepare engine will read
@@ -248,14 +248,14 @@ to keep that boundary clear:
       `OpaqueInput`, JSX helper rewriting, and `WriteAuthorizedBy` diagnostics
 - [x] Add schema-generator tests for every canonical alias and metadata merge
       path
-- [ ] Add parity tests proving identical CFC output for:
+- [x] Add parity tests proving identical CFC output for:
       inferred schemas, explicit `toSchema<T>()`, and explicit output schema
       bindings
 - [x] Add integration tests for UI helper parity across compile-time rewriting,
       builder/runtime helper rendering, and `[UI]` schema synthesis
 - [ ] Add end-to-end tests that exercise runner observe-mode and fail-closed
       behavior for trust-sensitive claims emitted by the authoring surface
-- [ ] Add fixture coverage for `OpaqueInput<T, Spec>` lowering to `ifc.opaque`
+- [x] Add fixture coverage for `OpaqueInput<T, Spec>` lowering to `ifc.opaque`
 
 ### 8. Rollout Order
 

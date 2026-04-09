@@ -19,6 +19,46 @@ function normalizePrintedNode(
     .trim();
 }
 
+function extractVariableInitializer(output: string, variableName: string): string {
+  const sourceFile = ts.createSourceFile(
+    "/output.tsx",
+    output,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let initializer: string | undefined;
+
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === variableName &&
+      node.initializer
+    ) {
+      const unwrapped = ts.isCallExpression(node.initializer) &&
+          ts.isPropertyAccessExpression(node.initializer.expression) &&
+          ts.isIdentifier(node.initializer.expression.expression) &&
+          node.initializer.expression.expression.text === "__cfHelpers" &&
+          node.initializer.expression.name.text === "__ct_data" &&
+          node.initializer.arguments[0]
+        ? node.initializer.arguments[0]
+        : node.initializer;
+      initializer = normalizePrintedNode(unwrapped, sourceFile);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+
+  if (!initializer) {
+    throw new Error(`Missing variable initializer for ${variableName}`);
+  }
+
+  return initializer;
+}
+
 function extractPatternSchemaPairs(output: string): string[][] {
   const sourceFile = ts.createSourceFile(
     "/output.tsx",
@@ -217,6 +257,37 @@ Deno.test(
     const pairs = extractPatternSchemaPairs(output);
     assertEquals(pairs.length, 2);
     assertEquals(pairs[0]![0], pairs[1]![0]);
+  },
+);
+
+Deno.test(
+  "Schema injection keeps inferred schemas, explicit toSchema<T>(), and explicit output bindings identical",
+  async () => {
+    const source = `/// <cts-enable />
+      import { pattern, toSchema } from "commonfabric";
+
+      interface Model {
+        title: string;
+      }
+
+      const directSchema = toSchema<Model>();
+      const inferred = pattern((state: Model) => ({ title: state.title }));
+      const explicit = pattern<Model, Model>((state) => ({ title: state.title }));
+
+      export { directSchema, inferred, explicit };
+    `;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    const directSchema = extractVariableInitializer(output, "directSchema");
+    const pairs = extractPatternSchemaPairs(output);
+
+    assertEquals(pairs.length, 2);
+    assertEquals(pairs[0]![1], pairs[1]![1]);
+    assertEquals(directSchema, pairs[0]![1]);
+    assertEquals(directSchema, pairs[1]![1]);
   },
 );
 
