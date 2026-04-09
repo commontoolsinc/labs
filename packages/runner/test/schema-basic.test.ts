@@ -725,9 +725,7 @@ describe("Schema - Basic Types and References", () => {
       expect(innerStringCell.get()).toBe("hello double asCell");
     });
 
-    it.skip(
-      'should preserve nested asCell wrappers through anyOf branches',
-      () => {
+    it("should preserve nested asCell wrappers through anyOf branches", () => {
       const inner = runtime.getCell<string>(
         space,
         "double-ascell-anyof-inner-string",
@@ -762,8 +760,7 @@ describe("Schema - Basic Types and References", () => {
       expect(isCell(outerNestedCell)).toBe(true);
       expect(isCell(innerStringCell)).toBe(true);
       expect(innerStringCell.get()).toBe("hello anyOf nested cell");
-      },
-    );
+    });
 
     it('should create nested default cells for asCell: ["cell", "cell"]', () => {
       const outer = runtime.getCell<any>(

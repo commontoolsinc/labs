@@ -530,6 +530,9 @@ class TransformObjectCreator
         // already a super edge case.
         if (schema.asCell !== undefined) {
           // Use the asCell from the anyOf/allOf schema
+          // This code isn't typically reached, since a cell with an asCell
+          // schema will have just removed one level from asCell and returned
+          // that instead. However, I include it here for completeness.
           const unwrappedSchema = unwrapAsCellSchema(schema);
           return cellMatch.asSchema(unwrappedSchema) as any;
         } else {
