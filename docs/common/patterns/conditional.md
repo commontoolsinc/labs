@@ -1,39 +1,51 @@
-## Ternaries in JSX
+## Prefer Plain Ternaries
 
-Use regular ternary operators in JSX - the transformer automatically converts them to `ifElse()`:
+Use regular ternary operators in authored pattern code when the conditional
+result flows into JSX or returned pattern values. The transformer lowers many
+common expression sites automatically.
 
 ```tsx
-// ✅ Just use ternaries - they're transformed automatically
+// JSX children
 {show ? <div>Content</div> : null}
-{user.isActive ? "Active" : "Inactive"}
-{count > 10 ? "High" : "Low"}
 
-// ✅ Nested ternaries work too
+// Text labels and prop/style values
+<button disabled={loading}>
+  {loading ? "Loading..." : "Load"}
+</button>
+<div style={{ opacity: done ? 0.6 : 1 }}>
+  {done ? "Done" : "Todo"}
+</div>
+
+// Local aliases used by JSX
+const modalTitle = editing ? "Edit Person" : "Add Person";
+
+// Nested ternaries work too
 {score >= 90 ? "A" : score >= 80 ? "B" : "C"}
 ```
 
-You don't need to use `ifElse()` explicitly in JSX.
+Common lowered sites include:
 
-## Using ifElse() Directly
+- JSX children
+- prop values
+- inline text and template literals
+- style/object property values
+- local consts later consumed by JSX
+- returned object fields
 
-You can use `ifElse()` explicitly outside JSX when needed:
+You usually do not need to author `ifElse()` directly for render-time
+conditionals.
 
-```typescript
-const message = ifElse(
-  user.isLoggedIn,
-  str`Welcome back, ${user.name}!`,
-  "Please log in"
-);
+## Keep `computed()` for Data, Not UI Gating
 
-const processedItems = items.map(item =>
-  ifElse(
-    item.isValid,
-    () => processItem(item),
-    () => ({ ...item, error: "Invalid" })
-  )
-);
-```
+Inside a `computed()` body, ternaries are plain JavaScript, not transformer
+lowered conditionals. That means `Writable<boolean>` values are just truthy
+objects there.
+
+Use plain ternaries in authored expression positions instead of wrapping JSX in
+`computed()`. If you're unsure whether a site lowers the way you expect, inspect
+it with `deno task cf check <pattern>.tsx --show-transformed`.
 
 ## See Also
 
+- [computed()](../concepts/computed/computed.md) — when to derive data vs gate UI
 - [View Switching](./view-switching.md) — switching between entire sub-patterns or cell references

@@ -9,6 +9,14 @@ Start with the shared pattern development guidance in:
 
 Read that guide first. It is the canonical reference.
 
+When you're unsure whether a reactive expression site lowers the way you expect,
+inspect the emitted source directly with:
+
+- `deno task cf check <pattern>.tsx --show-transformed`
+
+Current main lowers plain ternaries across many common authored expression
+sites, not just top-level JSX children.
+
 Pay special attention to its SES authoring section before adding module-scope
 setup, timers, or time/random helpers. The current authored escape hatches are
 `safeDateNow()` and `nonPrivateRandom()`.

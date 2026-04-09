@@ -73,6 +73,8 @@ Use the runtime, not just static reasoning:
 
 - `deno task cf check <pattern>.tsx`
 - `deno task cf check <pattern>.tsx --no-run` for faster type validation
+- `deno task cf check <pattern>.tsx --show-transformed` when you need to
+  inspect how the transformer lowered a conditional or reactive expression site
 - `deno task cf test <pattern>.test.tsx` when tests are justified
 
 Primary verification is still runtime behavior. Tests are for logic that is
@@ -195,8 +197,18 @@ callbacks.
 
 ### Conditional JSX
 
-Do not use `computed()` to gate JSX sections. Use JSX conditionals directly.
-The JSX transformer handles ternaries correctly, including nested ternaries.
+Do not use `computed()` to gate JSX sections. Use plain authored ternaries
+instead.
+
+The transformer now lowers ternaries across many common authored expression
+sites that feed JSX or returned pattern values, including:
+
+- JSX children
+- prop values
+- inline text and template literals
+- style/object property values
+- local consts later consumed by JSX
+- returned object fields
 
 ```tsx
 // Wrong
@@ -212,7 +224,8 @@ The JSX transformer handles ternaries correctly, including nested ternaries.
 ```
 
 Inside `computed()`, a `Writable<boolean>` is just a JS object and therefore
-truthy. That leads to subtle incorrect rendering.
+truthy. That leads to subtle incorrect rendering because ternaries inside the
+`computed()` body are plain JS, not transformer-lowered conditionals.
 
 ### CORS and `fetchData`
 

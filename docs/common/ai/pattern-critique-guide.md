@@ -58,7 +58,9 @@ Allowed inside patterns:
 |-----------|-----|
 | `onClick` or conditional UI inside `computed()` | Move the interactive element outside and use direct JSX conditionals |
 
-Ternaries are valid in JSX. The transformer auto-converts them to `ifElse()`.
+Plain ternaries are valid across common JSX-facing expression positions. The
+transformer lowers them automatically in JSX children, prop values, style/object
+properties, and similar authored sites.
 
 ### 4. Type System and Data Shape
 
