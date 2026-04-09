@@ -528,7 +528,7 @@ export interface IObjectCreator<T> {
   // combine them (for example, merging properties)
   mergeMatches(
     matches: T[],
-    schema?: JSONSchema,
+    schema: JSONSchemaObj,
   ): T | undefined;
   // In the SchemaObjectTraverser system, we'll copy the object's value into
   // the new version
@@ -564,7 +564,7 @@ export interface IObjectCreator<T> {
 class StandardObjectCreator implements IObjectCreator<FabricValue> {
   mergeMatches(
     matches: FabricValue[],
-    _schema?: JSONSchema,
+    _schema: JSONSchemaObj,
   ): FabricValue {
     // These value objects should be merged. While this isn't JSONSchema
     // spec, when we have an anyOf with branches where name is set in one

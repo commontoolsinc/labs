@@ -3,7 +3,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { Immutable, isRecord } from "@commonfabric/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
-import type { JSONValue } from "@commonfabric/api";
+import type { CellKind, JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   type FabricValue,
@@ -503,9 +503,14 @@ class TransformObjectCreator
   ) {
   }
 
+  /**
+   * @param matches
+   * @param schema An allOf or anyOf schema
+   * @returns
+   */
   mergeMatches<T>(
     matches: T[],
-    schema?: JSONSchema,
+    schema: JSONSchemaObj,
   ): T | Record<string, T> | undefined {
     // These value objects should be merged. While this isn't JSONSchema
     // spec, when we have an anyOf with branches where name is set in one
@@ -517,11 +522,31 @@ class TransformObjectCreator
       // anymore.
       const cellMatch = matches.find((v) => isCell(v));
       if (cellMatch !== undefined) {
-        if (typeof schema === "object") {
-          const { asCell: _, ...restSchema } = schema;
-          return cellMatch.asSchema(restSchema) as any;
+        // At least one match is a cell. If they are all cells, we should be
+        // able to combine them. If some are not, we could alter our schema on
+        // the cell to include the anyOf. Since that's already a cell, we want
+        // to remove the first "cell" entry from the asCell array.
+        // I'm not going to fully support legacy streams here, since this is
+        // already a super edge case.
+        if (schema.asCell !== undefined) {
+          // Use the asCell from the anyOf/allOf schema
+          const unwrappedSchema = unwrapAsCellSchema(schema);
+          return cellMatch.asSchema(unwrappedSchema) as any;
         } else {
-          return cellMatch.asSchema(schema) as any;
+          // at least one of the entries should have had an asCell or we
+          // wouldn't have a cell. We will use the asCell used for creating
+          // this cell, but change the rest of the schema to be the logical
+          // combination schema.
+          const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
+          const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
+          const asCellValues = getAsCellValues(cellMatch.schema);
+          const combinedSchema = {
+            ...schema,
+            ...(allOfItems.length > 0) && { allOf: allOfItems },
+            ...(anyOfItems.length > 0) && { anyOf: anyOfItems },
+            ...(asCellValues.length > 0) && { asCell: asCellValues },
+          };
+          return cellMatch.asSchema(combinedSchema) as any;
         }
       }
     }
@@ -560,16 +585,8 @@ class TransformObjectCreator
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(this.runtime, this.tx, link);
     } else if (isRecord(link.schema)) {
-      const { asCell, asStream, ...restSchema } = link.schema;
-      let asCellValues = [];
-      // Support both modern and legacy versions
-      if (Array.isArray(asCell)) {
-        asCellValues = asCell;
-      } else if (asCell === true) {
-        asCellValues = ["cell"];
-      } else if (asStream === true) {
-        asCellValues = ["stream"];
-      }
+      const { asCell: _c, asStream: _s, ...restSchema } = link.schema;
+      const asCellValues = getAsCellValues(link.schema);
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest
         // in with the schema for the created cell.
@@ -695,4 +712,35 @@ export function generateHandlerSchema(
     ...(Object.keys(mergedDefinitions).length &&
       { definitions: mergedDefinitions }),
   }, true);
+}
+
+function getAsCellValues(schema: JSONSchema | undefined): readonly CellKind[] {
+  // Support both modern and legacy versions
+  if (isRecord(schema)) {
+    if (Array.isArray(schema.asCell)) {
+      return schema.asCell;
+    } else if (schema.asCell === true) {
+      return ["cell"];
+    } else if (schema.asStream === true) {
+      return ["stream"];
+    }
+  }
+  return [];
+}
+
+function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
+  const { asCell: _c, asStream: _s, ...restSchema } = schema;
+  const asCellValues = getAsCellValues(schema);
+  return {
+    ...restSchema,
+    ...(asCellValues.length > 1 && { asCell: asCellValues.slice(1) }),
+  };
+}
+
+function removeAsCellFromSchema(schema: JSONSchema): JSONSchema {
+  if (isRecord(schema)) {
+    const { asCell: _c, asStream: _s, ...restSchema } = schema;
+    return restSchema;
+  }
+  return schema;
 }

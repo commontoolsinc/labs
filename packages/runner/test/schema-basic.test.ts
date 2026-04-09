@@ -724,5 +724,71 @@ describe("Schema - Basic Types and References", () => {
       expect(isCell(innerStringCell)).toBe(true);
       expect(innerStringCell.get()).toBe("hello double asCell");
     });
+
+    it.skip(
+      'should preserve nested asCell wrappers through anyOf branches',
+      () => {
+      const inner = runtime.getCell<string>(
+        space,
+        "double-ascell-anyof-inner-string",
+        { type: "string" } as const satisfies JSONSchema,
+        tx,
+      );
+      inner.set("hello anyOf nested cell");
+
+      const outer = runtime.getCell<any>(
+        space,
+        "double-ascell-anyof-outer-string",
+        {
+          type: "object",
+          properties: {
+            current: {
+              anyOf: [
+                { type: "string" },
+                { type: "string", asCell: ["cell", "cell"] },
+              ],
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      outer.set({ current: inner });
+
+      const currentCell = outer.key("current");
+      const outerNestedCell = currentCell.get();
+      const innerStringCell = outerNestedCell.get();
+
+      expect(isCell(outerNestedCell)).toBe(true);
+      expect(isCell(innerStringCell)).toBe(true);
+      expect(innerStringCell.get()).toBe("hello anyOf nested cell");
+      },
+    );
+
+    it('should create nested default cells for asCell: ["cell", "cell"]', () => {
+      const outer = runtime.getCell<any>(
+        space,
+        "double-ascell-default-outer-string",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "string",
+              default: "hello nested default",
+              asCell: ["cell", "cell"],
+            },
+          },
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      const currentCell = outer.key("current");
+      const outerNestedCell = currentCell.get();
+      const innerStringCell = outerNestedCell.get();
+
+      expect(isCell(outerNestedCell)).toBe(true);
+      expect(isCell(innerStringCell)).toBe(true);
+      expect(innerStringCell.get()).toBe("hello nested default");
+    });
   });
 });
