@@ -9,7 +9,7 @@
     "dev-local": "deno task clean && API_URL=http://localhost:$TOOLSHED_PORT deno run -A ../felt/cli.ts dev .",
     "dev-clusterduck": "deno task clean && API_URL='http://localhost:7001' deno run -A ../felt/cli.ts dev .",
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
-    "test": "deno test test/*.test.ts"
+    "test": "deno test --allow-env --allow-read test/*.test.ts"
   },
   "exports": {
     "./shared": "./shared/mod.ts"
