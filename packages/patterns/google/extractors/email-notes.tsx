@@ -440,7 +440,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     fontWeight: "500",
                   }}
                 >
-                  {ifElse(loadingLabels, "Loading...", "Load Labels")}
+                  {loadingLabels ? "Loading..." : "Load Labels"}
                 </button>
               </div>,
               null,
@@ -552,7 +552,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                               ),
                             }}
                           >
-                            {ifElse(isProcessing, "Processing...", "Done")}
+                            {isProcessing ? "Processing..." : "Done"}
                           </button>
                         </div>
                       </div>

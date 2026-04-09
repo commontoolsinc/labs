@@ -2462,7 +2462,7 @@ export const ExtractorModule = pattern<
             }}
           >
             <span style={{ color: "#92400e", fontWeight: "500" }}>
-              {ifElse(isPreviewPhase, "Review Changes", "Select Sources")}
+              {isPreviewPhase ? "Review Changes" : "Select Sources"}
             </span>
             {ifElse(
               isExtractingPhase,
@@ -2517,11 +2517,9 @@ export const ExtractorModule = pattern<
                       color: "#6b7280",
                     }}
                   >
-                    {ifElse(
-                      hasNoUsableSources,
-                      "Add content to sources below:",
-                      "Select sources to extract from:",
-                    )}
+                    {hasNoUsableSources
+                      ? "Add content to sources below:"
+                      : "Select sources to extract from:"}
                   </div>
                   <div
                     style={{
@@ -2688,7 +2686,7 @@ export const ExtractorModule = pattern<
                       }}
                     >
                       Extract from {selectedSourceCount} source
-                      {ifElse(isSingleSource, "", "s")}
+                      {isSingleSource ? "" : "s"}
                     </button>
                   </div>
                 </div>,
@@ -2752,7 +2750,7 @@ export const ExtractorModule = pattern<
                     textDecoration: "underline",
                   }}
                 >
-                  {ifElse(showErrorDetails, "Hide details", "Show details")}
+                  {showErrorDetails ? "Hide details" : "Show details"}
                 </button>
                 {ifElse(
                   showErrorDetails,
@@ -3198,11 +3196,9 @@ export const ExtractorModule = pattern<
                             fontStyle: "italic",
                           }}
                         >
-                          {ifElse(
-                            cleanupDisabled,
-                            "Cleanup disabled - Notes will remain unchanged",
-                            "No changes needed to Notes content",
-                          )}
+                          {cleanupDisabled
+                            ? "Cleanup disabled - Notes will remain unchanged"
+                            : "No changes needed to Notes content"}
                         </div>,
                       )}
                     </div>,

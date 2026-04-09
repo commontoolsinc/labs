@@ -997,7 +997,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
                     fontWeight: "500",
                   }}
                 >
-                  {ifElse(loadingLabels, "Loading...", "Load Labels")}
+                  {loadingLabels ? "Loading..." : "Load Labels"}
                 </button>
               </div>,
               null,
@@ -1193,7 +1193,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
                               fontSize: "12px",
                             }}
                           >
-                            {ifElse(isExpanded, "Hide thread", "Show thread")}
+                            {isExpanded ? "Hide thread" : "Show thread"}
                           </button>
                         </div>
                       </div>

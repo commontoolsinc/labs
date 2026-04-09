@@ -335,7 +335,7 @@ export default pattern<Input, Output>(
                   cursor: "pointer",
                 }}
               >
-                {ifElse(loadingLabels, "Loading...", "Refresh Labels")}
+                {loadingLabels ? "Loading..." : "Refresh Labels"}
               </button>
             </div>,
             null,
@@ -887,7 +887,7 @@ export default pattern<Input, Output>(
                       opacity: derive(processing, (p) => (p ? 0.7 : 1)),
                     }}
                   >
-                    {ifElse(processing, "Applying...", "Apply Changes")}
+                    {processing ? "Applying..." : "Apply Changes"}
                   </button>
                 </div>
               </div>

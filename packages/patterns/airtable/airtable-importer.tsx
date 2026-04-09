@@ -349,7 +349,7 @@ export default pattern<Input, Output>(
                       fontSize: "14px",
                     }}
                   >
-                    {ifElse(loading, "Loading...", "Load Bases")}
+                    {loading ? "Loading..." : "Load Bases"}
                   </button>
                 </div>
 
@@ -436,7 +436,7 @@ export default pattern<Input, Output>(
                         fontSize: "14px",
                       }}
                     >
-                      {ifElse(loading, "Loading...", "Load Tables")}
+                      {loading ? "Loading..." : "Load Tables"}
                     </button>
                   </div>
 
@@ -525,7 +525,7 @@ export default pattern<Input, Output>(
                         fontSize: "14px",
                       }}
                     >
-                      {ifElse(loading, "Fetching...", "Fetch Records")}
+                      {loading ? "Fetching..." : "Fetch Records"}
                     </button>
                   </div>
 
