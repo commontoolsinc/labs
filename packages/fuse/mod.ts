@@ -192,7 +192,9 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
   ) {
     return buildNodeStat(node, ino, {
-      isWritable: Boolean(
+      // When the backend transport is dead, report all files as read-only
+      // so writes fail with EACCES instead of silently succeeding.
+      isWritable: !bridge?.disconnected && Boolean(
         bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
       ),
       ownership: mountOwnership,
@@ -846,6 +848,24 @@ export async function main(argv: string[] = Deno.args) {
         ? "[fuse] handler flush error"
         : "[fuse] flush error";
       console.error(`${logPrefix}: ${e}`);
+
+      // Detect transport/connection failures and mark the bridge as
+      // disconnected so subsequent writes fail loudly (EACCES) instead
+      // of silently succeeding in the optimistic local tree.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (
+        bridge && !bridge.disconnected &&
+        (msg.includes("transport closed") ||
+          msg.includes("ConnectionError") ||
+          msg.includes("connection refused"))
+      ) {
+        bridge.disconnected = true;
+        console.error(
+          "[FUSE] ⚠️  Backend connection lost — mount is now READ-ONLY. " +
+            "Remount to restore write access.",
+        );
+      }
+
       return EIO;
     } finally {
       handle.flushing = false;
