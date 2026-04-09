@@ -30,6 +30,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IStorageSubscription,
+  IStorageTransaction,
   MediaType,
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
@@ -232,6 +233,7 @@ export interface TriggerTraceActionRecord {
     | "schedule-effect"
     | "mark-dirty"
     | "already-dirty"
+    | "skip-own-commit-source"
     | "skip-same-change-group";
   pendingBefore: boolean;
   pendingAfter: boolean;
@@ -379,6 +381,7 @@ export class Scheduler {
 
   // Throttle infrastructure - "value can be stale by T ms"
   private actionThrottle = new WeakMap<Action, number>();
+  private inFlightSources = new WeakMap<Action, Set<IStorageTransaction>>();
 
   // Track what each action has ever written (grows over time, includes potentialWrites).
   // Unlike dependencies.writes (current run only), mightWrite is cumulative and used
@@ -1095,6 +1098,7 @@ export class Scheduler {
       changeGroup: this.actionChangeGroups.get(action),
     });
     (tx.tx as { debugActionId?: string }).debugActionId = actionId;
+    this.addInFlightSource(action, tx.tx);
     const actionStartTime = performance.now();
 
     let result: any;
@@ -1150,6 +1154,8 @@ export class Scheduler {
               // Clear retries after successful commit.
               this.retries.delete(action);
             }
+          }).finally(() => {
+            this.removeInFlightSource(action, tx.tx);
           }).catch((error) => {
             logger.error(
               "schedule-error",
@@ -1505,6 +1511,27 @@ export class Scheduler {
                   : "computation";
                 const pendingBefore = this.pending.has(action);
                 const dirtyBefore = this.dirty.has(action);
+                const isOwnCommitSource = notification.type === "commit" &&
+                  notification.source !== undefined &&
+                  this.inFlightSources.get(action)?.has(notification.source);
+                if (isOwnCommitSource) {
+                  triggerFlowLogger.debug("schedule-change-skip-source", () => [
+                    `Change #${changeIndex} skipped action commit source`,
+                    `Action: ${actionId}`,
+                  ]);
+                  triggerTraceEntry?.triggered.push({
+                    actionId,
+                    actionType,
+                    mode: this.pullMode ? "pull" : "push",
+                    decision: "skip-own-commit-source",
+                    pendingBefore,
+                    pendingAfter: this.pending.has(action),
+                    dirtyBefore,
+                    dirtyAfter: this.dirty.has(action),
+                    scheduledEffects: [],
+                  });
+                  continue;
+                }
                 if (
                   hasSourceChangeGroup &&
                   actionChangeGroup !== undefined &&
@@ -3719,7 +3746,6 @@ export class Scheduler {
         if (this.pullMode) {
           this.clearDirty(fn);
         }
-        this.unsubscribe(fn, { preserveChangeGroup: true });
 
         this.filterStats.executed++;
         iterActionsRun++;
@@ -3924,6 +3950,30 @@ export class Scheduler {
       });
     }
     logger.timeEnd("scheduler", "execute");
+  }
+
+  private addInFlightSource(
+    action: Action,
+    source: IStorageTransaction,
+  ): void {
+    let sources = this.inFlightSources.get(action);
+    if (!sources) {
+      sources = new Set<IStorageTransaction>();
+      this.inFlightSources.set(action, sources);
+    }
+    sources.add(source);
+  }
+
+  private removeInFlightSource(
+    action: Action,
+    source: IStorageTransaction,
+  ): void {
+    const sources = this.inFlightSources.get(action);
+    if (!sources) return;
+    sources.delete(source);
+    if (sources.size === 0) {
+      this.inFlightSources.delete(action);
+    }
   }
 
   /**
