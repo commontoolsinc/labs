@@ -116,12 +116,31 @@ This plan assumes phased availability:
   lower-layer code-identity work in
   [runner_cfc_implementation.md](./runner_cfc_implementation.md) is complete
 
+Deferred until the lower-layer verified code-identity work lands:
+
+- verified compiled user code is still gated on the runner identity model
+- the authoring surface documents the handoff now, but the runner still owns the
+  eventual identity decision
+
 ### Structural Provenance Handoff
 
 `projection`, `exactCopyOf`, and `collection` annotations only become
 enforceable when the runtime also records the write-policy inputs described in
 the runner plan. Authoring work must therefore standardize the emitted schema
 shapes that those runtime write-policy inputs are checked against.
+
+The emitted schema shapes are standardized as follows:
+
+- `writeAuthorizedBy` emits a stable binding marker that the schema generator
+  can rehydrate
+- `exactCopyOf` lowers to canonical JSON Pointer segments
+- `projection` lowers to canonical `from` + `path` pointer metadata
+- `collection` lowers to canonical collection claim metadata
+
+Deferred until runtime mutation paths record the required write-policy inputs:
+
+- the authoring surface emits the structural claims, but the runner still owns
+  enforcement
 
 ### UI Contract Handoff
 
@@ -131,6 +150,9 @@ UI helpers are only useful if the compile-time and runtime halves agree:
 - builder and renderer emit the same runtime node shape
 - the runner's trusted-event and provenance path consumes those hints without
   inventing a second helper-specific policy format
+
+This branch already aligns the emitted `ifc.uiContract` shape with the runner's
+trusted-event and UI provenance path.
 
 ### `OpaqueInput` Boundary
 
@@ -142,6 +164,17 @@ to keep that boundary clear:
 - builder/runtime input handling owns opaque read restrictions
 - runner boundary enforcement is driven by the supported IFC rule set, not by
   treating `opaque` as a transition rule
+
+### Literal Evaluation Limits
+
+Metadata payload lowering is intentionally conservative. The authoring
+transform only evaluates payloads that are statically reducible during
+transform-time lowering; dynamic expressions remain runtime values and do not
+become schema metadata.
+
+UI helper hints follow the same rule. `cfcUiContract` is synthesized only from
+compile-time string literals, while non-literal helper props still rewrite the
+DOM but do not produce schema hints.
 
 ## Workstreams
 
@@ -159,7 +192,7 @@ to keep that boundary clear:
       `ProjectionOf`, and `Projection`
 - [x] Lock the supported `WriteAuthorizedBy` declaration forms and the required
       `cfc-write-authorized-by` diagnostic
-- [ ] Document the literal-only limits for metadata payload evaluation and UI
+- [x] Document the literal-only limits for metadata payload evaluation and UI
       helper schema hint synthesis
 
 ### 2. Add The Public API Surface
@@ -169,8 +202,19 @@ to keep that boundary clear:
 - [x] Export `OpaqueInput<T, Spec>` and keep its base schema shape equal to `T`
 - [x] Keep friendly sugar as aliases over the canonical surface rather than
       separate lowering paths
-- [ ] Add author-facing examples for path-bearing projections, opaque inputs,
+- [x] Add author-facing examples for path-bearing projections, opaque inputs,
       and trusted write authorization annotations
+
+#### Authoring Examples
+
+The supported helpers should read like ordinary TypeScript:
+
+- `ProjectionPath<{ title: string }, "/source", readonly ["nested", "path"]>`
+  lowers to `ifc.projection` with canonical JSON Pointer paths.
+- `OpaqueInput<{ token: string }>` preserves the base schema of `T` while
+  adding `ifc.opaque`.
+- `WriteAuthorizedBy<{ title: string }, typeof localFunction>` preserves the
+  local binding identity marker for later runner handoff.
 
 ### 3. Implement Schema Lowering In `schema-generator`
 
@@ -227,24 +271,26 @@ to keep that boundary clear:
 - [x] Add explicit acceptance criteria that compare the normalized IFC output
       from inferred and explicit schema paths to protect stable runner
       `schemaHash` values
-- [ ] Define the emitted schema shape that the runner prepare engine will read
+- [x] Define the emitted schema shape that the runner prepare engine will read
       for `writeAuthorizedBy`, `exactCopyOf`, `projection`, and `collection`
-- [ ] Align the `WriteAuthorizedBy` handoff with the runner's
-      `ImplementationIdentity` model instead of treating schema emission as the
-      end of the feature
-- [ ] Document that trust-sensitive enforcement for verified compiled user code
-      remains gated on the lower-layer identity work
-- [ ] Document that structural claims are not enforceable unless runtime
-      mutation paths also record the required write-policy inputs
-- [ ] Align `ifc.uiContract` output with the runner's trusted-event and UI
+- [ ] Deferred until lower-layer verified code-identity work lands: Align the
+      `WriteAuthorizedBy` handoff with the runner's `ImplementationIdentity`
+      model instead of treating schema emission as the end of the feature
+- [ ] Deferred until the lower-layer identity work lands: Document that
+      trust-sensitive enforcement for verified compiled user code remains
+      gated on the lower-layer identity work
+- [ ] Deferred until runtime mutation paths record the required write-policy
+      inputs: Document that structural claims are not enforceable unless
+      runtime mutation paths also record the required write-policy inputs
+- [x] Align `ifc.uiContract` output with the runner's trusted-event and UI
       provenance path in workstream 11 of
       [runner_cfc_implementation.md](./runner_cfc_implementation.md)
-- [ ] Keep `OpaqueInput` documented as an authoring/runtime feature rather than
+- [x] Keep `OpaqueInput` documented as an authoring/runtime feature rather than
       a commit-boundary transition rule
 
 ### 7. Testing And Acceptance Coverage
 
-- [ ] Add transformer tests for alias expansion, projection path encoding,
+- [x] Add transformer tests for alias expansion, projection path encoding,
       `OpaqueInput`, JSX helper rewriting, and `WriteAuthorizedBy` diagnostics
 - [x] Add schema-generator tests for every canonical alias and metadata merge
       path
@@ -259,14 +305,14 @@ to keep that boundary clear:
 
 ### 8. Rollout Order
 
-- [ ] Land the contract docs and public API surface first
-- [ ] Land schema-generator lowering for the canonical alias set next
-- [ ] Land `WriteAuthorizedBy` diagnostics and cross-stage identity plumbing
-- [ ] Land the UI helper vertical slice as one coordinated transformer,
+- [x] Land the contract docs and public API surface first
+- [x] Land schema-generator lowering for the canonical alias set next
+- [x] Land `WriteAuthorizedBy` diagnostics and cross-stage identity plumbing
+- [x] Land the UI helper vertical slice as one coordinated transformer,
       schema-injection, and runtime-helper change
-- [ ] Land runner-aligned acceptance tests before treating the authoring surface
+- [x] Land runner-aligned acceptance tests before treating the authoring surface
       as complete
-- [ ] Publish author guidance only after the inferred and explicit schema paths
+- [x] Publish author guidance only after the inferred and explicit schema paths
       are demonstrably equivalent
 
 ## Done Means
