@@ -7,6 +7,51 @@ import {
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
+function extractSchemas(output: string): string[] {
+  const schemas: string[] = [];
+  const marker = "as const satisfies __cfHelpers.JSONSchema";
+  let searchFrom = 0;
+  while (true) {
+    const markerIdx = output.indexOf(marker, searchFrom);
+    if (markerIdx === -1) break;
+
+    let start = markerIdx - 1;
+    while (start >= 0 && /\s/.test(output[start]!)) start--;
+
+    let schemaText: string | undefined;
+    if (output[start] === "}") {
+      let depth = 1;
+      start--;
+      while (start >= 0 && depth > 0) {
+        if (output[start] === "}") depth++;
+        else if (output[start] === "{") depth--;
+        start--;
+      }
+      start++;
+      schemaText = output.slice(start, markerIdx).trim();
+    } else {
+      let tokenStart = start;
+      while (tokenStart >= 0 && /[A-Za-z]/.test(output[tokenStart]!)) {
+        tokenStart--;
+      }
+      tokenStart++;
+      const token = output.slice(tokenStart, start + 1).trim();
+      if (token === "true" || token === "false") {
+        schemaText = token;
+      }
+    }
+
+    if (!schemaText) {
+      searchFrom = markerIdx + marker.length;
+      continue;
+    }
+
+    schemas.push(schemaText);
+    searchFrom = markerIdx + marker.length;
+  }
+  return schemas;
+}
+
 Deno.test(
   "Pipeline regression: manual mapWithPattern preserves fixed plain-capture key evaluation",
   async () => {
@@ -92,6 +137,51 @@ const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
 
     assertStringIncludes(output, "return c.key(__cfHelpers.NAME)!");
     assert(!output.includes("return c.key(NAME)!"));
+  },
+);
+
+Deno.test(
+  "Pipeline regression: nested writable map callbacks keep direct key reads in shrunk schemas",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL(
+        "./fixtures/kitchensink/nested-writable-pattern-branches.input.tsx",
+        import.meta.url,
+      ),
+    );
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const schemas = extractSchemas(output);
+
+    const outerMapSchema =
+      schemas.find((schema) =>
+        schema.includes('required: ["element", "params"]') &&
+        schema.includes("globalAccent") &&
+        schema.includes("selectedTaskId") &&
+        schema.includes("hoveredSectionId")
+      ) ?? "";
+    assert(outerMapSchema.length > 0, "expected outer sections map schema");
+    assertStringIncludes(outerMapSchema, "id");
+    assertStringIncludes(outerMapSchema, "title");
+    assertStringIncludes(outerMapSchema, "expanded");
+    assertStringIncludes(outerMapSchema, "accent");
+    assertStringIncludes(outerMapSchema, "tasks");
+
+    const innerMapSchema =
+      schemas.find((schema) =>
+        schema.includes('required: ["element", "params"]') &&
+        schema.includes("sectionIndex") &&
+        schema.includes("selectedTaskId") &&
+        schema.includes("hoveredSectionId") &&
+        !schema.includes("globalAccent")
+      ) ?? "";
+    assert(innerMapSchema.length > 0, "expected inner tasks map schema");
+    assertStringIncludes(innerMapSchema, "id");
+    assertStringIncludes(innerMapSchema, "label");
+    assertStringIncludes(innerMapSchema, "done");
+    assertStringIncludes(innerMapSchema, "tags");
+    assertStringIncludes(innerMapSchema, "note");
   },
 );
 

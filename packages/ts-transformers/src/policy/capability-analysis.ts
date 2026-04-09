@@ -398,6 +398,28 @@ function unwrapIdentifierUsageSite(node: ts.Identifier): ts.Expression {
   }
 }
 
+function unwrapExpressionUsageSite(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (true) {
+    const parent = current.parent;
+    if (!parent) {
+      return current;
+    }
+    if (
+      (ts.isParenthesizedExpression(parent) ||
+        ts.isAsExpression(parent) ||
+        ts.isTypeAssertionExpression(parent) ||
+        ts.isSatisfiesExpression(parent) ||
+        ts.isNonNullExpression(parent)) &&
+      parent.expression === current
+    ) {
+      current = parent;
+      continue;
+    }
+    return current;
+  }
+}
+
 function isPassThroughIdentifierUsage(node: ts.Identifier): boolean {
   const usage = unwrapIdentifierUsageSite(node);
   const parent = usage.parent;
@@ -1820,6 +1842,22 @@ export function analyzeFunctionCapabilities(
               );
               if (argPath.dynamic) {
                 markWildcard(receiver.root);
+              } else {
+                const keyUsage = unwrapExpressionUsageSite(node);
+                const keyUsageParent = keyUsage.parent;
+                const isChainedIntoMemberAccess = !!(
+                  keyUsageParent &&
+                  (ts.isPropertyAccessExpression(keyUsageParent) ||
+                    ts.isElementAccessExpression(keyUsageParent)) &&
+                  keyUsageParent.expression === keyUsage
+                );
+                if (!isChainedIntoMemberAccess) {
+                  trackReadRef({
+                    root: receiver.root,
+                    path: [...receiver.path, ...argPath.path],
+                    dynamic: receiver.dynamic,
+                  });
+                }
               }
             } else if (identityEqualsCall) {
               markIdentityUseRef(receiver, node.expression.expression);
@@ -1919,6 +1957,7 @@ export function analyzeFunctionCapabilities(
       }
 
       if (ts.isForOfStatement(node)) {
+        const iterableExpression = unwrapExpression(node.expression);
         const iterableBinding = resolveArrayElementBinding(node.expression);
         const iterableRef =
           iterableBinding && isSourceRefBinding(iterableBinding)
@@ -1931,6 +1970,9 @@ export function analyzeFunctionCapabilities(
             markPassthrough(iterableRef.root);
           } else {
             trackReadRef(iterableRef);
+          }
+          if (ts.isCallExpression(iterableExpression)) {
+            visit(node.expression);
           }
         } else {
           visit(node.expression);

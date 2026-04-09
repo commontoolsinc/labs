@@ -1936,6 +1936,39 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "pattern preserves defaults for fixed-symbol destructuring aliases",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { NAME as CF_NAME, pattern, UI } from "commonfabric";',
+        "type Piece = {",
+        "  [CF_NAME]?: string;",
+        "  metadata: { author: string; tags: string[] };",
+        "};",
+        'const p = pattern<Piece>(({ [CF_NAME]: name = "Untitled" }) => ({',
+        "  [UI]: <div>{name}</div>,",
+        "}));",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "$NAME");
+      assertStringIncludes(inputSchema, '"default": "Untitled"');
+    },
+  );
+
+  await t.step(
     "derive resolves local const string keys instead of fixed-key name fallbacks",
     async () => {
       const source = [

@@ -1315,6 +1315,42 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis visits chained array callbacks inside for...of iterable expressions",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+      }
+
+      interface Section {
+        active: boolean;
+        title: string;
+        unused: string;
+      }
+
+      const fn = (input: { sections: Section[] }) => {
+        for (const section of input.sections.filter((entry) => entry.active)) {
+          section.title;
+        }
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("sections"));
+    assert(input.readPaths.includes("sections.0.active"));
+    assert(input.readPaths.includes("sections.0.title"));
+    assertEquals(input.readPaths.includes("sections.0.unused"), false);
+  },
+);
+
+Deno.test(
   "Capability analysis handles deeply nested mutual recursion without hanging",
   () => {
     const source = `

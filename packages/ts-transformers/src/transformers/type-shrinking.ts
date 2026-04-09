@@ -2051,6 +2051,7 @@ function applySingleDefaultToTypeNode(
   path: readonly string[],
   defaultType: ts.TypeNode,
   factory: ts.NodeFactory,
+  checker?: ts.TypeChecker,
 ): { node: ts.TypeNode; applied: boolean } {
   if (path.length === 0) {
     return {
@@ -2070,7 +2071,7 @@ function applySingleDefaultToTypeNode(
       if (!ts.isPropertySignature(member) || !member.type || !member.name) {
         return member;
       }
-      const memberName = getPropertyNameText(member.name);
+      const memberName = getPropertyNameText(member.name, checker);
       if (memberName !== head) {
         return member;
       }
@@ -2079,6 +2080,7 @@ function applySingleDefaultToTypeNode(
         tail,
         defaultType,
         factory,
+        checker,
       );
       if (!updatedChild.applied) {
         return member;
@@ -2112,6 +2114,7 @@ function applySingleDefaultToTypeNode(
       tail,
       defaultType,
       factory,
+      checker,
     );
     if (!updatedChild.applied) {
       return { node, applied: false };
@@ -2132,6 +2135,7 @@ function applySingleDefaultToTypeNode(
         path,
         defaultType,
         factory,
+        checker,
       );
       if (updatedChild.applied) {
         applied = true;
@@ -2151,6 +2155,7 @@ function applyDefaultsToTypeNode(
   node: ts.TypeNode,
   defaults: readonly CapabilityParamDefault[] | undefined,
   factory: ts.NodeFactory,
+  checker?: ts.TypeChecker,
 ): { node: ts.TypeNode; appliedCount: number } {
   if (!defaults || defaults.length === 0) {
     return { node, appliedCount: 0 };
@@ -2165,6 +2170,7 @@ function applyDefaultsToTypeNode(
       entry.path,
       entry.defaultType,
       factory,
+      checker,
     );
     if (updated.applied) {
       next = updated.node;
@@ -2184,7 +2190,7 @@ export function applyCapabilityDefaultsToTypeNode(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
 ): ts.TypeNode {
-  const initial = applyDefaultsToTypeNode(node, defaults, factory);
+  const initial = applyDefaultsToTypeNode(node, defaults, factory, checker);
   if (initial.appliedCount > 0 || !defaults || defaults.length === 0) {
     return initial.node;
   }
@@ -2207,7 +2213,12 @@ export function applyCapabilityDefaultsToTypeNode(
     return initial.node;
   }
 
-  const fallback = applyDefaultsToTypeNode(fallbackNode, defaults, factory);
+  const fallback = applyDefaultsToTypeNode(
+    fallbackNode,
+    defaults,
+    factory,
+    checker,
+  );
   return fallback.appliedCount > 0 ? fallback.node : initial.node;
 }
 
