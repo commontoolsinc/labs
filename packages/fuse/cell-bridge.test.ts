@@ -540,6 +540,129 @@ Deno.test("CellBridge.rebuildPieceProp keeps replaced callable inodes alive brie
   assertEquals(tree.getNode(initialToolIno!)?.kind, "callable");
 });
 
+Deno.test("CellBridge.rebuildPieceProp clears stale result mounts when value becomes null", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const initialResultCell = makeCell(
+    { title: "before" },
+    {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+      },
+    },
+  );
+
+  const piece = {
+    id: "of:entity-null-result",
+    name: () => "Null Result Fixture",
+    getPatternMeta: () => Promise.resolve({ patternName: "null-result" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(initialResultCell),
+      get: () => Promise.resolve(initialResultCell.get()),
+    },
+  };
+
+  state.pieceControllers.set(
+    "Null Result Fixture",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Null Result Fixture", "home");
+  state.pieceMap.set("Null Result Fixture", piece.id);
+  state.pieceInos.set("Null Result Fixture", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  const initialResultIno = tree.lookup(pieceIno, "result");
+  assertEquals(initialResultIno !== undefined, true);
+  assertEquals(getFileContent(tree, initialResultIno!, "title"), "before");
+  assertEquals(tree.lookup(pieceIno, "result.json") !== undefined, true);
+
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: makeCell(null, undefined),
+      newValue: null,
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Null Result Fixture",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+
+  assertEquals(tree.lookup(pieceIno, "result"), undefined);
+  assertEquals(tree.lookup(pieceIno, "result.json"), undefined);
+});
+
+Deno.test("CellBridge.rebuildPieceProp clears stale FS projection mounts when value becomes null", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const initialResultCell = new SinkableCell({
+    $FS: {
+      type: "text/markdown",
+      content: "Hello",
+      frontmatter: {
+        meta: {
+          pinned: true,
+        },
+      },
+    },
+  });
+
+  const piece = {
+    id: "of:entity-null-fs",
+    name: () => "Null FS Fixture",
+    getPatternMeta: () => Promise.resolve({ patternName: "null-fs" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(initialResultCell as unknown as FakeCell),
+      get: () => Promise.resolve(initialResultCell.get()),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  const pieceIno = tree.lookup(state.piecesIno, "Null-FS-Fixture")!;
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  assertEquals(tree.lookup(pieceIno, "index.md") !== undefined, true);
+  assertEquals(tree.lookup(pieceIno, "meta") !== undefined, true);
+
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: makeCell(null, undefined),
+      newValue: null,
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Null FS Fixture",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+
+  assertEquals(tree.lookup(pieceIno, "index.md"), undefined);
+  assertEquals(tree.lookup(pieceIno, "index.json"), undefined);
+  assertEquals(tree.lookup(pieceIno, "meta"), undefined);
+});
+
 Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables in .handlers", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");

@@ -1094,6 +1094,15 @@ export class CellBridge {
       this.markPiecePropHydrated(pieceIno, propName);
     } else {
       this.markPiecePropCleared(pieceIno, propName);
+      if (existingIno !== undefined) {
+        this.retainDetachedSubtree(existingIno);
+      }
+      if (jsonIno !== undefined) {
+        this.retainDetachedSubtree(jsonIno);
+      }
+      if (propName === "result") {
+        this.clearFsProjectionEntries(pieceIno);
+      }
     }
     if (propName === "result") {
       this.buildHandlersFile(pieceIno, callables);
