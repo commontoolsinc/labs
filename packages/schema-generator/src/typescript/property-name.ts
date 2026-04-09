@@ -133,15 +133,6 @@ export function getComputedPropertyKeyInfo(
   checker?: ts.TypeChecker,
   options: ComputedPropertyKeyResolutionOptions = {},
 ): ComputedPropertyKeyInfo | undefined {
-  const literalValue = getLiteralComputedKeyValue(expr, checker);
-  if (literalValue !== undefined) {
-    return {
-      kind: "literal",
-      text: String(literalValue),
-      value: literalValue,
-    };
-  }
-
   const commonFabricKeyName = resolveCommonFabricComputedKeyName(
     expr,
     checker,
@@ -152,6 +143,15 @@ export function getComputedPropertyKeyInfo(
       kind: "common-fabric",
       name: commonFabricKeyName,
       text: `$${commonFabricKeyName}`,
+    };
+  }
+
+  const literalValue = getLiteralComputedKeyValue(expr, checker);
+  if (literalValue !== undefined) {
+    return {
+      kind: "literal",
+      text: String(literalValue),
+      value: literalValue,
     };
   }
 

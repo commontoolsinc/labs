@@ -72,6 +72,30 @@ const p = pattern<{ item: { title: string } }>((state) => {
 );
 
 Deno.test(
+  "Pipeline regression: imported Common Fabric keys stay helper-backed in rewrites",
+  async () => {
+    const source = `/// <cts-enable />
+import { NAME, UI, pattern } from "commonfabric";
+
+type MentionablePiece = { [NAME]?: string };
+
+const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
+  { mentionable },
+) => ({
+  [UI]: <div>{mentionable.map((c) => c[NAME]!)}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, "return c.key(__cfHelpers.NAME)!");
+    assert(!output.includes("return c.key(NAME)!"));
+  },
+);
+
+Deno.test(
   "Pipeline regression: nested authored ifElse predicate in helper-owned branch lowers to derive",
   async () => {
     const source =

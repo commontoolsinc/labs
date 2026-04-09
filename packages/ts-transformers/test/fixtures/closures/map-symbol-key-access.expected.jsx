@@ -27,7 +27,7 @@ const _p = pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const item = __cf_pattern_input.key("element");
-        return ({ n: item.key(NAME), u: item.key(UI) });
+        return ({ n: item.key(__cfHelpers.NAME), u: item.key(__cfHelpers.UI) });
     }, {
         type: "object",
         properties: {
