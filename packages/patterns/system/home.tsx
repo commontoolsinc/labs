@@ -178,17 +178,19 @@ export default pattern((_) => {
                     </cf-button>
                   </cf-hstack>
                 ))}
-                {computed(() => spaces.get().length === 0) && (
-                  <p
-                    style={{
-                      color: "#888",
-                      fontStyle: "italic",
-                      textAlign: "center",
-                    }}
-                  >
-                    No spaces yet. Add one below.
-                  </p>
-                )}
+                {computed(() => spaces.get().length === 0)
+                  ? (
+                    <p
+                      style={{
+                        color: "#888",
+                        fontStyle: "italic",
+                        textAlign: "center",
+                      }}
+                    >
+                      No spaces yet. Add one below.
+                    </p>
+                  )
+                  : null}
               </cf-vstack>
 
               <hr style={{ border: "none", borderTop: "1px solid #e5e5e7" }} />
