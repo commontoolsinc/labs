@@ -242,8 +242,8 @@ cat "MOUNT/SPACE/pieces/$AGENT_NAME/input/directive"
 ```
 
 `markRunning`, `markIdle`, and `markError` automatically log to the Activity Log
-via `wish("#activity-log")`. You still log individual actions (deploys, populates,
-links) manually — the lifecycle handlers just record start/stop.
+via `wish("#activity-log")`. You still log individual actions (deploys,
+populates, links) manually — the lifecycle handlers just record start/stop.
 
 ### Discovering agents
 
