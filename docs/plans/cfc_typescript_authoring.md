@@ -253,7 +253,7 @@ to keep that boundary clear:
       bindings
 - [x] Add integration tests for UI helper parity across compile-time rewriting,
       builder/runtime helper rendering, and `[UI]` schema synthesis
-- [ ] Add end-to-end tests that exercise runner observe-mode and fail-closed
+- [x] Add end-to-end tests that exercise runner observe-mode and fail-closed
       behavior for trust-sensitive claims emitted by the authoring surface
 - [x] Add fixture coverage for `OpaqueInput<T, Spec>` lowering to `ifc.opaque`
 
