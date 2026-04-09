@@ -129,52 +129,50 @@ export function processDefaultValue(
     );
   }
 
-  const asCell = ContextualFlowControl.isAsCell(resolvedSchema);
-  const asStream = ContextualFlowControl.isAsStream(resolvedSchema);
-  if (asCell || asStream) {
-    const { asCell: _asCell, asStream: _asStream, ...restSchema } =
-      resolvedSchema;
+  const asCellValues = ContextualFlowControl.getAsCellValues(resolvedSchema);
+  if (asCellValues.length > 0) {
+    // Remove the asCell flags from the schema
+    const { asCell: _c, asStream: _s, ...restSchema } = resolvedSchema;
     resolvedSchema = restSchema;
-  }
 
-  // If schema indicates this should be a cell
-  if (asCell) {
-    // If the cell itself has a default value, make it its own (immutable)
-    // doc, to emulate the behavior of .get() returning a different underlying
-    // document when the value is changed. A classic example is
-    // `currentlySelected` with a default of `null`.
-    if (defaultValue === undefined && resolvedSchema.default !== undefined) {
+    if (asCellValues.at(0) === "stream") {
+      logger.warn(
+        "Created asStream as a default value, but this is likely unintentional",
+      );
+      // This can receive events, but at first nothing will be bound to it.
+      // Normally these get created by a handler call.
       return runtime.getImmutableCell(
         link.space,
-        resolvedSchema.default,
+        { $stream: true },
         resolvedSchema,
         tx,
       );
     } else {
-      return createCell(
-        runtime,
-        {
-          ...link,
-          schema: mergeDefaults(resolvedSchema, defaultValue),
-        },
-        getTransactionForChildCells(tx),
-        synced,
-      );
+      // If schema indicates this should be some sort of a cell
+      // If the cell itself has a default value, make it its own (immutable)
+      // doc, to emulate the behavior of .get() returning a different underlying
+      // document when the value is changed. A classic example is
+      // `currentlySelected` with a default of `null`.
+      if (defaultValue === undefined && resolvedSchema.default !== undefined) {
+        return runtime.getImmutableCell(
+          link.space,
+          resolvedSchema.default,
+          resolvedSchema,
+          tx,
+        );
+      } else {
+        return createCell(
+          runtime,
+          {
+            ...link,
+            schema: mergeDefaults(resolvedSchema, defaultValue),
+          },
+          getTransactionForChildCells(tx),
+          synced,
+          asCellValues.at(0),
+        );
+      }
     }
-  }
-
-  if (asStream) {
-    logger.warn(
-      "Created asStream as a default value, but this is likely unintentional",
-    );
-    // This can receive events, but at first nothing will be bound to it.
-    // Normally these get created by a handler call.
-    return runtime.getImmutableCell(
-      link.space,
-      { $stream: true },
-      resolvedSchema,
-      tx,
-    );
   }
 
   // Handle object type defaults
@@ -203,7 +201,10 @@ export function processDefaultValue(
           );
           processedKeys.add(key);
         } else if (isRecord(propSchema)) {
-          if (ContextualFlowControl.isAsCell(propSchema)) {
+          const asCellValues = ContextualFlowControl.getAsCellValues(
+            propSchema,
+          );
+          if (asCellValues.length > 0 && asCellValues.at(0) !== "stream") {
             // asCell are always created, it's their value that can be `undefined`
             result[key] = processDefaultValue(
               runtime,
@@ -414,7 +415,7 @@ export function validateAndTransform(
   if (
     (
       effectiveSchema === undefined ||
-      !SchemaObjectTraverser.asCellOrStream(effectiveSchema)
+      !SchemaObjectTraverser.hasAsCell(effectiveSchema)
     ) &&
     filteredSchema === undefined
   ) {
@@ -433,7 +434,7 @@ export function validateAndTransform(
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.
-  if (SchemaObjectTraverser.asCellOrStream(effectiveSchema)) {
+  if (SchemaObjectTraverser.hasAsCell(effectiveSchema)) {
     // We check for a link value, since we will follow links one step in get
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
@@ -542,7 +543,9 @@ class TransformObjectCreator
           // combination schema.
           const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
           const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
-          const asCellValues = getAsCellValues(cellMatch.schema);
+          const asCellValues = ContextualFlowControl.getAsCellValues(
+            cellMatch.schema,
+          );
           const combinedSchema = {
             ...schema,
             ...(allOfItems.length > 0) && { allOf: allOfItems },
@@ -589,7 +592,7 @@ class TransformObjectCreator
       return createQueryResultProxy(this.runtime, this.tx, link);
     } else if (isRecord(link.schema)) {
       const { asCell: _c, asStream: _s, ...restSchema } = link.schema;
-      const asCellValues = getAsCellValues(link.schema);
+      const asCellValues = ContextualFlowControl.getAsCellValues(link.schema);
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest
         // in with the schema for the created cell.
@@ -717,23 +720,9 @@ export function generateHandlerSchema(
   }, true);
 }
 
-function getAsCellValues(schema: JSONSchema | undefined): readonly CellKind[] {
-  // Support both modern and legacy versions
-  if (isRecord(schema)) {
-    if (Array.isArray(schema.asCell)) {
-      return schema.asCell;
-    } else if (schema.asCell === true) {
-      return ["cell"];
-    } else if (schema.asStream === true) {
-      return ["stream"];
-    }
-  }
-  return [];
-}
-
 function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
   const { asCell: _c, asStream: _s, ...restSchema } = schema;
-  const asCellValues = getAsCellValues(schema);
+  const asCellValues = ContextualFlowControl.getAsCellValues(schema);
   return {
     ...restSchema,
     ...(asCellValues.length > 1 && { asCell: asCellValues.slice(1) }),

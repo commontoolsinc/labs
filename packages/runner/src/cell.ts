@@ -1006,10 +1006,10 @@ export class CellImpl<T extends FabricValue>
     // Determine the kind based on schema flags
     let kind: CellKind = this._kind;
     if (isRecord(childSchema)) {
-      if (ContextualFlowControl.isAsCell(childSchema)) {
-        kind = "cell";
-      } else if (ContextualFlowControl.isAsStream(childSchema)) {
-        kind = "stream";
+      const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
+      // we can override the kind of cell we use for a key
+      if (asCellValues.length > 0) {
+        kind = asCellValues[0];
       }
     }
 

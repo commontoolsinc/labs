@@ -541,18 +541,15 @@ function recursiveStripAsCellFromSchema(
   // handled by recursive calls that create their own copies.
   if (context.options.keepAsCell) {
     result = { ...schema };
-  } else if (
-    context.options.keepStreams && ContextualFlowControl.isAsStream(schema)
-  ) {
-    if (schema.asStream === true) { // old style -- at least sanitize to new style
-      const { asCell: _c, asStream: _s, ...restSchema } = schema;
-      result = { asCell: ["stream"], ...restSchema };
-    } else { // already in the new style, so keep as is
-      result = { ...schema };
-    }
   } else {
     const { asCell: _c, asStream: _s, ...restSchema } = schema;
-    result = restSchema;
+    const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+    // If we're keeping streams and the outermost is a stream, keep it
+    if (context.options.keepStreams && asCellValues.at(0) === "stream") {
+      result = { asCell: asCellValues, ...restSchema };
+    } else {
+      result = restSchema;
+    }
   }
 
   // Recursively process all object properties

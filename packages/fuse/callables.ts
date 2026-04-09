@@ -29,7 +29,7 @@ function isPatternSchemaValue(value: unknown): boolean {
 
 function isPatternSchemaSchema(schema: JSONSchema | undefined): boolean {
   if (!isSchemaRecord(schema)) return false;
-  if (ContextualFlowControl.isAsCell(schema)) {
+  if (ContextualFlowControl.getAsCellValues(schema).at(0) === "cell") {
     return true;
   }
 

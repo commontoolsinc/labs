@@ -118,28 +118,31 @@ export function schemaToTypeString(
     return "unknown"; // Can't resolve ref
   }
 
+  // Normalize asCell/asStream into a single asCellValues array for easier handling
+  const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+
   // At max depth, return simplified representation
   if (depth >= maxDepth) {
-    if (ContextualFlowControl.isAsStream(schema)) return "(...) => void";
-    if (ContextualFlowControl.isAsCell(schema)) return "Cell<...>";
-    if (schema.type === "object") return "{...}";
-    if (schema.type === "array") return "[...]";
-    return String(schema.type || "unknown");
+    if (asCellValues.length > 0) {
+      let innerType = "...";
+      for (let i = asCellValues.length - 1; i >= 0; i--) {
+        innerType = getWrappedTypeString(asCellValues[i], innerType);
+      }
+      return innerType;
+    } else {
+      if (schema.type === "object") return "{...}";
+      if (schema.type === "array") return "[...]";
+      return String(schema.type || "unknown");
+    }
   }
 
-  // Handle wrapper types first
-  const { asCell, asStream, ...restSchema } = schema;
   // Normalize asCell/asStream into a single asCellValue array for easier handling
-  const asCellValue: readonly AsCellType[] = asCell
-    ? (asCell === true ? ["cell"] : asCell)
-    : asStream
-    ? ["stream"]
-    : [];
-  if (asCellValue.length > 0) {
+  if (asCellValues.length > 0) {
+    const { asCell: _c, asStream: _s, ...restSchema } = schema;
     // Wrapper arrays are ordered outermost-first, so apply them from the end.
     let innerType = schemaToTypeString(restSchema, nextOpts);
-    for (let i = asCellValue.length - 1; i >= 0; i--) {
-      innerType = getWrappedTypeString(asCellValue[i], innerType);
+    for (let i = asCellValues.length - 1; i >= 0; i--) {
+      innerType = getWrappedTypeString(asCellValues[i], innerType);
     }
     return innerType;
   }

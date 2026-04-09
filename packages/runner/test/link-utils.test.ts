@@ -833,7 +833,6 @@ describe("link-utils", () => {
     it("should handle keepStreams option with circular schemas", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
         asStream: true,
       };
       schema.self = schema;

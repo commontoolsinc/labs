@@ -1,7 +1,7 @@
 import { JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
-import type { JSONSchema } from "./builder/types.ts";
+import type { CellKind, JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
 import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
@@ -841,25 +841,19 @@ export class ContextualFlowControl {
         this.isTrueSchema(schema["not"]!));
   }
 
-  // Checks the first (outermost) asCell tag to see if this is a cell
-  // Also handles the legacy boolean asCell
-  static isAsCell(schema: JSONSchema | boolean): boolean {
-    if (typeof schema === "boolean") return false;
-    if (schema.asCell === true) {
-      return true;
+  // Utility function to handle the legacy asCell and asStream tags, as well
+  // as the modern asCell array tag.
+  static getAsCellValues(schema: JSONSchema | undefined): readonly CellKind[] {
+    // Support both modern and legacy versions
+    if (isRecord(schema)) {
+      if (Array.isArray(schema.asCell)) {
+        return schema.asCell;
+      } else if (schema.asCell === true) {
+        return ["cell"];
+      } else if (schema.asStream === true) {
+        return ["stream"];
+      }
     }
-    return Array.isArray(schema.asCell) && (schema.asCell.length > 0) &&
-      (schema.asCell[0] === "cell");
-  }
-
-  // Checks the first (outermost) asCell tag to see if this is a stream
-  // Also handles the legacy asStream tag
-  static isAsStream(schema: JSONSchema | boolean): boolean {
-    if (typeof schema === "boolean") return false;
-    if (schema.asStream === true) {
-      return true;
-    }
-    return Array.isArray(schema.asCell) && (schema.asCell.length > 0) &&
-      (schema.asCell[0] === "stream");
+    return [];
   }
 }
