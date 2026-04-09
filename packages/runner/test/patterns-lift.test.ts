@@ -435,6 +435,8 @@ describe("Pattern Runner - Lift", () => {
     // - Instantiate both
     // - Pull only on the first one's result
     // - Only the lift in the first pattern should run
+    runtime.scheduler.enablePullMode();
+
     let lift1Runs = 0;
     let lift2Runs = 0;
 
