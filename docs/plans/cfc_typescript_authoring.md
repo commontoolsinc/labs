@@ -217,7 +217,7 @@ to keep that boundary clear:
 - [x] Synthesize `[UI]` member schemas from returned JSX trees
 - [x] Copy node-local UI contract hints onto the synthesized schema as
       `ifc.uiContract`
-- [ ] Ensure explicit output schemas receive the same `[UI]` helper hints as
+- [x] Ensure explicit output schemas receive the same `[UI]` helper hints as
       inferred output schemas
 - [ ] Mirror the same runtime helper shape in builder and renderer code so
       transformed JSX and direct helper usage converge

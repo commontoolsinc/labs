@@ -2231,6 +2231,19 @@ function handlePatternSchemaInjection(
       checker,
       typeRegistry,
     );
+    if (
+      unwrappedPatternReturnExpr &&
+      ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
+    ) {
+      setUiContractHint(
+        resultTypeNode,
+        getUiContractHintFromObjectLiteral(
+          unwrappedPatternReturnExpr,
+          context.options.schemaHints,
+        ),
+        context.options.schemaHints,
+      );
+    }
   } else if (typeArgs && typeArgs.length === 1) {
     // Case 2: One type argument → input from type arg, result inferred
     inputTypeNode = typeArgs[0]!;

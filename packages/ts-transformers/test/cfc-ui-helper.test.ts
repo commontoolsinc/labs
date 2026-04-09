@@ -188,3 +188,26 @@ Deno.test(
     assertStringIncludes(output, "SubmitDirectCommand");
   },
 );
+
+Deno.test(
+  "UI helper contract hints also reach explicit output schemas",
+  async () => {
+    const source = `/// <cts-enable />
+      import { pattern, UI, UiAction } from "commonfabric";
+
+      type Model = { title: string };
+
+      export default pattern<Model, Model>((state) => ({
+        [UI]: <UiAction action="SubmitDirectCommand">Go</UiAction>,
+        title: state.title,
+      }));
+    `;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, "uiContract");
+    assertStringIncludes(output, "SubmitDirectCommand");
+  },
+);
