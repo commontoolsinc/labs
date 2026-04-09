@@ -102,6 +102,14 @@ const NOTE_CREATE_TIMING_SERIES = (() => {
     return 0;
   }
 })();
+const CAPTURE_NOTE_CREATE_PROFILE_SERIES = (() => {
+  try {
+    const raw = Deno.env.get("CF_CAPTURE_NOTE_CREATE_PROFILE_SERIES");
+    return raw ? Number(raw) : 0;
+  } catch {
+    return 0;
+  }
+})();
 
 type NoteCreateTimingEntry = {
   noteIndex: number;
@@ -111,6 +119,43 @@ type NoteCreateTimingEntry = {
   createToViewMs: number;
   returnToHomeMs: number;
   totalMs: number;
+};
+
+type NoteCreateProfileEntry = {
+  noteIndex: number;
+  focusTiming: Array<{
+    logger: string;
+    key: string;
+    count: number;
+    totalTime: number;
+    average: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }>;
+  topTiming: Array<{
+    logger: string;
+    key: string;
+    count: number;
+    totalTime: number;
+    average: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }>;
+  settle: {
+    executeCalls: number;
+    totalDurationMs: number;
+    maxDurationMs: number;
+    latestDurationMs: number;
+    maxIterations: number;
+    latestIterations: number;
+    recent: Array<{
+      totalDurationMs: number;
+      iterations: number;
+      actionsRun: number;
+    }>;
+  };
 };
 
 describe("default-app flow test", () => {
@@ -184,10 +229,12 @@ describe("default-app flow test", () => {
     const actionRunSeries: unknown[] = [];
     const homeLoadSeries: unknown[] = [];
     const noteCreateTimings: NoteCreateTimingEntry[] = [];
+    const noteCreateProfiles: NoteCreateProfileEntry[] = [];
     const noteIterations = Math.max(
       CAPTURE_ACTION_RUN_SERIES > 0 ? CAPTURE_ACTION_RUN_SERIES : 1,
       CAPTURE_HOME_LOAD_SERIES,
       NOTE_CREATE_TIMING_SERIES,
+      CAPTURE_NOTE_CREATE_PROFILE_SERIES,
     );
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
@@ -216,6 +263,15 @@ describe("default-app flow test", () => {
     for (let noteIndex = 1; noteIndex <= noteIterations; noteIndex++) {
       const noteTitlesBefore = await collectNoteTitlesInList(page);
       const noteCountBefore = noteTitlesBefore.length;
+
+      if (noteIndex <= CAPTURE_NOTE_CREATE_PROFILE_SERIES) {
+        console.log(
+          `Reset note-create profiling baselines (note ${noteIndex})...`,
+        );
+        await waitFor(async () => {
+          return await resetNoteCreateProfiling(page);
+        });
+      }
 
       if (CAPTURE_ACTION_RUN_SERIES > 0) {
         console.log(`Enable action run trace for note ${noteIndex}...`);
@@ -383,6 +439,18 @@ describe("default-app flow test", () => {
         JSON.stringify(noteCreateTiming, null, 2),
       );
 
+      if (noteIndex <= CAPTURE_NOTE_CREATE_PROFILE_SERIES) {
+        const noteCreateProfile = await collectNoteCreateProfile(page);
+        assert(
+          noteCreateProfile,
+          `Expected note-create profile for note ${noteIndex}`,
+        );
+        noteCreateProfiles.push({
+          noteIndex,
+          ...(noteCreateProfile as Omit<NoteCreateProfileEntry, "noteIndex">),
+        });
+      }
+
       if (noteIndex <= CAPTURE_HOME_LOAD_SERIES) {
         console.log(
           `Open fresh home page for load summary (${noteIndex} notes)...`,
@@ -434,6 +502,13 @@ describe("default-app flow test", () => {
       console.log(
         "Note creation timing summary:",
         JSON.stringify(summarizeNoteCreateTimings(noteCreateTimings), null, 2),
+      );
+    }
+
+    if (noteCreateProfiles.length > 0) {
+      console.log(
+        "Note creation profile summary:",
+        JSON.stringify(compareNoteCreateProfiles(noteCreateProfiles), null, 2),
       );
     }
 
@@ -523,6 +598,17 @@ async function resetLoggerBaselines(page: Page): Promise<boolean> {
     const api = globalThis.commonfabric?.rt;
     if (!api) return false;
     await api.resetLoggerBaselines();
+    return true;
+  });
+}
+
+async function resetNoteCreateProfiling(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric?.rt;
+    if (!api) return false;
+    await api.resetLoggerBaselines();
+    await api.setSettleStatsEnabled(false);
+    await api.setSettleStatsEnabled(true);
     return true;
   });
 }
@@ -1106,6 +1192,87 @@ function summarizeNoteCreateTimings(
   };
 }
 
+function compareNoteCreateProfiles(
+  series: NoteCreateProfileEntry[],
+): unknown {
+  const noteIndices = series.map((entry) => entry.noteIndex);
+  const byTimingKey = new Map<string, {
+    logger: string;
+    key: string;
+    totalTimes: Record<number, number>;
+    averages: Record<number, number>;
+    counts: Record<number, number>;
+    p95s: Record<number, number>;
+  }>();
+
+  for (const entry of series) {
+    for (const row of entry.focusTiming) {
+      const key = `${row.logger}:${row.key}`;
+      const existing = byTimingKey.get(key) ?? {
+        logger: row.logger,
+        key: row.key,
+        totalTimes: {},
+        averages: {},
+        counts: {},
+        p95s: {},
+      };
+      existing.totalTimes[entry.noteIndex] = row.totalTime;
+      existing.averages[entry.noteIndex] = row.average;
+      existing.counts[entry.noteIndex] = row.count;
+      existing.p95s[entry.noteIndex] = row.p95;
+      byTimingKey.set(key, existing);
+    }
+  }
+
+  const focusTimingGrowth = [...byTimingKey.values()]
+    .map((row) => {
+      const totals = noteIndices.map((noteIndex) =>
+        row.totalTimes[noteIndex] ?? 0
+      );
+      const averages = noteIndices.map((noteIndex) =>
+        row.averages[noteIndex] ?? 0
+      );
+      const counts = noteIndices.map((noteIndex) => row.counts[noteIndex] ?? 0);
+      const p95s = noteIndices.map((noteIndex) => row.p95s[noteIndex] ?? 0);
+      return {
+        logger: row.logger,
+        key: row.key,
+        totalTimes: totals,
+        averages,
+        counts,
+        p95s,
+        deltaLastVsFirst: Number(
+          (
+            (totals[totals.length - 1] ?? 0) -
+            (totals[0] ?? 0)
+          ).toFixed(3),
+        ),
+      };
+    })
+    .sort((a, b) =>
+      b.deltaLastVsFirst - a.deltaLastVsFirst ||
+      (b.totalTimes[b.totalTimes.length - 1] ?? 0) -
+        (a.totalTimes[a.totalTimes.length - 1] ?? 0) ||
+      `${a.logger}:${a.key}`.localeCompare(`${b.logger}:${b.key}`)
+    );
+
+  const lastEntry = series[series.length - 1];
+
+  return {
+    notes: series.map((entry) => ({
+      noteIndex: entry.noteIndex,
+      settleExecuteCalls: entry.settle.executeCalls,
+      settleTotalDurationMs: entry.settle.totalDurationMs,
+      settleMaxDurationMs: entry.settle.maxDurationMs,
+      settleMaxIterations: entry.settle.maxIterations,
+    })),
+    focusTimingGrowth,
+    focusTimingAtMaxNoteCount: lastEntry?.focusTiming ?? [],
+    topTimingAtMaxNoteCount: lastEntry?.topTiming ?? [],
+    settleAtMaxNoteCount: lastEntry?.settle ?? null,
+  };
+}
+
 async function collectHomeLoadSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
     const rt = globalThis.commonfabric?.rt;
@@ -1207,6 +1374,143 @@ async function collectHomeLoadSummary(page: Page): Promise<unknown> {
       },
       topSchedulerTiming,
       topActions,
+    };
+  });
+}
+
+async function collectNoteCreateProfile(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric?.rt;
+    if (!api?.getLoggerCounts || !api?.getSettleStatsHistory || !api?.idle) {
+      return null;
+    }
+
+    await api.idle();
+
+    type TimingRow = {
+      count: number;
+      totalTime: number;
+      average: number;
+      p50: number;
+      p95: number;
+      max: number;
+    };
+
+    const { timing } = await api.getLoggerCounts();
+    const focusKeys = [
+      ["scheduler", "scheduler/execute"],
+      ["scheduler", "scheduler/execute/settle"],
+      ["scheduler", "scheduler/execute/event"],
+      ["scheduler", "scheduler/run"],
+      ["scheduler", "scheduler/run/action"],
+      ["scheduler", "scheduler/run/commit"],
+      ["traverse", "traverse"],
+      ["runner", "action/readInputs"],
+      ["runner", "action/postRun"],
+      ["runner", "action/populateDependencies"],
+    ] as const;
+
+    const focusTiming = focusKeys
+      .map(([loggerName, key]) => {
+        const row = (timing[loggerName] ?? {})[key] as TimingRow | undefined;
+        if (!row) return null;
+        return {
+          logger: loggerName,
+          key,
+          count: row.count ?? 0,
+          totalTime: Number((row.totalTime ?? 0).toFixed(3)),
+          average: Number((row.average ?? 0).toFixed(3)),
+          p50: Number((row.p50 ?? 0).toFixed(3)),
+          p95: Number((row.p95 ?? 0).toFixed(3)),
+          max: Number((row.max ?? 0).toFixed(3)),
+        };
+      })
+      .filter((row) => row !== null);
+
+    const topTiming = Object.entries(timing)
+      .filter(([loggerName]) =>
+        [
+          "scheduler",
+          "traverse",
+          "storage.cache",
+          "worker-reconciler",
+          "runner",
+        ].includes(loggerName)
+      )
+      .flatMap(([loggerName, rows]) =>
+        Object.entries(rows as Record<string, TimingRow>).map(([key, row]) => ({
+          logger: loggerName,
+          key,
+          count: row.count ?? 0,
+          totalTime: Number((row.totalTime ?? 0).toFixed(3)),
+          average: Number((row.average ?? 0).toFixed(3)),
+          p50: Number((row.p50 ?? 0).toFixed(3)),
+          p95: Number((row.p95 ?? 0).toFixed(3)),
+          max: Number((row.max ?? 0).toFixed(3)),
+        }))
+      )
+      .sort((a, b) =>
+        b.totalTime - a.totalTime ||
+        b.count - a.count ||
+        `${a.logger}:${a.key}`.localeCompare(`${b.logger}:${b.key}`)
+      )
+      .slice(0, 20);
+
+    type SettleHistoryEntry = {
+      recordedAt: number;
+      stats: {
+        iterations: Array<{
+          workSetSize: number;
+          orderSize: number;
+          actionsRun: number;
+          durationMs: number;
+        }>;
+        totalDurationMs: number;
+      };
+    };
+
+    const settleHistory = await api
+      .getSettleStatsHistory() as SettleHistoryEntry[];
+    const recentHistory = settleHistory.slice(-8);
+    const settle = {
+      executeCalls: settleHistory.length,
+      totalDurationMs: Number(
+        recentHistory.reduce(
+          (sum, entry) => sum + entry.stats.totalDurationMs,
+          0,
+        )
+          .toFixed(3),
+      ),
+      maxDurationMs: Number(
+        Math.max(
+          0,
+          ...recentHistory.map((entry) => entry.stats.totalDurationMs),
+        ).toFixed(3),
+      ),
+      latestDurationMs: Number(
+        (recentHistory[recentHistory.length - 1]?.stats.totalDurationMs ?? 0)
+          .toFixed(3),
+      ),
+      maxIterations: Math.max(
+        0,
+        ...recentHistory.map((entry) => entry.stats.iterations.length),
+      ),
+      latestIterations:
+        recentHistory[recentHistory.length - 1]?.stats.iterations.length ?? 0,
+      recent: recentHistory.map((entry) => ({
+        totalDurationMs: Number(entry.stats.totalDurationMs.toFixed(3)),
+        iterations: entry.stats.iterations.length,
+        actionsRun: entry.stats.iterations.reduce(
+          (sum, iteration) => sum + iteration.actionsRun,
+          0,
+        ),
+      })),
+    };
+
+    return {
+      focusTiming,
+      topTiming,
+      settle,
     };
   });
 }
