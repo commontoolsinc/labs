@@ -358,6 +358,12 @@ These categories do not mean "rewrite every descendant expression." Explicit
 computation callbacks still create their own ownership boundary, and every site
 must separately satisfy the shared handling policy.
 
+In particular, current-main explicit compute callbacks preserve authored
+JavaScript control flow even for nested JSX ternaries/logicals inside the
+callback body. The recent recursive lowering work applies to pattern-owned
+sites and supported collection callbacks, not to explicit compute callback
+bodies.
+
 ## 7. JSX Expression Site Routing And Early Rewriting
 
 `JsxExpressionSiteRouterTransformer` runs only when helper import is present.

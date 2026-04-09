@@ -111,8 +111,9 @@ Those container kinds appear to authors in three main buckets:
 
 Explicit computation callbacks such as `computed`, `derive`, `action`, `lift`,
 and `handler` are important boundaries, but their bodies are **not** blanket
-"lower everything here" regions. Inner expressions lower only when they appear
-inside one of the supported container kinds above.
+"lower everything here" regions. The shared container list above does not imply
+that nested compute-context JSX/control-flow receives pattern-context lowering;
+current-main behavior preserves authored JavaScript control flow there.
 
 ### Top-Level Pattern Body
 

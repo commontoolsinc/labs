@@ -207,11 +207,15 @@ buckets:
 - top-level pattern-body value-expression sites, such as:
   - returned object property values
   - variable initializers
-  - call arguments
-  - array elements
   - return expressions
 - callback-local value-expression sites inside supported reactive collection
   callbacks
+
+Some call-argument and array-element sites are also lowerable, but those can
+still route through whole-site wrapping rather than direct inner `ifElse()`
+lowering. For unusual call-root shapes, inspect the emitted output with
+`cf check --show-transformed` instead of assuming the conditional itself will
+be rewritten.
 
 ```tsx
 // Wrong
@@ -231,9 +235,10 @@ truthy. That leads to subtle incorrect rendering because ternaries inside the
 `computed()` body are plain JS, not transformer-lowered conditionals.
 
 That distinction matters: explicit computation callbacks like `computed`,
-`derive`, `action`, `lift`, and `handler` are not blanket "rewrite everywhere"
-contexts. Inside those callback bodies, ternaries follow ordinary JavaScript
-rules unless they appear inside a nested supported lowered site such as JSX.
+`derive`, `action`, `lift`, and `handler` are preserved-JavaScript control-flow
+boundaries. Inside those callback bodies, ternaries and logical operators
+follow ordinary JavaScript rules even when nested inside returned JSX, local
+consts, or object literals.
 
 ### CORS and `fetchData`
 

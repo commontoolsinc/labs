@@ -83,6 +83,12 @@ Inside a `computed()` body, ternaries are **not** transformed — they execute
 as plain JS where a `Writable<boolean>` object is always truthy. This is
 the most common source of "conditional section always renders" bugs.
 
+That current-main behavior includes ternaries nested inside returned JSX,
+callback-local aliases, object properties, and logical `&&` / `||` forms. The
+recent recursive lowering work helps in pattern-owned sites and supported
+collection callbacks, but it does not currently rescue explicit compute
+callback bodies.
+
 ```tsx
 // ❌ WRONG - computed() for conditional JSX. The ternary inside the
 // computed body is plain JS, not a transformer-lowered conditional.
