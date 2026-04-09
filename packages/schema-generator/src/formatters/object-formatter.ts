@@ -328,6 +328,13 @@ export class ObjectFormatter implements TypeFormatter {
           );
         }
       }
+      if (propName === "$UI") {
+        const uiContract = getUiContractHint(context, propTypeNode);
+        if (uiContract) {
+          properties[propName] = attachUiContract(generated, uiContract);
+          continue;
+        }
+      }
       properties[propName] = generated;
     }
 
@@ -390,4 +397,48 @@ export class ObjectFormatter implements TypeFormatter {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
   }
+}
+
+function getUiContractHint(
+  context: GenerationContext,
+  typeNode: ts.TypeNode | undefined = context.typeNode,
+): {
+  helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+  action?: string;
+  surface?: string;
+  role?: string;
+  kind?: string;
+} | undefined {
+  if (!context.schemaHints || !typeNode) {
+    return undefined;
+  }
+
+  return context.schemaHints.get(typeNode)?.cfcUiContract ??
+    context.schemaHints.get(ts.getOriginalNode(typeNode))?.cfcUiContract;
+}
+
+function attachUiContract(
+  schema: JSONSchemaMutable,
+  uiContract: {
+    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+    action?: string;
+    surface?: string;
+    role?: string;
+    kind?: string;
+  },
+): JSONSchemaMutable {
+  if (typeof schema === "boolean") {
+    return schema === false ? { not: true, ifc: { uiContract } } : {
+      ifc: { uiContract },
+    };
+  }
+
+  const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+  return {
+    ...schema,
+    ifc: {
+      ...existingIfc,
+      uiContract,
+    },
+  };
 }

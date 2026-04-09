@@ -39,7 +39,19 @@ export interface GenerationContext {
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
-  schemaHints?: WeakMap<ts.Node, { items?: unknown }>;
+  schemaHints?: WeakMap<
+    ts.Node,
+    {
+      items?: unknown;
+      cfcUiContract?: {
+        helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+        action?: string;
+        surface?: string;
+        role?: string;
+        kind?: string;
+      };
+    }
+  >;
   /** Override for array items schema, propagated from wrapper types */
   arrayItemsOverride?: JSONSchema;
 }
@@ -74,7 +86,19 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+        };
+      }
+    >,
   ): SchemaDefinition;
 
   /**
@@ -90,6 +114,18 @@ export interface SchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+        };
+      }
+    >,
   ): SchemaDefinition;
 }

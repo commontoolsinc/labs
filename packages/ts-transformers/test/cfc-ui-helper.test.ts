@@ -167,3 +167,24 @@ Deno.test(
     result.dispose?.();
   },
 );
+
+Deno.test(
+  "UI helper contract hints propagate onto generated schemas",
+  async () => {
+    const source = `/// <cts-enable />
+      import { pattern, UI, UiAction } from "commonfabric";
+
+      export default pattern<{ title: string }>((state) => ({
+        [UI]: <UiAction action="SubmitDirectCommand">Go</UiAction>,
+        title: state.title,
+      }));
+    `;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, "uiContract");
+    assertStringIncludes(output, "SubmitDirectCommand");
+  },
+);

@@ -105,6 +105,14 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         let finalSchema: unknown = typeof schema === "boolean"
           ? schema
           : { ...(schema as Record<string, unknown>), ...optionsObj };
+        if (schemaHints) {
+          finalSchema = attachUiContractFromSchemaHints(
+            finalSchema,
+            node,
+            schemaTypeArg,
+            schemaHints,
+          );
+        }
         if (writeAuthorizedByIdentity && typeof finalSchema !== "boolean") {
           finalSchema = attachWriteAuthorizedByMarker(
             finalSchema as Record<string, unknown>,
@@ -202,6 +210,104 @@ function attachWriteAuthorizedByMarker(
       writeAuthorizedBy: {
         __ctWriterIdentityOf: identity,
       },
+    },
+  };
+}
+
+function attachUiContractFromSchemaHints(
+  schema: unknown,
+  sourceNode: ts.Node,
+  typeNode: ts.TypeNode,
+  schemaHints: WeakMap<
+    ts.Node,
+    {
+      items?: unknown;
+      cfcUiContract?: {
+        helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+        action?: string;
+        surface?: string;
+        role?: string;
+        kind?: string;
+      };
+    }
+  >,
+): unknown {
+  const hint = schemaHints.get(sourceNode)?.cfcUiContract ??
+    schemaHints.get(ts.getOriginalNode(sourceNode))?.cfcUiContract ??
+    schemaHints.get(typeNode)?.cfcUiContract ??
+    schemaHints.get(ts.getOriginalNode(typeNode))?.cfcUiContract;
+  if (!hint) {
+    return schema;
+  }
+
+  if (typeof schema === "boolean") {
+    return schema === false ? { not: true, ifc: { uiContract: hint } } : {
+      ifc: { uiContract: hint },
+    };
+  }
+  if (typeof schema !== "object" || schema === null) {
+    return schema;
+  }
+
+  const recordSchema = schema as Record<string, unknown>;
+  const uiProperty = getUiPropertySchema(recordSchema);
+  if (uiProperty) {
+    return {
+      ...recordSchema,
+      properties: {
+        ...(recordSchema.properties as Record<string, unknown>),
+        $UI: attachUiContractToSchemaRecord(uiProperty, hint),
+      },
+    };
+  }
+
+  return attachUiContractToSchemaRecord(recordSchema, hint);
+}
+
+function getUiPropertySchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> | boolean | undefined {
+  if (
+    !schema.properties ||
+    typeof schema.properties !== "object" ||
+    schema.properties === null
+  ) {
+    return undefined;
+  }
+
+  const uiProperty = (schema.properties as Record<string, unknown>).$UI;
+  if (typeof uiProperty === "boolean") {
+    return uiProperty;
+  }
+  return typeof uiProperty === "object" && uiProperty !== null
+    ? uiProperty as Record<string, unknown>
+    : undefined;
+}
+
+function attachUiContractToSchemaRecord(
+  schema: Record<string, unknown> | boolean,
+  hint: {
+    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+    action?: string;
+    surface?: string;
+    role?: string;
+    kind?: string;
+  },
+): Record<string, unknown> {
+  if (typeof schema === "boolean") {
+    return schema === false ? { not: true, ifc: { uiContract: hint } } : {
+      ifc: { uiContract: hint },
+    };
+  }
+
+  const existingIfc = schema.ifc && typeof schema.ifc === "object"
+    ? schema.ifc as Record<string, unknown>
+    : {};
+  return {
+    ...schema,
+    ifc: {
+      ...existingIfc,
+      uiContract: hint,
     },
   };
 }

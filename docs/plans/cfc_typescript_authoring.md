@@ -214,8 +214,8 @@ to keep that boundary clear:
 - [x] Re-emit semantic props as `data-ui-*` attributes on the rewritten node
 - [x] Attach node-local `cfcUiContract` hints only when the relevant helper
       props are compile-time string literals
-- [ ] Synthesize `[UI]` member schemas from returned JSX trees
-- [ ] Copy node-local UI contract hints onto the synthesized schema as
+- [x] Synthesize `[UI]` member schemas from returned JSX trees
+- [x] Copy node-local UI contract hints onto the synthesized schema as
       `ifc.uiContract`
 - [ ] Ensure explicit output schemas receive the same `[UI]` helper hints as
       inferred output schemas

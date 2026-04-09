@@ -56,7 +56,19 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+        };
+      }
+    >,
   ): JSONSchemaMutable {
     return this.generateSchemaInternal(
       type,
@@ -79,7 +91,19 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+        };
+      }
+    >,
   ): JSONSchemaMutable {
     // Pass 'any' type with the typeNode - auto-detection will choose node-based analysis
     const anyType = checker.getAnyType();
@@ -103,7 +127,19 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+        };
+      }
+    >,
   ): JSONSchemaMutable {
     // Create unified context with all state
     const cycles = this.getCycles(type, checker);
@@ -137,12 +173,14 @@ export class SchemaGenerator implements ISchemaGenerator {
         checker,
         context,
       );
+      schema = this.applyNodeSchemaHints(schema, context);
       // Build final schema with $schema and $defs
       return this.buildFinalSchemaForSynthetic(schema, context);
     }
 
     // Use type-based analysis (normal path)
     schema = this.formatType(type, context, true);
+    schema = this.applyNodeSchemaHints(schema, context);
 
     // Attach root-level description from JSDoc if available
     schema = this.attachRootDescription(schema, type, context);
@@ -206,15 +244,21 @@ export class SchemaGenerator implements ISchemaGenerator {
     );
     if (useNodeBased) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
-      return this.analyzeTypeNodeStructure(
+      return this.applyNodeSchemaHints(
+        this.analyzeTypeNodeStructure(
         typeNode!,
         context.typeChecker,
+        childContext,
+        ),
         childContext,
       );
     }
 
     // Use type-based analysis (normal path)
-    return this.formatType(type, childContext, false);
+    return this.applyNodeSchemaHints(
+      this.formatType(type, childContext, false),
+      childContext,
+    );
   }
 
   /**
@@ -473,6 +517,49 @@ export class SchemaGenerator implements ISchemaGenerator {
     // If the root type already exists in definitions and has been referenced,
     // promote it
     return !!(definitions[namedKey] && emittedRefs.has(namedKey));
+  }
+
+  private applyNodeSchemaHints(
+    schema: JSONSchemaMutable,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    if (!context.schemaHints || !context.typeNode) {
+      return schema;
+    }
+
+    const hint = context.schemaHints.get(context.typeNode) ??
+      context.schemaHints.get(ts.getOriginalNode(context.typeNode));
+    if (!hint?.cfcUiContract) {
+      return schema;
+    }
+
+    return this.attachUiContract(schema, hint.cfcUiContract);
+  }
+
+  private attachUiContract(
+    schema: JSONSchemaMutable,
+    uiContract: {
+      helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+      action?: string;
+      surface?: string;
+      role?: string;
+      kind?: string;
+    },
+  ): JSONSchemaMutable {
+    if (typeof schema === "boolean") {
+      return schema === false
+        ? { not: true, ifc: { uiContract } }
+        : { ifc: { uiContract } };
+    }
+
+    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+    return {
+      ...schema,
+      ifc: {
+        ...existingIfc,
+        uiContract,
+      },
+    };
   }
 
   /**
