@@ -3,7 +3,6 @@ import {
   computed,
   Default,
   handler,
-  ifElse,
   NAME,
   pattern,
   safeDateNow,
@@ -446,56 +445,60 @@ export default pattern<Input, Output>(
     const hasPicture = computed(() => !!auth?.user?.picture);
     const hasUserName = computed(() => !!auth?.user?.name);
 
-    const userChipAvatar = ifElse(
-      hasPicture,
-      <img
-        src={auth.user.picture}
-        alt=""
-        style={{ width: "24px", height: "24px", borderRadius: "50%" }}
-      />,
-      <span
-        style={{
-          width: "24px",
-          height: "24px",
-          borderRadius: "50%",
-          backgroundColor: "#10b981",
-          display: "inline-block",
-        }}
-      />,
-    );
-
-    const userChipEmailLine = ifElse(
-      hasUserName,
-      <div style={{ fontSize: "12px", color: "#6b7280" }}>
-        {auth.user.email}
-      </div>,
-      null,
-    );
-
-    const userChip = ifElse(
-      hasEmail,
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        {userChipAvatar}
-        <div>
-          <div style={{ fontWeight: 500, fontSize: "14px" }}>
-            {auth.user.name || auth.user.email}
-          </div>
-          {userChipEmailLine}
-        </div>
-      </div>,
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+    const userChipAvatar = hasPicture
+      ? (
+        <img
+          src={auth.user.picture}
+          alt=""
+          style={{ width: "24px", height: "24px", borderRadius: "50%" }}
+        />
+      )
+      : (
         <span
           style={{
             width: "24px",
             height: "24px",
             borderRadius: "50%",
-            backgroundColor: "#e5e7eb",
+            backgroundColor: "#10b981",
             display: "inline-block",
           }}
         />
-        <span style={{ color: "#6b7280" }}>Not signed in</span>
-      </div>,
-    );
+      );
+
+    const userChipEmailLine = hasUserName
+      ? (
+        <div style={{ fontSize: "12px", color: "#6b7280" }}>
+          {auth.user.email}
+        </div>
+      )
+      : null;
+
+    const userChip = hasEmail
+      ? (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {userChipAvatar}
+          <div>
+            <div style={{ fontWeight: 500, fontSize: "14px" }}>
+              {auth.user.name || auth.user.email}
+            </div>
+            {userChipEmailLine}
+          </div>
+        </div>
+      )
+      : (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              backgroundColor: "#e5e7eb",
+              display: "inline-block",
+            }}
+          />
+          <span style={{ color: "#6b7280" }}>Not signed in</span>
+        </div>
+      );
 
     // Minimal preview chip for picker display using shared helper
     const previewUI = computed(() =>
@@ -513,7 +516,7 @@ export default pattern<Input, Output>(
 
     const loggedIn = computed(() => !!auth?.user?.email);
 
-    // Compound conditions for ifElse in JSX
+    // Compound conditions for conditional UI
     const showScopePreview = computed(() => !loggedIn && hasSelectedScopes);
     const showTokenStatus = computed(() =>
       !!auth?.user?.email && !isTokenExpired
@@ -562,23 +565,25 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ fontSize: "16px", marginTop: "0" }}>
-              Status: {ifElse(loggedIn, "Authenticated", "Not Authenticated")}
+              Status: {loggedIn ? "Authenticated" : "Not Authenticated"}
             </h3>
 
-            {ifElse(
-              loggedIn,
-              <div>
-                <p style={{ margin: "8px 0" }}>
-                  <strong>Email:</strong> {auth.user.email}
+            {loggedIn
+              ? (
+                <div>
+                  <p style={{ margin: "8px 0" }}>
+                    <strong>Email:</strong> {auth.user.email}
+                  </p>
+                  <p style={{ margin: "8px 0" }}>
+                    <strong>Name:</strong> {auth.user.name}
+                  </p>
+                </div>
+              )
+              : (
+                <p style={{ color: "#666" }}>
+                  Select permissions below and authenticate with Google
                 </p>
-                <p style={{ margin: "8px 0" }}>
-                  <strong>Name:</strong> {auth.user.name}
-                </p>
-              </div>,
-              <p style={{ color: "#666" }}>
-                Select permissions below and authenticate with Google
-              </p>,
-            )}
+              )}
           </div>
 
           {/* Permissions checkboxes */}
@@ -593,20 +598,20 @@ export default pattern<Input, Output>(
           >
             <h4 style={{ marginTop: "0", marginBottom: "12px" }}>
               Permissions
-              {ifElse(
-                loggedIn,
-                <span
-                  style={{
-                    fontWeight: "normal",
-                    fontSize: "12px",
-                    color: "#6b7280",
-                    marginLeft: "8px",
-                  }}
-                >
-                  (locked while authenticated)
-                </span>,
-                null,
-              )}
+              {loggedIn
+                ? (
+                  <span
+                    style={{
+                      fontWeight: "normal",
+                      fontSize: "12px",
+                      color: "#6b7280",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    (locked while authenticated)
+                  </span>
+                )
+                : null}
             </h4>
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
@@ -633,187 +638,85 @@ export default pattern<Input, Output>(
           </div>
 
           {/* Re-auth warning */}
-          {ifElse(
-            needsReauth,
-            <div
-              style={{
-                padding: "12px",
-                backgroundColor: "#fff3cd",
-                borderRadius: "8px",
-                border: "1px solid #ffc107",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Note:</strong>{" "}
-              You've selected new permissions. Click "Sign in with Google" below
-              to grant access.
-            </div>,
-            null,
-          )}
-
-          {/* Favorite reminder */}
-          {ifElse(
-            loggedIn,
-            <div
-              style={{
-                padding: "15px",
-                backgroundColor: "#d4edda",
-                borderRadius: "8px",
-                border: "1px solid #28a745",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Tip:</strong>{" "}
-              Favorite this piece (click ⭐) to share your Google auth across
-              all your patterns. Any pattern using{" "}
-              <code>wish({"{"} query: "#googleAuth" {"}"})</code>{" "}
-              will automatically find and use it.
-            </div>,
-            null,
-          )}
-
-          {/* Show selected scopes if no auth yet */}
-          {ifElse(
-            showScopePreview,
-            <div style={{ fontSize: "14px", color: "#666" }}>
-              Will request: {scopesDisplay}
-            </div>,
-            null,
-          )}
-
-          {/* Token expired warning with refresh button */}
-          {ifElse(
-            isTokenExpired,
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#fee2e2",
-                borderRadius: "8px",
-                border: "1px solid #ef4444",
-                marginBottom: "15px",
-              }}
-            >
-              <h4
-                style={{
-                  margin: "0 0 8px 0",
-                  color: "#dc2626",
-                  fontSize: "14px",
-                }}
-              >
-                Session Expired
-              </h4>
-              <p
-                style={{
-                  margin: "0 0 12px 0",
-                  fontSize: "13px",
-                  color: "#4b5563",
-                }}
-              >
-                Your Google token has expired. Click below to refresh it
-                automatically.
-              </p>
-              <button
-                type="button"
-                onClick={handleRefresh({
-                  auth,
-                  refreshInProgress,
-                  refreshing,
-                  refreshFailed,
-                })}
-                disabled={refreshing}
-                style={{
-                  padding: "10px 20px",
-                  backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: refreshing ? "not-allowed" : "pointer",
-                  fontWeight: "500",
-                  fontSize: "14px",
-                }}
-              >
-                {ifElse(refreshing, "Refreshing...", "Refresh Token")}
-              </button>
-              {ifElse(
-                refreshFailed,
-                <p
-                  style={{
-                    margin: "8px 0 0 0",
-                    fontSize: "13px",
-                    color: "#dc2626",
-                    fontWeight: "500",
-                  }}
-                >
-                  Refresh failed — try signing in again below.
-                </p>,
-                null,
-              )}
-            </div>,
-            null,
-          )}
-
-          <cf-google-oauth
-            $auth={auth}
-            scopes={scopes}
-          />
-
-          {/* Show granted scopes if authenticated */}
-          {ifElse(
-            loggedIn,
-            <div
-              style={{
-                padding: "15px",
-                backgroundColor: "#e3f2fd",
-                borderRadius: "8px",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Granted Scopes:</strong>
-              {grantedScopesUI}
-            </div>,
-            null,
-          )}
-
-          {/* Manual token refresh section - visible when authenticated and NOT expired */}
-          {ifElse(
-            showTokenStatus,
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#f0f9ff",
-                borderRadius: "8px",
-                border: "1px solid #0ea5e9",
-              }}
-            >
+          {needsReauth
+            ? (
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "12px",
+                  padding: "12px",
+                  backgroundColor: "#fff3cd",
+                  borderRadius: "8px",
+                  border: "1px solid #ffc107",
+                  fontSize: "14px",
                 }}
               >
-                <div>
-                  <h4
-                    style={{
-                      margin: "0 0 4px 0",
-                      fontSize: "14px",
-                      color: "#0369a1",
-                    }}
-                  >
-                    Token Status
-                  </h4>
-                  <p
-                    style={{
-                      margin: "0",
-                      fontSize: "13px",
-                      color: "#4b5563",
-                    }}
-                  >
-                    Expires in: <strong>{tokenExpiryDisplay}</strong>
-                  </p>
-                </div>
+                <strong>Note:</strong>{" "}
+                You've selected new permissions. Click "Sign in with Google"
+                below to grant access.
+              </div>
+            )
+            : null}
+
+          {/* Favorite reminder */}
+          {loggedIn
+            ? (
+              <div
+                style={{
+                  padding: "15px",
+                  backgroundColor: "#d4edda",
+                  borderRadius: "8px",
+                  border: "1px solid #28a745",
+                  fontSize: "14px",
+                }}
+              >
+                <strong>Tip:</strong>{" "}
+                Favorite this piece (click ⭐) to share your Google auth across
+                all your patterns. Any pattern using{" "}
+                <code>wish({"{"} query: "#googleAuth" {"}"})</code>{" "}
+                will automatically find and use it.
+              </div>
+            )
+            : null}
+
+          {/* Show selected scopes if no auth yet */}
+          {showScopePreview
+            ? (
+              <div style={{ fontSize: "14px", color: "#666" }}>
+                Will request: {scopesDisplay}
+              </div>
+            )
+            : null}
+
+          {/* Token expired warning with refresh button */}
+          {isTokenExpired
+            ? (
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#fee2e2",
+                  borderRadius: "8px",
+                  border: "1px solid #ef4444",
+                  marginBottom: "15px",
+                }}
+              >
+                <h4
+                  style={{
+                    margin: "0 0 8px 0",
+                    color: "#dc2626",
+                    fontSize: "14px",
+                  }}
+                >
+                  Session Expired
+                </h4>
+                <p
+                  style={{
+                    margin: "0 0 12px 0",
+                    fontSize: "13px",
+                    color: "#4b5563",
+                  }}
+                >
+                  Your Google token has expired. Click below to refresh it
+                  automatically.
+                </p>
                 <button
                   type="button"
                   onClick={handleRefresh({
@@ -824,22 +727,124 @@ export default pattern<Input, Output>(
                   })}
                   disabled={refreshing}
                   style={{
-                    padding: "8px 16px",
-                    backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
+                    padding: "10px 20px",
+                    backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
                     color: "white",
                     border: "none",
                     borderRadius: "6px",
                     cursor: refreshing ? "not-allowed" : "pointer",
                     fontWeight: "500",
-                    fontSize: "13px",
+                    fontSize: "14px",
                   }}
                 >
-                  {ifElse(refreshing, "Refreshing...", "Refresh Now")}
+                  {refreshing ? "Refreshing..." : "Refresh Token"}
                 </button>
+                {refreshFailed
+                  ? (
+                    <p
+                      style={{
+                        margin: "8px 0 0 0",
+                        fontSize: "13px",
+                        color: "#dc2626",
+                        fontWeight: "500",
+                      }}
+                    >
+                      Refresh failed — try signing in again below.
+                    </p>
+                  )
+                  : null}
               </div>
-            </div>,
-            null,
-          )}
+            )
+            : null}
+
+          <cf-google-oauth
+            $auth={auth}
+            scopes={scopes}
+          />
+
+          {/* Show granted scopes if authenticated */}
+          {loggedIn
+            ? (
+              <div
+                style={{
+                  padding: "15px",
+                  backgroundColor: "#e3f2fd",
+                  borderRadius: "8px",
+                  fontSize: "14px",
+                }}
+              >
+                <strong>Granted Scopes:</strong>
+                {grantedScopesUI}
+              </div>
+            )
+            : null}
+
+          {/* Manual token refresh section - visible when authenticated and NOT expired */}
+          {showTokenStatus
+            ? (
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#f0f9ff",
+                  borderRadius: "8px",
+                  border: "1px solid #0ea5e9",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <h4
+                      style={{
+                        margin: "0 0 4px 0",
+                        fontSize: "14px",
+                        color: "#0369a1",
+                      }}
+                    >
+                      Token Status
+                    </h4>
+                    <p
+                      style={{
+                        margin: "0",
+                        fontSize: "13px",
+                        color: "#4b5563",
+                      }}
+                    >
+                      Expires in: <strong>{tokenExpiryDisplay}</strong>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefresh({
+                      auth,
+                      refreshInProgress,
+                      refreshing,
+                      refreshFailed,
+                    })}
+                    disabled={refreshing}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: refreshing ? "not-allowed" : "pointer",
+                      fontWeight: "500",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {refreshing ? "Refreshing..." : "Refresh Now"}
+                  </button>
+                </div>
+              </div>
+            )
+            : null}
 
           <div
             style={{

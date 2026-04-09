@@ -18,7 +18,6 @@ import {
   computed,
   Default,
   handler,
-  ifElse,
   lift,
   navigateTo,
   pattern,
@@ -422,41 +421,41 @@ export function createAuthManager<T, R>(
             fontSize: "14px",
           }}
         >
-          {ifElse(
-            authState.showAvatar,
-            <img
-              src={authState.avatarUrl}
-              alt=""
-              style={{ width: "20px", height: "20px", borderRadius: "50%" }}
-            />,
-            <span
-              style={{
-                width: "10px",
-                height: "10px",
-                borderRadius: "50%",
-                backgroundColor: ifElse(
-                  computed(() => currentState === "ready"),
-                  descriptor.brandColor,
-                  authState.statusDotColor,
-                ),
-              }}
-            />,
-          )}
+          {authState.showAvatar
+            ? (
+              <img
+                src={authState.avatarUrl}
+                alt=""
+                style={{ width: "20px", height: "20px", borderRadius: "50%" }}
+              />
+            )
+            : (
+              <span
+                style={{
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  backgroundColor: currentState === "ready"
+                    ? descriptor.brandColor
+                    : authState.statusDotColor,
+                }}
+              />
+            )}
           <span>{authState.statusText}</span>
-          {ifElse(
-            authState.showExpiryInStatus,
-            <span
-              style={{
-                marginLeft: "4px",
-                fontSize: "12px",
-                color: authState.expiryHintColor,
-                fontWeight: authState.expiryHintWeight,
-              }}
-            >
-              • {tokenExpiryDisplay}
-            </span>,
-            null,
-          )}
+          {authState.showExpiryInStatus
+            ? (
+              <span
+                style={{
+                  marginLeft: "4px",
+                  fontSize: "12px",
+                  color: authState.expiryHintColor,
+                  fontWeight: authState.expiryHintWeight,
+                }}
+              >
+                • {tokenExpiryDisplay}
+              </span>
+            )
+            : null}
         </div>
       );
 
@@ -680,15 +679,15 @@ export function createAuthManager<T, R>(
                   fontSize: "14px",
                 }}
               >
-                {ifElse(isRefreshing, "Refreshing...", "Refresh Session")}
+                {isRefreshing ? "Refreshing..." : "Refresh Session"}
               </button>
-              {ifElse(
-                refreshFailed,
-                <span style={{ fontSize: "13px", color: "#dc2626" }}>
-                  Refresh failed — try signing in again below.
-                </span>,
-                null,
-              )}
+              {refreshFailed
+                ? (
+                  <span style={{ fontSize: "13px", color: "#dc2626" }}>
+                    Refresh failed — try signing in again below.
+                  </span>
+                )
+                : null}
             </div>
           </div>
           {pickerUI}
@@ -740,13 +739,13 @@ export function createAuthManager<T, R>(
                 gap: "12px",
               }}
             >
-              {ifElse(
-                showExpiryInReady,
-                <span style={{ fontSize: "12px", color: "#059669" }}>
-                  {tokenExpiryDisplay}
-                </span>,
-                null,
-              )}
+              {showExpiryInReady
+                ? (
+                  <span style={{ fontSize: "12px", color: "#059669" }}>
+                    {tokenExpiryDisplay}
+                  </span>
+                )
+                : null}
               <button
                 type="button"
                 onClick={reauthenticate}
@@ -779,23 +778,23 @@ export function createAuthManager<T, R>(
               </button>
             </div>
           </div>
-          {ifElse(
-            showTokenWarning,
-            <div
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#fef3c7",
-                borderRadius: "0 0 8px 8px",
-                border: "1px solid #f59e0b",
-                borderTop: "none",
-                fontSize: "13px",
-                color: "#b45309",
-              }}
-            >
-              Token expires soon. You may need to re-authenticate shortly.
-            </div>,
-            null,
-          )}
+          {showTokenWarning
+            ? (
+              <div
+                style={{
+                  padding: "8px 16px",
+                  backgroundColor: "#fef3c7",
+                  borderRadius: "0 0 8px 8px",
+                  border: "1px solid #f59e0b",
+                  borderTop: "none",
+                  fontSize: "13px",
+                  color: "#b45309",
+                }}
+              >
+                Token expires soon. You may need to re-authenticate shortly.
+              </div>
+            )
+            : null}
         </div>
       );
 
@@ -819,24 +818,14 @@ export function createAuthManager<T, R>(
         </div>
       );
 
-      // Compose fullUI via chained ifElse
-      const loginOrLoad = ifElse(
-        authState.isNeedsLogin,
-        needsLoginUI,
-        loadingUI,
-      );
-      const scopesOrPrev = ifElse(
-        isMissingScopes,
-        missingScopesUI,
-        loginOrLoad,
-      );
-      const expiredOrPrev = ifElse(
-        authState.isTokenExpiredState,
-        tokenExpiredUI,
-        scopesOrPrev,
-      );
-      const refreshOrPrev = ifElse(isRefreshing, refreshingUI, expiredOrPrev);
-      const fullUI = ifElse(authState.isReadyState, readyUI, refreshOrPrev);
+      // Compose fullUI via nested ternaries
+      const loginOrLoad = authState.isNeedsLogin ? needsLoginUI : loadingUI;
+      const scopesOrPrev = isMissingScopes ? missingScopesUI : loginOrLoad;
+      const expiredOrPrev = authState.isTokenExpiredState
+        ? tokenExpiredUI
+        : scopesOrPrev;
+      const refreshOrPrev = isRefreshing ? refreshingUI : expiredOrPrev;
+      const fullUI = authState.isReadyState ? readyUI : refreshOrPrev;
 
       // ====================================================================
       // RETURN
