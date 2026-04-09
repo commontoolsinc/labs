@@ -392,6 +392,24 @@ export function validateAndTransform(
   const schema = link.schema;
   const resolvedSchema = resolveSchema(schema);
 
+  const objectCreator = new TransformObjectCreator(
+    runtime,
+    tx!,
+    options?.synced ?? false,
+  );
+
+  // For opaque cells, create the cell directly from the current link.
+  // We intentionally avoid traversing redirect chains or reading through the
+  // transaction, since opaque cells should preserve identity without materializing
+  // the pointed-to value.
+  const asCellValues = ContextualFlowControl.getAsCellValues(resolvedSchema);
+  if (asCellValues.at(0) === "opaque") {
+    return objectCreator.createObject(
+      { ...link, schema: resolvedSchema },
+      undefined,
+    );
+  }
+
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
@@ -420,20 +438,6 @@ export function validateAndTransform(
     filteredSchema === undefined
   ) {
     return createQueryResultProxy(runtime, tx, link);
-  }
-  const objectCreator = new TransformObjectCreator(
-    runtime,
-    tx!,
-    options?.synced ?? false,
-  );
-
-  const asCellValues = ContextualFlowControl.getAsCellValues(effectiveSchema);
-  // For opaque cells, we want to create the cell with the schema we have,
-  // and we don't want to actually read from the tx.
-  // We don't even follow write-redirect links, since we can't write to
-  // these cells.
-  if (asCellValues.at(0) === "opaque") {
-    return objectCreator.createObject(link, undefined);
   }
 
   // Now resolve further links until we get the actual value.
