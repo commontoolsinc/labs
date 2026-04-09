@@ -1,7 +1,8 @@
 import { computed, Default, pattern, UI } from "commonfabric";
 
 export default pattern<{ value?: Default<string, "hello"> }>(({ value }) => {
-  // This computed will fail silently (console.log in computed)
+  // This computed throws; current runner surfaces the failure via scheduler
+  // error reporting and blanks the poisoned output path.
   const poisoned = computed(() => {
     console.log("debug:", value);
     // force an error thrown directly as another repro case if console.log doesn't throw
@@ -14,7 +15,7 @@ export default pattern<{ value?: Default<string, "hello"> }>(({ value }) => {
   const healthy = computed(() => `healthy: ${value}`);
 
   return {
-    $NAME: "Silent Computed Crash Repro",
+    $NAME: "Computed Crash Surfacing Repro",
     [UI]: (
       <div
         style={{
@@ -23,7 +24,7 @@ export default pattern<{ value?: Default<string, "hello"> }>(({ value }) => {
           border: "1px solid red",
         }}
       >
-        <h3>Silent computed crash repro</h3>
+        <h3>Computed crash surfacing repro</h3>
         <div>1. Direct value: {value}</div>
         <div>2. Healthy computed: {healthy}</div>
         <div>3. Poisoned computed: {poisoned}</div>

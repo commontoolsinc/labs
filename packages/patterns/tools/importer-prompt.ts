@@ -2106,10 +2106,10 @@ Native HTML elements (\`<div>\`, \`<table>\`, \`<button>\`) work with object-sty
 
 ### Anti-Patterns to Avoid
 
-1. **NEVER** access \`wishResult[UI]\` inside a \`computed()\` — crashes silently
+1. **NEVER** access \`wishResult[UI]\` inside a \`computed()\` — it can throw and surface a scheduler error
 2. **NEVER** use React patterns (useState, useEffect, etc.)
 3. **NEVER** re-invoke the pattern function — it runs exactly once
-4. \`computed()\` failures propagate silently — downstream values become undefined
+4. \`computed()\` failures surface through scheduler error reporting — downstream values become undefined
 5. Always use \`handler()\` for async operations (API calls), not inline async
 6. Use module-scope \`handler()\` definitions, bind inside the pattern
 7. **NEVER** wrap JSX in \`computed()\` — the transformer automatically handles reactivity in JSX expressions
