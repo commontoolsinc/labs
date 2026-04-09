@@ -161,6 +161,8 @@ export interface ExperimentalOptions {
   modernSchemaHash?: boolean | undefined;
   /** Backward-compat alias for `modernHash`. */
   canonicalHashing?: boolean | undefined;
+  /** Preserve cumulative scheduler write history instead of using current-known writes. */
+  schedulerHistoricalMightWrite?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -296,6 +298,7 @@ export class Runtime {
       modernHash: undefined,
       modernSchemaHash: undefined,
       canonicalHashing: undefined,
+      schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
 

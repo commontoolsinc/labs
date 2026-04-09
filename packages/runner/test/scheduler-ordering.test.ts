@@ -63,7 +63,7 @@ describe("push-triggered filtering", () => {
     expect(mightWrite!.length).toBeGreaterThan(0);
   });
 
-  it("should accumulate mightWrite over multiple runs", async () => {
+  it("should replace current-known writes over multiple resubscriptions by default", async () => {
     const cell1 = runtime.getCell<number>(space, "mw-accum-1", undefined, tx);
     const cell2 = runtime.getCell<number>(space, "mw-accum-2", undefined, tx);
     cell1.set(0);
@@ -71,15 +71,7 @@ describe("push-triggered filtering", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    let writeToCell2 = false;
-    const action: Action = (actionTx) => {
-      cell1.withTx(actionTx).send(1);
-      if (writeToCell2) {
-        cell2.withTx(actionTx).send(2);
-      }
-    };
-
-    // First run - writes only to cell1
+    const action: Action = () => {};
     runtime.scheduler.subscribe(
       action,
       {
@@ -89,30 +81,111 @@ describe("push-triggered filtering", () => {
       },
       {},
     );
-    await cell1.pull();
 
-    const mightWrite1 = runtime.scheduler.getMightWrite(action);
-    const initialLength = mightWrite1?.length || 0;
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      cell1.getAsNormalizedFullLink(),
+    ]);
 
-    // Second run - writes to both cells
-    writeToCell2 = true;
+    runtime.scheduler.resubscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [cell2.getAsNormalizedFullLink()],
+    });
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      cell2.getAsNormalizedFullLink(),
+    ]);
+  });
+
+  it("should preserve historical mightWrite behind the experimental flag", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: {
+        schedulerHistoricalMightWrite: true,
+      },
+    });
+    tx = runtime.edit();
+
+    const cell1 = runtime.getCell<number>(
+      space,
+      "mw-experimental-1",
+      undefined,
+      tx,
+    );
+    const cell2 = runtime.getCell<number>(
+      space,
+      "mw-experimental-2",
+      undefined,
+      tx,
+    );
+    cell1.set(0);
+    cell2.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const action: Action = () => {};
     runtime.scheduler.subscribe(
       action,
       {
         reads: [],
         shallowReads: [],
-        writes: [
-          cell1.getAsNormalizedFullLink(),
-          cell2.getAsNormalizedFullLink(),
-        ],
+        writes: [cell1.getAsNormalizedFullLink()],
       },
       {},
     );
-    await cell2.pull();
 
-    // mightWrite should have grown
-    const mightWrite2 = runtime.scheduler.getMightWrite(action);
-    expect(mightWrite2!.length).toBeGreaterThan(initialLength);
+    runtime.scheduler.resubscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [cell2.getAsNormalizedFullLink()],
+    });
+
+    expect(
+      runtime.scheduler.getMightWrite(action)?.map((write) => write.id).sort(),
+    ).toEqual([
+      cell1.getAsNormalizedFullLink().id,
+      cell2.getAsNormalizedFullLink().id,
+    ].sort());
+  });
+
+  it("should keep declared writes in current-known writes after empty resubscribe", async () => {
+    const output = runtime.getCell<number>(
+      space,
+      "mw-declared-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const declaredWrite = output.getAsNormalizedFullLink();
+    const action = Object.assign((() => {}) as Action, {
+      writes: [declaredWrite],
+    });
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [declaredWrite],
+      },
+      {},
+    );
+
+    runtime.scheduler.resubscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    });
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([declaredWrite]);
   });
 
   it("should track filter stats", async () => {

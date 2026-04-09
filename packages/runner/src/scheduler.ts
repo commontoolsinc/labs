@@ -388,14 +388,14 @@ export class Scheduler {
   private actionThrottle = new WeakMap<Action, number>();
   private inFlightSources = new WeakMap<Action, Set<IStorageTransaction>>();
 
-  // Track what each action has ever written (grows over time, includes potentialWrites).
-  // Unlike dependencies.writes (current run only), mightWrite is cumulative and used
-  // for building the dependency graph conservatively - if an action ever wrote to a path,
-  // we assume it might write there again. This prevents missed dependencies when an
-  // action's write behavior varies between runs.
-  private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
-  // Index: entity -> actions that write to it (for fast dependency lookup)
-  // Updated when mightWrite changes
+  // Current-known writes are rebuilt on each dependency update from actual
+  // writes plus declared/potential writes. This is the default scheduling view.
+  private currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
+  // Historical writes preserve the legacy cumulative union and are only used
+  // when the experimental historical-write mode is enabled.
+  private historicalMightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
+  // Index: entity -> actions that write to it (for fast dependency lookup).
+  // Updated from the active scheduling write set.
   private writersByEntity = new Map<SpaceAndURI, Set<Action>>();
   // Reverse index: action -> entities it writes to (for cleanup)
   private actionWriteEntities = new WeakMap<Action, Set<SpaceAndURI>>();
@@ -889,7 +889,7 @@ export class Scheduler {
     if (
       this.pullMode &&
       !actionIsEffect &&
-      this.mightWrite.get(action)?.length
+      this.getSchedulingWrites(action)?.length
     ) {
       this.scheduleAffectedEffects(action);
     }
@@ -997,7 +997,7 @@ export class Scheduler {
             if (this.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
 
             // Check path overlap
-            const writerWrites = this.mightWrite.get(writer) ?? [];
+            const writerWrites = this.getSchedulingWrites(writer) ?? [];
             for (const write of writerWrites) {
               if (
                 write.space === read.space &&
@@ -1179,7 +1179,7 @@ export class Scheduler {
 
           if (this.collectActionRunTrace) {
             const parentAction = this.actionParent.get(action);
-            const declaredWrites = (this.mightWrite.get(action) ?? []).map(
+            const declaredWrites = (this.getSchedulingWrites(action) ?? []).map(
               toActionRunTraceAddress,
             );
             const actualWrites = sortAndCompactPaths(log.writes).map(
@@ -1633,6 +1633,24 @@ export class Scheduler {
     this.scheduled = true;
   }
 
+  private useHistoricalMightWrite(): boolean {
+    return this.runtime.experimental.schedulerHistoricalMightWrite === true;
+  }
+
+  private getSchedulingWrites(
+    action: Action,
+  ): IMemorySpaceAddress[] | undefined {
+    return this.useHistoricalMightWrite()
+      ? this.historicalMightWrite.get(action)
+      : this.currentKnownWrites.get(action);
+  }
+
+  private getSchedulingWritesMap(): WeakMap<Action, IMemorySpaceAddress[]> {
+    return this.useHistoricalMightWrite()
+      ? this.historicalMightWrite
+      : this.currentKnownWrites;
+  }
+
   private setDependencies(
     action: Action,
     log: ReactivityLog,
@@ -1651,6 +1669,12 @@ export class Scheduler {
     const potentialWrites = sortAndCompactPaths(
       filterIgnoredAddresses(log.potentialWrites, ignoredSchedulingWrites),
     );
+    const declaredWrites = sortAndCompactPaths(
+      filterIgnoredAddresses(
+        (action as Partial<TelemetryAnnotations>).writes,
+        ignoredSchedulingWrites,
+      ),
+    );
     const schedulingLog: ReactivityLog = {
       reads,
       shallowReads,
@@ -1659,22 +1683,42 @@ export class Scheduler {
     };
     this.dependencies.set(action, schedulingLog);
 
-    // Initialize/update mightWrite with declared writes
-    // This ensures dependency chain can be built even before action runs
-    const rawExistingMightWrite = this.mightWrite.get(action) ?? [];
-    const existingMightWrite = filterIgnoredAddresses(
-      rawExistingMightWrite,
+    // Rebuild the current scheduling view from the latest writes plus
+    // declared/potential writes. Keep the cumulative legacy union separately
+    // so it can be enabled behind an experimental flag.
+    const rawExistingCurrentWrites = this.currentKnownWrites.get(action) ?? [];
+    const existingCurrentWrites = filterIgnoredAddresses(
+      rawExistingCurrentWrites,
       ignoredSchedulingWrites,
     );
-    const newMightWrite = sortAndCompactPaths([
-      ...existingMightWrite,
+    const newCurrentKnownWrites = sortAndCompactPaths([
+      ...declaredWrites,
       ...writes,
       ...potentialWrites,
     ]);
-    this.mightWrite.set(action, newMightWrite);
+    this.currentKnownWrites.set(action, newCurrentKnownWrites);
 
-    const addedWrites = newMightWrite.filter((write) =>
-      !existingMightWrite.some((existing) =>
+    const rawExistingHistoricalWrites = this.historicalMightWrite.get(action) ??
+      [];
+    const existingHistoricalWrites = filterIgnoredAddresses(
+      rawExistingHistoricalWrites,
+      ignoredSchedulingWrites,
+    );
+    const newHistoricalMightWrite = sortAndCompactPaths([
+      ...existingHistoricalWrites,
+      ...newCurrentKnownWrites,
+    ]);
+    this.historicalMightWrite.set(action, newHistoricalMightWrite);
+
+    const previousSchedulingWrites = this.useHistoricalMightWrite()
+      ? existingHistoricalWrites
+      : existingCurrentWrites;
+    const nextSchedulingWrites = this.useHistoricalMightWrite()
+      ? newHistoricalMightWrite
+      : newCurrentKnownWrites;
+
+    const addedWrites = nextSchedulingWrites.filter((write) =>
+      !previousSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
         existing.type === write.type &&
@@ -1682,8 +1726,8 @@ export class Scheduler {
         arraysOverlap(existing.path, write.path)
       )
     );
-    const removedWrites = rawExistingMightWrite.filter((write) =>
-      !newMightWrite.some((existing) =>
+    const removedWrites = previousSchedulingWrites.filter((write) =>
+      !nextSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
         existing.type === write.type &&
@@ -1698,7 +1742,7 @@ export class Scheduler {
     const nextEntities = new Set<SpaceAndURI>();
     const addedEntities = new Set<SpaceAndURI>();
     const removedEntities = new Set<SpaceAndURI>();
-    for (const write of newMightWrite) {
+    for (const write of nextSchedulingWrites) {
       const entity: SpaceAndURI = `${write.space}/${write.id}`;
       nextEntities.add(entity);
       if (!existingEntities.has(entity)) {
@@ -1732,7 +1776,7 @@ export class Scheduler {
     this.actionWriteEntities.set(action, nextEntities);
 
     if (removedWrites.length > 0) {
-      this.pruneDependentsForCurrentWrites(action, newMightWrite);
+      this.pruneDependentsForCurrentWrites(action, nextSchedulingWrites);
     }
 
     if (this.pullMode && addedWrites.length > 0) {
@@ -1931,7 +1975,7 @@ export class Scheduler {
         if (newDependencies.has(otherAction)) continue;
 
         // Get paths this action writes to
-        const otherWrites = this.mightWrite.get(otherAction) ?? [];
+        const otherWrites = this.getSchedulingWrites(otherAction) ?? [];
 
         if (
           this.readsOverlapWrites(
@@ -2167,7 +2211,7 @@ export class Scheduler {
       const reads = deps?.reads.map((r) =>
         `${r.space}/${r.id}/${r.path.join("/")}`
       );
-      const writes = this.mightWrite.get(action)?.map((w) =>
+      const writes = this.getSchedulingWrites(action)?.map((w) =>
         `${w.space}/${w.id}/${w.path.join("/")}`
       );
 
@@ -2236,7 +2280,7 @@ export class Scheduler {
         }
       }
 
-      const writes = this.mightWrite.get(action);
+      const writes = this.getSchedulingWrites(action);
       if (writes) {
         for (const write of writes) {
           writtenEntities.add(`${write.space}/${write.id}`);
@@ -2310,7 +2354,7 @@ export class Scheduler {
    * Finds the cell IDs that create a dependency between producer and consumer.
    */
   private findOverlappingCells(producer: Action, consumer: Action): string[] {
-    const producerWrites = this.mightWrite.get(producer) ?? [];
+    const producerWrites = this.getSchedulingWrites(producer) ?? [];
     const consumerDeps = this.dependencies.get(consumer);
     if (!consumerDeps) return [];
 
@@ -2520,7 +2564,7 @@ export class Scheduler {
 
         for (const writer of writers) {
           if (this.effects.has(writer)) continue;
-          const writes = this.mightWrite.get(writer) ?? [];
+          const writes = this.getSchedulingWrites(writer) ?? [];
           if (this.readsOverlapWrites([read], [], writes)) {
             directWriters.add(writer);
           }
@@ -2534,7 +2578,7 @@ export class Scheduler {
 
         for (const writer of writers) {
           if (this.effects.has(writer)) continue;
-          const writes = this.mightWrite.get(writer) ?? [];
+          const writes = this.getSchedulingWrites(writer) ?? [];
           if (this.readsOverlapWrites([], [read], writes)) {
             directWriters.add(writer);
           }
@@ -2819,7 +2863,8 @@ export class Scheduler {
    * Sets a throttle period for an action.
    * The action won't run if it ran within the last `ms` milliseconds.
    * Unlike debounce, throttled actions stay dirty and will be pulled
-   * by effects when the throttle period expires.
+   * by effects when the throttle period expires. Event handlers whose head
+   * dependencies are throttled are parked until the earliest eligible wake time.
    */
   setThrottle(action: Action, ms: number): void {
     if (ms <= 0) {
@@ -2900,10 +2945,12 @@ export class Scheduler {
   // ============================================================
 
   /**
-   * Returns the accumulated "might write" set for an action.
+   * Returns the active scheduling write set for an action. By default this is
+   * the current-known write set; experimental historical mode returns the
+   * cumulative legacy view instead.
    */
   getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
-    return this.mightWrite.get(action);
+    return this.getSchedulingWrites(action);
   }
 
   /**
@@ -3425,7 +3472,7 @@ export class Scheduler {
       .filter(
         (action) =>
           !this.effects.has(action) &&
-          (this.mightWrite.get(action)?.length ?? 0) === 0,
+          (this.getSchedulingWrites(action)?.length ?? 0) === 0,
       );
 
     // Clear the pending collection set - dependencies have been collected
@@ -3745,7 +3792,7 @@ export class Scheduler {
       const order = topologicalSort(
         workSet,
         this.dependencies,
-        this.mightWrite,
+        this.getSchedulingWritesMap(),
         this.actionParent,
         this.pullMode ? this.dependents : undefined,
       );
