@@ -282,14 +282,17 @@ function toActionRunTraceAddress(
   };
 }
 
+type QueuedEvent = {
+  action: Action;
+  handler: EventHandler;
+  event: any;
+  retriesLeft: number;
+  onCommit?: (tx: IExtendedStorageTransaction) => void;
+  notBefore?: number;
+};
+
 export class Scheduler {
-  private eventQueue: {
-    action: Action;
-    handler: EventHandler;
-    event: any;
-    retriesLeft: number;
-    onCommit?: (tx: IExtendedStorageTransaction) => void;
-  }[] = [];
+  private eventQueue: QueuedEvent[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
 
   private pending = new Set<Action>();
@@ -375,6 +378,8 @@ export class Scheduler {
   // Track all active debounce timers for cleanup during dispose
   private activeDebounceTimers = new Set<ReturnType<typeof setTimeout>>();
   private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
+  private eventQueueWakeTimer: ReturnType<typeof setTimeout> | null = null;
+  private eventQueueWakeAt: number | null = null;
   private actionDebounce = new WeakMap<Action, number>();
   // Actions that opt out of auto-debounce (inverted: true means NO auto-debounce)
   private noDebounce = new WeakMap<Action, boolean>();
@@ -1281,6 +1286,10 @@ export class Scheduler {
         Promise.allSettled([...this.backgroundTasks]).then(() =>
           this.idle().then(resolve)
         );
+      } else if (this.eventQueueWakeTimer !== null) {
+        // A queued event is parked behind a throttled dependency. Wait for the
+        // wake timer to re-schedule the queue and then re-check.
+        this.idlePromises.push(resolve);
       } else if (!this.scheduled) {
         // Nothing is scheduled to run - we're idle.
         // In pull mode, pending computations won't run without an effect to pull them,
@@ -1614,7 +1623,9 @@ export class Scheduler {
   }
 
   queueExecution(): void {
-    if (this.scheduled || this.disposed) return;
+    if (this.disposed) return;
+    this.cancelEventQueueWake();
+    if (this.scheduled) return;
     this.pendingQueueTaskTimer = queueTask(() => {
       this.pendingQueueTaskTimer = null;
       this.execute();
@@ -2837,14 +2848,51 @@ export class Scheduler {
    * Returns true if the action should be skipped this execution cycle.
    */
   private isThrottled(action: Action): boolean {
+    const nextEligibleAt = this.getNextEligibleRunTime(action);
+    return nextEligibleAt !== undefined && nextEligibleAt > performance.now();
+  }
+
+  private getNextEligibleRunTime(action: Action): number | undefined {
     const throttleMs = this.actionThrottle.get(action);
-    if (!throttleMs) return false;
+    if (!throttleMs) return undefined;
 
     const stats = this.actionStats.get(this.getActionId(action));
-    if (!stats) return false; // No stats yet, action hasn't run
+    if (!stats) return undefined;
 
-    const elapsed = performance.now() - stats.lastRunTimestamp;
-    return elapsed < throttleMs;
+    return stats.lastRunTimestamp + throttleMs;
+  }
+
+  private scheduleEventQueueWake(notBefore: number): void {
+    if (this.disposed) return;
+    if (
+      this.eventQueueWakeAt !== null && this.eventQueueWakeAt <= notBefore &&
+      this.eventQueueWakeTimer !== null
+    ) {
+      return;
+    }
+
+    this.cancelEventQueueWake();
+
+    const delay = Math.max(0, notBefore - performance.now());
+    this.eventQueueWakeAt = notBefore;
+    this.eventQueueWakeTimer = setTimeout(() => {
+      this.eventQueueWakeTimer = null;
+      this.eventQueueWakeAt = null;
+      this.queueExecution();
+    }, delay);
+  }
+
+  private cancelEventQueueWake(): void {
+    if (this.eventQueueWakeTimer !== null) {
+      clearTimeout(this.eventQueueWakeTimer);
+      this.eventQueueWakeTimer = null;
+    }
+    this.eventQueueWakeAt = null;
+  }
+
+  private isHeadEventParked(now: number = performance.now()): boolean {
+    const headEvent = this.eventQueue[0];
+    return headEvent?.notBefore !== undefined && headEvent.notBefore > now;
   }
 
   // ============================================================
@@ -3389,134 +3437,161 @@ export class Scheduler {
 
     logger.timeStart("scheduler", "execute", "event");
     // Process next event from the event queue.
-    const queuedEvent = this.eventQueue.shift();
+    const queuedEvent = this.eventQueue[0];
     if (queuedEvent) {
-      const { action, handler, event: eventValue, retriesLeft, onCommit } =
-        queuedEvent;
-      const handlerId = this.getActionId(handler);
-      this.runtime.telemetry.submit({
-        type: "scheduler.invocation",
-        handlerId,
-        handlerInfo: this.getActionTelemetryInfo(handler),
-      });
-      // In pull mode, ensure handler dependencies are computed before running
-      let shouldSkipEvent = false;
-      if (this.pullMode && handler.populateDependencies) {
-        // Get the handler's dependencies (read-only, just capturing what will be read)
-        const depTx = this.runtime.edit();
-        handler.populateDependencies(depTx, eventValue);
-        const deps = txToReactivityLog(depTx);
-        // Commit even though we only read - the tx has no writes so this is safe
-        depTx.commit();
-
-        const dirtyDeps = new Set<Action>();
-        const dirtyDepMemo = new Map<Action, boolean>();
-        const hasDirtyDependencies = this.collectDirtyDependenciesForLog(
-          deps,
-          dirtyDeps,
-          dirtyDepMemo,
-        );
-
-        // If there are dirty dependencies, add them to pending and re-queue event
-        if (hasDirtyDependencies) {
-          for (const dep of dirtyDeps) {
-            this.pending.add(dep);
-            eventBlockingDeps.add(dep); // Track for workSet inclusion
-          }
-          // Re-queue the event to be processed after dependencies compute
-          this.eventQueue.unshift(queuedEvent);
-          shouldSkipEvent = true;
-        }
-      }
-
-      // Skip running the event if we need to compute dependencies first
-      if (shouldSkipEvent) {
-        // Continue to process pending actions
-        // The event will be processed in the next execute() cycle
+      if (
+        queuedEvent.notBefore !== undefined &&
+        queuedEvent.notBefore > performance.now()
+      ) {
+        this.scheduleEventQueueWake(queuedEvent.notBefore);
       } else {
-        const finalize = (error?: unknown) => {
-          try {
-            if (error) this.handleError(error as Error, action);
-          } finally {
-            tx.commit().then(({ error }) => {
-              // If the transaction failed, and we have retries left, queue the
-              // event again at the beginning of the queue. This isn't guaranteed
-              // to be the same order as the original event, but it's close
-              // enough, especially for a series of event that act on the same
-              // conflicting data.
-              if (error && retriesLeft > 0) {
-                logger.warn(
-                  "scheduler",
-                  `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
-                  { error, handlerId },
-                );
-                this.eventQueue.unshift({
-                  action,
-                  handler,
-                  event: eventValue,
-                  retriesLeft: retriesLeft - 1,
-                  onCommit,
-                });
-                // Ensure the re-queued event gets processed even if the scheduler
-                // finished this cycle before the commit completed.
-                this.queueExecution();
-              } else {
-                if (error) {
-                  logger.error(
-                    "schedule-error",
-                    "Event handler transaction failed after exhausting all retries",
+        delete queuedEvent.notBefore;
+
+        const { action, handler, event: eventValue, retriesLeft, onCommit } =
+          queuedEvent;
+        const handlerId = this.getActionId(handler);
+
+        // In pull mode, ensure handler dependencies are computed before running.
+        let shouldSkipEvent = false;
+        if (this.pullMode && handler.populateDependencies) {
+          // Get the handler's dependencies (read-only, just capturing what will be read)
+          const depTx = this.runtime.edit();
+          handler.populateDependencies(depTx, eventValue);
+          const deps = txToReactivityLog(depTx);
+          // Commit even though we only read - the tx has no writes so this is safe
+          depTx.commit();
+
+          const dirtyDeps = new Set<Action>();
+          const dirtyDepMemo = new Map<Action, boolean>();
+          const hasDirtyDependencies = this.collectDirtyDependenciesForLog(
+            deps,
+            dirtyDeps,
+            dirtyDepMemo,
+          );
+
+          if (hasDirtyDependencies) {
+            let nextEligibleAt: number | undefined;
+            let hasRunnableDirtyDependency = false;
+
+            for (const dep of dirtyDeps) {
+              const depNextEligibleAt = this.getNextEligibleRunTime(dep);
+              if (
+                depNextEligibleAt !== undefined &&
+                depNextEligibleAt > performance.now()
+              ) {
+                nextEligibleAt = nextEligibleAt === undefined
+                  ? depNextEligibleAt
+                  : Math.min(nextEligibleAt, depNextEligibleAt);
+                continue;
+              }
+
+              hasRunnableDirtyDependency = true;
+              this.pending.add(dep);
+              eventBlockingDeps.add(dep);
+            }
+
+            if (hasRunnableDirtyDependency) {
+              shouldSkipEvent = true;
+            } else if (nextEligibleAt !== undefined) {
+              queuedEvent.notBefore = nextEligibleAt;
+              this.scheduleEventQueueWake(nextEligibleAt);
+              shouldSkipEvent = true;
+            }
+          }
+        }
+
+        if (!shouldSkipEvent) {
+          this.runtime.telemetry.submit({
+            type: "scheduler.invocation",
+            handlerId,
+            handlerInfo: this.getActionTelemetryInfo(handler),
+          });
+          this.eventQueue.shift();
+
+          const finalize = (error?: unknown) => {
+            try {
+              if (error) this.handleError(error as Error, action);
+            } finally {
+              tx.commit().then(({ error }) => {
+                // If the transaction failed, and we have retries left, queue the
+                // event again at the beginning of the queue. This isn't guaranteed
+                // to be the same order as the original event, but it's close
+                // enough, especially for a series of event that act on the same
+                // conflicting data.
+                if (error && retriesLeft > 0) {
+                  logger.warn(
+                    "scheduler",
+                    `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
                     { error, handlerId },
                   );
-                }
-                if (onCommit) {
-                  // Call commit callback when:
-                  // - Commit succeeds (!error), OR
-                  // - Commit fails but we're out of retries (retriesLeft === 0)
-                  try {
-                    onCommit(tx);
-                  } catch (callbackError) {
+                  this.eventQueue.unshift({
+                    action,
+                    handler,
+                    event: eventValue,
+                    retriesLeft: retriesLeft - 1,
+                    onCommit,
+                  });
+                  // Ensure the re-queued event gets processed even if the scheduler
+                  // finished this cycle before the commit completed.
+                  this.queueExecution();
+                } else {
+                  if (error) {
                     logger.error(
                       "schedule-error",
-                      "Error in event commit callback:",
-                      callbackError,
+                      "Event handler transaction failed after exhausting all retries",
+                      { error, handlerId },
                     );
                   }
+                  if (onCommit) {
+                    // Call commit callback when:
+                    // - Commit succeeds (!error), OR
+                    // - Commit fails but we're out of retries (retriesLeft === 0)
+                    try {
+                      onCommit(tx);
+                    } catch (callbackError) {
+                      logger.error(
+                        "schedule-error",
+                        "Error in event commit callback:",
+                        callbackError,
+                      );
+                    }
+                  }
                 }
-              }
-            }).catch((error) => {
-              logger.error(
-                "schedule-error",
-                "Event handler commit promise rejected:",
-                error,
-              );
-            });
-          }
-        };
-        const tx = this.runtime.edit();
-        tx.tx.immediate = true;
-        const actionId = this.getActionId(action);
-
-        try {
-          const actionStartTime = performance.now();
-          this.runningPromise = Promise.resolve(
-            this.runtime.harness.invoke(() => action(tx)),
-          ).then(() => {
-            const duration = (performance.now() - actionStartTime) / 1000;
-            if (duration > 10) {
-              console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+              }).catch((error) => {
+                logger.error(
+                  "schedule-error",
+                  "Event handler commit promise rejected:",
+                  error,
+                );
+              });
             }
-            logger.debug("action-timing", () => {
-              return [
-                `Action ${actionId} completed in ${duration.toFixed(3)}s`,
-              ];
-            });
-            finalize();
-          }).catch((error) => finalize(error));
-          await this.runningPromise;
-        } catch (error) {
-          finalize(error);
+          };
+          const tx = this.runtime.edit();
+          tx.tx.immediate = true;
+          const actionId = this.getActionId(action);
+
+          try {
+            const actionStartTime = performance.now();
+            this.runningPromise = Promise.resolve(
+              this.runtime.harness.invoke(() => action(tx)),
+            ).then(() => {
+              const duration = (performance.now() - actionStartTime) / 1000;
+              if (duration > 10) {
+                console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+              }
+              logger.debug("action-timing", () => {
+                return [
+                  `Action ${actionId} completed in ${duration.toFixed(3)}s`,
+                ];
+              });
+              finalize();
+            }).catch((error) => finalize(error));
+            await this.runningPromise;
+          } catch (error) {
+            finalize(error);
+          }
         }
-      } // Close else block for shouldSkipEvent
+      }
     }
     logger.timeEnd("scheduler", "execute", "event");
 
@@ -3922,26 +3997,41 @@ export class Scheduler {
       : this.pending.size > 0;
     const hasDirtyEffects = this.pullMode &&
       [...this.dirty].some((a) => this.effects.has(a));
+    const hasQueuedEventReadyNow = this.eventQueue.length > 0 &&
+      !this.isHeadEventParked();
 
-    if (
-      !hasPendingEffects && !hasDirtyEffects && this.eventQueue.length === 0
-    ) {
-      const promises = this.idlePromises;
-      for (const resolve of promises) resolve();
-      this.idlePromises.length = 0;
-      this.loopCounter = new WeakMap();
-      this.scheduled = false;
+    if (!hasPendingEffects && !hasDirtyEffects && !hasQueuedEventReadyNow) {
+      if (this.eventQueueWakeTimer !== null) {
+        this.loopCounter = new WeakMap();
+        this.scheduled = false;
 
-      // Reset settling tracker on idle
-      this.settlingTracker = {
-        windowStart: 0,
-        busyTime: 0,
-        lastExecuteStart: 0,
-        isExecuting: false,
-        nonSettlingDetected: false,
-      };
+        // Waiting on a future wake is quiescent from the scheduler's
+        // perspective, so reset the non-settling tracker.
+        this.settlingTracker = {
+          windowStart: 0,
+          busyTime: 0,
+          lastExecuteStart: 0,
+          isExecuting: false,
+          nonSettlingDetected: false,
+        };
+      } else {
+        const promises = this.idlePromises;
+        for (const resolve of promises) resolve();
+        this.idlePromises.length = 0;
+        this.loopCounter = new WeakMap();
+        this.scheduled = false;
 
-      this.scheduledFirstTime.clear();
+        // Reset settling tracker on idle
+        this.settlingTracker = {
+          windowStart: 0,
+          busyTime: 0,
+          lastExecuteStart: 0,
+          isExecuting: false,
+          nonSettlingDetected: false,
+        };
+
+        this.scheduledFirstTime.clear();
+      }
     } else {
       // Keep scheduled = true since we're queuing another execution
       this.pendingQueueTaskTimer = queueTask(() => {
@@ -3991,6 +4081,7 @@ export class Scheduler {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;
     }
+    this.cancelEventQueueWake();
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {
       clearTimeout(this.diagnosisTimeout);
