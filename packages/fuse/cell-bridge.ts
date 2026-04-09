@@ -266,6 +266,7 @@ export class CellBridge {
   private hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
   private pendingHydrations = new Map<string, Promise<boolean>>();
+  private retainedSubtrees = new Map<bigint, number>();
   /** Monotonic invalidation epoch per hydration key. */
   private hydrationEpochs = new Map<string, number>();
   /**
@@ -549,6 +550,20 @@ export class CellBridge {
     this.hydratedPieceProps.get(pieceIno)?.delete(propName);
   }
 
+  private cleanupRetainedSubtrees(now = Date.now()): void {
+    for (const [ino, expiresAt] of this.retainedSubtrees) {
+      if (expiresAt > now) continue;
+      this.retainedSubtrees.delete(ino);
+      this.tree.clear(ino);
+    }
+  }
+
+  private retainDetachedSubtree(ino: bigint, ttlMs = 1000): void {
+    if (!this.tree.getNode(ino)) return;
+    this.tree.detach(ino);
+    this.retainedSubtrees.set(ino, Date.now() + ttlMs);
+  }
+
   private getPieceInfo(
     pieceIno: bigint,
   ): (PieceRootInfo & { state?: SpaceState }) | null {
@@ -574,6 +589,7 @@ export class CellBridge {
   }
 
   async prepareLookup(parentIno: bigint, name: string): Promise<boolean> {
+    this.cleanupRetainedSubtrees();
     if (this.isEntitiesDir(parentIno)) {
       return await this.resolveEntity(parentIno, name);
     }
@@ -604,6 +620,7 @@ export class CellBridge {
   }
 
   async prepareDirectory(ino: bigint): Promise<boolean> {
+    this.cleanupRetainedSubtrees();
     const pieceInfo = this.getPieceInfo(ino);
     if (pieceInfo) {
       await this.hydratePieceProp(ino, "input");
@@ -946,6 +963,7 @@ export class CellBridge {
     resolveLink: ResolveLink;
     spaceName: string;
   }): Promise<void> {
+    this.cleanupRetainedSubtrees();
     const startedAt = Date.now();
     if (this.tree.getNode(args.pieceIno)?.kind !== "dir") {
       return;
@@ -1053,10 +1071,10 @@ export class CellBridge {
       if (buildRootName === pendingPropName) {
         this.markPiecePropCleared(pieceIno, propName);
         if (existingIno !== undefined) {
-          this.tree.clear(existingIno);
+          this.retainDetachedSubtree(existingIno);
         }
         if (jsonIno !== undefined) {
-          this.tree.clear(jsonIno);
+          this.retainDetachedSubtree(jsonIno);
         }
         if (propName === "result") {
           this.clearFsProjectionEntries(pieceIno);
@@ -2285,9 +2303,11 @@ export class CellBridge {
           debounceTimer = setTimeout(() => {
             debounceTimer = undefined;
             void (async () => {
-              this.invalidateRootPropCache(pieceIno, propName);
               let rebuildValue = newValue;
               if (rebuildValue === undefined) {
+                if (typeof cell.pull === "function") {
+                  await cell.pull().catch(() => undefined);
+                }
                 rebuildValue = await piece[propName].get().catch(() =>
                   undefined
                 );
@@ -2298,7 +2318,10 @@ export class CellBridge {
               // Eagerly rebuild using the sink payload when available. Under
               // pull mode the sink can briefly report undefined before an
               // explicit pull materializes the latest result, so fall back to
-              // the piece getter in that case.
+              // the piece getter in that case. If the value is still
+              // undefined, keep the current mounted tree intact until a
+              // concrete replacement arrives.
+              this.invalidateRootPropCache(pieceIno, propName);
               await this.rebuildPieceProp({
                 cell,
                 newValue: rebuildValue,

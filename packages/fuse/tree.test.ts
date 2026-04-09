@@ -95,6 +95,42 @@ Deno.test("removeChild clears dir and nested file recursively", () => {
   assertEquals(tree.lookup(tree.rootIno, "dir"), undefined);
 });
 
+Deno.test("detached subtrees stay readable by inode until cleared", () => {
+  const tree = new FsTree();
+  const dir = tree.addDir(tree.rootIno, "dir");
+  const file = tree.addFile(dir, "nested.txt", "content", "string");
+
+  tree.detach(dir);
+
+  assertEquals(tree.lookup(tree.rootIno, "dir"), undefined);
+  assertEquals(tree.inodes.has(dir), true);
+  assertEquals(tree.inodes.has(file), true);
+  assertEquals(tree.getPath(dir), "/dir");
+  assertEquals(tree.getPath(file), "/dir/nested.txt");
+
+  tree.clear(dir);
+
+  assertEquals(tree.inodes.has(dir), false);
+  assertEquals(tree.inodes.has(file), false);
+});
+
+Deno.test("clearing a detached subtree does not remove a replacement path mapping", () => {
+  const tree = new FsTree();
+  const oldDir = tree.addDir(tree.rootIno, "dir");
+  const oldFile = tree.addFile(oldDir, "nested.txt", "old", "string");
+
+  tree.detach(oldDir);
+
+  const newDir = tree.addDir(tree.rootIno, "dir");
+  const newFile = tree.addFile(newDir, "nested.txt", "new", "string");
+
+  tree.clear(oldDir);
+
+  assertEquals(tree.lookup(tree.rootIno, "dir"), newDir);
+  assertEquals(tree.getPath(newFile), "/dir/nested.txt");
+  assertEquals(tree.inodes.has(oldFile), false);
+});
+
 Deno.test("clear removes subtree but keeps sibling", () => {
   const tree = new FsTree();
   const a = tree.addDir(tree.rootIno, "a");
