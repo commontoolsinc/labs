@@ -280,14 +280,10 @@ Use the user context above to personalize your suggestions when relevant.`;
     result,
     candidates: initialResults,
     // [UI] must be a static VNode — the reconciler breaks if it's a computed.
-    // Use ifElse as a child to switch between modes at the reactive level.
+    // Switch between modes at the child level instead.
     [UI]: (
       <div style="display:contents">
-        {ifElse(
-          computed(() => initialResults.length > 0),
-          pickerUI,
-          freeformUI,
-        )}
+        {computed(() => initialResults.length > 0) ? pickerUI : freeformUI}
       </div>
     ),
   };

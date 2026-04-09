@@ -2,7 +2,6 @@ import {
   computed,
   fetchData,
   handler,
-  ifElse,
   NAME,
   navigateTo,
   nonPrivateRandom,
@@ -305,42 +304,42 @@ Be matter-of-fact. Prefer action to explanation.`;
                     </div>
                   </div>
 
-                  {ifElse(
-                    computed(() => {
+                  {computed(() => {
                       const show = showHistory.get();
                       const dismissedIdx = peekDismissedIndex.get();
                       return !show && latestAssistantMessage &&
                         assistantMessageCount !== dismissedIdx;
-                    }),
-                    <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
-                      <cf-button
-                        variant="ghost"
-                        size="icon"
-                        onClick={dismissPeek({
-                          peekDismissedIndex,
-                          assistantMessageCount,
-                        })}
-                        style="position: absolute; top: 0px; right: 0px; z-index: 1; font-size: 16px;"
-                        title="Dismiss"
-                      >
-                        ×
-                      </cf-button>
-                      <div
-                        onClick={toggle({ value: showHistory })}
-                        style="cursor: pointer;"
-                      >
-                        <cf-cell-context $cell={latestAssistantMessage}>
-                          <cf-chat-message
-                            role="assistant"
-                            compact
-                            content={latestAssistantMessage ?? ""}
-                            pending={omnibot.pending}
-                          />
-                        </cf-cell-context>
+                    })
+                    ? (
+                      <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
+                        <cf-button
+                          variant="ghost"
+                          size="icon"
+                          onClick={dismissPeek({
+                            peekDismissedIndex,
+                            assistantMessageCount,
+                          })}
+                          style="position: absolute; top: 0px; right: 0px; z-index: 1; font-size: 16px;"
+                          title="Dismiss"
+                        >
+                          ×
+                        </cf-button>
+                        <div
+                          onClick={toggle({ value: showHistory })}
+                          style="cursor: pointer;"
+                        >
+                          <cf-cell-context $cell={latestAssistantMessage}>
+                            <cf-chat-message
+                              role="assistant"
+                              compact
+                              content={latestAssistantMessage ?? ""}
+                              pending={omnibot.pending}
+                            />
+                          </cf-cell-context>
+                        </div>
                       </div>
-                    </div>,
-                    null,
-                  )}
+                    )
+                    : null}
 
                   {/* Prompt input */}
                   <div style="padding: 4px 8px 8px; flex-shrink: 0;">
