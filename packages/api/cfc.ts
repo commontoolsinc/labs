@@ -29,8 +29,7 @@ export const CFC_CANONICAL_ALIAS_NAMES = [
   "PermutationOf",
 ] as const;
 
-export type CfcCanonicalAliasName =
-  typeof CFC_CANONICAL_ALIAS_NAMES[number];
+export type CfcCanonicalAliasName = typeof CFC_CANONICAL_ALIAS_NAMES[number];
 
 export type Ref<Root, Path extends readonly string[]> = {
   readonly __ct_ref_root__?: Root;

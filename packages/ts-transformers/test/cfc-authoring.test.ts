@@ -19,7 +19,10 @@ function normalizePrintedNode(
     .trim();
 }
 
-function extractVariableInitializer(output: string, variableName: string): string {
+function extractVariableInitializer(
+  output: string,
+  variableName: string,
+): string {
   const sourceFile = ts.createSourceFile(
     "/output.tsx",
     output,
@@ -117,7 +120,12 @@ function transformWithSchemaInjection(source: string): string {
     ...Object.entries(COMMONFABRIC_TYPES),
   ]);
   const originalGetSourceFile = host.getSourceFile.bind(host);
-  host.getSourceFile = (name, languageVersion, onError, shouldCreateNewSourceFile) => {
+  host.getSourceFile = (
+    name,
+    languageVersion,
+    onError,
+    shouldCreateNewSourceFile,
+  ) => {
     const sourceText = sourceFiles.get(name);
     if (sourceText !== undefined) {
       return ts.createSourceFile(name, sourceText, languageVersion, true);

@@ -135,14 +135,18 @@ describe("Schema: CFC authoring aliases", () => {
       .toEqual(["add-integrity"]);
     expect((schema.properties?.requiresIntegrity as any).ifc?.requiredIntegrity)
       .toEqual(["required-integrity"]);
-    expect((schema.properties?.maxConfidentiality as any).ifc?.maxConfidentiality)
+    expect(
+      (schema.properties?.maxConfidentiality as any).ifc?.maxConfidentiality,
+    )
       .toEqual(["max-confidentiality"]);
     expect((schema.properties?.exactCopy as any).ifc?.exactCopyOf)
       .toBe("/source");
-    expect((schema.properties?.lengthPreserved as any).ifc?.collection).toEqual({
-      sourceCollection: "/collection",
-      lengthPreserved: true,
-    });
+    expect((schema.properties?.lengthPreserved as any).ifc?.collection).toEqual(
+      {
+        sourceCollection: "/collection",
+        lengthPreserved: true,
+      },
+    );
     expect((schema.properties?.filteredFrom as any).ifc?.collection).toEqual({
       filteredFrom: "/filtered",
     });

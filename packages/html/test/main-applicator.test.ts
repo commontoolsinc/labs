@@ -42,8 +42,9 @@ function createMockDocument() {
           if (!name.startsWith("data-")) {
             continue;
           }
-          const key = name.slice(5).replace(/-([a-z])/g, (_, char: string) =>
-            char.toUpperCase()
+          const key = name.slice(5).replace(
+            /-([a-z])/g,
+            (_, char: string) => char.toUpperCase(),
           );
           dataset[key] = value;
         }

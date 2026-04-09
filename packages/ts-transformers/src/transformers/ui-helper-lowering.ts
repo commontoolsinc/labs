@@ -195,7 +195,9 @@ function isHelperOnlyAttribute(
     spec.helperProps.includes(attribute.name.text);
 }
 
-function hasJsxChildren(node: ts.JsxElement | ts.JsxSelfClosingElement): boolean {
+function hasJsxChildren(
+  node: ts.JsxElement | ts.JsxSelfClosingElement,
+): boolean {
   return ts.isJsxElement(node) && node.children.length > 0;
 }
 

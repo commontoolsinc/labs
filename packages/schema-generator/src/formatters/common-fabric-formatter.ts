@@ -776,7 +776,8 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     const aliasSymbol = typeWithAlias.aliasSymbol;
     const aliasDeclaration = aliasSymbol?.declarations?.find(
-      (decl): decl is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(decl),
+      (decl): decl is ts.TypeAliasDeclaration =>
+        ts.isTypeAliasDeclaration(decl),
     );
     if (!aliasDeclaration) {
       return undefined;
@@ -802,7 +803,9 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     const aliased = aliasDeclaration.type;
-    if (!ts.isTypeReferenceNode(aliased) || !ts.isIdentifier(aliased.typeName)) {
+    if (
+      !ts.isTypeReferenceNode(aliased) || !ts.isIdentifier(aliased.typeName)
+    ) {
       return undefined;
     }
 
@@ -813,7 +816,8 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     const symbol = context.typeChecker.getSymbolAtLocation(aliased.typeName);
     const targetDeclaration = symbol?.declarations?.find(
-      (decl): decl is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(decl),
+      (decl): decl is ts.TypeAliasDeclaration =>
+        ts.isTypeAliasDeclaration(decl),
     );
     if (!targetDeclaration) {
       return undefined;
@@ -847,7 +851,9 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
     paramMap: ReadonlyMap<string, ts.Type>,
   ): ts.Type {
-    if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+    if (
+      ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+    ) {
       const mapped = paramMap.get(typeNode.typeName.text);
       if (mapped) {
         return mapped;
@@ -981,9 +987,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     const sourceRefType = aliasArgs[0] as TypeWithInternals | undefined;
     const sourceRefNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
     const nestedPathType = sourceRefType?.aliasTypeArguments?.[1];
-    const nestedPathNode = sourceRefNode && ts.isTypeReferenceNode(sourceRefNode)
-      ? sourceRefNode.typeArguments?.[1]
-      : undefined;
+    const nestedPathNode =
+      sourceRefNode && ts.isTypeReferenceNode(sourceRefNode)
+        ? sourceRefNode.typeArguments?.[1]
+        : undefined;
     const nestedPath = this.encodeJsonPointerPath(
       this.extractLiteralLikeValue(nestedPathType, nestedPathNode, context),
     );

@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { validateSource, transformSource } from "./utils.ts";
+import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 function normalizeOutput(output: string): string {
@@ -27,8 +27,8 @@ Deno.test("transformer coverage: nested aliases expand to canonical metadata", a
   );
 
   assertStringIncludes(output, "classification: [");
-  assertStringIncludes(output, "\"secret\"");
-  assertStringIncludes(output, "value: { type: \"string\" }");
+  assertStringIncludes(output, '"secret"');
+  assertStringIncludes(output, 'value: { type: "string" }');
 });
 
 Deno.test("transformer coverage: projection paths lower as canonical pointers", async () => {
@@ -51,7 +51,10 @@ Deno.test("transformer coverage: projection paths lower as canonical pointers", 
     await transformSource(source, { types: COMMONFABRIC_TYPES }),
   );
 
-  assertStringIncludes(output, 'projection: { from: "/", path: "/nested/path" }');
+  assertStringIncludes(
+    output,
+    'projection: { from: "/", path: "/nested/path" }',
+  );
   assertStringIncludes(output, 'title: { type: "string" }');
 });
 
@@ -91,7 +94,10 @@ Deno.test("transformer coverage: UI helpers rewrite to intrinsic tags and data-u
     types: COMMONFABRIC_TYPES,
   });
 
-  assertStringIncludes(output, '<ct-button data-ui-action="SubmitDirectCommand">Go</ct-button>');
+  assertStringIncludes(
+    output,
+    '<ct-button data-ui-action="SubmitDirectCommand">Go</ct-button>',
+  );
   assertEquals(output.includes("<UiAction"), false);
 });
 

@@ -66,17 +66,21 @@ export const h: HFunction = Object.assign(
   },
 ) as HFunction;
 
-function toChildArray(children: RenderNode | RenderNode[] | undefined): RenderNode[] {
+function toChildArray(
+  children: RenderNode | RenderNode[] | undefined,
+): RenderNode[] {
   if (children === undefined || children === null) {
     return [];
   }
   return Array.isArray(children) ? children.flat() : [children];
 }
 
-function createUiHelper<Props extends {
-  readonly as?: string;
-  readonly children?: RenderNode;
-}>(
+function createUiHelper<
+  Props extends {
+    readonly as?: string;
+    readonly children?: RenderNode;
+  },
+>(
   defaultTag: string,
   dataAttrs: readonly [string, string][],
   helperOnlyProps: readonly string[],

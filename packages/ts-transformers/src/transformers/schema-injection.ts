@@ -466,10 +466,12 @@ function collectFunctionSchemaTypeNodes(
   }
 
   const returnExpr = getCallbackReturnExpression(fn);
-  const unwrappedReturnExpr = returnExpr ? unwrapExpression(returnExpr) : undefined;
+  const unwrappedReturnExpr = returnExpr
+    ? unwrapExpression(returnExpr)
+    : undefined;
   const uiContractHint = context?.options.schemaHints &&
-    unwrappedReturnExpr &&
-    ts.isObjectLiteralExpression(unwrappedReturnExpr)
+      unwrappedReturnExpr &&
+      ts.isObjectLiteralExpression(unwrappedReturnExpr)
     ? propagateUiContractHintsFromObjectLiteral(
       unwrappedReturnExpr,
       resultNode,
@@ -1747,8 +1749,10 @@ function unwrapParenthesizedSchemaTypeNode(node: ts.TypeNode): ts.TypeNode {
 function getObjectLiteralPropertyName(
   name: ts.PropertyName,
 ): string | undefined {
-  if (ts.isIdentifier(name) || ts.isStringLiteral(name) ||
-    ts.isNumericLiteral(name)) {
+  if (
+    ts.isIdentifier(name) || ts.isStringLiteral(name) ||
+    ts.isNumericLiteral(name)
+  ) {
     return name.text;
   }
   if (

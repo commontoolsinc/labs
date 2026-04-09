@@ -4,7 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createSchemaTransformerV2 } from "../../schema-generator/src/plugin.ts";
-import { asObjectSchema, getTypeFromCode } from "../../schema-generator/test/utils.ts";
+import {
+  asObjectSchema,
+  getTypeFromCode,
+} from "../../schema-generator/test/utils.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-authoring-observe-tests",

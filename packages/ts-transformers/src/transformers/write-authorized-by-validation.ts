@@ -115,8 +115,10 @@ function isSupportedWriteAuthorizedByBindingName(
       return;
     }
 
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
-      node.name.text === name) {
+    if (
+      ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+      node.name.text === name
+    ) {
       supported = node.initializer !== undefined;
       return;
     }

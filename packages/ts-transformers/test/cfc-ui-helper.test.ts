@@ -1,6 +1,9 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import ts from "typescript";
-import { CommonFabricTransformerPipeline, transformCfDirective } from "../src/mod.ts";
+import {
+  CommonFabricTransformerPipeline,
+  transformCfDirective,
+} from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { transformSource } from "./utils.ts";
 
@@ -93,13 +96,22 @@ Deno.test(
       );
     `;
 
-  const output = await transformSource(source, {
+    const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, '<ct-button data-ui-action="SubmitDirectCommand"');
-    assertStringIncludes(output, '<ct-textarea data-ui-surface="PromptPane" data-ui-role="assistant"');
-    assertStringIncludes(output, '<ct-card data-ui-disclosure-kind="warning">Heads up</ct-card>');
+    assertStringIncludes(
+      output,
+      '<ct-button data-ui-action="SubmitDirectCommand"',
+    );
+    assertStringIncludes(
+      output,
+      '<ct-textarea data-ui-surface="PromptPane" data-ui-role="assistant"',
+    );
+    assertStringIncludes(
+      output,
+      '<ct-card data-ui-disclosure-kind="warning">Heads up</ct-card>',
+    );
     assertEquals(output.includes("<UiAction"), false);
   },
 );

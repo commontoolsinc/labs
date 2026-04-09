@@ -246,9 +246,9 @@ export class SchemaGenerator implements ISchemaGenerator {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       return this.applyNodeSchemaHints(
         this.analyzeTypeNodeStructure(
-        typeNode!,
-        context.typeChecker,
-        childContext,
+          typeNode!,
+          context.typeChecker,
+          childContext,
         ),
         childContext,
       );

@@ -45,7 +45,10 @@ const isTrustedDomProvenance = (
 export const uiContractFromSchema = (
   schema: JSONSchema | undefined,
 ): UiContract | undefined => {
-  if (!isRecord(schema) || !isRecord(schema.ifc) || !isRecord(schema.ifc.uiContract)) {
+  if (
+    !isRecord(schema) || !isRecord(schema.ifc) ||
+    !isRecord(schema.ifc.uiContract)
+  ) {
     return undefined;
   }
   const contract = schema.ifc.uiContract;
@@ -116,8 +119,9 @@ export const recordTrustedEventPolicyInputs = (
         type: write.type,
         path: [...write.path],
       },
-      eventId:
-        `trusted-event:${String((event as { type?: string }).type ?? "event")}:${write.id}:${write.path.join("/")}`,
+      eventId: `trusted-event:${
+        String((event as { type?: string }).type ?? "event")
+      }:${write.id}:${write.path.join("/")}`,
       provenance: (event as SerializedTrustedEvent).provenance,
     });
   }

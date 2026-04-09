@@ -94,7 +94,8 @@ describe("CFC trusted UI event enforcement", () => {
       },
     );
 
-    const handler = Object.assign(((tx: IExtendedStorageTransaction) => {
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
         output.withTx(tx).set("accepted");
       }) as EventHandler,
       {
@@ -152,7 +153,8 @@ describe("CFC trusted UI event enforcement", () => {
       },
     );
 
-    const handler = Object.assign(((tx: IExtendedStorageTransaction) => {
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
         output.withTx(tx).set("rejected");
       }) as EventHandler,
       {
