@@ -1,14 +1,21 @@
 import {
   computed,
   Default,
-  handler,
   NAME,
   pattern,
   Stream,
   UI,
   Writable,
-  WriteAuthorizedBy,
 } from "commonfabric";
+import {
+  publishTrustedSnapshot,
+  reviewTrustedSnapshot,
+  saveTrustedDraftSnapshot,
+  TrustedActionWrite,
+  TrustedPublishSurface,
+  TrustedReviewSurface,
+  TrustedSaveDraftSurface,
+} from "../cfc-trusted-surfaces/main.tsx";
 
 interface StagedPublishInput {
   draftTitle: Writable<Default<string, "">>;
@@ -26,56 +33,41 @@ interface StagedPublishOutput {
   [UI]: unknown;
   draftTitle: string;
   draftBody: string;
-  savedTitle: WriteAuthorizedBy<string, typeof saveDraftSnapshot>;
-  savedBody: WriteAuthorizedBy<string, typeof saveDraftSnapshot>;
-  reviewedTitle: WriteAuthorizedBy<string, typeof reviewSavedSnapshot>;
-  reviewedBody: WriteAuthorizedBy<string, typeof reviewSavedSnapshot>;
-  publishedTitle: WriteAuthorizedBy<string, typeof publishReviewedSnapshot>;
-  publishedBody: WriteAuthorizedBy<string, typeof publishReviewedSnapshot>;
+  savedTitle: TrustedActionWrite<
+    string,
+    typeof saveTrustedDraftSnapshot,
+    "TrustedSaveDraft"
+  >;
+  savedBody: TrustedActionWrite<
+    string,
+    typeof saveTrustedDraftSnapshot,
+    "TrustedSaveDraft"
+  >;
+  reviewedTitle: TrustedActionWrite<
+    string,
+    typeof reviewTrustedSnapshot,
+    "TrustedReviewSnapshot"
+  >;
+  reviewedBody: TrustedActionWrite<
+    string,
+    typeof reviewTrustedSnapshot,
+    "TrustedReviewSnapshot"
+  >;
+  publishedTitle: TrustedActionWrite<
+    string,
+    typeof publishTrustedSnapshot,
+    "TrustedPublishSnapshot"
+  >;
+  publishedBody: TrustedActionWrite<
+    string,
+    typeof publishTrustedSnapshot,
+    "TrustedPublishSnapshot"
+  >;
   stage: "drafting" | "saved" | "reviewed" | "published";
   saveDraft: Stream<void>;
   reviewSaved: Stream<void>;
   publishReviewed: Stream<void>;
 }
-
-const saveDraftSnapshot = handler<
-  void,
-  {
-    draftTitle: Writable<string>;
-    draftBody: Writable<string>;
-    savedTitle: Writable<string>;
-    savedBody: Writable<string>;
-  }
->((_, { draftTitle, draftBody, savedTitle, savedBody }) => {
-  savedTitle.set(draftTitle.get().trim());
-  savedBody.set(draftBody.get().trim());
-});
-
-const reviewSavedSnapshot = handler<
-  void,
-  {
-    savedTitle: Writable<string>;
-    savedBody: Writable<string>;
-    reviewedTitle: Writable<string>;
-    reviewedBody: Writable<string>;
-  }
->((_, { savedTitle, savedBody, reviewedTitle, reviewedBody }) => {
-  reviewedTitle.set(savedTitle.get());
-  reviewedBody.set(savedBody.get());
-});
-
-const publishReviewedSnapshot = handler<
-  void,
-  {
-    reviewedTitle: Writable<string>;
-    reviewedBody: Writable<string>;
-    publishedTitle: Writable<string>;
-    publishedBody: Writable<string>;
-  }
->((_, { reviewedTitle, reviewedBody, publishedTitle, publishedBody }) => {
-  publishedTitle.set(reviewedTitle.get());
-  publishedBody.set(reviewedBody.get());
-});
 
 export default pattern<StagedPublishInput, StagedPublishOutput>(
   ({
@@ -88,19 +80,19 @@ export default pattern<StagedPublishInput, StagedPublishOutput>(
     publishedTitle,
     publishedBody,
   }) => {
-    const saveDraft = saveDraftSnapshot({
+    const trustedSaveDraft = TrustedSaveDraftSurface({
       draftTitle,
       draftBody,
       savedTitle,
       savedBody,
     });
-    const reviewSaved = reviewSavedSnapshot({
+    const trustedReview = TrustedReviewSurface({
       savedTitle,
       savedBody,
       reviewedTitle,
       reviewedBody,
     });
-    const publishReviewed = publishReviewedSnapshot({
+    const trustedPublish = TrustedPublishSurface({
       reviewedTitle,
       reviewedBody,
       publishedTitle,
@@ -120,38 +112,46 @@ export default pattern<StagedPublishInput, StagedPublishOutput>(
     return {
       [NAME]: computed(() => `CFC Staged Publish (${stage})`),
       [UI]: (
-        <div>
-          <div>
-            <strong>Stage:</strong> <span id="stage-pill">{stage}</span>
-          </div>
+        <cf-screen title="CFC Staged Publish">
+          <cf-vstack gap="3" style={{ padding: "1rem" }}>
+            <cf-card>
+              <cf-hstack slot="content" justify="between" align="center">
+                <cf-label>Stage</cf-label>
+                <cf-badge id="stage-pill">{stage}</cf-badge>
+              </cf-hstack>
+            </cf-card>
 
-          <section>
-            <h3>Draft</h3>
-            <cf-input $value={draftTitle} placeholder="Draft title" />
-            <cf-input $value={draftBody} placeholder="Draft body" />
-            <cf-button onClick={saveDraft}>Save draft</cf-button>
-          </section>
+            {trustedSaveDraft}
 
-          <section>
-            <h3>Saved Snapshot</h3>
-            <div id="saved-title">{savedTitle}</div>
-            <div id="saved-body">{savedBody}</div>
-            <cf-button onClick={reviewSaved}>Mark reviewed</cf-button>
-          </section>
+            <cf-card>
+              <cf-vstack slot="content" gap="2">
+                <cf-heading level={3}>Saved snapshot</cf-heading>
+                <div id="saved-title">{savedTitle}</div>
+                <div id="saved-body">{savedBody}</div>
+              </cf-vstack>
+            </cf-card>
 
-          <section>
-            <h3>Reviewed Snapshot</h3>
-            <div id="reviewed-title">{reviewedTitle}</div>
-            <div id="reviewed-body">{reviewedBody}</div>
-            <cf-button onClick={publishReviewed}>Publish</cf-button>
-          </section>
+            {trustedReview}
 
-          <section>
-            <h3>Published Snapshot</h3>
-            <div id="published-title">{publishedTitle}</div>
-            <div id="published-body">{publishedBody}</div>
-          </section>
-        </div>
+            <cf-card>
+              <cf-vstack slot="content" gap="2">
+                <cf-heading level={3}>Reviewed snapshot</cf-heading>
+                <div id="reviewed-title">{reviewedTitle}</div>
+                <div id="reviewed-body">{reviewedBody}</div>
+              </cf-vstack>
+            </cf-card>
+
+            {trustedPublish}
+
+            <cf-card>
+              <cf-vstack slot="content" gap="2">
+                <cf-heading level={3}>Published snapshot</cf-heading>
+                <div id="published-title">{publishedTitle}</div>
+                <div id="published-body">{publishedBody}</div>
+              </cf-vstack>
+            </cf-card>
+          </cf-vstack>
+        </cf-screen>
       ),
       draftTitle,
       draftBody,
@@ -162,9 +162,9 @@ export default pattern<StagedPublishInput, StagedPublishOutput>(
       publishedTitle,
       publishedBody,
       stage,
-      saveDraft,
-      reviewSaved,
-      publishReviewed,
+      saveDraft: trustedSaveDraft.saveDraft,
+      reviewSaved: trustedReview.reviewSaved,
+      publishReviewed: trustedPublish.publishReviewed,
     };
   },
 );

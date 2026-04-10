@@ -4,6 +4,7 @@ import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -31,8 +32,9 @@ describe("cfc authorized save integration test", () => {
       "cfc-authorized-save",
       "main.tsx",
     );
+    const rootPath = join(import.meta.dirname!, "..");
     const program = await cc.manager().runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath),
+      new FileSystemProgramResolver(sourcePath, rootPath),
     );
     piece = await cc.create(program, { start: true });
 
@@ -45,7 +47,7 @@ describe("cfc authorized save integration test", () => {
     await cc?.dispose();
   });
 
-  it("updates the protected field through a trusted UI click", async () => {
+  it("accepts the trusted surface and rejects a lookalike host button", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -61,15 +63,27 @@ describe("cfc authorized save integration test", () => {
     });
     await input.type("Saved from UI");
 
-    const button = await page.waitForSelector("[data-cf-button]", {
+    const legacyButton = await page.waitForSelector("#legacy-save-button", {
       strategy: "pierce",
     });
-    await button.click();
+    await legacyButton.click();
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const savedTitleBeforeTrustedClick = await page.waitForSelector(
+      "#saved-title",
+      { strategy: "pierce" },
+    );
+    assertEquals((await savedTitleBeforeTrustedClick.innerText())?.trim(), "");
+
+    const trustedButton = await page.waitForSelector(
+      '[data-ui-action="TrustedSaveTitle"]',
+      {
+        strategy: "pierce",
+      },
+    );
+    await trustedButton.click();
 
     await waitForSavedTitle(page, "Saved from UI");
-    await waitFor(async () =>
-      (await piece.result.get(["savedTitle"])) === "Saved from UI"
-    );
   });
 });
 

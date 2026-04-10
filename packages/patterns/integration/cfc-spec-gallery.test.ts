@@ -8,7 +8,7 @@ import { join } from "@std/path";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-describe("cfc staged publish integration test", () => {
+describe("cfc spec gallery integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -28,7 +28,7 @@ describe("cfc staged publish integration test", () => {
     const sourcePath = join(
       import.meta.dirname!,
       "..",
-      "cfc-staged-publish",
+      "cfc-spec-gallery",
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
@@ -46,7 +46,7 @@ describe("cfc staged publish integration test", () => {
     await cc?.dispose();
   });
 
-  it("drives save, review, and publish through trusted UI actions", async () => {
+  it("drives the trusted forward, command, and safe-link surfaces", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -57,40 +57,48 @@ describe("cfc staged publish integration test", () => {
       identity,
     });
 
-    const inputs = await waitForCount(page, "[data-cf-input]", 2);
-    await inputs[0].type("Launch checklist");
-    await inputs[1].type("Ship the staged publish demo with trusted UI gates.");
-
-    await clickButtonAtIndex(page, 0);
-    await waitForStage(page, "saved");
-    await waitForText(page, "#saved-title", "Launch checklist");
-
-    await clickButtonAtIndex(page, 1);
-    await waitForStage(page, "reviewed");
-    await waitForText(page, "#reviewed-title", "Launch checklist");
-
-    await clickButtonAtIndex(page, 2);
-    await waitForStage(page, "published");
-    await waitForText(page, "#published-title", "Launch checklist");
+    await clickTrustedAction(page, "TrustedPrepareForward");
+    await waitForText(page, "#trusted-forward-prepared", "Prepared for");
+    await waitForText(page, "#forward-stage", "prepared");
+    await clickTrustedAction(page, "TrustedForwardNote");
     await waitForText(
       page,
-      "#published-body",
-      "Ship the staged publish demo with trusted UI gates.",
+      "#trusted-forward-result",
+      "Only the bounded itinerary excerpt will be forwarded.",
     );
+    await waitForText(page, "#forward-stage", "forwarded");
+
+    await clickTrustedAction(page, "TrustedCaptureDirectCommand");
+    await waitForText(page, "#research-stage", "captured");
+    await clickTrustedAction(page, "TrustedPrepareResearchBrief");
+    await waitForText(page, "#trusted-command-prepared", "Prepared outbound");
+    await waitForText(page, "#research-stage", "prepared");
+    await clickTrustedAction(page, "TrustedAuthorizeResearchSend");
+    await waitForText(
+      page,
+      "#trusted-command-result",
+      "Authorized outbound message",
+    );
+    await waitForText(page, "#research-stage", "sent");
+
+    await clickTrustedAction(page, "TrustedPrepareSafeLink");
+    await waitForText(page, "#trusted-safe-link-prepared", "?view=summary");
+    await waitForText(page, "#safe-link-stage", "prepared");
+    await clickTrustedAction(page, "TrustedReleaseSafeLink");
+    await waitForText(
+      page,
+      "#trusted-safe-link-result",
+      "?view=summary",
+    );
+    await waitForText(page, "#safe-link-stage", "released");
   });
 });
 
-async function waitForStage(page: Page, stage: string) {
-  await waitFor(async () => {
-    try {
-      const stageNode = await page.waitForSelector("#stage-pill", {
-        strategy: "pierce",
-      });
-      return (await stageNode.innerText())?.trim() === stage;
-    } catch {
-      return false;
-    }
+async function clickTrustedAction(page: Page, action: string) {
+  const button = await page.waitForSelector(`[data-ui-action="${action}"]`, {
+    strategy: "pierce",
   });
+  await button.click();
 }
 
 async function waitForText(page: Page, selector: string, text: string) {
@@ -99,28 +107,7 @@ async function waitForText(page: Page, selector: string, text: string) {
       const node = await page.waitForSelector(selector, {
         strategy: "pierce",
       });
-      return (await node.innerText())?.trim() === text;
-    } catch {
-      return false;
-    }
-  });
-}
-
-async function waitForCount(page: Page, selector: string, count: number) {
-  await waitFor(async () => {
-    const nodes = await page.$$(selector, { strategy: "pierce" });
-    return nodes.length >= count;
-  });
-  return await page.$$(selector, { strategy: "pierce" });
-}
-
-async function clickButtonAtIndex(page: Page, index: number) {
-  await waitFor(async () => {
-    const buttons = await page.$$("[data-cf-button]", { strategy: "pierce" });
-    if (buttons.length <= index) return false;
-    try {
-      await buttons[index].click();
-      return true;
+      return (await node.innerText())?.includes(text) === true;
     } catch {
       return false;
     }
