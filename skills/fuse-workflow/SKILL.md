@@ -202,9 +202,9 @@ automatically.
 
 ### Writes Are Fire-and-Forget
 
-FUSE returns success before the cell write completes. If toolshed is down or
-the transport has disconnected, writes silently fail. Check the browser or
-re-read the cell to confirm writes landed.
+FUSE returns success before the cell write completes. If toolshed is down or the
+transport has disconnected, writes silently fail. Check the browser or re-read
+the cell to confirm writes landed.
 
 **Diagnosing silent write failures:** If writes succeed (no error) but values
 revert or stay empty, check the FUSE log for transport errors:

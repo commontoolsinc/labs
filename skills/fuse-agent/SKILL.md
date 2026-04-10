@@ -92,11 +92,12 @@ Add `sleep 2` before verification reads if you see repeated stalls.
 
 ### Transport disconnection (silent write failures)
 
-Long-running FUSE mounts (24h+) can lose their backend transport. Symptom:
-all writes appear to succeed (no error), but values don't persist — cells
-stay empty or revert. The FUSE process is still running but useless.
+Long-running FUSE mounts (24h+) can lose their backend transport. Symptom: all
+writes appear to succeed (no error), but values don't persist — cells stay empty
+or revert. The FUSE process is still running but useless.
 
 **Diagnose:**
+
 ```bash
 tail -20 /tmp/ct-fuse-<mount-name>.log
 # Look for: "ConnectionError: memory/v2 transport closed"
@@ -105,9 +106,9 @@ tail -20 /tmp/ct-fuse-<mount-name>.log
 **Fix:** Kill and remount. Remount before each experiment run to be safe.
 
 Agent handlers (`markIdle.handler`, `appendLearned.handler`, etc.) will also
-fail silently with a dead transport — the handler appears to execute but
-no state changes. If agents report "learned" entries that don't show up
-in `input/learned`, check the transport first.
+fail silently with a dead transport — the handler appears to execute but no
+state changes. If agents report "learned" entries that don't show up in
+`input/learned`, check the transport first.
 
 ---
 
@@ -233,9 +234,9 @@ MOUNT/SPACE/pieces/🤖 Deployer/
 
 ### Agent lifecycle
 
-**Important:** Always re-resolve the piece name before each handler call.
-Piece name suffixes can change after handler invocations (e.g. `Counter-1`
-becomes `Counter-2`), so a stale `$AGENT_NAME` will target a non-existent path.
+**Important:** Always re-resolve the piece name before each handler call. Piece
+name suffixes can change after handler invocations (e.g. `Counter-1` becomes
+`Counter-2`), so a stale `$AGENT_NAME` will target a non-existent path.
 
 ```bash
 # Helper function: resolve current piece name (call before each handler use)

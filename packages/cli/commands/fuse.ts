@@ -117,7 +117,11 @@ export const fuse = new Command()
   )
   .option("--background", "Run in the background (detached).")
   .option("--debug", "Enable FUSE debug output.")
-  .option("-s, --space <name:string>", "Space(s) to connect (repeatable, default: home).", { collect: true })
+  .option(
+    "-s, --space <name:string>",
+    "Space(s) to connect (repeatable, default: home).",
+    { collect: true },
+  )
   .example(
     cliText("cf fuse mount /tmp/cf-fuse"),
     "Mount with settings from CF_API_URL / CF_IDENTITY env vars.",
