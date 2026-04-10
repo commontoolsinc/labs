@@ -266,7 +266,7 @@ export async function newPiece(
     "newPiece.getProgramFromFile",
     () => getProgramFromFile(manager, entry),
   );
-  const PIECE_START_TIMEOUT_MS = 30_000;
+  const PIECE_START_TIMEOUT_MS = 60_000;
   const piece = await timeCliPhase(
     "newPiece.create",
     () => {
