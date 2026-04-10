@@ -4,7 +4,7 @@
  * /!\ interfaces and utilities.
  */
 
-import { NAME, type Schema, TYPE, UI } from "./shared.ts";
+import { NAME, type Schema, UI } from "./shared.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 
 export const rendererVDOMSchema = toDeepFrozenSchema(
@@ -278,8 +278,7 @@ export const pieceSourceCellSchema = toDeepFrozenSchema(
   {
     type: "object",
     properties: {
-      [TYPE]: { type: "string" },
-      spell: { type: "object" },
+      spell: { type: "object", asCell: ["readonly"] },
       lineage: {
         type: "array",
         items: pieceLineageSchema,
@@ -296,10 +295,21 @@ export const processSchema = toDeepFrozenSchema(
     type: "object",
     properties: {
       argument: { type: "object" },
-      [TYPE]: { type: "string" },
-      spell: { type: "object" },
+      pattern: { type: "object", asCell: ["readonly"] },
     },
-    required: [TYPE],
+  },
+  true,
+);
+
+export const processLinkSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      pattern: { type: "object", asCell: ["readonly"] },
+      resultRef: { type: "object", asCell: ["cell"] },
+      // phase this out in favor of pattern
+      spell: { type: "object", asCell: ["readonly"] },
+    },
   },
   true,
 );

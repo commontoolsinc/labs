@@ -40,7 +40,6 @@ import {
   SELF,
   type Stream,
   type StripDefaultBrand,
-  TYPE,
 } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
 import { isOpaqueRefMarker } from "./builder/types.ts";
@@ -217,7 +216,6 @@ declare module "@commonfabric/api" {
     ):
       | Cell<
         & T
-        & { [TYPE]: string | undefined }
         & ("argument" extends keyof T ? unknown : { argument: any })
       >
       | undefined;
@@ -226,7 +224,6 @@ declare module "@commonfabric/api" {
     ):
       | Cell<
         & Schema<S>
-        & { [TYPE]: string | undefined }
         & ("argument" extends keyof Schema<S> ? unknown : { argument: any })
       >
       | undefined;
@@ -1249,9 +1246,8 @@ export class CellImpl<T extends FabricValue>
   ):
     | Cell<
       & T
-      // Add default types for TYPE and `argument`. A more specific type in T will
-      // take precedence.
-      & { [TYPE]: string | undefined }
+      // Add a default type for `argument`. A more specific type in T will take
+      // precedence.
       & ("argument" extends keyof T ? unknown : { argument: any })
     >
     | undefined;
@@ -1260,9 +1256,8 @@ export class CellImpl<T extends FabricValue>
   ):
     | Cell<
       & Schema<S>
-      // Add default types for TYPE and `argument`. A more specific type in
-      // `schema` will take precedence.
-      & { [TYPE]: string | undefined }
+      // Add a default type for `argument`. A more specific type in `schema`
+      // will take precedence.
       & ("argument" extends keyof Schema<S> ? unknown
         : { argument: any })
     >

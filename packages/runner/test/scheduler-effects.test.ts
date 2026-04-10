@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { TYPE } from "../src/builder/types.ts";
+import { getPatternLink } from "../src/runner-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Action } from "../src/scheduler.ts";
@@ -422,7 +422,7 @@ describe("effect/computation tracking", () => {
     } = (actionTx) => {
       output.withTx(actionTx).set(1);
       childProcess.withTx(actionTx).setRaw({
-        [TYPE]: "child-pattern",
+        pattern: getPatternLink("child-pattern"),
       });
     };
 

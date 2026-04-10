@@ -65,7 +65,7 @@ import {
   cellAwareDeepCopy,
   describePatternOrModule,
   extractDefaultValues,
-  getSpellLink,
+  getPatternLink,
   mergeObjects,
   sanitizeDebugLabel,
   setRunnableName,
@@ -92,8 +92,7 @@ const sourceLocationLogger = getLogger("runner.source-location", {
 });
 
 type ProcessCellData<T> = {
-  [TYPE]: string;
-  spell?: SigilLink;
+  pattern?: SigilLink;
   argument?: T;
   internal?: FabricValue;
   resultRef: SigilLink;
@@ -390,7 +389,6 @@ export class Runner {
 
     processCell.withTx(tx).setRawUntyped(fabricFromNativeValue({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
-      [TYPE]: patternId,
       resultRef: pattern.resultSchema !== undefined
         ? resultCell.asSchema(pattern.resultSchema).getAsLink({
           base: processCell,
@@ -401,7 +399,7 @@ export class Runner {
           base: processCell,
         }),
       internal,
-      spell: getSpellLink(patternId),
+      pattern: getPatternLink(patternId),
     }, false));
 
     if (nextArgument) {
@@ -614,13 +612,18 @@ export class Runner {
       }
     };
 
-    // Helper to set up the $TYPE watcher
-    const setupTypeWatcher = () => {
-      const typeCell = processCell.key(TYPE).asSchema({ type: "string" });
+    // Helper to set up the pattern watcher
+    const setupPatternWatcher = () => {
+      const patternCell = processCell.key("pattern").asSchema({
+        type: "object",
+      });
       addCancel(
-        typeCell.sink((newPatternId) => {
-          if (!newPatternId) return;
+        patternCell.sink((newPatternLinkObj) => {
+          if (!newPatternLinkObj) return;
+          const newPatternLink = parseLink(newPatternLinkObj, processCell);
+          const newPatternId = newPatternLink?.id;
           if (newPatternId === currentPatternId) return; // No change
+          if (!newPatternId) return;
 
           // Pattern changed
           const previousPatternId = currentPatternId;
@@ -690,7 +693,7 @@ export class Runner {
       }
       instantiatePattern(givenPattern, tx);
       if (!doNotUpdateOnPatternChange) {
-        setupTypeWatcher();
+        setupPatternWatcher();
       }
       return;
     }
@@ -708,7 +711,7 @@ export class Runner {
     currentPatternId = initialPatternId;
     instantiatePattern(this.resolveToPattern(initialResolved), tx);
     if (!doNotUpdateOnPatternChange) {
-      setupTypeWatcher();
+      setupPatternWatcher();
     }
 
     return;
@@ -776,12 +779,15 @@ export class Runner {
     }
 
     // Step 5: Check whether the pattern is available, otherwise load it
-    const patternId = processCell.key(TYPE).getRaw() as string | undefined;
-    if (!patternId) {
+    const patternLinkObj = processCell.key("pattern").getRaw() as
+      | object
+      | undefined;
+    if (!patternLinkObj) {
       return Promise.reject(
-        new Error(`Cannot start: no pattern ID ($TYPE)`),
+        new Error(`Cannot start: no pattern ID (pattern)`),
       );
     }
+    const patternId = parseLink(patternLinkObj, processCell)!.id;
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
       return this.runtime.patternManager.loadPattern(
@@ -2341,4 +2347,20 @@ function getTxDebugActionId(
   tx?: IExtendedStorageTransaction,
 ): string | undefined {
   return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
+}
+
+/**
+ * Extract the pattern id from the process cell's link to the pattern.
+ *
+ * @param processCell
+ * @returns pattern id
+ */
+function getPatternId(processCell: Cell<any>): URI | undefined {
+  const patternLinkRaw = processCell.key("pattern").getRaw({
+    meta: ignoreReadForScheduling,
+  }) ?? processCell.key("spell").getRaw({
+    meta: ignoreReadForScheduling,
+  });
+  const patternLink = parseLink(patternLinkRaw, processCell);
+  return patternLink?.id;
 }

@@ -1,5 +1,9 @@
-import { Cell, type JSONSchema, type Runtime } from "@commonfabric/runner";
-import { getPatternIdFromPiece } from "../manager.ts";
+import {
+  Cell,
+  getPatternIdFromPiece,
+  type JSONSchema,
+  type Runtime,
+} from "@commonfabric/runner";
 
 export type IFramePattern = {
   src: string;
@@ -65,7 +69,7 @@ export const getIframePattern = (
   piece: Cell<unknown>,
   runtime: Runtime,
 ): {
-  patternId: string;
+  patternId?: string;
   // `src` is either a single file string source, or the entry
   // file source code in a pattern.
   src?: string;
@@ -74,7 +78,7 @@ export const getIframePattern = (
   const patternId = getPatternIdFromPiece(piece);
   if (!patternId) {
     console.warn("No patternId found for piece", piece.entityId);
-    return { patternId, src: "", iframe: undefined };
+    return { src: "", iframe: undefined };
   }
   const meta = runtime.patternManager.getPatternMeta({ patternId });
   const src = meta
@@ -83,7 +87,7 @@ export const getIframePattern = (
         ?.contents)
     : undefined;
   if (!src) {
-    return { patternId };
+    return { patternId, src: "", iframe: undefined };
   }
   try {
     return { patternId, src, iframe: parseIframePattern(src) };

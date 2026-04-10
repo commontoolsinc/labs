@@ -31,7 +31,7 @@ export function sanitizeDebugLabel(label?: string): string | undefined {
   return label.replace(/^async\s+/, "").trim() || undefined;
 }
 
-export function getSpellLink(patternId: string): SigilLink {
+export function getPatternLink(patternId: string): SigilLink {
   const id = hashOf({ causal: { patternId, type: "pattern" } }).toJSON()["/"];
   return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
 }

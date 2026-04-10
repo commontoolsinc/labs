@@ -1251,10 +1251,10 @@ describe("setup/start", () => {
       output: { $alias: { path: ["internal", "output"] } },
     });
 
-    // Verify a pattern id is present after setup without passing pattern
+    // Verify a pattern link is present after setup without passing the pattern
     const source = resultCell.getSourceCell()!;
-    const typeValue = source.key("$TYPE").get();
-    expect(typeof typeValue).toEqual("string");
+    const patternValue = source.key("pattern").get();
+    expect(patternValue).toBeDefined();
 
     // Also verify the argument was updated in the process cell
     const sourceValue = await source.pull();
@@ -1556,7 +1556,7 @@ describe("runner utils", () => {
       ).toBe(true);
     });
 
-    it("restarts with new pattern when $TYPE changes via setup()", async () => {
+    it("restarts with new pattern when the pattern changes via setup()", async () => {
       const pattern1: Pattern = {
         argumentSchema: {
           type: "object",
@@ -1602,7 +1602,7 @@ describe("runner utils", () => {
       expect(await resultCell.pull()).toEqual({ output: 10 }); // 5 * 2
 
       // Change pattern via setup (not run or start)
-      // The $TYPE sink should detect the change and restart once the result is pulled.
+      // The pattern sink should detect the change and restart once the result is pulled.
       await setupTrusted(
         runtime,
         undefined,

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Pattern, TYPE } from "../src/builder/types.ts";
+import { type Pattern } from "../src/builder/types.ts";
+import { getPatternLink } from "../src/runner-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
@@ -53,18 +54,18 @@ describe("ensurePieceRunning", () => {
     expect(result).toBe(false);
   });
 
-  it("should return false for cells without TYPE in process cell", async () => {
-    // Create a result cell that points to a process cell without TYPE
+  it("should return false for cells without pattern in process cell", async () => {
+    // Create a result cell that points to a process cell without a pattern.
     const resultCell = runtime.getCell(
       space,
-      "no-type-test-result",
+      "no-pattern-test-result",
       undefined,
       tx,
     );
 
     const processCell = runtime.getCell(
       space,
-      "no-type-test-process",
+      "no-pattern-test-process",
       undefined,
       tx,
     );
@@ -73,7 +74,7 @@ describe("ensurePieceRunning", () => {
     resultCell.set({ value: 1 });
     resultCell.setSourceCell(processCell);
 
-    // Process cell has no TYPE
+    // Process cell has no pattern
     processCell.set({
       argument: { value: 1 },
       resultRef: resultCell.getAsLink({ base: processCell }),
@@ -82,7 +83,7 @@ describe("ensurePieceRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // ensurePieceRunning should return false - no TYPE means no pattern
+    // ensurePieceRunning should return false - no pattern in cell
     const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
@@ -122,9 +123,9 @@ describe("ensurePieceRunning", () => {
     resultCell.set({ value: 1 });
     resultCell.setSourceCell(processCell);
 
-    // Process cell has TYPE but no resultRef
+    // Process cell has a pattern but no resultRef
     processCell.set({
-      [TYPE]: patternId,
+      pattern: getPatternLink(patternId),
       argument: { value: 1 },
       // Missing resultRef!
     });
@@ -200,7 +201,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      [TYPE]: patternId,
+      pattern: getPatternLink(patternId),
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -266,7 +267,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      [TYPE]: patternId,
+      pattern: getPatternLink(patternId),
       argument: {},
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -339,7 +340,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      [TYPE]: patternId,
+      pattern: getPatternLink(patternId),
       argument: {},
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -501,7 +502,7 @@ describe("queueEvent with auto-start", () => {
     // Set up process cell - internal.events must be set to $stream: true
     // (both in pattern.initial and directly on the cell)
     processCell.set({
-      [TYPE]: patternId,
+      pattern: getPatternLink(patternId),
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {
@@ -519,7 +520,7 @@ describe("queueEvent with auto-start", () => {
     // ensurePieceRunning will:
     // 1. Get cell at resultCell (with path removed)
     // 2. Follow getSourceCell() to find processCell
-    // 3. Find TYPE and resultRef in processCell
+    // 3. Find pattern and resultRef in processCell
     // 4. Start the piece
     const eventsLink = resultCell.key("events").getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
@@ -654,7 +655,7 @@ describe("queueEvent with auto-start", () => {
     // Set up process cell - internal.events must be set to $stream: true
     // (both in pattern.initial and directly on the cell)
     processCell.set({
-      [TYPE]: patternId,
+      pattern: getPatternLink(patternId),
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {

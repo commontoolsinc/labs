@@ -57,8 +57,8 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 ### Runtime instantiation today
 
 - `Runner.setup` ensures each result cell has a paired process cell storing
-  `TYPE` (pattern id), `argument`, `internal` state, `resultRef`, and optional
-  spell links. Result cells expose generated data plus `source` metadata.
+  `pattern` (pattern link), `argument`, `internal` state, and `resultRef`. 
+  Result cells expose generated data plus `source` metadata.
 - `setupInternal` merges defaults into the process cell and binds the serialized
   pattern graph via `unwrapOneLevelAndBindtoDoc`; aliases remain path based.
 - `startWithTx` iterates serialized nodes, resolves modules, and calls

@@ -14,6 +14,7 @@ import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getPatternIdFromPiece } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -25,7 +26,6 @@ describe("Pattern Runner - Lift", () => {
   let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
-  let TYPE: ReturnType<typeof createBuilder>["commonfabric"]["TYPE"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -41,7 +41,6 @@ describe("Pattern Runner - Lift", () => {
       lift,
       pattern,
       Cell,
-      TYPE,
     } = commonfabric);
   });
 
@@ -242,7 +241,7 @@ describe("Pattern Runner - Lift", () => {
     expect(errors).toBe(1);
     expect(value.result).toBeUndefined();
 
-    const patternId = piece.getSourceCell()?.get()?.[TYPE];
+    const patternId = getPatternIdFromPiece(piece);
     expect(patternId).toBeDefined();
     expect(lastError?.patternId).toBe(patternId);
     expect(lastError?.space).toBe(space);

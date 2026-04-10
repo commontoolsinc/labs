@@ -3,12 +3,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { getTopFrame } from "./builder/pattern.ts";
-import {
-  type Frame,
-  type Module,
-  type Pattern,
-  TYPE,
-} from "./builder/types.ts";
+import { type Frame, type Module, type Pattern } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   getCellOrThrow,
@@ -63,6 +58,8 @@ import type {
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { processLinkSchema } from "@commonfabric/runner/schemas";
+import { getPatternIdFromSourceCell } from "./process-cell.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -841,7 +838,7 @@ export class Scheduler {
     this.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
 
     // In pull mode, newly subscribed computations can be the replacement for an
-    // already-running child graph (for example after a $TYPE change). Seed any
+    // already-running child graph (for example after a pattern change). Seed any
     // statically declared writes immediately so existing effects can discover
     // the new writer before the first execute() cycle.
     if (
@@ -3367,7 +3364,7 @@ export class Scheduler {
   }
 
   private handleError(error: Error, action: any) {
-    const { pieceId, spellId, patternId, space } = getPieceMetadataFromFrame(
+    const { pieceId, patternId, space } = getPieceMetadataFromFrame(
       (error as Error & { frame?: Frame }).frame,
     );
 
@@ -3380,7 +3377,6 @@ export class Scheduler {
     const errorWithContext = error as ErrorWithContext;
     errorWithContext.action = action;
     if (pieceId) errorWithContext.pieceId = pieceId;
-    if (spellId) errorWithContext.spellId = spellId;
     if (patternId) errorWithContext.patternId = patternId;
     if (space) errorWithContext.space = space as MemorySpace;
 
@@ -3738,7 +3734,7 @@ export class Scheduler {
 
         // Every iteration needs to consider newly created pending effects.
         // Without this, nested/recursive patterns can stall after creating
-        // new `readResult`/`$TYPE` effects in an earlier iteration.
+        // new `readResult`/pattern effects in an earlier iteration.
         this.collectPullIterationSeeds(iterationSeeds);
 
         // On first iteration, add special-case seeds discovered before settle
@@ -3881,7 +3877,7 @@ export class Scheduler {
             }`,
           );
           // Attach the last frame from the action so handleError can
-          // extract piece/spell metadata (CT-1316: fixes message:null).
+          // extract piece/pattern metadata (CT-1316: fixes message:null).
           const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
           if (lastFrame) {
             (error as Error & { frame?: Frame }).frame = lastFrame;
@@ -4321,7 +4317,6 @@ function summarizeTriggerTraceValue(value: unknown): TriggerTraceValueSummary {
 }
 
 function getPieceMetadataFromFrame(frame?: Frame): {
-  spellId?: string;
   patternId?: string;
   space?: string;
   pieceId?: string;
@@ -4337,17 +4332,8 @@ function getPieceMetadataFromFrame(frame?: Frame): {
     return {};
   }
   const result: ReturnType<typeof getPieceMetadataFromFrame> = {};
-  const source = getCellOrThrow(sourceAsProxy).asSchema({
-    type: "object",
-    properties: {
-      [TYPE]: { type: "string" },
-      spell: { type: "object", asCell: ["cell"] },
-      resultRef: { type: "object", asCell: ["cell"] },
-    },
-  });
-  result.patternId = source.get()?.[TYPE];
-  const spellCell = source.get()?.spell;
-  result.spellId = spellCell?.getAsNormalizedFullLink().id;
+  const source = getCellOrThrow(sourceAsProxy).asSchema(processLinkSchema);
+  result.patternId = getPatternIdFromSourceCell(source);
   const resultCell = source.get()?.resultRef;
   result.space = source.space;
   result.pieceId = JSON.parse(

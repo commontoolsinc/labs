@@ -21,11 +21,11 @@ statically and dynamically.
 
 ## Piece
 
-Piece is a [spell] invocation binding set of [cell]s as inputs and set of
-[cell]s as outputs, creating an execution graph. It may help to think of [spell]
+Piece is a [pattern] invocation binding set of [cell]s as inputs and set of
+[cell]s as outputs, creating an execution graph. It may help to think of [pattern]
 as an open electric circuit, in this case [piece] would be a closed electric
 circuit as current will flow through it. Different analogy could be to think of
-[piece] as a process, where's [spell] would be a program and [cell]s would be
+[piece] as a process, where's [pattern] would be a program and [cell]s would be
 program inputs and outputs.
 
 There are a few more specific terms for cells within the piece:
@@ -39,7 +39,7 @@ flowchart TD
     A["Result Cell"]
     A --source--> B["Process Cell"]
     B --value.resultRef--> A
-    B --value.spell--> C["Pattern Cell"]
+    B --value.pattern--> C["Pattern Cell"]
     D@{ shape: procs, label: "Data Cells"} --source--> B
 ```
 
@@ -130,7 +130,7 @@ make appropriate transformations.
 The secure, isolated rendering of pattern-generated UI, considered part of the
 Trusted Computing Base (TCB).
 
-## Spell
+## Pattern
 
 Unit of computation that describes transformation from the set of inputs to the
 set of outputs. In practice it is manifested as a typescript function that takes
@@ -206,7 +206,7 @@ tokens.
 A data representation of UI elements returned by patterns, which the runtime
 turns into rendered HTML.
 
-[spell]: #spell
+[pattern]: #pattern
 [cell]: #cell
 [piece]: #piece
 [acl]: #acl-access-control-list

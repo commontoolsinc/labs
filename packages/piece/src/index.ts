@@ -1,4 +1,4 @@
-export { getPatternIdFromPiece, pieceId, PieceManager } from "./manager.ts";
+export { pieceId, PieceManager } from "./manager.ts";
 export {
   addFavorite,
   getHomeFavorites,

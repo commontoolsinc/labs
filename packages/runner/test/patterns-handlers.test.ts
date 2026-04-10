@@ -14,6 +14,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isPrimitiveCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getPatternIdFromPiece } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -25,7 +26,6 @@ describe("Pattern Runner - Handlers", () => {
   let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
-  let TYPE: ReturnType<typeof createBuilder>["commonfabric"]["TYPE"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -41,7 +41,6 @@ describe("Pattern Runner - Handlers", () => {
       lift,
       pattern,
       handler,
-      TYPE,
     } = commonfabric);
   });
 
@@ -307,15 +306,9 @@ describe("Pattern Runner - Handlers", () => {
     expect(value).toMatchObject({ result: 5 });
 
     // Cast to any to avoid type checking
-    const sourceCellValue = piece.getSourceCell()?.getRaw() as any;
-    const patternId = sourceCellValue?.[TYPE];
+    const patternId = getPatternIdFromPiece(piece);
     expect(patternId).toBeDefined();
     expect(lastError?.patternId).toBe(patternId);
-    expect(isPrimitiveCellLink(sourceCellValue?.["spell"])).toBe(true);
-    const spellLink = parseLink(sourceCellValue["spell"]);
-    const spellId = spellLink?.id;
-    expect(spellId).toBeDefined();
-    expect(lastError?.spellId).toBe(spellId);
     expect(lastError?.space).toBe(space);
     expect(lastError?.pieceId).toBe(
       JSON.parse(JSON.stringify(piece.entityId))["/"],

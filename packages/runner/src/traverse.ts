@@ -1,4 +1,3 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   hashSchemaItem,
@@ -984,7 +983,7 @@ export abstract class BaseObjectTraverser {
  * @param schemaTracker: Tracks schema used for loaded docs
  * @param selector: The selector being used (its path is relative to doc's root)
  * @param includeSource: if true, we will include linked source as well as
- *   spell and $TYPE recursively
+ *   pattern recursively
  * @param lastNode: defaults to "value", but if provided "writeRedirect", the
  *   return value will be the target of the last redirect pointer instead.
  *
@@ -1159,7 +1158,7 @@ function getTrackerKey(
  * @param schemaTracker: Tracks schema to use for loaded docs
  * @param selector: SchemaPathSelector used to query the target doc
  * @param includeSource: if true, we will include linked source as well as
- *   spell and $TYPE recursively
+ *   pattern recursively
  * @param lastNode: This is just passed back into successive getAtPath calls,
  *   so @see getAtPath for details.
  *
@@ -1669,24 +1668,18 @@ function loadLinkedPattern(
     return;
   }
   let address: IMemorySpaceAddress | undefined;
-  // Check for a spell link first, since this is more efficient
-  // Older patterns will only have a $TYPE
-  if ("spell" in value && isPrimitiveCellLink(value["spell"])) {
-    const link = parseLink(value["spell"], valueEntry.address)!;
+  const patternLinkObj =
+    ("pattern" in value && isPrimitiveCellLink(value["pattern"]))
+      ? value["pattern"]
+      : ("spell" in value && isPrimitiveCellLink(value["spell"]))
+      ? value["spell"]
+      : undefined;
+  if (patternLinkObj !== undefined) {
+    const link = parseLink(patternLinkObj, valueEntry.address)!;
     address = {
       space: link.space,
       id: link.id!,
       type: link.type! as MIME,
-      path: [],
-    };
-  } else if ("$TYPE" in value && isString(value["$TYPE"])) {
-    const patternId = value["$TYPE"];
-    const entityId = hashOf({ causal: { patternId, type: "pattern" } });
-    const shortId = entityId.toJSON()["/"];
-    address = {
-      space: valueEntry.address.space,
-      id: `of:${shortId}`,
-      type: "application/json",
       path: [],
     };
   }
@@ -1698,30 +1691,7 @@ function loadLinkedPattern(
   if (result.error) {
     return;
   }
-  let entry = result.ok;
-  // Fall back to legacy {recipeId, type: "recipe"} cause for backwards compat
-  if (
-    (entry === null || entry.value === undefined) &&
-    "$TYPE" in value && isString(value["$TYPE"])
-  ) {
-    const patternId = value["$TYPE"];
-    const legacyEntityId = hashOf({
-      causal: { recipeId: patternId, type: "recipe" },
-    });
-    const legacyShortId = legacyEntityId.toJSON()["/"];
-    const legacyAddress: IMemorySpaceAddress = {
-      space: address.space,
-      id: `of:${legacyShortId}` as IMemorySpaceAddress["id"],
-      type: "application/json" as MIME,
-      path: [],
-    };
-    // This only happens in the query path, so don't worry about scheduler
-    const legacyResult = tx.read(legacyAddress);
-    if (!legacyResult.error) {
-      entry = legacyResult.ok;
-      address = legacyAddress;
-    }
-  }
+  const entry = result.ok;
   if (entry === null || entry.value === undefined) {
     return;
   }

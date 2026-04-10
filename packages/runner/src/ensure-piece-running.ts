@@ -1,8 +1,8 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { TYPE } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import { type NormalizedFullLink, parseLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
+import { processLinkSchema } from "@commonfabric/runner/schemas";
 
 const logger = getLogger("ensure-piece-running", {
   enabled: false,
@@ -51,17 +51,17 @@ export async function ensurePieceRunning(
 
       // Traverse up the source cell chain
       // This follows links from derived cells back to the process cell
-      let sourceCell = currentCell.getSourceCell();
+      let sourceCell = currentCell.getSourceCell(processLinkSchema);
       while (sourceCell) {
         logger.debug("ensure-piece", () => [
           `Following source cell from ${currentCell?.getAsNormalizedFullLink().id} to ${sourceCell?.getAsNormalizedFullLink().id}`,
         ]);
         currentCell = sourceCell;
-        sourceCell = currentCell.getSourceCell();
+        sourceCell = currentCell.getSourceCell(processLinkSchema);
       }
 
       // currentCell is now the process cell (or the original cell if no sources)
-      // Check if it has a resultRef and a TYPE (indicating it's a process cell)
+      // Check if it has the process metadata needed to resolve the pattern.
       const processData = currentCell.getRaw();
 
       if (!processData || typeof processData !== "object") {
@@ -71,12 +71,13 @@ export async function ensurePieceRunning(
         return false;
       }
 
-      const patternId = (processData as Record<string, unknown>)[TYPE];
+      const patternLinkObj = (processData as Record<string, unknown>).pattern;
+      const patternId = parseLink(patternLinkObj, currentCell)?.id;
       const resultRef = (processData as Record<string, unknown>).resultRef;
 
       if (!patternId) {
         logger.debug("ensure-piece", () => [
-          `No pattern ID (TYPE) found in process cell`,
+          `No pattern ID (pattern) found in process cell`,
         ]);
         return false;
       }
@@ -103,9 +104,9 @@ export async function ensurePieceRunning(
       // Commit the read transaction before starting the piece
       await tx.commit();
 
-      // Load the pattern
+      // Load the pattern from the persisted spell reference.
       const pattern = await runtime.patternManager.loadPattern(
-        patternId as string,
+        patternId,
         cellLink.space,
       );
 

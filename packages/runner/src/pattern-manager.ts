@@ -8,11 +8,12 @@ import {
   unsafe_verifiedLoadId,
 } from "./builder/types.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import { Cell } from "./cell.ts";
+import { Cell, isCell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
 import type { CompileResult } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
+import { type NormalizedFullLink, parseLink } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTopFrame } from "./builder/pattern.ts";
 

@@ -3,6 +3,7 @@ import {
   Classification,
   EntityId,
   getEntityId,
+  getPatternIdFromSourceCell,
   isCell,
   isLink,
   isStream,
@@ -14,7 +15,6 @@ import {
   Runtime,
   type Schema,
   type SpaceCellContents,
-  TYPE,
   URI,
 } from "@commonfabric/runner";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
@@ -26,6 +26,7 @@ import {
   nameSchema,
   pieceListSchema,
   pieceSourceCellSchema,
+  processLinkSchema,
   processSchema,
 } from "@commonfabric/runner/schemas";
 ensureNotRenderThread();
@@ -736,8 +737,9 @@ export class PieceManager {
   async getArgument<T = unknown>(
     piece: Cell<unknown | T>,
   ): Promise<Cell<T>> {
-    const source = piece.getSourceCell(processSchema);
-    const patternId = source?.get()?.[TYPE]!;
+    const source = piece.getSourceCell(processLinkSchema);
+    if (!source) throw new Error("piece missing source cell");
+    const patternId = getPatternIdFromSourceCell(source);
     if (!patternId) throw new Error("piece missing pattern ID");
     const pattern = await this.runtime.patternManager.loadPattern(
       patternId,
@@ -921,11 +923,11 @@ export class PieceManager {
 
     // When we subscribe to a doc, our subscription includes the doc's source,
     // so get that.
-    const sourceCell = piece.getSourceCell();
+    const sourceCell = piece.getSourceCell(processLinkSchema);
     if (!sourceCell) throw new Error("piece missing source cell");
     await timePiecePhase("syncPattern.source.sync", () => sourceCell.sync());
 
-    let patternId = sourceCell.get()?.[TYPE];
+    let patternId = getPatternIdFromSourceCell(sourceCell);
     if (!patternId) {
       // Under remote sync, the source cell can transiently lag the result cell
       // even though setup just wrote both. Wait for storage to settle and retry
@@ -936,7 +938,7 @@ export class PieceManager {
         "syncPattern.retry.source.sync",
         () => sourceCell.sync(),
       );
-      patternId = sourceCell.get()?.[TYPE];
+      patternId = getPatternIdFromSourceCell(sourceCell);
     }
     if (!patternId) throw new Error("piece missing pattern ID");
 
@@ -1019,12 +1021,6 @@ export class PieceManager {
     await this.synced();
   }
 }
-
-export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
-  const sourceCell = piece.getSourceCell(processSchema);
-  if (!sourceCell) throw new Error("piece missing source cell");
-  return sourceCell.get()?.[TYPE]!;
-};
 
 async function getCellByIdOrPiece(
   manager: PieceManager,

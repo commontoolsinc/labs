@@ -1,13 +1,13 @@
 import {
   Cell,
+  getPatternIdFromPiece,
   NAME,
   Pattern,
   PatternMeta,
   RuntimeProgram,
-  TYPE,
 } from "@commonfabric/runner";
 import { pieceId, PieceManager } from "../manager.ts";
-import { nameSchema, processSchema } from "@commonfabric/runner/schemas";
+import { nameSchema } from "@commonfabric/runner/schemas";
 import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
 import { injectUserCode } from "../iframe/static.ts";
 import {
@@ -112,6 +112,7 @@ export class PieceController<T = unknown> {
 
   async getPattern(): Promise<Pattern> {
     const patternId = getPatternIdFromPiece(this.#cell);
+    if (!patternId) throw new Error("piece missing pattern ID");
     const runtime = this.#manager.runtime;
     const pattern = await runtime.patternManager.loadPattern(
       patternId,
@@ -122,6 +123,7 @@ export class PieceController<T = unknown> {
 
   getPatternMeta(): Promise<PatternMeta> {
     const patternId = getPatternIdFromPiece(this.#cell);
+    if (!patternId) throw new Error("piece missing pattern ID");
     const space = this.#manager.getSpace();
     return this.#manager.runtime.patternManager.loadPatternMeta(
       patternId,
@@ -179,9 +181,3 @@ async function execute(
 ): Promise<void> {
   await manager.runWithPattern(pattern, pieceId, input, options);
 }
-
-export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
-  const sourceCell = piece.getSourceCell(processSchema);
-  if (!sourceCell) throw new Error("piece missing source cell");
-  return sourceCell.get()?.[TYPE];
-};
