@@ -191,6 +191,109 @@ Deno.test("memory v2 query does not include linked opaque cells in graph entitie
   }
 });
 
+Deno.test("memory v2 query does not walk nested links inside inline opaque cells", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-inline-opaque-link";
+  const rootId = "of:inline-opaque-link-root";
+  const targetId = "of:inline-opaque-link-target";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: targetId,
+            value: {
+              value: {
+                secret: "shh",
+              },
+            },
+          },
+          {
+            op: "set",
+            id: rootId,
+            value: {
+              value: {
+                hidden: {
+                  nested: {
+                    "/": {
+                      "link@1": {
+                        id: targetId,
+                        path: [],
+                        space,
+                      },
+                    },
+                  },
+                  local: "still here",
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const result = queryGraph(space, engine, {
+      roots: [{
+        id: rootId,
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              hidden: {
+                type: "object",
+                properties: {
+                  nested: {
+                    type: "object",
+                    properties: {
+                      secret: { type: "string" },
+                    },
+                  },
+                  local: { type: "string" },
+                },
+                asCell: ["opaque"],
+              },
+            },
+            required: ["hidden"],
+          },
+        },
+      }],
+    });
+
+    assertEquals(result.entities, [{
+      branch: "",
+      id: rootId,
+      seq: 1,
+      document: {
+        value: {
+          hidden: {
+            nested: {
+              "/": {
+                "link@1": {
+                  id: targetId,
+                  path: [],
+                  space,
+                },
+              },
+            },
+            local: "still here",
+          },
+        },
+      },
+    }]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 query reuses a persistent manager cache for shared source growth", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-manager-growth";

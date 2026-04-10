@@ -2350,6 +2350,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
       throw new Error("Schema is neither boolean nor an object");
     }
     const schemaObj = resolved;
+    const asCellValues = ContextualFlowControl.getAsCellValues(schemaObj);
+    // Don't walk into opaque cells
+    if (asCellValues.at(0) === "opaque") {
+      const newLink = link ?? getNormalizedLink(
+        doc.address,
+        schemaObj,
+      );
+      return { ok: this.objectCreator.createObject(newLink, doc.value) };
+    }
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
