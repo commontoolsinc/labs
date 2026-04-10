@@ -7,7 +7,7 @@ transformer recognizes a shared set of authored container kinds, not just JSX.
 // JSX expressions
 {show ? <div>Content</div> : null}
 
-// Returned object property values
+// JSX prop/text values
 <button disabled={loading}>
   {loading ? "Loading..." : "Load"}
 </button>
