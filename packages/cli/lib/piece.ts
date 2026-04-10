@@ -266,9 +266,26 @@ export async function newPiece(
     "newPiece.getProgramFromFile",
     () => getProgramFromFile(manager, entry),
   );
+  const PIECE_START_TIMEOUT_MS = 60_000;
   const piece = await timeCliPhase(
     "newPiece.create",
-    () => pieces.create(program, options),
+    () => {
+      const createPromise = pieces.create(program, options);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              `Piece created but failed to start within ${PIECE_START_TIMEOUT_MS / 1000}s. ` +
+                `Check toolshed logs for runtime errors.`,
+            ),
+          );
+        }, PIECE_START_TIMEOUT_MS);
+      });
+      return Promise.race([createPromise, timeout]).finally(() =>
+        clearTimeout(timer)
+      );
+    },
   );
 
   // Explicitly add the piece to the space's allPieces list
