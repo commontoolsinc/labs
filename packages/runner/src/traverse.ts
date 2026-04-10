@@ -2959,6 +2959,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): TraverseResult<Immutable<FabricValue>> {
     this.traversePointerCalls++;
     const selector = { path: doc.address.path, schema };
+
+    // In the case of an opaque cell, we want to skip any deeper reads
+    // This means we don't follow any redirects
+    const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+    if (asCellValues.at(0) === "opaque") {
+      const cellLink = getNextCellLink(doc, schema);
+      return { ok: this.objectCreator.createObject(cellLink, undefined) };
+    }
+
     const [redirDoc, redirSelector] = this.getDocAtPath(
       doc,
       [],
