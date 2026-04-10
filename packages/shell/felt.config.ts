@@ -45,9 +45,6 @@ const config: Config = {
       "$EXPERIMENTAL_MODERN_DATA_MODEL": Deno.env.get(
         "EXPERIMENTAL_MODERN_DATA_MODEL",
       ),
-      "$EXPERIMENTAL_STORABLE_PROTOCOL": Deno.env.get(
-        "EXPERIMENTAL_STORABLE_PROTOCOL",
-      ),
       "$EXPERIMENTAL_UNIFIED_JSON_ENCODING": Deno.env.get(
         "EXPERIMENTAL_UNIFIED_JSON_ENCODING",
       ),
