@@ -211,7 +211,7 @@ type CalculatorRequest = {
 
       expect(schema.anyOf).toEqual([
         { type: "undefined" },
-        { type: "unknown", asOpaque: true },
+        { type: "unknown", asCell: ["opaque"] },
       ]);
     });
 

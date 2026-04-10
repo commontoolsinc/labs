@@ -28,10 +28,7 @@
   },
   "properties": {
     "state": {
-      "$ref": "#/$defs/LLMState",
-      "asCell": [
-        "opaque"
-      ]
+      "$ref": "#/$defs/LLMState"
     }
   },
   "required": [
