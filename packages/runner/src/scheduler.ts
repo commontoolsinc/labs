@@ -3623,13 +3623,6 @@ export class Scheduler {
                   error,
                 );
               });
-              }).catch((error) => {
-                logger.error(
-                  "schedule-error",
-                  "Event handler commit promise rejected:",
-                  error,
-                );
-              });
             }
           };
 
