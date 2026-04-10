@@ -503,7 +503,16 @@ export default pattern((state) => {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/Comment"
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            text: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "text"]
                     },
                     index: {
                         type: "number"
@@ -527,30 +536,7 @@ export default pattern((state) => {
                         required: ["outerIndex", "state"]
                     }
                 },
-                required: ["element", "params"],
-                $defs: {
-                    Comment: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "string"
-                            },
-                            text: {
-                                type: "string"
-                            },
-                            flagged: {
-                                type: "boolean"
-                            },
-                            reactions: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            }
-                        },
-                        required: ["id", "text", "flagged", "reactions"]
-                    }
-                }
+                required: ["element", "params"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
