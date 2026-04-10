@@ -233,29 +233,40 @@ MOUNT/SPACE/pieces/🤖 Deployer/
 
 ### Agent lifecycle
 
-```bash
-# 1. Find your agent piece
-AGENT_NAME=$(cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
-  "import json,sys; p=json.load(sys.stdin); \
-   print(next(x['name'] for x in p if 'Deployer' in x['name']))")
+**Important:** Always re-resolve the piece name before each handler call.
+Piece name suffixes can change after handler invocations (e.g. `Counter-1`
+becomes `Counter-2`), so a stale `$AGENT_NAME` will target a non-existent path.
 
-# 2. Read your directive
+```bash
+# Helper function: resolve current piece name (call before each handler use)
+resolve_agent() {
+  cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
+    "import json,sys; p=json.load(sys.stdin); \
+     print(next(x['name'] for x in p if 'Deployer' in x['name']))"
+}
+
+# 1. Read your directive
+AGENT_NAME=$(resolve_agent)
 cat "MOUNT/SPACE/pieces/$AGENT_NAME/input/directive"
 
-# 3. Mark running (auto-logs "started" to Activity Log)
+# 2. Mark running (auto-logs "started" to Activity Log)
+AGENT_NAME=$(resolve_agent)
 "MOUNT/SPACE/pieces/$AGENT_NAME/result/markRunning.handler"
 
-# 4. Do your work...
+# 3. Do your work...
 # Log individual actions to Activity Log as you go (see Activity Log section)
 
-# 5. Record learnings
+# 4. Record learnings
+AGENT_NAME=$(resolve_agent)
 "MOUNT/SPACE/pieces/$AGENT_NAME/result/appendLearned.handler" \
   --entry "2026-04-07: Calendar addEvent throws pattern-load-error but succeeds"
 
-# 6. Mark idle when done (auto-logs "completed" to Activity Log)
+# 5. Mark idle when done (auto-logs "completed" to Activity Log)
+AGENT_NAME=$(resolve_agent)
 "MOUNT/SPACE/pieces/$AGENT_NAME/result/markIdle.handler" \
   --summary "Deployed Contact Book and Calendar, left 2 wishes for Populator"
 # Or on error:
+AGENT_NAME=$(resolve_agent)
 "MOUNT/SPACE/pieces/$AGENT_NAME/result/markError.handler" \
   --summary "FUSE mount unresponsive after 3 retries"
 ```
