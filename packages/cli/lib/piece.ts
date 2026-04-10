@@ -276,7 +276,9 @@ export async function newPiece(
         timer = setTimeout(() => {
           reject(
             new Error(
-              `Piece created but failed to start within ${PIECE_START_TIMEOUT_MS / 1000}s. ` +
+              `Piece created but failed to start within ${
+                PIECE_START_TIMEOUT_MS / 1000
+              }s. ` +
                 `Check toolshed logs for runtime errors.`,
             ),
           );
