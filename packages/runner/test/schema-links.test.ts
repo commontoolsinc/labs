@@ -9,8 +9,9 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
+import { diffAndUpdate } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
-import { createDataCellURI } from "../src/link-utils.ts";
+import { areLinksSame, createDataCellURI } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { CellResult } from "../src/query-result-proxy.ts";
@@ -1027,6 +1028,88 @@ describe("Schema - Link Resolution", () => {
       expect(resultLink.id).not.toBe(secondLink.id);
       expect(resultLink.id).not.toBe(firstLink.id);
       expect(resultLink.id).not.toBe(dataLink.id);
+    });
+
+    it("diffAndUpdate preserves the original link when writing an opaque asCell result", () => {
+      const data = runtime.getCell<{ test: { foo: string } }>(
+        space,
+        "redirect-test-opaque-diff-data",
+        undefined,
+        tx,
+      );
+      data.set({ test: { foo: "bar" } });
+
+      const second = runtime.getCell<any>(
+        space,
+        "redirect-test-opaque-diff-second",
+        undefined,
+        tx,
+      );
+      second.setRaw(data.getAsLink());
+
+      const first = runtime.getCell<any>(
+        space,
+        "redirect-test-opaque-diff-first",
+        undefined,
+        tx,
+      );
+      first.setRaw(second.getAsLink());
+
+      const redir = runtime.getCell<any>(
+        space,
+        "redirect-test-opaque-diff-redir",
+        undefined,
+        tx,
+      );
+      redir.setRaw(first.getAsWriteRedirectLink());
+
+      const start = runtime.getCell<any>(
+        space,
+        "redirect-test-opaque-diff-start",
+        undefined,
+        tx,
+      );
+      start.setRaw({
+        label: "source",
+        value: redir.getAsWriteRedirectLink(),
+      });
+
+      const opaqueSchema = {
+        type: "object",
+        properties: {
+          test: {
+            type: "object",
+            properties: { foo: { type: "string" } },
+          },
+        },
+        asCell: ["opaque"],
+      } as const satisfies JSONSchema;
+
+      const opaqueResult = start.key("value").asSchema(opaqueSchema).get();
+      expect(isCell(opaqueResult)).toBe(true);
+
+      const target = runtime.getCell<{ value: unknown }>(
+        space,
+        "redirect-test-opaque-diff-target",
+        undefined,
+        tx,
+      );
+      target.set({ value: null });
+
+      const didChange = diffAndUpdate(
+        runtime,
+        tx,
+        target.key("value").getAsNormalizedFullLink(),
+        opaqueResult,
+      );
+
+      expect(didChange).toBe(true);
+      expect(areLinksSame(target.getRaw()?.value, start.key("value"), target))
+        .toBe(true);
+      expect(areLinksSame(target.getRaw()?.value, redir, target)).toBe(false);
+      expect(areLinksSame(target.getRaw()?.value, first, target)).toBe(false);
+      expect(areLinksSame(target.getRaw()?.value, second, target)).toBe(false);
+      expect(areLinksSame(target.getRaw()?.value, data, target)).toBe(false);
     });
 
     it("with toCell: returns Cell pointing past redirects if needed for full path", () => {
