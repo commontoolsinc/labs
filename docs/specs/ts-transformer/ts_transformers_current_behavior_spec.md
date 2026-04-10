@@ -358,11 +358,11 @@ These categories do not mean "rewrite every descendant expression." Explicit
 computation callbacks still create their own ownership boundary, and every site
 must separately satisfy the shared handling policy.
 
-In particular, current-main explicit compute callbacks preserve authored
-JavaScript control flow even for nested JSX ternaries/logicals inside the
-callback body. The recent recursive lowering work applies to pattern-owned
-sites and supported collection callbacks, not to explicit compute callback
-bodies.
+In particular, explicit compute callbacks remain an ownership boundary for
+recursive lowering. That boundary does not disappear just because the callback
+returns JSX: ternaries and logical control flow inside the compute callback
+body stay authored JavaScript rather than recursively lowered helper control
+flow.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 
