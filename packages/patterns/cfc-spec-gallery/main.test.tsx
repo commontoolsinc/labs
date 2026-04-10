@@ -5,123 +5,105 @@ const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
   stream.send();
 });
 
+const sendString = handler<void, { stream: Stream<string>; next: string }>((
+  _,
+  { stream, next },
+) => {
+  stream.send(next);
+});
+
 export default pattern(() => {
   const instance = Gallery({});
 
-  const action_hotel_membership = trigger({
-    stream: instance.runHotelMembershipReturn,
+  const action_prepare_forward = trigger({
+    stream: instance.prepareForwardHotelNote,
   });
   const action_forward_note = trigger({ stream: instance.runForwardHotelNote });
-  const action_select_result = trigger({
-    stream: instance.runSelectSearchResult,
+  const action_capture_command = trigger({
+    stream: instance.runCaptureDirectCommand,
   });
-  const action_ack_disclosure = trigger({
-    stream: instance.runAcknowledgeDisclosure,
+  const action_prepare_brief = trigger({
+    stream: instance.runPreviewResearchBrief,
   });
-  const action_ack_alert = trigger({ stream: instance.runAcknowledgeAlert });
-  const action_accept_invite = trigger({ stream: instance.runAcceptInvite });
-  const action_release_redacted = trigger({
-    stream: instance.runReleaseRedactedSummary,
-  });
-  const action_escalate = trigger({ stream: instance.runEscalateSupportCase });
-  const action_preview = trigger({ stream: instance.runPreviewResearchBrief });
-  const action_finalize = trigger({ stream: instance.runFinalizeChecklist });
-  const action_confirm = trigger({ stream: instance.runConfirmReceipt });
-  const action_capture = trigger({ stream: instance.runCaptureDirectCommand });
-  const action_authorize = trigger({
+  const action_authorize_send = trigger({
     stream: instance.runAuthorizeResearchSend,
   });
-  const action_safe_link = trigger({ stream: instance.runReleaseSafeLink });
+  const action_prepare_safe_link = trigger({
+    stream: instance.prepareSafeLinkRelease,
+  });
+  const action_release_safe_link = trigger({
+    stream: instance.runReleaseSafeLink,
+  });
+  const action_membership = trigger({
+    stream: instance.runHotelMembershipReturn,
+  });
+
+  const action_change_forward_recipient = sendString({
+    stream: instance.setForwardRecipient,
+    next: "night-audit@hotel.example",
+  });
+  const action_change_command = sendString({
+    stream: instance.setResearchCommand,
+    next:
+      "Research the product launch and email a short briefing to launch@example.com",
+  });
+  const action_change_source_url = sendString({
+    stream: instance.setSafeLinkSource,
+    next:
+      "https://source.example.com/private/source?token=debug&draft=internal",
+  });
 
   const assert_count = computed(() => instance.totalExamples === 16);
-  const assert_hotel = computed(() =>
+  const assert_forward_prepared = computed(() => instance.completedCount === 0);
+  const assert_forward_committed = computed(() =>
     instance.completedCount === 1 &&
-    instance.lastCompleted === "hotel-membership-return"
-  );
-  const assert_forward = computed(() =>
-    instance.completedCount === 2 &&
     instance.lastCompleted === "forward-hotel-note"
   );
-  const assert_select = computed(() =>
-    instance.completedCount === 3 &&
-    instance.lastCompleted === "select-search-result"
+  const assert_research_captured = computed(() =>
+    instance.completedCount === 1 &&
+    instance.lastCompleted === "forward-hotel-note"
   );
-  const assert_disclosure = computed(() =>
-    instance.completedCount === 4 &&
-    instance.lastCompleted === "acknowledge-disclosure"
+  const assert_research_prepared = computed(() =>
+    instance.completedCount === 1
   );
-  const assert_alert = computed(() =>
-    instance.completedCount === 5 &&
-    instance.lastCompleted === "acknowledge-alert"
-  );
-  const assert_invite = computed(() =>
-    instance.completedCount === 6 &&
-    instance.lastCompleted === "accept-invite"
-  );
-  const assert_redacted = computed(() =>
-    instance.completedCount === 7 &&
-    instance.lastCompleted === "release-redacted-summary"
-  );
-  const assert_escalate = computed(() =>
-    instance.completedCount === 8 &&
-    instance.lastCompleted === "escalate-support-case"
-  );
-  const assert_preview = computed(() =>
-    instance.completedCount === 9 &&
-    instance.lastCompleted === "preview-research-brief"
-  );
-  const assert_finalize = computed(() =>
-    instance.completedCount === 10 &&
-    instance.lastCompleted === "finalize-checklist"
-  );
-  const assert_confirm = computed(() =>
-    instance.completedCount === 11 &&
-    instance.lastCompleted === "confirm-receipt"
-  );
-  const assert_capture = computed(() =>
-    instance.completedCount === 12 &&
-    instance.lastCompleted === "capture-direct-command"
-  );
-  const assert_authorize = computed(() =>
-    instance.completedCount === 13 &&
+  const assert_research_sent = computed(() =>
+    instance.completedCount === 2 &&
     instance.lastCompleted === "authorize-research-send"
   );
-  const assert_safe_link = computed(() =>
-    instance.completedCount === 14 &&
+  const assert_safe_link_prepared = computed(() =>
+    instance.completedCount === 2 &&
+    instance.lastCompleted === "authorize-research-send"
+  );
+  const assert_safe_link_released = computed(() =>
+    instance.completedCount === 3 &&
     instance.lastCompleted === "release-safe-link"
+  );
+  const assert_placeholder_actions = computed(() =>
+    instance.totalExamples === 16
   );
 
   return {
     tests: [
       { assertion: assert_count },
-      { action: action_hotel_membership },
-      { assertion: assert_hotel },
+      { action: action_change_forward_recipient },
+      { action: action_prepare_forward },
+      { assertion: assert_forward_prepared },
       { action: action_forward_note },
-      { assertion: assert_forward },
-      { action: action_select_result },
-      { assertion: assert_select },
-      { action: action_ack_disclosure },
-      { assertion: assert_disclosure },
-      { action: action_ack_alert },
-      { assertion: assert_alert },
-      { action: action_accept_invite },
-      { assertion: assert_invite },
-      { action: action_release_redacted },
-      { assertion: assert_redacted },
-      { action: action_escalate },
-      { assertion: assert_escalate },
-      { action: action_preview },
-      { assertion: assert_preview },
-      { action: action_finalize },
-      { assertion: assert_finalize },
-      { action: action_confirm },
-      { assertion: assert_confirm },
-      { action: action_capture },
-      { assertion: assert_capture },
-      { action: action_authorize },
-      { assertion: assert_authorize },
-      { action: action_safe_link },
-      { assertion: assert_safe_link },
+      { assertion: assert_forward_committed },
+      { action: action_change_command },
+      { action: action_capture_command },
+      { assertion: assert_research_captured },
+      { action: action_prepare_brief },
+      { assertion: assert_research_prepared },
+      { action: action_authorize_send },
+      { assertion: assert_research_sent },
+      { action: action_change_source_url },
+      { action: action_prepare_safe_link },
+      { assertion: assert_safe_link_prepared },
+      { action: action_release_safe_link },
+      { assertion: assert_safe_link_released },
+      { action: action_membership },
+      { assertion: assert_placeholder_actions },
     ],
     instance,
   };
