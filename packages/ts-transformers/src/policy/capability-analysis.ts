@@ -1208,6 +1208,52 @@ export function analyzeFunctionCapabilities(
       localMapValueBindings.delete(name);
     };
 
+    const scopedLocalCollectionNamesStack: Array<Set<string>> = [];
+
+    const markScopedLocalCollectionName = (name: string): void => {
+      const currentScope = scopedLocalCollectionNamesStack[
+        scopedLocalCollectionNamesStack.length - 1
+      ];
+      currentScope?.add(name);
+    };
+
+    const clearScopedLocalCollectionBindingNames = (
+      name: ts.BindingName,
+    ): void => {
+      if (ts.isIdentifier(name)) {
+        markScopedLocalCollectionName(name.text);
+        clearLocalCollectionBindings(name.text);
+        return;
+      }
+
+      for (const element of name.elements) {
+        if (ts.isOmittedExpression(element)) continue;
+        clearScopedLocalCollectionBindingNames(element.name);
+      }
+    };
+
+    const restoreScopedLocalCollectionBindings = (
+      names: ReadonlySet<string>,
+      savedArrayElementBindings: ReadonlyMap<string, AliasBinding>,
+      savedMapValueBindings: ReadonlyMap<string, AliasBinding>,
+    ): void => {
+      for (const name of names) {
+        const arrayBinding = savedArrayElementBindings.get(name);
+        if (arrayBinding) {
+          localArrayElementBindings.set(name, arrayBinding);
+        } else {
+          localArrayElementBindings.delete(name);
+        }
+
+        const mapBinding = savedMapValueBindings.get(name);
+        if (mapBinding) {
+          localMapValueBindings.set(name, mapBinding);
+        } else {
+          localMapValueBindings.delete(name);
+        }
+      }
+    };
+
     const recordLocalArrayPush = (
       arrayName: string,
       args: readonly ts.Expression[],
@@ -1422,6 +1468,12 @@ export function analyzeFunctionCapabilities(
       const savedAliases = new Map(aliases);
       const savedAliasShapes = new Map(aliasShapes);
       const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
+      const savedLocalArrayElementBindings = new Map(
+        localArrayElementBindings,
+      );
+      const savedLocalMapValueBindings = new Map(localMapValueBindings);
+      const scopedLocalCollectionNames = new Set<string>();
+      scopedLocalCollectionNamesStack.push(scopedLocalCollectionNames);
 
       try {
         if (callback.name && ts.isIdentifier(callback.name)) {
@@ -1429,6 +1481,7 @@ export function analyzeFunctionCapabilities(
           aliasShapes.delete(callback.name.text);
         }
         for (const [index, parameter] of callback.parameters.entries()) {
+          clearScopedLocalCollectionBindingNames(parameter.name);
           clearBindingAliases(parameter.name, aliases, aliasShapes);
           const binding = paramBindings?.get(index);
           if (binding) {
@@ -1447,6 +1500,7 @@ export function analyzeFunctionCapabilities(
           visit(body);
         }
       } finally {
+        scopedLocalCollectionNamesStack.pop();
         aliases.clear();
         for (const [name, source] of savedAliases) {
           aliases.set(name, source);
@@ -1459,6 +1513,11 @@ export function analyzeFunctionCapabilities(
         for (const name of savedSpecificPaths) {
           aliasesWithSpecificPaths.add(name);
         }
+        restoreScopedLocalCollectionBindings(
+          scopedLocalCollectionNames,
+          savedLocalArrayElementBindings,
+          savedLocalMapValueBindings,
+        );
       }
     };
 
@@ -1919,9 +1978,7 @@ export function analyzeFunctionCapabilities(
       }
 
       if (ts.isVariableDeclaration(node)) {
-        if (ts.isIdentifier(node.name)) {
-          clearLocalCollectionBindings(node.name.text);
-        }
+        clearScopedLocalCollectionBindingNames(node.name);
         const initRef = node.initializer && ts.isExpression(node.initializer)
           ? buildAliasBindingFromExpression(node.initializer)
           : undefined;
@@ -1981,10 +2038,17 @@ export function analyzeFunctionCapabilities(
         const savedAliases = new Map(aliases);
         const savedAliasShapes = new Map(aliasShapes);
         const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
+        const savedLocalArrayElementBindings = new Map(
+          localArrayElementBindings,
+        );
+        const savedLocalMapValueBindings = new Map(localMapValueBindings);
+        const scopedLocalCollectionNames = new Set<string>();
+        scopedLocalCollectionNamesStack.push(scopedLocalCollectionNames);
         try {
           if (iterableBinding) {
             if (ts.isVariableDeclarationList(node.initializer)) {
               for (const declaration of node.initializer.declarations) {
+                clearScopedLocalCollectionBindingNames(declaration.name);
                 assignBindingAlias(declaration.name, iterableBinding);
               }
             } else if (ts.isExpression(node.initializer)) {
@@ -1995,6 +2059,7 @@ export function analyzeFunctionCapabilities(
           }
           visit(node.statement);
         } finally {
+          scopedLocalCollectionNamesStack.pop();
           aliases.clear();
           for (const [name, source] of savedAliases) {
             aliases.set(name, source);
@@ -2007,6 +2072,11 @@ export function analyzeFunctionCapabilities(
           for (const name of savedSpecificPaths) {
             aliasesWithSpecificPaths.add(name);
           }
+          restoreScopedLocalCollectionBindings(
+            scopedLocalCollectionNames,
+            savedLocalArrayElementBindings,
+            savedLocalMapValueBindings,
+          );
         }
         return;
       }

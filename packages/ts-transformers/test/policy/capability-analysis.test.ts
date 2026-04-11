@@ -739,6 +739,50 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis restores local array bindings after nested callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        push(...items: T[]): number;
+        sort(compareFn?: (a: T, b: T) => number): T[];
+        map<U>(mapper: (value: T) => U): U[];
+      }
+
+      type Candidate = { id: string; name: string; unused: string };
+
+      const fn = (input: { candidates: Candidate[]; other: Candidate[] }) => {
+        const results: Candidate[] = [];
+        for (const candidate of input.candidates) {
+          results.push(candidate);
+        }
+        input.other.map((candidate) => {
+          const results: Candidate[] = [];
+          results.push(candidate);
+          return candidate.id;
+        });
+        results.sort((left, right) => left.name.localeCompare(right.name));
+        return results.length;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("candidates"));
+    assert(input.readPaths.includes("candidates.0"));
+    assert(input.readPaths.includes("candidates.0.name"));
+    assert(input.readPaths.includes("other"));
+    assert(input.readPaths.includes("other.0.id"));
+    assertEquals(input.readPaths.includes("other.0.name"), false);
+  },
+);
+
+Deno.test(
   "Capability analysis keeps element bindings through filter-to-map chains",
   () => {
     const { program, sourceFile } = createProgramWithSource(
