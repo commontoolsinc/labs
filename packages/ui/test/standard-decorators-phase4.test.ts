@@ -41,5 +41,8 @@ Deno.test("transitive ui slice type-checks under standard decorators", async () 
     console.error(decode(output.stderr));
   }
 
-  assert(output.success, "transitive ui slice should pass under standard decorators");
+  assert(
+    output.success,
+    "transitive ui slice should pass under standard decorators",
+  );
 });

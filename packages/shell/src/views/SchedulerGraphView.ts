@@ -1107,8 +1107,10 @@ export class XSchedulerGraph extends LitElement {
 
   @state()
   private accessor tableSortColumn:
-    "totalTime" | "runCount" | "avgTime" | "lastTime" =
-    "totalTime";
+    | "totalTime"
+    | "runCount"
+    | "avgTime"
+    | "lastTime" = "totalTime";
 
   @state()
   private accessor tableSortAscending = false;

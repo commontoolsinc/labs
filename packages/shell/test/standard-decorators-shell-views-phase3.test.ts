@@ -46,5 +46,8 @@ Deno.test("shell view slice type-checks under standard decorators", async () => 
     console.error(decode(output.stderr));
   }
 
-  assert(output.success, "shell view slice should pass under standard decorators");
+  assert(
+    output.success,
+    "shell view slice should pass under standard decorators",
+  );
 });

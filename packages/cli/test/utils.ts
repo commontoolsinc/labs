@@ -9,7 +9,9 @@ export function bytesToLines(stream: Uint8Array): string[] {
 
 export function isIgnorableDenoWarningLine(line: string): boolean {
   const trimmed = line.trimStart();
-  return trimmed.startsWith("Warning The following peer dependency issues were found:") ||
+  return trimmed.startsWith(
+    "Warning The following peer dependency issues were found:",
+  ) ||
     trimmed.startsWith("╭ Warning") ||
     trimmed.startsWith("╰─") ||
     trimmed.startsWith("│") ||

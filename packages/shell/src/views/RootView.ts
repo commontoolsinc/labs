@@ -152,8 +152,7 @@ export class XRootView extends BaseView {
         global.commonfabric.readArgumentCell = debugUtils.readArgumentCell;
         global.commonfabric.subscribeToCell = debugUtils.subscribeToCell;
         global.commonfabric.watchWrites = debugUtils.watchWrites;
-        global.commonfabric.getWriteStackTrace =
-          debugUtils.getWriteStackTrace;
+        global.commonfabric.getWriteStackTrace = debugUtils.getWriteStackTrace;
         global.commonfabric.explainTriggerTrace =
           debugUtils.explainTriggerTrace;
 

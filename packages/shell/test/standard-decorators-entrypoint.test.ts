@@ -8,7 +8,9 @@ function decode(bytes: Uint8Array): string {
 }
 
 Deno.test("shell entrypoint type-checks under standard decorators", async () => {
-  const rootConfig = JSON.parse(await Deno.readTextFile(join(ROOT, "deno.json")));
+  const rootConfig = JSON.parse(
+    await Deno.readTextFile(join(ROOT, "deno.json")),
+  );
   const packageConfig = JSON.parse(
     await Deno.readTextFile(join(ROOT, "packages", "shell", "deno.json")),
   );

@@ -851,12 +851,13 @@ export class XDebuggerView extends LitElement {
   // Logger stats tracking
   @state()
   private accessor loggerBaseline:
-    Record<string, LoggerBreakdown | number> | null =
-    null;
+    | Record<string, LoggerBreakdown | number>
+    | null = null;
 
   @state()
   private accessor loggerSample:
-    Record<string, LoggerBreakdown | number> | null = null;
+    | Record<string, LoggerBreakdown | number>
+    | null = null;
 
   @state()
   private accessor workerLoggerMetadata: LoggerMetadata | null = null;
