@@ -30,7 +30,7 @@ export default pattern((__cf_pattern_input) => {
     const people = __cf_pattern_input.key("people");
     const showAdmin = Writable.of(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("showAdmin", true);
     const adminData = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -76,7 +76,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => [...people.get()]
         .sort((a, b) => a.rank - b.rank)
-        .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 })));
+        .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 }))).for("adminData", true);
     const count = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -105,7 +105,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length);
+    } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length).for("count", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({

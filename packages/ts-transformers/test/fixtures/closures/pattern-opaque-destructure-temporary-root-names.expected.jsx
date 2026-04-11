@@ -29,7 +29,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["messages"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { messages: messages }, ({ messages }) => messages[0] ?? "");
+    } as const satisfies __cfHelpers.JSONSchema, { messages: messages }, ({ messages }) => messages[0] ?? "").for("preview", true);
     const __cf_destructure_1 = generateObject({
         prompt: preview,
         schema: {

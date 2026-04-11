@@ -20,7 +20,7 @@ export default pattern((_state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("list", true);
     return {
         [UI]: (<div>
         {__cfHelpers.when({

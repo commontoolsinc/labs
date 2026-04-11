@@ -38,7 +38,7 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content),
-    });
+    }).for("genResult", true);
     return __cfHelpers.derive({
         type: "object",
         properties: {
@@ -69,7 +69,7 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
 });
 const content = __cfHelpers.__cf_data(Writable.of("Hello world", {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema));
+} as const satisfies __cfHelpers.JSONSchema).for("content", true));
 type Output = {
     tool: PatternToolResult<{
         content: string;

@@ -72,7 +72,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {}), (arr) => arr.length);
+    } as const satisfies __cfHelpers.JSONSchema), {}), (arr) => arr.length).for("count", true);
     return { count };
 }, {
     type: "object",

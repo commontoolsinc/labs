@@ -79,7 +79,7 @@ export default pattern((__cf_pattern_input) => {
     } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => ({
         tasks: items.filter((i) => !i.done),
         view: "inbox",
-    }));
+    })).for("result", true);
     return {
         [UI]: (<div>
         {__cfHelpers.derive({

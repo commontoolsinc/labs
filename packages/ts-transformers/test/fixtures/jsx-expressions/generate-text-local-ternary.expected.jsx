@@ -18,7 +18,7 @@ const __cfAmdHooks = undefined;
 // input binding, so this exercises expression-site lowering on local reactive
 // aliases in JSX.
 export default pattern(() => {
-    const text = generateText({ prompt: "hi" });
+    const text = generateText({ prompt: "hi" }).for("text", true);
     return {
         [UI]: <div>{__cfHelpers.ifElse({
             type: "boolean"

@@ -22,7 +22,7 @@ export default pattern((_state: any) => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("items", true);
     return {
         [UI]: (<div>
         {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

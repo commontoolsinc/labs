@@ -64,7 +64,7 @@ export default pattern((state) => {
             .map((p) => p.ingredient)
             .join(", ");
         return `Pattern for ${food} with: ${liked}`;
-    });
+    }).for("wishQuery", true);
     return { wishQuery };
 }, {
     type: "object",

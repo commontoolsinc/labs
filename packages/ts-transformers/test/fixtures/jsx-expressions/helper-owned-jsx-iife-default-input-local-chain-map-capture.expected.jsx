@@ -50,7 +50,7 @@ export default pattern((__cf_pattern_input) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("path", true);
     const handleNavigateInto = __cfHelpers.handler({
         type: "object",
         properties: {
@@ -75,7 +75,7 @@ export default pattern((__cf_pattern_input) => {
         path.push(name);
     })({
         path: path
-    });
+    }).for("handleNavigateInto", true);
     const handleOpenFile = __cfHelpers.handler({
         type: "object",
         properties: {
@@ -115,11 +115,11 @@ export default pattern((__cf_pattern_input) => {
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, ({ item }, __cf_action_params) => {
         void item;
-    })({});
+    })({}).for("handleOpenFile", true);
     return {
         [UI]: (<div>
         {(() => {
-                const tree = (__cfHelpers.unless({
+                const tree = ((__cfHelpers.unless({
                     $ref: "#/$defs/AnonymousType_1",
                     $defs: {
                         AnonymousType_1: {
@@ -184,8 +184,8 @@ export default pattern((__cf_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, entries, [])) as Entry[];
-                const p = (__cfHelpers.unless({
+                } as const satisfies __cfHelpers.JSONSchema, entries, [])) as Entry[]).for("tree", true);
+                const p = ((__cfHelpers.unless({
                     type: "array",
                     items: {
                         type: "string"
@@ -215,7 +215,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), [])) as string[];
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), [])) as string[]).for("p", true);
                 const unsorted = findChildren(tree, p) as Entry[];
                 const items = __cfHelpers.derive({
                     type: "object",
@@ -289,7 +289,7 @@ export default pattern((__cf_pattern_input) => {
                     if (a.type === b.type)
                         return 0;
                     return a.type === "file" ? -1 : 1;
-                }));
+                })).for("items", true);
                 return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const item = __cf_pattern_input.key("element");
                     const handleNavigateInto = __cf_pattern_input.key("params", "handleNavigateInto");
@@ -302,7 +302,7 @@ export default pattern((__cf_pattern_input) => {
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "boolean"
                     } as const satisfies __cfHelpers.JSONSchema, !isFolder &&
-                        !!item.key("contentType"), item.key("contentType") !== "binary");
+                        !!item.key("contentType"), item.key("contentType") !== "binary").for("isOpenable", true);
                     return (<button type="button" onClick={isFolder
                             ? __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                                 type: "object",

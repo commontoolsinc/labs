@@ -31,7 +31,7 @@ export default pattern((_state) => {
             }
         },
         required: ["name", "age"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("user", true);
     return {
         [UI]: (<div>
         {/* Non-JSX right side: string template with complex expression */}

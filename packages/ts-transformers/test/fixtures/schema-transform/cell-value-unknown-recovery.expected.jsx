@@ -14,9 +14,9 @@ const __cfAmdHooks = undefined;
 declare function fetchUnknown(): unknown;
 // FIXTURE: cell-value-unknown-recovery
 // Verifies: direct `unknown` cell values emit an explicit `{ type: "unknown" }` schema.
-export const value = cell(fetchUnknown(), {
+export const value = __cfHelpers.__cf_data(cell(fetchUnknown(), {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema).for("value", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -29,7 +29,7 @@ export default pattern((__cf_pattern_input: {
         required: ["token"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { token: token }, ({ token }) => `http://api.example.com?token=${token}`);
+    } as const satisfies __cfHelpers.JSONSchema, { token: token }, ({ token }) => `http://api.example.com?token=${token}`).for("url", true);
     const options = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -54,7 +54,7 @@ export default pattern((__cf_pattern_input: {
         required: ["headers"]
     } as const satisfies __cfHelpers.JSONSchema, { token: token }, ({ token }) => ({
         headers: { Authorization: `Bearer ${token}` },
-    }));
+    })).for("options", true);
     return { url, options };
 }, {
     type: "object",

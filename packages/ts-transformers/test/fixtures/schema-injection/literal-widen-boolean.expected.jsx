@@ -18,10 +18,10 @@ const __cfAmdHooks = undefined;
 export default function TestLiteralWidenBoolean() {
     const _b1 = cell(true, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_b1", true);
     const _b2 = cell(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_b2", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenBoolean);

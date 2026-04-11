@@ -20,7 +20,7 @@ export default pattern((state) => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("typedValues", true);
     return { typedValues };
 }, {
     type: "object",

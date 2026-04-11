@@ -58,7 +58,7 @@ export default function TestCollectionsNestedObjects() {
             }
         },
         required: ["user", "timestamp"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_nested", true);
     return _nested;
 }
 __cfHardenFn(TestCollectionsNestedObjects);

@@ -19,13 +19,13 @@ const __cfAmdHooks = undefined;
 export default function TestLiteralWidenBigInt() {
     const _bi1 = cell(123n, {
         type: "integer"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_bi1", true);
     const _bi2 = cell(0n, {
         type: "integer"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_bi2", true);
     const _bi3 = cell(-456n, {
         type: "integer"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_bi3", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenBigInt);

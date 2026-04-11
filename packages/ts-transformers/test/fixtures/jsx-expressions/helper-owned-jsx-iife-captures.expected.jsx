@@ -42,7 +42,7 @@ export default pattern((__cf_pattern_input) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("path", true);
     const pushPath = __cfHelpers.handler({
         type: "object",
         properties: {
@@ -67,7 +67,7 @@ export default pattern((__cf_pattern_input) => {
         path.push(name);
     })({
         path: path
-    });
+    }).for("pushPath", true);
     return {
         [UI]: (<div>
         {(() => {
@@ -101,7 +101,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []).for("p", true);
                 if (p.length === 0)
                     return null;
                 return <div>{__cfHelpers.derive({
@@ -150,7 +150,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []).for("p", true);
                 const visible = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -199,7 +199,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     p: p
-                }, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
+                }, ({ entries, p }) => visibleEntries(entries, p[0] || "")).for("visible", true);
                 return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const pushPath = __cf_pattern_input.key("params", "pushPath");

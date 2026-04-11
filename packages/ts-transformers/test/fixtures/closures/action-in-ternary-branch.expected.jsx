@@ -35,7 +35,7 @@ export default pattern((__cf_pattern_input) => {
     const card = __cf_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("isEditing", true);
     const startEditing = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -49,7 +49,7 @@ export default pattern((__cf_pattern_input) => {
         isEditing.set(true);
     })({
         isEditing: isEditing
-    });
+    }).for("startEditing", true);
     const hasDescription = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -71,7 +71,7 @@ export default pattern((__cf_pattern_input) => {
         } }, ({ card }) => {
         const desc = card.description;
         return desc && desc.length > 0;
-    });
+    }).for("hasDescription", true);
     return {
         [UI]: (<cf-card>
         {__cfHelpers.ifElse({

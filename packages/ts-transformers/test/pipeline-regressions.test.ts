@@ -517,7 +517,7 @@ export default pattern<{ values: string[] }>(({ values }) => {
 
     assertMatch(
       normalized,
-      /const result = derive\([\s\S]*, values, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\);/,
+      /const result = derive\([\s\S]*, values, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\)\.for\("result", true\);/,
     );
   },
 );

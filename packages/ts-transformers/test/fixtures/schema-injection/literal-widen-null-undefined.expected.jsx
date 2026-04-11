@@ -18,10 +18,10 @@ const __cfAmdHooks = undefined;
 export default function TestLiteralWidenNullUndefined() {
     const _c1 = cell(null, {
         type: "null"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c1", true);
     const _c2 = cell(undefined, {
         type: "undefined"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c2", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenNullUndefined);

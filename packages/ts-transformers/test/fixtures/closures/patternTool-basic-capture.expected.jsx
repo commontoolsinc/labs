@@ -44,9 +44,9 @@ const __cfModuleCallback_1 = __cfHardenFn(({ query, content }: {
         return content.split("\n").filter((c: string) => c.includes(query));
     });
 });
-const content = cell("Hello world\nGoodbye world", {
+const content = __cfHelpers.__cf_data(cell("Hello world\nGoodbye world", {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema).for("content", true));
 type Output = {
     grepTool: PatternToolResult<{
         content: string;

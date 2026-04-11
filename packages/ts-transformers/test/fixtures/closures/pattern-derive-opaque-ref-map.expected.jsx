@@ -36,7 +36,7 @@ export default pattern((items) => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.map((n) => n * 2));
+    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.map((n) => n * 2)).for("doubled", true);
     return doubled;
 }, {
     type: "array",

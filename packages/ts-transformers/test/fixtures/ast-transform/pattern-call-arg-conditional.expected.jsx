@@ -36,7 +36,7 @@ export default pattern((state) => {
         "enum": ["Done", "Pending"]
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             done: state.key("done")
-        } }, ({ state }) => identity(state.done ? "Done" : "Pending"));
+        } }, ({ state }) => identity(state.done ? "Done" : "Pending")).for("label", true);
     return { label };
 }, {
     type: "object",

@@ -22,12 +22,12 @@ export default pattern(() => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_emptyArray", true);
     // Empty object
     const _emptyObject = Writable.of({}, {
         type: "object",
         properties: {}
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_emptyObject", true);
     return {
         emptyArray: _emptyArray,
         emptyObject: _emptyObject,

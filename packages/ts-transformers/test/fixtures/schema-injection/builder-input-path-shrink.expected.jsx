@@ -32,7 +32,7 @@ const deriveInput = __cfHelpers.__cf_data({} as Writable<{
     foo: string;
     bar: string;
 }>);
-const deriveObserved = derive({
+const deriveObserved = __cfHelpers.__cf_data(derive({
     type: "object",
     properties: {
         foo: {
@@ -46,8 +46,8 @@ const deriveObserved = derive({
 } as const satisfies __cfHelpers.JSONSchema, deriveInput, (input: Writable<{
     foo: string;
     bar: string;
-}>) => input.key("foo").get());
-const deriveExplicit = derive({
+}>) => input.key("foo").get()).for("deriveObserved", true));
+const deriveExplicit = __cfHelpers.__cf_data(derive({
     type: "object",
     properties: {
         foo: {
@@ -58,7 +58,7 @@ const deriveExplicit = derive({
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, deriveInput, (value) => value.key("foo").get());
+} as const satisfies __cfHelpers.JSONSchema, deriveInput, (value) => value.key("foo").get()).for("deriveExplicit", true));
 const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -173,7 +173,7 @@ const actionPattern = pattern((input: Writable<{
         required: ["input"]
     } as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get())({
         input: input
-    });
+    }).for("a", true);
     return a;
 }, {
     type: "object",

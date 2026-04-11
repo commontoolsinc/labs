@@ -18,10 +18,10 @@ const __cfAmdHooks = undefined;
 export default pattern((_state) => {
     const showPanel = cell(true, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("showPanel", true);
     const userName = cell("Alice", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("userName", true);
     return {
         [UI]: (<div>
         {/* Simple opaque ref with JSX on right - SHOULD use when for short-circuit optimization */}

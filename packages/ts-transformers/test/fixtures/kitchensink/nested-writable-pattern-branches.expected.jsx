@@ -68,11 +68,11 @@ export default pattern((state) => {
     // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const selectedTaskId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("selectedTaskId", true);
     // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const hoveredSectionId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("hoveredSectionId", true);
     // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)
     const hasSections = __cfHelpers.derive({
         type: "object",
@@ -96,7 +96,7 @@ export default pattern((state) => {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             sections: state.key("sections")
-        } }, ({ state }) => state.sections.get().length > 0);
+        } }, ({ state }) => state.sections.get().length > 0).for("hasSections", true);
     return {
         [UI]: (<div>
         {/* [TRANSFORM] ifElse: schema-injected authored ifElse(hasSections, ..., ...) */}

@@ -25,7 +25,7 @@ export default pattern(() => {
                     type: "string"
                 }
             }]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("list", true);
     return {
         [NAME]: "Optional element access",
         [UI]: (<div>

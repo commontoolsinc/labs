@@ -119,9 +119,9 @@ const createSimplePattern = handler({
     // Create isInitialized cell for this charm addition
     const isInitialized = cell(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("isInitialized", true);
     // Create the charm
-    const charm = SimplePattern({});
+    const charm = SimplePattern({}).for("charm", true);
     // Store the charm in the array and navigate
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
 });

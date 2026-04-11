@@ -18,14 +18,14 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // No captures - should not be transformed
     const result = derive({
         type: "number",
         asCell: ["cell"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, value, (v) => v.get() * 2);
+    } as const satisfies __cfHelpers.JSONSchema, value, (v) => v.get() * 2).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

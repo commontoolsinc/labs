@@ -69,7 +69,7 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
-        } }, ({ state }) => state.items);
+        } }, ({ state }) => state.items).for("rows", true);
     return {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

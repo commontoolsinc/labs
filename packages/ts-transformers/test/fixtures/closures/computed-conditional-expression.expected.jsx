@@ -18,16 +18,16 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const threshold = Writable.of(5, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("threshold", true);
     const a = Writable.of(100, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("a", true);
     const b = Writable.of(200, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("b", true);
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -56,7 +56,7 @@ export default pattern(() => {
         threshold: threshold,
         a: a,
         b: b
-    }, ({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get());
+    }, ({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get()).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

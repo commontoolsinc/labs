@@ -50,7 +50,7 @@ export default pattern((__cf_pattern_input) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("path", true);
     const pushPath = __cfHelpers.handler({
         type: "object",
         properties: {
@@ -75,7 +75,7 @@ export default pattern((__cf_pattern_input) => {
         path.push(name);
     })({
         path: path
-    });
+    }).for("pushPath", true);
     return {
         [UI]: (<div>
         {(() => {
@@ -110,7 +110,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []).for("p", true);
                 const unsorted = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -186,7 +186,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     tree: tree,
                     p: p
-                }, ({ tree, p }) => findChildren(tree, p));
+                }, ({ tree, p }) => findChildren(tree, p)).for("unsorted", true);
                 const items = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -252,7 +252,7 @@ export default pattern((__cf_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { unsorted: unsorted }, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => a.name.localeCompare(b.name)));
+                } as const satisfies __cfHelpers.JSONSchema, { unsorted: unsorted }, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => a.name.localeCompare(b.name))).for("items", true);
                 return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const item = __cf_pattern_input.key("element");
                     const pushPath = __cf_pattern_input.key("params", "pushPath");

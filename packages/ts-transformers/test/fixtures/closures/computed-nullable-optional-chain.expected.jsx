@@ -55,7 +55,7 @@ export default pattern((_) => {
     } as const satisfies __cfHelpers.JSONSchema, {}, (): Question | null => {
         // In real code this would filter and return first match, or null
         return null;
-    });
+    }).for("topQuestion", true);
     return {
         [NAME]: "Computed Nullable Optional Chain",
         [UI]: (<div>

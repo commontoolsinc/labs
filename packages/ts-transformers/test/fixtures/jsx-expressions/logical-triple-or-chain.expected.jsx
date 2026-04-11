@@ -19,16 +19,16 @@ const __cfAmdHooks = undefined;
 export default pattern((_state) => {
     const primary = cell("", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("primary", true);
     const secondary = cell("", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("secondary", true);
     const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("items", true);
     return {
         [UI]: (<div>
         {/* Triple || chain - first truthy wins */}

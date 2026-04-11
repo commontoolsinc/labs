@@ -23,10 +23,10 @@ export default pattern(() => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("numbers", true);
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Inside computed, we close over numbers (a Cell)
     // The computed gets transformed to derive({}, () => numbers.map(...))
     // Inside a derive, .map on a closed-over Cell should STILL be transformed to mapWithPattern
@@ -81,7 +81,7 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema), {
         multiplier: multiplier
-    }));
+    })).for("doubled", true);
     return doubled;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",

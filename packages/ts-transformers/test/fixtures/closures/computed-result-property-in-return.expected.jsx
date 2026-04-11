@@ -48,7 +48,7 @@ export default pattern((state) => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
-        } }, ({ state }) => state.items.join(", "));
+        } }, ({ state }) => state.items.join(", ")).for("summary", true);
     return {
         summary,
         charCount: __cfHelpers.derive({

@@ -23,7 +23,7 @@ interface State {
 export default pattern((state: State) => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -57,7 +57,7 @@ export default pattern((state: State) => {
                 multiplier: state.key("config", "multiplier")
             }
         }
-    }, ({ value: v, state }) => v.get() * state.config.multiplier);
+    }, ({ value: v, state }) => v.get() * state.config.multiplier).for("result", true);
     return result;
 }, {
     type: "object",

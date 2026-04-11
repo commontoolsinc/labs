@@ -21,17 +21,17 @@ export default function TestCellOfNoValue() {
     // Cell.of with type argument but no value - should become Cell.of(undefined, schema)
     const _c1 = Cell.of<string>(undefined, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c1", true);
     const _c2 = Cell.of<number>(undefined, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c2", true);
     const _c3 = Cell.of<boolean>(undefined, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c3", true);
     // cell() with type argument but no value - should become cell(undefined, schema)
     const _c4 = cell<string>(undefined, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c4", true);
     // ComparableCell.of with type argument but no value
     const _c5 = ComparableCell.of<{
         name: string;
@@ -43,14 +43,14 @@ export default function TestCellOfNoValue() {
             }
         },
         required: ["name"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c5", true);
     // Mixed - some with value, some without
     const _c6 = Cell.of<string>("hello", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema); // has value
+    } as const satisfies __cfHelpers.JSONSchema).for("_c6", true); // has value
     const _c7 = Cell.of<number>(undefined, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema); // no value
+    } as const satisfies __cfHelpers.JSONSchema).for("_c7", true); // no value
     return null;
 }
 __cfHardenFn(TestCellOfNoValue);

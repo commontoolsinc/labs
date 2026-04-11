@@ -11,12 +11,12 @@ import { cell, derive, pattern, patternTool, type PatternToolResult } from "comm
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const multiplier = cell(2, {
+const multiplier = __cfHelpers.__cf_data(cell(2, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const offset = cell(10, {
+} as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
+const offset = __cfHelpers.__cf_data(cell(10, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema).for("offset", true));
 type Output = {
     tool: PatternToolResult<{
         offset: number;

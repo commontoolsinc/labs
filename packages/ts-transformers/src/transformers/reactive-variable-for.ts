@@ -39,6 +39,7 @@ function createReactiveVariableForVisitor(
     const declarations = visited.declarations.map((declaration) => {
       if (
         !ts.isIdentifier(declaration.name) ||
+        isInternalSyntheticName(declaration.name.text) ||
         !declaration.initializer ||
         !shouldAddVariableFor(declaration.initializer, context)
       ) {
@@ -122,6 +123,10 @@ function shouldAddVariableFor(
     context.options.logger,
   );
   return isCellLikeType(type, context.checker);
+}
+
+function isInternalSyntheticName(name: string): boolean {
+  return name.startsWith("__cf");
 }
 
 function isReactiveBuilderResult(

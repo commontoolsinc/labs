@@ -21,19 +21,19 @@ const __cfAmdHooks = undefined;
 export default function TestLiteralWidenNumber() {
     const _n1 = cell(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_n1", true);
     const _n2 = cell(-5, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_n2", true);
     const _n3 = cell(3.14, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_n3", true);
     const _n4 = cell(1e10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_n4", true);
     const _n5 = cell(0, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_n5", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenNumber);

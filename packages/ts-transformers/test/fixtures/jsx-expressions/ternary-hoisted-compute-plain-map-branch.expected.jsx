@@ -25,7 +25,7 @@ interface Item {
 export default pattern((state) => {
     const showList = Writable.of(true, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
     const sorted = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -78,7 +78,7 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
-        } }, ({ state }) => [...state.items].sort((a, b) => a.value - b.value));
+        } }, ({ state }) => [...state.items].sort((a, b) => a.value - b.value)).for("sorted", true);
     const count = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -105,7 +105,7 @@ export default pattern((state) => {
             items: {
                 length: state.key("items", "length")
             }
-        } }, ({ state }) => state.items.length);
+        } }, ({ state }) => state.items.length).for("count", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({

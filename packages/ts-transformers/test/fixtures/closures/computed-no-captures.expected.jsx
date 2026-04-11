@@ -22,7 +22,7 @@ export default pattern(() => {
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => 42);
+    } as const satisfies __cfHelpers.JSONSchema, {}, () => 42).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

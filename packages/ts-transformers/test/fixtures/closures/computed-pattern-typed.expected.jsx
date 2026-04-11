@@ -21,7 +21,7 @@ export default pattern((__cf_pattern_input) => {
     const multiplier = __cf_pattern_input.key("multiplier");
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -39,7 +39,7 @@ export default pattern((__cf_pattern_input) => {
     } as const satisfies __cfHelpers.JSONSchema, {
         value: value,
         multiplier: multiplier
-    }, ({ value, multiplier }) => value.get() * multiplier);
+    }, ({ value, multiplier }) => value.get() * multiplier).for("result", true);
     return result;
 }, {
     type: "object",

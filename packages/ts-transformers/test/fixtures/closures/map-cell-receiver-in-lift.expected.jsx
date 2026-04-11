@@ -20,7 +20,7 @@ const items = __cfHelpers.__cf_data(Cell.of<string[]>([], {
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema));
+} as const satisfies __cfHelpers.JSONSchema).for("items", true));
 export const fn = lift(false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {

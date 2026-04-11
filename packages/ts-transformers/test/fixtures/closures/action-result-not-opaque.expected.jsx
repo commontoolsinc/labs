@@ -27,7 +27,7 @@ export default pattern((__cf_pattern_input) => {
     const label = __cf_pattern_input.key("label");
     const count = Writable.of(0, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("count", true);
     const increment = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -41,7 +41,7 @@ export default pattern((__cf_pattern_input) => {
         count.set(count.get() + 1);
     })({
         count: count
-    });
+    }).for("increment", true);
     const decrement = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -55,7 +55,7 @@ export default pattern((__cf_pattern_input) => {
         count.set(count.get() - 1);
     })({
         count: count
-    });
+    }).for("decrement", true);
     return {
         [UI]: (<div>
         <span>{label}: {count}</span>

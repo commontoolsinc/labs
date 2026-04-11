@@ -31,7 +31,7 @@ export default pattern((__cf_pattern_input) => {
     const self = __cf_pattern_input[__cfHelpers.SELF];
     const count = Writable.of(0, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("count", true);
     // Action closing over `self` — works because all inputs use Default<>
     const showSelf = __cfHelpers.handler({
         type: "object",
@@ -57,7 +57,7 @@ export default pattern((__cf_pattern_input) => {
         self: {
             title: self.key("title")
         }
-    });
+    }).for("showSelf", true);
     // Action closing over both `self` and `count`
     const incrementWithSelf = __cfHelpers.handler({
         type: "object",
@@ -101,7 +101,7 @@ export default pattern((__cf_pattern_input) => {
     })({
         self: self,
         count: count
-    });
+    }).for("incrementWithSelf", true);
     return {
         [NAME]: "Action SELF Test",
         [UI]: (<div>

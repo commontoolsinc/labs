@@ -13,10 +13,10 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const multiplier = __cfHelpers.__cf_data(Writable.of(2, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema));
+} as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
 const prefix = __cfHelpers.__cf_data(Writable.of("Result: ", {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema));
+} as const satisfies __cfHelpers.JSONSchema).for("prefix", true));
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };

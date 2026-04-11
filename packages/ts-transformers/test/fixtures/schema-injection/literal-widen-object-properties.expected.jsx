@@ -29,7 +29,7 @@ export default function TestLiteralWidenObjectProperties() {
             }
         },
         required: ["x", "y", "name"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_obj", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenObjectProperties);

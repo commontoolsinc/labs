@@ -32,10 +32,10 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const showOuter = Writable.of(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("showOuter", true);
     const secondToggle = Writable.of(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("secondToggle", true);
     return {
         [UI]: (<div>
         {/* Case A: Top-level computed - always worked */}

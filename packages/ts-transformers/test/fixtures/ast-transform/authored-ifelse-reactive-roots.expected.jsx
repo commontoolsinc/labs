@@ -34,7 +34,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["name"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim()));
+    } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim())).for("upper", true);
     return {
         value: ifElse({
             type: "boolean"

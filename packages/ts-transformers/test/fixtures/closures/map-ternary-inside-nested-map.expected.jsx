@@ -87,7 +87,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0);
+    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0).for("hasItems", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({

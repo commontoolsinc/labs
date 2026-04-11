@@ -19,7 +19,7 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Input name 'multiplier' collides with captured variable 'multiplier'
     // The callback returns an object with a property named 'multiplier'
     // Only the variable reference should be renamed, NOT the property name
@@ -53,7 +53,7 @@ export default pattern(() => {
     }, ({ multiplier: m, multiplier_1 }) => ({
         multiplier: multiplier_1.get(),
         value: m.get() * 3,
-    }));
+    })).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

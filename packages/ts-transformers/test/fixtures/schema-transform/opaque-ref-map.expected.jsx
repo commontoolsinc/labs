@@ -50,7 +50,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    } as const satisfies __cfHelpers.JSONSchema), {}).for("mapped", true);
     // This should also be transformed
     const filtered = items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const item = __cf_pattern_input.key("element");
@@ -99,7 +99,7 @@ export default pattern((__cf_pattern_input) => {
             }
         },
         required: ["title", "done", "position"]
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    } as const satisfies __cfHelpers.JSONSchema), {}).for("filtered", true);
     return { mapped, filtered };
 }, {
     type: "object",

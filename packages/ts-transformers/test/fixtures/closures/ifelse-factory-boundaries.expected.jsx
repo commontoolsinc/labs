@@ -66,7 +66,7 @@ export default pattern((__cf_pattern_input) => {
     const messages = __cf_pattern_input.key("messages");
     const selectedId = Writable.of("", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("selectedId", true);
     return {
         [UI]: (<div>
           {entries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

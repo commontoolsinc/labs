@@ -20,10 +20,10 @@ export default pattern((_state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("items", true);
     const index = cell(1, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("index", true);
     return {
         [UI]: (<div>
         <h3>Element Access with Both OpaqueRefs</h3>

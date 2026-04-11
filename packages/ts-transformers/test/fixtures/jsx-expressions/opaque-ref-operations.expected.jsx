@@ -19,10 +19,10 @@ const __cfAmdHooks = undefined;
 export default pattern((_state) => {
     const count = cell(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("count", true);
     const price = cell(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("price", true);
     return {
         [UI]: (<div>
         <p>Count: {count}</p>

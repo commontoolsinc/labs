@@ -23,11 +23,11 @@ export default pattern((config: {
 }) => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const offset = 5; // non-cell local
     const threshold = Writable.of(15, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema); // cell local
+    } as const satisfies __cfHelpers.JSONSchema).for("threshold", true); // cell local
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -66,7 +66,7 @@ export default pattern((config: {
         },
         offset: offset,
         threshold: threshold
-    }, ({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get());
+    }, ({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get()).for("result", true);
     return result;
 }, {
     type: "object",

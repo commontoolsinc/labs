@@ -20,7 +20,7 @@ export default pattern((_state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("items", true);
     return {
         [UI]: (<div>
         {/* Pattern: falsy check || fallback */}

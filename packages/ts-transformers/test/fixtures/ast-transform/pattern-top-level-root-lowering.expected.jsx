@@ -48,7 +48,7 @@ export default pattern((state) => {
             user: {
                 name: state.key("user", "name")
             }
-        } }, ({ state }) => identity(state.user.name));
+        } }, ({ state }) => identity(state.user.name)).for("label", true);
     const maybeLabel = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -72,7 +72,7 @@ export default pattern((state) => {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             maybeUser: state.key("maybeUser")
-        } }, ({ state }) => identity(state.maybeUser?.name));
+        } }, ({ state }) => identity(state.maybeUser?.name)).for("maybeLabel", true);
     return {
         label,
         maybeLabel,

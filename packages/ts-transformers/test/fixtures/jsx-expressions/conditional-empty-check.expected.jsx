@@ -21,7 +21,7 @@ export default pattern(() => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("items", true);
     return {
         [NAME]: "Conditional empty check",
         [UI]: (<div>

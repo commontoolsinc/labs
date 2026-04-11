@@ -54,7 +54,7 @@ export default pattern((state) => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("typedValues", true);
     return {
         [UI]: (<div>
         {typedValues.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
