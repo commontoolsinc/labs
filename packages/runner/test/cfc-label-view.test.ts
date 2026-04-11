@@ -1,10 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
-  cfcLabelViewFromSchema,
 } from "../src/cfc/label-view.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "../src/runtime.ts";
+import { parseLink } from "../src/link-utils.ts";
 
 describe("CFC label view helpers", () => {
   it("collects labels that apply to a logical value path", () => {
@@ -45,30 +49,114 @@ describe("CFC label view helpers", () => {
     });
   });
 
-  it("falls back to schema ifc annotations before persisted metadata exists", () => {
-    expect(
-      cfcLabelViewFromSchema({
-        type: "object",
-        properties: {
-          rendered: {
-            type: "string",
-            ifc: {
-              classification: ["prompt-risk"],
-              integrity: ["trusted-summary"],
-              maxConfidentiality: ["internal"],
-            },
+  it("does not treat schema constraints as display labels", () => {
+    const cell = {
+      getAsNormalizedFullLink: () => ({
+        id: "of:labelled-cell",
+        space: "did:key:test",
+        type: "application/json",
+        path: [],
+      }),
+      get schema() {
+        return {
+          type: "string",
+          ifc: { maxConfidentiality: ["prompt-influence"] },
+        };
+      },
+    };
+
+    expect(cfcLabelViewForCell(cell)).toBeUndefined();
+  });
+
+  it("joins labels from the runtime read behind a linked cell", async () => {
+    const signer = await Identity.fromPassphrase("cfc label view linked read");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-source",
+        undefined,
+        tx,
+      );
+      const sourceLink = parseLink(source.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: sourceLink.id!,
+        type: "application/json",
+        path: [],
+      }, {
+        value: "labelled content",
+        cfc: {
+          version: 1,
+          schemaHash: "test-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { classification: ["prompt-influence"] },
+            }],
           },
         },
+      });
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-target",
+        undefined,
+        tx,
+      );
+      target.set(source);
+      await tx.commit();
+
+      expect(cfcLabelViewForCell(target)).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: { classification: ["prompt-influence"] },
+        }],
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("reads stored metadata directly from the queried cell", () => {
+    const cell = {
+      getAsNormalizedFullLink: () => ({
+        id: "of:labelled-cell",
+        space: "did:key:test",
+        type: "application/json",
+        path: [],
       }),
-    ).toEqual({
+      runtime: {
+        readTx: () => ({
+          readOrThrow: () => ({
+            cfc: {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: { integrity: ["trusted-source"] },
+                }],
+              },
+            },
+          }),
+        }),
+      },
+    };
+
+    expect(cfcLabelViewForCell(cell)).toEqual({
       version: 1,
       entries: [{
-        path: ["rendered"],
-        label: {
-          classification: ["prompt-risk"],
-          confidentiality: ["internal"],
-          integrity: ["trusted-summary"],
-        },
+        path: [],
+        label: { integrity: ["trusted-source"] },
       }],
     });
   });

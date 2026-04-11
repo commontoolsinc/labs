@@ -1,5 +1,4 @@
 import { isRecord } from "@commonfabric/utils/types";
-import type { JSONSchema } from "../builder/types.ts";
 import type {
   IExtendedStorageTransaction,
   MediaType,
@@ -9,6 +8,7 @@ import type { Runtime } from "../runtime.ts";
 import { canonicalizeLogicalPath, logicalPathToPointer } from "./canonical.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
 import type { CfcMetadata, IFCLabel } from "./types.ts";
+import { isInternalVerifierRead } from "../storage/reactivity-log.ts";
 
 export type CfcLabelViewEntry = {
   path: string[];
@@ -22,6 +22,8 @@ export type CfcLabelView = {
 
 type LabelQueryableCell = {
   getAsNormalizedFullLink(): NormalizedFullLink;
+  get?(options?: { traverseCells?: boolean }): unknown;
+  withTx?(tx: IExtendedStorageTransaction): LabelQueryableCell;
   runtime?: Runtime;
   tx?: IExtendedStorageTransaction;
 };
@@ -52,26 +54,6 @@ const cloneLabel = (label: IFCLabel): IFCLabel => {
 
 const hasLabelValues = (label: IFCLabel): boolean =>
   LABEL_KEYS.some((key) => Array.isArray(label[key]) && label[key]!.length > 0);
-
-const labelFromIfc = (ifc: unknown): IFCLabel | undefined => {
-  if (!isRecord(ifc)) {
-    return undefined;
-  }
-  const label: IFCLabel = {};
-  if (Array.isArray(ifc.classification) && ifc.classification.length > 0) {
-    label.classification = [...ifc.classification];
-  }
-  if (
-    Array.isArray(ifc.maxConfidentiality) &&
-    ifc.maxConfidentiality.length > 0
-  ) {
-    label.confidentiality = [...ifc.maxConfidentiality];
-  }
-  if (Array.isArray(ifc.integrity) && ifc.integrity.length > 0) {
-    label.integrity = [...ifc.integrity];
-  }
-  return hasLabelValues(label) ? label : undefined;
-};
 
 const sortEntries = (entries: CfcLabelViewEntry[]): CfcLabelViewEntry[] =>
   entries.sort((left, right) =>
@@ -113,38 +95,6 @@ export const cfcLabelViewFromMetadata = (
     : undefined;
 };
 
-const walkIfcSchema = (
-  schema: JSONSchema | undefined,
-  path: string[] = [],
-  entries: CfcLabelViewEntry[] = [],
-): CfcLabelViewEntry[] => {
-  if (!schema || typeof schema === "boolean") {
-    return entries;
-  }
-
-  const label = labelFromIfc(schema.ifc);
-  if (label) {
-    entries.push({ path, label });
-  }
-
-  if (isRecord(schema.properties)) {
-    for (const [key, child] of Object.entries(schema.properties)) {
-      walkIfcSchema(child as JSONSchema, [...path, key], entries);
-    }
-  }
-  if (typeof schema.items === "object" && schema.items !== null) {
-    walkIfcSchema(schema.items as JSONSchema, [...path, "*"], entries);
-  }
-  return entries;
-};
-
-export const cfcLabelViewFromSchema = (
-  schema: JSONSchema | undefined,
-): CfcLabelView | undefined => {
-  const entries = sortEntries(walkIfcSchema(schema));
-  return entries.length > 0 ? { version: 1, entries } : undefined;
-};
-
 const storedMetadataForCell = (
   cell: LabelQueryableCell,
   link: NormalizedFullLink,
@@ -164,6 +114,78 @@ const storedMetadataForCell = (
   } catch {
     return undefined;
   }
+};
+
+const mergeLabel = (left: IFCLabel | undefined, right: IFCLabel): IFCLabel => {
+  const merged: IFCLabel = {};
+  for (const key of LABEL_KEYS) {
+    const values = [
+      ...(Array.isArray(left?.[key]) ? left[key] : []),
+      ...(Array.isArray(right[key]) ? right[key] : []),
+    ];
+    const unique = [...new Set(values)];
+    if (unique.length > 0) {
+      merged[key] = unique;
+    }
+  }
+  return merged;
+};
+
+const mergeViews = (
+  views: Array<CfcLabelView | undefined>,
+): CfcLabelView | undefined => {
+  const byPath = new Map<string, CfcLabelViewEntry>();
+  for (const view of views) {
+    if (!view) {
+      continue;
+    }
+    for (const entry of view.entries) {
+      const path = canonicalizeLogicalPath(entry.path);
+      const key = logicalPathToPointer(path);
+      const existing = byPath.get(key);
+      byPath.set(key, {
+        path,
+        label: mergeLabel(existing?.label, entry.label),
+      });
+    }
+  }
+  const entries = sortEntries(
+    [...byPath.values()].filter((entry) => hasLabelValues(entry.label)),
+  );
+  return entries.length > 0 ? { version: 1, entries } : undefined;
+};
+
+const readLabelViewForCell = (
+  cell: LabelQueryableCell,
+): CfcLabelView | undefined => {
+  if (!cell.runtime || typeof cell.withTx !== "function") {
+    return undefined;
+  }
+
+  const tx = cell.runtime.readTx();
+  try {
+    const readCell = cell.withTx(tx);
+    if (typeof readCell.get === "function") {
+      readCell.get({ traverseCells: true });
+    } else {
+      const link = readCell.getAsNormalizedFullLink();
+      tx.readValueOrThrow(link);
+    }
+  } catch {
+    return undefined;
+  }
+
+  const reads = [...(tx.getReadActivities?.() ?? [])];
+  const views = reads.flatMap((read) => {
+    if (isInternalVerifierRead(read.meta)) {
+      return [];
+    }
+    return cfcLabelViewFromMetadata(
+      readStoredCfcMetadata(tx, read),
+      canonicalizeLogicalPath(read.path),
+    );
+  });
+  return mergeViews(views);
 };
 
 export const cfcLabelViewForCell = (
@@ -190,5 +212,5 @@ export const cfcLabelViewForCell = (
   if (metadataView !== undefined) {
     return metadataView;
   }
-  return cfcLabelViewFromSchema(link.schema);
+  return readLabelViewForCell(cell as LabelQueryableCell);
 };
