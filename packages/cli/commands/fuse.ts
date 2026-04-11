@@ -116,6 +116,10 @@ export const fuse = new Command()
     "Mount a FUSE filesystem at the given directory.",
   )
   .option("--background", "Run in the background (detached).")
+  .option(
+    "--allow-root",
+    "Allow the mounting user and root to access the mount (Linux/libfuse; requires user_allow_other in /etc/fuse.conf for non-root mounts).",
+  )
   .option("--debug", "Enable FUSE debug output.")
   .example(
     cliText("cf fuse mount /tmp/cf-fuse"),
@@ -170,6 +174,7 @@ export const fuse = new Command()
       if (apiUrl) spawnArgs.push("--api-url", apiUrl);
       if (identity) spawnArgs.push("--identity", identity);
       if (execCli) spawnArgs.push("--exec-cli", execCli);
+      if (options.allowRoot) spawnArgs.push("--allow-root");
     } else {
       const modPath = fuseMod(import.meta.url);
       spawnCmd = "deno";
@@ -179,6 +184,7 @@ export const fuse = new Command()
         apiUrl,
         identity,
         execCli,
+        allowRoot: options.allowRoot,
       });
     }
 

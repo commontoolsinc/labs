@@ -79,7 +79,7 @@ type HandleWriteTarget =
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
     string: ["api-url", "space", "identity", "exec-cli", "log-file"],
-    boolean: ["debug"],
+    boolean: ["debug", "allow-root"],
     collect: ["space"],
     default: {
       "api-url": Deno.env.get("CF_API_URL") ?? "",
@@ -87,6 +87,7 @@ export async function main(argv: string[] = Deno.args) {
       identity: Deno.env.get("CF_IDENTITY") ?? "",
       "exec-cli": "",
       "log-file": "",
+      "allow-root": false,
       debug: false,
     },
   });
@@ -112,11 +113,12 @@ export async function main(argv: string[] = Deno.args) {
   }
 
   const debug = args.debug;
+  const allowRoot = args["allow-root"];
 
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
     console.error(
-      "Usage: mod.ts <mountpoint> [--api-url URL] [--space NAME ...] [--identity PATH]",
+      "Usage: mod.ts <mountpoint> [--api-url URL] [--space NAME ...] [--identity PATH] [--allow-root]",
     );
     Deno.exit(1);
   }
@@ -1659,9 +1661,13 @@ export async function main(argv: string[] = Deno.args) {
   setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---
-  const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs([
-    "fuse_ct",
-  ]);
+  const fuseArgs = ["fuse_ct"];
+  if (allowRoot && Deno.build.os === "linux") {
+    fuseArgs.push("-o", "allow_root");
+  }
+  const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs(
+    fuseArgs,
+  );
 
   const mountpointBuf = encoder.encode(mountpoint + "\0");
 

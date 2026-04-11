@@ -213,6 +213,9 @@ cf fuse mount /tmp/cf
 # Mount in background
 cf fuse mount /tmp/cf --background
 
+# On Linux, let root access a non-root mount (useful for Docker bind mounts)
+cf fuse mount /tmp/cf --allow-root
+
 # Check active mounts
 cf fuse status
 
@@ -227,6 +230,10 @@ cf exec /tmp/cf/home/pieces/todo-app/result/search.tool --help
 ```
 
 Environment variables `CF_API_URL` and `CF_IDENTITY` are also supported.
+
+On Linux, `--allow-root` lets the mounting user and root access the mount. For
+non-root mounts, libfuse requires `user_allow_other` to be enabled in
+`/etc/fuse.conf` before `--allow-root` will work.
 
 Handlers remain writable through the mounted `.handler` file. Both mounted
 `.handler` and `.tool` files can be executed directly or via `cf exec`.

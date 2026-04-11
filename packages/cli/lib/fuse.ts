@@ -288,6 +288,7 @@ export function buildDenoArgs(opts: {
   apiUrl: string;
   identity: string;
   execCli: string;
+  allowRoot?: boolean;
   logFile?: string;
 }): string[] {
   const args = [
@@ -305,6 +306,7 @@ export function buildDenoArgs(opts: {
   if (opts.apiUrl) args.push("--api-url", opts.apiUrl);
   if (opts.identity) args.push("--identity", opts.identity);
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
+  if (opts.allowRoot) args.push("--allow-root");
   if (opts.logFile) args.push("--log-file", opts.logFile);
 
   return args;
