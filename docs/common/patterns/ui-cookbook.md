@@ -42,7 +42,8 @@ const theme = {
 };
 
 <cf-theme theme={theme}>
-  <cf-screen title="Pattern">
+  <cf-screen>
+    <cf-heading slot="header" level={2}>Pattern</cf-heading>
     <cf-vscroll flex showScrollbar fadeEdges>
       <cf-vstack gap="4" padding="4">
         {/* main content */}
@@ -123,7 +124,8 @@ Use when the pattern centers on one record, note, recipe, or project.
 
 ```tsx
 <cf-theme theme={theme}>
-  <cf-screen title="Details">
+  <cf-screen>
+    <cf-heading slot="header" level={2}>Details</cf-heading>
     <cf-vscroll style="flex: 1;">
       <cf-vstack gap="4" padding="4">
         <cf-card>

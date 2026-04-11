@@ -86,7 +86,8 @@ const theme = {
 };
 
 <cf-theme theme={theme}>
-  <cf-screen title="Budget tracker">
+  <cf-screen>
+    <cf-heading slot="header" level={2}>Budget tracker</cf-heading>
     <cf-vscroll flex showScrollbar fadeEdges>
       <cf-vstack gap="4" padding="4">
         {/* themed UI */}

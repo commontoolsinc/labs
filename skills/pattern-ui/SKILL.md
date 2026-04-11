@@ -101,7 +101,8 @@ defaults, or layouts that read like a raw form dump.
 **Layout structure:**
 
 ```tsx
-<cf-screen title="My Pattern">
+<cf-screen>
+  <cf-heading slot="header" level={2}>My Pattern</cf-heading>
   <cf-vscroll flex showScrollbar fadeEdges>
     <cf-vstack gap="4" padding="4">
       <cf-hstack gap="3">
@@ -134,7 +135,8 @@ const theme = {
 };
 
 <cf-theme theme={theme}>
-  <cf-screen title="My Pattern">
+  <cf-screen>
+    <cf-heading slot="header" level={2}>My Pattern</cf-heading>
     <cf-vscroll flex>
       {/* ... */}
     </cf-vscroll>

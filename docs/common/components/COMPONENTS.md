@@ -49,66 +49,10 @@ Useful companion references:
 - `docs/common/patterns/ui-cookbook.md`
 - `packages/ui/README.md`
 - `packages/ui/LLM-COMPONENT-INSTRUCTIONS.md`
-- `packages/patterns/catalog/stories/vignette-recipe-story.tsx`
-- `packages/patterns/catalog/stories/vignette-finance-story.tsx`
 
 This document does not yet enumerate every custom property or part for every
 component. When a component exposes those affordances, prefer them over
 guessing at unsupported shadow-internal structure.
-
----
-
-## cf-theme
-
-Start themeable UI surfaces with `cf-theme` whenever it is available.
-
-```tsx
-const theme = {
-  fontFamily: "'Georgia', 'Times New Roman', serif",
-  borderRadius: "1rem",
-  density: "comfortable" as const,
-  colorScheme: "light" as const,
-  colors: {
-    primary: "#8b4513",
-    primaryForeground: "#fff8f0",
-    background: "#fff8f0",
-    surface: "#fff0e0",
-    text: "#2c1810",
-    textMuted: "#8b7355",
-    border: "#e8d5c0",
-    accent: "#c84c09",
-    accentForeground: "#fff8f0",
-    success: "#4a7c59",
-    successForeground: "#ffffff",
-    error: "#a03020",
-    errorForeground: "#ffffff",
-    warning: "#b8860b",
-    warningForeground: "#ffffff",
-  },
-};
-
-<cf-theme theme={theme}>
-  <cf-screen title="Pattern">{/* ... */}</cf-screen>
-</cf-theme>;
-```
-
-Use `cf-theme` to establish:
-
-- typography
-- base surface and text colors
-- border radius
-- density / spacing
-- animation speed
-
-Then refine individual components with their documented local CSS custom
-properties instead of hard-coding unrelated overrides everywhere.
-
-Working references:
-
-- `packages/ui/src/v2/components/cf-theme/cf-theme.ts`
-- `packages/ui/src/v2/components/theme-context.ts`
-- `packages/patterns/catalog/stories/vignette-recipe-story.tsx`
-- `packages/patterns/catalog/stories/vignette-finance-story.tsx`
 
 ---
 

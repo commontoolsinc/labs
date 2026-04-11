@@ -43,28 +43,6 @@ agent-browser snapshot -i
 agent-browser screenshot
 ```
 
-## Design-Focused Browser Checks
-
-When the pattern includes meaningful UI work, do not stop at "it rendered."
-Also verify:
-
-- the page loads without obvious console/runtime errors
-- the main screen has a readable hierarchy and grouping rhythm
-- `cf-theme`-driven styling or other public component styling hooks actually
-  appear in the rendered result when they were part of the design intent
-- full-height layouts can actually reach below-the-fold content, either through
-  normal page scroll or an explicit inner scroll region such as `cf-vscroll`
-- text inputs, selections, and badges render expected user-facing values rather
-  than raw object output or schema artifacts
-- empty, loading, and first-run states are understandable and feel designed
-- screenshots from key states support the visual claims in the review
-
-For UI-heavy patterns, capture at least:
-
-1. first load
-2. one meaningful interactive state
-3. one empty, onboarding, or edge state when applicable
-
 ## Browser State and Session Discipline
 
 - isolate stale browser state when a previous login, draft, or cached view can
@@ -103,14 +81,6 @@ One known limitation is that CLI-driven calls with plain JSON objects may not
 exercise identity-sensitive `equals()` behavior the same way the browser does.
 For handlers that depend on identity comparisons, browser testing is the more
 reliable verification path.
-
-When the UI looks wrong but CLI behavior seems fine, check these before blaming
-the pattern logic:
-
-- browser console errors
-- runtime flag / environment mismatches between shell and toolshed
-- missing theme variables or component custom property application
-- data-shape mismatches that only appear in rendered controls
 
 ## Common `agent-browser` Patterns
 
@@ -157,11 +127,3 @@ The report should include:
 - severity-tagged issues
 - screenshots or artifact references when relevant
 - any constraints that limited coverage
-
-For UI-focused reports, also state:
-
-- whether the intended visual direction came through
-- whether the rendered result used the expected theme system or public styling
-  affordances
-- whether any issues are environment-level blockers versus pattern-level
-  problems

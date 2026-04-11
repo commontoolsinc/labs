@@ -57,50 +57,16 @@ registerAllComponents();
 
 ## 🎨 Theme System
 
-For polished Common Fabric UIs, start with `cf-theme` rather than scattering
-one-off overrides across individual components.
-
-```tsx
-const theme = {
-  fontFamily: "'Georgia', 'Times New Roman', serif",
-  borderRadius: "1rem",
-  density: "comfortable" as const,
-  colorScheme: "light" as const,
-  colors: {
-    primary: "#8b4513",
-    primaryForeground: "#fff8f0",
-    background: "#fff8f0",
-    surface: "#fff0e0",
-    text: "#2c1810",
-    textMuted: "#8b7355",
-    border: "#e8d5c0",
-    accent: "#c84c09",
-    accentForeground: "#fff8f0",
-    success: "#4a7c59",
-    successForeground: "#ffffff",
-    error: "#a03020",
-    errorForeground: "#ffffff",
-    warning: "#b8860b",
-    warningForeground: "#ffffff",
-  },
-};
-
-<cf-theme theme={theme}>
-  <cf-screen title="Pattern">{/* ... */}</cf-screen>
-</cf-theme>;
-```
-
-`cf-theme` applies public `--cf-theme-*` CSS custom properties for typography,
-surface colors, semantic colors, spacing, border radius, and animation speed.
-Components then derive their own local `--cf-*` properties from those theme
-tokens.
+`cf-theme` provides subtree-level theme tokens for typography, colors, spacing,
+border radius, and motion. Use it for overall visual direction, then refine
+individual components with their documented `--cf-*` custom properties.
 
 Useful references:
 
 - `src/v2/components/cf-theme/cf-theme.ts`
 - `src/v2/components/theme-context.ts`
-- `../patterns/catalog/stories/vignette-recipe-story.tsx`
-- `../patterns/catalog/stories/vignette-finance-story.tsx`
+- `../../docs/common/patterns/style.md`
+- `../../docs/common/components/COMPONENTS.md`
 
 ## 📖 V2 Components (39 total)
 

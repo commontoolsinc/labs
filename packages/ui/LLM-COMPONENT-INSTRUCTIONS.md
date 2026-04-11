@@ -16,71 +16,16 @@ shadcn/ui design system. All components:
 
 ## Theme System First
 
-When composing a polished UI with `cf-*` components:
-
-1. define a `theme` object first
-2. wrap the main surface in `<cf-theme theme={theme}>`
-3. use the theme for typography, color, spacing, radius, and motion
-4. use component-specific CSS custom properties only for local refinement
-
-Example:
-
-```tsx
-const theme = {
-  fontFamily: "'Georgia', 'Times New Roman', serif",
-  borderRadius: "1rem",
-  density: "comfortable" as const,
-  colorScheme: "light" as const,
-  colors: {
-    primary: "#8b4513",
-    primaryForeground: "#fff8f0",
-    background: "#fff8f0",
-    surface: "#fff0e0",
-    text: "#2c1810",
-    textMuted: "#8b7355",
-    border: "#e8d5c0",
-    accent: "#c84c09",
-    accentForeground: "#fff8f0",
-    success: "#4a7c59",
-    successForeground: "#ffffff",
-    error: "#a03020",
-    errorForeground: "#ffffff",
-    warning: "#b8860b",
-    warningForeground: "#ffffff",
-  },
-};
-
-<cf-theme theme={theme}>
-  <cf-screen title="Pattern">{/* ... */}</cf-screen>
-</cf-theme>;
-```
-
-`cf-theme` provides public `--cf-theme-*` tokens such as:
-
-- `--cf-theme-font-family`
-- `--cf-theme-border-radius`
-- `--cf-theme-color-primary`
-- `--cf-theme-color-background`
-- `--cf-theme-color-surface`
-- `--cf-theme-color-text`
-- `--cf-theme-color-border`
-- `--cf-theme-spacing-tight`
-- `--cf-theme-spacing-normal`
-- `--cf-theme-spacing-loose`
-
-Many components expose their own public `--cf-*` variables built from these
-theme tokens, for example:
-
-- `cf-card`: `--cf-card-color-surface`, `--cf-card-color-border`
-- `cf-button`: `--cf-button-color-primary`, `--cf-button-border-radius`
-- `cf-input`: `--cf-input-color-border`, `--cf-input-color-primary`
+When composing a polished UI with `cf-*` components, prefer `cf-theme` for
+overall typography, color, spacing, radius, and motion, then use component
+`--cf-*` custom properties only for local refinement.
 
 Working references:
 
 - `src/v2/components/cf-theme/cf-theme.ts`
 - `src/v2/components/theme-context.ts`
-- `../patterns/catalog/stories/vignette-recipe-story.tsx`
-- `../patterns/catalog/stories/vignette-finance-story.tsx`
+- `../../docs/common/patterns/style.md`
+- `../../docs/common/components/COMPONENTS.md`
 
 ## Component Reference
 
