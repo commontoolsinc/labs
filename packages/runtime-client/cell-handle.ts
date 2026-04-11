@@ -12,7 +12,12 @@ import {
   type URI,
 } from "@commonfabric/runner/shared";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
-import { type CellRef, JSONValue, RequestType } from "./protocol/mod.ts";
+import {
+  type CellRef,
+  type CfcLabelView,
+  JSONValue,
+  RequestType,
+} from "./protocol/mod.ts";
 import { DID } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
@@ -236,6 +241,16 @@ export class CellHandle<T = unknown> {
     });
 
     return new CellHandle<T>(this.#rt, response.cell);
+  }
+
+  async getCfcLabel(): Promise<CfcLabelView | undefined> {
+    const response = await this.#conn.request<
+      RequestType.CellGetCfcLabel
+    >({
+      type: RequestType.CellGetCfcLabel,
+      cell: this.ref(),
+    });
+    return response.cfcLabel;
   }
 
   equals(other: unknown): boolean {

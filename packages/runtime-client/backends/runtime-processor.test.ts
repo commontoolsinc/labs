@@ -5,7 +5,7 @@ import {
   RuntimeProcessor,
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
-import { RequestType } from "../protocol/mod.ts";
+import { type CellRef, RequestType } from "../protocol/mod.ts";
 
 describe("sanitizeForPostMessage", () => {
   describe("primitives", () => {
@@ -377,6 +377,43 @@ describe("RuntimeProcessor diagnosis helpers", () => {
       },
     );
     expect(writeTraceMatchers).toEqual([[]]);
+  });
+});
+
+describe("RuntimeProcessor CFC label IPC", () => {
+  it("returns a label view for a cell ref", () => {
+    const ref: CellRef = {
+      id: "of:cfc-label-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      type: "application/json",
+      path: [],
+      schema: {
+        type: "string",
+        ifc: { classification: ["prompt-risk"] },
+      },
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          getAsNormalizedFullLink: () => ref,
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    expect(
+      RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
+        type: RequestType.CellGetCfcLabel,
+        cell: ref,
+      }),
+    ).toEqual({
+      cfcLabel: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: { classification: ["prompt-risk"] },
+        }],
+      },
+    });
   });
 });
 

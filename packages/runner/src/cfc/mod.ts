@@ -1,3 +1,9 @@
+export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
+export {
+  cfcLabelViewForCell,
+  cfcLabelViewFromMetadata,
+  cfcLabelViewFromSchema,
+} from "./label-view.ts";
 export type {
   AttemptedWrite,
   CfcAddress,

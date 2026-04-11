@@ -22,6 +22,7 @@ import {
   setPatternEnvironment,
   type SigilLink,
 } from "@commonfabric/runner";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import {
   CachedCompiler,
   IDBCompilationCache,
@@ -39,6 +40,7 @@ import {
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
+  type CellGetCfcLabelRequest,
   type CellGetRequest,
   type CellResolveAsCellRequest,
   CellResponse,
@@ -46,6 +48,7 @@ import {
   type CellSetRequest,
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
+  type CfcLabelViewResponse,
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
@@ -538,6 +541,15 @@ export class RuntimeProcessor {
     };
   }
 
+  handleCellGetCfcLabel(
+    request: CellGetCfcLabelRequest,
+  ): CfcLabelViewResponse {
+    const cell = getCell(this.runtime, request.cell);
+    return {
+      cfcLabel: cfcLabelViewForCell(cell),
+    };
+  }
+
   handleGetCell(request: GetCellRequest): CellResponse {
     const cell = this.runtime.getCell(
       request.space,
@@ -910,6 +922,8 @@ export class RuntimeProcessor {
         return this.handleCellUnsubscribe(request);
       case RequestType.CellResolveAsCell:
         return this.handleCellResolveAsCell(request);
+      case RequestType.CellGetCfcLabel:
+        return this.handleCellGetCfcLabel(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:

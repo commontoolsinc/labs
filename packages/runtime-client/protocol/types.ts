@@ -11,12 +11,15 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 export type { JSONSchema, JSONValue, Program };
 
 import type { MemoryVersion } from "@commonfabric/memory/interface";
+
+export type { CfcLabelView };
 
 export type MessageId = number;
 
@@ -38,6 +41,7 @@ export enum RequestType {
   CellSubscribe = "cell:subscribe",
   CellUnsubscribe = "cell:unsubscribe",
   CellResolveAsCell = "cell:resolveAsCell",
+  CellGetCfcLabel = "cell:getCfcLabel",
 
   // Runtime operations
   GetCell = "runtime:getCell",
@@ -185,6 +189,11 @@ export interface CellUnsubscribeRequest extends BaseRequest {
 
 export interface CellResolveAsCellRequest extends BaseRequest {
   type: RequestType.CellResolveAsCell;
+  cell: CellRef;
+}
+
+export interface CellGetCfcLabelRequest extends BaseRequest {
+  type: RequestType.CellGetCfcLabel;
   cell: CellRef;
 }
 
@@ -530,6 +539,7 @@ export type IPCClientRequest =
   | CellSubscribeRequest
   | CellUnsubscribeRequest
   | CellResolveAsCellRequest
+  | CellGetCfcLabelRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -580,6 +590,10 @@ export interface JSONValueResponse {
 
 export interface CellResponse {
   cell: CellRef;
+}
+
+export interface CfcLabelViewResponse {
+  cfcLabel: CfcLabelView | undefined;
 }
 
 export interface PageResponse {
@@ -678,6 +692,7 @@ export type RemoteResponse =
   | BooleanResponse
   | JSONValueResponse
   | CellResponse
+  | CfcLabelViewResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
   | SettleStatsResponse
@@ -811,6 +826,10 @@ export type Commands = {
   [RequestType.CellResolveAsCell]: {
     request: CellResolveAsCellRequest;
     response: CellResponse;
+  };
+  [RequestType.CellGetCfcLabel]: {
+    request: CellGetCfcLabelRequest;
+    response: CfcLabelViewResponse;
   };
   // Page requests
   [RequestType.PageCreate]: {

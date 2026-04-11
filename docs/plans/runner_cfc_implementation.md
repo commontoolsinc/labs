@@ -822,6 +822,11 @@ Implementation notes for spec update:
 - [x] Event-integrity labels are collected from the event target ancestry, so a
       trusted pattern can later bind rendered integrity-bearing data into the
       event attestation without introducing a parallel helper-specific policy
+- [x] Render-time label disclosure now has a generic `cf-cfc-label` UI
+      primitive: it takes a bound `$value` and optional `atom`/`kind` filters,
+      asks the trusted runtime IPC layer for that cell's CFC label view, and
+      renders the result without exposing a general label-introspection API to
+      pattern code
 - [x] Audience release is modeled as a family of trusted send/publish surfaces,
       not one universal component: each surface should bind the visible
       destination context (conversation, channel, public target, persistent

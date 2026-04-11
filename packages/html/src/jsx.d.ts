@@ -2895,6 +2895,7 @@ interface CFKbdElement extends CFHTMLElement {}
 interface CFKeybindElement extends CFHTMLElement {}
 interface CFRenderElement extends CFHTMLElement {}
 interface CFCellContextElement extends CFHTMLElement {}
+interface CFCFCLabelElement extends CFHTMLElement {}
 interface CFDragSourceElement extends CFHTMLElement {}
 interface CFDropZoneElement extends CFHTMLElement {}
 interface CFChatMessageElement extends CFHTMLElement {}
@@ -3468,6 +3469,13 @@ interface CFCellContextAttributes<T> extends CFHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "label"?: string;
   "inline"?: boolean;
+}
+
+interface CFCFCLabelAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<unknown>;
+  "value"?: unknown;
+  "atom"?: string;
+  "kind"?: string;
 }
 
 interface CFDragSourceAttributes<T> extends CFHTMLAttributes<T> {
@@ -4808,6 +4816,10 @@ declare global {
       "cf-cell-context": CFDOM.DetailedHTMLProps<
         CFCellContextAttributes<CFCellContextElement>,
         CFCellContextElement
+      >;
+      "cf-cfc-label": CFDOM.DetailedHTMLProps<
+        CFCFCLabelAttributes<CFCFCLabelElement>,
+        CFCFCLabelElement
       >;
       "cf-drag-source": CFDOM.DetailedHTMLProps<
         CFDragSourceAttributes<CFDragSourceElement>,
