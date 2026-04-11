@@ -26,7 +26,7 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
             required: ["language"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`),
+        } as const satisfies __cfHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`).for("system", true),
         prompt: __cfHelpers.derive({
             type: "object",
             properties: {
@@ -37,7 +37,7 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
             required: ["content"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content),
+        } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content).for("prompt", true),
     }).for("genResult", true);
     return __cfHelpers.derive({
         type: "object",

@@ -23,7 +23,7 @@ export default pattern((state) => ({
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, state.key("label"), "Pending"),
+    } as const satisfies __cfHelpers.JSONSchema, state.key("label"), "Pending").for("label", true),
 }), {
     type: "object",
     properties: {

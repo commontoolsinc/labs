@@ -298,7 +298,7 @@ export default pattern((state) => {
                             fontSize: state.key("config", "theme", "fontSize")
                         }
                     }
-                } }, ({ state }) => state.config.theme.fontSize + "px"),
+                } }, ({ state }) => state.config.theme.fontSize + "px").for("fontSize", true),
         }}>
           Styled text
         </p>
@@ -311,7 +311,7 @@ export default pattern((state) => {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, {
                 "enum": ["#333", "#fff"]
-            } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "darkMode"), "#333", "#fff"),
+            } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "darkMode"), "#333", "#fff").for("backgroundColor", true),
             borderColor: state.key("config", "theme", "secondaryColor"),
         }}>
           Theme-aware box

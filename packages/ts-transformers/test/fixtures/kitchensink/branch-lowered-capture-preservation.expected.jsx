@@ -355,7 +355,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["a", "b"]
-                    } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b") }}>
+                    } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b").for("background", true) }}>
                 expand
               </button>
               {__cfHelpers.when({

@@ -80,7 +80,7 @@ export default pattern((state) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": [true, "Pending"]
-                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Pending") };
+                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Pending").for("status", true) };
                 return <span>{view.status}</span>;
             }, {
                 type: "object",

@@ -52,6 +52,27 @@ export function make() {
     assert(!main.includes('.for("already", true)'));
   });
 
+  it("adds stable property causes to pattern-owned lowered derives", async () => {
+    const source = `
+import { pattern } from "commonfabric";
+
+export default pattern<{ count: number }, { doubled: number }>((state) => ({
+  doubled: state.count * 2,
+}));
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, "doubled: __cfHelpers.derive(");
+    assertStringIncludes(main, '.for("doubled", true)');
+    assertNotMatch(main, /state\.key\("count"\)\.for/);
+  });
+
   it("transforms by default and supports cf-disable-transform opt-out", async () => {
     const source = `
 import { computed } from "commonfabric";

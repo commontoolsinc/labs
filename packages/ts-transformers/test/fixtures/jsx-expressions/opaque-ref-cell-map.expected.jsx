@@ -151,8 +151,8 @@ export default pattern(() => {
     const { cellRef } = createCellRef({
         isInitialized: cell(false, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema),
-        storedCellRef: cell(),
+        } as const satisfies __cfHelpers.JSONSchema).for("isInitialized", true),
+        storedCellRef: cell().for("storedCellRef", true),
     }) as {
         cellRef: any[];
     };

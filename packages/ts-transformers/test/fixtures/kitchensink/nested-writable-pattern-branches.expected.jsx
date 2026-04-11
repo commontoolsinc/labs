@@ -132,7 +132,7 @@ export default pattern((state) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, section.key("accent"), section.key("accent"), state.key("globalAccent")),
+                    } as const satisfies __cfHelpers.JSONSchema, section.key("accent"), section.key("accent"), state.key("globalAccent")).for("color", true),
                 }}>
                   {section.key("title")}
                 </h2>

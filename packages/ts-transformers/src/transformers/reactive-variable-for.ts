@@ -21,6 +21,29 @@ function createReactiveVariableForVisitor(
   context: TransformationContext,
 ): ts.Visitor {
   const visit: ts.Visitor = (node: ts.Node): ts.Node => {
+    if (ts.isPropertyAssignment(node)) {
+      const visited = ts.visitEachChild(
+        node,
+        visit,
+        context.tsContext,
+      ) as ts.PropertyAssignment;
+
+      const propertyName = getStablePropertyName(visited.name);
+      if (
+        !propertyName ||
+        isInternalSyntheticName(propertyName) ||
+        !shouldAddPropertyFor(visited.initializer, context)
+      ) {
+        return visited;
+      }
+
+      return context.factory.updatePropertyAssignment(
+        visited,
+        visited.name,
+        createForCall(visited.initializer, propertyName, context),
+      );
+    }
+
     if (!ts.isVariableDeclarationList(node)) {
       return ts.visitEachChild(node, visit, context.tsContext);
     }
@@ -75,6 +98,30 @@ function shouldAddVariableFor(
   initializer: ts.Expression,
   context: TransformationContext,
 ): boolean {
+  return shouldAddReactiveFor(initializer, context, {
+    includeRuntimeCalls: true,
+    useTypeFallback: true,
+  });
+}
+
+function shouldAddPropertyFor(
+  initializer: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  return shouldAddReactiveFor(initializer, context, {
+    includeRuntimeCalls: false,
+    useTypeFallback: false,
+  });
+}
+
+function shouldAddReactiveFor(
+  initializer: ts.Expression,
+  context: TransformationContext,
+  options: {
+    includeRuntimeCalls: boolean;
+    useTypeFallback: boolean;
+  },
+): boolean {
   if (chainContainsForCall(initializer)) {
     return false;
   }
@@ -109,11 +156,15 @@ function shouldAddVariableFor(
       case "generate-object":
         return true;
       case "runtime-call":
-        return callKind.reactiveOrigin;
+        return options.includeRuntimeCalls && callKind.reactiveOrigin;
       case "cell-for":
       case "pattern-tool":
         return false;
     }
+  }
+
+  if (!options.useTypeFallback) {
+    return false;
   }
 
   const type = getTypeAtLocationWithFallback(
@@ -127,6 +178,31 @@ function shouldAddVariableFor(
 
 function isInternalSyntheticName(name: string): boolean {
   return name.startsWith("__cf");
+}
+
+function getStablePropertyName(name: ts.PropertyName): string | undefined {
+  if (
+    ts.isIdentifier(name) ||
+    ts.isStringLiteralLike(name) ||
+    ts.isNumericLiteral(name)
+  ) {
+    return name.text;
+  }
+
+  if (!ts.isComputedPropertyName(name)) {
+    return undefined;
+  }
+
+  const expression = unwrapExpression(name.expression);
+  if (
+    ts.isStringLiteralLike(expression) ||
+    ts.isNoSubstitutionTemplateLiteral(expression) ||
+    ts.isNumericLiteral(expression)
+  ) {
+    return expression.text;
+  }
+
+  return undefined;
 }
 
 function isReactiveBuilderResult(
