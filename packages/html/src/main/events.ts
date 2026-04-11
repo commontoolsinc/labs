@@ -134,7 +134,7 @@ export function serializeEvent(event: Event): SerializedEvent {
   const serialized: SerializedEvent = {
     type: event.type,
   };
-  const provenance = getEventProvenance(event);
+  const provenance = getEventProvenance(event, event.target);
   if (provenance) {
     serialized.provenance = provenance;
   }

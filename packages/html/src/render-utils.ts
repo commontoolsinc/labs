@@ -237,7 +237,7 @@ const allowListedEventTargetProperties = [
  */
 export function sanitizeEvent(event: Event): object {
   const eventObject: Record<string, unknown> = {};
-  const provenance = getEventProvenance(event);
+  const provenance = getEventProvenance(event, event.target);
   if (provenance) {
     eventObject.provenance = provenance;
   }

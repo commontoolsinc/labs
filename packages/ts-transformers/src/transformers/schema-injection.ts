@@ -27,6 +27,7 @@ import {
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
   HelpersOnlyTransformer,
+  type SchemaHint,
   TransformationContext,
   type TypeRegistry,
 } from "../core/mod.ts";
@@ -38,6 +39,8 @@ import {
   isCellLikeTypeNode,
   printTypeNode,
 } from "./type-shrinking.ts";
+
+type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 
 /**
  * Schema Injection Transformer - TypeRegistry Integration
@@ -1500,13 +1503,7 @@ function propagateUiContractHintsFromObjectLiteral(
   resultNode: ts.TypeNode | undefined,
   context: TransformationContext,
 ):
-  | {
-    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-    action?: string;
-    surface?: string;
-    role?: string;
-    kind?: string;
-  }
+  | UiContractHint
   | undefined {
   const schemaHints = context.options.schemaHints;
   if (!schemaHints || !resultNode) {
@@ -1515,13 +1512,7 @@ function propagateUiContractHintsFromObjectLiteral(
 
   const target = unwrapParenthesizedSchemaTypeNode(resultNode);
   let resultHint:
-    | {
-      helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-      action?: string;
-      surface?: string;
-      role?: string;
-      kind?: string;
-    }
+    | UiContractHint
     | undefined;
   for (const property of expr.properties) {
     if (
@@ -1577,13 +1568,7 @@ function getUiContractHintFromObjectLiteral(
   expr: ts.ObjectLiteralExpression,
   schemaHints: TransformationContext["options"]["schemaHints"],
 ):
-  | {
-    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-    action?: string;
-    surface?: string;
-    role?: string;
-    kind?: string;
-  }
+  | UiContractHint
   | undefined {
   if (!schemaHints) {
     return undefined;
@@ -1610,13 +1595,7 @@ function getUiContractHintFromObjectLiteral(
 
 function setUiContractHint(
   target: ts.Node | undefined,
-  hint: {
-    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-    action?: string;
-    surface?: string;
-    role?: string;
-    kind?: string;
-  } | undefined,
+  hint: UiContractHint | undefined,
   schemaHints: TransformationContext["options"]["schemaHints"],
 ): void {
   if (!schemaHints || !target || !hint) {
@@ -1656,13 +1635,7 @@ function getUiContractHintFromNode(
   node: ts.Node | undefined,
   schemaHints: TransformationContext["options"]["schemaHints"],
 ):
-  | {
-    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-    action?: string;
-    surface?: string;
-    role?: string;
-    kind?: string;
-  }
+  | UiContractHint
   | undefined {
   if (!node) {
     return undefined;
@@ -1680,13 +1653,7 @@ function getUiContractHintFromNode(
 function extractUiContractFromLoweredJsx(
   node: ts.Node,
 ):
-  | {
-    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-    action?: string;
-    surface?: string;
-    role?: string;
-    kind?: string;
-  }
+  | UiContractHint
   | undefined {
   const attributes = ts.isJsxElement(node)
     ? node.openingElement.attributes.properties

@@ -66,6 +66,8 @@ export class SchemaGenerator implements ISchemaGenerator {
           surface?: string;
           role?: string;
           kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
         };
       }
     >,
@@ -101,6 +103,8 @@ export class SchemaGenerator implements ISchemaGenerator {
           surface?: string;
           role?: string;
           kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
         };
       }
     >,
@@ -137,6 +141,8 @@ export class SchemaGenerator implements ISchemaGenerator {
           surface?: string;
           role?: string;
           kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
         };
       }
     >,
@@ -547,6 +553,8 @@ export class SchemaGenerator implements ISchemaGenerator {
       surface?: string;
       role?: string;
       kind?: string;
+      trustedPattern?: string;
+      requiredEventIntegrity?: string[];
     },
   ): JSONSchemaMutable {
     if (typeof schema === "boolean") {

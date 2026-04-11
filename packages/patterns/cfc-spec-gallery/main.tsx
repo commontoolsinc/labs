@@ -16,6 +16,9 @@ import {
   prepareTrustedForward,
   prepareTrustedResearchBrief,
   prepareTrustedSafeLink,
+  TRUSTED_DIRECT_COMMAND_SURFACE,
+  TRUSTED_FORWARD_SURFACE,
+  TRUSTED_SAFE_LINK_SURFACE,
   TrustedActionWrite,
   TrustedDirectCommandSurface,
   TrustedForwardSurface,
@@ -59,14 +62,16 @@ interface GalleryOutput {
   forwardHotelNote: TrustedActionWrite<
     string,
     typeof commitTrustedForward,
-    "TrustedForwardNote"
+    "TrustedForwardNote",
+    typeof TRUSTED_FORWARD_SURFACE
   >;
   forwardSourceNote: string;
   forwardRecipientInput: string;
   forwardPreparedPreview: TrustedActionWrite<
     string,
     typeof prepareTrustedForward,
-    "TrustedPrepareForward"
+    "TrustedPrepareForward",
+    typeof TRUSTED_FORWARD_SURFACE
   >;
   forwardStage: string;
   forwardRecipientInputCell: Writable<string>;
@@ -87,18 +92,21 @@ interface GalleryOutput {
   previewResearchBrief: TrustedActionWrite<
     string,
     typeof prepareTrustedResearchBrief,
-    "TrustedPrepareResearchBrief"
+    "TrustedPrepareResearchBrief",
+    typeof TRUSTED_DIRECT_COMMAND_SURFACE
   >;
   researchCommandInput: string;
   capturedCommand: TrustedActionWrite<
     string,
     typeof captureTrustedDirectCommand,
-    "TrustedCaptureDirectCommand"
+    "TrustedCaptureDirectCommand",
+    typeof TRUSTED_DIRECT_COMMAND_SURFACE
   >;
   researchPreparedBrief: TrustedActionWrite<
     string,
     typeof prepareTrustedResearchBrief,
-    "TrustedPrepareResearchBrief"
+    "TrustedPrepareResearchBrief",
+    typeof TRUSTED_DIRECT_COMMAND_SURFACE
   >;
   researchStage: string;
   researchCommandInputCell: Writable<string>;
@@ -110,18 +118,21 @@ interface GalleryOutput {
   authorizeResearchSend: TrustedActionWrite<
     string,
     typeof commitTrustedResearchSend,
-    "TrustedAuthorizeResearchSend"
+    "TrustedAuthorizeResearchSend",
+    typeof TRUSTED_DIRECT_COMMAND_SURFACE
   >;
   releaseSafeLink: TrustedActionWrite<
     string,
     typeof commitTrustedSafeLink,
-    "TrustedReleaseSafeLink"
+    "TrustedReleaseSafeLink",
+    typeof TRUSTED_SAFE_LINK_SURFACE
   >;
   safeLinkSource: string;
   safeLinkPrepared: TrustedActionWrite<
     string,
     typeof prepareTrustedSafeLink,
-    "TrustedPrepareSafeLink"
+    "TrustedPrepareSafeLink",
+    typeof TRUSTED_SAFE_LINK_SURFACE
   >;
   safeLinkStage: string;
   safeLinkSourceCell: Writable<string>;

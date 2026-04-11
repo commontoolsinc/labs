@@ -21,7 +21,10 @@ import { getValueAtPath } from "../path-utils.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import type { CfcMetadata, IFCLabel, WritePolicyInput } from "./types.ts";
-import { uiContractFromSchema } from "./ui-contract.ts";
+import {
+  trustedEventProvenanceMatchesUiContract,
+  uiContractFromSchema,
+} from "./ui-contract.ts";
 
 const INTERNAL_VERIFIER_META = {
   ...ignoreReadForScheduling,
@@ -441,9 +444,7 @@ const verifyTrustedEventRequirements = (
     input.target.space === target.space &&
     input.target.id === target.id &&
     input.target.type === target.type &&
-    isRecord(input.provenance) &&
-    input.provenance.origin === "dom" &&
-    input.provenance.trusted === true
+    trustedEventProvenanceMatchesUiContract(input.provenance, contract)
   );
   return matched
     ? undefined

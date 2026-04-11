@@ -51,6 +51,8 @@ export interface GenerationContext {
         surface?: string;
         role?: string;
         kind?: string;
+        trustedPattern?: string;
+        requiredEventIntegrity?: string[];
       };
     }
   >;
@@ -98,6 +100,8 @@ export interface SchemaGenerator {
           surface?: string;
           role?: string;
           kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
         };
       }
     >,
@@ -126,6 +130,8 @@ export interface SchemaGenerator {
           surface?: string;
           role?: string;
           kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
         };
       }
     >,

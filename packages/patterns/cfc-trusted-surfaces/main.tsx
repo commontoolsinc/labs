@@ -10,15 +10,30 @@ import {
   WriteAuthorizedBy,
 } from "commonfabric";
 
-export type TrustedActionWrite<T, Binding, Action extends string> = Cfc<
+export type TrustedActionWrite<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+> = Cfc<
   WriteAuthorizedBy<T, Binding>,
   {
     uiContract: {
       helper: "UiAction";
       action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: [Pattern];
     };
   }
 >;
+
+export const TRUSTED_SAVE_SURFACE = "TrustedSaveSurface";
+export const TRUSTED_SAVE_DRAFT_SURFACE = "TrustedSaveDraftSurface";
+export const TRUSTED_REVIEW_SURFACE = "TrustedReviewSurface";
+export const TRUSTED_PUBLISH_SURFACE = "TrustedPublishSurface";
+export const TRUSTED_FORWARD_SURFACE = "TrustedForwardSurface";
+export const TRUSTED_DIRECT_COMMAND_SURFACE = "TrustedDirectCommandSurface";
+export const TRUSTED_SAFE_LINK_SURFACE = "TrustedSafeLinkSurface";
 
 const SAVE_TITLE_ACTION = "TrustedSaveTitle";
 const SAVE_DRAFT_ACTION = "TrustedSaveDraft";
@@ -181,7 +196,8 @@ export interface TrustedSaveSurfaceOutput {
   savedTitle: TrustedActionWrite<
     string,
     typeof commitTrustedSaveTitle,
-    typeof SAVE_TITLE_ACTION
+    typeof SAVE_TITLE_ACTION,
+    typeof TRUSTED_SAVE_SURFACE
   >;
   save: Stream<void>;
 }
@@ -195,7 +211,11 @@ export const TrustedSaveSurface = pattern<
   return {
     [NAME]: computed(() => "Trusted Save Surface"),
     [UI]: (
-      <cf-card id="trusted-save-surface">
+      <cf-card
+        id="trusted-save-surface"
+        data-ui-pattern={TRUSTED_SAVE_SURFACE}
+        data-ui-event-integrity={TRUSTED_SAVE_SURFACE}
+      >
         <cf-vstack slot="content" gap="3">
           <cf-heading level={3}>Trusted save</cf-heading>
           <cf-card data-ui-disclosure-kind="trusted-save-disclosure">
@@ -238,12 +258,14 @@ export interface TrustedSaveDraftSurfaceOutput {
   savedTitle: TrustedActionWrite<
     string,
     typeof saveTrustedDraftSnapshot,
-    typeof SAVE_DRAFT_ACTION
+    typeof SAVE_DRAFT_ACTION,
+    typeof TRUSTED_SAVE_DRAFT_SURFACE
   >;
   savedBody: TrustedActionWrite<
     string,
     typeof saveTrustedDraftSnapshot,
-    typeof SAVE_DRAFT_ACTION
+    typeof SAVE_DRAFT_ACTION,
+    typeof TRUSTED_SAVE_DRAFT_SURFACE
   >;
   saveDraft: Stream<void>;
 }
@@ -262,7 +284,11 @@ export const TrustedSaveDraftSurface = pattern<
   return {
     [NAME]: computed(() => "Trusted Save Draft Surface"),
     [UI]: (
-      <cf-card id="trusted-save-draft-surface">
+      <cf-card
+        id="trusted-save-draft-surface"
+        data-ui-pattern={TRUSTED_SAVE_DRAFT_SURFACE}
+        data-ui-event-integrity={TRUSTED_SAVE_DRAFT_SURFACE}
+      >
         <cf-vstack slot="content" gap="3">
           <cf-heading level={3}>Trusted save draft</cf-heading>
           <cf-card data-ui-disclosure-kind="trusted-save-draft-disclosure">
@@ -316,12 +342,14 @@ export interface TrustedReviewSurfaceOutput {
   reviewedTitle: TrustedActionWrite<
     string,
     typeof reviewTrustedSnapshot,
-    typeof REVIEW_SNAPSHOT_ACTION
+    typeof REVIEW_SNAPSHOT_ACTION,
+    typeof TRUSTED_REVIEW_SURFACE
   >;
   reviewedBody: TrustedActionWrite<
     string,
     typeof reviewTrustedSnapshot,
-    typeof REVIEW_SNAPSHOT_ACTION
+    typeof REVIEW_SNAPSHOT_ACTION,
+    typeof TRUSTED_REVIEW_SURFACE
   >;
   reviewSaved: Stream<void>;
 }
@@ -340,7 +368,11 @@ export const TrustedReviewSurface = pattern<
   return {
     [NAME]: computed(() => "Trusted Review Surface"),
     [UI]: (
-      <cf-card id="trusted-review-surface">
+      <cf-card
+        id="trusted-review-surface"
+        data-ui-pattern={TRUSTED_REVIEW_SURFACE}
+        data-ui-event-integrity={TRUSTED_REVIEW_SURFACE}
+      >
         <cf-vstack slot="content" gap="3">
           <cf-heading level={3}>Trusted review</cf-heading>
           <cf-card data-ui-disclosure-kind="trusted-review-disclosure">
@@ -381,12 +413,14 @@ export interface TrustedPublishSurfaceOutput {
   publishedTitle: TrustedActionWrite<
     string,
     typeof publishTrustedSnapshot,
-    typeof PUBLISH_SNAPSHOT_ACTION
+    typeof PUBLISH_SNAPSHOT_ACTION,
+    typeof TRUSTED_PUBLISH_SURFACE
   >;
   publishedBody: TrustedActionWrite<
     string,
     typeof publishTrustedSnapshot,
-    typeof PUBLISH_SNAPSHOT_ACTION
+    typeof PUBLISH_SNAPSHOT_ACTION,
+    typeof TRUSTED_PUBLISH_SURFACE
   >;
   publishReviewed: Stream<void>;
 }
@@ -405,7 +439,11 @@ export const TrustedPublishSurface = pattern<
   return {
     [NAME]: computed(() => "Trusted Publish Surface"),
     [UI]: (
-      <cf-card id="trusted-publish-surface">
+      <cf-card
+        id="trusted-publish-surface"
+        data-ui-pattern={TRUSTED_PUBLISH_SURFACE}
+        data-ui-event-integrity={TRUSTED_PUBLISH_SURFACE}
+      >
         <cf-vstack slot="content" gap="3">
           <cf-heading level={3}>Trusted publish</cf-heading>
           <cf-card data-ui-disclosure-kind="trusted-publish-disclosure">
@@ -447,12 +485,14 @@ export interface TrustedForwardSurfaceOutput {
   preparedPreview: TrustedActionWrite<
     string,
     typeof prepareTrustedForward,
-    typeof PREPARE_FORWARD_ACTION
+    typeof PREPARE_FORWARD_ACTION,
+    typeof TRUSTED_FORWARD_SURFACE
   >;
   forwardedNote: TrustedActionWrite<
     string,
     typeof commitTrustedForward,
-    typeof FORWARD_NOTE_ACTION
+    typeof FORWARD_NOTE_ACTION,
+    typeof TRUSTED_FORWARD_SURFACE
   >;
   prepareForward: Stream<void>;
   forwardNote: Stream<void>;
@@ -475,7 +515,11 @@ export const TrustedForwardSurface = pattern<
   return {
     [NAME]: computed(() => "Trusted Forward Surface"),
     [UI]: (
-      <cf-card id="trusted-forward-surface">
+      <cf-card
+        id="trusted-forward-surface"
+        data-ui-pattern={TRUSTED_FORWARD_SURFACE}
+        data-ui-event-integrity={TRUSTED_FORWARD_SURFACE}
+      >
         <cf-vstack slot="content" gap="3">
           <cf-hstack justify="between" align="center" wrap>
             <cf-vstack gap="1">
@@ -549,17 +593,20 @@ export interface TrustedDirectCommandSurfaceOutput {
   capturedCommand: TrustedActionWrite<
     string,
     typeof captureTrustedDirectCommand,
-    typeof CAPTURE_COMMAND_ACTION
+    typeof CAPTURE_COMMAND_ACTION,
+    typeof TRUSTED_DIRECT_COMMAND_SURFACE
   >;
   preparedBrief: TrustedActionWrite<
     string,
     typeof prepareTrustedResearchBrief,
-    typeof PREPARE_BRIEF_ACTION
+    typeof PREPARE_BRIEF_ACTION,
+    typeof TRUSTED_DIRECT_COMMAND_SURFACE
   >;
   authorizedSend: TrustedActionWrite<
     string,
     typeof commitTrustedResearchSend,
-    typeof AUTHORIZE_SEND_ACTION
+    typeof AUTHORIZE_SEND_ACTION,
+    typeof TRUSTED_DIRECT_COMMAND_SURFACE
   >;
   captureCommand: Stream<void>;
   prepareBrief: Stream<void>;
@@ -588,7 +635,11 @@ export const TrustedDirectCommandSurface = pattern<
   return {
     [NAME]: computed(() => "Trusted Direct Command Surface"),
     [UI]: (
-      <cf-card id="trusted-direct-command-surface">
+      <cf-card
+        id="trusted-direct-command-surface"
+        data-ui-pattern={TRUSTED_DIRECT_COMMAND_SURFACE}
+        data-ui-event-integrity={TRUSTED_DIRECT_COMMAND_SURFACE}
+      >
         <cf-vstack slot="content" gap="3">
           <cf-heading level={3}>Trusted direct command</cf-heading>
           <cf-card data-ui-disclosure-kind="trusted-direct-command-disclosure">
@@ -664,12 +715,14 @@ export interface TrustedSafeLinkSurfaceOutput {
   preparedSafeLink: TrustedActionWrite<
     string,
     typeof prepareTrustedSafeLink,
-    typeof PREPARE_SAFE_LINK_ACTION
+    typeof PREPARE_SAFE_LINK_ACTION,
+    typeof TRUSTED_SAFE_LINK_SURFACE
   >;
   releasedSafeLink: TrustedActionWrite<
     string,
     typeof commitTrustedSafeLink,
-    typeof RELEASE_SAFE_LINK_ACTION
+    typeof RELEASE_SAFE_LINK_ACTION,
+    typeof TRUSTED_SAFE_LINK_SURFACE
   >;
   prepareSafeLink: Stream<void>;
   releaseSafeLink: Stream<void>;
@@ -691,7 +744,11 @@ export const TrustedSafeLinkSurface = pattern<
   return {
     [NAME]: computed(() => "Trusted Safe Link Surface"),
     [UI]: (
-      <cf-card id="trusted-safe-link-surface">
+      <cf-card
+        id="trusted-safe-link-surface"
+        data-ui-pattern={TRUSTED_SAFE_LINK_SURFACE}
+        data-ui-event-integrity={TRUSTED_SAFE_LINK_SURFACE}
+      >
         <cf-vstack slot="content" gap="3">
           <cf-heading level={3}>Trusted safe-link release</cf-heading>
           <cf-card data-ui-disclosure-kind="trusted-safe-link-disclosure">

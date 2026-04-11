@@ -423,6 +423,69 @@ Deno.test("DomApplicator - event handling", async (t) => {
     });
   });
 
+  await t.step("attests nearest trusted UI pattern provenance", () => {
+    const doc = createMockDocument();
+    const events: DomEventMessage[] = [];
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: (msg) => events.push(msg),
+      setProp: (target, key, value) => {
+        if (
+          key.startsWith("data-") &&
+          typeof target === "object" &&
+          target !== null &&
+          "setAttribute" in target &&
+          typeof target.setAttribute === "function"
+        ) {
+          target.setAttribute(key, String(value));
+          return;
+        }
+        (target as Record<string, unknown>)[key] = value;
+      },
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "section" },
+        {
+          op: "set-attrs",
+          nodeId: 1,
+          attrs: {
+            "data-ui-pattern": "TrustedDirectCommandSurface",
+            "data-ui-event-integrity": "TrustedDirectCommandSurface",
+          },
+        },
+        { op: "create-element", nodeId: 2, tagName: "button" },
+        {
+          op: "set-attrs",
+          nodeId: 2,
+          attrs: { "data-ui-action": "SubmitDirectCommand" },
+        },
+        {
+          op: "insert-child",
+          parentId: 1,
+          childId: 2,
+          beforeId: null,
+        },
+        { op: "set-event", nodeId: 2, eventType: "click", handlerId: 42 },
+      ],
+    });
+
+    const node = applicator.getNode(2) as any;
+    node.dispatchEvent({ type: "click", target: node, isTrusted: true });
+
+    assertEquals(events[0].event.provenance, {
+      origin: "dom",
+      trusted: true,
+      ui: {
+        pattern: "TrustedDirectCommandSurface",
+        eventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    });
+  });
+
   await t.step("removes event listener", () => {
     const doc = createMockDocument();
     const events: DomEventMessage[] = [];

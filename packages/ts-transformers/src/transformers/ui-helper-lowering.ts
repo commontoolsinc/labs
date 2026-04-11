@@ -205,12 +205,14 @@ function createUiContractHint(
   spec: UiHelperSpec,
   attributes: ts.JsxAttributes,
 ): SchemaHint | undefined {
-  const hint: Record<string, string> = { helper: spec.helper };
+  const hint: Partial<NonNullable<SchemaHint["cfcUiContract"]>> = {
+    helper: spec.helper,
+  };
   let populated = false;
   for (const entry of spec.dataAttrs) {
     const literal = getStringLiteralAttributeValue(attributes, entry.prop);
     if (literal) {
-      hint[entry.prop] = literal.text;
+      (hint as Record<string, string>)[entry.prop] = literal.text;
       populated = true;
     }
   }

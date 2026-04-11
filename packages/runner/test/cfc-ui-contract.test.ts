@@ -23,6 +23,18 @@ const uiActionSchema = {
   },
 } as const;
 
+const trustedPatternUiActionSchema = {
+  type: "string",
+  ifc: {
+    uiContract: {
+      helper: "UiAction",
+      action: "SubmitDirectCommand",
+      trustedPattern: "TrustedDirectCommandSurface",
+      requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+    },
+  },
+} as const;
+
 describe("CFC UI contract matching", () => {
   it("matches UiAction contracts against trusted DOM dataset markers", () => {
     const contract = uiContractFromSchema({
@@ -48,6 +60,81 @@ describe("CFC UI contract matching", () => {
         target: {
           dataset: {
             uiAction: "DifferentAction",
+          },
+        },
+      }, contract),
+    ).toBe(false);
+  });
+
+  it("requires renderer-attested trusted pattern provenance when declared", () => {
+    const contract = uiContractFromSchema({
+      ...trustedPatternUiActionSchema,
+    });
+
+    expect(
+      trustedEventMatchesUiContract({
+        type: "click",
+        provenance: { origin: "dom", trusted: true },
+        target: {
+          dataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      }, contract),
+    ).toBe(false);
+
+    expect(
+      trustedEventMatchesUiContract({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+          },
+        },
+        target: {
+          dataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      }, contract),
+    ).toBe(true);
+
+    expect(
+      trustedEventMatchesUiContract({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+          },
+        },
+        target: {
+          dataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      }, contract),
+    ).toBe(false);
+
+    expect(
+      trustedEventMatchesUiContract({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+          },
+        },
+        target: {
+          dataset: {
+            uiAction: "SubmitDirectCommand",
           },
         },
       }, contract),
@@ -89,7 +176,7 @@ describe("CFC trusted UI event enforcement", () => {
       {
         type: "string",
         ifc: {
-          ...uiActionSchema.ifc,
+          ...trustedPatternUiActionSchema.ifc,
         },
       },
     );
@@ -112,7 +199,14 @@ describe("CFC trusted UI event enforcement", () => {
     );
     runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
       type: "click",
-      provenance: { origin: "dom", trusted: true },
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+        },
+      },
       target: {
         dataset: {
           uiAction: "SubmitDirectCommand",
@@ -148,7 +242,7 @@ describe("CFC trusted UI event enforcement", () => {
       {
         type: "string",
         ifc: {
-          ...uiActionSchema.ifc,
+          ...trustedPatternUiActionSchema.ifc,
         },
       },
     );
@@ -174,7 +268,23 @@ describe("CFC trusted UI event enforcement", () => {
       provenance: { origin: "dom", trusted: true },
       target: {
         dataset: {
-          uiAction: "WrongAction",
+          uiAction: "SubmitDirectCommand",
+        },
+      },
+    });
+    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "UntrustedLookalikeSurface",
+          eventIntegrity: ["UntrustedLookalikeSurface"],
+        },
+      },
+      target: {
+        dataset: {
+          uiAction: "SubmitDirectCommand",
         },
       },
     });

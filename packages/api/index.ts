@@ -1386,6 +1386,8 @@ export type JSONSchemaObj = {
       readonly surface?: string;
       readonly role?: string;
       readonly kind?: string;
+      readonly trustedPattern?: string;
+      readonly requiredEventIntegrity?: readonly string[];
     };
   };
 };

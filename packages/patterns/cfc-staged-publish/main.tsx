@@ -11,6 +11,9 @@ import {
   publishTrustedSnapshot,
   reviewTrustedSnapshot,
   saveTrustedDraftSnapshot,
+  TRUSTED_PUBLISH_SURFACE,
+  TRUSTED_REVIEW_SURFACE,
+  TRUSTED_SAVE_DRAFT_SURFACE,
   TrustedActionWrite,
   TrustedPublishSurface,
   TrustedReviewSurface,
@@ -36,32 +39,38 @@ interface StagedPublishOutput {
   savedTitle: TrustedActionWrite<
     string,
     typeof saveTrustedDraftSnapshot,
-    "TrustedSaveDraft"
+    "TrustedSaveDraft",
+    typeof TRUSTED_SAVE_DRAFT_SURFACE
   >;
   savedBody: TrustedActionWrite<
     string,
     typeof saveTrustedDraftSnapshot,
-    "TrustedSaveDraft"
+    "TrustedSaveDraft",
+    typeof TRUSTED_SAVE_DRAFT_SURFACE
   >;
   reviewedTitle: TrustedActionWrite<
     string,
     typeof reviewTrustedSnapshot,
-    "TrustedReviewSnapshot"
+    "TrustedReviewSnapshot",
+    typeof TRUSTED_REVIEW_SURFACE
   >;
   reviewedBody: TrustedActionWrite<
     string,
     typeof reviewTrustedSnapshot,
-    "TrustedReviewSnapshot"
+    "TrustedReviewSnapshot",
+    typeof TRUSTED_REVIEW_SURFACE
   >;
   publishedTitle: TrustedActionWrite<
     string,
     typeof publishTrustedSnapshot,
-    "TrustedPublishSnapshot"
+    "TrustedPublishSnapshot",
+    typeof TRUSTED_PUBLISH_SURFACE
   >;
   publishedBody: TrustedActionWrite<
     string,
     typeof publishTrustedSnapshot,
-    "TrustedPublishSnapshot"
+    "TrustedPublishSnapshot",
+    typeof TRUSTED_PUBLISH_SURFACE
   >;
   stage: "drafting" | "saved" | "reviewed" | "published";
   saveDraft: Stream<void>;

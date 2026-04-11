@@ -223,6 +223,8 @@ function attachUiContractFromSchemaHints(
         surface?: string;
         role?: string;
         kind?: string;
+        trustedPattern?: string;
+        requiredEventIntegrity?: readonly string[];
       };
     }
   >,
@@ -287,6 +289,8 @@ function attachUiContractToSchemaRecord(
     surface?: string;
     role?: string;
     kind?: string;
+    trustedPattern?: string;
+    requiredEventIntegrity?: readonly string[];
   },
 ): Record<string, unknown> {
   if (typeof schema === "boolean") {

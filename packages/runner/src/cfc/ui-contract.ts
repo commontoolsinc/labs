@@ -3,18 +3,23 @@ import type { JSONSchema } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
-type UiActionContract = {
+type UiContractTrustRequirements = {
+  trustedPattern?: string;
+  requiredEventIntegrity?: readonly string[];
+};
+
+type UiActionContract = UiContractTrustRequirements & {
   helper: "UiAction";
   action: string;
 };
 
-type UiPromptSlotContract = {
+type UiPromptSlotContract = UiContractTrustRequirements & {
   helper: "UiPromptSlot";
   surface: string;
   role?: string;
 };
 
-type UiDisclosureContract = {
+type UiDisclosureContract = UiContractTrustRequirements & {
   helper: "UiDisclosure";
   kind: string;
 };
@@ -29,18 +34,51 @@ type SerializedTrustedEvent = {
   provenance?: {
     origin?: string;
     trusted?: boolean;
+    ui?: {
+      pattern?: string;
+      eventIntegrity?: unknown;
+    };
   };
   target?: {
     dataset?: Record<string, string>;
   };
 };
 
+type TrustedDomProvenance = {
+  origin: "dom";
+  trusted: true;
+  ui?: {
+    pattern?: unknown;
+    eventIntegrity?: unknown;
+  };
+};
+
 const isTrustedDomProvenance = (
   provenance: unknown,
-): provenance is { origin: "dom"; trusted: true } =>
+): provenance is TrustedDomProvenance =>
   isRecord(provenance) &&
   provenance.origin === "dom" &&
   provenance.trusted === true;
+
+const trustRequirementsFromContract = (
+  contract: Record<string, unknown>,
+): UiContractTrustRequirements | undefined => {
+  const trustedPattern = typeof contract.trustedPattern === "string"
+    ? contract.trustedPattern
+    : undefined;
+  const requiredEventIntegrity = Array.isArray(contract.requiredEventIntegrity)
+    ? contract.requiredEventIntegrity.filter((label): label is string =>
+      typeof label === "string"
+    )
+    : undefined;
+
+  return {
+    ...(trustedPattern ? { trustedPattern } : {}),
+    ...(requiredEventIntegrity && requiredEventIntegrity.length > 0
+      ? { requiredEventIntegrity }
+      : {}),
+  };
+};
 
 export const uiContractFromSchema = (
   schema: JSONSchema | undefined,
@@ -52,10 +90,11 @@ export const uiContractFromSchema = (
     return undefined;
   }
   const contract = schema.ifc.uiContract;
+  const trustRequirements = trustRequirementsFromContract(contract);
   switch (contract.helper) {
     case "UiAction":
       return typeof contract.action === "string"
-        ? { helper: "UiAction", action: contract.action }
+        ? { helper: "UiAction", action: contract.action, ...trustRequirements }
         : undefined;
     case "UiPromptSlot":
       return typeof contract.surface === "string"
@@ -63,15 +102,56 @@ export const uiContractFromSchema = (
           helper: "UiPromptSlot",
           surface: contract.surface,
           ...(typeof contract.role === "string" ? { role: contract.role } : {}),
+          ...trustRequirements,
         }
         : undefined;
     case "UiDisclosure":
       return typeof contract.kind === "string"
-        ? { helper: "UiDisclosure", kind: contract.kind }
+        ? { helper: "UiDisclosure", kind: contract.kind, ...trustRequirements }
         : undefined;
     default:
       return undefined;
   }
+};
+
+export const trustedEventProvenanceMatchesUiContract = (
+  provenance: unknown,
+  contract: UiContract | undefined,
+): boolean => {
+  if (contract === undefined || !isTrustedDomProvenance(provenance)) {
+    return false;
+  }
+  if (
+    contract.trustedPattern !== undefined ||
+    (contract.requiredEventIntegrity?.length ?? 0) > 0
+  ) {
+    if (!isRecord(provenance.ui)) {
+      return false;
+    }
+    if (
+      contract.trustedPattern !== undefined &&
+      provenance.ui.pattern !== contract.trustedPattern
+    ) {
+      return false;
+    }
+    if ((contract.requiredEventIntegrity?.length ?? 0) > 0) {
+      const labels = provenance.ui.eventIntegrity;
+      if (!Array.isArray(labels)) {
+        return false;
+      }
+      const presentLabels = new Set(
+        labels.filter((label): label is string => typeof label === "string"),
+      );
+      if (
+        contract.requiredEventIntegrity?.some((label) =>
+          !presentLabels.has(label)
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 };
 
 export const trustedEventMatchesUiContract = (
@@ -82,7 +162,12 @@ export const trustedEventMatchesUiContract = (
     return false;
   }
   const serializedEvent = event as SerializedTrustedEvent;
-  if (!isTrustedDomProvenance(serializedEvent.provenance)) {
+  if (
+    !trustedEventProvenanceMatchesUiContract(
+      serializedEvent.provenance,
+      contract,
+    )
+  ) {
     return false;
   }
   const dataset = serializedEvent.target?.dataset;

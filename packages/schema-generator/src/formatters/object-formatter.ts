@@ -408,6 +408,8 @@ function getUiContractHint(
   surface?: string;
   role?: string;
   kind?: string;
+  trustedPattern?: string;
+  requiredEventIntegrity?: string[];
 } | undefined {
   if (!context.schemaHints || !typeNode) {
     return undefined;
@@ -425,6 +427,8 @@ function attachUiContract(
     surface?: string;
     role?: string;
     kind?: string;
+    trustedPattern?: string;
+    requiredEventIntegrity?: string[];
   },
 ): JSONSchemaMutable {
   if (typeof schema === "boolean") {

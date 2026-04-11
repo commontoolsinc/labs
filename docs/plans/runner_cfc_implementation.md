@@ -804,6 +804,25 @@ Acceptance:
       second helper-specific policy format
 - [x] Untrusted UI-origin claims fail closed
 
+Implementation notes for spec update:
+
+- [x] Trusted reusable UI surfaces now express pattern-level trust through
+      `ifc.uiContract.trustedPattern` plus
+      `ifc.uiContract.requiredEventIntegrity`; the renderer supplies matching
+      event provenance from aligned `data-ui-pattern` and
+      `data-ui-event-integrity` markers on the rendered UI ancestry
+- [x] Prepare-side trusted-event validation reuses the existing
+      `trusted-event` write-policy input and fails closed when a schema declares
+      trusted pattern or event-integrity requirements that the renderer did not
+      attest
+- [x] Current enforcement assumes a trusted host and an embedding model where
+      untrusted embedders cannot hide or obscure embedded trusted UIs; future
+      spec work should define opaque trusted UI islands and a non-forgeable
+      pattern identity token beyond DOM data attributes
+- [x] Event-integrity labels are collected from the event target ancestry, so a
+      trusted pattern can later bind rendered integrity-bearing data into the
+      event attestation without introducing a parallel helper-specific policy
+
 ### 12. Content-Addressed Side-Path Hardening
 
 This stays behind the core causal-path rollout. Phase 1 schema persistence uses

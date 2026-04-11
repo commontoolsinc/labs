@@ -9,6 +9,7 @@ import {
 } from "commonfabric";
 import {
   commitTrustedSaveTitle,
+  TRUSTED_SAVE_SURFACE,
   TrustedActionWrite,
   TrustedSaveSurface,
 } from "../cfc-trusted-surfaces/main.tsx";
@@ -25,7 +26,8 @@ interface AuthorizedSaveOutput {
   savedTitle: TrustedActionWrite<
     string,
     typeof commitTrustedSaveTitle,
-    "TrustedSaveTitle"
+    "TrustedSaveTitle",
+    typeof TRUSTED_SAVE_SURFACE
   >;
   save: Stream<void>;
 }
