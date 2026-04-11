@@ -52,7 +52,7 @@ export default pattern((input: Writable<State>) => {
     };
 }, {
     $ref: "#/$defs/State",
-    asOpaque: true,
+    asCell: ["opaque"],
     $defs: {
         State: {
             type: "object",

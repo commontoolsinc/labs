@@ -1793,7 +1793,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         }`,
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "asCell: true");
+      assertStringIncludes(inputSchema, 'asCell: ["cell"]');
       assertEquals(inputSchema.includes("asOpaque: true"), false);
     },
   );
@@ -1821,7 +1821,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         }`,
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "asCell: true");
+      assertStringIncludes(inputSchema, 'asCell: ["cell"]');
       assertEquals(inputSchema.includes("asOpaque: true"), false);
     },
   );
@@ -2027,7 +2027,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         }`,
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "asOpaque: true");
+      assertStringIncludes(inputSchema, 'asCell: ["opaque"]');
       assertEquals(inputSchema.includes("name"), false);
       assertEquals(inputSchema.includes("extra"), false);
       assertEquals(inputSchema.includes("nested"), false);
@@ -2058,7 +2058,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
       assertStringIncludes(inputSchema, 'type: "undefined"');
-      assertStringIncludes(inputSchema, "asOpaque: true");
+      assertStringIncludes(inputSchema, 'asCell: ["opaque"]');
     },
   );
 

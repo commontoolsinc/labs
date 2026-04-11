@@ -43,7 +43,7 @@ const patternFullShape = pattern((input: Writable<{
         }
     },
     required: ["foo", "bar"],
-    asOpaque: true
+    asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
     asCell: ["cell"]
@@ -59,7 +59,7 @@ const patternExplicit = pattern((input) => input.key("foo"), {
         }
     },
     required: ["foo", "bar"],
-    asOpaque: true
+    asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
     asCell: ["cell"]
@@ -75,7 +75,7 @@ const liftPassthrough = lift({
         }
     },
     required: ["foo", "bar"],
-    asOpaque: true
+    asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -110,7 +110,7 @@ const patternHelper = pattern((input: Writable<{
         }
     },
     required: ["foo", "bar"],
-    asOpaque: true
+    asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
     asCell: ["cell"]
