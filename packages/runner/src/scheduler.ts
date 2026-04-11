@@ -1314,9 +1314,9 @@ export class Scheduler {
     eventLink: NormalizedFullLink,
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
-    // Internal-only commit callback. This can run after failed commits, so it
-    // must not perform external side effects. Use the post-commit outbox for
-    // success-only effect release.
+    // Internal-only commit callback. This runs after the final commit result,
+    // including exhausted failure, so it must not perform external side
+    // effects. Use the post-commit outbox for success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
@@ -3571,35 +3571,32 @@ export class Scheduler {
           const tx = this.runtime.edit();
           tx.tx.immediate = true;
           const actionId = this.getActionId(action);
+          const runFinalCommitCallback = () => {
+            if (!onCommit) {
+              return;
+            }
+            try {
+              onCommit(tx);
+            } catch (callbackError) {
+              logger.error(
+                "schedule-error",
+                "Error in event commit callback:",
+                callbackError,
+              );
+            }
+          };
 
           const finalize = (error?: unknown) => {
             try {
               if (error) this.handleError(error as Error, action);
             } finally {
-              if (onCommit) {
-                tx.enqueuePostCommitEffect({
-                  id: `event-onCommit:${handlerId}:${crypto.randomUUID()}`,
-                  kind: "event-onCommit",
-                  flush: (committedTx) => {
-                    try {
-                      onCommit(committedTx as IExtendedStorageTransaction);
-                    } catch (callbackError) {
-                      logger.error(
-                        "schedule-error",
-                        "Error in event commit callback:",
-                        callbackError,
-                      );
-                    }
-                  },
-                });
-              }
               this.runtime.prepareTxForCommit(tx);
-              tx.commit().then(({ error }) => {
-                if (error && retriesLeft > 0) {
+              tx.commit().then((result) => {
+                if (result.error && retriesLeft > 0) {
                   logger.warn(
                     "scheduler",
                     `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
-                    { error, handlerId },
+                    { error: result.error, handlerId },
                   );
                   this.eventQueue.unshift({
                     action,
@@ -3609,11 +3606,14 @@ export class Scheduler {
                     onCommit,
                   });
                   this.queueExecution();
-                } else if (error) {
+                  return;
+                }
+                runFinalCommitCallback();
+                if (result.error) {
                   logger.error(
                     "schedule-error",
                     "Event handler transaction failed after exhausting all retries",
-                    { error, handlerId },
+                    { error: result.error, handlerId },
                   );
                 }
               }).catch((error) => {

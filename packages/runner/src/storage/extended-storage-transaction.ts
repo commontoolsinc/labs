@@ -24,6 +24,7 @@ import type {
   ReaderError,
   ReadError,
   Result,
+  StorageTransactionFailed,
   StorageTransactionStatus,
   TransactionReactivityLog,
   TransactionWriteDetail,
@@ -79,6 +80,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void
   >();
+  private statusOverride?: StorageTransactionStatus;
+  private commitCallbacksDispatched = false;
   private outboxIdempotencyKeys = new Set<string>();
   private readOnlySource?: string;
   private cfcState: CfcTxState = {
@@ -280,6 +283,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   status(): StorageTransactionStatus {
+    if (this.statusOverride !== undefined) {
+      return this.statusOverride;
+    }
     return this.tx.status();
   }
 
@@ -460,13 +466,54 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   abort(reason?: any): Result<any, InactiveTransactionError> {
     this.assertWritable("abort()");
+    this.statusOverride = undefined;
     this.cfcState.outbox = [];
     this.outboxIdempotencyKeys.clear();
     this.cfcState.prepare = { status: "unprepared" };
     return this.tx.abort(reason);
   }
 
+  private runCommitCallbacks(result: Result<Unit, CommitError>): void {
+    if (this.commitCallbacksDispatched) {
+      return;
+    }
+    this.commitCallbacksDispatched = true;
+    // Call all callbacks, wrapping each in try/catch to prevent one
+    // failing callback from breaking others.
+    for (const callback of this.commitCallbacks) {
+      try {
+        callback(this, result);
+      } catch (error) {
+        logger.error("storage-error", "Error in commit callback:", error);
+      }
+    }
+  }
+
+  private clearPostCommitOutbox(): void {
+    this.cfcState.outbox = [];
+    this.outboxIdempotencyKeys.clear();
+  }
+
+  private rejectCommitBeforeStorage(
+    result: Result<Unit, CommitError>,
+  ): Result<Unit, CommitError> {
+    if (result.error) {
+      this.statusOverride = {
+        status: "error",
+        journal: this.tx.journal,
+        error: result.error as StorageTransactionFailed,
+      };
+      this.tx.abort(result.error);
+    }
+    this.clearPostCommitOutbox();
+    this.runCommitCallbacks(result);
+    return result;
+  }
+
   async commit(): Promise<Result<Unit, CommitError>> {
+    if (this.statusOverride?.status === "error") {
+      return { error: this.statusOverride.error };
+    }
     const readOnly = this.isReadOnly();
     if (readOnly) {
       this.tx.clearReadOnly?.();
@@ -488,14 +535,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const detail = this.cfcState.prepare.status === "invalidated"
           ? `: ${this.cfcState.prepare.reasons[0]}`
           : "";
-        return {
+        return this.rejectCommitBeforeStorage({
           error: {
             name: "StorageTransactionAborted",
             message:
               `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`,
             reason: new Error("cfc-relevant-transaction-not-prepared"),
           },
-        };
+        });
       }
 
       if (this.cfcState.prepare.status === "prepared") {
@@ -505,14 +552,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         if (currentDigest !== this.cfcState.prepare.digest) {
           this.invalidateCfc("prepared-digest-mismatch");
           if (this.cfcState.enforcementMode !== "observe") {
-            return {
+            return this.rejectCommitBeforeStorage({
               error: {
                 name: "StorageTransactionAborted",
                 message:
                   "CFC enforcement rejected commit: prepared digest changed",
                 reason: new Error("cfc-prepared-digest-mismatch"),
               },
-            };
+            });
           }
         }
       }
@@ -525,15 +572,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // passes an error message as result. An exception here would be an internal
     // error that should propagate.
     promise.then((result) => {
-      // Call all callbacks, wrapping each in try/catch to prevent one
-      // failing callback from breaking others
-      for (const callback of this.commitCallbacks) {
-        try {
-          callback(this, result);
-        } catch (error) {
-          logger.error("storage-error", "Error in commit callback:", error);
-        }
-      }
+      this.runCommitCallbacks(result);
     }).catch((error) => {
       logger.error(
         "storage-error",
@@ -550,8 +589,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       this.outboxIdempotencyKeys.clear();
     } else {
-      this.cfcState.outbox = [];
-      this.outboxIdempotencyKeys.clear();
+      this.clearPostCommitOutbox();
     }
 
     return result;

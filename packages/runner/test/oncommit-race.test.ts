@@ -1,9 +1,8 @@
 /**
- * Regression tests for stream-event success callbacks.
+ * Regression tests for stream-event final-outcome callbacks.
  *
- * Scheduler-delivered `onCommit` callbacks now run through the success-only
- * post-commit outbox, so they must not fire for exhausted failures and must
- * fire exactly once for the winning retry.
+ * Scheduler-delivered `onCommit` callbacks fire exactly once for the final
+ * result: after the winning retry, or after retries are exhausted.
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -15,7 +14,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test oncommit race");
 const space = signer.did();
 
-describe("onCommit callback as success signal (race condition)", () => {
+describe("onCommit callback final outcome", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -38,7 +37,7 @@ describe("onCommit callback as success signal (race condition)", () => {
     await storageManager?.close();
   });
 
-  it("does not fire onCommit when handler transaction is aborted", async () => {
+  it("fires onCommit once after handler retries are exhausted", async () => {
     const streamCell = runtime.getCell<{ piece: string }>(
       space,
       "add-piece-stream",
@@ -68,20 +67,20 @@ describe("onCommit callback as success signal (race condition)", () => {
       streamCell.getAsNormalizedFullLink(),
     );
 
-    let callbackCalled = false;
+    const statuses: string[] = [];
     runtime.scheduler.queueEvent(
       streamCell.getAsNormalizedFullLink(),
       { piece: "test-piece-id" },
       2,
-      () => {
-        callbackCalled = true;
+      (committedTx) => {
+        statuses.push(committedTx.status().status);
       },
     );
 
     await runtime.idle();
     await runtime.storageManager.synced();
 
-    expect(callbackCalled).toBe(false);
+    expect(statuses).toEqual(["error"]);
     expect(handlerCallCount).toBe(3);
     expect(allPiecesCell.get()).toEqual([]);
   });

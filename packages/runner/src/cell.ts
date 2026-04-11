@@ -736,9 +736,10 @@ export class CellImpl<T extends FabricValue>
   set(
     newValue: AnyCellWrapping<T> | T,
     /**
-     * Internal-only commit callback. This may run after failed commits, so it
-     * must remain non-effectful. Use the post-commit outbox for external side
-     * effects that must happen only after success.
+     * Internal-only commit callback. This runs after this transaction's final
+     * commit result, including failure, so it must remain non-effectful. Use
+     * the post-commit outbox for external side effects that must happen only
+     * after success.
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<T> {
@@ -804,21 +805,14 @@ export class CellImpl<T extends FabricValue>
         this._frame?.cause,
       );
 
-      // Register commit callback if provided
+      // Register commit callback if provided.
       if (onCommit) {
-        this.tx.enqueuePostCommitEffect({
-          id:
-            `cell-onCommit:${resolvedToValueLink.space}:${resolvedToValueLink.id}:${
-              resolvedToValueLink.path.join("/")
-            }:${crypto.randomUUID()}`,
-          kind: "cell-onCommit",
-          flush: (committedTx) => {
-            try {
-              onCommit(committedTx as IExtendedStorageTransaction);
-            } catch (error) {
-              console.error("Error in cell onCommit callback:", error);
-            }
-          },
+        this.tx.addCommitCallback((committedTx) => {
+          try {
+            onCommit(committedTx);
+          } catch (error) {
+            console.error("Error in cell onCommit callback:", error);
+          }
         });
       }
     }
@@ -830,18 +824,20 @@ export class CellImpl<T extends FabricValue>
     ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
         /**
-         * Internal-only commit callback. This may run after failed commits, so
-         * it must remain non-effectful. Use the post-commit outbox for
-         * external side effects that must happen only after success.
+         * Internal-only commit callback. This runs after the final commit
+         * result, including failure, so it must remain non-effectful. Use the
+         * post-commit outbox for external side effects that must happen only
+         * after success.
          */
         (tx: IExtendedStorageTransaction) => void,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
         /**
-         * Internal-only commit callback. This may run after failed commits,
-         * so it must remain non-effectful. Use the post-commit outbox for
-         * external side effects that must happen only after success.
+         * Internal-only commit callback. This runs after the final commit
+         * result, including failure, so it must remain non-effectful. Use the
+         * post-commit outbox for external side effects that must happen only
+         * after success.
          */
         (tx: IExtendedStorageTransaction) => void,
       ]
