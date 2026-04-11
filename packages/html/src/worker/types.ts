@@ -90,6 +90,23 @@ export interface ChildrenState {
 }
 
 /**
+ * Ambient CFC render policy while walking a VDOM subtree.
+ */
+export interface RenderPolicy {
+  /**
+   * Highest confidentiality classifications allowed to render in this subtree.
+   * Undefined means no render-time confidentiality bound is active.
+   */
+  maxConfidentiality?: readonly string[];
+
+  /**
+   * Classifications this subtree may declassify before applying the max bound.
+   * This is a temporary low-level capability hook for trusted UI experiments.
+   */
+  declassifyClassification: readonly string[];
+}
+
+/**
  * State tracked for each rendered node in the worker reconciler.
  * This is used to manage subscriptions and track DOM node IDs.
  */
@@ -117,6 +134,18 @@ export interface NodeState {
 
   /** Track child order to optimize inserts */
   childOrder: string[];
+
+  /** Ambient policy that applied to this node itself. */
+  renderPolicy: RenderPolicy;
+
+  /** Policy that should apply to this node's descendants. */
+  childRenderPolicy: RenderPolicy;
+
+  /** Whether this node's own render-policy boundary blocked its children. */
+  childrenBlockedByPolicy: boolean;
+
+  /** Original authored children, before any render-policy placeholder rewrite. */
+  sourceChildren?: WorkerVNode["children"];
 }
 
 /**

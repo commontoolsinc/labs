@@ -2896,6 +2896,7 @@ interface CFKeybindElement extends CFHTMLElement {}
 interface CFRenderElement extends CFHTMLElement {}
 interface CFCellContextElement extends CFHTMLElement {}
 interface CFCFCLabelElement extends CFHTMLElement {}
+interface CFCFCRenderBoundaryElement extends CFHTMLElement {}
 interface CFDragSourceElement extends CFHTMLElement {}
 interface CFDropZoneElement extends CFHTMLElement {}
 interface CFChatMessageElement extends CFHTMLElement {}
@@ -3476,6 +3477,15 @@ interface CFCFCLabelAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: unknown;
   "atom"?: string;
   "kind"?: string;
+}
+
+interface CFCFCRenderBoundaryAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<unknown>;
+  "value"?: unknown;
+  "maxConfidentiality"?: string | readonly string[];
+  "data-cfc-max-confidentiality"?: string | readonly string[];
+  "declassifyClassification"?: string | readonly string[];
+  "data-cfc-declassify-classification"?: string | readonly string[];
 }
 
 interface CFDragSourceAttributes<T> extends CFHTMLAttributes<T> {
@@ -4820,6 +4830,10 @@ declare global {
       "cf-cfc-label": CFDOM.DetailedHTMLProps<
         CFCFCLabelAttributes<CFCFCLabelElement>,
         CFCFCLabelElement
+      >;
+      "cf-cfc-render-boundary": CFDOM.DetailedHTMLProps<
+        CFCFCRenderBoundaryAttributes<CFCFCRenderBoundaryElement>,
+        CFCFCRenderBoundaryElement
       >;
       "cf-drag-source": CFDOM.DetailedHTMLProps<
         CFDragSourceAttributes<CFDragSourceElement>,
