@@ -65,7 +65,7 @@ export { value };
     });
     assertStringIncludes(
       enabledByDefault["/main.ts"]!,
-      "const value = __cfHelpers.derive(",
+      "__cfHelpers.derive(",
     );
 
     const disabled = await transformFiles({

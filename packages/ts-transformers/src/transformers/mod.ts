@@ -9,5 +9,6 @@ export { ModuleScopeShadowingTransformer } from "./module-scope-shadowing.ts";
 export { OpaqueGetValidationTransformer } from "./opaque-get-validation.ts";
 export { PatternContextValidationTransformer } from "./pattern-context-validation.ts";
 export { PatternOwnedExpressionSiteLoweringTransformer } from "./pattern-owned-expression-site-lowering.ts";
+export { ReactiveVariableForTransformer } from "./reactive-variable-for.ts";
 export { SchemaInjectionTransformer } from "./schema-injection.ts";
 export { SchemaGeneratorTransformer } from "./schema-generator.ts";

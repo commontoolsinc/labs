@@ -10,6 +10,7 @@ import {
   PatternCallbackLoweringTransformer,
   PatternContextValidationTransformer,
   PatternOwnedExpressionSiteLoweringTransformer,
+  ReactiveVariableForTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
@@ -67,6 +68,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
     transformers.push(
       new SchemaInjectionTransformer(sharedOps),
       new SchemaGeneratorTransformer(sharedOps),
+      new ReactiveVariableForTransformer(sharedOps),
       new ModuleScopeShadowingTransformer(sharedOps),
       new ModuleScopeCfDataTransformer(sharedOps),
       new ModuleScopeFunctionHardeningTransformer(sharedOps),
