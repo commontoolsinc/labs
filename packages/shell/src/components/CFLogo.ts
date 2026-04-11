@@ -79,19 +79,19 @@ export class CFLogo extends LitElement {
   `;
 
   @property()
-  width = 32;
+  accessor width = 32;
 
   @property()
-  height = 32;
+  accessor height = 32;
 
   @property({ attribute: "background-color" })
-  backgroundColor = "white";
+  accessor backgroundColor = "white";
 
   @property({ attribute: "shape-color" })
-  shapeColor = "#f9fafb";
+  accessor shapeColor = "#f9fafb";
 
   @property({ type: Boolean, reflect: true })
-  loading = false;
+  accessor loading = false;
 
   override render() {
     return html`
