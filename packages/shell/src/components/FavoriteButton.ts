@@ -37,22 +37,22 @@ export class XFavoriteButtonElement extends LitElement {
   `;
 
   @property()
-  rt?: RuntimeInternals;
+  accessor rt: RuntimeInternals | undefined = undefined;
 
   @property({ attribute: false })
-  pieceId?: string;
+  accessor pieceId: string | undefined = undefined;
 
   // Server favorites from subscription
   @state()
-  private _serverFavorites: readonly FavoriteEntry[] = [];
+  private accessor _serverFavorites: readonly FavoriteEntry[] = [];
 
   // Local state for favoriting, used for optimistic updates
   // between user click and server sync
   @state()
-  private _localIsFavorite: boolean | undefined = undefined;
+  private accessor _localIsFavorite: boolean | undefined = undefined;
 
   @state()
-  private _isLoading = false;
+  private accessor _isLoading = false;
 
   // Subscription cleanup function
   private _unsubscribe: (() => void) | undefined;

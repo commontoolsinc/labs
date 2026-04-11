@@ -79,10 +79,10 @@ export class XPieceList extends LitElement {
   `;
 
   @property({ attribute: false })
-  pieces: PieceItem[] = [];
+  accessor pieces: PieceItem[] = [];
 
   @property({ attribute: false })
-  activePieceId?: string;
+  accessor activePieceId: string | undefined = undefined;
 
   private _handleClick(e: Event) {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
