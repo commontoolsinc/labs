@@ -89,6 +89,27 @@ describe("Schema: CFC authoring aliases", () => {
     expect(secret.ifc?.classification).toEqual(["secret"]);
   });
 
+  it("preserves CFC metadata under writable cell wrappers", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+      type Classified<T, X extends readonly string[]> = Cfc<T, { classification: X }>;
+
+      interface SchemaRoot {
+        labelled: Writable<Classified<string, readonly ["prompt-influence"]>>;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const labelled = schema.properties?.labelled as any;
+    expect(labelled.type).toBe("string");
+    expect(labelled.asCell).toEqual(["cell"]);
+    expect(labelled.ifc?.classification).toEqual(["prompt-influence"]);
+  });
+
   it("lowers the remaining canonical metadata aliases and merges nested Cfc metadata", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };

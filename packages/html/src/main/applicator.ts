@@ -390,7 +390,10 @@ export class DomApplicator {
       requestUpdate?: (name?: PropertyKey, oldValue?: unknown) => void;
     };
 
-    element.requestUpdate?.(propName, undefined);
+    if (typeof element.requestUpdate === "function") {
+      element.requestUpdate(propName, undefined);
+      return;
+    }
 
     const tagName = element.localName ?? element.tagName?.toLowerCase();
     if (!tagName || !tagName.includes("-")) {

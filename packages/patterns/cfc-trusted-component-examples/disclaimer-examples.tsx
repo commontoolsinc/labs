@@ -1,5 +1,6 @@
 import {
   Cell,
+  type Classified,
   computed,
   handler,
   lift,
@@ -10,10 +11,27 @@ import {
   Writable,
 } from "commonfabric";
 
+type PromptInfluenceContent = Classified<
+  string,
+  readonly ["prompt-influence"]
+>;
+type SourceProvenanceContent = Classified<
+  string,
+  readonly ["source-provenance"]
+>;
+type FactCheckRequiredContent = Classified<
+  string,
+  readonly ["fact-check-required"]
+>;
+type LabelledContentArgument = {
+  id: string;
+  content: string;
+};
+
 type DisclaimerHostInput = {
   title: Writable<string>;
   summary: Writable<string>;
-  content: Writable<string>;
+  content: Writable<PromptInfluenceContent>;
   disclaimerText: Writable<string>;
   acknowledgedDisclaimer: Writable<string>;
   fakeButton: Writable<string>;
@@ -24,7 +42,7 @@ type DisclaimerHostInput = {
 type ProvenanceHostInput = {
   title: Writable<string>;
   summary: Writable<string>;
-  content: Writable<string>;
+  content: Writable<SourceProvenanceContent>;
   provenanceText: Writable<string>;
   reviewedProvenance: Writable<string>;
   fakeButton: Writable<string>;
@@ -35,7 +53,7 @@ type ProvenanceHostInput = {
 type FactCheckHostInput = {
   title: Writable<string>;
   summary: Writable<string>;
-  content: Writable<string>;
+  content: Writable<FactCheckRequiredContent>;
   factCheckClaim: Writable<string>;
   factCheckResult: Writable<string>;
   fakeButton: Writable<string>;
@@ -57,143 +75,32 @@ type DisclosureExampleOutput = {
   triggerLookalike: Stream<void>;
 };
 
-const TEXT_SCHEMA = { type: "string" } as const;
-
-const LABELLED_PROMPT_INFLUENCE_SCHEMA = {
-  type: "string",
-  ifc: { classification: ["prompt-influence"] },
-} as const;
-
-const LABELLED_SOURCE_PROVENANCE_SCHEMA = {
-  type: "string",
-  ifc: { classification: ["source-provenance"] },
-} as const;
-
-const LABELLED_FACT_CHECK_SCHEMA = {
-  type: "string",
-  ifc: { classification: ["fact-check-required"] },
-} as const;
-
-const LABELLED_PROMPT_INFLUENCE_CELL_SCHEMA = {
-  ...LABELLED_PROMPT_INFLUENCE_SCHEMA,
-  asCell: true,
-} as const;
-
-const LABELLED_SOURCE_PROVENANCE_CELL_SCHEMA = {
-  ...LABELLED_SOURCE_PROVENANCE_SCHEMA,
-  asCell: true,
-} as const;
-
-const LABELLED_FACT_CHECK_CELL_SCHEMA = {
-  ...LABELLED_FACT_CHECK_SCHEMA,
-  asCell: true,
-} as const;
-
-const LABELLED_CONTENT_ARGUMENT_SCHEMA = {
-  type: "object",
-  properties: {
-    id: TEXT_SCHEMA,
-    content: TEXT_SCHEMA,
-  },
-  required: ["id", "content"],
-} as const;
-
-const makePromptInfluenceContent = lift(
-  LABELLED_CONTENT_ARGUMENT_SCHEMA,
-  LABELLED_PROMPT_INFLUENCE_CELL_SCHEMA,
-  (input: { id: string; content: string }) =>
-    Cell.for(input.id).asSchema(LABELLED_PROMPT_INFLUENCE_SCHEMA).set(
-      input.content,
-    ),
+const makePromptInfluenceContent = lift<
+  LabelledContentArgument,
+  Writable<PromptInfluenceContent>
+>((input) =>
+  Cell.for<PromptInfluenceContent>(input.id).set(
+    input.content as PromptInfluenceContent,
+  )
 );
 
-const makeSourceProvenanceContent = lift(
-  LABELLED_CONTENT_ARGUMENT_SCHEMA,
-  LABELLED_SOURCE_PROVENANCE_CELL_SCHEMA,
-  (input: { id: string; content: string }) =>
-    Cell.for(input.id).asSchema(LABELLED_SOURCE_PROVENANCE_SCHEMA).set(
-      input.content,
-    ),
+const makeSourceProvenanceContent = lift<
+  LabelledContentArgument,
+  Writable<SourceProvenanceContent>
+>((input) =>
+  Cell.for<SourceProvenanceContent>(input.id).set(
+    input.content as SourceProvenanceContent,
+  )
 );
 
-const makeFactCheckContent = lift(
-  LABELLED_CONTENT_ARGUMENT_SCHEMA,
-  LABELLED_FACT_CHECK_CELL_SCHEMA,
-  (input: { id: string; content: string }) =>
-    Cell.for(input.id).asSchema(LABELLED_FACT_CHECK_SCHEMA).set(input.content),
+const makeFactCheckContent = lift<
+  LabelledContentArgument,
+  Writable<FactCheckRequiredContent>
+>((input) =>
+  Cell.for<FactCheckRequiredContent>(input.id).set(
+    input.content as FactCheckRequiredContent,
+  )
 );
-
-const DISCLAIMER_HOST_ARGUMENT_SCHEMA = {
-  type: "object",
-  properties: {
-    title: TEXT_SCHEMA,
-    summary: TEXT_SCHEMA,
-    content: LABELLED_PROMPT_INFLUENCE_CELL_SCHEMA,
-    disclaimerText: TEXT_SCHEMA,
-    acknowledgedDisclaimer: TEXT_SCHEMA,
-    fakeButton: TEXT_SCHEMA,
-    fakeMessage: TEXT_SCHEMA,
-    fakeStatus: TEXT_SCHEMA,
-  },
-  required: [
-    "title",
-    "summary",
-    "content",
-    "disclaimerText",
-    "acknowledgedDisclaimer",
-    "fakeButton",
-    "fakeMessage",
-    "fakeStatus",
-  ],
-} as const;
-
-const PROVENANCE_HOST_ARGUMENT_SCHEMA = {
-  type: "object",
-  properties: {
-    title: TEXT_SCHEMA,
-    summary: TEXT_SCHEMA,
-    content: LABELLED_SOURCE_PROVENANCE_CELL_SCHEMA,
-    provenanceText: TEXT_SCHEMA,
-    reviewedProvenance: TEXT_SCHEMA,
-    fakeButton: TEXT_SCHEMA,
-    fakeMessage: TEXT_SCHEMA,
-    fakeStatus: TEXT_SCHEMA,
-  },
-  required: [
-    "title",
-    "summary",
-    "content",
-    "provenanceText",
-    "reviewedProvenance",
-    "fakeButton",
-    "fakeMessage",
-    "fakeStatus",
-  ],
-} as const;
-
-const FACT_CHECK_HOST_ARGUMENT_SCHEMA = {
-  type: "object",
-  properties: {
-    title: TEXT_SCHEMA,
-    summary: TEXT_SCHEMA,
-    content: LABELLED_FACT_CHECK_CELL_SCHEMA,
-    factCheckClaim: TEXT_SCHEMA,
-    factCheckResult: TEXT_SCHEMA,
-    fakeButton: TEXT_SCHEMA,
-    fakeMessage: TEXT_SCHEMA,
-    fakeStatus: TEXT_SCHEMA,
-  },
-  required: [
-    "title",
-    "summary",
-    "content",
-    "factCheckClaim",
-    "factCheckResult",
-    "fakeButton",
-    "fakeMessage",
-    "fakeStatus",
-  ],
-} as const;
 
 const setLookalikeStatus = handler<
   void,
@@ -274,7 +181,6 @@ export const TrustedDisclaimerAckHost = pattern<
       triggerLookalike,
     };
   },
-  DISCLAIMER_HOST_ARGUMENT_SCHEMA,
 );
 
 export const TrustedProvenanceReviewHost = pattern<
@@ -349,7 +255,6 @@ export const TrustedProvenanceReviewHost = pattern<
       triggerLookalike,
     };
   },
-  PROVENANCE_HOST_ARGUMENT_SCHEMA,
 );
 
 export const TrustedFactCheckGateHost = pattern<
@@ -424,7 +329,6 @@ export const TrustedFactCheckGateHost = pattern<
       triggerLookalike,
     };
   },
-  FACT_CHECK_HOST_ARGUMENT_SCHEMA,
 );
 
 export const DisclaimerPromptRoutingAckExample = pattern<
@@ -439,7 +343,7 @@ export const DisclaimerPromptRoutingAckExample = pattern<
     content: makePromptInfluenceContent({
       id: "disclaimer-prompt-routing",
       content: "Route this note to the verified recipient only.",
-    }) as Writable<string>,
+    }),
     disclaimerText: Writable.of(
       "Routing can be influenced by prompt-derived text.",
     ),
@@ -474,7 +378,7 @@ export const DisclaimerAIGeneratedContentAckExample = pattern<
     content: makePromptInfluenceContent({
       id: "disclaimer-ai-generated-content",
       content: "Draft social copy for the launch announcement.",
-    }) as Writable<string>,
+    }),
     disclaimerText: Writable.of(
       "This content was generated by AI and may need review.",
     ),
@@ -509,7 +413,7 @@ export const DisclaimerMedicalInfoAckExample = pattern<
     content: makePromptInfluenceContent({
       id: "disclaimer-medical-info",
       content: "Medication summary and dosage reminder.",
-    }) as Writable<string>,
+    }),
     disclaimerText: Writable.of("Informational only. Not medical advice."),
     acknowledgedDisclaimer: Writable.of(""),
     fakeButton: Writable.of("Fake medical ack"),
@@ -540,7 +444,7 @@ export const DisclaimerInfluenceDisclosureAckExample = pattern<
     content: makePromptInfluenceContent({
       id: "disclaimer-influence-disclosure",
       content: "Recommendation copy generated by a campaign-tuned assistant.",
-    }) as Writable<string>,
+    }),
     disclaimerText: Writable.of(
       "This recommendation may be influenced by campaign goals.",
     ),
@@ -575,7 +479,7 @@ export const DisclaimerRedactedSummaryAckExample = pattern<
     content: makePromptInfluenceContent({
       id: "disclaimer-redacted-summary",
       content: "Redacted incident summary for the internal audience.",
-    }) as Writable<string>,
+    }),
     disclaimerText: Writable.of("Redacted from a more detailed report."),
     acknowledgedDisclaimer: Writable.of(""),
     fakeButton: Writable.of("Fake redaction ack"),
@@ -608,7 +512,7 @@ export const DisclaimerConfidentialSourceAckExample = pattern<
     content: makePromptInfluenceContent({
       id: "disclaimer-confidential-source",
       content: "Sensitive source excerpt for internal circulation only.",
-    }) as Writable<string>,
+    }),
     disclaimerText: Writable.of(
       "Do not redistribute outside the approved group.",
     ),
@@ -643,7 +547,7 @@ export const DisclaimerPublicPostAckExample = pattern<
     content: makePromptInfluenceContent({
       id: "disclaimer-public-post",
       content: "Draft public post for the product launch.",
-    }) as Writable<string>,
+    }),
     disclaimerText: Writable.of(
       "Public-facing content. Review for accuracy before publish.",
     ),
@@ -678,7 +582,7 @@ export const DisclaimerSourceProvenanceReviewExample = pattern<
     content: makeSourceProvenanceContent({
       id: "disclaimer-source-provenance",
       content: "Shared source excerpt for the design review.",
-    }) as Writable<string>,
+    }),
     provenanceText: Writable.of(
       "Source provenance: shared by the project owner.",
     ),
@@ -713,7 +617,7 @@ export const DisclaimerCitationProvenanceReviewExample = pattern<
     content: makeSourceProvenanceContent({
       id: "disclaimer-citation-provenance",
       content: "Claim that requires citation provenance.",
-    }) as Writable<string>,
+    }),
     provenanceText: Writable.of("Citations verified against the source list."),
     reviewedProvenance: Writable.of(""),
     fakeButton: Writable.of("Fake citation review"),
@@ -746,7 +650,7 @@ export const DisclaimerPublicPostProvenanceReviewExample = pattern<
     content: makeSourceProvenanceContent({
       id: "disclaimer-public-post-provenance",
       content: "Public status update draft.",
-    }) as Writable<string>,
+    }),
     provenanceText: Writable.of(
       "Provenance review required before public release.",
     ),
@@ -781,7 +685,7 @@ export const DisclaimerFactCheckBriefExample = pattern<
     content: makeFactCheckContent({
       id: "disclaimer-fact-check-brief",
       content: "External brief about launch performance.",
-    }) as Writable<string>,
+    }),
     factCheckClaim: Writable.of("External brief about launch performance."),
     factCheckResult: Writable.of(""),
     fakeButton: Writable.of("Fake fact-check"),
@@ -814,7 +718,7 @@ export const DisclaimerFactCheckReleaseExample = pattern<
     content: makeFactCheckContent({
       id: "disclaimer-fact-check-release",
       content: "Release note for the launch checklist.",
-    }) as Writable<string>,
+    }),
     factCheckClaim: Writable.of("Release note for the launch checklist."),
     factCheckResult: Writable.of(""),
     fakeButton: Writable.of("Fake release gate"),
@@ -847,7 +751,7 @@ export const DisclaimerFactCheckClaimsExample = pattern<
     content: makeFactCheckContent({
       id: "disclaimer-fact-check-claims",
       content: "Claim about the incident response timeline.",
-    }) as Writable<string>,
+    }),
     factCheckClaim: Writable.of("Claim about the incident response timeline."),
     factCheckResult: Writable.of(""),
     fakeButton: Writable.of("Fake claims gate"),
@@ -880,7 +784,7 @@ export const DisclaimerLookalikeHostExample = pattern<
     content: makePromptInfluenceContent({
       id: "disclaimer-lookalike-host",
       content: "Host-controlled disclaimer demo.",
-    }) as Writable<string>,
+    }),
     disclaimerText: Writable.of(
       "Trusted output only changes when the reviewed button is used.",
     ),

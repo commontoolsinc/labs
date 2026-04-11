@@ -218,9 +218,8 @@ export type IsThisArray =
  * IAnyCell is an interface that is used by all calls and to which the runner
  * attaches the internal methods..
  */
-export interface IAnyCell<T> {
-  asSchema<U = T>(schema?: JSONSchema): Cell<U>;
-}
+// deno-lint-ignore no-empty-interface
+export interface IAnyCell<T> {}
 
 /**
  * Readable cells can retrieve their current value.

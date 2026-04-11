@@ -718,7 +718,18 @@ Deno.test("DomApplicator - error handling", async (t) => {
 Deno.test("DomApplicator - bindings", async (t) => {
   await t.step(
     "requests a custom element update after assigning a CellHandle",
-    () => {
+    async () => {
+      const customElementsDescriptor = Object.getOwnPropertyDescriptor(
+        globalThis,
+        "customElements",
+      );
+      Object.defineProperty(globalThis, "customElements", {
+        configurable: true,
+        value: {
+          whenDefined: () => Promise.resolve(undefined),
+        },
+      });
+
       const doc = createMockDocument();
       const applicator = createDomApplicator({
         document: doc,
@@ -740,23 +751,37 @@ Deno.test("DomApplicator - bindings", async (t) => {
         }
       };
 
-      applicator.applyBatch({
-        batchId: 2,
-        ops: [{
-          op: "set-binding",
-          nodeId: 1,
-          propName: "value",
-          cellRef: {
-            space: "did:key:test",
-            id: "of:test",
-            path: [],
-            type: "application/json",
-          },
-        }],
-      });
+      try {
+        applicator.applyBatch({
+          batchId: 2,
+          ops: [{
+            op: "set-binding",
+            nodeId: 1,
+            propName: "value",
+            cellRef: {
+              space: "did:key:test",
+              id: "of:test",
+              path: [],
+              type: "application/json",
+            },
+          }],
+        });
 
-      assertEquals(node.value.constructor.name, "CellHandle");
-      assertEquals(requested, ["value"]);
+        await Promise.resolve();
+
+        assertEquals(node.value.constructor.name, "CellHandle");
+        assertEquals(requested, ["value"]);
+      } finally {
+        if (customElementsDescriptor) {
+          Object.defineProperty(
+            globalThis,
+            "customElements",
+            customElementsDescriptor,
+          );
+        } else {
+          Reflect.deleteProperty(globalThis, "customElements");
+        }
+      }
     },
   );
 });
