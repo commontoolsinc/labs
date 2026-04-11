@@ -12,7 +12,7 @@ This document captures:
 
 - what the migration actually involves
 - what a focused spike proved
-- how to break the work into reviewable batches
+- how to break the work into reviewable execution phases
 - how to validate each step
 
 ## Goals
@@ -55,8 +55,11 @@ important migration rules:
 4. `@consume` / `@provide` work under standard decorators, but they are stricter
    than the current legacy forms and often need explicit initial values and
    tighter types.
-5. Pure Lit files look incrementally migratable. `@lit/context` files do not
-   look cleanly dual-mode with the current legacy root config.
+5. Pure Lit files are mechanically simpler than `@lit/context` files, but they
+   are still not safe to ship incrementally before the root flag flip. CI
+   confirmed that standard-decorator `accessor` syntax in production code does
+   not run correctly while the repo is still operating under the legacy root
+   config.
 
 ## Inventory
 
@@ -185,14 +188,23 @@ accessor theme: CFTheme = defaultTheme;
 Note: this is the most important migration boundary. These files should be
 treated as a coordinated batch, not mixed piecemeal into otherwise-legacy code.
 
-## Proposed Batches
+## Execution Phases
 
-### Batch 1: Low-risk pure Lit files
+### Prep phase
 
 Objective:
 
-- Prove the codemod pattern in normal review flow
-- Land easy wins without flipping the root decorator mode yet
+- Finish documentation and add explicit compiler/tooling guard coverage before
+  starting the coordinated migration branch.
+
+Scope:
+
+- migration plan documentation
+- focused spike artifacts and migration rules
+- `js-compiler` guard coverage for TSX inputs with accessor fields
+- `ts-transformers` guard coverage for accessor-field AST assumptions
+
+### Coordinated migration phase 1: Low-risk pure Lit files
 
 Good first candidates:
 
@@ -213,7 +225,12 @@ Characteristics:
 - no getter/setter reactive fields
 - little or no optional/accessor edge-case handling
 
-### Batch 2: Remaining pure Lit files
+Important constraint:
+
+- These files are still part of the coordinated cutover branch.
+- They should not be merged to `main` ahead of the root flag flip.
+
+### Coordinated migration phase 2: Remaining pure Lit files
 
 Objective:
 
@@ -234,7 +251,7 @@ Representative files:
 - `packages/shell/src/views/AppView.ts`
 - `packages/iframe-sandbox/src/common-iframe-sandbox.ts`
 
-### Batch 3: `@lit/context` files and config/test cleanup
+### Coordinated migration phase 3: `@lit/context` files and config/test cleanup
 
 Objective:
 
@@ -257,15 +274,28 @@ Expected follow-up work in this batch:
 - update package-local `deno-web-test` configs still forcing legacy decorators
 - update tests that currently assert the deprecation warning text
 
+### Root flag flip
+
+This is the cutover point where the repo stops running in legacy decorator
+mode.
+
+Required change:
+
+- remove `compilerOptions.experimentalDecorators` from the root `deno.json`
+
+This should land together with the coordinated migration phases above, not
+afterward. The execution phases are still useful for implementation and review,
+but they are not safe as independently mergeable releases.
+
 ## Validation Plan
 
-### For every batch
+### For every execution phase
 
 - `deno check` on touched files
 - focused component/package tests where present
 - no behavioral refactors mixed into the migration diff
 
-### For the migration workstream
+### For the coordinated migration workstream
 
 Maintain a focused test that runs representative files under a generated
 standard-decorators config. The spike used this to catch typing and config
@@ -279,7 +309,7 @@ Suggested coverage areas:
 - getter/setter-backed reactive property
 - compiler/tooling compatibility for `accessor` fields
 
-### For the final flag removal batch
+### For the root flag flip
 
 - root `deno check` coverage for affected packages
 - relevant package tests for `ui`, `shell`, `iframe-sandbox`, and `deno-web-test`
@@ -319,16 +349,19 @@ Before broad rollout, add explicit guard coverage for:
 
 ## Recommended Execution Strategy
 
-1. Land Batch 1 first to validate review ergonomics and codemod shape.
-2. If Batch 1 is clean, do Batch 2 as the larger mechanical sweep.
-3. Save Batch 3 for a coordinated change set that flips the remaining
-   `@lit/context` files and removes the legacy root flag.
+1. Finish the prep phase first.
+2. Build the real migration as one coordinated branch or tightly coupled stack.
+3. Use the phases above for implementation order and review structure, but do
+   not merge standard-decorator production code to `main` before the root flag
+   flip.
+4. Remove the legacy root flag in the same coordinated cutover.
 
 This sequencing minimizes risk because:
 
+- the compiler/tooling assumptions get explicit guard coverage first
 - the bulk of the file count is in pure Lit conversions
-- the hardest part is isolated to the context boundary
-- the final config flip happens after most syntax churn is already behind us
+- the hardest part remains isolated to the context boundary
+- CI already showed that mixed-mode shipping is unsafe
 
 ## Open Questions
 
@@ -341,8 +374,9 @@ This sequencing minimizes risk because:
 
 ## Current Recommendation
 
-Proceed with Batch 1 as the first real implementation PR.
+Proceed with prep only until the compiler/tooling guard tests are in place.
 
-That batch is large enough to validate the approach, but small enough to avoid
-mixing the most fragile `@lit/context` conversions with the initial migration
-review.
+After that, do the real migration as a coordinated cutover that includes the
+root flag flip. Do not land Batch 1-style standard-decorator `accessor`
+conversions into `main` while the repo is still running under the legacy root
+config.
