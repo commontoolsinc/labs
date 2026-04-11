@@ -277,12 +277,45 @@ Suggested coverage areas:
 - `@query`
 - `@consume` / `@provide`
 - getter/setter-backed reactive property
+- compiler/tooling compatibility for `accessor` fields
 
 ### For the final flag removal batch
 
 - root `deno check` coverage for affected packages
 - relevant package tests for `ui`, `shell`, `iframe-sandbox`, and `deno-web-test`
 - update tests that explicitly look for the old warning text
+
+## Risks
+
+### Component/runtime risk
+
+The primary risk is in Lit and `@lit/context` behavior, not parsing. The repo
+currently type-checks and runs under legacy decorator semantics, and the
+migration changes both syntax and runtime expectations for decorated class
+members.
+
+### Compiler/tooling risk
+
+The pattern compiler and transformer pipeline do not appear to consume Lit
+decorators directly today, but the migration still changes class field syntax
+from plain property declarations to accessor-backed declarations.
+
+The spike checked the TypeScript AST shape directly and found that:
+
+- `accessor foo = 1` still parses as a `PropertyDeclaration`
+- the node carries an `AccessorKeyword` modifier
+
+That lowers the parser/AST-compatibility risk, but does not eliminate semantic
+or tooling risk. Any compiler or transformer code that assumes plain field
+semantics could still be affected.
+
+### Specific compiler/tooling follow-up
+
+Before broad rollout, add explicit guard coverage for:
+
+- `packages/js-compiler`: compile a TSX input containing `accessor` fields
+- `packages/ts-transformers`: verify no AST assumptions break on
+  `PropertyDeclaration` nodes with `AccessorKeyword`
 
 ## Recommended Execution Strategy
 
