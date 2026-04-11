@@ -151,6 +151,49 @@ Deno.test("Capability analysis tracks alias assignment chains", () => {
   assert(input.readPaths.includes("user.name"));
 });
 
+Deno.test("TypeScript exposes accessor fields as property declarations", () => {
+  const file = ts.createSourceFile(
+    "/test.ts",
+    `
+function tracked(
+  _value: undefined,
+  _context: ClassAccessorDecoratorContext<Example, number>,
+) {}
+
+class Example {
+  @tracked accessor count = 1;
+}
+`,
+    ts.ScriptTarget.ESNext,
+    true,
+    ts.ScriptKind.TS,
+  );
+
+  let property: ts.PropertyDeclaration | undefined;
+  const visit = (node: ts.Node): void => {
+    if (property) return;
+    if (ts.isPropertyDeclaration(node)) {
+      property = node;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+
+  assert(property);
+  assertEquals(property.name.getText(file), "count");
+  assert(
+    property.modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.AccessorKeyword
+    ),
+  );
+  assert(
+    property.modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.Decorator
+    ),
+  );
+});
+
 Deno.test("Capability analysis tracks object destructure aliases", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
