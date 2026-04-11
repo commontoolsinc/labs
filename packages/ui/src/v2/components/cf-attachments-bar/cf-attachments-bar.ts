@@ -58,10 +58,10 @@ export class CFAttachmentsBar extends BaseElement {
   ];
 
   @property({ type: Array })
-  pinnedCells: Attachment[] = [];
+  accessor pinnedCells: Attachment[] = [];
 
   @property({ type: Boolean })
-  removable = false;
+  accessor removable = false;
 
   private _getVariant(type: string): "default" | "primary" | "accent" {
     switch (type) {

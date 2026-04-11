@@ -5,7 +5,7 @@ import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
 export class CFRouter extends BaseElement {
   @property({ attribute: false })
-  path: CellHandle<string> | string = "/";
+  accessor path: CellHandle<string> | string = "/";
 
   override connectedCallback(): void {
     super.connectedCallback();
