@@ -3,7 +3,7 @@ import TrustedComponentExamples from "./main.tsx";
 
 export default pattern(() => {
   const gallery = TrustedComponentExamples({});
-  const assert_total_examples = computed(() => gallery.totalExamples === 48);
+  const assert_total_examples = computed(() => gallery.totalExamples === 52);
 
   return {
     tests: [{ assertion: assert_total_examples }],

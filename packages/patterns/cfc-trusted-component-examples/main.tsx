@@ -1,9 +1,10 @@
 import { computed, NAME, pattern, UI } from "commonfabric";
+import ConfirmationReleaseExamples from "./confirmation-release-examples.tsx";
 import DisclaimerExamples from "./disclaimer-examples.tsx";
 import ProcessExamples from "./process-examples.tsx";
 import SendPublishExamples from "./send-publish-examples.tsx";
 
-const TOTAL_EXAMPLES = 48;
+const TOTAL_EXAMPLES = 52;
 
 interface TrustedComponentExamplesOutput {
   [NAME]: string;
@@ -27,7 +28,8 @@ export default pattern<
                 This gallery collects untrusted host examples that embed
                 reusable trusted surfaces for send/publish flows, disclaimer
                 gates, provenance review, fact-check release, scoped policies,
-                and visible long-running jobs.
+                visible long-running jobs, recipient confirmation, and redacted
+                release.
               </cf-label>
               <cf-label>
                 Total untrusted example patterns: {TOTAL_EXAMPLES}.
@@ -37,6 +39,7 @@ export default pattern<
           <div>{SendPublishExamples}</div>
           <div>{DisclaimerExamples}</div>
           <div>{ProcessExamples}</div>
+          <div>{ConfirmationReleaseExamples}</div>
         </cf-vstack>
       </cf-vscroll>
     </cf-screen>

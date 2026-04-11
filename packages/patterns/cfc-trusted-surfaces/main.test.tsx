@@ -8,6 +8,8 @@ import {
   TrustedForwardSurface,
   TrustedLongRunningJobSurface,
   TrustedProvenanceReviewSurface,
+  TrustedRecipientConfirmSurface,
+  TrustedRedactedReleaseSurface,
   TrustedSafeLinkSurface,
   TrustedSaveDraftSurface,
   TrustedSaveSurface,
@@ -84,6 +86,14 @@ export default pattern(() => {
   const jobAuthorization = Writable.of("");
   const jobCancellation = Writable.of("");
 
+  const recipientLabel = Writable.of("");
+  const recipientPayloadPreview = Writable.of("");
+  const confirmedRecipientRelease = Writable.of("");
+
+  const redactionLabel = Writable.of("");
+  const redactionSourceText = Writable.of("");
+  const releasedRedactedContent = Writable.of("");
+
   const trustedSave = TrustedSaveSurface({ draftTitle, savedTitle });
   const trustedSaveDraft = TrustedSaveDraftSurface({
     draftTitle,
@@ -147,6 +157,16 @@ export default pattern(() => {
     jobStatus,
     jobAuthorization,
     jobCancellation,
+  });
+  const trustedRecipientConfirm = TrustedRecipientConfirmSurface({
+    recipientLabel,
+    payloadPreview: recipientPayloadPreview,
+    confirmedRecipientRelease,
+  });
+  const trustedRedactedRelease = TrustedRedactedReleaseSurface({
+    redactionLabel,
+    sourceText: redactionSourceText,
+    releasedRedactedContent,
   });
 
   const action_set_title = setString({
@@ -260,6 +280,28 @@ export default pattern(() => {
   const action_cancel_job = trigger({
     stream: trustedLongRunningJob.cancelJob,
   });
+  const action_set_recipient_label = setString({
+    value: recipientLabel,
+    next: "finance@example.com",
+  });
+  const action_set_recipient_preview = setString({
+    value: recipientPayloadPreview,
+    next: "Quarterly budget packet",
+  });
+  const action_confirm_recipient = trigger({
+    stream: trustedRecipientConfirm.confirmRecipientRelease,
+  });
+  const action_set_redaction_label = setString({
+    value: redactionLabel,
+    next: "support case",
+  });
+  const action_set_redaction_source = setString({
+    value: redactionSourceText,
+    next: "Customer secret code 123-45-6789 may be released after redaction.",
+  });
+  const action_release_redacted = trigger({
+    stream: trustedRedactedRelease.releaseRedactedContent,
+  });
 
   const assert_saved = computed(() =>
     savedTitle.get() === "Saved from trusted surface"
@@ -332,6 +374,14 @@ export default pattern(() => {
     jobStatus.get() === "Cancelled" &&
     jobCancellation.get() === "Cancelled long-running job: nightly export"
   );
+  const assert_recipient_confirmed = computed(() =>
+    confirmedRecipientRelease.get() ===
+      "Confirmed release to finance@example.com: Quarterly budget packet"
+  );
+  const assert_redacted_released = computed(() =>
+    releasedRedactedContent.get() ===
+      "Released redacted support case: Customer [redacted-secret] code [redacted-id] may be released after redaction."
+  );
 
   return {
     tests: [
@@ -389,6 +439,14 @@ export default pattern(() => {
       { assertion: assert_job_authorized },
       { action: action_cancel_job },
       { assertion: assert_job_cancelled },
+      { action: action_set_recipient_label },
+      { action: action_set_recipient_preview },
+      { action: action_confirm_recipient },
+      { assertion: assert_recipient_confirmed },
+      { action: action_set_redaction_label },
+      { action: action_set_redaction_source },
+      { action: action_release_redacted },
+      { assertion: assert_redacted_released },
     ],
     trustedSave,
     trustedSaveDraft,
@@ -403,5 +461,7 @@ export default pattern(() => {
     trustedSongIdRecording,
     trustedSharePolicy,
     trustedLongRunningJob,
+    trustedRecipientConfirm,
+    trustedRedactedRelease,
   };
 });
