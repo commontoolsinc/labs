@@ -1,7 +1,7 @@
 import { assert } from "@std/assert";
 import { join } from "@std/path";
 
-const ROOT = join(import.meta.dirname!, "..");
+const ROOT = join(import.meta.dirname!, "..", "..", "..");
 
 function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
