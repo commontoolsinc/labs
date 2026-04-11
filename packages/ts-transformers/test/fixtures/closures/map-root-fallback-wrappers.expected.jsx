@@ -31,7 +31,7 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             input: { items: items },
             items: items
-        }, ({ input: { items }, items }) => items ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        }, ({ input: { items }, items: items_1 }) => items ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return <span data-inline-id={item.key("id")}>{item.key("id")}</span>;
         }, {
@@ -81,7 +81,7 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             input: { items: items },
             items: items
-        }, ({ input: { items }, items }) => (items as Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        }, ({ input: { items }, items: items_1 }) => (items as Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return (<span data-cast-id={item.key("id")}>{item.key("id")}</span>);
         }, {
@@ -131,7 +131,7 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             input: { items: items },
             items: items
-        }, ({ input: { items }, items }) => (items satisfies Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        }, ({ input: { items }, items: items_1 }) => (items satisfies Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return (<span data-satisfies-id={item.key("id")}>{item.key("id")}</span>);
         }, {

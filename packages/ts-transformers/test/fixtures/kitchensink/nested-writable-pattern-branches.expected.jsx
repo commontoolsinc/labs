@@ -209,7 +209,7 @@ export default pattern((state) => {
                                     task: {
                                         note: task.key("note")
                                     }
-                                }, ({ input: { task }, task }) => task.note !== undefined), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
+                                }, ({ input: { task }, task: task_1 }) => task.note !== undefined), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
                         </button>
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
@@ -239,7 +239,7 @@ export default pattern((state) => {
                                             },
                                             tagIndex: tagIndex,
                                             taskIndex: taskIndex
-                                        }, ({ input: { tagIndex, taskIndex }, tagIndex, taskIndex }) => tagIndex === taskIndex), `${section.key("title")}:${tag}`, __cfHelpers.ifElse({
+                                        }, ({ input: { tagIndex, taskIndex }, tagIndex: tagIndex_1, taskIndex: taskIndex_1 }) => tagIndex === taskIndex), `${section.key("title")}:${tag}`, __cfHelpers.ifElse({
                                             type: "boolean"
                                         } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"

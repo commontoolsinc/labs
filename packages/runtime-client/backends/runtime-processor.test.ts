@@ -387,14 +387,28 @@ describe("RuntimeProcessor CFC label IPC", () => {
       space: "did:key:test" as CellRef["space"],
       type: "application/json",
       path: [],
-      schema: {
-        type: "string",
-        ifc: { classification: ["prompt-risk"] },
-      },
     };
     const processor = {
       runtime: {
         getCellFromLink: () => ({
+          runtime: {
+            readTx: () => ({
+              readOrThrow: () => ({
+                value: "labelled data",
+                cfc: {
+                  version: 1,
+                  schemaHash: "test-schema",
+                  labelMap: {
+                    version: 1,
+                    entries: [{
+                      path: [],
+                      label: { classification: ["prompt-risk"] },
+                    }],
+                  },
+                },
+              }),
+            }),
+          },
           getAsNormalizedFullLink: () => ref,
         }),
       },

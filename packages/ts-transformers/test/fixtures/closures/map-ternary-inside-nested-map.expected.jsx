@@ -134,7 +134,7 @@ export default pattern((__cf_pattern_input) => {
                         length: item.key("tags", "length")
                     }
                 }
-            }, ({ input: { item }, item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
+            }, ({ input: { item }, item: item_1 }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
               <ul>
                 {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const tag = __cf_pattern_input.key("element");

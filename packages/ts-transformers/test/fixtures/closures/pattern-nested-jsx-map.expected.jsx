@@ -140,7 +140,7 @@ export default pattern((__cf_pattern_input) => {
                         item: {
                             selectedIndex: item.key("selectedIndex")
                         }
-                    }, ({ input: { i, item }, i, item }) => i === item.selectedIndex), "* ", "")}
+                    }, ({ input: { i, item }, i: i_1, item: item_1 }) => i === item.selectedIndex), "* ", "")}
                     {tag.key("name")}
                   </li>);
                 }, {
