@@ -104,6 +104,48 @@ describe("TypeScriptCompiler", () => {
     await compiler.resolveAndCompile(program);
   });
 
+  it("Compiles TSX with standard-decorator accessor fields", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `
+function tracked(
+  _value: ClassAccessorDecoratorTarget<Counter, number>,
+  _context: ClassAccessorDecoratorContext<Counter, number>,
+) {
+  return {
+    init(value: number) {
+      return value;
+    },
+  };
+}
+
+declare namespace JSX {
+  interface IntrinsicElements {
+    div: {};
+  }
+}
+
+declare function h(
+  tag: string,
+  props: Record<string, unknown> | null,
+  ...children: unknown[]
+): unknown;
+
+class Counter {
+  @tracked accessor count = 1;
+}
+
+export default <div>{new Counter().count}</div>;
+`,
+    });
+
+    const compiled = await compiler.resolveAndCompile(program, {
+      filename: "standard-decorators.js",
+    });
+    expect(compiled.filename).toBe("standard-decorators.js");
+    expect(compiled.sourceMap).toBeDefined();
+  });
+
   it("Inlines errors", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {
