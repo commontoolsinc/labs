@@ -170,22 +170,22 @@ export class CFLinkPreview extends BaseElement {
       ];
 
       @property({ type: String, reflect: true })
-      declare url: string;
+      accessor url = "";
 
       @state()
-      private _loading = false;
+      private accessor _loading = false;
 
       @state()
-      private _error = false;
+      private accessor _error = false;
 
       @state()
-      private _title = "";
+      private accessor _title = "";
 
       @state()
-      private _description = "";
+      private accessor _description = "";
 
       @state()
-      private _image = "";
+      private accessor _image = "";
 
       private _abortController: AbortController | null = null;
 

@@ -62,8 +62,7 @@
       "dom.iterable",
       "dom.asynciterable",
       "esnext"
-    ],
-    "experimentalDecorators": true
+    ]
   },
   "exclude": [
     "**/node_modules/",

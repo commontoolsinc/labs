@@ -68,39 +68,39 @@ export class CFModal extends BaseElement {
 
   /** Visibility state - supports both Cell<boolean> and plain boolean */
   @property({ attribute: false })
-  declare open: CellHandle<boolean> | boolean;
+  accessor open: CellHandle<boolean> | boolean = false;
 
   /** Allow dismiss via backdrop click, Escape key, and X button */
   @property({ type: Boolean, reflect: true })
-  declare dismissable: boolean;
+  accessor dismissable = true;
 
   /** Modal width preset */
   @property({ type: String, reflect: true })
-  declare size: "sm" | "md" | "lg" | "full";
+  accessor size: "sm" | "md" | "lg" | "full" = "md";
 
   /** Prevent body scroll when modal is open */
   @property({ type: Boolean, attribute: "prevent-scroll" })
-  declare preventScroll: boolean;
+  accessor preventScroll = true;
 
   /** Accessible label for the modal */
   @property({ type: String })
-  declare label: string | undefined;
+  accessor label: string | undefined = undefined;
 
   /** Modal manager from context (optional - works standalone too) */
   @consume({ context: modalContext, subscribe: false })
-  private _manager?: ModalManager;
+  private accessor _manager: ModalManager | undefined = undefined;
 
   /** Registration with modal manager */
   @state()
-  private _registration?: ModalRegistration;
+  private accessor _registration: ModalRegistration | undefined = undefined;
 
   /** Whether header slot has content */
   @state()
-  private _headerHasContent = false;
+  private accessor _headerHasContent = false;
 
   /** Whether footer slot has content */
   @state()
-  private _footerHasContent = false;
+  private accessor _footerHasContent = false;
 
   /** Previous body overflow value for restoration */
   private _previousBodyOverflow = "";

@@ -464,46 +464,46 @@ export class XHeaderView extends BaseView {
   `;
 
   @property()
-  private keyStore?: KeyStore;
+  private accessor keyStore: KeyStore | undefined = undefined;
 
   @property()
-  private rt?: RuntimeInternals;
+  private accessor rt: RuntimeInternals | undefined = undefined;
 
   @property({ attribute: false })
-  pieceTitle?: string;
+  accessor pieceTitle: string | undefined = undefined;
 
   @property({ attribute: false })
-  pieceId?: string;
+  accessor pieceId: string | undefined = undefined;
 
   @property({ attribute: false })
-  spaceName?: string;
+  accessor spaceName: string | undefined = undefined;
 
   @property({ attribute: false })
-  spaceDid?: DID;
+  accessor spaceDid: DID | undefined = undefined;
 
   @property({ attribute: false })
-  isLoggedIn = false;
+  accessor isLoggedIn = false;
 
   @property()
-  showDebuggerView = false;
+  accessor showDebuggerView = false;
 
   @property({ attribute: false })
-  isViewingDefaultPattern = false;
+  accessor isViewingDefaultPattern = false;
 
   @state()
-  private menuOpen = false;
+  private accessor menuOpen = false;
 
   @state()
-  private pieceListExpanded = false;
+  private accessor pieceListExpanded = false;
 
   @state()
-  private headerPieceDropdownOpen = false;
+  private accessor headerPieceDropdownOpen = false;
 
   @state()
-  private _serverFavorites: readonly FavoriteEntry[] = [];
+  private accessor _serverFavorites: readonly FavoriteEntry[] = [];
 
   @state()
-  private _localIsFavorite: boolean | undefined = undefined;
+  private accessor _localIsFavorite: boolean | undefined = undefined;
 
   private _unsubscribeFavorites: (() => void) | undefined;
 

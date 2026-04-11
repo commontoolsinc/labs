@@ -294,30 +294,30 @@ export class XSchedulerSource extends LitElement {
   `;
 
   @property({ attribute: false })
-  patternSources: PatternSourceInfo[] = [];
+  accessor patternSources: PatternSourceInfo[] = [];
 
   @property({ attribute: false })
-  nodes: Map<string, SourceViewNode> = new Map();
+  accessor nodes: Map<string, SourceViewNode> = new Map();
 
   @property({ attribute: false })
-  selectedNodeId: string | null = null;
+  accessor selectedNodeId: string | null = null;
 
   @property({ attribute: false })
-  baselineStats: Map<string, { runCount: number; totalTime: number }> =
+  accessor baselineStats: Map<string, { runCount: number; totalTime: number }> =
     new Map();
 
   @property({ attribute: false })
-  breakpoints: Set<string> = new Set();
+  accessor breakpoints: Set<string> = new Set();
 
   @state()
-  private selectedPatternIdx = 0;
+  private accessor selectedPatternIdx = 0;
 
   @state()
-  private selectedFileIdx = 0;
+  private accessor selectedFileIdx = 0;
 
   /** Index into the current line's entries for cycling through actions */
   @state()
-  private selectedEntryIdx = 0;
+  private accessor selectedEntryIdx = 0;
 
   /** Build lookup: file -> line -> LineAnnotation */
   private buildAnnotations(): Map<string, Map<number, LineAnnotation>> {

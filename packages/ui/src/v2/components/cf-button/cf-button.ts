@@ -56,7 +56,7 @@ export class CFButton extends BaseElement {
 
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  accessor theme: CFTheme = defaultTheme;
 
   constructor() {
     super();

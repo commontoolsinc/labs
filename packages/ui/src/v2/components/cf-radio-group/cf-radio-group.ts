@@ -164,7 +164,7 @@ export class CFRadioGroup extends BaseElement {
   // Theme consumption
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  accessor theme: CFTheme = defaultTheme;
 
   override firstUpdated() {
     // Initialize cell controller binding

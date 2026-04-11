@@ -180,23 +180,24 @@ export class XLoginView extends BaseView {
   `;
 
   @state()
-  private flow: AuthFlow | null = null;
+  private accessor flow: AuthFlow | null = null;
   @state()
-  private method: AuthMethod | null = null;
+  private accessor method: AuthMethod | null = null;
   @state()
-  private error: string | null = null;
+  private accessor error: string | null = null;
   @state()
-  private mnemonic: string | null = null;
+  private accessor mnemonic: string | null = null;
   @state()
-  private isProcessing = false;
+  private accessor isProcessing = false;
   @state()
-  private registrationSuccess = false;
+  private accessor registrationSuccess = false;
   @state()
-  private storedCredential: StoredCredential | null = getStoredCredential();
+  private accessor storedCredential: StoredCredential | null =
+    getStoredCredential();
   @state()
-  private copied = false;
+  private accessor copied = false;
   @state()
-  private keyStore?: KeyStore;
+  private accessor keyStore: KeyStore | undefined = undefined;
 
   private availableMethods: AuthMethod[] = [];
 

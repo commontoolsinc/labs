@@ -16,6 +16,7 @@ import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
+  defaultTheme,
 } from "../theme-context.ts";
 
 /**
@@ -231,26 +232,26 @@ export class CFChatMessage extends BaseElement {
   ];
 
   @property({ type: String, reflect: true })
-  declare role: "user" | "assistant";
+  override accessor role: "user" | "assistant" = "user";
 
   @property({ type: Object })
-  declare content: BuiltInLLMContent;
+  accessor content: BuiltInLLMContent = "";
 
   @property({ type: Boolean, reflect: true })
-  declare streaming: boolean;
+  accessor streaming = false;
 
   @property({ type: String })
-  declare avatar?: string;
+  accessor avatar: string | undefined = undefined;
 
   @property({ type: String })
-  declare name?: string;
+  accessor name: string | undefined = undefined;
 
   @property({ type: Boolean, reflect: true })
-  declare compact?: boolean;
+  accessor compact: boolean | undefined = undefined;
 
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  accessor theme: CFTheme = defaultTheme;
 
   constructor() {
     super();

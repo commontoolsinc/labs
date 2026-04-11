@@ -35,7 +35,7 @@ export class CFModalProvider extends LitElement {
 
   /** Provide the modal manager to descendants */
   @provide({ context: modalContext })
-  private _manager: ModalManager = this._createManager();
+  private accessor _manager: ModalManager = this._createManager();
 
   /** Stack of registered modals (topmost is last) */
   private _stack: ModalRegistration[] = [];

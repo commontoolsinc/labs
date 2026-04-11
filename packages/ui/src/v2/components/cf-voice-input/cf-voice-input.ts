@@ -262,31 +262,31 @@ export class CFVoiceInput extends BaseElement {
   ];
 
   @property({ attribute: false })
-  transcription:
+  accessor transcription:
     | CellHandle<TranscriptionData | null>
     | TranscriptionData
     | null = null;
 
   @property({ type: String })
-  recordingMode: "hold" | "toggle" = "hold";
+  accessor recordingMode: "hold" | "toggle" = "hold";
 
   @property({ type: Boolean })
-  autoTranscribe = true;
+  accessor autoTranscribe = true;
 
   @property({ type: Number })
-  maxDuration = 60;
+  accessor maxDuration = 60;
 
   @property({ type: Boolean })
-  showWaveform = true;
+  accessor showWaveform = true;
 
   @property({ type: Boolean })
-  disabled = false;
+  accessor disabled = false;
 
   /**
    * Internal recording state machine - prevents race conditions
    */
   @property({ type: String })
-  private _recordingState: RecordingState = "idle";
+  private accessor _recordingState: RecordingState = "idle";
 
   /** Derived property for template compatibility */
   private get isRecording(): boolean {
@@ -299,14 +299,14 @@ export class CFVoiceInput extends BaseElement {
   }
 
   @property({ type: Number })
-  private recordingDuration = 0;
+  private accessor recordingDuration = 0;
 
   @property({ type: String })
-  private errorMessage = "";
+  private accessor errorMessage = "";
 
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  accessor theme: CFTheme = defaultTheme;
 
   private _cellController = createCellController<TranscriptionData | null>(
     this,

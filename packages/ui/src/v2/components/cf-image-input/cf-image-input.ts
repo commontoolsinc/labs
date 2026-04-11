@@ -82,20 +82,20 @@ export interface ImageData extends FileData {
 export class CFImageInput extends CFFileInput {
   // Override default properties with image-specific defaults
   @property({ type: String })
-  override buttonText = "📷 Add Photo";
+  override accessor buttonText = "📷 Add Photo";
 
   @property({ type: String })
-  override accept = "image/*";
+  override accessor accept = "image/*";
 
   @property({ type: Number })
-  override maxSizeBytes = 5 * 1024 * 1024; // Default to 5MB for images
+  override accessor maxSizeBytes = 5 * 1024 * 1024; // Default to 5MB for images
 
   // Image-specific properties
   @property({ type: String })
-  capture?: "user" | "environment" | false;
+  accessor capture: "user" | "environment" | false | undefined = undefined;
 
   @property({ type: Boolean })
-  extractExif = false;
+  accessor extractExif = false;
 
   // Provide backward-compatible property alias
   get images(): ImageData[] | any {

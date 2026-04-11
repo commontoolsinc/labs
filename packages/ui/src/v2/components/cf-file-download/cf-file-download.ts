@@ -257,33 +257,33 @@ export class CFFileDownload extends BaseElement {
   declare allowAutosave: boolean;
 
   @state()
-  private _downloaded = false;
+  private accessor _downloaded = false;
 
   @state()
-  private _downloading = false;
+  private accessor _downloading = false;
 
   private _resetTimeout?: ReturnType<typeof setTimeout>;
 
   // Autosave state
   @state()
-  private _autosaveEnabled = false;
+  private accessor _autosaveEnabled = false;
 
   private _autosaveDirHandle: FileSystemDirectoryHandle | null = null;
   private _autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   @state()
-  private _isDirty = false;
+  private accessor _isDirty = false;
 
   private _lastSavedData: string | null = null;
 
   @state()
-  private _isSavingAutosave = false;
+  private accessor _isSavingAutosave = false;
 
   @state()
-  private _showNotAvailableTooltip = false;
+  private accessor _showNotAvailableTooltip = false;
 
   @state()
-  private _notAvailableMessage = "";
+  private accessor _notAvailableMessage = "";
 
   private _notAvailableTooltipTimeout?: ReturnType<typeof setTimeout>;
 

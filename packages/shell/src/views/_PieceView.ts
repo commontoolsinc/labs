@@ -30,7 +30,7 @@ export class XPieceView extends BaseView {
   `;
 
   @property({ attribute: false })
-  piece?: PieceController;
+  accessor piece: PieceController | undefined = undefined;
 
   override render() {
     if (!this.piece) {

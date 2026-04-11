@@ -11,6 +11,7 @@ import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
+  defaultTheme,
 } from "../theme-context.ts";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
@@ -373,20 +374,20 @@ export class CFMarkdown extends BaseElement {
   ];
 
   @property({ attribute: false })
-  declare content: CellHandle<string> | string;
+  accessor content: CellHandle<string> | string = "";
 
   @property({ type: String, reflect: true })
-  declare variant: MarkdownVariant;
+  accessor variant: MarkdownVariant = "default";
 
   @property({ type: Boolean, reflect: true })
-  declare streaming: boolean;
+  accessor streaming = false;
 
   @property({ type: Boolean, reflect: true })
-  declare compact: boolean;
+  accessor compact = false;
 
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  accessor theme: CFTheme = defaultTheme;
 
   private _unsubscribe: (() => void) | null = null;
 

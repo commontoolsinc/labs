@@ -55,7 +55,7 @@ export class CFSvg extends BaseElement {
   ];
 
   @property({ attribute: false })
-  declare content: CellHandle<string> | string;
+  accessor content: CellHandle<string> | string = "";
 
   private _unsubscribe: (() => void) | null = null;
 

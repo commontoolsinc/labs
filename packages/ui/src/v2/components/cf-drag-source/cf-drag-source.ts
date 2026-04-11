@@ -57,16 +57,16 @@ export class CFDragSource extends BaseElement {
   ];
 
   @property({ attribute: false })
-  cell?: CellHandle;
+  accessor cell: CellHandle | undefined = undefined;
 
   @property({ type: String })
-  type?: string;
+  accessor type: string | undefined = undefined;
 
   @property({ type: Boolean, reflect: true })
-  disabled?: boolean;
+  accessor disabled: boolean | undefined = undefined;
 
   @state()
-  private _resolvedCell?: CellHandle;
+  private accessor _resolvedCell: CellHandle | undefined = undefined;
 
   private _isDragging = false;
   private _isTracking = false;

@@ -70,7 +70,6 @@ const config: Config = {
         // `useDefineForClassFields` is critical when using Lit
         // with esbuild, even when not using decorators.
         useDefineForClassFields: false,
-        experimentalDecorators: true,
       },
     },
     logOverride: {

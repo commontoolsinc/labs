@@ -32,12 +32,12 @@ export class CFThemeProvider extends BaseElement {
 
   /** Partial or full theme object (pattern-style supported) */
   @property({ attribute: false })
-  theme: any = {};
+  accessor theme: any = {};
 
   /** Computed full theme that is provided to children */
   @provide({ context: cfThemeContext })
   @property({ attribute: false })
-  _computedTheme: CFTheme = defaultTheme;
+  accessor _computedTheme: CFTheme = defaultTheme;
 
   #unsubs: Array<() => void> = [];
 
