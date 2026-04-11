@@ -546,3 +546,28 @@ export default pattern<{ values: string[] }>(({ values }) => {
     );
   },
 );
+
+Deno.test(
+  "Pipeline regression: helper-owned IIFE local cell reads lower before use",
+  async () => {
+    const source = `import { pattern, UI, Writable } from "commonfabric";
+
+export default pattern<{ enabled: Writable<boolean> }>(({ enabled }) => ({
+  [UI]: <div>{(() => {
+    const raw = enabled.get();
+    return typeof raw === "boolean" ? raw : true;
+  })()}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assert(
+      !output.includes("const raw = enabled.get();"),
+      "expected the eager cell read to be lowered into a derive before the IIFE body uses it",
+    );
+    assertStringIncludes(output, "({ enabled }) => enabled.get()");
+  },
+);

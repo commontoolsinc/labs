@@ -91,9 +91,11 @@ export class PatternBuilder {
 
     // 1. Add explicitly registered parameters
     for (const param of this.parameters) {
+      const bindingName = param.bindingName ||
+        this.factory.createIdentifier(param.name);
       const propertyName = param.propertyName
         ? this.factory.createIdentifier(param.propertyName)
-        : (param.name !== (param.bindingName as any)?.text
+        : (param.name !== (bindingName as any)?.text
           ? this.factory.createIdentifier(param.name)
           : undefined);
 
@@ -101,10 +103,13 @@ export class PatternBuilder {
         this.factory.createBindingElement(
           undefined,
           propertyName,
-          param.bindingName || this.factory.createIdentifier(param.name),
+          bindingName,
           param.initializer,
         ),
       );
+      for (const name of extractBindingNames(bindingName)) {
+        this.usedBindingNames.add(name);
+      }
     }
 
     // 2. Add captures
