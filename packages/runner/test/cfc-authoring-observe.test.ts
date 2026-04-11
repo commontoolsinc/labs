@@ -124,7 +124,7 @@ describe("CFC authoring surface trust-sensitive claims", () => {
         files: [{
           name: "/main.tsx",
           contents: `/// <cts-enable />
-            import { lift, pattern } from "commontools";
+            import { lift, pattern } from "commonfabric";
             type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
             type WriteAuthorizedBy<T, Binding> = Cfc<T, { writeAuthorizedBy: Binding }>;
 

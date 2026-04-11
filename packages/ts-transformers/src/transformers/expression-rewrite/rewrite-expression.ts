@@ -3,7 +3,6 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   detectCallKind,
-  isInsideSafeCallbackWrapper,
   visitEachChildWithJsx,
 } from "../../ast/mod.ts";
 
@@ -44,6 +43,89 @@ function isSameReactiveContextBoundary(
   const targetInfo = context.getReactiveContext(target);
   return sourceInfo.kind === targetInfo.kind &&
     sourceInfo.owner === targetInfo.owner;
+}
+
+function hasSyntheticComputeCallbackAncestor(
+  node: ts.Node,
+  context: RewriteParams["context"],
+): boolean {
+  let current = node.parent;
+  while (current) {
+    if (
+      (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) &&
+      context.isSyntheticComputeCallback(current)
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isTransparentReceiverWrapper(node: ts.Node): boolean {
+  return ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isPartiallyEmittedExpression(node);
+}
+
+function getTransparentReceiverWrappedExpression(
+  node: ts.Node,
+): ts.Expression | undefined {
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isPartiallyEmittedExpression(node)
+  ) {
+    return node.expression;
+  }
+  return undefined;
+}
+
+function isArrayMethodReceiverExpression(node: ts.Node): boolean {
+  let current: ts.Node = node;
+  let parent = current.parent;
+  while (parent && isTransparentReceiverWrapper(parent)) {
+    if (getTransparentReceiverWrappedExpression(parent) !== current) {
+      return false;
+    }
+    current = parent;
+    parent = parent.parent;
+  }
+
+  if (
+    !parent ||
+    (
+      !ts.isPropertyAccessExpression(parent) &&
+      !ts.isElementAccessExpression(parent)
+    ) ||
+    parent.expression !== current
+  ) {
+    return false;
+  }
+
+  const call = parent.parent;
+  return !!call && ts.isCallExpression(call) && call.expression === parent &&
+    !!classifyArrayMethodCall(call);
+}
+
+function isInsideKnownSafeCallbackWrapper(
+  node: ts.Node,
+  context: RewriteParams["context"],
+): boolean {
+  const info = context.getReactiveContext(node);
+  if (info.kind === "compute" && isArrayMethodReceiverExpression(node)) {
+    return false;
+  }
+  return info.kind === "compute" &&
+    (info.owner !== "unknown" ||
+      context.isSyntheticComputeOwnedNode(node) ||
+      hasSyntheticComputeCallbackAncestor(node, context));
 }
 
 function rewriteChildExpressions(
@@ -100,7 +182,7 @@ function rewriteChildExpressions(
       if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
         // Skip wrapping if inside a safe callback wrapper (computed/derive/action/etc.)
         // This prevents double-wrapping expressions already in a reactive context
-        if (isInsideSafeCallbackWrapper(child, context.checker, context)) {
+        if (isInsideKnownSafeCallbackWrapper(child, context)) {
           return visitEachChildWithJsx(child, visitor, context.tsContext);
         }
 

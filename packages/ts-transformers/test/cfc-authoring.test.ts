@@ -43,7 +43,10 @@ function extractVariableInitializer(
           ts.isPropertyAccessExpression(node.initializer.expression) &&
           ts.isIdentifier(node.initializer.expression.expression) &&
           node.initializer.expression.expression.text === "__cfHelpers" &&
-          node.initializer.expression.name.text === "__ct_data" &&
+          (
+            node.initializer.expression.name.text === "__ct_data" ||
+            node.initializer.expression.name.text === "__cf_data"
+          ) &&
           node.initializer.arguments[0]
         ? node.initializer.arguments[0]
         : node.initializer;

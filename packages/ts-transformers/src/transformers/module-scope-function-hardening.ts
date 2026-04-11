@@ -192,34 +192,38 @@ function transformVariableStatement(
     (declaration) => {
       if (
         !ts.isIdentifier(declaration.name) ||
-        !declaration.initializer ||
-        !state.trustedBindingNames.has(declaration.name.text)
+        !declaration.initializer
       ) {
         return declaration;
       }
       const initializer = unwrapExpression(declaration.initializer);
-      if (
-        !ts.isCallExpression(initializer) && !isDirectFunctionExpression(
-          initializer,
-        )
-      ) {
+      const isTrustedBinding = state.trustedBindingNames.has(
+        declaration.name.text,
+      );
+      const isDirectFunction = isDirectFunctionExpression(initializer);
+      const isTrustedCallable = isTrustedBinding &&
+        (ts.isCallExpression(initializer) || isDirectFunction);
+
+      if (!isTrustedCallable && !isDirectFunction) {
         return declaration;
       }
 
       changed = true;
-      state.useBindingHelper();
-      postStatements.push(
-        factory.createExpressionStatement(
-          annotateBindingIdentifier(
-            factory.createIdentifier(declaration.name.text),
-            declaration.name.text,
-            factory,
-            state,
+      if (isTrustedCallable) {
+        state.useBindingHelper();
+        postStatements.push(
+          factory.createExpressionStatement(
+            annotateBindingIdentifier(
+              factory.createIdentifier(declaration.name.text),
+              declaration.name.text,
+              factory,
+              state,
+            ),
           ),
-        ),
-      );
-      const rewritten = declaration.initializer;
-      if (isDirectFunctionExpression(initializer)) {
+        );
+      }
+
+      if (isDirectFunction && isTrustedBinding) {
         state.useHelper();
         postStatements.push(
           factory.createExpressionStatement(
@@ -230,7 +234,19 @@ function transformVariableStatement(
             ),
           ),
         );
+        return declaration;
       }
+
+      let rewritten = declaration.initializer;
+      if (isDirectFunction) {
+        state.useHelper();
+        rewritten = wrapWithFunctionHardener(
+          declaration.initializer,
+          factory,
+          state.helperName,
+        );
+      }
+
       return factory.updateVariableDeclaration(
         declaration,
         declaration.name,

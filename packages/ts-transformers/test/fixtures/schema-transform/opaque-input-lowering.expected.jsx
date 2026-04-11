@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -6,11 +6,12 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import { __ctHelpers as __cfHelpers } from "commonfabric";
+import { __cfHelpers } from "commonfabric";
+/// <cts-enable />
 import { toSchema } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
-const __ctAmdHooks = undefined;
+const __cfAmdHooks = undefined;
 type Cfc<T, Meta> = T & {
     readonly __ct_cfc__?: Meta;
 };
@@ -23,7 +24,7 @@ type OpaqueInput<T, Spec extends true | {
 interface SecretPayload {
     token: OpaqueInput<string>;
 }
-const schema = __cfHelpers.__ct_data({
+const schema = __cfHelpers.__cf_data({
     type: "object",
     properties: {
         token: {
@@ -40,4 +41,4 @@ const schema = __cfHelpers.__ct_data({
 export default schema;
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

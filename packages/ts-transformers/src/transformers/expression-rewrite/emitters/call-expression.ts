@@ -6,6 +6,8 @@ import {
   classifyArrayMethodResultSinkReceiverChainCall,
   detectCallKind,
 } from "../../../ast/mod.ts";
+import { getCellKind } from "../../opaque-ref/opaque-ref.ts";
+import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
 
@@ -99,6 +101,31 @@ function shouldFilterNestedLocalsForCallWrapper(
 
   const receiverAnalysis = analyze(callee.expression);
   return receiverAnalysis.containsOpaqueRef;
+}
+
+function isCellGetTerminalCall(
+  expression: ts.CallExpression,
+  context: Parameters<Emitter>[0]["context"],
+): boolean {
+  if (classifyOpaquePathTerminalCall(expression) !== "get") {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return false;
+  }
+
+  try {
+    const receiverType = context.checker.getTypeAtLocation(callee.expression);
+    const cellKind = getCellKind(receiverType, context.checker);
+    return cellKind !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 export const emitCallExpression: Emitter = ({
@@ -222,6 +249,7 @@ export const emitCallExpression: Emitter = ({
         context,
         analyze,
       ),
+      allowDirectExpressionWrap: isCellGetTerminalCall(expression, context),
       preferDeriveWrapper: preferDeriveWrappers,
     },
   );

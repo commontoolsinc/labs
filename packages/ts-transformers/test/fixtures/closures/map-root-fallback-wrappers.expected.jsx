@@ -25,43 +25,13 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
         {(__cfHelpers.derive({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Item"
-                    }
-                }
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        }
-                    },
-                    required: ["id"]
-                }
-            }
+            type: "unknown"
         } as const satisfies __cfHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        }
-                    },
-                    required: ["id"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            type: "unknown"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            input: { items: items },
+            items: items
+        }, ({ input: { items }, items }) => items ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return <span data-inline-id={item.key("id")}>{item.key("id")}</span>;
         }, {
@@ -105,43 +75,13 @@ export default pattern((__cf_pattern_input) => {
             }
         } as const satisfies __cfHelpers.JSONSchema), {})}
         {(__cfHelpers.derive({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Item"
-                    }
-                }
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        }
-                    },
-                    required: ["id"]
-                }
-            }
+            type: "unknown"
         } as const satisfies __cfHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        }
-                    },
-                    required: ["id"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => (items as Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            type: "unknown"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            input: { items: items },
+            items: items
+        }, ({ input: { items }, items }) => (items as Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return (<span data-cast-id={item.key("id")}>{item.key("id")}</span>);
         }, {
@@ -185,43 +125,13 @@ export default pattern((__cf_pattern_input) => {
             }
         } as const satisfies __cfHelpers.JSONSchema), {})}
         {(__cfHelpers.derive({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Item"
-                    }
-                }
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        }
-                    },
-                    required: ["id"]
-                }
-            }
+            type: "unknown"
         } as const satisfies __cfHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        }
-                    },
-                    required: ["id"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => (items satisfies Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            type: "unknown"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            input: { items: items },
+            items: items
+        }, ({ input: { items }, items }) => (items satisfies Item[] | undefined) ?? [])).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return (<span data-satisfies-id={item.key("id")}>{item.key("id")}</span>);
         }, {

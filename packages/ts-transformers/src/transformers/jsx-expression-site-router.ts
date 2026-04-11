@@ -61,6 +61,7 @@ function transform(context: TransformationContext): ts.SourceFile {
           context,
           analyze,
           visit,
+          preferDeriveWrappers: true,
         });
         if (rewritten) {
           return context.factory.createJsxExpression(
@@ -81,6 +82,7 @@ function transform(context: TransformationContext): ts.SourceFile {
           context,
           analyze,
           visit,
+          preferDeriveWrappers: true,
         });
         if (rewritten) {
           return context.factory.createJsxExpression(

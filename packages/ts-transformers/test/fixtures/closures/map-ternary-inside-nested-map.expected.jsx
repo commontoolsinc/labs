@@ -113,41 +113,28 @@ export default pattern((__cf_pattern_input) => {
             const showInactive = __cf_pattern_input.key("params", "showInactive");
             return (<div>
               {/* Ternary in outer map, outside inner map - should also be ifElse */}
-              <strong>{__cfHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
+              <strong>{__cfHelpers.ifElse(true as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            tags: {
-                                type: "object",
-                                properties: {
-                                    length: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["length"]
-                            }
-                        },
-                        required: ["tags"]
-                    }
-                },
-                required: ["item"]
+                type: "unknown"
             } as const satisfies __cfHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, { item: {
+                type: "unknown"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                input: { item: {
+                        tags: {
+                            length: item.key("tags", "length")
+                        }
+                    } },
+                item: {
                     tags: {
                         length: item.key("tags", "length")
                     }
-                } }, ({ item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
+                }
+            }, ({ input: { item }, item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
               <ul>
                 {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const tag = __cf_pattern_input.key("element");
@@ -170,25 +157,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, showInactive, __cfHelpers.derive({
-                        type: "object",
-                        properties: {
-                            tag: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        },
-                        required: ["tag"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, { tag: {
-                            name: tag.key("name")
-                        } }, ({ tag }) => `(${tag.name})`), ""))}
+                    } as const satisfies __cfHelpers.JSONSchema, showInactive, `(${tag.key("name")})`, ""))}
                   </li>);
                 }, {
                     type: "object",
