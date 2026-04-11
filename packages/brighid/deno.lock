@@ -1,0 +1,21 @@
+{
+  "version": "3",
+  "packages": {
+    "specifiers": {
+      "jsr:@std/assert": "jsr:@std/assert@1.0.18",
+      "jsr:@std/internal@^1.0.12": "jsr:@std/internal@1.0.12"
+    },
+    "jsr": {
+      "@std/assert@1.0.18": {
+        "integrity": "270245e9c2c13b446286de475131dc688ca9abcd94fc5db41d43a219b34d1c78",
+        "dependencies": [
+          "jsr:@std/internal@^1.0.12"
+        ]
+      },
+      "@std/internal@1.0.12": {
+        "integrity": "972a634fd5bc34b242024402972cd5143eac68d8dffaca5eaa4dba30ce17b027"
+      }
+    }
+  },
+  "remote": {}
+}
