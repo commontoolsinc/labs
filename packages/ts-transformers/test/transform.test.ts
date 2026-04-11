@@ -6,6 +6,7 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { transformFiles } from "./utils.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 const fixture = `
 import { toSchema } from "commonfabric";
@@ -22,6 +23,35 @@ export { configSchema };
 `;
 
 describe("CommonFabricTransformerPipeline", () => {
+  it("adds stable variable causes to fresh reactive initializers", async () => {
+    const source = `
+import { cell, computed, Writable } from "commonfabric";
+
+export function make() {
+  const foo = Writable.of(1);
+  const bar = computed(() => foo.get() + 1);
+  const baz = cell(["a"]).map((value) => value.toUpperCase());
+  const already = Writable.of(2).for("manual");
+  return { already, bar, baz, foo };
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(
+      main,
+      'const foo = Writable.of(1, {\n        type: "number"\n    } as const satisfies __cfHelpers.JSONSchema).for("foo", true);',
+    );
+    assertStringIncludes(main, '.for("bar", true);');
+    assertStringIncludes(main, '.for("baz", true);');
+    assert(!main.includes('.for("already", true)'));
+  });
+
   it("transforms by default and supports cf-disable-transform opt-out", async () => {
     const source = `
 import { computed } from "commonfabric";
