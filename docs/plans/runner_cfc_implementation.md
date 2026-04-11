@@ -822,6 +822,31 @@ Implementation notes for spec update:
 - [x] Event-integrity labels are collected from the event target ancestry, so a
       trusted pattern can later bind rendered integrity-bearing data into the
       event attestation without introducing a parallel helper-specific policy
+- [x] Audience release is modeled as a family of trusted send/publish surfaces,
+      not one universal component: each surface should bind the visible
+      destination context (conversation, channel, public target, persistent
+      policy target) into the trusted pattern semantics
+- [x] Disclaimer-style gates such as fact-check, prompt-influence
+      acknowledgement, provenance review, and redaction warnings are modeled as
+      trusted surfaces that render the associated content and disclaimer under
+      the same `data-ui-pattern` ancestry, then require an additional
+      `data-ui-event-integrity` evidence label on the acknowledgement/release
+      event
+- [x] The current implemented boundary prevents trusted CFC writes/releases
+      from being authorized without the trusted disclaimer evidence; it does not
+      yet provide a general render-time declassification monitor that blocks
+      arbitrary untrusted UI from displaying labeled content outside a trusted
+      disclaimer surface
+- [x] Defer full render-time declassification enforcement to a follow-on
+      runtime/spec slice: define schema-side render/declassify obligations,
+      decide how UI render reads enter CFC prepare/digest inputs, and specify
+      how trusted disclaimer render evidence is checked before labeled content
+      can appear in an untrusted host tree
+- [x] Process-oriented examples such as song identification, scoped
+      availability contribution, and long-running upload are modeled as trusted
+      interactive kickoff surfaces with mocked middle steps; the surface should
+      authorize only the bounded derivative/process result, not raw recording
+      or raw private inputs
 
 ### 12. Content-Addressed Side-Path Hardening
 

@@ -1,9 +1,18 @@
 import { computed, handler, pattern, Stream, Writable } from "commonfabric";
 import {
+  TrustedAudiencePublishSurface,
+  TrustedConversationSendSurface,
   TrustedDirectCommandSurface,
+  TrustedDisclaimerAckSurface,
+  TrustedFactCheckGateSurface,
   TrustedForwardSurface,
+  TrustedLongRunningJobSurface,
+  TrustedProvenanceReviewSurface,
   TrustedSafeLinkSurface,
+  TrustedSaveDraftSurface,
   TrustedSaveSurface,
+  TrustedSharePolicySurface,
+  TrustedSongIdRecordingSurface,
 } from "./main.tsx";
 
 const setString = handler<void, { value: Writable<string>; next: string }>((
@@ -20,25 +29,68 @@ const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
 export default pattern(() => {
   const draftTitle = Writable.of("");
   const savedTitle = Writable.of("");
+  const draftBody = Writable.of("");
+  const savedBody = Writable.of("");
+
   const forwardSource = Writable.of(
     "Guest arrives late and needs the bell desk to hold room access after midnight. Raw inbox context stays in the note.",
   );
   const forwardRecipient = Writable.of("ops@hotel.example");
   const forwardPrepared = Writable.of("");
   const forwardedNote = Writable.of("");
+
   const commandInput = Writable.of(
     "Research Common Fabric launch updates and email a three-bullet brief to team@example.com",
   );
   const capturedCommand = Writable.of("");
   const preparedBrief = Writable.of("");
   const authorizedSend = Writable.of("");
+
   const sourceUrl = Writable.of(
     "https://source.example.com/private/report?token=secret-token&draft=internal",
   );
   const preparedSafeLink = Writable.of("");
   const releasedSafeLink = Writable.of("");
 
+  const conversationTitle = Writable.of("");
+  const audienceInput = Writable.of("");
+  const messageDraft = Writable.of("");
+  const sentMessage = Writable.of("");
+
+  const targetAudience = Writable.of("");
+  const publishSubject = Writable.of("");
+  const publishBody = Writable.of("");
+  const preparedAudiencePublish = Writable.of("");
+  const publishedAudiencePost = Writable.of("");
+
+  const disclaimerText = Writable.of("");
+  const acknowledgedDisclaimer = Writable.of("");
+
+  const provenanceText = Writable.of("");
+  const reviewedProvenance = Writable.of("");
+
+  const factCheckClaim = Writable.of("");
+  const factCheckResult = Writable.of("");
+
+  const songHint = Writable.of("");
+  const identifiedSongId = Writable.of("");
+
+  const policyAudience = Writable.of("");
+  const policyScope = Writable.of("");
+  const savedSharePolicy = Writable.of("");
+
+  const jobName = Writable.of("");
+  const jobStatus = Writable.of("");
+  const jobAuthorization = Writable.of("");
+  const jobCancellation = Writable.of("");
+
   const trustedSave = TrustedSaveSurface({ draftTitle, savedTitle });
+  const trustedSaveDraft = TrustedSaveDraftSurface({
+    draftTitle,
+    draftBody,
+    savedTitle,
+    savedBody,
+  });
   const trustedForward = TrustedForwardSurface({
     sourceNote: forwardSource,
     recipientInput: forwardRecipient,
@@ -56,12 +108,57 @@ export default pattern(() => {
     preparedSafeLink,
     releasedSafeLink,
   });
+  const trustedConversationSend = TrustedConversationSendSurface({
+    conversationTitle,
+    audienceInput,
+    messageDraft,
+    sentMessage,
+  });
+  const trustedAudiencePublish = TrustedAudiencePublishSurface({
+    targetAudience,
+    publishSubject,
+    publishBody,
+    preparedAudiencePublish,
+    publishedAudiencePost,
+  });
+  const trustedDisclaimerAck = TrustedDisclaimerAckSurface({
+    disclaimerText,
+    acknowledgedDisclaimer,
+  });
+  const trustedProvenanceReview = TrustedProvenanceReviewSurface({
+    provenanceText,
+    reviewedProvenance,
+  });
+  const trustedFactCheckGate = TrustedFactCheckGateSurface({
+    factCheckClaim,
+    factCheckResult,
+  });
+  const trustedSongIdRecording = TrustedSongIdRecordingSurface({
+    songHint,
+    identifiedSongId,
+  });
+  const trustedSharePolicy = TrustedSharePolicySurface({
+    policyAudience,
+    policyScope,
+    savedSharePolicy,
+  });
+  const trustedLongRunningJob = TrustedLongRunningJobSurface({
+    jobName,
+    jobStatus,
+    jobAuthorization,
+    jobCancellation,
+  });
 
   const action_set_title = setString({
     value: draftTitle,
     next: "Saved from trusted surface",
   });
   const action_save = trigger({ stream: trustedSave.save });
+  const action_set_draft_body = setString({
+    value: draftBody,
+    next: "Draft body",
+  });
+  const action_save_draft = trigger({ stream: trustedSaveDraft.saveDraft });
   const action_set_recipient = setString({
     value: forwardRecipient,
     next: "night-audit@hotel.example",
@@ -83,9 +180,93 @@ export default pattern(() => {
   const action_release_safe_link = trigger({
     stream: trustedSafeLink.releaseSafeLink,
   });
+  const action_set_conversation_title = setString({
+    value: conversationTitle,
+    next: "Project Sync",
+  });
+  const action_set_conversation_audience = setString({
+    value: audienceInput,
+    next: "product thread",
+  });
+  const action_set_message_draft = setString({
+    value: messageDraft,
+    next: "Ship the reviewed update only.",
+  });
+  const action_send_conversation = trigger({
+    stream: trustedConversationSend.sendMessage,
+  });
+  const action_set_publish_audience = setString({
+    value: targetAudience,
+    next: "public",
+  });
+  const action_set_publish_subject = setString({
+    value: publishSubject,
+    next: "Release note",
+  });
+  const action_set_publish_body = setString({
+    value: publishBody,
+    next: "Summarize the trusted review before publish.",
+  });
+  const action_prepare_audience_publish = trigger({
+    stream: trustedAudiencePublish.prepareAudiencePublish,
+  });
+  const action_publish_audience = trigger({
+    stream: trustedAudiencePublish.publishAudiencePost,
+  });
+  const action_set_disclaimer = setString({
+    value: disclaimerText,
+    next: "Disclosure before use is required.",
+  });
+  const action_ack_disclaimer = trigger({
+    stream: trustedDisclaimerAck.acknowledgeDisclaimer,
+  });
+  const action_set_provenance = setString({
+    value: provenanceText,
+    next: "Rendered provenance from trusted source.",
+  });
+  const action_review_provenance = trigger({
+    stream: trustedProvenanceReview.reviewProvenance,
+  });
+  const action_set_fact_check_claim = setString({
+    value: factCheckClaim,
+    next: "Claim checked against trusted facts.",
+  });
+  const action_release_fact_check = trigger({
+    stream: trustedFactCheckGate.releaseFactCheckGate,
+  });
+  const action_set_song_hint = setString({
+    value: songHint,
+    next: "Midnight Bloom",
+  });
+  const action_record_song_id = trigger({
+    stream: trustedSongIdRecording.recordSongId,
+  });
+  const action_set_policy_audience = setString({
+    value: policyAudience,
+    next: "team",
+  });
+  const action_set_policy_scope = setString({
+    value: policyScope,
+    next: "share-only",
+  });
+  const action_save_policy = trigger({
+    stream: trustedSharePolicy.saveSharePolicy,
+  });
+  const action_set_job_name = setString({
+    value: jobName,
+    next: "nightly export",
+  });
+  const action_start_job = trigger({ stream: trustedLongRunningJob.startJob });
+  const action_cancel_job = trigger({
+    stream: trustedLongRunningJob.cancelJob,
+  });
 
   const assert_saved = computed(() =>
     savedTitle.get() === "Saved from trusted surface"
+  );
+  const assert_saved_draft = computed(() =>
+    savedTitle.get() === "Saved from trusted surface" &&
+    savedBody.get() === "Draft body"
   );
   const assert_forward_prepared = computed(() =>
     forwardPrepared.get() ===
@@ -114,12 +295,52 @@ export default pattern(() => {
     releasedSafeLink.get() ===
       "Released safe link https://source.example.com/private/report?view=summary"
   );
+  const assert_conversation_sent = computed(() =>
+    sentMessage.get() ===
+      "Sent in Project Sync to product thread: Ship the reviewed update only."
+  );
+  const assert_audience_prepared = computed(() =>
+    preparedAudiencePublish.get() ===
+      "Prepared publish for public: Release note — Summarize the trusted review before publish."
+  );
+  const assert_audience_published = computed(() =>
+    publishedAudiencePost.get() === preparedAudiencePublish.get()
+  );
+  const assert_disclaimer_acknowledged = computed(() =>
+    acknowledgedDisclaimer.get() ===
+      "Acknowledged trusted disclaimer: Disclosure before use is required."
+  );
+  const assert_provenance_reviewed = computed(() =>
+    reviewedProvenance.get() ===
+      "Reviewed provenance: Rendered provenance from trusted source."
+  );
+  const assert_fact_check_released = computed(() =>
+    factCheckResult.get() ===
+      "Fact-check gate opened for: Claim checked against trusted facts."
+  );
+  const assert_song_id_recorded = computed(() =>
+    identifiedSongId.get() === "Mock song id: midnight-bloom"
+  );
+  const assert_share_policy_saved = computed(() =>
+    savedSharePolicy.get() === "Share policy saved for team (share-only)"
+  );
+  const assert_job_authorized = computed(() =>
+    jobStatus.get() === "Running" &&
+    jobAuthorization.get() === "Authorized long-running job: nightly export"
+  );
+  const assert_job_cancelled = computed(() =>
+    jobStatus.get() === "Cancelled" &&
+    jobCancellation.get() === "Cancelled long-running job: nightly export"
+  );
 
   return {
     tests: [
       { action: action_set_title },
       { action: action_save },
       { assertion: assert_saved },
+      { action: action_set_draft_body },
+      { action: action_save_draft },
+      { assertion: assert_saved_draft },
       { action: action_set_recipient },
       { action: action_prepare_forward },
       { assertion: assert_forward_prepared },
@@ -135,10 +356,52 @@ export default pattern(() => {
       { assertion: assert_safe_link_prepared },
       { action: action_release_safe_link },
       { assertion: assert_safe_link_released },
+      { action: action_set_conversation_title },
+      { action: action_set_conversation_audience },
+      { action: action_set_message_draft },
+      { action: action_send_conversation },
+      { assertion: assert_conversation_sent },
+      { action: action_set_publish_audience },
+      { action: action_set_publish_subject },
+      { action: action_set_publish_body },
+      { action: action_prepare_audience_publish },
+      { assertion: assert_audience_prepared },
+      { action: action_publish_audience },
+      { assertion: assert_audience_published },
+      { action: action_set_disclaimer },
+      { action: action_ack_disclaimer },
+      { assertion: assert_disclaimer_acknowledged },
+      { action: action_set_provenance },
+      { action: action_review_provenance },
+      { assertion: assert_provenance_reviewed },
+      { action: action_set_fact_check_claim },
+      { action: action_release_fact_check },
+      { assertion: assert_fact_check_released },
+      { action: action_set_song_hint },
+      { action: action_record_song_id },
+      { assertion: assert_song_id_recorded },
+      { action: action_set_policy_audience },
+      { action: action_set_policy_scope },
+      { action: action_save_policy },
+      { assertion: assert_share_policy_saved },
+      { action: action_set_job_name },
+      { action: action_start_job },
+      { assertion: assert_job_authorized },
+      { action: action_cancel_job },
+      { assertion: assert_job_cancelled },
     ],
     trustedSave,
+    trustedSaveDraft,
     trustedForward,
     trustedDirect,
     trustedSafeLink,
+    trustedConversationSend,
+    trustedAudiencePublish,
+    trustedDisclaimerAck,
+    trustedProvenanceReview,
+    trustedFactCheckGate,
+    trustedSongIdRecording,
+    trustedSharePolicy,
+    trustedLongRunningJob,
   };
 });
