@@ -379,6 +379,26 @@ export class DomApplicator {
     // Set the CellHandle on the element's property
     // Custom elements like cf-input and cf-checkbox expect this
     (node as any)[propName] = cellHandle;
+    this.notifyBoundProperty(node, propName);
+  }
+
+  private notifyBoundProperty(
+    node: HTMLElement,
+    propName: string,
+  ): void {
+    const element = node as HTMLElement & {
+      requestUpdate?: (name?: PropertyKey, oldValue?: unknown) => void;
+    };
+
+    element.requestUpdate?.(propName, undefined);
+
+    const tagName = element.localName ?? element.tagName?.toLowerCase();
+    if (!tagName || !tagName.includes("-")) {
+      return;
+    }
+    void globalThis.customElements?.whenDefined(tagName).then(() => {
+      element.requestUpdate?.(propName, undefined);
+    });
   }
 
   private insertChild(

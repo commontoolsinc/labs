@@ -1,20 +1,14 @@
 import {
+  Cell,
   computed,
   handler,
+  lift,
   NAME,
   pattern,
   Stream,
   UI,
   Writable,
 } from "commonfabric";
-import {
-  TrustedDisclaimerAckSurface,
-  type TrustedDisclaimerAckSurfaceOutput,
-  TrustedFactCheckGateSurface,
-  type TrustedFactCheckGateSurfaceOutput,
-  TrustedProvenanceReviewSurface,
-  type TrustedProvenanceReviewSurfaceOutput,
-} from "../cfc-trusted-surfaces/main.tsx";
 
 type DisclaimerHostInput = {
   title: Writable<string>;
@@ -54,21 +48,152 @@ type DisclosureExampleOutput = {
   [UI]: unknown;
   content: string;
   disclaimerText?: string;
-  acknowledgedDisclaimer?: TrustedDisclaimerAckSurfaceOutput[
-    "acknowledgedDisclaimer"
-  ];
+  acknowledgedDisclaimer?: string;
   provenanceText?: string;
-  reviewedProvenance?: TrustedProvenanceReviewSurfaceOutput[
-    "reviewedProvenance"
-  ];
+  reviewedProvenance?: string;
   factCheckClaim?: string;
-  factCheckResult?: TrustedFactCheckGateSurfaceOutput["factCheckResult"];
+  factCheckResult?: string;
   fakeStatus: string;
-  acknowledgeDisclaimer?: Stream<void>;
-  reviewProvenance?: Stream<void>;
-  releaseFactCheckGate?: Stream<void>;
   triggerLookalike: Stream<void>;
 };
+
+const TEXT_SCHEMA = { type: "string" } as const;
+
+const LABELLED_PROMPT_INFLUENCE_SCHEMA = {
+  type: "string",
+  ifc: { classification: ["prompt-influence"] },
+} as const;
+
+const LABELLED_SOURCE_PROVENANCE_SCHEMA = {
+  type: "string",
+  ifc: { classification: ["source-provenance"] },
+} as const;
+
+const LABELLED_FACT_CHECK_SCHEMA = {
+  type: "string",
+  ifc: { classification: ["fact-check-required"] },
+} as const;
+
+const LABELLED_PROMPT_INFLUENCE_CELL_SCHEMA = {
+  ...LABELLED_PROMPT_INFLUENCE_SCHEMA,
+  asCell: true,
+} as const;
+
+const LABELLED_SOURCE_PROVENANCE_CELL_SCHEMA = {
+  ...LABELLED_SOURCE_PROVENANCE_SCHEMA,
+  asCell: true,
+} as const;
+
+const LABELLED_FACT_CHECK_CELL_SCHEMA = {
+  ...LABELLED_FACT_CHECK_SCHEMA,
+  asCell: true,
+} as const;
+
+const LABELLED_CONTENT_ARGUMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    id: TEXT_SCHEMA,
+    content: TEXT_SCHEMA,
+  },
+  required: ["id", "content"],
+} as const;
+
+const makePromptInfluenceContent = lift(
+  LABELLED_CONTENT_ARGUMENT_SCHEMA,
+  LABELLED_PROMPT_INFLUENCE_CELL_SCHEMA,
+  (input: { id: string; content: string }) =>
+    Cell.for(input.id).asSchema(LABELLED_PROMPT_INFLUENCE_SCHEMA).set(
+      input.content,
+    ),
+);
+
+const makeSourceProvenanceContent = lift(
+  LABELLED_CONTENT_ARGUMENT_SCHEMA,
+  LABELLED_SOURCE_PROVENANCE_CELL_SCHEMA,
+  (input: { id: string; content: string }) =>
+    Cell.for(input.id).asSchema(LABELLED_SOURCE_PROVENANCE_SCHEMA).set(
+      input.content,
+    ),
+);
+
+const makeFactCheckContent = lift(
+  LABELLED_CONTENT_ARGUMENT_SCHEMA,
+  LABELLED_FACT_CHECK_CELL_SCHEMA,
+  (input: { id: string; content: string }) =>
+    Cell.for(input.id).asSchema(LABELLED_FACT_CHECK_SCHEMA).set(input.content),
+);
+
+const DISCLAIMER_HOST_ARGUMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: TEXT_SCHEMA,
+    summary: TEXT_SCHEMA,
+    content: LABELLED_PROMPT_INFLUENCE_CELL_SCHEMA,
+    disclaimerText: TEXT_SCHEMA,
+    acknowledgedDisclaimer: TEXT_SCHEMA,
+    fakeButton: TEXT_SCHEMA,
+    fakeMessage: TEXT_SCHEMA,
+    fakeStatus: TEXT_SCHEMA,
+  },
+  required: [
+    "title",
+    "summary",
+    "content",
+    "disclaimerText",
+    "acknowledgedDisclaimer",
+    "fakeButton",
+    "fakeMessage",
+    "fakeStatus",
+  ],
+} as const;
+
+const PROVENANCE_HOST_ARGUMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: TEXT_SCHEMA,
+    summary: TEXT_SCHEMA,
+    content: LABELLED_SOURCE_PROVENANCE_CELL_SCHEMA,
+    provenanceText: TEXT_SCHEMA,
+    reviewedProvenance: TEXT_SCHEMA,
+    fakeButton: TEXT_SCHEMA,
+    fakeMessage: TEXT_SCHEMA,
+    fakeStatus: TEXT_SCHEMA,
+  },
+  required: [
+    "title",
+    "summary",
+    "content",
+    "provenanceText",
+    "reviewedProvenance",
+    "fakeButton",
+    "fakeMessage",
+    "fakeStatus",
+  ],
+} as const;
+
+const FACT_CHECK_HOST_ARGUMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: TEXT_SCHEMA,
+    summary: TEXT_SCHEMA,
+    content: LABELLED_FACT_CHECK_CELL_SCHEMA,
+    factCheckClaim: TEXT_SCHEMA,
+    factCheckResult: TEXT_SCHEMA,
+    fakeButton: TEXT_SCHEMA,
+    fakeMessage: TEXT_SCHEMA,
+    fakeStatus: TEXT_SCHEMA,
+  },
+  required: [
+    "title",
+    "summary",
+    "content",
+    "factCheckClaim",
+    "factCheckResult",
+    "fakeButton",
+    "fakeMessage",
+    "fakeStatus",
+  ],
+} as const;
 
 const setLookalikeStatus = handler<
   void,
@@ -91,10 +216,6 @@ export const TrustedDisclaimerAckHost = pattern<
     fakeMessage,
     fakeStatus,
   }) => {
-    const trustedSurface = TrustedDisclaimerAckSurface({
-      disclaimerText,
-      acknowledgedDisclaimer,
-    });
     const triggerLookalike = setLookalikeStatus({
       fakeStatus,
       fakeMessage,
@@ -115,7 +236,23 @@ export const TrustedDisclaimerAckHost = pattern<
                     <div>{content}</div>
                   </cf-vstack>
                 </cf-card>
-                {trustedSurface}
+                <cf-card data-ui-disclosure-kind="trusted-label-disclosure">
+                  <cf-vstack slot="content" gap="2">
+                    <cf-heading level={3}>
+                      Trusted label disclosure
+                    </cf-heading>
+                    <cf-label>
+                      The trusted disclosure is rendered with the content label;
+                      no acknowledgement click is required.
+                    </cf-label>
+                    <cf-label>{disclaimerText}</cf-label>
+                    <cf-cfc-label
+                      className="trusted-disclaimer-label"
+                      data-cfc-label-surface="prompt-influence"
+                      $value={content}
+                    />
+                  </cf-vstack>
+                </cf-card>
                 <cf-card>
                   <cf-vstack slot="content" gap="2">
                     <cf-label>Lookalike host control</cf-label>
@@ -132,12 +269,12 @@ export const TrustedDisclaimerAckHost = pattern<
       ),
       content,
       disclaimerText,
-      acknowledgedDisclaimer: trustedSurface.acknowledgedDisclaimer,
+      acknowledgedDisclaimer,
       fakeStatus,
-      acknowledgeDisclaimer: trustedSurface.acknowledgeDisclaimer,
       triggerLookalike,
     };
   },
+  DISCLAIMER_HOST_ARGUMENT_SCHEMA,
 );
 
 export const TrustedProvenanceReviewHost = pattern<
@@ -154,10 +291,6 @@ export const TrustedProvenanceReviewHost = pattern<
     fakeMessage,
     fakeStatus,
   }) => {
-    const trustedSurface = TrustedProvenanceReviewSurface({
-      provenanceText,
-      reviewedProvenance,
-    });
     const triggerLookalike = setLookalikeStatus({
       fakeStatus,
       fakeMessage,
@@ -178,7 +311,23 @@ export const TrustedProvenanceReviewHost = pattern<
                     <div>{content}</div>
                   </cf-vstack>
                 </cf-card>
-                {trustedSurface}
+                <cf-card data-ui-disclosure-kind="trusted-label-disclosure">
+                  <cf-vstack slot="content" gap="2">
+                    <cf-heading level={3}>
+                      Trusted provenance disclosure
+                    </cf-heading>
+                    <cf-label>
+                      Provenance is rendered as label context next to the
+                      content; no provenance review click is required.
+                    </cf-label>
+                    <cf-label>{provenanceText}</cf-label>
+                    <cf-cfc-label
+                      className="trusted-disclaimer-label"
+                      data-cfc-label-surface="source-provenance"
+                      $value={content}
+                    />
+                  </cf-vstack>
+                </cf-card>
                 <cf-card>
                   <cf-vstack slot="content" gap="2">
                     <cf-label>Lookalike host provenance card</cf-label>
@@ -195,12 +344,12 @@ export const TrustedProvenanceReviewHost = pattern<
       ),
       content,
       provenanceText,
-      reviewedProvenance: trustedSurface.reviewedProvenance,
+      reviewedProvenance,
       fakeStatus,
-      reviewProvenance: trustedSurface.reviewProvenance,
       triggerLookalike,
     };
   },
+  PROVENANCE_HOST_ARGUMENT_SCHEMA,
 );
 
 export const TrustedFactCheckGateHost = pattern<
@@ -217,10 +366,6 @@ export const TrustedFactCheckGateHost = pattern<
     fakeMessage,
     fakeStatus,
   }) => {
-    const trustedSurface = TrustedFactCheckGateSurface({
-      factCheckClaim,
-      factCheckResult,
-    });
     const triggerLookalike = setLookalikeStatus({
       fakeStatus,
       fakeMessage,
@@ -241,7 +386,23 @@ export const TrustedFactCheckGateHost = pattern<
                     <div>{content}</div>
                   </cf-vstack>
                 </cf-card>
-                {trustedSurface}
+                <cf-card data-ui-disclosure-kind="trusted-label-disclosure">
+                  <cf-vstack slot="content" gap="2">
+                    <cf-heading level={3}>
+                      Trusted fact-check disclosure
+                    </cf-heading>
+                    <cf-label>
+                      The fact-check label is shown with the claim; no approval
+                      click is required for this disclosure demo.
+                    </cf-label>
+                    <cf-label>{factCheckClaim}</cf-label>
+                    <cf-cfc-label
+                      className="trusted-disclaimer-label"
+                      data-cfc-label-surface="fact-check-required"
+                      $value={content}
+                    />
+                  </cf-vstack>
+                </cf-card>
                 <cf-card>
                   <cf-vstack slot="content" gap="2">
                     <cf-label>Lookalike host fact-check card</cf-label>
@@ -258,12 +419,12 @@ export const TrustedFactCheckGateHost = pattern<
       ),
       content,
       factCheckClaim,
-      factCheckResult: trustedSurface.factCheckResult,
+      factCheckResult,
       fakeStatus,
-      releaseFactCheckGate: trustedSurface.releaseFactCheckGate,
       triggerLookalike,
     };
   },
+  FACT_CHECK_HOST_ARGUMENT_SCHEMA,
 );
 
 export const DisclaimerPromptRoutingAckExample = pattern<
@@ -275,7 +436,10 @@ export const DisclaimerPromptRoutingAckExample = pattern<
     summary: Writable.of(
       "A routing-sensitive disclaimer must be rendered before the recipient can be acknowledged.",
     ),
-    content: Writable.of("Route this note to the verified recipient only."),
+    content: makePromptInfluenceContent({
+      id: "disclaimer-prompt-routing",
+      content: "Route this note to the verified recipient only.",
+    }) as Writable<string>,
     disclaimerText: Writable.of(
       "Routing can be influenced by prompt-derived text.",
     ),
@@ -294,7 +458,6 @@ export const DisclaimerPromptRoutingAckExample = pattern<
     disclaimerText: host.disclaimerText,
     acknowledgedDisclaimer: host.acknowledgedDisclaimer,
     fakeStatus: host.fakeStatus,
-    acknowledgeDisclaimer: host.acknowledgeDisclaimer,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -308,7 +471,10 @@ export const DisclaimerAIGeneratedContentAckExample = pattern<
     summary: Writable.of(
       "An AI-generated disclosure is rendered alongside the content before the user can acknowledge it.",
     ),
-    content: Writable.of("Draft social copy for the launch announcement."),
+    content: makePromptInfluenceContent({
+      id: "disclaimer-ai-generated-content",
+      content: "Draft social copy for the launch announcement.",
+    }) as Writable<string>,
     disclaimerText: Writable.of(
       "This content was generated by AI and may need review.",
     ),
@@ -327,7 +493,6 @@ export const DisclaimerAIGeneratedContentAckExample = pattern<
     disclaimerText: host.disclaimerText,
     acknowledgedDisclaimer: host.acknowledgedDisclaimer,
     fakeStatus: host.fakeStatus,
-    acknowledgeDisclaimer: host.acknowledgeDisclaimer,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -341,7 +506,10 @@ export const DisclaimerMedicalInfoAckExample = pattern<
     summary: Writable.of(
       "An informational disclaimer is bound to the content before the acknowledgment can produce the trusted output.",
     ),
-    content: Writable.of("Medication summary and dosage reminder."),
+    content: makePromptInfluenceContent({
+      id: "disclaimer-medical-info",
+      content: "Medication summary and dosage reminder.",
+    }) as Writable<string>,
     disclaimerText: Writable.of("Informational only. Not medical advice."),
     acknowledgedDisclaimer: Writable.of(""),
     fakeButton: Writable.of("Fake medical ack"),
@@ -356,7 +524,6 @@ export const DisclaimerMedicalInfoAckExample = pattern<
     disclaimerText: host.disclaimerText,
     acknowledgedDisclaimer: host.acknowledgedDisclaimer,
     fakeStatus: host.fakeStatus,
-    acknowledgeDisclaimer: host.acknowledgeDisclaimer,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -370,9 +537,10 @@ export const DisclaimerInfluenceDisclosureAckExample = pattern<
     summary: Writable.of(
       "A persuasion/influence disclosure is rendered before the associated recommendation can be acknowledged.",
     ),
-    content: Writable.of(
-      "Recommendation copy generated by a campaign-tuned assistant.",
-    ),
+    content: makePromptInfluenceContent({
+      id: "disclaimer-influence-disclosure",
+      content: "Recommendation copy generated by a campaign-tuned assistant.",
+    }) as Writable<string>,
     disclaimerText: Writable.of(
       "This recommendation may be influenced by campaign goals.",
     ),
@@ -391,7 +559,6 @@ export const DisclaimerInfluenceDisclosureAckExample = pattern<
     disclaimerText: host.disclaimerText,
     acknowledgedDisclaimer: host.acknowledgedDisclaimer,
     fakeStatus: host.fakeStatus,
-    acknowledgeDisclaimer: host.acknowledgeDisclaimer,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -405,9 +572,10 @@ export const DisclaimerRedactedSummaryAckExample = pattern<
     summary: Writable.of(
       "The host shows a redacted derivative only after the trusted disclaimer is rendered with it.",
     ),
-    content: Writable.of(
-      "Redacted incident summary for the internal audience.",
-    ),
+    content: makePromptInfluenceContent({
+      id: "disclaimer-redacted-summary",
+      content: "Redacted incident summary for the internal audience.",
+    }) as Writable<string>,
     disclaimerText: Writable.of("Redacted from a more detailed report."),
     acknowledgedDisclaimer: Writable.of(""),
     fakeButton: Writable.of("Fake redaction ack"),
@@ -424,7 +592,6 @@ export const DisclaimerRedactedSummaryAckExample = pattern<
     disclaimerText: host.disclaimerText,
     acknowledgedDisclaimer: host.acknowledgedDisclaimer,
     fakeStatus: host.fakeStatus,
-    acknowledgeDisclaimer: host.acknowledgeDisclaimer,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -438,9 +605,10 @@ export const DisclaimerConfidentialSourceAckExample = pattern<
     summary: Writable.of(
       "A confidentiality disclaimer is required before the host can acknowledge the source-restricted content.",
     ),
-    content: Writable.of(
-      "Sensitive source excerpt for internal circulation only.",
-    ),
+    content: makePromptInfluenceContent({
+      id: "disclaimer-confidential-source",
+      content: "Sensitive source excerpt for internal circulation only.",
+    }) as Writable<string>,
     disclaimerText: Writable.of(
       "Do not redistribute outside the approved group.",
     ),
@@ -459,7 +627,6 @@ export const DisclaimerConfidentialSourceAckExample = pattern<
     disclaimerText: host.disclaimerText,
     acknowledgedDisclaimer: host.acknowledgedDisclaimer,
     fakeStatus: host.fakeStatus,
-    acknowledgeDisclaimer: host.acknowledgeDisclaimer,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -473,7 +640,10 @@ export const DisclaimerPublicPostAckExample = pattern<
     summary: Writable.of(
       "A publication disclaimer is rendered with the post before acknowledgment is possible.",
     ),
-    content: Writable.of("Draft public post for the product launch."),
+    content: makePromptInfluenceContent({
+      id: "disclaimer-public-post",
+      content: "Draft public post for the product launch.",
+    }) as Writable<string>,
     disclaimerText: Writable.of(
       "Public-facing content. Review for accuracy before publish.",
     ),
@@ -492,7 +662,6 @@ export const DisclaimerPublicPostAckExample = pattern<
     disclaimerText: host.disclaimerText,
     acknowledgedDisclaimer: host.acknowledgedDisclaimer,
     fakeStatus: host.fakeStatus,
-    acknowledgeDisclaimer: host.acknowledgeDisclaimer,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -506,7 +675,10 @@ export const DisclaimerSourceProvenanceReviewExample = pattern<
     summary: Writable.of(
       "A provenance review surface binds the source and the review note together before releasing the reviewed text.",
     ),
-    content: Writable.of("Shared source excerpt for the design review."),
+    content: makeSourceProvenanceContent({
+      id: "disclaimer-source-provenance",
+      content: "Shared source excerpt for the design review.",
+    }) as Writable<string>,
     provenanceText: Writable.of(
       "Source provenance: shared by the project owner.",
     ),
@@ -525,7 +697,6 @@ export const DisclaimerSourceProvenanceReviewExample = pattern<
     provenanceText: host.provenanceText,
     reviewedProvenance: host.reviewedProvenance,
     fakeStatus: host.fakeStatus,
-    reviewProvenance: host.reviewProvenance,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -539,7 +710,10 @@ export const DisclaimerCitationProvenanceReviewExample = pattern<
     summary: Writable.of(
       "The trusted provenance review is paired with citations before the host can claim the content is review-backed.",
     ),
-    content: Writable.of("Claim that requires citation provenance."),
+    content: makeSourceProvenanceContent({
+      id: "disclaimer-citation-provenance",
+      content: "Claim that requires citation provenance.",
+    }) as Writable<string>,
     provenanceText: Writable.of("Citations verified against the source list."),
     reviewedProvenance: Writable.of(""),
     fakeButton: Writable.of("Fake citation review"),
@@ -556,7 +730,6 @@ export const DisclaimerCitationProvenanceReviewExample = pattern<
     provenanceText: host.provenanceText,
     reviewedProvenance: host.reviewedProvenance,
     fakeStatus: host.fakeStatus,
-    reviewProvenance: host.reviewProvenance,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -570,7 +743,10 @@ export const DisclaimerPublicPostProvenanceReviewExample = pattern<
     summary: Writable.of(
       "The public-post example exposes provenance review before release to the wider audience.",
     ),
-    content: Writable.of("Public status update draft."),
+    content: makeSourceProvenanceContent({
+      id: "disclaimer-public-post-provenance",
+      content: "Public status update draft.",
+    }) as Writable<string>,
     provenanceText: Writable.of(
       "Provenance review required before public release.",
     ),
@@ -589,7 +765,6 @@ export const DisclaimerPublicPostProvenanceReviewExample = pattern<
     provenanceText: host.provenanceText,
     reviewedProvenance: host.reviewedProvenance,
     fakeStatus: host.fakeStatus,
-    reviewProvenance: host.reviewProvenance,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -603,7 +778,10 @@ export const DisclaimerFactCheckBriefExample = pattern<
     summary: Writable.of(
       "A fact-check gate is rendered with the brief before the trusted approved output is produced.",
     ),
-    content: Writable.of("External brief about launch performance."),
+    content: makeFactCheckContent({
+      id: "disclaimer-fact-check-brief",
+      content: "External brief about launch performance.",
+    }) as Writable<string>,
     factCheckClaim: Writable.of("External brief about launch performance."),
     factCheckResult: Writable.of(""),
     fakeButton: Writable.of("Fake fact-check"),
@@ -620,7 +798,6 @@ export const DisclaimerFactCheckBriefExample = pattern<
     factCheckClaim: host.factCheckClaim,
     factCheckResult: host.factCheckResult,
     fakeStatus: host.fakeStatus,
-    releaseFactCheckGate: host.releaseFactCheckGate,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -634,7 +811,10 @@ export const DisclaimerFactCheckReleaseExample = pattern<
     summary: Writable.of(
       "The release gate ensures the verified brief is shown with its disclaimer before approval.",
     ),
-    content: Writable.of("Release note for the launch checklist."),
+    content: makeFactCheckContent({
+      id: "disclaimer-fact-check-release",
+      content: "Release note for the launch checklist.",
+    }) as Writable<string>,
     factCheckClaim: Writable.of("Release note for the launch checklist."),
     factCheckResult: Writable.of(""),
     fakeButton: Writable.of("Fake release gate"),
@@ -651,7 +831,6 @@ export const DisclaimerFactCheckReleaseExample = pattern<
     factCheckClaim: host.factCheckClaim,
     factCheckResult: host.factCheckResult,
     fakeStatus: host.fakeStatus,
-    releaseFactCheckGate: host.releaseFactCheckGate,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -665,7 +844,10 @@ export const DisclaimerFactCheckClaimsExample = pattern<
     summary: Writable.of(
       "A claims gate sits next to the drafted claim before the trusted approval output can change.",
     ),
-    content: Writable.of("Claim about the incident response timeline."),
+    content: makeFactCheckContent({
+      id: "disclaimer-fact-check-claims",
+      content: "Claim about the incident response timeline.",
+    }) as Writable<string>,
     factCheckClaim: Writable.of("Claim about the incident response timeline."),
     factCheckResult: Writable.of(""),
     fakeButton: Writable.of("Fake claims gate"),
@@ -682,7 +864,6 @@ export const DisclaimerFactCheckClaimsExample = pattern<
     factCheckClaim: host.factCheckClaim,
     factCheckResult: host.factCheckResult,
     fakeStatus: host.fakeStatus,
-    releaseFactCheckGate: host.releaseFactCheckGate,
     triggerLookalike: host.triggerLookalike,
   };
 });
@@ -696,7 +877,10 @@ export const DisclaimerLookalikeHostExample = pattern<
     summary: Writable.of(
       "This example renders a visible host control that looks similar but does not call the trusted acknowledgement stream.",
     ),
-    content: Writable.of("Host-controlled disclaimer demo."),
+    content: makePromptInfluenceContent({
+      id: "disclaimer-lookalike-host",
+      content: "Host-controlled disclaimer demo.",
+    }) as Writable<string>,
     disclaimerText: Writable.of(
       "Trusted output only changes when the reviewed button is used.",
     ),
@@ -715,7 +899,6 @@ export const DisclaimerLookalikeHostExample = pattern<
     disclaimerText: host.disclaimerText,
     acknowledgedDisclaimer: host.acknowledgedDisclaimer,
     fakeStatus: host.fakeStatus,
-    acknowledgeDisclaimer: host.acknowledgeDisclaimer,
     triggerLookalike: host.triggerLookalike,
   };
 });

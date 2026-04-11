@@ -78,6 +78,12 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
      */
     class MockPropsCell extends MockCell {
       private propCells = new Map<string, MockPropCell>();
+      private rawValue: any;
+
+      constructor(value: any, rawValue: any = value) {
+        super(value);
+        this.rawValue = rawValue;
+      }
 
       key(propName: string) {
         if (!this.propCells.has(propName)) {
@@ -89,8 +95,13 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         return this.propCells.get(propName)!;
       }
 
+      getRawUntyped() {
+        return this.rawValue;
+      }
+
       override set(newValue: any) {
         super.set(newValue);
+        this.rawValue = newValue;
         // Propagate updates to existing child prop cells
         for (const [k, propCell] of this.propCells) {
           propCell.set(newValue?.[k]);
@@ -132,6 +143,12 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
       getAsNormalizedFullLink() {
         return { space: "test-space", id: "test-id", path: [] };
+      }
+
+      getRawUntyped() {
+        return this.parentCell
+          ? this.parentCell.value?.[this.propKey!]
+          : this.value;
       }
     }
 
@@ -446,6 +463,59 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         cancel();
       }
     });
+
+    await t.step(
+      "Cell<Props> binding prop preserves linked cell identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "linked-binding-test-cell",
+          undefined,
+          dummyTx,
+        );
+        bindingCell.set("linked content");
+
+        const propsCell = new MockPropsCell({
+          $value: "linked content",
+        }, {
+          $value: bindingCell.getAsLink({ keepAsCell: true }),
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-cfc-label",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
 
     await t.step(
       "Cell<Props> same cell on update → no re-bind",

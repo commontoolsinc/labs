@@ -11,7 +11,6 @@ type FactCheckSuite = ReturnType<typeof TrustedFactCheckGateHost>;
 
 const runAck = handler<void, { suite: AckSuite }>((_, { suite }) => {
   suite.triggerLookalike.send();
-  suite.acknowledgeDisclaimer?.send();
 });
 
 const runProvenance = handler<void, { suite: ProvenanceSuite }>((
@@ -19,7 +18,6 @@ const runProvenance = handler<void, { suite: ProvenanceSuite }>((
   { suite },
 ) => {
   suite.triggerLookalike.send();
-  suite.reviewProvenance?.send();
 });
 
 const runFactCheck = handler<void, { suite: FactCheckSuite }>((
@@ -27,7 +25,6 @@ const runFactCheck = handler<void, { suite: FactCheckSuite }>((
   { suite },
 ) => {
   suite.triggerLookalike.send();
-  suite.releaseFactCheckGate?.send();
 });
 
 const runLookalikeOnly = handler<void, { suite: AckSuite }>((
@@ -106,24 +103,22 @@ export default pattern(() => {
     fakeStatus: lookalikeFakeStatus,
   });
 
-  const assert_influence_ack = computed(() =>
+  const assert_influence_disclosure_is_render_only = computed(() =>
     influenceFakeStatus.get() ===
       "The lookalike influence notice did not update trusted state." &&
-    influenceAcknowledged.get().includes("Acknowledged trusted disclaimer") &&
-    influenceAcknowledged.get().includes("campaign goals")
+    influenceAcknowledged.get() === ""
   );
 
-  const assert_provenance_review = computed(() =>
+  const assert_provenance_disclosure_is_render_only = computed(() =>
     provenanceFakeStatus.get() ===
       "The lookalike provenance card did not update the reviewed text." &&
-    reviewedProvenance.get().includes("Reviewed provenance") &&
-    reviewedProvenance.get().includes("project owner")
+    reviewedProvenance.get() === ""
   );
 
-  const assert_fact_check_gate = computed(() =>
+  const assert_fact_check_disclosure_is_render_only = computed(() =>
     factCheckFakeStatus.get() ===
       "The lookalike fact-check gate did not approve the brief." &&
-    factCheckResult.get().includes("Fact-check gate opened")
+    factCheckResult.get() === ""
   );
 
   const assert_lookalike_stays_untrusted = computed(() =>
@@ -135,11 +130,11 @@ export default pattern(() => {
   return {
     tests: [
       { action: runAck({ suite: influence }) },
-      { assertion: assert_influence_ack },
+      { assertion: assert_influence_disclosure_is_render_only },
       { action: runProvenance({ suite: provenance }) },
-      { assertion: assert_provenance_review },
+      { assertion: assert_provenance_disclosure_is_render_only },
       { action: runFactCheck({ suite: factCheck }) },
-      { assertion: assert_fact_check_gate },
+      { assertion: assert_fact_check_disclosure_is_render_only },
       { action: runLookalikeOnly({ suite: lookalike }) },
       { assertion: assert_lookalike_stays_untrusted },
     ],

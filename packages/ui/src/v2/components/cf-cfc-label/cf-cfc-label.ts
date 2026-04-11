@@ -13,6 +13,10 @@ type CfcLabelQueryableValue = {
   getCfcLabel(): Promise<CfcLabelView | undefined>;
 };
 
+type CfcLabelSubscribableValue = {
+  subscribe(callback: (value: unknown) => void): () => void;
+};
+
 const LABEL_KEYS = [
   "classification",
   "confidentiality",
@@ -23,6 +27,13 @@ const hasLabelQuery = (value: unknown): value is CfcLabelQueryableValue =>
   typeof value === "object" && value !== null &&
   "getCfcLabel" in value &&
   typeof (value as { getCfcLabel?: unknown }).getCfcLabel === "function";
+
+const hasLabelSubscription = (
+  value: unknown,
+): value is CfcLabelSubscribableValue =>
+  typeof value === "object" && value !== null &&
+  "subscribe" in value &&
+  typeof (value as { subscribe?: unknown }).subscribe === "function";
 
 const stableObjectEntries = (value: Record<string, unknown>) =>
   Object.keys(value).sort().map((key) => [key, value[key]] as const);
@@ -187,38 +198,102 @@ export class CFCFCLabel extends BaseElement {
     kind: { type: String },
   };
 
-  declare value: unknown;
   declare cfcLabel: CfcLabelView | undefined;
   declare atom: string | undefined;
   declare kind: string | undefined;
 
   private _labelRequestId = 0;
+  private _value: unknown = undefined;
+  private _observedValue: unknown = undefined;
+  private _unsubscribeValue: (() => void) | undefined;
 
   constructor() {
     super();
-    this.value = undefined;
     this.cfcLabel = undefined;
     this.atom = undefined;
     this.kind = undefined;
   }
 
+  get value(): unknown {
+    return this._value;
+  }
+
+  set value(next: unknown) {
+    const previous = this._value;
+    this._value = next;
+    this.requestUpdate("value", previous);
+    this.refreshForCurrentValue();
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.refreshForCurrentValue();
+  }
+
+  override disconnectedCallback() {
+    this.clearValueSubscription();
+    super.disconnectedCallback();
+  }
+
+  protected override firstUpdated(
+    changedProperties: Map<PropertyKey, unknown>,
+  ) {
+    super.firstUpdated(changedProperties);
+    this.refreshForCurrentValue();
+  }
+
   override updated(changedProperties: Map<PropertyKey, unknown>) {
     super.updated(changedProperties);
     if (changedProperties.has("value")) {
+      this.refreshForCurrentValue();
+    }
+  }
+
+  private refreshForCurrentValue(): void {
+    const hasSubscription = this.observeValue(this.value);
+    if (!hasSubscription) {
       void this.refreshLabel();
     }
+  }
+
+  private observeValue(value: unknown): boolean {
+    if (Object.is(value, this._observedValue)) {
+      return this._unsubscribeValue !== undefined;
+    }
+
+    this.clearValueSubscription();
+    this._observedValue = value;
+
+    if (!hasLabelSubscription(value)) {
+      return false;
+    }
+
+    this._unsubscribeValue = value.subscribe(() => {
+      void this.refreshLabel();
+    });
+    return true;
+  }
+
+  private clearValueSubscription(): void {
+    this._unsubscribeValue?.();
+    this._unsubscribeValue = undefined;
+    this._observedValue = undefined;
   }
 
   async refreshLabel(): Promise<void> {
     const requestId = ++this._labelRequestId;
     if (!hasLabelQuery(this.value)) {
+      const previous = this.cfcLabel;
       this.cfcLabel = undefined;
+      this.requestUpdate("cfcLabel", previous);
       return;
     }
 
     const cfcLabel = await this.value.getCfcLabel();
     if (requestId === this._labelRequestId) {
+      const previous = this.cfcLabel;
       this.cfcLabel = cfcLabel;
+      this.requestUpdate("cfcLabel", previous);
     }
   }
 

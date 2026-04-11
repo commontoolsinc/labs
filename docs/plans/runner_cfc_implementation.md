@@ -831,17 +831,18 @@ Implementation notes for spec update:
       not one universal component: each surface should bind the visible
       destination context (conversation, channel, public target, persistent
       policy target) into the trusted pattern semantics
-- [x] Disclaimer-style gates such as fact-check, prompt-influence
-      acknowledgement, provenance review, and redaction warnings are modeled as
-      trusted surfaces that render the associated content and disclaimer under
-      the same `data-ui-pattern` ancestry, then require an additional
-      `data-ui-event-integrity` evidence label on the acknowledgement/release
-      event
-- [x] The current implemented boundary prevents trusted CFC writes/releases
-      from being authorized without the trusted disclaimer evidence; it does not
-      yet provide a general render-time declassification monitor that blocks
-      arbitrary untrusted UI from displaying labeled content outside a trusted
-      disclaimer surface
+- [x] Disclaimer-style gates such as fact-check, prompt-influence disclosure,
+      provenance review, and redaction warnings now have a non-interactive
+      render path: trusted surfaces render the associated content plus a
+      generic `cf-cfc-label` disclosure instead of treating the disclaimer as a
+      click-derived event authorization
+- [x] `cf-cfc-label` intentionally reads document-level CFC metadata through
+      the trusted runtime IPC path. It must not treat schema `ifc` constraints
+      as labels to display; schema annotations remain the policy/declaration
+      surface that prepare uses to create or constrain stored metadata
+- [x] The current implemented boundary still does not provide a general
+      render-time declassification monitor that blocks arbitrary untrusted UI
+      from displaying labeled content outside a trusted disclaimer surface
 - [x] Defer full render-time declassification enforcement to a follow-on
       runtime/spec slice: define schema-side render/declassify obligations,
       decide how UI render reads enter CFC prepare/digest inputs, and specify

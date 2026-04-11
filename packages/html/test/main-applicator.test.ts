@@ -6,6 +6,7 @@
  */
 
 import { assertEquals, assertExists } from "@std/assert";
+import { $conn } from "@commonfabric/runtime-client";
 import { createDomApplicator } from "../src/main/applicator.ts";
 import type { DomEventMessage } from "../src/main/events.ts";
 import type { VDomBatch } from "../src/vdom-ops.ts";
@@ -13,6 +14,11 @@ import type { VDomBatch } from "../src/vdom-ops.ts";
 // Mock RuntimeClient for testing
 const createMockRuntimeClient = () => {
   return {
+    [$conn]: () => ({
+      request: () => Promise.resolve({}),
+      subscribe: () => Promise.resolve(),
+      unsubscribe: () => Promise.resolve(),
+    }),
     getConnection: () => ({
       subscribe: () => Promise.resolve(),
       unsubscribe: () => Promise.resolve(),
@@ -707,6 +713,52 @@ Deno.test("DomApplicator - error handling", async (t) => {
     // Second op should still have worked
     assertExists(applicator.getNode(1));
   });
+});
+
+Deno.test("DomApplicator - bindings", async (t) => {
+  await t.step(
+    "requests a custom element update after assigning a CellHandle",
+    () => {
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [{ op: "create-element", nodeId: 1, tagName: "cf-cfc-label" }],
+      });
+
+      const node = applicator.getNode(1) as any;
+      const requested: PropertyKey[] = [];
+      node.localName = "cf-cfc-label";
+      node.requestUpdate = (name?: PropertyKey) => {
+        if (name !== undefined) {
+          requested.push(name);
+        }
+      };
+
+      applicator.applyBatch({
+        batchId: 2,
+        ops: [{
+          op: "set-binding",
+          nodeId: 1,
+          propName: "value",
+          cellRef: {
+            space: "did:key:test",
+            id: "of:test",
+            path: [],
+            type: "application/json",
+          },
+        }],
+      });
+
+      assertEquals(node.value.constructor.name, "CellHandle");
+      assertEquals(requested, ["value"]);
+    },
+  );
 });
 
 // Note: The following tests require a real DOM environment because the applicator

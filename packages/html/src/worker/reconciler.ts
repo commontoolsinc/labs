@@ -19,6 +19,7 @@ import {
   convertCellsToLinks,
   isCell,
   isStream,
+  parseLink,
   type Stream,
   UI,
   useCancelGroup,
@@ -869,10 +870,16 @@ export class WorkerReconciler {
             cancel: () => {},
           });
         } else if (isBindingProp(key)) {
-          // Binding prop - resolve target Cell via navigation
+          // Binding prop - prefer a serialized cell link in the prop value.
+          // Cell<Props> VDOM props can store links to the original target cell;
+          // resolving the props slot itself would bind an internal VDOM cell.
           let resolvedTarget: Cell<unknown>;
           try {
-            resolvedTarget = propsCell.key(key).resolveAsCell();
+            resolvedTarget = this.resolveCellPropsBindingTarget(
+              propsCell,
+              key,
+              value,
+            );
           } catch (e) {
             logger.error(
               "resolveAsCell failed for binding prop",
@@ -964,6 +971,55 @@ export class WorkerReconciler {
     });
 
     return cancel;
+  }
+
+  private resolveCellPropsBindingTarget(
+    propsCell: Cell<WorkerProps>,
+    key: string,
+    value: unknown,
+  ): Cell<unknown> {
+    if (isCell(value)) {
+      return value as Cell<unknown>;
+    }
+    const propCell = propsCell.key(key);
+    const rawValue = this.readRawBindingPropValue(propsCell, propCell, key);
+    let base:
+      | ReturnType<Cell<WorkerProps>["getAsNormalizedFullLink"]>
+      | undefined;
+    try {
+      base = propsCell.getAsNormalizedFullLink();
+    } catch {
+      base = undefined;
+    }
+    const link = base
+      ? parseLink(rawValue, base) ?? parseLink(value, base)
+      : parseLink(rawValue) ?? parseLink(value);
+    if (link?.id && link.space && link.type) {
+      return propsCell.runtime.getCellFromLink(link);
+    }
+    return propCell.resolveAsCell();
+  }
+
+  private readRawBindingPropValue(
+    propsCell: Cell<WorkerProps>,
+    propCell: Cell<unknown>,
+    key: string,
+  ): unknown {
+    try {
+      const rawProps = propsCell.getRawUntyped({ frozen: false });
+      if (
+        rawProps !== null && typeof rawProps === "object" && key in rawProps
+      ) {
+        return (rawProps as Record<string, unknown>)[key];
+      }
+    } catch {
+      // Fall through to the prop cell: older/mock cells may not expose parent raw props.
+    }
+    try {
+      return propCell.getRawUntyped({ frozen: false });
+    } catch {
+      return undefined;
+    }
   }
 
   /**

@@ -33,6 +33,78 @@ describe("CFCFCLabel", () => {
 
     expect(element.cfcLabel).toEqual(cfcLabel);
   });
+
+  it("refreshes when the bound value property is assigned", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { classification: ["prompt-influence"] },
+      }],
+    };
+    const element = new CFCFCLabel();
+
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+    await Promise.resolve();
+
+    expect(element.cfcLabel).toEqual(cfcLabel);
+  });
+
+  it("loads a prebound label view on first update", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { classification: ["prompt-influence"] },
+      }],
+    };
+    const element = new CFCFCLabel();
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+
+    (element as unknown as {
+      firstUpdated(changedProperties: Map<PropertyKey, unknown>): void;
+    }).firstUpdated(new Map());
+    await Promise.resolve();
+
+    expect(element.cfcLabel).toEqual(cfcLabel);
+  });
+
+  it("refreshes the label when a bound cell emits an update", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { classification: ["prompt-influence"] },
+      }],
+    };
+    let labelCalls = 0;
+    let emitUpdate: (() => void) | undefined;
+    const element = new CFCFCLabel();
+
+    element.value = {
+      getCfcLabel: () =>
+        Promise.resolve(labelCalls++ === 0 ? undefined : cfcLabel),
+      subscribe: (callback: () => void) => {
+        emitUpdate = () => callback();
+        callback();
+        return () => {};
+      },
+    };
+    await Promise.resolve();
+
+    expect(element.cfcLabel).toBeUndefined();
+    if (!emitUpdate) {
+      throw new Error("expected cf-cfc-label to subscribe to the bound cell");
+    }
+    emitUpdate();
+    await Promise.resolve();
+
+    expect(element.cfcLabel).toEqual(cfcLabel);
+  });
 });
 
 describe("cf-cfc-label formatting", () => {
