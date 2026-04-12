@@ -110,6 +110,7 @@ export * from "./components/cf-modal-provider/index.ts";
 export * from "./components/cf-modal/index.ts";
 export * from "./components/cf-attachments-bar/cf-attachments-bar.ts";
 export * from "./components/cf-chip/cf-chip.ts";
+export * from "./components/cf-cfc-authorship/index.ts";
 export * from "./components/cf-cfc-label/index.ts";
 export * from "./components/cf-question/cf-question.ts";
 export * from "./components/cf-cell-link/index.ts";

@@ -2895,6 +2895,7 @@ interface CFKbdElement extends CFHTMLElement {}
 interface CFKeybindElement extends CFHTMLElement {}
 interface CFRenderElement extends CFHTMLElement {}
 interface CFCellContextElement extends CFHTMLElement {}
+interface CFCFCAuthorshipElement extends CFHTMLElement {}
 interface CFCFCLabelElement extends CFHTMLElement {}
 interface CFCFCRenderBoundaryElement extends CFHTMLElement {}
 interface CFDragSourceElement extends CFHTMLElement {}
@@ -3476,6 +3477,16 @@ interface CFCFCLabelAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<unknown>;
   "value"?: unknown;
   "atom"?: string;
+  "kind"?: string;
+}
+
+interface CFCFCAuthorshipAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<unknown>;
+  "$author"?: CellLike<unknown>;
+  "value"?: unknown;
+  "author"?: unknown;
+  "authorName"?: unknown;
+  "avatar"?: unknown;
   "kind"?: string;
 }
 
@@ -4826,6 +4837,10 @@ declare global {
       "cf-cell-context": CFDOM.DetailedHTMLProps<
         CFCellContextAttributes<CFCellContextElement>,
         CFCellContextElement
+      >;
+      "cf-cfc-authorship": CFDOM.DetailedHTMLProps<
+        CFCFCAuthorshipAttributes<CFCFCAuthorshipElement>,
+        CFCFCAuthorshipElement
       >;
       "cf-cfc-label": CFDOM.DetailedHTMLProps<
         CFCFCLabelAttributes<CFCFCLabelElement>,
