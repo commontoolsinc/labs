@@ -60,7 +60,7 @@ const CELL_PROPS_KEY = "__cellProps__";
 const CFC_RENDER_BOUNDARY_TAG = "cf-cfc-render-boundary";
 const CFC_BLOCKED_PLACEHOLDER_TAG = "cf-cfc-blocked";
 const DEFAULT_RENDER_POLICY: RenderPolicy = {
-  declassifyClassification: [],
+  declassifyConfidentiality: [],
 };
 
 /**
@@ -350,17 +350,17 @@ export class WorkerReconciler {
     }
 
     const props = this.propsForRenderPolicy(node);
-    const localMax = this.normalizeClassificationBound(
+    const localMax = this.normalizeAtomBound(
       this.staticPropAsAtomList(props, "maxConfidentiality") ??
         this.staticPropAsAtomList(props, "data-cfc-max-confidentiality"),
     );
-    const declassifyClassification = this.staticPropAsAtomList(
+    const declassifyConfidentiality = this.staticPropAsAtomList(
       props,
-      "declassifyClassification",
+      "declassifyConfidentiality",
     ) ??
       this.staticPropAsAtomList(
         props,
-        "data-cfc-declassify-classification",
+        "data-cfc-declassify-confidentiality",
       ) ??
       [];
 
@@ -369,9 +369,9 @@ export class WorkerReconciler {
         parentPolicy.maxConfidentiality,
         localMax,
       ),
-      declassifyClassification: [
-        ...parentPolicy.declassifyClassification,
-        ...declassifyClassification,
+      declassifyConfidentiality: [
+        ...parentPolicy.declassifyConfidentiality,
+        ...declassifyConfidentiality,
       ],
     };
   }
@@ -497,7 +497,7 @@ export class WorkerReconciler {
     };
   }
 
-  private normalizeClassificationBound(
+  private normalizeAtomBound(
     labels: readonly unknown[] | undefined,
   ): readonly unknown[] | undefined {
     if (labels === undefined) {
@@ -516,10 +516,8 @@ export class WorkerReconciler {
     if (localMax === undefined || localMax.length === 0) {
       return parentMax;
     }
-    return parentMax.filter((classification) =>
-      localMax.some((localClassification) =>
-        deepEqual(classification, localClassification)
-      )
+    return parentMax.filter((atom) =>
+      localMax.some((localAtom) => deepEqual(atom, localAtom))
     );
   }
 
@@ -532,8 +530,8 @@ export class WorkerReconciler {
       right.maxConfidentiality ?? [],
     ) &&
       this.atomListsEqual(
-        left.declassifyClassification,
-        right.declassifyClassification,
+        left.declassifyConfidentiality,
+        right.declassifyConfidentiality,
       );
   }
 
@@ -551,7 +549,7 @@ export class WorkerReconciler {
   ): boolean {
     if (
       policy.maxConfidentiality === undefined &&
-      policy.declassifyClassification.length === 0
+      policy.declassifyConfidentiality.length === 0
     ) {
       return true;
     }
@@ -569,23 +567,23 @@ export class WorkerReconciler {
       if (schemaLabels.length === 0) {
         return true;
       }
-      return schemaLabels.every((classification) =>
-        policy.declassifyClassification.some((declassified) =>
-          deepEqual(declassified, classification)
+      return schemaLabels.every((atom) =>
+        policy.declassifyConfidentiality.some((declassified) =>
+          deepEqual(declassified, atom)
         ) ||
-        this.canRenderClassification(classification, policy)
+        this.canRenderConfidentialityAtom(atom, policy)
       );
     }
 
-    for (const classification of this.confidentialityLabels(labelView)) {
+    for (const atom of this.confidentialityLabels(labelView)) {
       if (
-        policy.declassifyClassification.some((declassified) =>
-          deepEqual(declassified, classification)
+        policy.declassifyConfidentiality.some((declassified) =>
+          deepEqual(declassified, atom)
         )
       ) {
         continue;
       }
-      if (!this.canRenderClassification(classification, policy)) {
+      if (!this.canRenderConfidentialityAtom(atom, policy)) {
         return false;
       }
     }
@@ -617,15 +615,15 @@ export class WorkerReconciler {
     return ContextualFlowControl.uniqueAtoms(joined);
   }
 
-  private canRenderClassification(
-    classification: unknown,
+  private canRenderConfidentialityAtom(
+    atom: unknown,
     policy: RenderPolicy,
   ): boolean {
-    const max = this.normalizeClassificationBound(policy.maxConfidentiality);
+    const max = this.normalizeAtomBound(policy.maxConfidentiality);
     if (max === undefined) {
       return true;
     }
-    return max.some((allowed) => deepEqual(allowed, classification));
+    return max.some((allowed) => deepEqual(allowed, atom));
   }
 
   /**

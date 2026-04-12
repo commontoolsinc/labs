@@ -153,7 +153,7 @@ export const TrustedHealthDisclosureSurface = pattern<
               <cf-label>Trusted render region</cf-label>
               <cf-cfc-render-boundary
                 maxConfidentiality={[]}
-                declassifyClassification={[HEALTH_RECORD_CONFIDENTIALITY]}
+                declassifyConfidentiality={[HEALTH_RECORD_CONFIDENTIALITY]}
                 $value={content}
               >
                 <div

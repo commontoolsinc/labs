@@ -3495,8 +3495,8 @@ interface CFCFCRenderBoundaryAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: unknown;
   "maxConfidentiality"?: unknown | readonly unknown[];
   "data-cfc-max-confidentiality"?: unknown | readonly unknown[];
-  "declassifyClassification"?: unknown | readonly unknown[];
-  "data-cfc-declassify-classification"?: unknown | readonly unknown[];
+  "declassifyConfidentiality"?: unknown | readonly unknown[];
+  "data-cfc-declassify-confidentiality"?: unknown | readonly unknown[];
 }
 
 interface CFDragSourceAttributes<T> extends CFHTMLAttributes<T> {

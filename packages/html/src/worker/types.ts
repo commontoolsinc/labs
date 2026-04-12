@@ -99,16 +99,16 @@ export interface ChildrenState {
  */
 export interface RenderPolicy {
   /**
-   * Confidentiality/classification atoms allowed to render in this subtree.
+   * Confidentiality atoms allowed to render in this subtree.
    * Undefined means no render-time confidentiality bound is active.
    */
   maxConfidentiality?: readonly unknown[];
 
   /**
-   * Classifications this subtree may declassify before applying the max bound.
+   * Confidentiality atoms this subtree may declassify before applying the max bound.
    * This is a temporary low-level capability hook for trusted UI experiments.
    */
-  declassifyClassification: readonly unknown[];
+  declassifyConfidentiality: readonly unknown[];
 }
 
 /**
