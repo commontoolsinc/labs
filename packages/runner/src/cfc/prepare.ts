@@ -293,8 +293,8 @@ const walkIfcSchema = (
           ? [...schema.ifc.classification]
           : undefined,
         integrity: schema.ifc.integrity ? [...schema.ifc.integrity] : undefined,
-        confidentiality: schema.ifc.maxConfidentiality
-          ? [...schema.ifc.maxConfidentiality]
+        confidentiality: schema.ifc.confidentiality
+          ? [...schema.ifc.confidentiality]
           : undefined,
       },
       schema,
@@ -444,7 +444,9 @@ const verifyInputRequirements = (
     if (maxConfidentiality.length > 0 && consumed.length > 0) {
       const ok = consumed.every((read) =>
         ((read.label?.classification ?? read.label?.confidentiality) ?? [])
-          .every((value) => maxConfidentiality.includes(String(value)))
+          .every((value) =>
+            maxConfidentiality.some((allowed) => deepEqual(allowed, value))
+          )
       );
       if (!ok) {
         return `maxConfidentiality failed at /${entry.path.join("/")}`;

@@ -58,12 +58,43 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         },
       },
     });
+    const structuredAtom = { type: "Source", source: "health-clinic" };
+    const structuredSecret = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-structured-secret",
+      undefined,
+      tx,
+    );
+    const structuredSecretLink = structuredSecret.getAsNormalizedFullLink();
+    tx.writeOrThrow({
+      space: signer.did(),
+      id: structuredSecretLink.id!,
+      type: "application/json",
+      path: [],
+    }, {
+      value: "Structured atom record",
+      cfc: {
+        version: 1,
+        schemaHash: "test-structured-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: { classification: [structuredAtom] },
+          }],
+        },
+      },
+    });
     const commitResult = await tx.commit();
     assertEquals(commitResult.ok !== undefined, true);
 
     const classified = runtime.getCell<string>(
       signer.did(),
       "cfc-render-policy-secret",
+    );
+    const structuredClassified = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-structured-secret",
     );
     const dummyTx = runtime.edit();
     const dummyCell = runtime.getCell(
@@ -207,6 +238,69 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             renderedText.includes("Content hidden by policy"),
             false,
           );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "matches structured render-policy atoms by structural equality",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [{ type: "Source", source: "health-clinic" }],
+          },
+          children: [structuredClassified as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Structured atom record"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by policy"),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "does not collapse distinct structured atoms through string coercion",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [{ type: "Source", source: "other-system" }],
+          },
+          children: [structuredClassified as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Structured atom record"), false);
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
         } finally {
           cancel();
         }

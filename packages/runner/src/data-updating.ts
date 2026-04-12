@@ -525,7 +525,7 @@ export function normalizeAndDiff(
         : undefined;
       // We have to cast these, since the type could be changed to another value
       const childSchema = (lub !== undefined)
-        ? { type: "number", ifc: { classification: [lub] } } as JSONSchema
+        ? { type: "number", ifc: { classification: lub } } as JSONSchema
         : { type: "number" } as JSONSchema;
       changes.push({
         location: {

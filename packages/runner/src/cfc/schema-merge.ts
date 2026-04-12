@@ -5,6 +5,7 @@ import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 
 const IFC_KEYS = [
   "classification",
+  "confidentiality",
   "integrity",
   "addIntegrity",
   "requiredIntegrity",
@@ -27,9 +28,26 @@ const asSchemaObject = (
 };
 
 const arraySubsetOf = (
-  subset: readonly string[],
-  superset: readonly string[],
-): boolean => subset.every((value) => superset.includes(value));
+  subset: readonly unknown[],
+  superset: readonly unknown[],
+): boolean =>
+  subset.every((value) =>
+    superset.some((candidate) => deepEqual(candidate, value))
+  );
+
+const mergeArraySet = (
+  ...sources: Array<readonly unknown[]>
+): unknown[] => {
+  const result: unknown[] = [];
+  for (const source of sources) {
+    for (const value of source) {
+      if (!result.some((candidate) => deepEqual(candidate, value))) {
+        result.push(value);
+      }
+    }
+  }
+  return result;
+};
 
 const mergeSetLikeIfcArray = (
   key: string,
@@ -46,13 +64,20 @@ const mergeSetLikeIfcArray = (
   switch (key) {
     case "requiredIntegrity":
     case "classification":
+    case "confidentiality":
     case "addIntegrity": {
-      const existingArray = existing as readonly string[];
-      const candidateArray = candidate as readonly string[];
+      if (!Array.isArray(existing) || !Array.isArray(candidate)) {
+        if (!deepEqual(existing, candidate)) {
+          throw new Error(`${key} must remain stable`);
+        }
+        return existing;
+      }
+      const existingArray = existing as readonly unknown[];
+      const candidateArray = candidate as readonly unknown[];
       if (!arraySubsetOf(existingArray, candidateArray)) {
         throw new Error(`${key} cannot be weakened`);
       }
-      return [...new Set([...existingArray, ...candidateArray])];
+      return mergeArraySet(existingArray, candidateArray);
     }
     case "integrity":
     case "maxConfidentiality":
@@ -67,12 +92,12 @@ const mergeSetLikeIfcArray = (
         }
         return existing;
       }
-      const existingArray = existing as readonly string[];
-      const candidateArray = candidate as readonly string[];
+      const existingArray = existing as readonly unknown[];
+      const candidateArray = candidate as readonly unknown[];
       if (!arraySubsetOf(candidateArray, existingArray)) {
         throw new Error(`${key} cannot be weakened`);
       }
-      return [...candidateArray];
+      return mergeArraySet(candidateArray);
     }
     case "exactCopyOf":
     case "projection":

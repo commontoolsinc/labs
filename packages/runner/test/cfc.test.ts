@@ -30,6 +30,38 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
   });
 });
 
+describe("ContextualFlowControl atom joins", () => {
+  it("preserves arbitrary classification atoms instead of collapsing through the legacy lattice", () => {
+    const cfc = new ContextualFlowControl();
+    const caveatAtom = {
+      type: "https://commonfabric.org/cfc/atom/Caveat",
+      kind: "prompt-influence",
+      source: "of:prompt-source",
+    };
+    const schema: JSONSchema = {
+      type: "object",
+      ifc: { classification: [caveatAtom] },
+      properties: {
+        body: {
+          type: "string",
+          ifc: { classification: ["source-provenance"] },
+        },
+      },
+    };
+
+    const joined = new Set<unknown>();
+    ContextualFlowControl.joinSchema(joined, schema);
+
+    expect(cfc.lub(joined)).toEqual([caveatAtom, "source-provenance"]);
+    expect(cfc.schemaAtPath(schema, ["body"])).toMatchObject({
+      type: "string",
+      ifc: {
+        classification: [caveatAtom, "source-provenance"],
+      },
+    });
+  });
+});
+
 describe("ContextualFlowControl.isFalseSchema", () => {
   it("treats false as a false schema", () => {
     expect(ContextualFlowControl.isFalseSchema(false)).toBe(true);

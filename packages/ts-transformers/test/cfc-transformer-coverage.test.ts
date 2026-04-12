@@ -11,7 +11,7 @@ Deno.test("transformer coverage: nested aliases expand to canonical metadata", a
     import { toSchema } from "commonfabric";
 
     type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-    type Classified<T, X extends readonly string[]> = Cfc<T, { classification: X }>;
+    type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
     type SecretText<T> = Classified<T, readonly ["secret"]>;
 
     interface SchemaRoot {
@@ -36,8 +36,8 @@ Deno.test("transformer coverage: projection paths lower as canonical pointers", 
     import { toSchema } from "commonfabric";
 
     type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-    type ProjectionPath<T, From extends string, Path extends readonly string[]> = Cfc<T, { projection: { from: From; path: Path } }>;
-    type ProjectionOf<Root, PathTuple extends readonly string[]> = ProjectionPath<Root, "/", PathTuple>;
+    type ProjectionPath<T, From extends string, Path extends readonly unknown[]> = Cfc<T, { projection: { from: From; path: Path } }>;
+    type ProjectionOf<Root, PathTuple extends readonly unknown[]> = ProjectionPath<Root, "/", PathTuple>;
 
     interface SchemaRoot {
       projection: ProjectionOf<{ title: string }, readonly ["nested", "path"]>;

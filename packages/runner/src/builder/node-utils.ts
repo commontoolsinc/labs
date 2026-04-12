@@ -35,7 +35,7 @@ export function applyArgumentIfcToResult(
 ): JSONSchema | undefined {
   if (argumentSchema !== undefined) {
     const cfc = new ContextualFlowControl();
-    const joined = new Set<string>();
+    const joined = new Set<unknown>();
     ContextualFlowControl.joinSchema(joined, argumentSchema);
     return (joined.size !== 0)
       ? cfc.schemaWithLub(resultSchema ?? true, cfc.lub(joined))
@@ -49,7 +49,7 @@ export function applyInputIfcToOutput<T, R>(
   inputs: Opaque<T>,
   outputs: Opaque<R>,
 ) {
-  const collectedClassifications = new Set<string>();
+  const collectedClassifications = new Set<unknown>();
   const cfc = new ContextualFlowControl();
   traverseValue(inputs, (item: unknown) => {
     if (isCell(item)) {
@@ -70,18 +70,18 @@ export function applyInputIfcToOutput<T, R>(
 function attachCfcToOutputs(
   outputs: unknown,
   cfc: ContextualFlowControl,
-  lubClassification: string,
+  lubClassification: readonly unknown[],
 ) {
   if (isCell(outputs)) {
     const exported = outputs.export();
     const outputSchema = exported.schema ?? true;
     // we may have fields in the output schema, so incorporate those
-    const joined = new Set<string>([lubClassification]);
+    const joined = new Set<unknown>(lubClassification);
     ContextualFlowControl.joinSchema(joined, outputSchema);
     const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
       ? { ...outputSchema.ifc }
       : {};
-    ifc.classification = [cfc.lub(joined)];
+    ifc.classification = cfc.lub(joined);
     const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
       ? {}
       : outputSchema === false

@@ -1,4 +1,5 @@
 import type { Immutable } from "@commonfabric/utils/types";
+import type { ImmutableJSONValue } from "@commonfabric/api";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
@@ -103,7 +104,7 @@ export interface IReadOptions {
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
 export type Labels = {
-  classification?: string[];
+  classification?: ImmutableJSONValue[];
 };
 
 /** Immutable storage value container. */

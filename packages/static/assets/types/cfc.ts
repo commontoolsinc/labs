@@ -54,23 +54,23 @@ type JoinPointerPath<Path extends readonly string[]> = Path extends readonly []
 export type CanonicalPointer<Path extends readonly string[]> = Path extends
   readonly [] ? "/" : `/${JoinPointerPath<Path>}`;
 
-export type Classified<T, X extends readonly string[]> = Cfc<T, {
+export type Classified<T, X extends readonly unknown[]> = Cfc<T, {
   classification: X;
 }>;
 
-export type Integrity<T, X extends readonly string[]> = Cfc<T, {
+export type Integrity<T, X extends readonly unknown[]> = Cfc<T, {
   integrity: X;
 }>;
 
-export type AddIntegrity<T, X extends readonly string[]> = Cfc<T, {
+export type AddIntegrity<T, X extends readonly unknown[]> = Cfc<T, {
   addIntegrity: X;
 }>;
 
-export type RequiresIntegrity<T, X extends readonly string[]> = Cfc<T, {
+export type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, {
   requiredIntegrity: X;
 }>;
 
-export type MaxConfidentiality<T, X extends readonly string[]> = Cfc<T, {
+export type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, {
   maxConfidentiality: X;
 }>;
 

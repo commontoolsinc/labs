@@ -26,6 +26,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commonfabric/runner";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import type {
   ChildNodeState,
@@ -80,8 +81,6 @@ export class WorkerReconciler {
   private handlerIdCounter = 0;
   private handlers = new Map<number, (event: unknown) => void>();
   private batchIdCounter = 0;
-  private readonly cfc = new ContextualFlowControl();
-
   private pendingOps: VDomOp[] = [];
   private flushScheduled = false;
 
@@ -342,14 +341,14 @@ export class WorkerReconciler {
 
     const props = this.propsForRenderPolicy(node);
     const localMax = this.normalizeClassificationBound(
-      this.staticPropAsStringList(props, "maxConfidentiality") ??
-        this.staticPropAsStringList(props, "data-cfc-max-confidentiality"),
+      this.staticPropAsAtomList(props, "maxConfidentiality") ??
+        this.staticPropAsAtomList(props, "data-cfc-max-confidentiality"),
     );
-    const declassifyClassification = this.staticPropAsStringList(
+    const declassifyClassification = this.staticPropAsAtomList(
       props,
       "declassifyClassification",
     ) ??
-      this.staticPropAsStringList(
+      this.staticPropAsAtomList(
         props,
         "data-cfc-declassify-classification",
       ) ??
@@ -384,23 +383,24 @@ export class WorkerReconciler {
     }
   }
 
-  private staticPropAsStringList(
+  private staticPropAsAtomList(
     props: WorkerProps | null | undefined,
     key: string,
-  ): readonly string[] | undefined {
+  ): readonly unknown[] | undefined {
     if (!props || typeof props !== "object" || !(key in props)) {
       return undefined;
     }
     const value = props[key];
-    if (typeof value === "string") {
-      return [value];
+    if (isCell(value) || typeof value === "function") {
+      return undefined;
     }
-    if (
-      Array.isArray(value) && value.every((item) => typeof item === "string")
-    ) {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (Array.isArray(value)) {
       return value;
     }
-    return undefined;
+    return [value];
   }
 
   private staticCellProp(
@@ -488,61 +488,51 @@ export class WorkerReconciler {
   }
 
   private normalizeClassificationBound(
-    labels: readonly string[] | undefined,
-  ): readonly string[] | undefined {
+    labels: readonly unknown[] | undefined,
+  ): readonly unknown[] | undefined {
     if (labels === undefined || labels.length === 0) {
       return undefined;
     }
-    try {
-      return [this.cfc.lub(new Set(labels))];
-    } catch {
-      return labels;
-    }
+    return ContextualFlowControl.uniqueAtoms(labels);
   }
 
   private narrowMaxConfidentiality(
-    parentMax: readonly string[] | undefined,
-    localMax: readonly string[] | undefined,
-  ): readonly string[] | undefined {
+    parentMax: readonly unknown[] | undefined,
+    localMax: readonly unknown[] | undefined,
+  ): readonly unknown[] | undefined {
     if (parentMax === undefined || parentMax.length === 0) {
       return localMax;
     }
     if (localMax === undefined || localMax.length === 0) {
       return parentMax;
     }
-    const parent = this.normalizeClassificationBound(parentMax)?.[0];
-    const local = this.normalizeClassificationBound(localMax)?.[0];
-    if (parent === undefined) return localMax;
-    if (local === undefined) return parentMax;
-    if (this.isClassificationAtOrBelow(parent, local)) {
-      return [parent];
-    }
-    if (this.isClassificationAtOrBelow(local, parent)) {
-      return [local];
-    }
-    return parentMax;
+    return parentMax.filter((classification) =>
+      localMax.some((localClassification) =>
+        deepEqual(classification, localClassification)
+      )
+    );
   }
 
   private renderPolicyEquals(
     left: RenderPolicy,
     right: RenderPolicy,
   ): boolean {
-    return this.stringListsEqual(
+    return this.atomListsEqual(
       left.maxConfidentiality ?? [],
       right.maxConfidentiality ?? [],
     ) &&
-      this.stringListsEqual(
+      this.atomListsEqual(
         left.declassifyClassification,
         right.declassifyClassification,
       );
   }
 
-  private stringListsEqual(
-    left: readonly string[],
-    right: readonly string[],
+  private atomListsEqual(
+    left: readonly unknown[],
+    right: readonly unknown[],
   ): boolean {
     return left.length === right.length &&
-      left.every((value, index) => value === right[index]);
+      left.every((value, index) => deepEqual(value, right[index]));
   }
 
   private canRenderCellUnderPolicy(
@@ -550,8 +540,7 @@ export class WorkerReconciler {
     policy: RenderPolicy,
   ): boolean {
     if (
-      (policy.maxConfidentiality === undefined ||
-        policy.maxConfidentiality.length === 0) &&
+      policy.maxConfidentiality === undefined &&
       policy.declassifyClassification.length === 0
     ) {
       return true;
@@ -571,13 +560,19 @@ export class WorkerReconciler {
         return true;
       }
       return schemaLabels.every((classification) =>
-        policy.declassifyClassification.includes(classification) ||
+        policy.declassifyClassification.some((declassified) =>
+          deepEqual(declassified, classification)
+        ) ||
         this.canRenderClassification(classification, policy)
       );
     }
 
     for (const classification of this.confidentialityLabels(labelView)) {
-      if (policy.declassifyClassification.includes(classification)) {
+      if (
+        policy.declassifyClassification.some((declassified) =>
+          deepEqual(declassified, classification)
+        )
+      ) {
         continue;
       }
       if (!this.canRenderClassification(classification, policy)) {
@@ -587,54 +582,40 @@ export class WorkerReconciler {
     return true;
   }
 
-  private confidentialityLabels(labelView: CfcLabelView): readonly string[] {
-    return [
-      ...new Set(
-        labelView.entries.flatMap((entry) => [
-          ...(entry.label.classification ?? []),
-          ...(entry.label.confidentiality ?? []),
-        ]).map(String),
-      ),
-    ];
+  private confidentialityLabels(labelView: CfcLabelView): readonly unknown[] {
+    return ContextualFlowControl.uniqueAtoms(
+      labelView.entries.flatMap((entry) => [
+        ...(entry.label.classification ?? []),
+        ...(entry.label.confidentiality ?? []),
+      ]),
+    );
   }
 
   private confidentialityLabelsFromCellSchema(
     cell: Cell<unknown>,
-  ): readonly string[] {
+  ): readonly unknown[] {
     const schema = (cell as { schema?: JSONSchema }).schema;
     if (schema === undefined) {
       return [];
     }
-    const joined = new Set<string>();
+    const joined = new Set<unknown>();
     try {
       ContextualFlowControl.joinSchema(joined, schema);
     } catch {
       return ["__unknown_cfc_schema_label__"];
     }
-    return [...joined];
+    return ContextualFlowControl.uniqueAtoms(joined);
   }
 
   private canRenderClassification(
-    classification: string,
+    classification: unknown,
     policy: RenderPolicy,
   ): boolean {
-    const max = this.normalizeClassificationBound(policy.maxConfidentiality)
-      ?.[0];
+    const max = this.normalizeClassificationBound(policy.maxConfidentiality);
     if (max === undefined) {
       return true;
     }
-    return this.isClassificationAtOrBelow(classification, max);
-  }
-
-  private isClassificationAtOrBelow(
-    classification: string,
-    max: string,
-  ): boolean {
-    try {
-      return this.cfc.lub(new Set([classification, max])) === max;
-    } catch {
-      return false;
-    }
+    return max.some((allowed) => deepEqual(allowed, classification));
   }
 
   /**
