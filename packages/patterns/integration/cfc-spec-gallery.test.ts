@@ -113,10 +113,41 @@ describe("cfc spec gallery integration test", () => {
 });
 
 async function clickTrustedAction(page: Page, action: string) {
+  // Nested trusted surfaces can be rematerialized shortly after first render.
+  // Click after a settle window so the handler stream is loaded in the worker.
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  await page.waitForSelector(`[data-ui-action="${action}"]`, {
+    strategy: "pierce",
+  });
+  await scrollTrustedActionIntoView(page, action);
+  await new Promise((resolve) => setTimeout(resolve, 200));
   const button = await page.waitForSelector(`[data-ui-action="${action}"]`, {
     strategy: "pierce",
   });
   await button.click();
+}
+
+async function scrollTrustedActionIntoView(page: Page, action: string) {
+  await page.evaluate((targetAction) => {
+    function collect(
+      root: Document | ShadowRoot,
+      result: Element[],
+      action: string,
+    ): void {
+      for (const element of root.querySelectorAll("*")) {
+        if (element.getAttribute("data-ui-action") === action) {
+          result.push(element);
+        }
+        if (element.shadowRoot) {
+          collect(element.shadowRoot, result, action);
+        }
+      }
+    }
+
+    const matches: Element[] = [];
+    collect(document, matches, targetAction);
+    matches[0]?.scrollIntoView({ block: "center", inline: "center" });
+  }, { args: [action] });
 }
 
 async function waitForText(page: Page, selector: string, text: string) {

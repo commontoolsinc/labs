@@ -9,6 +9,7 @@ import type { JSONValue } from "@commonfabric/runtime-client";
 import {
   type EventProvenance,
   getEventProvenance,
+  getEventUiContractDataset,
 } from "../event-provenance.ts";
 
 /**
@@ -172,17 +173,12 @@ export function serializeEvent(event: Event): SerializedEvent {
       hasTargetProps = true;
     }
 
-    // Handle dataset
-    if ("dataset" in target && target.dataset) {
-      const dataset: Record<string, string> = {};
-      const targetDataset = target.dataset as DOMStringMap;
-      for (const key in targetDataset) {
-        dataset[key] = String(targetDataset[key]);
-      }
-      if (Object.keys(dataset).length > 0) {
-        serializedTarget.dataset = dataset;
-        hasTargetProps = true;
-      }
+    // Handle dataset. Prefer UI contract markers from the composed path so
+    // trusted markers survive shadow DOM event retargeting.
+    const dataset = getEventUiContractDataset(event, target);
+    if (dataset) {
+      serializedTarget.dataset = dataset;
+      hasTargetProps = true;
     }
 
     if (hasTargetProps) {

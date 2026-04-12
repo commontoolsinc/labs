@@ -169,9 +169,16 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         return true;
       }
 
+      withTx(tx?: unknown) {
+        this.usedTx = tx;
+        return this;
+      }
+
       send(event: unknown) {
         this.sent.push(event);
       }
+
+      public usedTx: unknown;
     }
 
     const mountReconciler = (
@@ -426,6 +433,49 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         cancel();
       }
     });
+
+    await t.step(
+      "Cell<Props> stream event dispatch uses fresh event transaction",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const mockStream = new MockStream();
+        const propsCell = new MockPropsCell({
+          onclick: mockStream,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: propsCell,
+          children: ["Click"],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setEventOps = collector.getOpsOfType("set-event");
+          const eventOp = setEventOps[0] as Extract<
+            VDomOp,
+            { op: "set-event" }
+          >;
+          const eventTx = { fresh: true } as never;
+          reconciler.dispatchEvent(
+            eventOp.handlerId,
+            { type: "click" },
+            eventTx,
+          );
+
+          assertEquals(mockStream.usedTx, eventTx);
+          assertEquals(mockStream.sent, [{ type: "click" }]);
+        } finally {
+          cancel();
+        }
+      },
+    );
 
     await t.step("Cell<Props> binding prop", async () => {
       const collector = createOpsCollector();
@@ -1098,3 +1148,85 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     await runtime.dispose();
   }
 });
+
+Deno.test(
+  "worker reconciler - static Cell event prop sends to resolved stream target",
+  async () => {
+    const signer = await Identity.fromPassphrase("test static cell event prop");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL("http://localhost"),
+      cfcEnforcementMode: "observe",
+    });
+    let tx = runtime.edit();
+
+    try {
+      const streamCell = runtime.getCell<unknown>(
+        signer.did(),
+        "static-event-stream",
+        undefined,
+        tx,
+      );
+      streamCell.setRaw({ $stream: true });
+
+      const eventTargetCell = runtime.getCell<unknown>(
+        signer.did(),
+        "static-event-target",
+        undefined,
+        tx,
+      );
+      eventTargetCell.set(streamCell as never);
+
+      await tx.commit();
+      tx = runtime.edit();
+
+      let eventSeen: unknown;
+      runtime.scheduler.addEventHandler(
+        (_handlerTx, event) => {
+          eventSeen = event;
+        },
+        streamCell.getAsNormalizedFullLink(),
+      );
+
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+      const vnode: WorkerVNode = {
+        type: "vnode",
+        name: "button",
+        props: {
+          onClick: eventTargetCell,
+        },
+        children: ["Send"],
+      };
+
+      const cancel = reconciler.mount(vnode);
+      try {
+        await runtime.idle();
+
+        const setEventOp = collector.getOpsOfType("set-event")[0] as
+          | { handlerId: number }
+          | undefined;
+        assertEquals(setEventOp !== undefined, true);
+
+        const eventTx = runtime.edit();
+        reconciler.dispatchEvent(
+          setEventOp!.handlerId,
+          { type: "click" },
+          eventTx,
+        );
+        eventTx.abort("test event dispatch read transaction");
+
+        await runtime.idle();
+        assertEquals(eventSeen, { type: "click" });
+      } finally {
+        cancel();
+      }
+    } finally {
+      tx.abort("test cleanup");
+      await runtime.dispose();
+    }
+  },
+);

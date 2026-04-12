@@ -29,6 +29,21 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     storageManager,
     apiUrl: new URL("http://localhost"),
   });
+  const healthRecordAtom = {
+    type: "https://commonfabric.org/cfc/atom/Resource",
+    class: "SensitiveHealthRecord",
+    subject: signer.did(),
+  };
+  const healthClinicAtom = {
+    type: "https://commonfabric.org/cfc/atom/Origin",
+    uri: "https://health-clinic.example/records",
+    fetchedAt: 0,
+  };
+  const otherClinicAtom = {
+    type: "https://commonfabric.org/cfc/atom/Origin",
+    uri: "https://other-system.example/records",
+    fetchedAt: 0,
+  };
 
   try {
     const tx = runtime.edit();
@@ -53,12 +68,11 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           version: 1,
           entries: [{
             path: [],
-            label: { classification: ["confidential"] },
+            label: { classification: [healthRecordAtom] },
           }],
         },
       },
     });
-    const structuredAtom = { type: "Source", source: "health-clinic" };
     const structuredSecret = runtime.getCell<string>(
       signer.did(),
       "cfc-render-policy-structured-secret",
@@ -80,7 +94,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           version: 1,
           entries: [{
             path: [],
-            label: { classification: [structuredAtom] },
+            label: { classification: [healthClinicAtom] },
           }],
         },
       },
@@ -186,7 +200,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         const root: WorkerVNode = {
           type: "vnode",
           name: "cf-cfc-render-boundary",
-          props: { maxConfidentiality: "unclassified" },
+          props: { maxConfidentiality: [] },
           children: [classified as never],
         };
 
@@ -218,8 +232,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-render-boundary",
           props: {
-            maxConfidentiality: "unclassified",
-            declassifyClassification: "confidential",
+            maxConfidentiality: [],
+            declassifyClassification: [healthRecordAtom],
           },
           children: [classified as never],
         };
@@ -255,7 +269,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-render-boundary",
           props: {
-            maxConfidentiality: [{ type: "Source", source: "health-clinic" }],
+            maxConfidentiality: [healthClinicAtom],
           },
           children: [structuredClassified as never],
         };
@@ -288,7 +302,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-render-boundary",
           props: {
-            maxConfidentiality: [{ type: "Source", source: "other-system" }],
+            maxConfidentiality: [otherClinicAtom],
           },
           children: [structuredClassified as never],
         };
@@ -318,7 +332,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-render-boundary",
           props: {
-            maxConfidentiality: "unclassified",
+            maxConfidentiality: [],
             $value: classified as never,
           },
           children: [{
@@ -357,7 +371,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           propsTx,
         );
         propsCell.setRawUntyped({
-          maxConfidentiality: "unclassified",
+          maxConfidentiality: [],
           $value: classified.getAsLink({ includeSchema: true }),
         });
         const propsCommitResult = await propsTx.commit();
@@ -411,8 +425,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           propsTx,
         );
         propsCell.setRawUntyped({
-          maxConfidentiality: "unclassified",
-          declassifyClassification: "confidential",
+          maxConfidentiality: [],
+          declassifyClassification: [healthRecordAtom],
           $value: classified.getAsLink({ includeSchema: true }),
         });
         const propsCommitResult = await propsTx.commit();
@@ -470,7 +484,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             type: "vnode",
             name: "cf-cfc-render-boundary",
             props: {
-              maxConfidentiality: "unclassified",
+              maxConfidentiality: [],
               $value: classified,
             },
             children: [{
@@ -492,8 +506,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
               type: "vnode",
               name: "cf-cfc-render-boundary",
               props: {
-                maxConfidentiality: "unclassified",
-                declassifyClassification: "confidential",
+                maxConfidentiality: [],
+                declassifyClassification: [healthRecordAtom],
                 $value: classified,
               },
               children: [{
@@ -530,7 +544,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           onOps: collector.onOps,
         });
         const propsCell = new MockPropsCell({
-          maxConfidentiality: "unclassified",
+          maxConfidentiality: [],
           $value: classified,
         });
         const root: WorkerVNode = {
@@ -551,8 +565,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           collector.clear();
 
           propsCell.set({
-            maxConfidentiality: "unclassified",
-            declassifyClassification: "confidential",
+            maxConfidentiality: [],
+            declassifyClassification: [healthRecordAtom],
             $value: classified,
           });
           await new Promise((resolve) => setTimeout(resolve, 10));

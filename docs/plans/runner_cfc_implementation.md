@@ -840,14 +840,26 @@ Implementation notes for spec update:
       the trusted runtime IPC path. It must not treat schema `ifc` constraints
       as labels to display; schema annotations remain the policy/declaration
       surface that prepare uses to create or constrain stored metadata
-- [x] The current implemented boundary still does not provide a general
-      render-time declassification monitor that blocks arbitrary untrusted UI
-      from displaying labeled content outside a trusted disclaimer surface
-- [x] Defer full render-time declassification enforcement to a follow-on
-      runtime/spec slice: define schema-side render/declassify obligations,
-      decide how UI render reads enter CFC prepare/digest inputs, and specify
-      how trusted disclaimer render evidence is checked before labeled content
-      can appear in an untrusted host tree
+- [x] The implemented render-time monitor is intentionally low-level and
+      generic: `cf-cfc-render-boundary` can bind a `$value`, narrow
+      `maxConfidentiality`, and declassify an explicit atom list before
+      rendering its children. It reads actual document CFC metadata, with schema
+      IFC only as a conservative fallback when stored/read labels are absent
+- [x] The render boundary no longer models a legacy ordered secrecy lattice.
+      Absent `maxConfidentiality` means no render-time bound, while explicit
+      `maxConfidentiality={[]}` means only unlabeled content may render. Any
+      allowed or declassified labels are compared as structured CFC atoms by
+      canonical structural equality
+- [x] Runtime/demo CFC labels now use spec-style structured atoms such as
+      `Resource` and `Caveat` instead of the previous
+      `unclassified`/`confidential`/`secret`/`topsecret` compatibility strings.
+      The old runner `Classification` constants were removed from the public
+      runtime surface
+- [x] Defer full render-time declassification evidence to a follow-on
+      runtime/spec slice: specify how trusted disclaimer render evidence enters
+      CFC prepare/digest inputs and how that evidence is checked before labeled
+      content can appear in an untrusted host tree outside an explicit
+      `cf-cfc-render-boundary`
 - [x] Process-oriented examples such as song identification, scoped
       availability contribution, and long-running upload are modeled as trusted
       interactive kickoff surfaces with mocked middle steps; the surface should

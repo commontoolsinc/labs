@@ -77,7 +77,10 @@ import {
   resolveBuiltinImplementationIdentity,
   resolvePolicyFacingImplementationIdentity,
 } from "./cfc/implementation-identity.ts";
-import type { ImplementationIdentity } from "./cfc/types.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  type ImplementationIdentity,
+} from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 export {
   cellAwareDeepCopy,
@@ -132,10 +135,11 @@ const recordOutputSchemaPolicyInputs = (
   }
 
   if (isWriteRedirectLink(outputBinding)) {
+    const bindingLink = parseLink(outputBinding, processCell);
     const link = resolveLink(
       runtime,
       tx,
-      parseLink(outputBinding, processCell),
+      bindingLink,
       "writeRedirect",
     );
     const schema = schemaPath.length === 0
@@ -144,16 +148,18 @@ const recordOutputSchemaPolicyInputs = (
     if (schema === undefined) {
       return;
     }
-    tx.recordCfcWritePolicyInput({
-      kind: "schema",
-      target: {
-        space: link.space,
-        id: link.id,
-        type: link.type,
-        path: [...link.path],
-      },
-      schema,
-    });
+    for (const targetLink of [bindingLink, link]) {
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          space: targetLink.space,
+          id: targetLink.id,
+          type: targetLink.type,
+          path: [...targetLink.path],
+        },
+        schema,
+      });
+    }
     return;
   }
 
@@ -179,6 +185,78 @@ const recordOutputSchemaPolicyInputs = (
         processCell,
         child,
         resultSchema,
+        [...schemaPath, key],
+      );
+    }
+  }
+};
+
+const recordSetupProjectionPolicyInputs = (
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  processCell: Cell<any>,
+  resultCell: Cell<any>,
+  resultSchema: JSONSchema | undefined,
+  projection: unknown,
+  schemaPath: readonly string[] = [],
+): void => {
+  if (resultSchema === undefined) {
+    return;
+  }
+
+  const schema = schemaPath.length === 0
+    ? resultSchema
+    : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+  if (schema === undefined) {
+    return;
+  }
+
+  if (isWriteRedirectLink(projection)) {
+    const target = resultCell.getAsNormalizedFullLink();
+    const source = parseLink(projection, processCell);
+    tx.recordCfcWritePolicyInput({
+      kind: "structural-provenance",
+      target: {
+        space: target.space,
+        id: target.id,
+        type: target.type,
+        path: [...target.path, ...schemaPath],
+      },
+      claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+      sources: [{
+        space: source.space,
+        id: source.id,
+        type: source.type,
+        path: [...source.path],
+      }],
+    });
+    return;
+  }
+
+  if (Array.isArray(projection)) {
+    projection.forEach((child, index) =>
+      recordSetupProjectionPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        resultCell,
+        resultSchema,
+        child,
+        [...schemaPath, String(index)],
+      )
+    );
+    return;
+  }
+
+  if (isRecord(projection) && !isCellLink(projection)) {
+    for (const [key, child] of Object.entries(projection)) {
+      recordSetupProjectionPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        resultCell,
+        resultSchema,
+        child,
         [...schemaPath, key],
       );
     }
@@ -306,6 +384,12 @@ export class Runner {
               ? error.reason
               : new Error(error.message);
           }
+          if (
+            error.name === "StorageTransactionAborted" &&
+            error.message.startsWith("CFC enforcement rejected commit")
+          ) {
+            throw new Error(error.message, { cause: error.reason });
+          }
         }
 
         return resultCell;
@@ -408,11 +492,14 @@ export class Runner {
     resultCell: Cell<R>,
     options: { preserveName: boolean },
   ): void {
+    const writableResultCell = pattern.resultSchema === undefined
+      ? resultCell.withTx(tx)
+      : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       pattern.result as R,
       processCell,
     );
-    const previousResult = resultCell.withTx(tx).getRaw({
+    const previousResult = writableResultCell.getRaw({
       meta: ignoreReadForScheduling,
     });
     if (
@@ -423,7 +510,15 @@ export class Runner {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
     if (!deepEqual(result, previousResult)) {
-      resultCell.withTx(tx).setRawUntyped(
+      recordSetupProjectionPolicyInputs(
+        tx,
+        this.runtime,
+        processCell,
+        resultCell,
+        pattern.resultSchema,
+        result,
+      );
+      writableResultCell.setRawUntyped(
         fabricFromNativeValue(result, false),
       );
     }
@@ -1504,7 +1599,7 @@ export class Runner {
       name?: string;
       sourceLocationSample?: Record<string, unknown>;
     };
-    const name = namedFn.src || fn.name;
+    const name = namedFn.src || fn.name || module.implementationRef;
     if (name && namedFn.sourceLocationSample) {
       sourceLocationLogger.flag("sample", name, true, {
         name,
@@ -1759,12 +1854,14 @@ export class Runner {
     }
 
     previousResultCellRef.current ??= resultCell;
+    const effectiveResultSchema = resultSchema ?? resultPattern.resultSchema ??
+      resultCell.schema;
     recordOutputSchemaPolicyInputs(
       tx,
       this.runtime,
       processCell,
       outputs,
-      resultSchema,
+      effectiveResultSchema,
     );
     sendValueToBinding(
       tx,
@@ -1903,10 +2000,13 @@ export class Runner {
     };
 
     if (name) {
-      setRunnableName(handler, `handler:${name}`);
+      setRunnableName(handler, `handler:${name}`, { setSrc: true });
     }
 
     const wrappedHandler = Object.assign(handler, {
+      eventHandlerDedupeKey: module.implementationRef ??
+        name ??
+        Function.prototype.toString.call(fn),
       reads,
       writes,
       module,

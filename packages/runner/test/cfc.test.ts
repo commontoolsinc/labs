@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ContextualFlowControl } from "../src/cfc.ts";
+import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 
@@ -33,18 +33,18 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
 describe("ContextualFlowControl atom joins", () => {
   it("preserves arbitrary classification atoms instead of collapsing through the legacy lattice", () => {
     const cfc = new ContextualFlowControl();
-    const caveatAtom = {
-      type: "https://commonfabric.org/cfc/atom/Caveat",
-      kind: "prompt-influence",
-      source: "of:prompt-source",
-    };
+    const caveatAtom = cfcAtom.caveat("prompt-influence", "of:prompt-source");
+    const provenanceAtom = cfcAtom.resource(
+      "SourceProvenance",
+      "did:example:source",
+    );
     const schema: JSONSchema = {
       type: "object",
       ifc: { classification: [caveatAtom] },
       properties: {
         body: {
           type: "string",
-          ifc: { classification: ["source-provenance"] },
+          ifc: { classification: [provenanceAtom] },
         },
       },
     };
@@ -52,11 +52,11 @@ describe("ContextualFlowControl atom joins", () => {
     const joined = new Set<unknown>();
     ContextualFlowControl.joinSchema(joined, schema);
 
-    expect(cfc.lub(joined)).toEqual([caveatAtom, "source-provenance"]);
+    expect(cfc.lub(joined)).toEqual([caveatAtom, provenanceAtom]);
     expect(cfc.schemaAtPath(schema, ["body"])).toMatchObject({
       type: "string",
       ifc: {
-        classification: [caveatAtom, "source-provenance"],
+        classification: [caveatAtom, provenanceAtom],
       },
     });
   });

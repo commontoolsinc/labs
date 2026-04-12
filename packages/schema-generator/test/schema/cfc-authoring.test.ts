@@ -243,6 +243,34 @@ describe("Schema: CFC authoring aliases", () => {
     }]);
   });
 
+  it("preserves object-shaped classification atoms referenced with typeof", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+      type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
+
+      const HEALTH_RECORD_CONFIDENTIALITY = {
+        type: "https://commonfabric.org/cfc/atom/Resource",
+        class: "SensitiveHealthRecord",
+        subject: "did:example:patient",
+      } as const;
+
+      interface SchemaRoot {
+        body: Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    expect((schema.properties?.body as any).ifc?.classification).toEqual([{
+      type: "https://commonfabric.org/cfc/atom/Resource",
+      class: "SensitiveHealthRecord",
+      subject: "did:example:patient",
+    }]);
+  });
+
   it("preserves primitive Cfc metadata through generic aliases", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
@@ -273,6 +301,79 @@ describe("Schema: CFC authoring aliases", () => {
       kind: "authored-by",
       subject: "alice",
     }]);
+  });
+
+  it("preserves tuple metadata through chained generic Cfc aliases", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+      type WriteAuthorizedBy<T, Binding> = Cfc<T, { writeAuthorizedBy: Binding }>;
+
+      type TrustedActionWriteWithIntegrity<
+        T,
+        Binding,
+        Action extends string,
+        Pattern extends string,
+        Integrity extends readonly [string, ...string[]],
+      > = Cfc<
+        WriteAuthorizedBy<T, Binding>,
+        {
+          uiContract: {
+            helper: "UiAction";
+            action: Action;
+            trustedPattern: Pattern;
+            requiredEventIntegrity: Integrity;
+          };
+        }
+      >;
+
+      type TrustedActionWrite<
+        T,
+        Binding,
+        Action extends string,
+        Pattern extends string,
+      > = TrustedActionWriteWithIntegrity<T, Binding, Action, Pattern, [Pattern]>;
+
+      declare function handler<A, B>(fn: (argument: A, state: B) => void): { readonly __handler: [A, B] };
+      interface Writable<T> {
+        get(): T;
+        set(value: T): void;
+      }
+
+      const TRUSTED_SAVE_ACTION = "TrustedSaveTitle";
+      const TRUSTED_SAVE_SURFACE = "TrustedSaveSurface";
+      const commitTrustedSaveTitle = handler<void, { title: Writable<string> }>(
+        (_, { title }) => title.set(title.get().trim()),
+      );
+
+      interface SchemaRoot {
+        savedTitle: TrustedActionWrite<
+          string,
+          typeof commitTrustedSaveTitle,
+          typeof TRUSTED_SAVE_ACTION,
+          typeof TRUSTED_SAVE_SURFACE
+        >;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const savedTitle = schema.properties?.savedTitle as any;
+    expect(savedTitle.type).toBe("string");
+    expect(savedTitle.ifc?.uiContract).toEqual({
+      helper: "UiAction",
+      action: "TrustedSaveTitle",
+      trustedPattern: "TrustedSaveSurface",
+      requiredEventIntegrity: ["TrustedSaveSurface"],
+    });
+    expect(savedTitle.ifc?.writeAuthorizedBy).toEqual({
+      __ctWriterIdentityOf: {
+        file: "test.ts",
+        path: ["commitTrustedSaveTitle"],
+      },
+    });
   });
 
   it("falls back to ordinary schema generation when a canonical alias expansion cannot be resolved", async () => {

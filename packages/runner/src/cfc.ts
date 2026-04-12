@@ -7,6 +7,7 @@ import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
 import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
 import { decodeJsonPointer } from "./link-types.ts";
+export { CFC_ATOM_TYPE, CFC_RUNTIME_SUBJECT, cfcAtom } from "./cfc/atoms.ts";
 
 const logger = getLogger("cfc");
 type IFCAtom = ImmutableJSONValue;
@@ -18,19 +19,9 @@ const embeddedSchemas: Record<string, JSONSchema> = {
   "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
 };
 
-// I use these strings in other code, so make them available as
-// constants. These are just strings, and real meaning would be
-// up to implementation.
-export const Classification = {
-  Unclassified: "unclassified",
-  Confidential: "confidential",
-  Secret: "secret",
-  TopSecret: "topsecret",
-} as const;
-
 // Class for handling cfc rules.
 // The spec's confidentiality model is a flat set/CNF of structured atoms, not
-// an ordered four-level secrecy lattice. This compatibility layer still keeps
+// an ordered four-level secrecy lattice. This compatibility layer still accepts
 // the old "classification" field name, but treats its values as atoms.
 export class ContextualFlowControl {
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {

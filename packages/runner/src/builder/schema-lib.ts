@@ -1,6 +1,7 @@
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { cfcAtom } from "../cfc/atoms.ts";
 
-const ClassificationSecret = "secret";
+const credentialSecretAtom = cfcAtom.resource("CredentialSecret");
 
 // This is used by the various Google tokens created with tokenToAuthData
 export const AuthSchema = toDeepFrozenSchema(
@@ -10,7 +11,7 @@ export const AuthSchema = toDeepFrozenSchema(
       token: {
         type: "string",
         default: "",
-        ifc: { classification: [ClassificationSecret] },
+        ifc: { classification: [credentialSecretAtom] },
       },
       tokenType: { type: "string", default: "" },
       scope: { type: "array", items: { type: "string" }, default: [] },
@@ -19,7 +20,7 @@ export const AuthSchema = toDeepFrozenSchema(
       refreshToken: {
         type: "string",
         default: "",
-        ifc: { classification: [ClassificationSecret] },
+        ifc: { classification: [credentialSecretAtom] },
       },
       user: {
         type: "object",
@@ -42,7 +43,7 @@ export const OAuth2TokenSchema = toDeepFrozenSchema(
       accessToken: {
         type: "string",
         default: "",
-        ifc: { classification: [ClassificationSecret] },
+        ifc: { classification: [credentialSecretAtom] },
       },
       tokenType: { type: "string", default: "" },
       scope: { type: "array", items: { type: "string" }, default: [] },
@@ -51,7 +52,7 @@ export const OAuth2TokenSchema = toDeepFrozenSchema(
       refreshToken: {
         type: "string",
         default: "",
-        ifc: { classification: [ClassificationSecret] },
+        ifc: { classification: [credentialSecretAtom] },
       },
       user: {
         type: "object",
@@ -75,12 +76,12 @@ export const WebhookConfigSchema = toDeepFrozenSchema(
       url: {
         type: "string",
         default: "",
-        ifc: { classification: [ClassificationSecret] },
+        ifc: { classification: [credentialSecretAtom] },
       },
       secret: {
         type: "string",
         default: "",
-        ifc: { classification: [ClassificationSecret] },
+        ifc: { classification: [credentialSecretAtom] },
       },
     },
     required: ["url", "secret"],

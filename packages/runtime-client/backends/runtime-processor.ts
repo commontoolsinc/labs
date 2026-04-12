@@ -27,11 +27,7 @@ import {
   CachedCompiler,
   IDBCompilationCache,
 } from "@commonfabric/runner/compilation-cache";
-import {
-  NameSchema,
-  nameSchema,
-  rendererVDOMSchema,
-} from "@commonfabric/runner/schemas";
+import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type NormalizedFullLink,
@@ -657,17 +653,13 @@ export class RuntimeProcessor {
 
   // TODO(runtime-worker-refactor): Can this fail? What if the cell
   // is not a page cell?
-  handlePageGet(
+  async handlePageGet(
     request: PageGetRequest,
-  ): PageResponse {
-    let cell = this.runtime.getCellFromEntityId(this.space, {
-      "/": request.pageId,
-    });
-    cell = cell.asSchema(nameSchema);
-
-    if (request.runIt) {
-      this.runtime.start(cell).catch(console.error);
-    }
+  ): Promise<PageResponse> {
+    const cell = await this.cc.manager().get(
+      request.pageId,
+      request.runIt ?? false,
+    );
 
     return {
       page: createPageRef(cell),
@@ -945,7 +937,7 @@ export class RuntimeProcessor {
           request,
         );
       case RequestType.PageGet:
-        return this.handlePageGet(request);
+        return await this.handlePageGet(request);
       case RequestType.PageRemove:
         return await this.handlePageRemove(request);
       case RequestType.PageStart:
@@ -1018,8 +1010,16 @@ export class RuntimeProcessor {
       return;
     }
 
-    // Dispatch the event to the reconciler
-    mount.reconciler.dispatchEvent(request.handlerId, request.event);
+    const tx = this.runtime.edit();
+    try {
+      mount.reconciler.dispatchEvent(
+        request.handlerId,
+        request.event,
+        tx,
+      );
+    } finally {
+      tx.abort("vdom event dispatch read transaction");
+    }
   }
 
   /**

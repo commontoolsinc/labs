@@ -3493,10 +3493,10 @@ interface CFCFCAuthorshipAttributes<T> extends CFHTMLAttributes<T> {
 interface CFCFCRenderBoundaryAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<unknown>;
   "value"?: unknown;
-  "maxConfidentiality"?: string | readonly string[];
-  "data-cfc-max-confidentiality"?: string | readonly string[];
-  "declassifyClassification"?: string | readonly string[];
-  "data-cfc-declassify-classification"?: string | readonly string[];
+  "maxConfidentiality"?: unknown | readonly unknown[];
+  "data-cfc-max-confidentiality"?: unknown | readonly unknown[];
+  "declassifyClassification"?: unknown | readonly unknown[];
+  "data-cfc-declassify-classification"?: unknown | readonly unknown[];
 }
 
 interface CFDragSourceAttributes<T> extends CFHTMLAttributes<T> {

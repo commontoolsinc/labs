@@ -130,6 +130,48 @@ describe("Pattern Runner - Handlers", () => {
     addEventHandlerSpy.restore();
   });
 
+  it("should use implementationRef as the event handler dedupe key", async () => {
+    const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
+
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incPattern = pattern<{ counter: { value: number } }>(
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const resultCell = runtime.getCell<
+      { counter: { value: number }; stream: any }
+    >(space, "handler implementationRef dedupe key test", undefined, tx);
+    const result = runtime.run(tx, incPattern, {
+      counter: { value: 0 },
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    expect(addEventHandlerSpy.calls.length).toBeGreaterThan(0);
+    const registeredHandler = addEventHandlerSpy.calls[0].args[0] as {
+      eventHandlerDedupeKey?: string;
+    };
+
+    expect(registeredHandler.eventHandlerDedupeKey).toBe(
+      (incHandler as { implementationRef?: string }).implementationRef,
+    );
+
+    addEventHandlerSpy.restore();
+  });
+
   it("should execute patterns returned by handlers", async () => {
     const counter = runtime.getCell<{ value: number }>(
       space,

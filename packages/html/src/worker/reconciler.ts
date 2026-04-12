@@ -18,6 +18,7 @@ import {
   type Cell,
   ContextualFlowControl,
   convertCellsToLinks,
+  type IExtendedStorageTransaction,
   isCell,
   isStream,
   type JSONSchema,
@@ -79,7 +80,10 @@ const logger = getLogger("worker-reconciler", {
 export class WorkerReconciler {
   private nodeIdCounter = 0;
   private handlerIdCounter = 0;
-  private handlers = new Map<number, (event: unknown) => void>();
+  private handlers = new Map<
+    number,
+    (event: unknown, tx?: IExtendedStorageTransaction) => void
+  >();
   private batchIdCounter = 0;
   private pendingOps: VDomOp[] = [];
   private flushScheduled = false;
@@ -231,17 +235,23 @@ export class WorkerReconciler {
   /**
    * Dispatch a DOM event to its handler.
    */
-  dispatchEvent(handlerId: number, event: unknown): void {
+  dispatchEvent(
+    handlerId: number,
+    event: unknown,
+    tx?: IExtendedStorageTransaction,
+  ): boolean {
     const handler = this.handlers.get(handlerId);
     if (handler) {
       try {
-        handler(event);
+        handler(event, tx);
       } catch (error) {
         this.onError?.(
           error instanceof Error ? error : new Error(String(error)),
         );
       }
+      return true;
     }
+    return false;
   }
 
   /**
@@ -490,7 +500,7 @@ export class WorkerReconciler {
   private normalizeClassificationBound(
     labels: readonly unknown[] | undefined,
   ): readonly unknown[] | undefined {
-    if (labels === undefined || labels.length === 0) {
+    if (labels === undefined) {
       return undefined;
     }
     return ContextualFlowControl.uniqueAtoms(labels);
@@ -979,8 +989,8 @@ export class WorkerReconciler {
 
     if (isStream(value)) {
       const stream = value as Stream<unknown>;
-      const handlerId = ctx.registerHandler((event: unknown) => {
-        stream.send(event);
+      const handlerId = ctx.registerHandler((event, tx) => {
+        (tx ? stream.withTx(tx) : stream).send(event);
       });
       state.eventHandlers.set(eventType, handlerId);
       this.queueOps([{
@@ -1151,7 +1161,9 @@ export class WorkerReconciler {
           // Event prop - resolve target via Cell navigation
           let resolvedTarget: Cell<unknown>;
           try {
-            resolvedTarget = propsCell.key(key).resolveAsCell();
+            // Event handlers outlive the render transaction that resolved the
+            // props cell, so avoid capturing a tx-bound cell here.
+            resolvedTarget = propsCell.key(key).resolveAsCell().withTx();
           } catch (e) {
             logger.error(
               "resolveAsCell failed for event prop",
@@ -1184,8 +1196,8 @@ export class WorkerReconciler {
           }
           if (existingState) existingState.cancel();
 
-          const handlerId = ctx.registerHandler((event: unknown) =>
-            resolvedTarget.send(event)
+          const handlerId = ctx.registerHandler((event, tx) =>
+            (tx ? resolvedTarget.withTx(tx) : resolvedTarget).send(event)
           );
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{
@@ -1850,8 +1862,8 @@ export class WorkerReconciler {
         // Handle Streams (actions) - wrap in a handler that calls .send()
         if (isStream(value)) {
           const stream = value as Stream<unknown>;
-          const handlerId = ctx.registerHandler((event: unknown) => {
-            stream.send(event);
+          const handlerId = ctx.registerHandler((event, tx) => {
+            (tx ? stream.withTx(tx) : stream).send(event);
           });
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{

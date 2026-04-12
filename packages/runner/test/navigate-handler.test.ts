@@ -4,6 +4,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { navigateTo as rawNavigateTo } from "../src/builtins/navigate-to.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -168,3 +169,88 @@ Deno.test(
     }
   },
 );
+
+Deno.test("navigateTo is idempotent for one result process cell", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const navigations: string[] = [];
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    navigateCallback: (target) => {
+      navigations.push(target.entityId?.["/"] ?? "");
+    },
+  });
+
+  const tx: IExtendedStorageTransaction = runtime.edit();
+
+  try {
+    const processCell = runtime.getCell(
+      space,
+      "navigateTo idempotent process cell",
+      undefined,
+      tx,
+    );
+    const targetOne = runtime.getCell(
+      space,
+      "navigateTo idempotent target one",
+      undefined,
+      tx,
+    );
+    targetOne.set({ title: "one" });
+    const targetTwo = runtime.getCell(
+      space,
+      "navigateTo idempotent target two",
+      undefined,
+      tx,
+    );
+    targetTwo.set({ title: "two" });
+
+    const inputsOne = runtime.getImmutableCell(
+      space,
+      targetOne.getAsLink(),
+      undefined,
+      tx,
+    );
+    const inputsTwo = runtime.getImmutableCell(
+      space,
+      targetTwo.getAsLink(),
+      undefined,
+      tx,
+    );
+
+    const sendResult = (
+      resultTx: IExtendedStorageTransaction,
+      result: unknown,
+    ) => {
+      processCell.withTx(resultTx).key("result").set(result);
+    };
+
+    const first = rawNavigateTo(
+      inputsOne,
+      sendResult,
+      () => {},
+      [],
+      processCell,
+      runtime,
+    );
+    const second = rawNavigateTo(
+      inputsTwo,
+      sendResult,
+      () => {},
+      [],
+      processCell,
+      runtime,
+    );
+
+    first.action(tx);
+    second.action(tx);
+    await tx.commit();
+    await runtime.idle();
+
+    assertEquals(navigations.length, 1);
+    assertEquals(navigations[0], targetOne.entityId?.["/"]);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});

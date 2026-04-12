@@ -344,6 +344,25 @@ describe("RuntimeClient", () => {
       assertExists(page.id());
     });
 
+    it("retrieves a page with its result schema, including UI", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(TEST_PROGRAM, {
+        run: true,
+      });
+      const retrieved = await rt.getPage(page.id(), true);
+      assertExists(retrieved);
+
+      const cell = retrieved.cell();
+      await cell.sync();
+      const value = cell.get() as { $UI?: VNode; $NAME?: string };
+
+      assertEquals(value.$NAME, "Home");
+      assertExists(value.$UI, "Retrieved page cell should include $UI");
+      assertEquals(value.$UI.name, "h1");
+    });
+
     it("starts and stops page execution", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
@@ -528,6 +547,79 @@ export default pattern((_) => {
       cancel();
     });
 
+    it("renders nested pattern components when page UI is typed unknown", async () => {
+      const unknownUiPattern =
+        `import { NAME, pattern, UI } from "commonfabric";
+
+interface ChildOutput {
+  [NAME]: string;
+  [UI]: unknown;
+}
+
+interface ParentOutput {
+  [NAME]: string;
+  [UI]: unknown;
+}
+
+const Child = pattern<unknown, ChildOutput>(() => {
+  return {
+    [NAME]: "Nested child",
+    [UI]: <span id="nested-child">Nested child rendered</span>,
+  };
+});
+
+export default pattern<unknown, ParentOutput>(() => {
+  const child = Child({});
+  return {
+    [NAME]: "Unknown UI parent",
+    [UI]: (
+      <div id="unknown-ui-parent">
+        {child}
+        <p id="sibling-after-child">Sibling rendered</p>
+      </div>
+    ),
+  };
+});`;
+
+      const unknownUiProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: unknownUiPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(unknownUiProgram, {
+        run: true,
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () =>
+          Promise.resolve(
+            root.innerHTML.includes("Nested child rendered") &&
+              root.innerHTML.includes("Sibling rendered"),
+          ),
+        { timeout: 5000 },
+      );
+      assertEquals(
+        root.innerHTML.includes('id="nested-child"'),
+        true,
+        "Should render the nested child pattern UI",
+      );
+
+      cancel();
+    });
+
     it("renders cell values in VNode children", async () => {
       // Pattern that renders a state value in the UI
       const valuePattern =
@@ -702,6 +794,246 @@ export default pattern<State>(({ value }) => {
         () => Promise.resolve(root.innerHTML.includes(">1</span>")),
         { timeout: 5000 },
       );
+
+      cancel();
+    });
+
+    it("commits click events through rendered handler streams", async () => {
+      const clickPattern =
+        `import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
+
+interface State {
+  value: Writable<Default<number, 0>>;
+}
+
+const increment = handler<void, { value: Writable<number> }>((_, { value }) => {
+  value.set(value.get() + 1);
+});
+
+export default pattern<State>(({ value }) => {
+  return {
+    [NAME]: "Handler Click Test",
+    value,
+    [UI]: (
+      <div>
+        <button id="increment" onClick={increment({ value })}>Increment</button>
+        <span id="value">{value}</span>
+      </div>
+    ),
+  };
+});`;
+
+      const clickProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: clickPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(clickProgram, {
+        run: true,
+      });
+      const valueCell = (page.cell() as any).key("value").asSchema({
+        type: "number",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+      assertEquals(await valueCell.sync(), 0);
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        async () => await valueCell.sync() === 1,
+        { timeout: 5000 },
+      );
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.includes(">1</span>")),
+        { timeout: 5000 },
+      );
+
+      cancel();
+    });
+
+    it("dispatches navigateTo from rendered handler streams", async () => {
+      const navigatePattern =
+        `import { Default, handler, NAME, navigateTo, pattern, UI } from "commonfabric";
+
+interface ChildState {
+  label: Default<string, "target">;
+}
+
+const Child = pattern<ChildState>(({ label }) => ({
+  [NAME]: "Target Child",
+  label,
+  [UI]: <div id="child">{label}</div>,
+}));
+
+const go = handler<void, Record<string, never>>(() => {
+  return navigateTo(Child({ label: "target" }));
+});
+
+export default pattern<Record<string, never>>(() => {
+  return {
+    [NAME]: "Navigate Handler Test",
+    [UI]: <button id="go" onClick={go({})}>Go</button>,
+  };
+});`;
+
+      const navigateProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: navigatePattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(navigateProgram, {
+        run: true,
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const navigation = new Promise<string>((resolve) => {
+        rt.on("navigaterequest", ({ cell }) => {
+          resolve(cell.id());
+        });
+      });
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<string>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("timed out waiting for navigaterequest")),
+          5000,
+        );
+      });
+      const navigatedPieceId = await Promise.race([
+        navigation,
+        timeoutPromise,
+      ]).finally(() => {
+        if (timeout !== undefined) {
+          clearTimeout(timeout);
+        }
+      });
+      assertExists(navigatedPieceId);
+
+      cancel();
+    });
+
+    it("dispatches one navigateTo when a rendered handler changes local state", async () => {
+      const navigatePattern =
+        `import { Default, computed, handler, NAME, navigateTo, pattern, UI, Writable } from "commonfabric";
+
+interface ChildState {
+  label: Default<string, "target">;
+}
+
+const Child = pattern<ChildState>(({ label }) => ({
+  [NAME]: "Target Child",
+  label,
+  [UI]: <div id="child">{label}</div>,
+}));
+
+const go = handler<void, { menuOpen: Writable<boolean> }>((_, { menuOpen }) => {
+  menuOpen.set(false);
+  return navigateTo(Child({ label: "target" }));
+});
+
+export default pattern<Record<string, never>>(() => {
+  const menuOpen = Writable.of(true);
+  return {
+    [NAME]: "Navigate Handler State Test",
+    menuOpen,
+    [UI]: (
+      <button
+        id="go"
+        onClick={go({ menuOpen })}
+        style={{ display: computed(() => menuOpen.get() ? "block" : "none") }}
+      >
+        Go
+      </button>
+    ),
+  };
+});`;
+
+      const navigateProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: navigatePattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(navigateProgram, {
+        run: true,
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+      const navigations: string[] = [];
+      rt.on("navigaterequest", ({ cell }) => {
+        navigations.push(cell.id());
+      });
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        () => Promise.resolve(navigations.length > 0),
+        { timeout: 5000 },
+      );
+      await rt.idle();
+
+      assertEquals(navigations.length, 1);
 
       cancel();
     });

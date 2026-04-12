@@ -296,7 +296,11 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       event,
       nodeId,
     }).catch((error) => {
-      console.error("[RuntimeClient] VDom event dispatch failed:", error);
+      console.error(
+        "[RuntimeClient] VDom event dispatch failed:",
+        error instanceof Error ? error.message : String(error),
+        error,
+      );
     });
   }
 

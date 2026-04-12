@@ -48,17 +48,20 @@ export async function ensurePieceRunning(
         undefined,
         tx,
       );
+      await currentCell.sync();
 
       // Traverse up the source cell chain
       // This follows links from derived cells back to the process cell
       let sourceCell = currentCell.getSourceCell();
       while (sourceCell) {
+        await sourceCell.sync();
         logger.debug("ensure-piece", () => [
           `Following source cell from ${currentCell?.getAsNormalizedFullLink().id} to ${sourceCell?.getAsNormalizedFullLink().id}`,
         ]);
         currentCell = sourceCell;
         sourceCell = currentCell.getSourceCell();
       }
+      await currentCell.sync();
 
       // currentCell is now the process cell (or the original cell if no sources)
       // Check if it has a resultRef and a TYPE (indicating it's a process cell)
@@ -121,8 +124,9 @@ export async function ensurePieceRunning(
         `Starting piece with pattern ${patternId} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
       ]);
 
-      // Start the piece - this will register event handlers
-      await runtime.runSynced(resultCell, pattern);
+      // Start the existing piece - this registers event handlers without
+      // re-running setup and potentially allocating a different process cell.
+      await runtime.start(resultCell);
 
       logger.debug("ensure-piece", () => [
         `Piece started successfully`,

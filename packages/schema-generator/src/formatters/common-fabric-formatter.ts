@@ -744,11 +744,11 @@ export class CommonFabricFormatter implements TypeFormatter {
       throw new Error(`${resolved.aliasName}<T> requires type argument`);
     }
 
-    const baseSchema = this.schemaGenerator.formatChildType(
-      baseType,
-      context,
-      undefined,
-    );
+    const baseTypeNode = resolved.aliasArgNodes?.[0];
+    const baseSchema = baseTypeNode
+      ? this.formatCfcAliasTypeNode(baseTypeNode, context) ??
+        this.schemaGenerator.formatChildType(baseType, context, baseTypeNode)
+      : this.schemaGenerator.formatChildType(baseType, context, undefined);
 
     const ifc = this.buildIfcMetadataForAlias(
       resolved.aliasName,
@@ -761,6 +761,47 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     return this.mergeIfcMetadata(baseSchema, ifc);
+  }
+
+  private formatCfcAliasTypeNode(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): JSONSchemaMutable | undefined {
+    if (
+      ts.isParenthesizedTypeNode(typeNode) || ts.isTypeOperatorNode(typeNode)
+    ) {
+      return this.formatCfcAliasTypeNode(typeNode.type, context);
+    }
+    if (
+      !ts.isTypeReferenceNode(typeNode) || !ts.isIdentifier(typeNode.typeName)
+    ) {
+      return undefined;
+    }
+
+    const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+      context.typeChecker.getSymbolAtLocation(typeNode.typeName),
+      context,
+    );
+    if (!aliasDeclaration) {
+      return undefined;
+    }
+
+    const aliasArgNodes = typeNode.typeArguments
+      ? [...typeNode.typeArguments]
+      : undefined;
+    const aliasArgs = (aliasArgNodes ?? []).map((argNode) =>
+      this.resolveTypeNodeToType(argNode, context, new Map())
+    );
+    const resolved = this.resolveCfcAliasFromDeclaration(
+      aliasDeclaration,
+      aliasArgs,
+      aliasArgNodes,
+      { ...context, typeNode },
+      new Set([aliasDeclaration.name.text]),
+    );
+    return resolved
+      ? this.formatResolvedCfcAlias(resolved, context)
+      : undefined;
   }
 
   private resolveCfcAliasInstantiation(
@@ -847,8 +888,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     const resolvedArgs: ts.Type[] = [];
     const resolvedArgNodes: ts.TypeNode[] = [];
     for (const argNode of aliased.typeArguments ?? []) {
-      resolvedArgs.push(this.resolveTypeNodeToType(argNode, context, paramMap));
-      resolvedArgNodes.push(this.substituteTypeNode(argNode, paramNodeMap));
+      const resolvedArgNode = this.substituteTypeNode(argNode, paramNodeMap);
+      resolvedArgs.push(
+        this.resolveTypeNodeToType(resolvedArgNode, context, new Map()),
+      );
+      resolvedArgNodes.push(resolvedArgNode);
     }
 
     visited.add(aliasName);
@@ -1025,7 +1069,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           opaque: aliasArgs.length > 1 ? readValue(1) : true,
         };
       case "WriteAuthorizedBy":
-        return this.buildWriteAuthorizedByMetadata(context);
+        return this.buildWriteAuthorizedByMetadata(context, aliasArgNodes);
       case "LengthPreservedFrom":
         return {
           collection: {
@@ -1126,8 +1170,10 @@ export class CommonFabricFormatter implements TypeFormatter {
 
   private buildWriteAuthorizedByMetadata(
     context: GenerationContext,
+    aliasArgNodes?: readonly ts.TypeNode[],
   ): Record<string, unknown> | undefined {
-    const bindingNode = this.getAliasTypeArgumentNode(context.typeNode, 1);
+    const bindingNode = aliasArgNodes?.[1] ??
+      this.getAliasTypeArgumentNode(context.typeNode, 1);
     if (!bindingNode || !ts.isTypeQueryNode(bindingNode)) {
       return undefined;
     }
@@ -1219,6 +1265,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
       if (ts.isTypeOperatorNode(typeNode)) {
         return this.extractLiteralLikeValue(type, typeNode.type, context);
+      }
+      if (ts.isTypeQueryNode(typeNode)) {
+        return this.extractValueFromTypeQuery(typeNode, context);
       }
       if (ts.isLiteralTypeNode(typeNode)) {
         const literal = typeNode.literal;
@@ -1468,9 +1517,17 @@ export class CommonFabricFormatter implements TypeFormatter {
     const exprName = typeQueryNode.exprName;
 
     // Get the symbol for the referenced entity
-    const symbol = context.typeChecker.getSymbolAtLocation(exprName);
+    let symbol = context.typeChecker.getSymbolAtLocation(exprName);
     if (!symbol) {
       return undefined;
+    }
+    if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+      try {
+        symbol = context.typeChecker.getAliasedSymbol(symbol);
+      } catch {
+        // Fall back to the import alias; local test programs can produce
+        // synthetic symbols that do not round-trip through getAliasedSymbol.
+      }
     }
 
     return this.extractValueFromSymbol(symbol, context);
@@ -1507,6 +1564,13 @@ export class CommonFabricFormatter implements TypeFormatter {
     expr: ts.Expression,
     context: GenerationContext,
   ): unknown {
+    if (
+      ts.isAsExpression(expr) || ts.isTypeAssertionExpression(expr) ||
+      ts.isSatisfiesExpression(expr) || ts.isParenthesizedExpression(expr)
+    ) {
+      return this.extractValueFromExpression(expr.expression, context);
+    }
+
     // Handle array literals like [1, 2, 3] or [{ id: "a" }, { id: "b" }]
     if (ts.isArrayLiteralExpression(expr)) {
       return expr.elements.map((element) =>

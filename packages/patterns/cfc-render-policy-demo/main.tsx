@@ -11,13 +11,23 @@ import {
   Writable,
 } from "commonfabric";
 
+const HEALTH_RECORD_CONFIDENTIALITY = {
+  type: "https://commonfabric.org/cfc/atom/Resource",
+  class: "SensitiveHealthRecord",
+  subject: "did:example:patient",
+} as const;
+
 type TrustedHealthDisclosureInput = {
-  content: Writable<Classified<string, readonly ["confidential"]>>;
+  content: Writable<
+    Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
+  >;
   revealSensitive: Writable<boolean>;
 };
 
 type DirectHealthRenderInput = {
-  content: Writable<Classified<string, readonly ["confidential"]>>;
+  content: Writable<
+    Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
+  >;
 };
 
 type LabelledContentArgument = {
@@ -29,18 +39,20 @@ type TrustedHealthDisclosureOutput = {
   [NAME]: string;
   [UI]: unknown;
   revealed: boolean;
-  reveal: Stream<void>;
-  conceal: Stream<void>;
+  reveal: Stream<unknown>;
+  conceal: Stream<unknown>;
 };
 
 type RenderPolicyDemoOutput = {
   [NAME]: string;
   [UI]: unknown;
   revealSensitive: boolean;
+  reveal: Stream<unknown>;
+  conceal: Stream<unknown>;
 };
 
-const setRevealSensitive = handler<
-  void,
+export const setRevealSensitive = handler<
+  unknown,
   { revealSensitive: Writable<boolean>; next: boolean }
 >((_, { revealSensitive, next }) => {
   revealSensitive.set(next);
@@ -48,10 +60,15 @@ const setRevealSensitive = handler<
 
 const makeConfidentialHealthText = lift<
   LabelledContentArgument,
-  Writable<Classified<string, readonly ["confidential"]>>
+  Writable<Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>>
 >((input) =>
-  Cell.for<Classified<string, readonly ["confidential"]>>(input.id).set(
-    input.content as Classified<string, readonly ["confidential"]>,
+  Cell.for<
+    Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
+  >(input.id).set(
+    input.content as Classified<
+      string,
+      readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]
+    >,
   )
 );
 
@@ -69,7 +86,7 @@ export const UntrustedDirectHealthRender = pattern<
           the content below should stay hidden.
         </cf-label>
         <cf-cfc-render-boundary
-          maxConfidentiality="unclassified"
+          maxConfidentiality={[]}
           $value={content}
         >
           <div id="raw-health-direct">{content}</div>
@@ -90,6 +107,15 @@ export const TrustedHealthDisclosureSurface = pattern<
       ? "Hide sensitive health data"
       : "Show sensitive health data"
   );
+  const revealState = computed(() =>
+    revealSensitive.get() ? "Reveal enabled" : "Reveal disabled"
+  );
+  const trustedContentStyle = computed(() => ({
+    display: revealSensitive.get() ? "block" : "none",
+  }));
+  const trustedPlaceholderStyle = computed(() => ({
+    display: revealSensitive.get() ? "none" : "block",
+  }));
 
   return {
     [NAME]: "Trusted health disclosure surface",
@@ -120,33 +146,26 @@ export const TrustedHealthDisclosureSurface = pattern<
             </cf-button>
           </cf-hstack>
           <cf-label id="reveal-state">
-            {revealSensitive ? "Reveal enabled" : "Reveal disabled"}
+            {revealState}
           </cf-label>
           <cf-card>
             <cf-vstack slot="content" gap="2">
               <cf-label>Trusted render region</cf-label>
-              {revealSensitive
-                ? (
-                  <cf-cfc-render-boundary
-                    maxConfidentiality="unclassified"
-                    declassifyClassification="confidential"
-                    $value={content}
-                  >
-                    <div id="trusted-health-visible">
-                      {content}
-                    </div>
-                  </cf-cfc-render-boundary>
-                )
-                : (
-                  <cf-cfc-render-boundary
-                    maxConfidentiality="unclassified"
-                    $value={content}
-                  >
-                    <div id="trusted-health-blocked">
-                      {content}
-                    </div>
-                  </cf-cfc-render-boundary>
-                )}
+              <cf-cfc-render-boundary
+                maxConfidentiality={[]}
+                declassifyClassification={[HEALTH_RECORD_CONFIDENTIALITY]}
+                $value={content}
+              >
+                <div
+                  id="trusted-health-blocked"
+                  style={trustedPlaceholderStyle}
+                >
+                  Content hidden by policy
+                </div>
+                <div id="trusted-health-visible" style={trustedContentStyle}>
+                  {content}
+                </div>
+              </cf-cfc-render-boundary>
             </cf-vstack>
           </cf-card>
           <cf-card>
@@ -174,7 +193,7 @@ export default pattern<unknown, RenderPolicyDemoOutput>(() => {
       "Sensitive health data: migraine treatment plan includes medication review.",
   });
   const healthContentRender: Writable<
-    Classified<string, readonly ["confidential"]>
+    Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
   > = healthContent as never;
   const revealSensitive = Writable.of(false);
   const trustedDisclosure = TrustedHealthDisclosureSurface({
@@ -208,5 +227,7 @@ export default pattern<unknown, RenderPolicyDemoOutput>(() => {
       </cf-screen>
     ),
     revealSensitive,
+    reveal: trustedDisclosure.reveal,
+    conceal: trustedDisclosure.conceal,
   };
 });

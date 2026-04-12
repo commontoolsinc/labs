@@ -185,6 +185,38 @@ Deno.test("events - serializeEvent", async (t) => {
     });
   });
 
+  await t.step("captures data-ui markers from composed event paths", () => {
+    const event = new MockEvent("click", {
+      isTrusted: true,
+      target: { dataset: {} },
+    }) as MockEvent & { composedPath: () => unknown[] };
+    event.composedPath = () => [
+      { dataset: { cfButton: "" } },
+      { dataset: { uiAction: "TrustedSaveTitle" } },
+      {
+        dataset: {
+          uiPattern: "TrustedSaveSurface",
+          uiEventIntegrity: "TrustedSaveSurface",
+        },
+      },
+      event.target,
+    ];
+
+    const serialized = serializeEvent(event as unknown as Event);
+
+    assertEquals(serialized.target?.dataset, {
+      uiAction: "TrustedSaveTitle",
+    });
+    assertEquals(serialized.provenance, {
+      origin: "dom",
+      trusted: true,
+      ui: {
+        pattern: "TrustedSaveSurface",
+        eventIntegrity: ["TrustedSaveSurface"],
+      },
+    });
+  });
+
   await t.step("serializes keyboard event properties", () => {
     const event = new MockKeyboardEvent("keydown", {
       key: "Enter",

@@ -17,10 +17,16 @@ import {
   internalVerifierRead,
   isInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
+import { isPrimitiveCellLink } from "../link-utils.ts";
 import { getValueAtPath } from "../path-utils.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
-import type { CfcMetadata, IFCLabel, WritePolicyInput } from "./types.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  type CfcMetadata,
+  type IFCLabel,
+  type WritePolicyInput,
+} from "./types.ts";
 import {
   trustedEventProvenanceMatchesUiContract,
   uiContractFromSchema,
@@ -183,6 +189,27 @@ const normalizeIdentitySource = (
   return source.startsWith("/") ? source : `/${source}`;
 };
 
+const structuralProvenanceCoversPath = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    type: MediaType;
+  },
+  path: readonly string[],
+  claim: string,
+): boolean => {
+  const logicalPath = canonicalizeLogicalPath(path);
+  return tx.getCfcState().writePolicyInputs.some((input) =>
+    input.kind === "structural-provenance" &&
+    input.claim === claim &&
+    input.target.space === target.space &&
+    input.target.id === target.id &&
+    input.target.type === target.type &&
+    arraysEqual(canonicalizeLogicalPath(input.target.path), logicalPath)
+  );
+};
+
 const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -258,10 +285,15 @@ const valueWriteTargets = (
   );
   for (const space of seenWriteSpaces) {
     for (const write of tx.getWriteDetails?.(space) ?? []) {
+      const writePath = canonicalizeLogicalPath(write.address.path);
       if (
         write.address.id.startsWith("cid:") ||
-        write.address.path[0] === "cfc" ||
-        write.address.path[0] === "source"
+        writePath[0] === "cfc" ||
+        writePath[0] === "source" ||
+        (
+          writePath[0] === "internal" &&
+          isPrimitiveCellLink(write.value)
+        )
       ) {
         continue;
       }
@@ -397,6 +429,11 @@ const writeValueForTarget = (
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    type: MediaType;
+  },
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
     !isInternalVerifierRead(read.meta)
@@ -423,7 +460,13 @@ const verifyInputRequirements = (
       entry.schema,
       entry.path,
     );
-    if (writeAuthorizedByFailure !== undefined) {
+    const setupProjection = structuralProvenanceCoversPath(
+      tx,
+      target,
+      entry.path,
+      CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+    );
+    if (writeAuthorizedByFailure !== undefined && !setupProjection) {
       return writeAuthorizedByFailure;
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
@@ -467,6 +510,16 @@ const verifyTrustedEventRequirements = (
 ): string | undefined => {
   const contract = uiContractFromSchema(schema);
   if (contract === undefined) {
+    return undefined;
+  }
+  if (
+    structuralProvenanceCoversPath(
+      tx,
+      target,
+      [],
+      CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+    )
+  ) {
     return undefined;
   }
   const matched = tx.getCfcState().writePolicyInputs.some((input) =>
@@ -612,26 +665,23 @@ export const prepareBoundaryCommit = (
     ];
     const frozen = toDeepFrozenSchema(schema, true) as JSONSchema;
 
-    const requirementFailure = verifyInputRequirements(tx, frozen);
+    const target = { space, id, type };
+    const requirementFailure = verifyInputRequirements(tx, frozen, target);
     if (requirementFailure) {
       reasons.push(requirementFailure);
       continue;
     }
-    const trustedEventFailure = verifyTrustedEventRequirements(tx, {
-      space,
-      id,
-      type,
-    }, frozen);
+    const trustedEventFailure = verifyTrustedEventRequirements(
+      tx,
+      target,
+      frozen,
+    );
     if (trustedEventFailure) {
       reasons.push(trustedEventFailure);
       continue;
     }
 
-    const exactCopyFailure = verifyExactCopyRequirements(tx, {
-      space,
-      id,
-      type,
-    }, frozen);
+    const exactCopyFailure = verifyExactCopyRequirements(tx, target, frozen);
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);
       continue;

@@ -1,6 +1,6 @@
 import {
   type Cell,
-  Classification,
+  cfcAtom,
   EntityId,
   getEntityId,
   isCell,
@@ -32,7 +32,7 @@ ensureNotRenderThread();
 
 const PRIVILEGED_PIECE_LIST_SCHEMA = toDeepFrozenSchema({
   ...pieceListSchema,
-  ifc: { classification: [Classification.Secret] },
+  ifc: { classification: [cfcAtom.resource("PrivilegedPieceList")] },
 });
 
 /**
@@ -921,7 +921,14 @@ export class PieceManager {
 
     // When we subscribe to a doc, our subscription includes the doc's source,
     // so get that.
-    const sourceCell = piece.getSourceCell();
+    let sourceCell = piece.getSourceCell();
+    if (!sourceCell) {
+      // Under remote sync, the result cell can transiently arrive before its
+      // source edge. Wait for storage to settle and retry once before failing.
+      await timePiecePhase("syncPattern.retry.synced", () => this.synced());
+      await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
+      sourceCell = piece.getSourceCell();
+    }
     if (!sourceCell) throw new Error("piece missing source cell");
     await timePiecePhase("syncPattern.source.sync", () => sourceCell.sync());
 

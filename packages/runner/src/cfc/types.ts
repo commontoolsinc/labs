@@ -2,6 +2,9 @@ import type { JSONSchema } from "../builder/types.ts";
 import type { FabricValue, MemorySpace } from "@commonfabric/memory/interface";
 import type { Metadata } from "../storage/interface.ts";
 
+export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
+  "runtime.setup.result-projection";
+
 export type CfcEnforcementMode =
   | "disabled"
   | "observe"

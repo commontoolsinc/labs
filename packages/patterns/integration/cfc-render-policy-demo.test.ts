@@ -85,10 +85,42 @@ describe("cfc render policy demo integration test", () => {
 });
 
 async function clickTrustedAction(page: Page, action: string) {
+  // Nested pattern UI can be rematerialized after the marker first appears.
+  // Give the renderer one settle window so the click targets the durable
+  // instance whose event stream has been loaded in the browser worker.
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  await page.waitForSelector(`[data-ui-action="${action}"]`, {
+    strategy: "pierce",
+  });
+  await scrollTrustedActionIntoView(page, action);
+  await new Promise((resolve) => setTimeout(resolve, 200));
   const button = await page.waitForSelector(`[data-ui-action="${action}"]`, {
     strategy: "pierce",
   });
   await button.click();
+}
+
+async function scrollTrustedActionIntoView(page: Page, action: string) {
+  await page.evaluate((targetAction) => {
+    function collect(
+      root: Document | ShadowRoot,
+      result: Element[],
+      action: string,
+    ): void {
+      for (const element of root.querySelectorAll("*")) {
+        if (element.getAttribute("data-ui-action") === action) {
+          result.push(element);
+        }
+        if (element.shadowRoot) {
+          collect(element.shadowRoot, result, action);
+        }
+      }
+    }
+
+    const matches: Element[] = [];
+    collect(document, matches, targetAction);
+    matches[0]?.scrollIntoView({ block: "center", inline: "center" });
+  }, { args: [action] });
 }
 
 async function waitForText(page: Page, selector: string, text: string) {

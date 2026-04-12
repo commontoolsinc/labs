@@ -12,6 +12,7 @@ import {
   canonicalizeWritePolicyInput,
   logicalPathToPointer,
 } from "../src/cfc/mod.ts";
+import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -122,6 +123,232 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     });
     return { runtime, storageManager };
   };
+
+  it("allows setup to install alias-backed CFC result projections", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "trust-snapshot-setup",
+        actingPrincipal: signer.did(),
+      }),
+    });
+    try {
+      const resultSchema = {
+        type: "object",
+        properties: {
+          savedTitle: {
+            type: "string",
+            ifc: {
+              writeAuthorizedBy: {
+                __ctWriterIdentityOf: {
+                  file: "/main.tsx",
+                  path: ["commitTrustedSaveTitle"],
+                },
+              },
+            },
+          },
+        },
+        required: ["savedTitle"],
+      } as const satisfies JSONSchema;
+      const pattern = {
+        argumentSchema: { type: "object", properties: {} } as const,
+        resultSchema,
+        initial: {
+          internal: {
+            savedTitle: "",
+          },
+        },
+        result: {
+          savedTitle: { $alias: { path: ["internal", "savedTitle"] } },
+        },
+        nodes: [],
+      } satisfies Pattern;
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-projection",
+        resultSchema,
+      );
+
+      await runtime.setup(undefined, pattern, {}, resultCell);
+
+      expect(resultCell.getSourceCell()).toBeDefined();
+      expect((resultCell.getRaw() as any)?.savedTitle?.$alias?.path).toEqual([
+        "internal",
+        "savedTitle",
+      ]);
+
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: {
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: Record<string, unknown>;
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const persisted = replica.getDocument(
+        parseLink(resultCell.getAsLink()).id!,
+      );
+      expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["savedTitle"],
+        label: {},
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("allows setup to install alias-backed CFC projections when the result cell is initially untyped", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "trust-snapshot-setup-untyped",
+        actingPrincipal: signer.did(),
+      }),
+    });
+    try {
+      const resultSchema = {
+        type: "object",
+        properties: {
+          savedTitle: {
+            type: "string",
+            ifc: {
+              writeAuthorizedBy: {
+                __ctWriterIdentityOf: {
+                  file: "/main.tsx",
+                  path: ["commitTrustedSaveTitle"],
+                },
+              },
+            },
+          },
+        },
+        required: ["savedTitle"],
+      } as const satisfies JSONSchema;
+      const pattern = {
+        argumentSchema: { type: "object", properties: {} } as const,
+        resultSchema,
+        initial: {
+          internal: {
+            savedTitle: "",
+          },
+        },
+        result: {
+          savedTitle: { $alias: { path: ["internal", "savedTitle"] } },
+        },
+        nodes: [],
+      } satisfies Pattern;
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-projection-untyped",
+        undefined,
+      );
+
+      await runtime.setup(undefined, pattern, {}, resultCell);
+
+      expect(resultCell.getSourceCell()).toBeDefined();
+      expect((resultCell.getRaw() as any)?.savedTitle?.$alias?.path).toEqual([
+        "internal",
+        "savedTitle",
+      ]);
+
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: {
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: Record<string, unknown>;
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const persisted = replica.getDocument(
+        parseLink(resultCell.getAsLink()).id!,
+      );
+      expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["savedTitle"],
+        label: {},
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects setup constants for writeAuthorizedBy CFC outputs", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "trust-snapshot-setup",
+        actingPrincipal: signer.did(),
+      }),
+    });
+    try {
+      const resultSchema = {
+        type: "object",
+        properties: {
+          savedTitle: {
+            type: "string",
+            ifc: {
+              writeAuthorizedBy: {
+                __ctWriterIdentityOf: {
+                  file: "/main.tsx",
+                  path: ["commitTrustedSaveTitle"],
+                },
+              },
+            },
+          },
+        },
+        required: ["savedTitle"],
+      } as const satisfies JSONSchema;
+      const pattern = {
+        argumentSchema: { type: "object", properties: {} } as const,
+        resultSchema,
+        result: {
+          savedTitle: "not user authorized",
+        },
+        nodes: [],
+      } satisfies Pattern;
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-constant",
+        resultSchema,
+      );
+
+      await expect(runtime.setup(undefined, pattern, {}, resultCell)).rejects
+        .toThrow("CFC enforcement rejected commit");
+      expect(resultCell.getSourceCell()).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 
   it("rejects relevant unprepared commits in enforcing modes", async () => {
     const { runtime, storageManager } = createRuntime();
@@ -1872,6 +2099,36 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.error?.message).toContain(
         "missing schema write-policy input",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("records unknown schema policy inputs for untyped pattern result writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const pattern = {
+        argumentSchema: { type: "object", properties: {} } as const,
+        resultSchema: undefined,
+        result: { title: "Untyped" },
+        nodes: [],
+      } as unknown as Pattern;
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("untyped-pattern-result");
+
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "cfc-untyped-pattern-result",
+        undefined,
+        tx,
+      );
+      runtime.run(tx, pattern, {}, resultCell);
+
+      runtime.prepareTxForCommit(tx);
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

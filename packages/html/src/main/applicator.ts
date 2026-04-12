@@ -330,6 +330,7 @@ export class DomApplicator {
 
     // Remove existing listener for this event type
     this.removeEvent(nodeId, eventType);
+    this.removeEventForNode(node, eventType);
 
     // Create new listener
     const listener: EventListener = (event: Event) => {
@@ -353,6 +354,22 @@ export class DomApplicator {
 
     // Add to DOM
     (node as EventTarget).addEventListener(eventType, listener);
+  }
+
+  private removeEventForNode(node: Node, eventType: string): void {
+    for (const [trackedNodeId, listeners] of this.eventListeners) {
+      const trackedNode = this.nodes.get(trackedNodeId);
+      if (trackedNode !== node) continue;
+
+      const listener = listeners.get(eventType);
+      if (!listener) continue;
+
+      (node as EventTarget).removeEventListener(eventType, listener);
+      listeners.delete(eventType);
+      if (listeners.size === 0) {
+        this.eventListeners.delete(trackedNodeId);
+      }
+    }
   }
 
   private removeEvent(nodeId: number, eventType: string): void {

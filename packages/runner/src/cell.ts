@@ -122,10 +122,7 @@ const recordSchemaWritePolicyInput = (
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
 ): void => {
-  const resolvedSchema = resolveSchema(schema);
-  if (resolvedSchema === undefined) {
-    return;
-  }
+  const resolvedSchema = resolveSchema(schema) ?? { type: "unknown" } as const;
   const schemaAndHash = internSchema(
     toDeepFrozenSchema(resolvedSchema, true),
     true,
