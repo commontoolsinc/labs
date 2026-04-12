@@ -130,7 +130,7 @@ describe("Pattern Runner - Handlers", () => {
     addEventHandlerSpy.restore();
   });
 
-  it("should use implementationRef as the event handler dedupe key", async () => {
+  it("should annotate event handlers with write targets", async () => {
     const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
 
     const incHandler = handler<
@@ -151,7 +151,7 @@ describe("Pattern Runner - Handlers", () => {
 
     const resultCell = runtime.getCell<
       { counter: { value: number }; stream: any }
-    >(space, "handler implementationRef dedupe key test", undefined, tx);
+    >(space, "handler write target annotation test", undefined, tx);
     const result = runtime.run(tx, incPattern, {
       counter: { value: 0 },
     }, resultCell);
@@ -162,12 +162,9 @@ describe("Pattern Runner - Handlers", () => {
 
     expect(addEventHandlerSpy.calls.length).toBeGreaterThan(0);
     const registeredHandler = addEventHandlerSpy.calls[0].args[0] as {
-      eventHandlerDedupeKey?: string;
+      writes?: unknown[];
     };
-
-    expect(registeredHandler.eventHandlerDedupeKey).toBe(
-      (incHandler as { implementationRef?: string }).implementationRef,
-    );
+    expect(registeredHandler.writes).toBeDefined();
 
     addEventHandlerSpy.restore();
   });

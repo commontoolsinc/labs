@@ -1010,16 +1010,10 @@ export class RuntimeProcessor {
       return;
     }
 
-    const tx = this.runtime.edit();
-    try {
-      mount.reconciler.dispatchEvent(
-        request.handlerId,
-        request.event,
-        tx,
-      );
-    } finally {
-      tx.abort("vdom event dispatch read transaction");
-    }
+    mount.reconciler.dispatchEvent(
+      request.handlerId,
+      request.event,
+    );
   }
 
   /**

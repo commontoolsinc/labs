@@ -1,10 +1,15 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import {
+  clickTrustedAction,
+  waitForText,
+  waitForTextAbsent,
+} from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -83,157 +88,3 @@ describe("cfc render policy demo integration test", () => {
     );
   });
 });
-
-async function clickTrustedAction(page: Page, action: string) {
-  // Nested pattern UI can be rematerialized after the marker first appears.
-  // Retry the real browser click so CI layout settling does not produce a
-  // stale or invisible handle after the marker first appears.
-  await new Promise((resolve) => setTimeout(resolve, 1_000));
-  await page.waitForSelector(`[data-ui-action="${action}"]`, {
-    strategy: "pierce",
-  });
-  await waitFor(async () => {
-    try {
-      await scrollTrustedActionIntoView(page, action);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      const button = await page.waitForSelector(
-        `[data-ui-action="${action}"]`,
-        { strategy: "pierce" },
-      );
-      await button.click();
-      return true;
-    } catch {
-      return false;
-    }
-  }, { timeout: 10_000 });
-}
-
-async function scrollTrustedActionIntoView(page: Page, action: string) {
-  await page.evaluate((targetAction) => {
-    function collect(
-      root: Document | ShadowRoot,
-      result: Element[],
-      action: string,
-    ): void {
-      for (const element of root.querySelectorAll("*")) {
-        if (element.getAttribute("data-ui-action") === action) {
-          result.push(element);
-        }
-        if (element.shadowRoot) {
-          collect(element.shadowRoot, result, action);
-        }
-      }
-    }
-
-    const matches: Element[] = [];
-    collect(document, matches, targetAction);
-    matches[0]?.scrollIntoView({ block: "center", inline: "center" });
-  }, { args: [action] });
-}
-
-async function waitForText(page: Page, selector: string, text: string) {
-  let probe: TextProbe | undefined;
-  try {
-    await waitFor(async () => {
-      try {
-        const node = await page.waitForSelector(selector, {
-          strategy: "pierce",
-        });
-        const innerText = await node.innerText();
-        probe = { selector, innerText, pageText: undefined };
-        if (innerText?.includes(text) === true) {
-          return true;
-        }
-        probe = await readTextProbe(page, selector);
-        return false;
-      } catch {
-        probe = await readTextProbe(page, selector);
-        return false;
-      }
-    }, { timeout: 10_000 });
-  } catch (cause) {
-    throw new Error(
-      `Timed out waiting for ${selector} to contain ${JSON.stringify(text)}. ${
-        JSON.stringify(probe, null, 2)
-      }`,
-      { cause },
-    );
-  }
-}
-
-async function waitForTextAbsent(page: Page, selector: string, text: string) {
-  await waitFor(async () => {
-    try {
-      const node = await page.waitForSelector(selector, {
-        strategy: "pierce",
-      });
-      return (await node.innerText())?.includes(text) !== true;
-    } catch {
-      return false;
-    }
-  }, { timeout: 10_000 });
-}
-
-type TextProbe = {
-  selector: string;
-  innerText: string | undefined;
-  pageText: string | undefined;
-  boundaries?: Array<{
-    text: string;
-    attributes: Record<string, string>;
-    hasValue: boolean;
-    valueConstructor: string | undefined;
-    ref: unknown;
-  }>;
-};
-
-async function readTextProbe(
-  page: Page,
-  selector: string,
-): Promise<TextProbe> {
-  return await page.evaluate((targetSelector) => {
-    function collect(
-      root: Document | ShadowRoot,
-      result: Element[],
-      selector: string,
-    ): void {
-      for (const element of root.querySelectorAll("*")) {
-        if (element.matches(selector)) {
-          result.push(element);
-        }
-        if (element.shadowRoot) {
-          collect(element.shadowRoot, result, selector);
-        }
-      }
-    }
-
-    const matches: Element[] = [];
-    collect(document, matches, targetSelector);
-    const boundaryElements: Element[] = [];
-    collect(document, boundaryElements, "cf-cfc-render-boundary");
-    const boundaries = boundaryElements.map((element) => {
-      const value = (element as unknown as { value?: unknown }).value;
-      const ref = typeof (value as { ref?: unknown } | undefined)?.ref ===
-          "function"
-        ? (value as { ref(): unknown }).ref()
-        : undefined;
-      return {
-        text: (element as HTMLElement).innerText,
-        attributes: Object.fromEntries(
-          Array.from(element.attributes).map((attr) => [attr.name, attr.value]),
-        ),
-        hasValue: value !== undefined,
-        valueConstructor: value && typeof value === "object"
-          ? value.constructor?.name
-          : undefined,
-        ref,
-      };
-    });
-    return {
-      selector: targetSelector,
-      innerText: (matches[0] as HTMLElement | undefined)?.innerText,
-      pageText: document.body?.innerText,
-      boundaries,
-    };
-  }, { args: [selector] });
-}

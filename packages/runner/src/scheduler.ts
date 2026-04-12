@@ -524,11 +524,6 @@ export class Scheduler {
     return generatedId;
   }
 
-  private getEventHandlerDedupeKey(handler: EventHandler): string {
-    return (handler as EventHandler & { eventHandlerDedupeKey?: string })
-      .eventHandlerDedupeKey ?? this.getActionId(handler);
-  }
-
   private formatTelemetryLink(link: NormalizedFullLink): string {
     const path = link.path.length ? `/${link.path.join("/")}` : "";
     return `${link.space}/${link.id}${path}`;
@@ -1326,16 +1321,10 @@ export class Scheduler {
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
     let handlerFound = false;
-    const queuedHandlerIds = new Set<string>();
 
     for (const [link, handler] of this.eventHandlers) {
       if (areNormalizedLinksSame(link, eventLink)) {
         handlerFound = true;
-        const handlerDedupeKey = this.getEventHandlerDedupeKey(handler);
-        if (queuedHandlerIds.has(handlerDedupeKey)) {
-          continue;
-        }
-        queuedHandlerIds.add(handlerDedupeKey);
         this.queueExecution();
         this.eventQueue.push({
           action: (tx: IExtendedStorageTransaction) => handler(tx, event),
@@ -1375,23 +1364,6 @@ export class Scheduler {
   ): Cancel {
     if (populateDependencies) {
       handler.populateDependencies = populateDependencies;
-    }
-    const handlerDedupeKey =
-      (handler as EventHandler & { eventHandlerDedupeKey?: string })
-        .eventHandlerDedupeKey;
-    if (handlerDedupeKey) {
-      for (let index = this.eventHandlers.length - 1; index >= 0; index--) {
-        const [existingRef, existingHandler] = this.eventHandlers[index];
-        const existingDedupeKey =
-          (existingHandler as EventHandler & { eventHandlerDedupeKey?: string })
-            .eventHandlerDedupeKey;
-        if (
-          existingDedupeKey === handlerDedupeKey &&
-          areNormalizedLinksSame(existingRef, ref)
-        ) {
-          this.eventHandlers.splice(index, 1);
-        }
-      }
     }
     this.eventHandlers.push([ref, handler]);
     return () => {

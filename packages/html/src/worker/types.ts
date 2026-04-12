@@ -5,12 +5,7 @@
  * where cells are accessed synchronously via cell.get() and cell.sink().
  */
 
-import type {
-  Cancel,
-  Cell,
-  IExtendedStorageTransaction,
-  JSONSchema,
-} from "@commonfabric/runner";
+import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
 import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
 
 /**
@@ -187,7 +182,7 @@ export interface ReconcileContext {
 
   /** Register an event handler and get its ID */
   registerHandler: (
-    handler: (event: unknown, tx?: IExtendedStorageTransaction) => void,
+    handler: (event: unknown) => void,
   ) => number;
 
   /** Unregister an event handler by ID */
@@ -196,7 +191,7 @@ export interface ReconcileContext {
   /** Get handler by ID for event dispatch */
   getHandler: (
     handlerId: number,
-  ) => ((event: unknown, tx?: IExtendedStorageTransaction) => void) | undefined;
+  ) => ((event: unknown) => void) | undefined;
 
   /** Optional document for SSR or testing */
   document?: Document;

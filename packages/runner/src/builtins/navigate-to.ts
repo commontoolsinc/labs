@@ -4,30 +4,6 @@ import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
-const navigatedProcessKeys = new WeakMap<Runtime, Set<string>>();
-
-function processKeyFor(cell: Cell<any>): string | undefined {
-  try {
-    const link = cell.getAsNormalizedFullLink();
-    return `${link.space}/${link.id}`;
-  } catch {
-    return undefined;
-  }
-}
-
-function hasNavigatedProcess(runtime: Runtime, key: string): boolean {
-  return navigatedProcessKeys.get(runtime)?.has(key) ?? false;
-}
-
-function markNavigatedProcess(runtime: Runtime, key: string): void {
-  let keys = navigatedProcessKeys.get(runtime);
-  if (!keys) {
-    keys = new Set();
-    navigatedProcessKeys.set(runtime, keys);
-  }
-  keys.add(key);
-}
-
 export function navigateTo(
   inputsCell: Cell<any>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
@@ -39,7 +15,6 @@ export function navigateTo(
   let isInitialized = false;
   let navigated = false;
   let resultCell: Cell<boolean>;
-  const processKey = processKeyFor(parentCell);
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
     // The main reason we might be called again after navigating is that the
@@ -63,11 +38,6 @@ export function navigateTo(
       sendResult(tx, resultCell);
 
       isInitialized = true;
-    }
-
-    if (processKey && hasNavigatedProcess(runtime, processKey)) {
-      resultCell.withTx(tx).set(true);
-      return;
     }
 
     // If the result cell is already true, we've already navigated.
@@ -94,9 +64,6 @@ export function navigateTo(
       const resolvedTarget = target.resolveAsCell();
 
       navigated = true;
-      if (processKey) {
-        markNavigatedProcess(runtime, processKey);
-      }
       tx.enqueuePostCommitEffect({
         id: `navigate-to:${JSON.stringify(resolvedTarget.getAsLink())}`,
         kind: "navigate-to",

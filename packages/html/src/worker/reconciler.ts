@@ -18,7 +18,6 @@ import {
   type Cell,
   ContextualFlowControl,
   convertCellsToLinks,
-  type IExtendedStorageTransaction,
   isCell,
   isStream,
   type JSONSchema,
@@ -82,7 +81,7 @@ export class WorkerReconciler {
   private handlerIdCounter = 0;
   private handlers = new Map<
     number,
-    (event: unknown, tx?: IExtendedStorageTransaction) => void
+    (event: unknown) => void
   >();
   private batchIdCounter = 0;
   private pendingOps: VDomOp[] = [];
@@ -235,15 +234,11 @@ export class WorkerReconciler {
   /**
    * Dispatch a DOM event to its handler.
    */
-  dispatchEvent(
-    handlerId: number,
-    event: unknown,
-    tx?: IExtendedStorageTransaction,
-  ): boolean {
+  dispatchEvent(handlerId: number, event: unknown): boolean {
     const handler = this.handlers.get(handlerId);
     if (handler) {
       try {
-        handler(event, tx);
+        handler(event);
       } catch (error) {
         this.onError?.(
           error instanceof Error ? error : new Error(String(error)),
@@ -986,8 +981,8 @@ export class WorkerReconciler {
 
     if (isStream(value)) {
       const stream = value as Stream<unknown>;
-      const handlerId = ctx.registerHandler((event, tx) => {
-        (tx ? stream.withTx(tx) : stream).send(event);
+      const handlerId = ctx.registerHandler((event) => {
+        stream.withTx(undefined).send(event);
       });
       state.eventHandlers.set(eventType, handlerId);
       this.queueOps([{
@@ -1193,8 +1188,8 @@ export class WorkerReconciler {
           }
           if (existingState) existingState.cancel();
 
-          const handlerId = ctx.registerHandler((event, tx) =>
-            (tx ? resolvedTarget.withTx(tx) : resolvedTarget).send(event)
+          const handlerId = ctx.registerHandler((event) =>
+            resolvedTarget.withTx(undefined).send(event)
           );
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{
@@ -1859,8 +1854,8 @@ export class WorkerReconciler {
         // Handle Streams (actions) - wrap in a handler that calls .send()
         if (isStream(value)) {
           const stream = value as Stream<unknown>;
-          const handlerId = ctx.registerHandler((event, tx) => {
-            (tx ? stream.withTx(tx) : stream).send(event);
+          const handlerId = ctx.registerHandler((event) => {
+            stream.withTx(undefined).send(event);
           });
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{

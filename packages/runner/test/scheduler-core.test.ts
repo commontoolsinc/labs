@@ -1334,42 +1334,6 @@ describe("event handling", () => {
     expect(eventCell.get()).toBe(1);
   });
 
-  it("should coalesce duplicate event handler registrations", async () => {
-    const eventCell = runtime.getCell<number>(
-      space,
-      "should coalesce duplicate event handler registrations",
-      undefined,
-      tx,
-    );
-    eventCell.set(0);
-    tx.commit();
-
-    let eventCount = 0;
-
-    const handlerKey = "test:duplicate-handler";
-    const makeEventHandler = (): EventHandler =>
-      Object.assign(
-        ((_tx, _event) => {
-          eventCount++;
-        }) as EventHandler,
-        { eventHandlerDedupeKey: handlerKey },
-      );
-
-    runtime.scheduler.addEventHandler(
-      makeEventHandler(),
-      eventCell.getAsNormalizedFullLink(),
-    );
-    runtime.scheduler.addEventHandler(
-      makeEventHandler(),
-      eventCell.getAsNormalizedFullLink(),
-    );
-
-    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
-    await runtime.idle();
-
-    expect(eventCount).toBe(1);
-  });
-
   it("should handle events with nested paths", async () => {
     const parentCell = runtime.getCell<{ child: { value: number } }>(
       space,

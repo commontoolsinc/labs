@@ -435,7 +435,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     });
 
     await t.step(
-      "Cell<Props> stream event dispatch uses fresh event transaction",
+      "Cell<Props> stream event dispatch avoids render transaction reuse",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -462,14 +462,12 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
             VDomOp,
             { op: "set-event" }
           >;
-          const eventTx = { fresh: true } as never;
           reconciler.dispatchEvent(
             eventOp.handlerId,
             { type: "click" },
-            eventTx,
           );
 
-          assertEquals(mockStream.usedTx, eventTx);
+          assertEquals(mockStream.usedTx, undefined);
           assertEquals(mockStream.sent, [{ type: "click" }]);
         } finally {
           cancel();
@@ -1211,13 +1209,10 @@ Deno.test(
           | undefined;
         assertEquals(setEventOp !== undefined, true);
 
-        const eventTx = runtime.edit();
         reconciler.dispatchEvent(
           setEventOp!.handlerId,
           { type: "click" },
-          eventTx,
         );
-        eventTx.abort("test event dispatch read transaction");
 
         await runtime.idle();
         assertEquals(eventSeen, { type: "click" });

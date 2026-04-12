@@ -17,7 +17,11 @@ import {
   internalVerifierRead,
   isInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
-import { isPrimitiveCellLink } from "../link-utils.ts";
+import {
+  isPrimitiveCellLink,
+  isWriteRedirectLink,
+  parseLink,
+} from "../link-utils.ts";
 import { getValueAtPath } from "../path-utils.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
@@ -189,7 +193,12 @@ const normalizeIdentitySource = (
   return source.startsWith("/") ? source : `/${source}`;
 };
 
-const structuralProvenanceCoversPath = (
+type StructuralProvenanceInput = Extract<
+  WritePolicyInput,
+  { kind: "structural-provenance" }
+>;
+
+const structuralProvenanceForPath = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -198,15 +207,52 @@ const structuralProvenanceCoversPath = (
   },
   path: readonly string[],
   claim: string,
-): boolean => {
+): StructuralProvenanceInput | undefined => {
   const logicalPath = canonicalizeLogicalPath(path);
-  return tx.getCfcState().writePolicyInputs.some((input) =>
+  return tx.getCfcState().writePolicyInputs.find((
+    input,
+  ): input is StructuralProvenanceInput =>
     input.kind === "structural-provenance" &&
     input.claim === claim &&
     input.target.space === target.space &&
     input.target.id === target.id &&
     input.target.type === target.type &&
     arraysEqual(canonicalizeLogicalPath(input.target.path), logicalPath)
+  );
+};
+
+const setupProjectionSourceMatchesValue = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    type: MediaType;
+  },
+  path: readonly string[],
+): boolean => {
+  const projection = structuralProvenanceForPath(
+    tx,
+    target,
+    path,
+    CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  );
+  if (projection === undefined) {
+    return false;
+  }
+  const targetValue = writeValueForTarget(tx, { ...target, path });
+  if (!isWriteRedirectLink(targetValue)) {
+    return false;
+  }
+  const projected = parseLink(targetValue);
+  if (projected === undefined) {
+    return false;
+  }
+  const projectedPath = canonicalizeLogicalPath(projected.path);
+  return projection.sources.some((source) =>
+    (projected.space === undefined || projected.space === source.space) &&
+    (projected.id === undefined || projected.id === source.id) &&
+    (projected.type === undefined || projected.type === source.type) &&
+    arraysEqual(projectedPath, canonicalizeLogicalPath(source.path))
   );
 };
 
@@ -395,6 +441,9 @@ const writeValueForTarget = (
     if (write.address.id !== target.id || write.address.type !== target.type) {
       continue;
     }
+    if (write.address.path[0] !== "value") {
+      continue;
+    }
     const writePath = canonicalizeLogicalPath(write.address.path);
     const targetPath = canonicalizeLogicalPath(target.path);
     if (writePath.length > targetPath.length) {
@@ -457,11 +506,10 @@ const verifyInputRequirements = (
       entry.schema,
       entry.path,
     );
-    const setupProjection = structuralProvenanceCoversPath(
+    const setupProjection = setupProjectionSourceMatchesValue(
       tx,
       target,
       entry.path,
-      CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
     );
     if (writeAuthorizedByFailure !== undefined && !setupProjection) {
       return writeAuthorizedByFailure;
@@ -506,16 +554,6 @@ const verifyTrustedEventRequirements = (
 ): string | undefined => {
   const contract = uiContractFromSchema(schema);
   if (contract === undefined) {
-    return undefined;
-  }
-  if (
-    structuralProvenanceCoversPath(
-      tx,
-      target,
-      [],
-      CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
-    )
-  ) {
     return undefined;
   }
   const matched = tx.getCfcState().writePolicyInputs.some((input) =>
@@ -643,6 +681,11 @@ export const prepareBoundaryCommit = (
   );
   for (const [key, target] of valueWriteTargets(tx)) {
     if (candidates.has(key)) {
+      continue;
+    }
+    if (
+      storedMetadataFor(tx, target.space, target.id, target.type) === undefined
+    ) {
       continue;
     }
     reasons.push(

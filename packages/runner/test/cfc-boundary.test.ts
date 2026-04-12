@@ -12,6 +12,7 @@ import {
   canonicalizeWritePolicyInput,
   logicalPathToPointer,
 } from "../src/cfc/mod.ts";
+import { CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION } from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
@@ -353,6 +354,134 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("rejects forged setup projection provenance for writeAuthorizedBy constants", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "trust-snapshot-setup-forged-projection",
+        actingPrincipal: signer.did(),
+      }),
+    });
+    try {
+      const tx = runtime.edit();
+      const schema = {
+        type: "object",
+        properties: {
+          savedTitle: {
+            type: "string",
+            ifc: {
+              writeAuthorizedBy: {
+                __ctWriterIdentityOf: {
+                  file: "/main.tsx",
+                  path: ["commitTrustedSaveTitle"],
+                },
+              },
+            },
+          },
+        },
+        required: ["savedTitle"],
+      } as const satisfies JSONSchema;
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-forged-projection",
+        schema,
+        tx,
+      );
+      cell.set({ savedTitle: "not user authorized" });
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "structural-provenance",
+        claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+        target: {
+          space: target.space,
+          id: target.id,
+          type: target.type,
+          path: ["savedTitle"],
+        },
+        sources: [{
+          space: signer.did(),
+          id: "of:source",
+          type: "application/json",
+          path: ["internal", "savedTitle"],
+        }],
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted verified binding identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not let setup projection provenance bypass uiContract requirements", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const tx = runtime.edit();
+      const schema = {
+        type: "string",
+        ifc: {
+          uiContract: {
+            helper: "UiAction",
+            action: "TrustedSave",
+          },
+        },
+      } as const satisfies JSONSchema;
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-ui-contract-bypass",
+        schema,
+        tx,
+      );
+      cell.set("saved");
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "structural-provenance",
+        claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+        target: {
+          space: target.space,
+          id: target.id,
+          type: target.type,
+          path: [],
+        },
+        sources: [{
+          space: signer.did(),
+          id: "of:source",
+          type: "application/json",
+          path: ["internal", "saved"],
+        }],
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "missing trusted-event policy input",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects relevant unprepared commits in enforcing modes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -462,7 +591,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
-      expect(tx.getCfcState().prepare.status).toBe("invalidated");
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -2084,7 +2213,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects relevant direct writes that lack schema policy inputs", async () => {
+  it("keeps unrelated direct writes without schema policy inputs out of CFC prepare", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
@@ -2099,16 +2228,14 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error?.message).toContain(
-        "missing schema write-policy input",
-      );
+      expect(result.ok).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
     }
   });
 
-  it("records unknown schema policy inputs for untyped pattern result writes", async () => {
+  it("keeps untyped pattern result writes without CFC labels permissive", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const pattern = {
@@ -2131,7 +2258,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       runtime.prepareTxForCommit(tx);
       const result = await tx.commit();
-      expect(result.error).toBeUndefined();
+      expect(result.ok).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

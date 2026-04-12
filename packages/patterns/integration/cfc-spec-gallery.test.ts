@@ -5,6 +5,7 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import { clickTrustedAction, waitForText } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -111,66 +112,6 @@ describe("cfc spec gallery integration test", () => {
     ]);
   });
 });
-
-async function clickTrustedAction(page: Page, action: string) {
-  // Nested trusted surfaces can be rematerialized shortly after first render.
-  // Retry the real browser click so CI layout settling does not produce a
-  // stale or invisible handle after the marker first appears.
-  await new Promise((resolve) => setTimeout(resolve, 1_000));
-  await page.waitForSelector(`[data-ui-action="${action}"]`, {
-    strategy: "pierce",
-  });
-  await waitFor(async () => {
-    try {
-      await scrollTrustedActionIntoView(page, action);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      const button = await page.waitForSelector(
-        `[data-ui-action="${action}"]`,
-        { strategy: "pierce" },
-      );
-      await button.click();
-      return true;
-    } catch {
-      return false;
-    }
-  }, { timeout: 10_000 });
-}
-
-async function scrollTrustedActionIntoView(page: Page, action: string) {
-  await page.evaluate((targetAction) => {
-    function collect(
-      root: Document | ShadowRoot,
-      result: Element[],
-      action: string,
-    ): void {
-      for (const element of root.querySelectorAll("*")) {
-        if (element.getAttribute("data-ui-action") === action) {
-          result.push(element);
-        }
-        if (element.shadowRoot) {
-          collect(element.shadowRoot, result, action);
-        }
-      }
-    }
-
-    const matches: Element[] = [];
-    collect(document, matches, targetAction);
-    matches[0]?.scrollIntoView({ block: "center", inline: "center" });
-  }, { args: [action] });
-}
-
-async function waitForText(page: Page, selector: string, text: string) {
-  await waitFor(async () => {
-    try {
-      const node = await page.waitForSelector(selector, {
-        strategy: "pierce",
-      });
-      return (await node.innerText())?.includes(text) === true;
-    } catch {
-      return false;
-    }
-  });
-}
 
 async function waitForCfcLabelText(page: Page, expected: string[]) {
   let probe: CfcLabelProbe | undefined;

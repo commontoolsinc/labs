@@ -67,7 +67,10 @@ import {
   schemaHasIfc,
   validateAndTransform,
 } from "./schema.ts";
-import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
+import {
+  readStoredCfcMetadata,
+  storedCfcMetadataAppliesToPath,
+} from "./cfc/metadata.ts";
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import {
@@ -122,7 +125,11 @@ const recordSchemaWritePolicyInput = (
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
 ): void => {
-  const resolvedSchema = resolveSchema(schema) ?? { type: "unknown" } as const;
+  const resolvedSchema = resolveSchema(schema) ??
+    storedSchemaForWritePolicyInput(tx, link);
+  if (resolvedSchema === undefined) {
+    return;
+  }
   const schemaAndHash = internSchema(
     toDeepFrozenSchema(resolvedSchema, true),
     true,
@@ -138,6 +145,46 @@ const recordSchemaWritePolicyInput = (
     schemaHash: schemaAndHash.hashString,
     schema: schemaAndHash.schema,
   });
+};
+
+const storedSchemaForWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): JSONSchema | undefined => {
+  const metadata = readStoredCfcMetadata(tx, link);
+  if (metadata === undefined) {
+    return undefined;
+  }
+  const stored = tx.readOrThrow({
+    space: link.space,
+    id: `cid:${metadata.schemaHash}` as URI,
+    type: "application/json",
+    path: [],
+  }, {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  });
+  if (!isRecord(stored) || stored.value === undefined) {
+    return undefined;
+  }
+  return new ContextualFlowControl().getSchemaAtPath(
+    stored.value as JSONSchema,
+    [...link.path],
+  );
+};
+
+const recordRelevantSchemaWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void => {
+  const resolvedSchema = resolveSchema(schema);
+  const cfcRelevant = schemaHasIfc(resolvedSchema) ||
+    storedCfcMetadataAppliesToPath(tx, link);
+  if (!cfcRelevant) {
+    return;
+  }
+  tx.markCfcRelevant(`schema-ifc-write:${link.id}`);
+  recordSchemaWritePolicyInput(tx, link, resolvedSchema);
 };
 
 /**
@@ -779,15 +826,7 @@ export class CellImpl<T extends FabricValue>
 
       // Looks for arrays and makes sure each object gets its own doc.
       const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
-      if (
-        schemaHasIfc(
-          resolveSchema(resolvedToValueLink.schema ?? this.schema),
-        ) ||
-        storedCfcMetadataAppliesToPath(this.tx, resolvedToValueLink)
-      ) {
-        this.tx.markCfcRelevant(`schema-ifc-write:${resolvedToValueLink.id}`);
-      }
-      recordSchemaWritePolicyInput(
+      recordRelevantSchemaWritePolicyInput(
         this.tx,
         resolvedToValueLink,
         resolvedToValueLink.schema ?? this.schema,
@@ -865,13 +904,7 @@ export class CellImpl<T extends FabricValue>
 
     // Get current value, following aliases and references
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
-    if (
-      schemaHasIfc(resolveSchema(resolvedLink.schema ?? this.schema)) ||
-      storedCfcMetadataAppliesToPath(this.tx, resolvedLink)
-    ) {
-      this.tx.markCfcRelevant(`schema-ifc-write:${resolvedLink.id}`);
-    }
-    recordSchemaWritePolicyInput(
+    recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
       resolvedLink.schema ?? this.schema,
@@ -932,13 +965,7 @@ export class CellImpl<T extends FabricValue>
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
-    if (
-      schemaHasIfc(resolveSchema(resolvedLink.schema ?? this.schema)) ||
-      storedCfcMetadataAppliesToPath(this.tx, resolvedLink)
-    ) {
-      this.tx.markCfcRelevant(`schema-ifc-write:${resolvedLink.id}`);
-    }
-    recordSchemaWritePolicyInput(
+    recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
       resolvedLink.schema ?? this.schema,
@@ -1334,13 +1361,7 @@ export class CellImpl<T extends FabricValue>
     // Raw writes bypass diff-based attempted-target capture. Same-value direct
     // writes through this internal path are therefore outside phase-1 CFC
     // attempted-target coverage unless a caller establishes it separately.
-    if (
-      schemaHasIfc(resolveSchema(this.link.schema ?? this.schema)) ||
-      storedCfcMetadataAppliesToPath(this.tx, this.link)
-    ) {
-      this.tx.markCfcRelevant(`schema-ifc-write:${this.link.id}`);
-    }
-    recordSchemaWritePolicyInput(
+    recordRelevantSchemaWritePolicyInput(
       this.tx,
       this.link,
       this.link.schema ?? this.schema,

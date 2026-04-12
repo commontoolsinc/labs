@@ -2004,9 +2004,6 @@ export class Runner {
     }
 
     const wrappedHandler = Object.assign(handler, {
-      eventHandlerDedupeKey: module.implementationRef ??
-        name ??
-        Function.prototype.toString.call(fn),
       reads,
       writes,
       module,
