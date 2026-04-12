@@ -5,7 +5,7 @@ import type {
   AddIntegrity,
   CanonicalPointer,
   Cfc,
-  Classified,
+  Confidential,
   ExactCopy,
   FilteredFrom,
   Integrity,
@@ -26,7 +26,7 @@ import type {
 
 Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   const aliasNames = CFC_CANONICAL_ALIAS_NAMES;
-  const classified: Classified<{ title: string }, readonly ["secret"]> = {
+  const confidential: Confidential<{ title: string }, readonly ["secret"]> = {
     title: "alpha",
   };
   const integrity: Integrity<{ title: string }, readonly ["trusted"]> = {
@@ -71,13 +71,13 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   };
   const cfcCarrier: Cfc<
     { title: string },
-    { classification: readonly ["secret"] }
+    { confidentiality: readonly ["secret"] }
   > = {
     title: "theta",
   };
   const rootCfcCarrier: RootCfc<
     { title: string },
-    { classification: readonly ["secret"] }
+    { confidentiality: readonly ["secret"] }
   > = {
     title: "theta-root",
   };
@@ -111,7 +111,7 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     title: "mu",
   };
 
-  assertEquals(classified, { title: "alpha" });
+  assertEquals(confidential, { title: "alpha" });
   assertEquals(integrity, { title: "beta" });
   assertEquals(addIntegrity, { title: "gamma" });
   assertEquals(requiresIntegrity, { title: "delta" });
@@ -133,7 +133,7 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(writeAuthorizedBy, { title: "mu" });
   assertEquals(aliasNames, [
     "Cfc",
-    "Classified",
+    "Confidential",
     "Integrity",
     "AddIntegrity",
     "RequiresIntegrity",

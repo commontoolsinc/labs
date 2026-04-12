@@ -1052,8 +1052,8 @@ export class CommonFabricFormatter implements TypeFormatter {
         const payload = readValue(1);
         return isRecord(payload) ? { ...payload } : undefined;
       }
-      case "Classified":
-        return { classification: readValue(1) };
+      case "Confidential":
+        return { confidentiality: readValue(1) };
       case "Integrity":
         return { integrity: readValue(1) };
       case "AddIntegrity":

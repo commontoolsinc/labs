@@ -11,8 +11,8 @@ Deno.test("transformer coverage: nested aliases expand to canonical metadata", a
     import { toSchema } from "commonfabric";
 
     type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-    type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
-    type SecretText<T> = Classified<T, readonly ["secret"]>;
+    type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
+    type SecretText<T> = Confidential<T, readonly ["secret"]>;
 
     interface SchemaRoot {
       secret: SecretText<{ value: string }>;
@@ -26,7 +26,7 @@ Deno.test("transformer coverage: nested aliases expand to canonical metadata", a
     await transformSource(source, { types: COMMONFABRIC_TYPES }),
   );
 
-  assertStringIncludes(output, "classification: [");
+  assertStringIncludes(output, "confidentiality: [");
   assertStringIncludes(output, '"secret"');
   assertStringIncludes(output, 'value: { type: "string" }');
 });

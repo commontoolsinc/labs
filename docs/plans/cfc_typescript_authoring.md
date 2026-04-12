@@ -54,7 +54,7 @@ The implementation centers on a small canonical surface:
 - path-bearing helpers: `Ref`, `PathValue`, `RefValue`, `CanonicalPointer`
 - projection helpers: `ProjectionPath`, `ProjectionOf`, `Projection`
 - simple wrapper aliases:
-  `Classified`, `Integrity`, `AddIntegrity`, `RequiresIntegrity`,
+  `Confidential`, `Integrity`, `AddIntegrity`, `RequiresIntegrity`,
   `MaxConfidentiality`, `ExactCopy`, `LengthPreservedFrom`, `FilteredFrom`,
   `SubsetOf`, `PermutationOf`
 - `OpaqueInput<T, Spec>` for schema-level opacity with `OpaqueRef<T>` erasure
@@ -183,7 +183,7 @@ DOM but do not produce schema hints.
 - [x] Freeze the canonical alias set across `packages/api`,
       `packages/ts-transformers`, and `packages/schema-generator`
 - [x] Define the supported metadata keys for the TypeScript surface:
-      `classification`, `integrity`, `addIntegrity`, `requiredIntegrity`,
+      `confidentiality`, `integrity`, `addIntegrity`, `requiredIntegrity`,
       `maxConfidentiality`, `writeAuthorizedBy`, `exactCopyOf`, `projection`,
       `collection`, and `opaque`
 - [x] Define the path-bearing helper contract for `Ref`, `PathValue`,

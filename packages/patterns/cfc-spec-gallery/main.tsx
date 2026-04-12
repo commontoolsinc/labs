@@ -1,7 +1,7 @@
 import {
   Cell,
-  type Classified,
   computed,
+  type Confidential,
   handler,
   lift,
   NAME,
@@ -86,29 +86,30 @@ type DisclosureContentArgument = {
 
 const makePromptInfluenceDisclosure = lift<
   DisclosureContentArgument,
-  Writable<Classified<string, readonly ["prompt-influence"]>>
+  Writable<Confidential<string, readonly ["prompt-influence"]>>
 >((input) =>
-  Cell.for<Classified<string, readonly ["prompt-influence"]>>(input.id).set(
-    input.content as Classified<string, readonly ["prompt-influence"]>,
+  Cell.for<Confidential<string, readonly ["prompt-influence"]>>(input.id).set(
+    input.content as Confidential<string, readonly ["prompt-influence"]>,
   )
 );
 
 const makeSourceProvenanceDisclosure = lift<
   DisclosureContentArgument,
-  Writable<Classified<string, readonly ["source-provenance"]>>
+  Writable<Confidential<string, readonly ["source-provenance"]>>
 >((input) =>
-  Cell.for<Classified<string, readonly ["source-provenance"]>>(input.id).set(
-    input.content as Classified<string, readonly ["source-provenance"]>,
+  Cell.for<Confidential<string, readonly ["source-provenance"]>>(input.id).set(
+    input.content as Confidential<string, readonly ["source-provenance"]>,
   )
 );
 
 const makeFactCheckDisclosure = lift<
   DisclosureContentArgument,
-  Writable<Classified<string, readonly ["fact-check-required"]>>
+  Writable<Confidential<string, readonly ["fact-check-required"]>>
 >((input) =>
-  Cell.for<Classified<string, readonly ["fact-check-required"]>>(input.id).set(
-    input.content as Classified<string, readonly ["fact-check-required"]>,
-  )
+  Cell.for<Confidential<string, readonly ["fact-check-required"]>>(input.id)
+    .set(
+      input.content as Confidential<string, readonly ["fact-check-required"]>,
+    )
 );
 
 interface GalleryOutput {

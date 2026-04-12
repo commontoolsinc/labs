@@ -1,7 +1,7 @@
 import {
   Cell,
-  type Classified,
   computed,
+  type Confidential,
   handler,
   lift,
   NAME,
@@ -11,15 +11,15 @@ import {
   Writable,
 } from "commonfabric";
 
-type PromptInfluenceContent = Classified<
+type PromptInfluenceContent = Confidential<
   string,
   readonly ["prompt-influence"]
 >;
-type SourceProvenanceContent = Classified<
+type SourceProvenanceContent = Confidential<
   string,
   readonly ["source-provenance"]
 >;
-type FactCheckRequiredContent = Classified<
+type FactCheckRequiredContent = Confidential<
   string,
   readonly ["fact-check-required"]
 >;

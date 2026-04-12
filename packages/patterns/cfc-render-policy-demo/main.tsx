@@ -1,7 +1,7 @@
 import {
   Cell,
-  type Classified,
   computed,
+  type Confidential,
   handler,
   lift,
   NAME,
@@ -19,14 +19,14 @@ const HEALTH_RECORD_CONFIDENTIALITY = {
 
 type TrustedHealthDisclosureInput = {
   content: Writable<
-    Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
+    Confidential<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
   >;
   revealSensitive: Writable<boolean>;
 };
 
 type DirectHealthRenderInput = {
   content: Writable<
-    Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
+    Confidential<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
   >;
 };
 
@@ -60,12 +60,14 @@ export const setRevealSensitive = handler<
 
 const makeConfidentialHealthText = lift<
   LabelledContentArgument,
-  Writable<Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>>
+  Writable<
+    Confidential<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
+  >
 >((input) =>
   Cell.for<
-    Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
+    Confidential<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
   >(input.id).set(
-    input.content as Classified<
+    input.content as Confidential<
       string,
       readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]
     >,
@@ -193,7 +195,7 @@ export default pattern<unknown, RenderPolicyDemoOutput>(() => {
       "Sensitive health data: migraine treatment plan includes medication review.",
   });
   const healthContentRender: Writable<
-    Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
+    Confidential<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
   > = healthContent as never;
   const revealSensitive = Writable.of(false);
   const trustedDisclosure = TrustedHealthDisclosureSurface({

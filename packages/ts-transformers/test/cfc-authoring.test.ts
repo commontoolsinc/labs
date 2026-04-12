@@ -179,7 +179,7 @@ function transformWithSchemaInjection(source: string): string {
 Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
   assertEquals(CFC_CANONICAL_ALIAS_NAMES, [
     "Cfc",
-    "Classified",
+    "Confidential",
     "Integrity",
     "AddIntegrity",
     "RequiresIntegrity",
@@ -296,7 +296,7 @@ Deno.test(
 
       type Model = Cfc<
         { title: string },
-        { classification: "public" }
+        { confidentiality: "public" }
       >;
 
       const explicit = pattern<Model, Model>((cell) => ({ title: cell.title }));

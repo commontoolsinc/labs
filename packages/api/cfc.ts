@@ -12,7 +12,7 @@ export type Cfc<T, Meta> = T & {
 
 export const CFC_CANONICAL_ALIAS_NAMES = [
   "Cfc",
-  "Classified",
+  "Confidential",
   "Integrity",
   "AddIntegrity",
   "RequiresIntegrity",
@@ -57,8 +57,8 @@ type JoinPointerPath<Path extends readonly string[]> = Path extends readonly []
 export type CanonicalPointer<Path extends readonly string[]> = Path extends
   readonly [] ? "/" : `/${JoinPointerPath<Path>}`;
 
-export type Classified<T, X extends readonly unknown[]> = Cfc<T, {
-  classification: X;
+export type Confidential<T, X extends readonly unknown[]> = Cfc<T, {
+  confidentiality: X;
 }>;
 
 export type Integrity<T, X extends readonly unknown[]> = Cfc<T, {

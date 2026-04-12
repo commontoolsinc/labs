@@ -4,10 +4,10 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: CFC authoring aliases", () => {
-  it("lowers Classified and OpaqueInput through the canonical Cfc carrier", async () => {
+  it("lowers Confidential and OpaqueInput through the canonical Cfc carrier", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-      type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
+      type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
       type OpaqueInput<T, Spec extends true | { schema?: unknown; allowPassThrough?: boolean } = true> = Cfc<T, { opaque: Spec }>;
       type ProjectionPath<T, From extends string, Path extends readonly unknown[]> = Cfc<T, { projection: { from: From; path: Path } }>;
       type ProjectionOf<Root, PathTuple extends readonly unknown[]> = ProjectionPath<Root, "/", PathTuple>;
@@ -21,7 +21,7 @@ describe("Schema: CFC authoring aliases", () => {
       > ? ProjectionOf<Root, Path> : never;
 
       interface SchemaRoot {
-        secret: Classified<string, readonly ["secret"]>;
+        secret: Confidential<string, readonly ["secret"]>;
         token: OpaqueInput<string>;
         projectionOf: ProjectionOf<{ title: string }, readonly ["title"]>;
         projectionPath: ProjectionPath<{ title: string }, "/source", readonly ["nested", "path"]>;
@@ -36,7 +36,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const secret = schema.properties?.secret as any;
     expect(secret.type).toBe("string");
-    expect(secret.ifc?.classification).toEqual(["secret"]);
+    expect(secret.ifc?.confidentiality).toEqual(["secret"]);
 
     const token = schema.properties?.token as any;
     expect(token.type).toBe("string");
@@ -70,8 +70,8 @@ describe("Schema: CFC authoring aliases", () => {
   it("expands nested aliases before lowering canonical Cfc metadata", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-      type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
-      type SecretText<T> = Classified<T, readonly ["secret"]>;
+      type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
+      type SecretText<T> = Confidential<T, readonly ["secret"]>;
 
       interface SchemaRoot {
         secret: SecretText<{ value: string }>;
@@ -86,16 +86,16 @@ describe("Schema: CFC authoring aliases", () => {
     const secret = schema.properties?.secret as any;
     expect(secret.type).toBe("object");
     expect(secret.properties?.value?.type).toBe("string");
-    expect(secret.ifc?.classification).toEqual(["secret"]);
+    expect(secret.ifc?.confidentiality).toEqual(["secret"]);
   });
 
   it("preserves CFC metadata under writable cell wrappers", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-      type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
+      type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
 
       interface SchemaRoot {
-        labelled: Writable<Classified<string, readonly ["prompt-influence"]>>;
+        labelled: Writable<Confidential<string, readonly ["prompt-influence"]>>;
       }
     `;
 
@@ -107,13 +107,13 @@ describe("Schema: CFC authoring aliases", () => {
     const labelled = schema.properties?.labelled as any;
     expect(labelled.type).toBe("string");
     expect(labelled.asCell).toEqual(["cell"]);
-    expect(labelled.ifc?.classification).toEqual(["prompt-influence"]);
+    expect(labelled.ifc?.confidentiality).toEqual(["prompt-influence"]);
   });
 
   it("lowers the remaining canonical metadata aliases and merges nested Cfc metadata", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-      type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
+      type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
       type Integrity<T, X extends readonly unknown[]> = Cfc<T, { integrity: X }>;
       type AddIntegrity<T, X extends readonly unknown[]> = Cfc<T, { addIntegrity: X }>;
       type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, { requiredIntegrity: X }>;
@@ -126,7 +126,7 @@ describe("Schema: CFC authoring aliases", () => {
       type OpaqueInput<T, Spec extends true | { schema?: unknown; allowPassThrough?: boolean } = true> = Cfc<T, { opaque: Spec }>;
 
       interface SchemaRoot {
-        classified: Classified<string, readonly ["classified"]>;
+        confidential: Confidential<string, readonly ["confidential"]>;
         integrity: Integrity<string, readonly ["integrity"]>;
         addIntegrity: AddIntegrity<string, readonly ["add-integrity"]>;
         requiresIntegrity: RequiresIntegrity<string, readonly ["required-integrity"]>;
@@ -137,7 +137,7 @@ describe("Schema: CFC authoring aliases", () => {
         subsetOf: SubsetOf<string[], "/subset">;
         permutationOf: PermutationOf<string[], "/permutation">;
         opaque: OpaqueInput<string, { schema: { type: "string" }; allowPassThrough: false }>;
-        merged: Cfc<Classified<{ value: string }, readonly ["nested"]>, { integrity: readonly ["outer"] }>;
+        merged: Cfc<Confidential<{ value: string }, readonly ["nested"]>, { integrity: readonly ["outer"] }>;
       }
     `;
 
@@ -146,9 +146,10 @@ describe("Schema: CFC authoring aliases", () => {
       createSchemaTransformerV2().generateSchema(type, checker),
     );
 
-    expect((schema.properties?.classified as any).ifc?.classification).toEqual([
-      "classified",
-    ]);
+    expect((schema.properties?.confidential as any).ifc?.confidentiality)
+      .toEqual([
+        "confidential",
+      ]);
     expect((schema.properties?.integrity as any).ifc?.integrity).toEqual([
       "integrity",
     ]);
@@ -181,7 +182,7 @@ describe("Schema: CFC authoring aliases", () => {
       schema: { type: "string" },
       allowPassThrough: false,
     });
-    expect((schema.properties?.merged as any).ifc?.classification).toEqual([
+    expect((schema.properties?.merged as any).ifc?.confidentiality).toEqual([
       "nested",
     ]);
     expect((schema.properties?.merged as any).ifc?.integrity).toEqual([
@@ -217,13 +218,13 @@ describe("Schema: CFC authoring aliases", () => {
     }]);
   });
 
-  it("preserves object-shaped classification atoms authored through canonical aliases", async () => {
+  it("preserves object-shaped confidentiality atoms authored through canonical aliases", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-      type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
+      type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
 
       interface SchemaRoot {
-        body: Classified<string, readonly [{
+        body: Confidential<string, readonly [{
           type: "https://commonfabric.org/cfc/atom/Caveat";
           kind: "prompt-influence";
           source: "of:message";
@@ -236,17 +237,17 @@ describe("Schema: CFC authoring aliases", () => {
       createSchemaTransformerV2().generateSchema(type, checker),
     );
 
-    expect((schema.properties?.body as any).ifc?.classification).toEqual([{
+    expect((schema.properties?.body as any).ifc?.confidentiality).toEqual([{
       type: "https://commonfabric.org/cfc/atom/Caveat",
       kind: "prompt-influence",
       source: "of:message",
     }]);
   });
 
-  it("preserves object-shaped classification atoms referenced with typeof", async () => {
+  it("preserves object-shaped confidentiality atoms referenced with typeof", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
-      type Classified<T, X extends readonly unknown[]> = Cfc<T, { classification: X }>;
+      type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
 
       const HEALTH_RECORD_CONFIDENTIALITY = {
         type: "https://commonfabric.org/cfc/atom/Resource",
@@ -255,7 +256,7 @@ describe("Schema: CFC authoring aliases", () => {
       } as const;
 
       interface SchemaRoot {
-        body: Classified<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>;
+        body: Confidential<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>;
       }
     `;
 
@@ -264,7 +265,7 @@ describe("Schema: CFC authoring aliases", () => {
       createSchemaTransformerV2().generateSchema(type, checker),
     );
 
-    expect((schema.properties?.body as any).ifc?.classification).toEqual([{
+    expect((schema.properties?.body as any).ifc?.confidentiality).toEqual([{
       type: "https://commonfabric.org/cfc/atom/Resource",
       class: "SensitiveHealthRecord",
       subject: "did:example:patient",
