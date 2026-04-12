@@ -60,25 +60,6 @@ describe("ContextualFlowControl atom joins", () => {
       },
     });
   });
-
-  it("normalizes classification input aliases to confidentiality outputs", () => {
-    const cfc = new ContextualFlowControl();
-    const caveatAtom = cfcAtom.caveat("prompt-influence", "of:prompt-source");
-    const schema: JSONSchema = {
-      type: "object",
-      ifc: { classification: [caveatAtom] },
-      properties: {
-        body: { type: "string" },
-      },
-    };
-
-    expect(cfc.schemaAtPath(schema, ["body"])).toMatchObject({
-      type: "string",
-      ifc: {
-        confidentiality: [caveatAtom],
-      },
-    });
-  });
 });
 
 describe("ContextualFlowControl.isFalseSchema", () => {

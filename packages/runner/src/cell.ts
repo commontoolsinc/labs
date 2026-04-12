@@ -793,7 +793,7 @@ export class CellImpl<T extends FabricValue>
         resolvedToValueLink.schema ?? this.schema,
       );
 
-      // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
+      // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       diffAndUpdate(
         this.runtime,
         this.tx,

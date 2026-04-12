@@ -162,7 +162,7 @@ describe("Cell commit callbacks", () => {
     const cell = runtime.getCell<number>(
       space,
       "callback-commit-error-test",
-      { type: "number", ifc: { classification: ["secret"] } } as JSONSchema,
+      { type: "number", ifc: { confidentiality: ["secret"] } } as JSONSchema,
       tx,
     );
 

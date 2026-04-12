@@ -34,7 +34,7 @@ describe("CFC exact copy claims", () => {
           properties: {
             emailAddress: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
             confirmedEmail: {
               type: "string",
@@ -64,7 +64,7 @@ describe("CFC exact copy claims", () => {
               entries: Array<{
                 path: string[];
                 label: {
-                  classification?: string[];
+                  confidentiality?: string[];
                   integrity?: string[];
                 };
               }>;
@@ -80,7 +80,7 @@ describe("CFC exact copy claims", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["confirmedEmail"],
         label: {
-          classification: ["secret"],
+          confidentiality: ["secret"],
         },
       });
     } finally {
@@ -101,7 +101,7 @@ describe("CFC exact copy claims", () => {
           properties: {
             emailAddress: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
             confirmedEmail: {
               type: "string",

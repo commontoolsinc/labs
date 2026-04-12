@@ -593,7 +593,6 @@ export class WorkerReconciler {
   private confidentialityLabels(labelView: CfcLabelView): readonly unknown[] {
     return ContextualFlowControl.uniqueAtoms(
       labelView.entries.flatMap((entry) => [
-        ...(entry.label.classification ?? []),
         ...(entry.label.confidentiality ?? []),
       ]),
     );

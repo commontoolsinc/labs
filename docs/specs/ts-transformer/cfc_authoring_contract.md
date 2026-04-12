@@ -106,7 +106,7 @@ to this canonical set.
 
 These aliases lower to direct `ifc` keys:
 
-- `Classified<T, X>` -> `ifc.classification = X`
+- `Confidential<T, X>` -> `ifc.confidentiality = X`
 - `Integrity<T, X>` -> `ifc.integrity = X`
 - `AddIntegrity<T, X>` -> `ifc.addIntegrity = X`
 - `RequiresIntegrity<T, X>` -> `ifc.requiredIntegrity = X`

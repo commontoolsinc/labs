@@ -14,14 +14,14 @@ import {
   UI,
 } from "commonfabric";
 
-const Classification = {
+const Confidentiality = {
   Unclassified: "unclassified",
   Confidential: "confidential",
   Secret: "secret",
   TopSecret: "topsecret",
 } as const;
 
-const ClassificationSecret = "secret";
+const ConfidentialitySecret = "secret";
 
 // This is used by the various Google tokens created with tokenToAuthData
 export const AuthSchema = {
@@ -30,7 +30,7 @@ export const AuthSchema = {
     token: {
       type: "string",
       default: "",
-      ifc: { classification: [ClassificationSecret] },
+      ifc: { confidentiality: [ConfidentialitySecret] },
     },
     tokenType: { type: "string", default: "" },
     scope: { type: "array", items: { type: "string" }, default: [] },
@@ -39,7 +39,7 @@ export const AuthSchema = {
     refreshToken: {
       type: "string",
       default: "",
-      ifc: { classification: [ClassificationSecret] },
+      ifc: { confidentiality: [ConfidentialitySecret] },
     },
     user: {
       type: "object",
@@ -579,7 +579,7 @@ const ContactSchema = {
     "urls",
     "userDefined",
   ],
-  ifc: { classification: [Classification.Confidential] },
+  ifc: { confidentiality: [Confidentiality.Confidential] },
 } as const satisfies JSONSchema;
 type Contact = Mutable<Schema<typeof ContactSchema>>;
 

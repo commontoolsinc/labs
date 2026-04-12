@@ -4,7 +4,6 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 
 const IFC_KEYS = [
-  "classification",
   "confidentiality",
   "integrity",
   "addIntegrity",
@@ -63,7 +62,6 @@ const mergeSetLikeIfcArray = (
 
   switch (key) {
     case "requiredIntegrity":
-    case "classification":
     case "confidentiality":
     case "addIntegrity": {
       if (!Array.isArray(existing) || !Array.isArray(candidate)) {

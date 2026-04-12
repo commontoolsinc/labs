@@ -52,7 +52,7 @@ describe("CFC runtime stats", () => {
         properties: {
           secret: {
             type: "string",
-            ifc: { classification: ["secret"] },
+            ifc: { confidentiality: ["secret"] },
           },
         },
         required: ["secret"],
@@ -102,7 +102,7 @@ describe("CFC runtime stats", () => {
         properties: {
           secret: {
             type: "string",
-            ifc: { classification: ["secret"] },
+            ifc: { confidentiality: ["secret"] },
           },
         },
         required: ["secret"],

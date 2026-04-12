@@ -1091,7 +1091,7 @@ describe("handler dependency pulling", () => {
       "handler-pull-labeled-source",
       {
         type: "number",
-        ifc: { classification: ["secret"] },
+        ifc: { confidentiality: ["secret"] },
       } as JSONSchema,
       tx,
     );

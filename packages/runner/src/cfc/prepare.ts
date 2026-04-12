@@ -321,9 +321,6 @@ const walkIfcSchema = (
     entries.push({
       path,
       label: {
-        classification: schema.ifc.classification
-          ? [...schema.ifc.classification]
-          : undefined,
         integrity: schema.ifc.integrity ? [...schema.ifc.integrity] : undefined,
         confidentiality: schema.ifc.confidentiality
           ? [...schema.ifc.confidentiality]
@@ -486,10 +483,9 @@ const verifyInputRequirements = (
     const maxConfidentiality = ifc?.maxConfidentiality ?? [];
     if (maxConfidentiality.length > 0 && consumed.length > 0) {
       const ok = consumed.every((read) =>
-        ((read.label?.classification ?? read.label?.confidentiality) ?? [])
-          .every((value) =>
-            maxConfidentiality.some((allowed) => deepEqual(allowed, value))
-          )
+        (read.label?.confidentiality ?? []).every((value) =>
+          maxConfidentiality.some((allowed) => deepEqual(allowed, value))
+        )
       );
       if (!ok) {
         return `maxConfidentiality failed at /${entry.path.join("/")}`;
@@ -576,10 +572,6 @@ const derivePersistedLabel = (
     )
     : undefined;
   return {
-    classification: mergeLabelValues(
-      schemaLabel.classification,
-      copiedInputLabel?.classification,
-    ),
     confidentiality: mergeLabelValues(
       schemaLabel.confidentiality,
       copiedInputLabel?.confidentiality,

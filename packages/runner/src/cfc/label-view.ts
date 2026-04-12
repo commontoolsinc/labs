@@ -30,7 +30,6 @@ type LabelQueryableCell = {
 };
 
 const LABEL_KEYS = [
-  "classification",
   "confidentiality",
   "integrity",
 ] as const satisfies readonly (keyof IFCLabel)[];

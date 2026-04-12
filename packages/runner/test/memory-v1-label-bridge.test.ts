@@ -49,7 +49,7 @@ describe("Memory v1 label bridge cleanup", () => {
         uri: `of:memory-v1-label-bridge-${Date.now()}`,
         value: {
           value: { hello: "labels" },
-          labels: { classification: ["confidential"] },
+          labels: { confidentiality: ["confidential"] },
         },
       }]);
 

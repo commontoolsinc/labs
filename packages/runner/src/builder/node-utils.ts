@@ -81,7 +81,6 @@ function attachCfcToOutputs(
     const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
       ? { ...outputSchema.ifc }
       : {};
-    delete ifc.classification;
     ifc.confidentiality = cfc.lub(joined);
     const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
       ? {}

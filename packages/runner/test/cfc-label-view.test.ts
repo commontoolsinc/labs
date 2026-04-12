@@ -20,7 +20,7 @@ describe("CFC label view helpers", () => {
         entries: [
           {
             path: ["value", "body"],
-            label: { classification: ["prompt-influenced"] },
+            label: { confidentiality: ["prompt-influenced"] },
           },
           {
             path: ["value", "body", "summary"],
@@ -28,7 +28,7 @@ describe("CFC label view helpers", () => {
           },
           {
             path: ["other"],
-            label: { classification: ["not-rendered"] },
+            label: { confidentiality: ["not-rendered"] },
           },
         ],
       },
@@ -39,7 +39,7 @@ describe("CFC label view helpers", () => {
       entries: [
         {
           path: [],
-          label: { classification: ["prompt-influenced"] },
+          label: { confidentiality: ["prompt-influenced"] },
         },
         {
           path: ["summary"],
@@ -98,7 +98,7 @@ describe("CFC label view helpers", () => {
             version: 1,
             entries: [{
               path: [],
-              label: { classification: ["prompt-influence"] },
+              label: { confidentiality: ["prompt-influence"] },
             }],
           },
         },
@@ -116,7 +116,7 @@ describe("CFC label view helpers", () => {
         version: 1,
         entries: [{
           path: [],
-          label: { classification: ["prompt-influence"] },
+          label: { confidentiality: ["prompt-influence"] },
         }],
       });
     } finally {

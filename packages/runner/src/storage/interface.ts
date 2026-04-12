@@ -102,9 +102,9 @@ export interface IReadOptions {
 }
 
 // This type is used to tag a document with any important metadata.
-// Currently, the only supported type is the classification.
+// Currently, the only supported type is confidentiality.
 export type Labels = {
-  classification?: ImmutableJSONValue[];
+  confidentiality?: ImmutableJSONValue[];
 };
 
 /** Immutable storage value container. */

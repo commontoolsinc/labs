@@ -149,7 +149,7 @@ describe("Runtime.editWithRetry", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -191,7 +191,7 @@ describe("Runtime.editWithRetry", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -248,7 +248,7 @@ describe("Runtime.editWithRetry", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],

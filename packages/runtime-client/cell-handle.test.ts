@@ -14,7 +14,7 @@ describe("CellHandle CFC label IPC", () => {
       version: 1 as const,
       entries: [{
         path: [],
-        label: { classification: ["prompt-risk"] },
+        label: { confidentiality: ["prompt-risk"] },
       }],
     };
     const requests: unknown[] = [];

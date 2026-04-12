@@ -12,7 +12,6 @@ export type CfcEnforcementMode =
   | "enforce-strict";
 
 export type IFCLabel = {
-  classification?: unknown[];
   confidentiality?: unknown[];
   integrity?: unknown[];
 };

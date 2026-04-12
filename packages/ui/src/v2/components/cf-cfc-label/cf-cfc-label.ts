@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import type { CfcLabelView } from "@commonfabric/runtime-client";
 
-type LabelKey = "classification" | "confidentiality" | "integrity";
+type LabelKey = "confidentiality" | "integrity";
 
 type CfcLabelFilter = {
   atom?: string;
@@ -18,7 +18,6 @@ type CfcLabelSubscribableValue = {
 };
 
 const LABEL_KEYS = [
-  "classification",
   "confidentiality",
   "integrity",
 ] as const satisfies readonly LabelKey[];

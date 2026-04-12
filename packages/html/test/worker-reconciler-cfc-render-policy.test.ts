@@ -68,7 +68,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           version: 1,
           entries: [{
             path: [],
-            label: { classification: [healthRecordAtom] },
+            label: { confidentiality: [healthRecordAtom] },
           }],
         },
       },
@@ -94,7 +94,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           version: 1,
           entries: [{
             path: [],
-            label: { classification: [healthClinicAtom] },
+            label: { confidentiality: [healthClinicAtom] },
           }],
         },
       },
@@ -102,7 +102,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     const commitResult = await tx.commit();
     assertEquals(commitResult.ok !== undefined, true);
 
-    const classified = runtime.getCell<string>(
+    const confidential = runtime.getCell<string>(
       signer.did(),
       "cfc-render-policy-secret",
     );
@@ -191,7 +191,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     }
 
     await t.step(
-      "blocks a classified cell above the boundary max confidentiality",
+      "blocks a confidential cell above the boundary max confidentiality",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -201,7 +201,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-render-boundary",
           props: { maxConfidentiality: [] },
-          children: [classified as never],
+          children: [confidential as never],
         };
 
         const cancel = reconciler.mount(root);
@@ -222,7 +222,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "renders a classified cell when the boundary declassifies that label",
+      "renders a confidential cell when the boundary declassifies that label",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -235,7 +235,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             maxConfidentiality: [],
             declassifyConfidentiality: [healthRecordAtom],
           },
-          children: [classified as never],
+          children: [confidential as never],
         };
 
         const cancel = reconciler.mount(root);
@@ -322,7 +322,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "blocks materialized children when boundary $value is classified",
+      "blocks materialized children when boundary $value is confidential",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -333,7 +333,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           name: "cf-cfc-render-boundary",
           props: {
             maxConfidentiality: [],
-            $value: classified as never,
+            $value: confidential as never,
           },
           children: [{
             type: "vnode",
@@ -372,7 +372,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         );
         propsCell.setRawUntyped({
           maxConfidentiality: [],
-          $value: classified.getAsLink({ includeSchema: true }),
+          $value: confidential.getAsLink({ includeSchema: true }),
         });
         const propsCommitResult = await propsTx.commit();
         assertEquals(propsCommitResult.ok !== undefined, true);
@@ -427,7 +427,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         propsCell.setRawUntyped({
           maxConfidentiality: [],
           declassifyConfidentiality: [healthRecordAtom],
-          $value: classified.getAsLink({ includeSchema: true }),
+          $value: confidential.getAsLink({ includeSchema: true }),
         });
         const propsCommitResult = await propsTx.commit();
         assertEquals(propsCommitResult.ok !== undefined, true);
@@ -485,7 +485,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             name: "cf-cfc-render-boundary",
             props: {
               maxConfidentiality: [],
-              $value: classified,
+              $value: confidential,
             },
             children: [{
               type: "vnode",
@@ -508,7 +508,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
               props: {
                 maxConfidentiality: [],
                 declassifyConfidentiality: [healthRecordAtom],
-                $value: classified,
+                $value: confidential,
               },
               children: [{
                 type: "vnode",
@@ -545,7 +545,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         });
         const propsCell = new MockPropsCell({
           maxConfidentiality: [],
-          $value: classified,
+          $value: confidential,
         });
         const root: WorkerVNode = {
           type: "vnode",
@@ -567,7 +567,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           propsCell.set({
             maxConfidentiality: [],
             declassifyConfidentiality: [healthRecordAtom],
-            $value: classified,
+            $value: confidential,
           });
           await new Promise((resolve) => setTimeout(resolve, 10));
 

@@ -146,7 +146,7 @@ describe("onCommit callback final outcome", () => {
         properties: {
           value: {
             type: "string",
-            ifc: { classification: ["secret"] },
+            ifc: { confidentiality: ["secret"] },
           },
         },
         required: ["value"],
@@ -187,7 +187,7 @@ describe("onCommit callback final outcome", () => {
         properties: {
           value: {
             type: "string",
-            ifc: { classification: ["secret"] },
+            ifc: { confidentiality: ["secret"] },
           },
         },
         required: ["value"],

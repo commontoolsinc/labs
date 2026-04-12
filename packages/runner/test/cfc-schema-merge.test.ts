@@ -10,7 +10,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
       properties: {
         secret: {
           type: "string",
-          ifc: { classification: ["secret"] },
+          ifc: { confidentiality: ["secret"] },
         },
       },
       required: ["secret"],
@@ -19,7 +19,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
       properties: {
         secret: {
           type: "string",
-          ifc: { classification: ["secret"] },
+          ifc: { confidentiality: ["secret"] },
         },
         title: {
           type: "string",
@@ -44,7 +44,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
         properties: {
           secret: {
             type: "string",
-            ifc: { classification: ["secret"] },
+            ifc: { confidentiality: ["secret"] },
           },
         },
         required: ["secret"],
@@ -53,7 +53,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
         properties: {
           secret: {
             type: "string",
-            ifc: { classification: ["secret"] },
+            ifc: { confidentiality: ["secret"] },
           },
           title: {
             type: "string",
@@ -102,7 +102,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
             properties: {
               secret: {
                 type: "string",
-                ifc: { classification: ["secret"] },
+                ifc: { confidentiality: ["secret"] },
               },
             },
           },

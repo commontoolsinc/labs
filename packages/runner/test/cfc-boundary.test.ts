@@ -24,8 +24,11 @@ describe("CFC canonicalization helpers", () => {
       labelMap: {
         version: 1,
         entries: [
-          { path: ["value", "b"], label: { classification: ["secret"] } },
-          { path: ["value", "a"], label: { classification: ["confidential"] } },
+          { path: ["value", "b"], label: { confidentiality: ["secret"] } },
+          {
+            path: ["value", "a"],
+            label: { confidentiality: ["confidential"] },
+          },
         ],
       },
     });
@@ -385,7 +388,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -404,7 +407,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -529,7 +532,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -572,7 +575,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -615,7 +618,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             count: {
               type: "number",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["count"],
@@ -752,7 +755,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const labeledCell = runtime.getCell(
         signer.did(),
         "cfc-read-labeled",
-        { type: "string", ifc: { classification: ["secret"] } },
+        { type: "string", ifc: { confidentiality: ["secret"] } },
         labeledTx,
       );
       labeledCell.get();
@@ -803,7 +806,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             version: 1,
             entries: [{
               path: ["secret"],
-              label: { classification: ["secret"] },
+              label: { confidentiality: ["secret"] },
             }],
           },
         },
@@ -878,7 +881,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             version: 1,
             entries: [{
               path: ["secret"],
-              label: { classification: ["secret"] },
+              label: { confidentiality: ["secret"] },
             }],
           },
         },
@@ -936,7 +939,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             version: 1,
             entries: [{
               path: ["source"],
-              label: { classification: ["secret"] },
+              label: { confidentiality: ["secret"] },
             }],
           },
         },
@@ -993,7 +996,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const cell = runtime.getCell(
         signer.did(),
         "cfc-write-labeled",
-        { type: "string", ifc: { classification: ["secret"] } },
+        { type: "string", ifc: { confidentiality: ["secret"] } },
         tx,
       );
       cell.set("value");
@@ -1035,7 +1038,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             version: 1,
             entries: [{
               path: ["secret"],
-              label: { classification: ["secret"] },
+              label: { confidentiality: ["secret"] },
             }],
           },
         },
@@ -1076,7 +1079,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -1099,7 +1102,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -1148,7 +1151,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             value: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["value"],
@@ -1201,7 +1204,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"], integrity: ["trusted"] },
+              ifc: { confidentiality: ["secret"], integrity: ["trusted"] },
             },
           },
         },
@@ -1226,7 +1229,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["secret"],
         label: {
-          classification: ["secret"],
+          confidentiality: ["secret"],
           integrity: ["trusted"],
         },
       });
@@ -1245,7 +1248,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"], integrity: ["trusted"] },
+              ifc: { confidentiality: ["secret"], integrity: ["trusted"] },
             },
           },
         },
@@ -1276,7 +1279,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             version: 1,
             entries: [{
               path: ["secret"],
-              label: { classification: ["secret"] },
+              label: { confidentiality: ["secret"] },
             }],
           },
         },
@@ -1295,7 +1298,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -1309,7 +1312,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         "cfc-derived-label-output",
         {
           type: "string",
-          ifc: { classification: ["public"] },
+          ifc: { confidentiality: ["public"] },
         },
         tx,
       );
@@ -1327,7 +1330,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
               entries: Array<{
                 path: string[];
                 label: {
-                  classification?: string[];
+                  confidentiality?: string[];
                   integrity?: string[];
                 };
               }>;
@@ -1339,13 +1342,13 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: [],
         label: {
-          classification: ["public"],
+          confidentiality: ["public"],
         },
       });
       expect(persisted?.cfc?.labelMap?.entries).not.toContainEqual({
         path: [],
         label: {
-          classification: ["public", "secret"],
+          confidentiality: ["public", "secret"],
         },
       });
     } finally {
@@ -1367,7 +1370,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -1399,7 +1402,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
             title: {
               type: "string",
@@ -1459,7 +1462,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -1490,7 +1493,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             properties: {
               secret: {
                 type: "string",
-                ifc: { classification: ["secret"] },
+                ifc: { confidentiality: ["secret"] },
               },
               title: {
                 type: "string",
@@ -1559,7 +1562,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             version: 1,
             entries: [{
               path: ["secret"],
-              label: { classification: ["secret"] },
+              label: { confidentiality: ["secret"] },
             }],
           },
         },
@@ -1577,7 +1580,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             secret: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["secret"],
@@ -1825,7 +1828,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             version: 1,
             entries: [{
               path: ["secret"],
-              label: { classification: ["secret"] },
+              label: { confidentiality: ["secret"] },
             }],
           },
         },
@@ -1900,7 +1903,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             bar: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["bar"],
@@ -1922,7 +1925,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             bar: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["bar"],
@@ -1946,7 +1949,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             bar: {
               type: "string",
-              ifc: { classification: ["secret"] },
+              ifc: { confidentiality: ["secret"] },
             },
           },
           required: ["bar"],
@@ -2001,7 +2004,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             entries: [{
               path: ["secret"],
               label: {
-                classification: ["secret"],
+                confidentiality: ["secret"],
                 integrity: ["source-integrity"],
               },
             }],
@@ -2057,7 +2060,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
               entries: Array<{
                 path: string[];
                 label: {
-                  classification?: string[];
+                  confidentiality?: string[];
                   integrity?: string[];
                 };
               }>;

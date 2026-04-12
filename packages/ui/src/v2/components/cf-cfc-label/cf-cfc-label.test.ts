@@ -21,7 +21,7 @@ describe("CFCFCLabel", () => {
       version: 1 as const,
       entries: [{
         path: [],
-        label: { classification: ["prompt-risk"] },
+        label: { confidentiality: ["prompt-risk"] },
       }],
     };
     const element = new CFCFCLabel();
@@ -39,7 +39,7 @@ describe("CFCFCLabel", () => {
       version: 1 as const,
       entries: [{
         path: [],
-        label: { classification: ["prompt-influence"] },
+        label: { confidentiality: ["prompt-influence"] },
       }],
     };
     const element = new CFCFCLabel();
@@ -57,7 +57,7 @@ describe("CFCFCLabel", () => {
       version: 1 as const,
       entries: [{
         path: [],
-        label: { classification: ["prompt-influence"] },
+        label: { confidentiality: ["prompt-influence"] },
       }],
     };
     const element = new CFCFCLabel();
@@ -78,7 +78,7 @@ describe("CFCFCLabel", () => {
       version: 1 as const,
       entries: [{
         path: [],
-        label: { classification: ["prompt-influence"] },
+        label: { confidentiality: ["prompt-influence"] },
       }],
     };
     let labelCalls = 0;
@@ -122,7 +122,7 @@ describe("cf-cfc-label formatting", () => {
       entries: [{
         path: [],
         label: {
-          classification: [
+          confidentiality: [
             "prompt-risk",
             { kind: "prompt-influence", source: "gmail" },
           ],
@@ -135,7 +135,7 @@ describe("cf-cfc-label formatting", () => {
       version: 1,
       entries: [{
         path: [],
-        label: { classification: ["prompt-risk"] },
+        label: { confidentiality: ["prompt-risk"] },
       }],
     });
     expect(filterCfcLabelView(view, { kind: "prompt-influence" })).toEqual({
@@ -143,7 +143,7 @@ describe("cf-cfc-label formatting", () => {
       entries: [{
         path: [],
         label: {
-          classification: [{ kind: "prompt-influence", source: "gmail" }],
+          confidentiality: [{ kind: "prompt-influence", source: "gmail" }],
         },
       }],
     });

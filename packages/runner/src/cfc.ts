@@ -21,8 +21,6 @@ const embeddedSchemas: Record<string, JSONSchema> = {
 
 // Class for handling cfc rules.
 // The spec's confidentiality model is based on structured atoms.
-// `classification` is accepted as an input alias, but new schema outputs are
-// normalized to `confidentiality`.
 export class ContextualFlowControl {
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
     const unique: IFCAtom[] = [];
@@ -75,7 +73,6 @@ export class ContextualFlowControl {
       return joined;
     }
     if (schema.ifc) {
-      ContextualFlowControl.addIfcAtoms(joined, schema.ifc.classification);
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
     if (schema.properties && typeof schema.properties === "object") {
@@ -150,7 +147,6 @@ export class ContextualFlowControl {
   ): JSONSchema {
     const joined = new Set<unknown>(confidentiality);
     if (isRecord(schema) && schema.ifc !== undefined) {
-      ContextualFlowControl.addIfcAtoms(joined, schema.ifc.classification);
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
     // If we have no confidentiality, we can leave the schema
@@ -160,11 +156,9 @@ export class ContextualFlowControl {
     // We don't really support "not" schemas, but it's the only good way we
     // have to attach ifc to a `false` schema.
     const schemaObj = ContextualFlowControl.toSchemaObj(schema);
-    const { classification: _legacyClassification, ...baseIfc } =
-      schemaObj.ifc ?? {};
     const restrictedSchema = {
       ...schemaObj,
-      ifc: { ...baseIfc, confidentiality: this.lub(joined) },
+      ifc: { ...schemaObj.ifc, confidentiality: this.lub(joined) },
     };
     return restrictedSchema;
   }
@@ -539,7 +533,6 @@ export class ContextualFlowControl {
         break;
       } else if (cursor.type === "object") {
         if (cursor.ifc !== undefined) {
-          ContextualFlowControl.addIfcAtoms(joined, cursor.ifc.classification);
           ContextualFlowControl.addIfcAtoms(
             joined,
             cursor.ifc.confidentiality,
@@ -552,10 +545,6 @@ export class ContextualFlowControl {
             break;
           } else {
             if (cursor.ifc !== undefined) {
-              ContextualFlowControl.addIfcAtoms(
-                joined,
-                cursor.ifc.classification,
-              );
               ContextualFlowControl.addIfcAtoms(
                 joined,
                 cursor.ifc.confidentiality,
@@ -598,7 +587,6 @@ export class ContextualFlowControl {
       }
     }
     if (isRecord(cursor) && cursor.ifc !== undefined) {
-      ContextualFlowControl.addIfcAtoms(joined, cursor.ifc.classification);
       ContextualFlowControl.addIfcAtoms(joined, cursor.ifc.confidentiality);
     }
     if (typeof cursor === "boolean") {
@@ -611,10 +599,8 @@ export class ContextualFlowControl {
     }
     // If we've encountered any confidentiality atoms while walking down the
     // schema, we need to add them to the returned object.
-    const { classification: _legacyClassification, ...baseIfc } = cursor.ifc ??
-      {};
     const ifc = (joined.size !== 0)
-      ? { ...baseIfc, confidentiality: this.lub(joined) }
+      ? { ...cursor.ifc, confidentiality: this.lub(joined) }
       : cursor.ifc;
     // Merge any ifc and defs
     return { ...cursor, ...(ifc && { ifc }), ...(defs && { $defs: defs }) };

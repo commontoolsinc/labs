@@ -1364,7 +1364,6 @@ export type JSONSchemaObj = {
   readonly asStream?: boolean;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
-    readonly classification?: readonly ImmutableJSONValue[];
     readonly confidentiality?: readonly ImmutableJSONValue[];
     readonly integrity?: readonly ImmutableJSONValue[];
     readonly addIntegrity?: readonly ImmutableJSONValue[];

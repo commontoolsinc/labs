@@ -402,7 +402,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
                     version: 1,
                     entries: [{
                       path: [],
-                      label: { classification: ["prompt-risk"] },
+                      label: { confidentiality: ["prompt-risk"] },
                     }],
                   },
                 },
@@ -424,7 +424,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
         version: 1,
         entries: [{
           path: [],
-          label: { classification: ["prompt-risk"] },
+          label: { confidentiality: ["prompt-risk"] },
         }],
       },
     });
