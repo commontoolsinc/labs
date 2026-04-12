@@ -444,6 +444,47 @@ describe("sanitizeEvent", () => {
       "Result should be a plain serializable object",
     );
   });
+
+  it("keeps composed-path UI markers separate from target.dataset", () => {
+    const target = {
+      dataset: {
+        ordinaryHandlerData: "preserved",
+      },
+    };
+    const event = {
+      type: "click",
+      isTrusted: true,
+      target,
+      composedPath: () => [
+        { dataset: { uiAction: "TrustedSaveTitle" } },
+        {
+          dataset: {
+            uiPattern: "TrustedSaveSurface",
+            uiEventIntegrity: "TrustedSaveSurface",
+          },
+        },
+        target,
+      ],
+    } as unknown as Event;
+
+    const result = sanitizeEvent(event) as {
+      provenance?: {
+        ui?: {
+          uiContractDataset?: Record<string, string>;
+        };
+      };
+      target?: {
+        dataset?: Record<string, string>;
+      };
+    };
+
+    assert.equal(result.target?.dataset?.ordinaryHandlerData, "preserved");
+    assert.equal(result.target?.dataset?.uiAction, undefined);
+    assert.equal(
+      result.provenance?.ui?.uiContractDataset?.uiAction,
+      "TrustedSaveTitle",
+    );
+  });
 });
 
 describe("style object support", () => {

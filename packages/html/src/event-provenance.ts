@@ -7,6 +7,7 @@ export interface EventProvenance {
 export interface EventUiProvenance {
   pattern?: string;
   eventIntegrity?: string[];
+  uiContractDataset?: Record<string, string>;
 }
 
 type EventLike = Pick<Event, "isTrusted"> & {
@@ -44,15 +45,17 @@ export const getEventUiContractDataset = (
 ): Record<string, string> | undefined => {
   for (const node of getEventPath(event, target)) {
     const dataset = readDataset(node);
-    if (
-      dataset &&
-      UI_CONTRACT_DATASET_KEYS.some((key) => key in dataset)
-    ) {
-      return dataset;
+    const uiContractDataset = dataset && pickUiContractDataset(dataset);
+    if (uiContractDataset) {
+      return uiContractDataset;
     }
   }
-  return readDataset(target);
+  return undefined;
 };
+
+export const getEventTargetDataset = (
+  target?: EventTarget | null,
+): Record<string, string> | undefined => readDataset(target);
 
 const getEventUiProvenance = (
   event: { composedPath?: () => readonly unknown[] },
@@ -60,6 +63,7 @@ const getEventUiProvenance = (
 ): EventUiProvenance | undefined => {
   let pattern: string | undefined;
   const eventIntegrity = new Set<string>();
+  const uiContractDataset = getEventUiContractDataset(event, target);
   for (const current of getEventPath(event, target)) {
     const dataset = readDataset(current);
     if (dataset) {
@@ -79,12 +83,14 @@ const getEventUiProvenance = (
       }
     }
   }
-  return pattern || eventIntegrity.size > 0
+  return pattern || eventIntegrity.size > 0 ||
+      uiContractDataset !== undefined
     ? {
       ...(pattern ? { pattern } : {}),
       ...(eventIntegrity.size > 0
         ? { eventIntegrity: [...eventIntegrity] }
         : {}),
+      ...(uiContractDataset ? { uiContractDataset } : {}),
     }
     : undefined;
 };
@@ -122,6 +128,18 @@ const readDataset = (value: unknown): Record<string, string> | undefined => {
     dataset[key] = String((source as Record<string, unknown>)[key]);
   }
   return Object.keys(dataset).length > 0 ? dataset : undefined;
+};
+
+const pickUiContractDataset = (
+  dataset: Record<string, string>,
+): Record<string, string> | undefined => {
+  const result: Record<string, string> = {};
+  for (const key of UI_CONTRACT_DATASET_KEYS) {
+    if (key in dataset) {
+      result[key] = dataset[key];
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 };
 
 const splitIntegrityLabels = (value: string): string[] | undefined => {

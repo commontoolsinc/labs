@@ -37,10 +37,8 @@ type SerializedTrustedEvent = {
     ui?: {
       pattern?: string;
       eventIntegrity?: unknown;
+      uiContractDataset?: unknown;
     };
-  };
-  target?: {
-    dataset?: Record<string, string>;
   };
 };
 
@@ -50,6 +48,7 @@ type TrustedDomProvenance = {
   ui?: {
     pattern?: unknown;
     eventIntegrity?: unknown;
+    uiContractDataset?: unknown;
   };
 };
 
@@ -170,7 +169,7 @@ export const trustedEventMatchesUiContract = (
   ) {
     return false;
   }
-  const dataset = serializedEvent.target?.dataset;
+  const dataset = serializedEvent.provenance?.ui?.uiContractDataset;
   if (!isRecord(dataset)) {
     return false;
   }

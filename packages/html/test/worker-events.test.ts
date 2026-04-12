@@ -188,7 +188,7 @@ Deno.test("events - serializeEvent", async (t) => {
   await t.step("captures data-ui markers from composed event paths", () => {
     const event = new MockEvent("click", {
       isTrusted: true,
-      target: { dataset: {} },
+      target: { dataset: { ordinaryHandlerData: "preserved" } },
     }) as MockEvent & { composedPath: () => unknown[] };
     event.composedPath = () => [
       { dataset: { cfButton: "" } },
@@ -205,7 +205,7 @@ Deno.test("events - serializeEvent", async (t) => {
     const serialized = serializeEvent(event as unknown as Event);
 
     assertEquals(serialized.target?.dataset, {
-      uiAction: "TrustedSaveTitle",
+      ordinaryHandlerData: "preserved",
     });
     assertEquals(serialized.provenance, {
       origin: "dom",
@@ -213,6 +213,9 @@ Deno.test("events - serializeEvent", async (t) => {
       ui: {
         pattern: "TrustedSaveSurface",
         eventIntegrity: ["TrustedSaveSurface"],
+        uiContractDataset: {
+          uiAction: "TrustedSaveTitle",
+        },
       },
     });
   });

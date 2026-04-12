@@ -44,10 +44,13 @@ describe("CFC UI contract matching", () => {
     expect(
       trustedEventMatchesUiContract({
         type: "click",
-        provenance: { origin: "dom", trusted: true },
-        target: {
-          dataset: {
-            uiAction: "SubmitDirectCommand",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
       }, contract),
@@ -56,10 +59,28 @@ describe("CFC UI contract matching", () => {
     expect(
       trustedEventMatchesUiContract({
         type: "click",
-        provenance: { origin: "dom", trusted: true },
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            uiContractDataset: {
+              uiAction: "DifferentAction",
+            },
+          },
+        },
+      }, contract),
+    ).toBe(false);
+
+    expect(
+      trustedEventMatchesUiContract({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+        },
         target: {
           dataset: {
-            uiAction: "DifferentAction",
+            uiAction: "SubmitDirectCommand",
           },
         },
       }, contract),
@@ -75,11 +96,6 @@ describe("CFC UI contract matching", () => {
       trustedEventMatchesUiContract({
         type: "click",
         provenance: { origin: "dom", trusted: true },
-        target: {
-          dataset: {
-            uiAction: "SubmitDirectCommand",
-          },
-        },
       }, contract),
     ).toBe(false);
 
@@ -92,11 +108,9 @@ describe("CFC UI contract matching", () => {
           ui: {
             pattern: "TrustedDirectCommandSurface",
             eventIntegrity: ["TrustedDirectCommandSurface"],
-          },
-        },
-        target: {
-          dataset: {
-            uiAction: "SubmitDirectCommand",
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
       }, contract),
@@ -111,11 +125,9 @@ describe("CFC UI contract matching", () => {
           ui: {
             pattern: "UntrustedLookalikeSurface",
             eventIntegrity: ["TrustedDirectCommandSurface"],
-          },
-        },
-        target: {
-          dataset: {
-            uiAction: "SubmitDirectCommand",
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
       }, contract),
@@ -130,11 +142,9 @@ describe("CFC UI contract matching", () => {
           ui: {
             pattern: "TrustedDirectCommandSurface",
             eventIntegrity: ["UntrustedLookalikeSurface"],
-          },
-        },
-        target: {
-          dataset: {
-            uiAction: "SubmitDirectCommand",
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
       }, contract),
@@ -205,11 +215,9 @@ describe("CFC trusted UI event enforcement", () => {
         ui: {
           pattern: "TrustedDirectCommandSurface",
           eventIntegrity: ["TrustedDirectCommandSurface"],
-        },
-      },
-      target: {
-        dataset: {
-          uiAction: "SubmitDirectCommand",
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
         },
       },
     });
@@ -280,11 +288,9 @@ describe("CFC trusted UI event enforcement", () => {
         ui: {
           pattern: "UntrustedLookalikeSurface",
           eventIntegrity: ["UntrustedLookalikeSurface"],
-        },
-      },
-      target: {
-        dataset: {
-          uiAction: "SubmitDirectCommand",
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
         },
       },
     });

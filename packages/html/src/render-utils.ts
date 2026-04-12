@@ -7,7 +7,7 @@ import {
 } from "@commonfabric/runtime-client";
 import {
   getEventProvenance,
-  getEventUiContractDataset,
+  getEventTargetDataset,
 } from "./event-provenance.ts";
 
 export type SetPropHandler = <T>(
@@ -263,9 +263,9 @@ export function sanitizeEvent(event: Event): object {
       );
   }
 
-  // Copy dataset as a plain object for serialization. Prefer UI contract
-  // markers from the composed path so shadow DOM retargeting keeps provenance.
-  const dataset = getEventUiContractDataset(event, target);
+  // Copy the event target's own dataset as handler-visible data. UI contract
+  // markers from the composed path are serialized separately in provenance.
+  const dataset = getEventTargetDataset(target);
   if (dataset) {
     targetObject.dataset = dataset;
   }

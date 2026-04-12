@@ -473,6 +473,15 @@ export interface VDomEventRequest extends BaseRequest {
  */
 export interface SerializedDomEvent {
   type: string;
+  provenance?: {
+    origin?: string;
+    trusted?: boolean;
+    ui?: {
+      pattern?: string;
+      eventIntegrity?: string[];
+      uiContractDataset?: Record<string, string>;
+    };
+  };
   key?: string;
   code?: string;
   repeat?: boolean;
