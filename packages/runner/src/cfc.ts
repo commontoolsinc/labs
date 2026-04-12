@@ -20,9 +20,9 @@ const embeddedSchemas: Record<string, JSONSchema> = {
 };
 
 // Class for handling cfc rules.
-// The spec's confidentiality model is a flat set/CNF of structured atoms, not
-// an ordered four-level secrecy lattice. This compatibility layer still accepts
-// the old "classification" field name, but treats its values as atoms.
+// The spec's confidentiality model is based on structured atoms.
+// `classification` is accepted as an input alias, but new schema outputs are
+// normalized to `confidentiality`.
 export class ContextualFlowControl {
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
     const unique: IFCAtom[] = [];
@@ -47,12 +47,12 @@ export class ContextualFlowControl {
   }
 
   /**
-   * Collect any required classification tags required by the schema.
+   * Collect any required confidentiality atoms required by the schema.
    * This could be made more conservative by combining the schema with the object
-   * If our object lacks any of the fields that would have a higher classification,
+   * If our object lacks any of the fields that would add confidentiality,
    * we don't need to consider them.
    *
-   * @param joined set to which we will add any classification tags
+   * @param joined set to which we will add any confidentiality atoms
    * @param schema the schema with tags
    * @param fullSchema the full schema with any $defs needed
    * @param cycleTracker used to avoid reference cycles
@@ -126,43 +126,45 @@ export class ContextualFlowControl {
     return joined;
   }
 
-  // Get the joined classification/confidentiality atoms from the schema.
+  // Get the joined confidentiality atoms from the schema.
   public lubSchema(
     schema: JSONSchema,
-    extraClassifications?: Set<unknown>,
+    extraConfidentiality?: Set<unknown>,
   ): IFCAtom[] | undefined {
-    const classifications = (extraClassifications !== undefined)
-      ? new Set<unknown>(extraClassifications)
+    const confidentiality = (extraConfidentiality !== undefined)
+      ? new Set<unknown>(extraConfidentiality)
       : new Set<unknown>();
-    ContextualFlowControl.joinSchema(classifications, schema);
+    ContextualFlowControl.joinSchema(confidentiality, schema);
 
-    return (classifications.size === 0) ? undefined : this.lub(classifications);
+    return (confidentiality.size === 0) ? undefined : this.lub(confidentiality);
   }
 
   public lub(joined: Set<unknown>): IFCAtom[] {
     return ContextualFlowControl.uniqueAtoms(joined);
   }
 
-  // Return a copy of the schema with joined classification atoms.
+  // Return a copy of the schema with joined confidentiality atoms.
   public schemaWithLub(
     schema: JSONSchema,
-    classification: readonly unknown[],
+    confidentiality: readonly unknown[],
   ): JSONSchema {
-    const joined = new Set<unknown>(classification);
+    const joined = new Set<unknown>(confidentiality);
     if (isRecord(schema) && schema.ifc !== undefined) {
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.classification);
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
-    // If we have no classification, we can leave the schema
+    // If we have no confidentiality, we can leave the schema
     if (joined.size === 0) {
       return schema;
     }
     // We don't really support "not" schemas, but it's the only good way we
     // have to attach ifc to a `false` schema.
     const schemaObj = ContextualFlowControl.toSchemaObj(schema);
+    const { classification: _legacyClassification, ...baseIfc } =
+      schemaObj.ifc ?? {};
     const restrictedSchema = {
       ...schemaObj,
-      ifc: { ...schemaObj.ifc, classification: this.lub(joined) },
+      ifc: { ...baseIfc, confidentiality: this.lub(joined) },
     };
     return restrictedSchema;
   }
@@ -399,12 +401,12 @@ export class ContextualFlowControl {
   getSchemaAtPath(
     schema: JSONSchema | undefined,
     path: string[],
-    extraClassifications?: Set<unknown>,
+    extraConfidentiality?: Set<unknown>,
   ): JSONSchema | undefined {
     if (schema === undefined) {
       return undefined;
     }
-    const result = this.schemaAtPath(schema, path, extraClassifications);
+    const result = this.schemaAtPath(schema, path, extraConfidentiality);
     return result === false ? undefined : result === true ? {} : result;
   }
 
@@ -438,7 +440,7 @@ export class ContextualFlowControl {
   schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
-    extraClassifications?: Set<unknown>,
+    extraConfidentiality?: Set<unknown>,
     defaultEmptyProperties: JSONSchema = true,
     defaultMissingProperty: JSONSchema = true,
   ): JSONSchema {
@@ -448,7 +450,7 @@ export class ContextualFlowControl {
       schema,
       path,
       defs,
-      extraClassifications,
+      extraConfidentiality,
       defaultEmptyProperties,
       defaultMissingProperty,
     );
@@ -458,12 +460,12 @@ export class ContextualFlowControl {
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
-    extraClassifications: Set<unknown> | undefined,
+    extraConfidentiality: Set<unknown> | undefined,
     defaultEmptyProperties: JSONSchema,
     defaultMissingProperty: JSONSchema,
   ): JSONSchema {
-    const joined = (extraClassifications !== undefined)
-      ? new Set<unknown>(extraClassifications)
+    const joined = (extraConfidentiality !== undefined)
+      ? new Set<unknown>(extraConfidentiality)
       : new Set<unknown>();
     let cursor = schema;
     for (
@@ -495,7 +497,7 @@ export class ContextualFlowControl {
             entry,
             path.slice(index),
             defs,
-            extraClassifications,
+            extraConfidentiality,
             defaultEmptyProperties,
             defaultMissingProperty,
           );
@@ -607,9 +609,12 @@ export class ContextualFlowControl {
       }
       cursor = {}; // change to use the empty object schema, so we can attach ifc.
     }
-    // If we've encountered any classification tags while walking down the schema, we need to add them to the returned object
+    // If we've encountered any confidentiality atoms while walking down the
+    // schema, we need to add them to the returned object.
+    const { classification: _legacyClassification, ...baseIfc } = cursor.ifc ??
+      {};
     const ifc = (joined.size !== 0)
-      ? { ...cursor.ifc, classification: this.lub(joined) }
+      ? { ...baseIfc, confidentiality: this.lub(joined) }
       : cursor.ifc;
     // Merge any ifc and defs
     return { ...cursor, ...(ifc && { ifc }), ...(defs && { $defs: defs }) };

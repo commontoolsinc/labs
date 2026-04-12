@@ -103,7 +103,7 @@ export function createNodeFactory<T = any, R = any>(
     ...moduleSpec,
     toJSON: () => moduleToJSON(module),
   };
-  // A module with ifc classification on its argument schema should have at least
+  // A module with ifc confidentiality on its argument schema should have at least
   // that value on its result schema
   module.resultSchema = applyArgumentIfcToResult(
     module.argumentSchema,

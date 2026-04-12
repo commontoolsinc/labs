@@ -31,7 +31,7 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
 });
 
 describe("ContextualFlowControl atom joins", () => {
-  it("preserves arbitrary classification atoms instead of collapsing through the legacy lattice", () => {
+  it("preserves arbitrary confidentiality atoms instead of collapsing through fixed lattice levels", () => {
     const cfc = new ContextualFlowControl();
     const caveatAtom = cfcAtom.caveat("prompt-influence", "of:prompt-source");
     const provenanceAtom = cfcAtom.resource(
@@ -40,11 +40,11 @@ describe("ContextualFlowControl atom joins", () => {
     );
     const schema: JSONSchema = {
       type: "object",
-      ifc: { classification: [caveatAtom] },
+      ifc: { confidentiality: [caveatAtom] },
       properties: {
         body: {
           type: "string",
-          ifc: { classification: [provenanceAtom] },
+          ifc: { confidentiality: [provenanceAtom] },
         },
       },
     };
@@ -56,7 +56,26 @@ describe("ContextualFlowControl atom joins", () => {
     expect(cfc.schemaAtPath(schema, ["body"])).toMatchObject({
       type: "string",
       ifc: {
-        classification: [caveatAtom, provenanceAtom],
+        confidentiality: [caveatAtom, provenanceAtom],
+      },
+    });
+  });
+
+  it("normalizes classification input aliases to confidentiality outputs", () => {
+    const cfc = new ContextualFlowControl();
+    const caveatAtom = cfcAtom.caveat("prompt-influence", "of:prompt-source");
+    const schema: JSONSchema = {
+      type: "object",
+      ifc: { classification: [caveatAtom] },
+      properties: {
+        body: { type: "string" },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["body"])).toMatchObject({
+      type: "string",
+      ifc: {
+        confidentiality: [caveatAtom],
       },
     });
   });

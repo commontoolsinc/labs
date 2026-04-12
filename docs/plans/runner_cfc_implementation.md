@@ -99,7 +99,7 @@ This plan adds the boundary substrate that those specs require:
 This plan treats schema `ifc` as the only declaration surface. The runner will
 support these keys in phases:
 
-- `classification`
+- `confidentiality`
 - `integrity`
 - `addIntegrity`
 - `requiredIntegrity`
@@ -238,7 +238,6 @@ entity:
 
 ```ts
 type IFCLabel = {
-  classification?: unknown[];
   confidentiality?: unknown[];
   integrity?: unknown[];
 };
@@ -321,7 +320,7 @@ data.
 
 Phase-1 merge rules:
 
-- IFC keys such as `classification`, `integrity`, `addIntegrity`,
+- IFC keys such as `confidentiality`, `integrity`, `addIntegrity`,
   `requiredIntegrity`, `maxConfidentiality`, `writeAuthorizedBy`,
   `exactCopyOf`, `projection`, and `collection` may stay the same or become
   stricter, but must never be weakened
@@ -597,7 +596,7 @@ Tasks:
       a required field requires a default
 - [x] Resolve input labels from stored CFC metadata and persisted
       `cid:<hash>`-backed schema documents; no coarse-label fallback
-- [x] Implement `classification`, `integrity`, `addIntegrity`,
+- [x] Implement `confidentiality`, `integrity`, `addIntegrity`,
       `requiredIntegrity`, and `maxConfidentiality`
 - [x] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
       collection-derived transition checks where they can be evaluated from
@@ -962,7 +961,7 @@ Land the work in mergeable vertical slices:
 4. [x] Relevance detection and merged-schema envelope implementation
 5. [x] Embedded v2 CFC metadata persistence, `cid:<hash>` schema-document
        persistence, and non-exposure
-6. [x] Baseline prepare engine for classification and integrity checks
+6. [x] Baseline prepare engine for confidentiality and integrity checks
 7. [x] Transaction integration and success-only outbox
 8. [x] Enforcing commit gate for state-only transactions for the
        non-trust-sensitive rule subset once extraction/prepare slices are green

@@ -11,7 +11,7 @@ export const AuthSchema = toDeepFrozenSchema(
       token: {
         type: "string",
         default: "",
-        ifc: { classification: [credentialSecretAtom] },
+        ifc: { confidentiality: [credentialSecretAtom] },
       },
       tokenType: { type: "string", default: "" },
       scope: { type: "array", items: { type: "string" }, default: [] },
@@ -20,7 +20,7 @@ export const AuthSchema = toDeepFrozenSchema(
       refreshToken: {
         type: "string",
         default: "",
-        ifc: { classification: [credentialSecretAtom] },
+        ifc: { confidentiality: [credentialSecretAtom] },
       },
       user: {
         type: "object",
@@ -43,7 +43,7 @@ export const OAuth2TokenSchema = toDeepFrozenSchema(
       accessToken: {
         type: "string",
         default: "",
-        ifc: { classification: [credentialSecretAtom] },
+        ifc: { confidentiality: [credentialSecretAtom] },
       },
       tokenType: { type: "string", default: "" },
       scope: { type: "array", items: { type: "string" }, default: [] },
@@ -52,7 +52,7 @@ export const OAuth2TokenSchema = toDeepFrozenSchema(
       refreshToken: {
         type: "string",
         default: "",
-        ifc: { classification: [credentialSecretAtom] },
+        ifc: { confidentiality: [credentialSecretAtom] },
       },
       user: {
         type: "object",
@@ -76,12 +76,12 @@ export const WebhookConfigSchema = toDeepFrozenSchema(
       url: {
         type: "string",
         default: "",
-        ifc: { classification: [credentialSecretAtom] },
+        ifc: { confidentiality: [credentialSecretAtom] },
       },
       secret: {
         type: "string",
         default: "",
-        ifc: { classification: [credentialSecretAtom] },
+        ifc: { confidentiality: [credentialSecretAtom] },
       },
     },
     required: ["url", "secret"],
