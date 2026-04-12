@@ -210,6 +210,7 @@ declare module "@commonfabric/api" {
   interface Pattern {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
+    internalSchema?: JSONSchema;
     initial?: JSONValue;
     result: JSONValue;
     nodes: Node[];

@@ -23,6 +23,7 @@ export type CfcLabelView = {
 type LabelQueryableCell = {
   getAsNormalizedFullLink(): NormalizedFullLink;
   get?(options?: { traverseCells?: boolean }): unknown;
+  getSourceCell?(): LabelQueryableCell | undefined;
   withTx?(tx: IExtendedStorageTransaction): LabelQueryableCell;
   runtime?: Runtime;
   tx?: IExtendedStorageTransaction;
@@ -212,5 +213,18 @@ export const cfcLabelViewForCell = (
   if (metadataView !== undefined) {
     return metadataView;
   }
+
+  const sourceCell = (cell as LabelQueryableCell).getSourceCell?.();
+  if (sourceCell !== undefined) {
+    const sourceLink = sourceCell.getAsNormalizedFullLink();
+    const sourceMetadataView = cfcLabelViewFromMetadata(
+      storedMetadataForCell(sourceCell, sourceLink),
+      link.path,
+    );
+    if (sourceMetadataView !== undefined) {
+      return sourceMetadataView;
+    }
+  }
+
   return readLabelViewForCell(cell as LabelQueryableCell);
 };

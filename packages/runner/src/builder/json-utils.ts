@@ -387,6 +387,9 @@ export function patternToJSON(pattern: Pattern) {
   return {
     argumentSchema: pattern.argumentSchema,
     resultSchema: pattern.resultSchema,
+    ...(pattern.internalSchema
+      ? { internalSchema: pattern.internalSchema }
+      : {}),
     ...(pattern.initial ? { initial: pattern.initial } : {}),
     result: pattern.result,
     nodes: pattern.nodes,

@@ -160,4 +160,64 @@ describe("CFC label view helpers", () => {
       }],
     });
   });
+
+  it("reads source-cell metadata for result-cell internal paths", () => {
+    const sourceCell = {
+      getAsNormalizedFullLink: () => ({
+        id: "of:source-cell",
+        space: "did:key:test",
+        type: "application/json",
+        path: [],
+      }),
+      runtime: {
+        readTx: () => ({
+          readOrThrow: () => ({
+            cfc: {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: ["internal", "__#3"],
+                  label: {
+                    integrity: [{
+                      kind: "authored-by",
+                      subject: "alice",
+                    }],
+                  },
+                }],
+              },
+            },
+          }),
+        }),
+      },
+    };
+    const resultCell = {
+      getAsNormalizedFullLink: () => ({
+        id: "of:result-cell",
+        space: "did:key:test",
+        type: "application/json",
+        path: ["internal", "__#3"],
+      }),
+      runtime: {
+        readTx: () => ({
+          readOrThrow: () => undefined,
+        }),
+      },
+      getSourceCell: () => sourceCell,
+    };
+
+    expect(cfcLabelViewForCell(resultCell)).toEqual({
+      version: 1,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      }],
+    });
+  });
 });

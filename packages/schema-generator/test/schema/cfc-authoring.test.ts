@@ -192,6 +192,63 @@ describe("Schema: CFC authoring aliases", () => {
     );
   });
 
+  it("preserves object-shaped integrity atoms authored through Cfc metadata", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+
+      interface Message {
+        senderId: string;
+        body: string;
+      }
+
+      interface SchemaRoot {
+        message: Cfc<Message, { integrity: readonly [{ kind: "authored-by"; subject: "alice" }] }>;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    expect((schema.properties?.message as any).ifc?.integrity).toEqual([{
+      kind: "authored-by",
+      subject: "alice",
+    }]);
+  });
+
+  it("preserves primitive Cfc metadata through generic aliases", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+
+      type AuthorshipIntegrity<Author extends string> = {
+        readonly kind: "authored-by";
+        readonly subject: Author;
+      };
+
+      type AuthoredMessageBody<Author extends string> = Cfc<
+        string,
+        { integrity: readonly [AuthorshipIntegrity<Author>] }
+      >;
+
+      interface SchemaRoot {
+        body: AuthoredMessageBody<"alice">;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const body = schema.properties?.body as any;
+    expect(body.type).toBe("string");
+    expect(body.ifc?.integrity).toEqual([{
+      kind: "authored-by",
+      subject: "alice",
+    }]);
+  });
+
   it("falls back to ordinary schema generation when a canonical alias expansion cannot be resolved", async () => {
     const code = `
       type OpaqueInput<T, Spec extends true | { schema?: unknown; allowPassThrough?: boolean } = true> = MaybeOpaque<T>;

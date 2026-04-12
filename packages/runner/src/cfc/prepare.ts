@@ -212,9 +212,35 @@ const candidateSchemasByTarget = (
     }
     const key =
       `${input.target.space}\u0000${input.target.id}\u0000${input.target.type}`;
-    result.set(key, input.schema);
+    const candidate = schemaEnvelopeForTargetPath(
+      input.schema,
+      input.target.path,
+    );
+    const existing = result.get(key);
+    result.set(
+      key,
+      existing === undefined
+        ? candidate
+        : mergeCfcSchemaEnvelopes(existing, candidate),
+    );
   }
   return result;
+};
+
+const schemaEnvelopeForTargetPath = (
+  schema: JSONSchema,
+  path: readonly string[],
+): JSONSchema => {
+  let envelope = schema;
+  for (const segment of [...canonicalizeLogicalPath(path)].reverse()) {
+    envelope = {
+      type: "object",
+      properties: {
+        [segment]: envelope,
+      },
+    };
+  }
+  return envelope;
 };
 
 const valueWriteTargets = (
@@ -403,8 +429,10 @@ const verifyInputRequirements = (
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     if (requiredIntegrity.length > 0 && consumed.length > 0) {
       const ok = consumed.every((read) =>
-        requiredIntegrity.every((required: string) =>
-          (read.label?.integrity ?? []).includes(required)
+        requiredIntegrity.every((required) =>
+          (read.label?.integrity ?? []).some((actual) =>
+            deepEqual(actual, required)
+          )
         )
       );
       if (!ok) {

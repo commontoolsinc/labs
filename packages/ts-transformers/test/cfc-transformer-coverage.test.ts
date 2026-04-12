@@ -81,6 +81,39 @@ Deno.test("transformer coverage: opaque inputs lower to ifc.opaque", async () =>
   assertStringIncludes(output, 'token: { type: "string"');
 });
 
+Deno.test("transformer coverage: imported Cfc metadata survives Writable.of type arguments", async () => {
+  const source = `/// <cts-enable />
+    import { type Cfc, Writable } from "commonfabric";
+
+    type AuthorshipIntegrity<Author extends string> = {
+      readonly kind: "authored-by";
+      readonly subject: Author;
+    };
+
+    type AuthoredMessageBody<Author extends string> = Cfc<
+      string,
+      { integrity: readonly [AuthorshipIntegrity<Author>] }
+    >;
+
+    const body = Writable.of<AuthoredMessageBody<"alice">>(
+      "Verified text" as AuthoredMessageBody<"alice">,
+    );
+
+    export default body;
+  `;
+
+  const output = normalizeOutput(
+    await transformSource(source, { types: COMMONFABRIC_TYPES }),
+  );
+
+  assertStringIncludes(output, 'type: "string"');
+  assertStringIncludes(
+    output,
+    'ifc: { integrity: [{ kind: "authored-by", subject: "alice" }] }',
+  );
+  assertEquals(output.includes("Unsupported intersection pattern"), false);
+});
+
 Deno.test("transformer coverage: UI helpers rewrite to intrinsic tags and data-ui markers", async () => {
   const source = `/// <cts-enable />
     import { UiAction } from "commonfabric";

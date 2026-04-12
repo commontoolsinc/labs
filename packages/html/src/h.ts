@@ -7,12 +7,46 @@ import {
   type UiPromptSlotProps,
   type VNode,
 } from "@commonfabric/api";
-import { isCell, isCellResult } from "@commonfabric/runner";
+import { getCellOrThrow, isCell, isCellResult } from "@commonfabric/runner";
 
 /**
  * Fragment element name used for JSX fragments.
  */
 const FRAGMENT_ELEMENT = "cf-fragment";
+
+type LinkableCell = {
+  getAsLink(options?: unknown): unknown;
+};
+
+const isDeferredLinkContextError = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.startsWith("Cannot create cell link - ");
+
+function bindingTargetLink(value: unknown): unknown {
+  if (isCell(value)) {
+    try {
+      return (value as unknown as LinkableCell).getAsLink({
+        includeSchema: true,
+        keepAsCell: true,
+      });
+    } catch (error) {
+      if (isDeferredLinkContextError(error)) return value;
+      throw error;
+    }
+  }
+  if (isCellResult(value)) {
+    try {
+      return (getCellOrThrow(value) as unknown as LinkableCell).getAsLink({
+        includeSchema: true,
+        keepAsCell: true,
+      });
+    } catch (error) {
+      if (isDeferredLinkContextError(error)) return value;
+      throw error;
+    }
+  }
+  return value;
+}
 
 /**
  * JSX factory function for creating virtual DOM nodes.
@@ -55,6 +89,7 @@ export const h: HFunction = Object.assign(
               "Use pattern parameter or create a cell using Writable.of()",
           );
         }
+        props![key] = bindingTargetLink(value);
       });
       return { type: "vnode", name, props, children: children.flat() };
     }

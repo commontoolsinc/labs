@@ -45,6 +45,25 @@ import {
 } from "../storage/interface.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
+const setSchemaAtPath = (
+  schema: Record<string, any>,
+  path: readonly PropertyKey[],
+  value: JSONSchema,
+): void => {
+  let cursor = schema;
+  for (let index = 0; index < path.length; index++) {
+    const segment = String(path[index]);
+    cursor.type ??= "object";
+    cursor.properties ??= {};
+    if (index === path.length - 1) {
+      cursor.properties[segment] = value;
+      return;
+    }
+    cursor.properties[segment] ??= { type: "object", properties: {} };
+    cursor = cursor.properties[segment] as Record<string, any>;
+  }
+};
+
 /** Declare a pattern
  *
  * @param fn A function that creates the pattern graph
@@ -318,14 +337,23 @@ function factoryFromPattern<T, R>(
 
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
+  const internalSchema: Record<string, any> = {
+    type: "object",
+    properties: {},
+  };
+  let hasInternalSchema = false;
   allCells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === (inputs as unknown)) return;
-    const { path, value, external } = cell.export();
+    const { path, value, schema, external } = cell.export();
     if (path.length > 0 || external) return;
 
     const cellPath = paths.get(cell)!;
     if (value !== undefined) setValueAtPath(initial, cellPath, value);
+    if (schema !== undefined && cellPath[0] === "internal") {
+      setSchemaAtPath(internalSchema, cellPath.slice(1), schema);
+      hasInternalSchema = true;
+    }
   });
 
   const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
@@ -348,6 +376,14 @@ function factoryFromPattern<T, R>(
       keepStreams: true,
     }),
     resultSchema: sanitizeSchemaForLinks(resultSchema, { keepStreams: true }),
+    ...(hasInternalSchema
+      ? {
+        internalSchema: sanitizeSchemaForLinks(
+          internalSchema as JSONSchema,
+          { keepStreams: true },
+        ),
+      }
+      : {}),
     initial,
     result,
     nodes: serializedNodes,

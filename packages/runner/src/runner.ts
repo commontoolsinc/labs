@@ -10,6 +10,7 @@ import {
   isModule,
   isPattern,
   isStreamValue,
+  type JSONSchema,
   type Module,
   NAME,
   type NodeFactory,
@@ -103,6 +104,85 @@ type ProcessCellData<T> = {
   argument?: T;
   internal?: FabricValue;
   resultRef: SigilLink;
+};
+
+const processCellSetupSchema = (pattern: Pattern): JSONSchema => ({
+  type: "object",
+  properties: {
+    [TYPE]: { type: "string" },
+    argument: pattern.argumentSchema ?? true,
+    resultRef: { type: "unknown", asCell: ["cell"] as const },
+    ...(pattern.internalSchema !== undefined
+      ? { internal: pattern.internalSchema }
+      : {}),
+  },
+  required: [TYPE] as const,
+});
+
+const recordOutputSchemaPolicyInputs = (
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  processCell: Cell<any>,
+  outputBinding: unknown,
+  resultSchema: JSONSchema | undefined,
+  schemaPath: readonly string[] = [],
+): void => {
+  if (resultSchema === undefined) {
+    return;
+  }
+
+  if (isWriteRedirectLink(outputBinding)) {
+    const link = resolveLink(
+      runtime,
+      tx,
+      parseLink(outputBinding, processCell),
+      "writeRedirect",
+    );
+    const schema = schemaPath.length === 0
+      ? resultSchema
+      : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+    if (schema === undefined) {
+      return;
+    }
+    tx.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: {
+        space: link.space,
+        id: link.id,
+        type: link.type,
+        path: [...link.path],
+      },
+      schema,
+    });
+    return;
+  }
+
+  if (Array.isArray(outputBinding)) {
+    outputBinding.forEach((child, index) =>
+      recordOutputSchemaPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        child,
+        resultSchema,
+        [...schemaPath, String(index)],
+      )
+    );
+    return;
+  }
+
+  if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
+    for (const [key, child] of Object.entries(outputBinding)) {
+      recordOutputSchemaPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        child,
+        resultSchema,
+        [...schemaPath, key],
+      );
+    }
+  }
 };
 
 type SetupResult<R> = {
@@ -394,21 +474,22 @@ export class Runner {
       nextArgument = mergeObjects<T>(argument as any, defaults);
     }
 
-    processCell.withTx(tx).setRawUntyped(fabricFromNativeValue({
-      ...processCell.getRaw({ meta: ignoreReadForScheduling }),
-      [TYPE]: patternId,
-      resultRef: pattern.resultSchema !== undefined
-        ? resultCell.asSchema(pattern.resultSchema).getAsLink({
-          base: processCell,
-          includeSchema: true,
-          keepAsCell: true,
-        })
-        : resultCell.getAsLink({
-          base: processCell,
-        }),
-      internal,
-      spell: getSpellLink(patternId),
-    }, false));
+    processCell.withTx(tx).asSchema(processCellSetupSchema(pattern))
+      .setRawUntyped(fabricFromNativeValue({
+        ...processCell.getRaw({ meta: ignoreReadForScheduling }),
+        [TYPE]: patternId,
+        resultRef: pattern.resultSchema !== undefined
+          ? resultCell.asSchema(pattern.resultSchema).getAsLink({
+            base: processCell,
+            includeSchema: true,
+            keepAsCell: true,
+          })
+          : resultCell.getAsLink({
+            base: processCell,
+          }),
+        internal,
+        spell: getSpellLink(patternId),
+      }, false));
 
     if (nextArgument) {
       this.updateProcessArgument(tx, processCell, nextArgument);
@@ -1062,6 +1143,9 @@ export class Runner {
       properties: {
         [TYPE]: { type: "string" },
         argument: pattern.argumentSchema ?? true,
+        ...(isPattern(pattern) && pattern.internalSchema !== undefined
+          ? { internal: pattern.internalSchema }
+          : {}),
       },
       required: [TYPE],
     };
@@ -1606,6 +1690,7 @@ export class Runner {
 
   private writeJavaScriptActionResult(
     tx: IExtendedStorageTransaction,
+    resultSchema: JSONSchema | undefined,
     result: any,
     name: string | undefined,
     frame: Frame,
@@ -1620,6 +1705,13 @@ export class Runner {
       !validateAndCheckOpaqueRefs(result, name) &&
       frame.opaqueRefs.size === 0
     ) {
+      recordOutputSchemaPolicyInputs(
+        tx,
+        this.runtime,
+        processCell,
+        outputs,
+        resultSchema,
+      );
       sendValueToBinding(tx, processCell, outputs, result);
       return result;
     }
@@ -1667,6 +1759,13 @@ export class Runner {
     }
 
     previousResultCellRef.current ??= resultCell;
+    recordOutputSchemaPolicyInputs(
+      tx,
+      this.runtime,
+      processCell,
+      outputs,
+      resultSchema,
+    );
     sendValueToBinding(
       tx,
       processCell,
@@ -1977,6 +2076,7 @@ export class Runner {
           try {
             return this.writeJavaScriptActionResult(
               tx,
+              module.resultSchema,
               result,
               name,
               frame,

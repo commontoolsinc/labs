@@ -1181,6 +1181,7 @@ export type AnyCellWrapping<T> =
 export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
+  internalSchema?: JSONSchema;
 }
 export interface Module {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
@@ -1364,9 +1365,9 @@ export type JSONSchemaObj = {
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
     readonly classification?: readonly string[];
-    readonly integrity?: readonly string[];
-    readonly addIntegrity?: readonly string[];
-    readonly requiredIntegrity?: readonly string[];
+    readonly integrity?: readonly ImmutableJSONValue[];
+    readonly addIntegrity?: readonly ImmutableJSONValue[];
+    readonly requiredIntegrity?: readonly ImmutableJSONValue[];
     readonly maxConfidentiality?: readonly string[];
     readonly writeAuthorizedBy?:
       | readonly string[]

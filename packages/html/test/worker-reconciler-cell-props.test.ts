@@ -6,6 +6,8 @@ import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "@commonfabric/runner";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -30,6 +32,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
   const runtime = new Runtime({
     storageManager,
     apiUrl: new URL("http://localhost"),
+    cfcEnforcementMode: "observe",
   });
 
   try {
@@ -511,6 +514,351 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
             bindingOp.cellRef.id,
             bindingCell.getAsNormalizedFullLink().id,
           );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> binding prop preserves CellResult proxy identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "cell-result-binding-test-cell",
+          undefined,
+          dummyTx,
+        );
+        bindingCell.set({
+          senderId: "alice",
+          body: "linked content",
+        });
+
+        const cellResult = bindingCell.getAsQueryResult();
+        const propsCell = new MockPropsCell({
+          $value: cellResult,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves linked binding prop identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const bindingSchema = {
+          type: "string",
+          ifc: {
+            integrity: [{
+              kind: "authored-by",
+              subject: "alice",
+            }],
+          },
+        } as const;
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-target",
+          bindingSchema,
+          tx,
+        );
+        bindingCell.set("renderer schema linked content");
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            $value: bindingCell.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+            author: "alice",
+          },
+          children: [],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+          assertEquals(
+            cfcLabelViewForCell(runtime.getCellFromLink(bindingOp.cellRef)),
+            {
+              version: 1,
+              entries: [{
+                path: [],
+                label: {
+                  integrity: [{
+                    kind: "authored-by",
+                    subject: "alice",
+                  }],
+                },
+              }],
+            },
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves linked child render nodes",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-card",
+          props: { id: "linked-child-card" },
+          children: ["Linked child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-vstack",
+          props: {},
+          children: [linkedChild.getAsLink({ keepAsCell: true })],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves legacy alias child render nodes",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-card",
+          props: { id: "legacy-alias-child-card" },
+          children: ["Legacy alias child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-vstack",
+          props: {},
+          children: [{
+            $alias: {
+              cell: {
+                "/": linkedChild.getAsNormalizedFullLink().id.replace(
+                  /^of:/,
+                  "",
+                ),
+              },
+              path: [],
+            },
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves nested render node children",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: { author: "alice" },
+          children: ["Nested linked child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-screen",
+          props: { title: "Nested children" },
+          children: [{
+            type: "vnode",
+            name: "cf-vstack",
+            props: {},
+            children: [
+              {
+                type: "vnode",
+                name: "cf-card",
+                props: { id: "nested-inline-card" },
+                children: ["Nested inline child"],
+              },
+              {
+                $alias: {
+                  cell: {
+                    "/": linkedChild.getAsNormalizedFullLink().id.replace(
+                      /^of:/,
+                      "",
+                    ),
+                  },
+                  path: [],
+                },
+              },
+            ],
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-screen"), true);
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+          assertEquals(createdTags.includes("cf-cfc-authorship"), true);
         } finally {
           cancel();
         }
