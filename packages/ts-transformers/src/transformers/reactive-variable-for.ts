@@ -14,6 +14,10 @@ import {
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import {
+  isPatternFactoryCalleeExpression,
+  isPatternFactoryHelperExpression,
+} from "./structural-reactive-factory.ts";
 
 type CausePathElement = string | number;
 type CausePath = readonly CausePathElement[];
@@ -579,7 +583,9 @@ function shouldAddReactiveFor(
     return false;
   }
 
-  if (isPatternFactoryCall(expression, context)) {
+  if (
+    isPatternFactoryCalleeExpression(expression.expression, context.checker)
+  ) {
     return false;
   }
 
@@ -708,32 +714,6 @@ function isReactiveArrayMethodCall(
   ) || isExplicitReactiveCall(target.expression, context);
 }
 
-function isPatternFactoryCall(
-  call: ts.CallExpression,
-  context: TransformationContext,
-): boolean {
-  const target = unwrapExpression(call.expression);
-  try {
-    const type = context.checker.getTypeAtLocation(target);
-    const signatures = context.checker.getSignaturesOfType(
-      type,
-      ts.SignatureKind.Call,
-    );
-    if (signatures.length === 0) {
-      return false;
-    }
-
-    const propertyNames = new Set(
-      type.getProperties().map((property) => property.getName()),
-    );
-    return propertyNames.has("argumentSchema") &&
-      propertyNames.has("resultSchema") &&
-      !propertyNames.has("with");
-  } catch {
-    return false;
-  }
-}
-
 function isExplicitReactiveCall(
   expression: ts.Expression,
   context: TransformationContext,
@@ -759,117 +739,8 @@ function shouldPreserveStructuralCallArgumentReferences(
   call: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  return isPatternFactoryCall(call, context) ||
-    isStructuralPatternFactoryHelperExpression(
-      call.expression,
-      context,
-      new Set(),
-    );
-}
-
-function isStructuralPatternFactoryHelperExpression(
-  expression: ts.Expression,
-  context: TransformationContext,
-  seenSymbols: Set<ts.Symbol>,
-): boolean {
-  const target = unwrapExpression(expression);
-
-  if (ts.isCallExpression(target)) {
-    return isPatternFactoryCall(target, context) ||
-      isStructuralPatternFactoryHelperExpression(
-        target.expression,
-        context,
-        seenSymbols,
-      );
-  }
-
-  if (
-    !ts.isIdentifier(target) &&
-    !ts.isPropertyAccessExpression(target)
-  ) {
-    return false;
-  }
-
-  const symbol = context.checker.getSymbolAtLocation(target);
-  if (!symbol) {
-    return false;
-  }
-
-  const resolvedSymbol = getAliasedSymbol(symbol, context.checker);
-  if (seenSymbols.has(resolvedSymbol)) {
-    return false;
-  }
-  seenSymbols.add(resolvedSymbol);
-
-  return (resolvedSymbol.getDeclarations() ?? []).some((declaration) => {
-    const returnedExpression = getReturnedExpression(declaration);
-    return !!returnedExpression &&
-      isStructuralPatternFactoryHelperExpression(
-        returnedExpression,
-        context,
-        seenSymbols,
-      );
-  });
-}
-
-function getAliasedSymbol(
-  symbol: ts.Symbol,
-  checker: ts.TypeChecker,
-): ts.Symbol {
-  if (!(symbol.flags & ts.SymbolFlags.Alias)) {
-    return symbol;
-  }
-
-  try {
-    return checker.getAliasedSymbol(symbol);
-  } catch {
-    return symbol;
-  }
-}
-
-function getReturnedExpression(
-  declaration: ts.Declaration,
-): ts.Expression | undefined {
-  if (
-    ts.isFunctionDeclaration(declaration) ||
-    ts.isMethodDeclaration(declaration) ||
-    ts.isFunctionExpression(declaration) ||
-    ts.isArrowFunction(declaration)
-  ) {
-    if (!declaration.body) {
-      return undefined;
-    }
-    if (ts.isBlock(declaration.body)) {
-      if (declaration.body.statements.length !== 1) {
-        return undefined;
-      }
-      const [statement] = declaration.body.statements;
-      return ts.isReturnStatement(statement) ? statement.expression : undefined;
-    }
-    return declaration.body;
-  }
-
-  if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) {
-    return undefined;
-  }
-
-  const initializer = unwrapExpression(declaration.initializer);
-  if (
-    ts.isArrowFunction(initializer) ||
-    ts.isFunctionExpression(initializer)
-  ) {
-    return getReturnedExpression(initializer);
-  }
-
-  if (
-    ts.isIdentifier(initializer) ||
-    ts.isCallExpression(initializer) ||
-    ts.isPropertyAccessExpression(initializer)
-  ) {
-    return initializer;
-  }
-
-  return undefined;
+  return isPatternFactoryCalleeExpression(call.expression, context.checker) ||
+    isPatternFactoryHelperExpression(call.expression, context.checker);
 }
 
 function chainContainsForCall(expression: ts.Expression): boolean {
