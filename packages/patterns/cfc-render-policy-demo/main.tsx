@@ -10,6 +10,11 @@ import {
   UI,
   Writable,
 } from "commonfabric";
+import type { TrustedActionWrite } from "../cfc-trusted-surfaces/main.tsx";
+
+const TRUSTED_HEALTH_DISCLOSURE_SURFACE = "TrustedHealthDisclosureSurface";
+const TRUSTED_REVEAL_HEALTH_DATA_ACTION = "TrustedRevealHealthData";
+const TRUSTED_CONCEAL_HEALTH_DATA_ACTION = "TrustedConcealHealthData";
 
 const HEALTH_RECORD_CONFIDENTIALITY = {
   type: "https://commonfabric.org/cfc/atom/Resource",
@@ -38,7 +43,12 @@ type LabelledContentArgument = {
 type TrustedHealthDisclosureOutput = {
   [NAME]: string;
   [UI]: unknown;
-  revealed: boolean;
+  revealed: TrustedActionWrite<
+    boolean,
+    typeof setRevealSensitive,
+    typeof TRUSTED_REVEAL_HEALTH_DATA_ACTION,
+    typeof TRUSTED_HEALTH_DISCLOSURE_SURFACE
+  >;
   reveal: Stream<unknown>;
   conceal: Stream<unknown>;
 };
@@ -46,7 +56,12 @@ type TrustedHealthDisclosureOutput = {
 type RenderPolicyDemoOutput = {
   [NAME]: string;
   [UI]: unknown;
-  revealSensitive: boolean;
+  revealSensitive: TrustedActionWrite<
+    boolean,
+    typeof setRevealSensitive,
+    typeof TRUSTED_REVEAL_HEALTH_DATA_ACTION,
+    typeof TRUSTED_HEALTH_DISCLOSURE_SURFACE
+  >;
   reveal: Stream<unknown>;
   conceal: Stream<unknown>;
 };
@@ -124,7 +139,9 @@ export const TrustedHealthDisclosureSurface = pattern<
     [UI]: (
       <cf-card
         id="trusted-health-surface"
-        data-ui-surface="TrustedHealthDisclosureSurface"
+        data-ui-surface={TRUSTED_HEALTH_DISCLOSURE_SURFACE}
+        data-ui-pattern={TRUSTED_HEALTH_DISCLOSURE_SURFACE}
+        data-ui-event-integrity={TRUSTED_HEALTH_DISCLOSURE_SURFACE}
       >
         <cf-vstack slot="content" gap="3">
           <cf-heading level={3}>Trusted shoulder-surfing control</cf-heading>
@@ -135,13 +152,13 @@ export const TrustedHealthDisclosureSurface = pattern<
           </cf-label>
           <cf-hstack gap="2">
             <cf-button
-              data-ui-action="TrustedRevealHealthData"
+              data-ui-action={TRUSTED_REVEAL_HEALTH_DATA_ACTION}
               onClick={reveal}
             >
               {buttonLabel}
             </cf-button>
             <cf-button
-              data-ui-action="TrustedConcealHealthData"
+              data-ui-action={TRUSTED_CONCEAL_HEALTH_DATA_ACTION}
               onClick={conceal}
             >
               Reset to private
