@@ -113,6 +113,13 @@ type TrustedActionProbe = {
     rect: { width: number; height: number; top: number; left: number };
     disabled: boolean;
     visible: boolean;
+    clickTarget: {
+      tagName: string;
+      text: string;
+      rect: { width: number; height: number; top: number; left: number };
+      disabled: boolean;
+      visible: boolean;
+    };
   }>;
   bodyText: string;
 };
@@ -172,8 +179,15 @@ async function markVisibleTrustedAction(
       await new Promise((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(resolve))
       );
-      if (isVisible(target) && !isDisabled(target)) {
-        target.setAttribute(targetAttr, targetToken);
+      const clickTarget =
+        (target.shadowRoot?.querySelector("[data-cf-button]") as
+          | HTMLElement
+          | null) ?? target;
+      if (
+        isVisible(target) && isVisible(clickTarget) &&
+        !isDisabled(target) && !isDisabled(clickTarget)
+      ) {
+        clickTarget.setAttribute(targetAttr, targetToken);
         return true;
       }
     }
@@ -249,7 +263,12 @@ async function readTrustedActionProbe(
       action: targetAction,
       matches: matches.map((element) => {
         const target = element as HTMLElement;
+        const clickTarget =
+          (target.shadowRoot?.querySelector("[data-cf-button]") as
+            | HTMLElement
+            | null) ?? target;
         const rect = target.getBoundingClientRect();
+        const clickRect = clickTarget.getBoundingClientRect();
         return {
           tagName: target.tagName.toLowerCase(),
           text: (target.textContent ?? "").trim().slice(0, 200),
@@ -259,8 +278,20 @@ async function readTrustedActionProbe(
             top: rect.top,
             left: rect.left,
           },
-          disabled: isDisabled(target),
-          visible: isVisible(target),
+          disabled: isDisabled(target) || isDisabled(clickTarget),
+          visible: isVisible(target) && isVisible(clickTarget),
+          clickTarget: {
+            tagName: clickTarget.tagName.toLowerCase(),
+            text: (clickTarget.textContent ?? "").trim().slice(0, 200),
+            rect: {
+              width: clickRect.width,
+              height: clickRect.height,
+              top: clickRect.top,
+              left: clickRect.left,
+            },
+            disabled: isDisabled(clickTarget),
+            visible: isVisible(clickTarget),
+          },
         };
       }),
       bodyText: (document.body?.innerText ?? "").slice(0, 1_000),
