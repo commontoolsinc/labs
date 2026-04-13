@@ -71,13 +71,10 @@ export default pattern<Input>(({ deck }) => ({
 
 Static strings like `[NAME]: "My Pattern"` don't need `computed()`.
 
-**Never wrap JSX in `computed()`** — the transformer automatically handles
-reactivity in JSX expressions and in many supported lowered value-expression
-sites in pattern-owned code. Important non-JSX examples include returned object
-property values, variable initializers, call arguments, array elements, return
-expressions, and callback-local values inside supported collection callbacks.
-Nested ternaries work too. See
-`docs/common/patterns/conditional.md`.
+**Never wrap JSX in `computed()`** — normal pattern code already handles
+reactive expressions directly. In current main, plain ternaries usually work
+the way you want in ordinary authored pattern code, including nested ternaries.
+See `docs/common/patterns/conditional.md`.
 
 Inside a `computed()` body, ternaries are **not** transformed — they execute
 as plain JS where a `Writable<boolean>` object is always truthy. This is
@@ -125,9 +122,9 @@ callback bodies.
 ```
 
 **Rule of thumb:** `computed()` is for deriving data (strings, numbers,
-arrays, objects). For conditional rendering or simple conditional values at
-supported lowered value-expression sites, use plain ternaries. If you're unsure
-whether a site lowers, inspect it with
+arrays, objects). For conditional rendering or other simple conditional values
+in normal pattern code, use plain ternaries. If you're unsure whether a site
+lowers, inspect it with
 `deno task cf check <pattern>.tsx --show-transformed`.
 
 Example of correct usage:

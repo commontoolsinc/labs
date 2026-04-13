@@ -90,7 +90,7 @@ export default pattern<Input>(({ deck }) => ({
 ### Correct Conditional Rendering
 
 ```typescript
-// Prefer plain ternaries at supported lowered value-expression sites
+// Prefer plain ternaries in normal pattern code
 return <>{showDetails ? <div>Details content</div> : null}</>;
 ```
 

@@ -58,10 +58,9 @@ Allowed inside patterns:
 |-----------|-----|
 | `onClick` or conditional UI inside `computed()` | Move the interactive element outside and use direct JSX conditionals |
 
-Plain ternaries are valid across supported lowered value-expression sites. The
-main author-facing buckets are JSX expressions, lowerable top-level
-pattern-body value-expression sites, and callback-local values inside supported
-collection callbacks.
+Plain ternaries are generally valid in normal pattern code. Prefer direct
+authored expressions over helper-owned conditional workarounds unless a site
+has been explicitly verified as problematic.
 
 ### 4. Type System and Data Shape
 

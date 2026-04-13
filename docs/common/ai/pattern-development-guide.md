@@ -197,25 +197,13 @@ callbacks.
 
 ### Conditional JSX
 
-Do not use `computed()` to gate JSX sections. Use plain authored ternaries at
-supported lowered value-expression sites instead.
+Do not use `computed()` to gate JSX sections. Use direct authored expressions
+instead, usually plain ternaries.
 
-The transformer now lowers plain ternaries across three main author-facing
-buckets:
-
-- JSX expressions
-- top-level pattern-body value-expression sites, such as:
-  - returned object property values
-  - variable initializers
-  - return expressions
-- callback-local value-expression sites inside supported reactive collection
-  callbacks
-
-Some call-argument and array-element sites are also lowerable, but those can
-still route through whole-site wrapping rather than direct inner `ifElse()`
-lowering. For unusual call-root shapes, inspect the emitted output with
-`cf check --show-transformed` instead of assuming the conditional itself will
-be rewritten.
+Current main handles ordinary ternaries correctly in normal pattern code, not
+just in JSX children. If you're debugging a less common site, inspect the
+emitted output with `cf check --show-transformed` instead of reasoning from old
+transformer limitations.
 
 ```tsx
 // Wrong
@@ -234,11 +222,10 @@ Inside `computed()`, a `Writable<boolean>` is just a JS object and therefore
 truthy. That leads to subtle incorrect rendering because ternaries inside the
 `computed()` body are plain JS, not transformer-lowered conditionals.
 
-That distinction matters: explicit computation callbacks like `computed`,
-`derive`, `action`, `lift`, and `handler` are preserved-JavaScript control-flow
-boundaries. Inside those callback bodies, ternaries and logical operators
-follow ordinary JavaScript rules even when nested inside returned JSX, local
-consts, or object literals.
+That distinction matters because explicit computation callbacks like
+`computed`, `derive`, `action`, `lift`, and `handler` are preserved-JavaScript
+control-flow boundaries. Inside those callback bodies, use `.get()` when you
+need the raw boolean value.
 
 ### CORS and `fetchData`
 

@@ -68,11 +68,9 @@ export default pattern<Input>(({ count, items, user }) => ({
 
 ### Conditional Expressions And Other Lowered Value Sites
 
-Plain ternaries work in more than just JSX children. The transformer also
-lowers other supported value-expression sites in pattern-owned code, including
-returned object property values, variable initializers, call arguments, array
-elements, return expressions, and callback-local values inside supported
-collection callbacks.
+Plain ternaries work in more than just JSX children. In current main, they
+also work across most ordinary value-expression positions in normal pattern
+code.
 
 ```tsx
 export default pattern<Input>(({ count, items, user }) => {
@@ -94,5 +92,5 @@ export default pattern<Input>(({ count, items, user }) => {
 });
 ```
 
-If you're debugging a less common expression site, inspect the emitted source
-with `deno task cf check <pattern>.tsx --show-transformed`.
+If you're debugging a less common site, inspect the emitted source with
+`deno task cf check <pattern>.tsx --show-transformed`.

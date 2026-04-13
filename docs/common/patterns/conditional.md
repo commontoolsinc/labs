@@ -1,7 +1,9 @@
 ## Prefer Plain Ternaries
 
-Use regular ternary operators at supported lowered value-expression sites. The
-transformer recognizes a shared set of authored container kinds, not just JSX.
+Use regular ternary operators directly in normal pattern code. On current main,
+the transformer handles ordinary authored ternaries in JSX and most other
+common value-expression positions, so you usually do not need to author
+`ifElse()` directly.
 
 ```tsx
 // JSX expressions
@@ -22,40 +24,21 @@ const modalTitle = editing ? "Edit Person" : "Add Person";
 {score >= 90 ? "A" : score >= 80 ? "B" : "C"}
 ```
 
-The main author-facing buckets are:
-
-- JSX expressions
-- top-level pattern-body value-expression sites:
-  - returned object property values
-  - variable initializers
-  - return expressions
-- callback-local value-expression sites inside supported reactive collection
-  callbacks
-
-In transformer source terms, those correspond to the current container kinds
-`jsx-expression`, `return-expression`, `variable-initializer`,
-`call-argument`, `object-property`, and `array-element`.
-
-The last two container kinds are a little more nuanced in practice: some
-call-argument and array-element shapes lower by wrapping the containing
-expression rather than by rewriting the inner conditional directly. If the
-condition is an unusual cell-like value at one of those sites, inspect the
-transformed output before assuming `ifElse()` lowering.
-
-You usually do not need to author `ifElse()` directly for render-time
-conditionals or simple conditional values in those sites. Authored helper
-control flow remains supported when it is the clearest way to express the code.
+This includes JSX expressions, common returned values, variable initializers,
+and many callback-local expressions. If you're debugging a less common site,
+inspect the emitted source with
+`deno task cf check <pattern>.tsx --show-transformed` rather than guessing
+about the lowering.
 
 ## Keep `computed()` for Data, Not UI Gating
 
-Inside a `computed()` body, the callback body itself is not a lowered
-value-expression site. Ternaries and logical operators there stay plain
-JavaScript even when nested inside returned JSX. That means `Writable<boolean>`
-values are still just truthy objects there.
+Inside a `computed()` body, ternaries and logical operators stay plain
+JavaScript even when nested inside returned JSX. That means
+`Writable<boolean>` values are still just truthy objects there.
 
-Use plain ternaries at supported lowered value-expression sites instead of
-wrapping JSX in `computed()`. If you're unsure whether a site lowers the way
-you expect, inspect it with
+Use plain ternaries in normal pattern code instead of wrapping JSX in
+`computed()`. If you're unsure whether a site lowers the way you expect,
+inspect it with
 `deno task cf check <pattern>.tsx --show-transformed`.
 
 ## See Also
