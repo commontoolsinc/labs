@@ -220,6 +220,22 @@ unsafe-host/test helpers, or any other unsupported identity class. Those paths
 are treated as untrusted for trust-sensitive relaxations unless a later
 explicit stable-id path is added.
 
+Outstanding verified-code trust-anchor gap:
+
+- [ ] Add policy/trust-graph infrastructure that can say a stable code
+      location is trusted for a specific claim class. The durable identity must
+      be based on the verified bundle hash plus canonical binding/source-map
+      metadata, or a content-addressed hash for sandbox-admitted self-contained
+      functions; do not persist or policy-reference `verifiedLoadId` load
+      counts. Source-map rebinding must fail closed if the resolved source
+      location is outside the verified bundle identity being checked.
+- [ ] Use that trust anchor to decide when authored annotations are trusted.
+      In particular, `ifc.uiContract` hints and aligned `data-ui-*` markers
+      should only become trusted UI provenance evidence when the declaring
+      pattern/helper code identity is trusted for the corresponding UI
+      annotation capability; otherwise the annotations remain untrusted and
+      fail closed.
+
 ### Trust Snapshot
 
 A trust snapshot is the acting-principal-scoped view of the trust graph used by
