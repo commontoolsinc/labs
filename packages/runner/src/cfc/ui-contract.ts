@@ -1,7 +1,12 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
-import type { NormalizedFullLink } from "../link-utils.ts";
+import {
+  findAndInlineDataURILinks,
+  type NormalizedFullLink,
+  parseLink,
+} from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { getJSONFromDataURI, toURI } from "../uri-utils.ts";
 import type { CfcAddress } from "./types.ts";
 
 type UiContractTrustRequirements = {
@@ -29,6 +34,11 @@ export type UiContract =
   | UiActionContract
   | UiPromptSlotContract
   | UiDisclosureContract;
+
+export type UiContractEntry = {
+  path: string[];
+  contract: UiContract;
+};
 
 type SerializedTrustedEvent = {
   type?: string;
@@ -92,16 +102,58 @@ const trustRequirementsFromContract = (
   };
 };
 
-export const uiContractFromSchema = (
+const decodePointerSegment = (segment: string): string => {
+  const decoded = segment.replace(/~1/g, "/").replace(/~0/g, "~");
+  try {
+    return decodeURIComponent(decoded);
+  } catch {
+    return decoded;
+  }
+};
+
+const resolveLocalSchemaRef = (
   schema: JSONSchema | undefined,
+  root: JSONSchema | undefined,
+  seenRefs: Set<string>,
+): JSONSchema | undefined => {
+  if (!isRecord(schema) || typeof schema.$ref !== "string") {
+    return schema;
+  }
+  const ref = schema.$ref;
+  if (!ref.startsWith("#/") || seenRefs.has(ref)) {
+    return schema;
+  }
+  seenRefs.add(ref);
+
+  let current: unknown = root;
+  for (const segment of ref.slice(2).split("/")) {
+    if (!isRecord(current)) {
+      return schema;
+    }
+    current = current[decodePointerSegment(segment)];
+  }
+
+  return isRecord(current) || typeof current === "boolean"
+    ? current as JSONSchema
+    : schema;
+};
+
+const uiContractFromSchemaInternal = (
+  schema: JSONSchema | undefined,
+  root: JSONSchema | undefined,
+  seenRefs: Set<string>,
 ): UiContract | undefined => {
+  const resolvedSchema = resolveLocalSchemaRef(schema, root, seenRefs);
+  if (resolvedSchema !== schema) {
+    return uiContractFromSchemaInternal(resolvedSchema, root, seenRefs);
+  }
   if (
-    !isRecord(schema) || !isRecord(schema.ifc) ||
-    !isRecord(schema.ifc.uiContract)
+    !isRecord(resolvedSchema) || !isRecord(resolvedSchema.ifc) ||
+    !isRecord(resolvedSchema.ifc.uiContract)
   ) {
     return undefined;
   }
-  const contract = schema.ifc.uiContract;
+  const contract = resolvedSchema.ifc.uiContract;
   const trustRequirements = trustRequirementsFromContract(contract);
   switch (contract.helper) {
     case "UiAction":
@@ -125,6 +177,120 @@ export const uiContractFromSchema = (
       return undefined;
   }
 };
+
+export const uiContractFromSchema = (
+  schema: JSONSchema | undefined,
+): UiContract | undefined =>
+  uiContractFromSchemaInternal(schema, schema, new Set());
+
+const uiContractsFromSchemaInternal = (
+  schema: JSONSchema | undefined,
+  root: JSONSchema | undefined,
+  path: string[],
+  seenRefs: Set<string>,
+): UiContractEntry[] => {
+  const branchRefs = new Set(seenRefs);
+  const resolvedSchema = resolveLocalSchemaRef(schema, root, branchRefs);
+  if (resolvedSchema !== schema) {
+    return uiContractsFromSchemaInternal(
+      resolvedSchema,
+      root,
+      path,
+      branchRefs,
+    );
+  }
+  if (!isRecord(resolvedSchema)) {
+    return [];
+  }
+
+  const entries: UiContractEntry[] = [];
+  const contract = uiContractFromSchemaInternal(
+    resolvedSchema,
+    root,
+    new Set(),
+  );
+  if (contract !== undefined) {
+    entries.push({ path: [...path], contract });
+  }
+
+  const hasProperties = isRecord(resolvedSchema.properties);
+  const hasCompoundSchemas = Array.isArray(resolvedSchema.anyOf) ||
+    Array.isArray(resolvedSchema.oneOf) ||
+    Array.isArray(resolvedSchema.allOf);
+  const hasItems = isRecord(resolvedSchema.items) ||
+    typeof resolvedSchema.items === "boolean";
+  if (
+    contract === undefined &&
+    !hasProperties &&
+    !hasCompoundSchemas &&
+    !hasItems &&
+    resolvedSchema.type === "unknown" &&
+    isRecord(resolvedSchema.$defs)
+  ) {
+    const definitionContracts = Object.values(resolvedSchema.$defs)
+      .flatMap((definition) =>
+        uiContractsFromSchemaInternal(
+          definition as JSONSchema,
+          definition as JSONSchema,
+          [],
+          new Set(),
+        )
+      )
+      .map((entry) => entry.contract);
+    if (definitionContracts.length === 1) {
+      entries.push({ path: [...path], contract: definitionContracts[0] });
+    }
+  }
+
+  if (hasProperties) {
+    for (const [key, child] of Object.entries(resolvedSchema.properties)) {
+      entries.push(
+        ...uiContractsFromSchemaInternal(
+          child as JSONSchema,
+          root,
+          [...path, key],
+          seenRefs,
+        ),
+      );
+    }
+  }
+
+  const compound = [
+    ...(Array.isArray(resolvedSchema.anyOf) ? resolvedSchema.anyOf : []),
+    ...(Array.isArray(resolvedSchema.oneOf) ? resolvedSchema.oneOf : []),
+    ...(Array.isArray(resolvedSchema.allOf) ? resolvedSchema.allOf : []),
+  ];
+  for (const child of compound) {
+    entries.push(
+      ...uiContractsFromSchemaInternal(
+        child as JSONSchema,
+        root,
+        path,
+        seenRefs,
+      ),
+    );
+  }
+
+  if (
+    isRecord(resolvedSchema.items) || typeof resolvedSchema.items === "boolean"
+  ) {
+    entries.push(
+      ...uiContractsFromSchemaInternal(
+        resolvedSchema.items as JSONSchema,
+        root,
+        [...path, "*"],
+        seenRefs,
+      ),
+    );
+  }
+
+  return entries;
+};
+
+export const uiContractsFromSchema = (
+  schema: JSONSchema | undefined,
+): UiContractEntry[] =>
+  uiContractsFromSchemaInternal(schema, schema, [], new Set());
 
 export const trustedEventProvenanceMatchesUiContract = (
   provenance: unknown,
@@ -198,12 +364,50 @@ export const trustedEventMatchesUiContract = (
   }
 };
 
+const trustedEventMatchCandidates = (event: unknown): unknown[] => {
+  const candidates: unknown[] = [];
+  const add = (candidate: unknown) => {
+    if (candidate !== undefined && !candidates.includes(candidate)) {
+      candidates.push(candidate);
+    }
+  };
+
+  add(event);
+  try {
+    add(findAndInlineDataURILinks(event));
+  } catch {
+    // Invalid data URI links cannot establish trusted provenance.
+  }
+
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index];
+    if (!isRecord(candidate)) {
+      continue;
+    }
+    if ("$event" in candidate) {
+      add(candidate.$event);
+    }
+    if (isRecord(candidate.value) && "$event" in candidate.value) {
+      add(candidate.value.$event);
+    }
+  }
+
+  return candidates;
+};
+
 const pathsEqual = (
   left: readonly unknown[],
   right: readonly unknown[],
 ): boolean =>
   left.length === right.length &&
   left.every((segment, index) => String(segment) === String(right[index]));
+
+const pathHasPrefix = (
+  path: readonly unknown[],
+  prefix: readonly unknown[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => String(segment) === String(path[index]));
 
 const targetMatchesWrite = (
   target: CfcAddress,
@@ -214,24 +418,125 @@ const targetMatchesWrite = (
   target.type === write.type &&
   pathsEqual(target.path, write.path);
 
-const schemaCandidatesForWrite = (
+const sameDocument = (
+  target: CfcAddress,
+  write: AddressLike,
+): boolean =>
+  target.space === write.space &&
+  target.id === write.id &&
+  target.type === write.type;
+
+const contractCandidatesForWrite = (
   tx: TrustedEventPolicyTx,
   write: NormalizedFullLink,
-): JSONSchema[] => {
-  const schemas: JSONSchema[] = [];
+): UiContract[] => {
+  const contracts: UiContract[] = [];
   if (write.schema !== undefined) {
-    schemas.push(write.schema);
+    for (const entry of uiContractsFromSchema(write.schema)) {
+      if (pathsEqual(entry.path, []) || pathsEqual(entry.path, write.path)) {
+        contracts.push(entry.contract);
+      }
+    }
   }
   for (const input of tx.getCfcState().writePolicyInputs) {
     if (
       input.kind === "schema" &&
       input.schema !== undefined &&
-      targetMatchesWrite(input.target, write)
+      sameDocument(input.target, write) &&
+      pathHasPrefix(write.path, input.target.path)
     ) {
-      schemas.push(input.schema);
+      for (const entry of uiContractsFromSchema(input.schema)) {
+        if (pathsEqual([...input.target.path, ...entry.path], write.path)) {
+          contracts.push(entry.contract);
+        }
+      }
     }
   }
-  return schemas;
+  return contracts;
+};
+
+const eventEnvelopePayloads = (
+  event: unknown,
+): Array<{ value: unknown; space?: string }> => {
+  const payloads: Array<{ value: unknown; space?: string }> = [];
+  const addPayload = (value: unknown, space?: string) => {
+    if (
+      !payloads.some((payload) =>
+        payload.value === value && payload.space === space
+      )
+    ) {
+      payloads.push({ value, ...(space !== undefined ? { space } : {}) });
+    }
+  };
+
+  addPayload(event);
+  if (isRecord(event) && "value" in event) {
+    addPayload(event.value);
+  }
+  try {
+    const eventLink = parseLink(event);
+    if (eventLink?.id?.startsWith("data:application/json")) {
+      const decoded = getJSONFromDataURI(eventLink.id);
+      addPayload(decoded, eventLink.space);
+      if (isRecord(decoded) && "value" in decoded) {
+        addPayload(decoded.value, eventLink.space);
+      }
+    }
+  } catch {
+    // Invalid data URI links cannot provide authoring context.
+  }
+
+  return payloads;
+};
+
+const aliasCellId = (cell: unknown): string | undefined => {
+  try {
+    return isRecord(cell) && typeof cell["/"] === "string"
+      ? toURI(cell)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const contractCandidatesFromEventContext = (
+  event: unknown,
+  write: NormalizedFullLink,
+): UiContract[] => {
+  const contracts: UiContract[] = [];
+  for (const payload of eventEnvelopePayloads(event)) {
+    if (!isRecord(payload.value) || !isRecord(payload.value.$ctx)) {
+      continue;
+    }
+    for (const value of Object.values(payload.value.$ctx)) {
+      if (!isRecord(value) || !isRecord(value.$alias)) {
+        continue;
+      }
+      const alias = value.$alias;
+      if (
+        !Array.isArray(alias.path) ||
+        !pathsEqual(alias.path, write.path)
+      ) {
+        continue;
+      }
+      const id = aliasCellId(alias.cell);
+      if (id !== undefined && id !== write.id) {
+        continue;
+      }
+      const aliasSpace = typeof alias.space === "string"
+        ? alias.space
+        : payload.space;
+      if (aliasSpace !== undefined && aliasSpace !== write.space) {
+        continue;
+      }
+      for (const entry of uiContractsFromSchema(alias.schema as JSONSchema)) {
+        if (pathsEqual(entry.path, [])) {
+          contracts.push(entry.contract);
+        }
+      }
+    }
+  }
+  return contracts;
 };
 
 const trustedEventPolicyInputAlreadyRecorded = (
@@ -259,9 +564,15 @@ export const recordTrustedEventPolicyInputs = (
   event: unknown,
 ): void => {
   for (const write of writes) {
-    for (const schema of schemaCandidatesForWrite(tx, write)) {
-      const contract = uiContractFromSchema(schema);
-      if (!trustedEventMatchesUiContract(event, contract)) {
+    const contracts = [
+      ...contractCandidatesForWrite(tx, write),
+      ...contractCandidatesFromEventContext(event, write),
+    ];
+    for (const contract of contracts) {
+      const matchingEvent = trustedEventMatchCandidates(event).find(
+        (candidate) => trustedEventMatchesUiContract(candidate, contract),
+      );
+      if (matchingEvent === undefined) {
         continue;
       }
       const target = {
@@ -270,7 +581,7 @@ export const recordTrustedEventPolicyInputs = (
         type: write.type,
         path: [...write.path],
       };
-      const eventId = trustedEventId(event, write);
+      const eventId = trustedEventId(matchingEvent, write);
       if (trustedEventPolicyInputAlreadyRecorded(tx, target, eventId)) {
         break;
       }
@@ -278,7 +589,7 @@ export const recordTrustedEventPolicyInputs = (
         kind: "trusted-event",
         target,
         eventId,
-        provenance: (event as SerializedTrustedEvent).provenance,
+        provenance: (matchingEvent as SerializedTrustedEvent).provenance,
       });
       break;
     }

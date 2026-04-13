@@ -8,27 +8,20 @@ import {
   Writable,
 } from "commonfabric";
 import {
-  commitTrustedSaveTitle,
-  TRUSTED_SAVE_SURFACE,
-  TrustedActionWrite,
   TrustedSaveSurface,
+  TrustedSaveTitleUiContract,
 } from "../cfc-trusted-surfaces/main.tsx";
 
 interface AuthorizedSaveInput {
   draftTitle: Writable<Default<string, "">>;
-  savedTitle: Writable<Default<string, "">>;
+  savedTitle: Writable<Default<TrustedSaveTitleUiContract, "">>;
 }
 
 interface AuthorizedSaveOutput {
   [NAME]: string;
   [UI]: unknown;
   draftTitle: string;
-  savedTitle: TrustedActionWrite<
-    string,
-    typeof commitTrustedSaveTitle,
-    "TrustedSaveTitle",
-    typeof TRUSTED_SAVE_SURFACE
-  >;
+  savedTitle: TrustedSaveTitleUiContract;
   save: Stream<void>;
 }
 

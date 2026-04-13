@@ -33,7 +33,7 @@ import {
 } from "./types.ts";
 import {
   trustedEventProvenanceMatchesUiContract,
-  uiContractFromSchema,
+  uiContractsFromSchema,
 } from "./ui-contract.ts";
 
 const INTERNAL_VERIFIER_META = {
@@ -552,20 +552,25 @@ const verifyTrustedEventRequirements = (
   },
   schema: JSONSchema,
 ): string | undefined => {
-  const contract = uiContractFromSchema(schema);
-  if (contract === undefined) {
-    return undefined;
+  for (const entry of uiContractsFromSchema(schema)) {
+    if (setupProjectionSourceMatchesValue(tx, target, entry.path)) {
+      continue;
+    }
+    const matched = tx.getCfcState().writePolicyInputs.some((input) =>
+      input.kind === "trusted-event" &&
+      input.target.space === target.space &&
+      input.target.id === target.id &&
+      input.target.type === target.type &&
+      arraysEqual(input.target.path, entry.path) &&
+      trustedEventProvenanceMatchesUiContract(input.provenance, entry.contract)
+    );
+    if (!matched) {
+      return `missing trusted-event policy input for ${target.id} at /${
+        entry.path.join("/")
+      }`;
+    }
   }
-  const matched = tx.getCfcState().writePolicyInputs.some((input) =>
-    input.kind === "trusted-event" &&
-    input.target.space === target.space &&
-    input.target.id === target.id &&
-    input.target.type === target.type &&
-    trustedEventProvenanceMatchesUiContract(input.provenance, contract)
-  );
-  return matched
-    ? undefined
-    : `missing trusted-event policy input for ${target.id}`;
+  return undefined;
 };
 
 const verifyExactCopyRequirements = (

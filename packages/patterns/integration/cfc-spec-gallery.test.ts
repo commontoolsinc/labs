@@ -5,7 +5,10 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { clickTrustedAction, waitForText } from "./cfc-browser-helpers.ts";
+import {
+  clickTrustedActionAndWaitForText,
+  waitForText,
+} from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -58,36 +61,53 @@ describe("cfc spec gallery integration test", () => {
       identity,
     });
 
-    await clickTrustedAction(page, "TrustedPrepareForward");
-    await waitForText(page, "#trusted-forward-prepared", "Prepared for");
-    await waitForText(page, "#forward-stage", "prepared");
-    await clickTrustedAction(page, "TrustedForwardNote");
-    await waitForText(
+    await clickTrustedActionAndWaitForText(
       page,
+      "TrustedPrepareForward",
+      "#trusted-forward-prepared",
+      "Prepared for",
+    );
+    await waitForText(page, "#forward-stage", "prepared");
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedForwardNote",
       "#trusted-forward-result",
       "Only the bounded itinerary excerpt will be forwarded.",
     );
     await waitForText(page, "#forward-stage", "forwarded");
 
-    await clickTrustedAction(page, "TrustedCaptureDirectCommand");
-    await waitForText(page, "#research-stage", "captured");
-    await clickTrustedAction(page, "TrustedPrepareResearchBrief");
-    await waitForText(page, "#trusted-command-prepared", "Prepared outbound");
-    await waitForText(page, "#research-stage", "prepared");
-    await clickTrustedAction(page, "TrustedAuthorizeResearchSend");
-    await waitForText(
+    await clickTrustedActionAndWaitForText(
       page,
+      "TrustedCaptureDirectCommand",
+      "#research-stage",
+      "captured",
+    );
+    await waitForText(page, "#research-stage", "captured");
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedPrepareResearchBrief",
+      "#trusted-command-prepared",
+      "Prepared outbound",
+    );
+    await waitForText(page, "#research-stage", "prepared");
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedAuthorizeResearchSend",
       "#trusted-command-result",
       "Authorized outbound message",
     );
     await waitForText(page, "#research-stage", "sent");
 
-    await clickTrustedAction(page, "TrustedPrepareSafeLink");
-    await waitForText(page, "#trusted-safe-link-prepared", "?view=summary");
-    await waitForText(page, "#safe-link-stage", "prepared");
-    await clickTrustedAction(page, "TrustedReleaseSafeLink");
-    await waitForText(
+    await clickTrustedActionAndWaitForText(
       page,
+      "TrustedPrepareSafeLink",
+      "#trusted-safe-link-prepared",
+      "?view=summary",
+    );
+    await waitForText(page, "#safe-link-stage", "prepared");
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedReleaseSafeLink",
       "#trusted-safe-link-result",
       "?view=summary",
     );

@@ -15,6 +15,11 @@ export function navigateTo(
   let isInitialized = false;
   let navigated = false;
   let resultCell: Cell<boolean>;
+  const targetCellSchema = {
+    type: "object",
+    properties: {},
+    asCell: ["cell"],
+  } as const;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
     // The main reason we might be called again after navigating is that the
@@ -44,12 +49,7 @@ export function navigateTo(
     if (resultCell.withTx(tx).get()) return;
 
     // Read with a schema that won't subscribe to the whole piece
-    const inputsWithLog = inputsCell.asSchema({
-      type: "object",
-      properties: {},
-      asCell: ["cell"],
-    })
-      .withTx(tx);
+    const inputsWithLog = inputsCell.asSchema(targetCellSchema).withTx(tx);
     const target = inputsWithLog.get();
 
     // Pattern creation can yield a navigable cell before every reactive
@@ -81,5 +81,8 @@ export function navigateTo(
   return {
     action,
     isEffect: true,
+    populateDependencies: (depTx) => {
+      inputsCell.asSchema(targetCellSchema).withTx(depTx).get();
+    },
   };
 }

@@ -148,6 +148,159 @@ export async function waitForTextAbsent(
   }
 }
 
+export async function fillCfInput(
+  page: Page,
+  selector: string,
+  value: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  let probe: CfInputProbe | undefined;
+  try {
+    await waitFor(async () => {
+      try {
+        const field = await page.waitForSelector(selector, {
+          strategy: "pierce",
+          timeout: 1_000,
+        });
+        probe = await field.evaluate(
+          async (
+            element: Element,
+            nextValue: string,
+          ): Promise<CfInputProbe> => {
+            const input = element instanceof HTMLInputElement
+              ? element
+              : element.shadowRoot?.querySelector("input");
+            if (!(input instanceof HTMLInputElement)) {
+              return {
+                selector: element.tagName.toLowerCase(),
+                found: false,
+                value: "",
+                cellValue: undefined,
+                hasCell: false,
+                disabled: false,
+                readOnly: false,
+                visible: false,
+                hostTagName: element.tagName.toLowerCase(),
+              };
+            }
+
+            const rect = input.getBoundingClientRect();
+            const style = globalThis.getComputedStyle(input);
+            const visible = rect.width > 0 && rect.height > 0 &&
+              rect.bottom >= 0 && rect.right >= 0 &&
+              rect.top <= globalThis.innerHeight &&
+              rect.left <= globalThis.innerWidth &&
+              style.visibility !== "hidden" &&
+              style.display !== "none";
+            const root = input.getRootNode();
+            const host = root instanceof ShadowRoot ? root.host : element;
+            const hostWithCell = host as Element & {
+              value?: {
+                get?: () => unknown;
+                set?: (value: string) => Promise<void>;
+                sync?: () => Promise<unknown>;
+              };
+              requestUpdate?: () => void | Promise<void>;
+            };
+            const readCellValue = () =>
+              typeof hostWithCell.value?.get === "function"
+                ? hostWithCell.value.get()
+                : undefined;
+            if (!visible || input.disabled || input.readOnly) {
+              return {
+                selector: input.tagName.toLowerCase(),
+                found: true,
+                value: input.value,
+                cellValue: readCellValue(),
+                hasCell: hostWithCell.value !== undefined,
+                disabled: input.disabled,
+                readOnly: input.readOnly,
+                visible,
+                hostTagName: hostWithCell.tagName.toLowerCase(),
+              };
+            }
+
+            input.scrollIntoView({ block: "center", inline: "center" });
+            await new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve))
+            );
+            input.focus();
+            const valueSetter = Object.getOwnPropertyDescriptor(
+              HTMLInputElement.prototype,
+              "value",
+            )?.set;
+            if (valueSetter) {
+              valueSetter.call(input, nextValue);
+            } else {
+              input.value = nextValue;
+            }
+            input.dispatchEvent(
+              new Event("input", { bubbles: true, composed: true }),
+            );
+            input.dispatchEvent(
+              new Event("change", { bubbles: true, composed: true }),
+            );
+            input.blur();
+
+            if (typeof hostWithCell.value?.set === "function") {
+              await hostWithCell.value.set(nextValue);
+            }
+            const syncedCellValue =
+              typeof hostWithCell.value?.sync === "function"
+                ? await hostWithCell.value.sync()
+                : readCellValue();
+            if (typeof hostWithCell.requestUpdate === "function") {
+              await hostWithCell.requestUpdate.call(hostWithCell);
+            }
+            await new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve))
+            );
+
+            return {
+              selector: input.tagName.toLowerCase(),
+              found: true,
+              value: input.value,
+              cellValue: syncedCellValue,
+              hasCell: hostWithCell.value !== undefined,
+              disabled: input.disabled,
+              readOnly: input.readOnly,
+              visible,
+              hostTagName: hostWithCell.tagName.toLowerCase(),
+            };
+          },
+          { args: [value] },
+        );
+        return probe.found && probe.visible && !probe.disabled &&
+          !probe.readOnly &&
+          (probe.hasCell ? probe.cellValue === value : probe.value === value);
+      } catch {
+        return false;
+      }
+    }, { timeout, delay: 250 });
+  } catch (cause) {
+    throw new Error(
+      `Timed out filling cf input "${selector}" with "${value}". Last probe: ${
+        JSON.stringify(probe, null, 2)
+      }`,
+      { cause },
+    );
+  }
+}
+
+export async function waitForRuntimeIdle(
+  page: Page,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  await waitFor(async () => {
+    return await page.evaluate(async () => {
+      const rt = globalThis.commonfabric?.rt;
+      if (!rt?.idle) return false;
+      await rt.idle();
+      return true;
+    });
+  }, { timeout, delay: 250 });
+}
+
 async function textIsPresent(
   page: Page,
   selector: string,
@@ -166,6 +319,14 @@ async function textIsPresent(
 
 type TrustedActionProbe = {
   action: string;
+  lastClick?: {
+    trusted: boolean;
+    path: Array<{
+      tagName: string;
+      id: string;
+      dataset: Record<string, string>;
+    }>;
+  };
   matches: Array<{
     tagName: string;
     text: string;
@@ -192,6 +353,18 @@ type TextProbe = {
     visible: boolean;
   }>;
   bodyText: string;
+};
+
+type CfInputProbe = {
+  selector: string;
+  found: boolean;
+  value: string;
+  cellValue: unknown;
+  hasCell: boolean;
+  disabled: boolean;
+  readOnly: boolean;
+  visible: boolean;
+  hostTagName: string;
 };
 
 async function markVisibleTrustedAction(
@@ -247,6 +420,31 @@ async function markVisibleTrustedAction(
         !isDisabled(target) && !isDisabled(clickTarget)
       ) {
         clickTarget.setAttribute(targetAttr, targetToken);
+        clickTarget.addEventListener(
+          "click",
+          (event) => {
+            (globalThis as typeof globalThis & {
+              __lastCfcTrustedActionClick?: TrustedActionProbe["lastClick"];
+            }).__lastCfcTrustedActionClick = {
+              trusted: event.isTrusted,
+              path: event.composedPath().flatMap((node) => {
+                if (!(node instanceof HTMLElement)) {
+                  return [];
+                }
+                const dataset: Record<string, string> = {};
+                for (const key in node.dataset) {
+                  dataset[key] = node.dataset[key] ?? "";
+                }
+                return [{
+                  tagName: node.tagName.toLowerCase(),
+                  id: node.id,
+                  dataset,
+                }];
+              }),
+            };
+          },
+          { capture: true, once: true },
+        );
         return true;
       }
     }
@@ -318,8 +516,12 @@ async function readTrustedActionProbe(
 
     const matches: Element[] = [];
     collect(document, matches);
+    const lastClick = (globalThis as typeof globalThis & {
+      __lastCfcTrustedActionClick?: TrustedActionProbe["lastClick"];
+    }).__lastCfcTrustedActionClick;
     return {
       action: targetAction,
+      ...(lastClick ? { lastClick } : {}),
       matches: matches.map((element) => {
         const target = element as HTMLElement;
         const clickTarget =

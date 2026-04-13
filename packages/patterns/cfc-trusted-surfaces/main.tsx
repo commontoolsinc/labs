@@ -41,6 +41,23 @@ export type TrustedActionWrite<
   [Pattern]
 >;
 
+export type TrustedActionUiContract<
+  T,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]] = [Pattern],
+> = Cfc<
+  T,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
+
 export const TRUSTED_SAVE_SURFACE = "TrustedSaveSurface";
 export const TRUSTED_SAVE_DRAFT_SURFACE = "TrustedSaveDraftSurface";
 export const TRUSTED_REVIEW_SURFACE = "TrustedReviewSurface";
@@ -95,11 +112,53 @@ const CANCEL_LONG_RUNNING_JOB_ACTION = "TrustedCancelLongRunningJob";
 const CONFIRM_RECIPIENT_RELEASE_ACTION = "TrustedConfirmRecipientRelease";
 const RELEASE_REDACTED_CONTENT_ACTION = "TrustedReleaseRedactedContent";
 
+export type TrustedSaveTitleUiContract = TrustedActionUiContract<
+  string,
+  typeof SAVE_TITLE_ACTION,
+  typeof TRUSTED_SAVE_SURFACE
+>;
+
+export type TrustedSavedDraftTitleUiContract = TrustedActionUiContract<
+  string,
+  typeof SAVE_DRAFT_ACTION,
+  typeof TRUSTED_SAVE_DRAFT_SURFACE
+>;
+
+export type TrustedSavedDraftBodyUiContract = TrustedActionUiContract<
+  string,
+  typeof SAVE_DRAFT_ACTION,
+  typeof TRUSTED_SAVE_DRAFT_SURFACE
+>;
+
+export type TrustedReviewedTitleUiContract = TrustedActionUiContract<
+  string,
+  typeof REVIEW_SNAPSHOT_ACTION,
+  typeof TRUSTED_REVIEW_SURFACE
+>;
+
+export type TrustedReviewedBodyUiContract = TrustedActionUiContract<
+  string,
+  typeof REVIEW_SNAPSHOT_ACTION,
+  typeof TRUSTED_REVIEW_SURFACE
+>;
+
+export type TrustedPublishedTitleUiContract = TrustedActionUiContract<
+  string,
+  typeof PUBLISH_SNAPSHOT_ACTION,
+  typeof TRUSTED_PUBLISH_SURFACE
+>;
+
+export type TrustedPublishedBodyUiContract = TrustedActionUiContract<
+  string,
+  typeof PUBLISH_SNAPSHOT_ACTION,
+  typeof TRUSTED_PUBLISH_SURFACE
+>;
+
 export const commitTrustedSaveTitle = handler<
   void,
   {
     draftTitle: Writable<string>;
-    savedTitle: Writable<string>;
+    savedTitle: Writable<TrustedSaveTitleUiContract>;
   }
 >((_, { draftTitle, savedTitle }) => {
   savedTitle.set(draftTitle.get().trim());
@@ -110,8 +169,8 @@ export const saveTrustedDraftSnapshot = handler<
   {
     draftTitle: Writable<string>;
     draftBody: Writable<string>;
-    savedTitle: Writable<string>;
-    savedBody: Writable<string>;
+    savedTitle: Writable<TrustedSavedDraftTitleUiContract>;
+    savedBody: Writable<TrustedSavedDraftBodyUiContract>;
   }
 >((_, { draftTitle, draftBody, savedTitle, savedBody }) => {
   savedTitle.set(draftTitle.get().trim());
@@ -123,8 +182,8 @@ export const reviewTrustedSnapshot = handler<
   {
     savedTitle: Writable<string>;
     savedBody: Writable<string>;
-    reviewedTitle: Writable<string>;
-    reviewedBody: Writable<string>;
+    reviewedTitle: Writable<TrustedReviewedTitleUiContract>;
+    reviewedBody: Writable<TrustedReviewedBodyUiContract>;
   }
 >((_, { savedTitle, savedBody, reviewedTitle, reviewedBody }) => {
   reviewedTitle.set(savedTitle.get());
@@ -136,13 +195,62 @@ export const publishTrustedSnapshot = handler<
   {
     reviewedTitle: Writable<string>;
     reviewedBody: Writable<string>;
-    publishedTitle: Writable<string>;
-    publishedBody: Writable<string>;
+    publishedTitle: Writable<TrustedPublishedTitleUiContract>;
+    publishedBody: Writable<TrustedPublishedBodyUiContract>;
   }
 >((_, { reviewedTitle, reviewedBody, publishedTitle, publishedBody }) => {
   publishedTitle.set(reviewedTitle.get());
   publishedBody.set(reviewedBody.get());
 });
+
+export type TrustedSaveTitleWrite = TrustedActionWrite<
+  string,
+  typeof commitTrustedSaveTitle,
+  typeof SAVE_TITLE_ACTION,
+  typeof TRUSTED_SAVE_SURFACE
+>;
+
+export type TrustedSavedDraftTitleWrite = TrustedActionWrite<
+  string,
+  typeof saveTrustedDraftSnapshot,
+  typeof SAVE_DRAFT_ACTION,
+  typeof TRUSTED_SAVE_DRAFT_SURFACE
+>;
+
+export type TrustedSavedDraftBodyWrite = TrustedActionWrite<
+  string,
+  typeof saveTrustedDraftSnapshot,
+  typeof SAVE_DRAFT_ACTION,
+  typeof TRUSTED_SAVE_DRAFT_SURFACE
+>;
+
+export type TrustedReviewedTitleWrite = TrustedActionWrite<
+  string,
+  typeof reviewTrustedSnapshot,
+  typeof REVIEW_SNAPSHOT_ACTION,
+  typeof TRUSTED_REVIEW_SURFACE
+>;
+
+export type TrustedReviewedBodyWrite = TrustedActionWrite<
+  string,
+  typeof reviewTrustedSnapshot,
+  typeof REVIEW_SNAPSHOT_ACTION,
+  typeof TRUSTED_REVIEW_SURFACE
+>;
+
+export type TrustedPublishedTitleWrite = TrustedActionWrite<
+  string,
+  typeof publishTrustedSnapshot,
+  typeof PUBLISH_SNAPSHOT_ACTION,
+  typeof TRUSTED_PUBLISH_SURFACE
+>;
+
+export type TrustedPublishedBodyWrite = TrustedActionWrite<
+  string,
+  typeof publishTrustedSnapshot,
+  typeof PUBLISH_SNAPSHOT_ACTION,
+  typeof TRUSTED_PUBLISH_SURFACE
+>;
 
 export const prepareTrustedForward = handler<
   void,
@@ -409,18 +517,13 @@ export const releaseTrustedRedactedContent = handler<
 
 export interface TrustedSaveSurfaceInput {
   draftTitle: Writable<string>;
-  savedTitle: Writable<string>;
+  savedTitle: Writable<TrustedSaveTitleUiContract>;
 }
 
 export interface TrustedSaveSurfaceOutput {
   [NAME]: string;
   [UI]: unknown;
-  savedTitle: TrustedActionWrite<
-    string,
-    typeof commitTrustedSaveTitle,
-    typeof SAVE_TITLE_ACTION,
-    typeof TRUSTED_SAVE_SURFACE
-  >;
+  savedTitle: TrustedSaveTitleUiContract;
   save: Stream<void>;
 }
 
@@ -470,25 +573,15 @@ export const TrustedSaveSurface = pattern<
 export interface TrustedSaveDraftSurfaceInput {
   draftTitle: Writable<string>;
   draftBody: Writable<string>;
-  savedTitle: Writable<string>;
-  savedBody: Writable<string>;
+  savedTitle: Writable<TrustedSavedDraftTitleUiContract>;
+  savedBody: Writable<TrustedSavedDraftBodyUiContract>;
 }
 
 export interface TrustedSaveDraftSurfaceOutput {
   [NAME]: string;
   [UI]: unknown;
-  savedTitle: TrustedActionWrite<
-    string,
-    typeof saveTrustedDraftSnapshot,
-    typeof SAVE_DRAFT_ACTION,
-    typeof TRUSTED_SAVE_DRAFT_SURFACE
-  >;
-  savedBody: TrustedActionWrite<
-    string,
-    typeof saveTrustedDraftSnapshot,
-    typeof SAVE_DRAFT_ACTION,
-    typeof TRUSTED_SAVE_DRAFT_SURFACE
-  >;
+  savedTitle: TrustedSavedDraftTitleUiContract;
+  savedBody: TrustedSavedDraftBodyUiContract;
   saveDraft: Stream<void>;
 }
 
@@ -554,25 +647,15 @@ export const TrustedSaveDraftSurface = pattern<
 export interface TrustedReviewSurfaceInput {
   savedTitle: Writable<string>;
   savedBody: Writable<string>;
-  reviewedTitle: Writable<string>;
-  reviewedBody: Writable<string>;
+  reviewedTitle: Writable<TrustedReviewedTitleUiContract>;
+  reviewedBody: Writable<TrustedReviewedBodyUiContract>;
 }
 
 export interface TrustedReviewSurfaceOutput {
   [NAME]: string;
   [UI]: unknown;
-  reviewedTitle: TrustedActionWrite<
-    string,
-    typeof reviewTrustedSnapshot,
-    typeof REVIEW_SNAPSHOT_ACTION,
-    typeof TRUSTED_REVIEW_SURFACE
-  >;
-  reviewedBody: TrustedActionWrite<
-    string,
-    typeof reviewTrustedSnapshot,
-    typeof REVIEW_SNAPSHOT_ACTION,
-    typeof TRUSTED_REVIEW_SURFACE
-  >;
+  reviewedTitle: TrustedReviewedTitleUiContract;
+  reviewedBody: TrustedReviewedBodyUiContract;
   reviewSaved: Stream<void>;
 }
 
@@ -625,25 +708,15 @@ export const TrustedReviewSurface = pattern<
 export interface TrustedPublishSurfaceInput {
   reviewedTitle: Writable<string>;
   reviewedBody: Writable<string>;
-  publishedTitle: Writable<string>;
-  publishedBody: Writable<string>;
+  publishedTitle: Writable<TrustedPublishedTitleUiContract>;
+  publishedBody: Writable<TrustedPublishedBodyUiContract>;
 }
 
 export interface TrustedPublishSurfaceOutput {
   [NAME]: string;
   [UI]: unknown;
-  publishedTitle: TrustedActionWrite<
-    string,
-    typeof publishTrustedSnapshot,
-    typeof PUBLISH_SNAPSHOT_ACTION,
-    typeof TRUSTED_PUBLISH_SURFACE
-  >;
-  publishedBody: TrustedActionWrite<
-    string,
-    typeof publishTrustedSnapshot,
-    typeof PUBLISH_SNAPSHOT_ACTION,
-    typeof TRUSTED_PUBLISH_SURFACE
-  >;
+  publishedTitle: TrustedPublishedTitleUiContract;
+  publishedBody: TrustedPublishedBodyUiContract;
   publishReviewed: Stream<void>;
 }
 

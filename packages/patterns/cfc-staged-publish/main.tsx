@@ -8,27 +8,26 @@ import {
   Writable,
 } from "commonfabric";
 import {
-  publishTrustedSnapshot,
-  reviewTrustedSnapshot,
-  saveTrustedDraftSnapshot,
-  TRUSTED_PUBLISH_SURFACE,
-  TRUSTED_REVIEW_SURFACE,
-  TRUSTED_SAVE_DRAFT_SURFACE,
-  TrustedActionWrite,
+  TrustedPublishedBodyUiContract,
+  TrustedPublishedTitleUiContract,
   TrustedPublishSurface,
+  TrustedReviewedBodyUiContract,
+  TrustedReviewedTitleUiContract,
   TrustedReviewSurface,
+  TrustedSavedDraftBodyUiContract,
+  TrustedSavedDraftTitleUiContract,
   TrustedSaveDraftSurface,
 } from "../cfc-trusted-surfaces/main.tsx";
 
 interface StagedPublishInput {
   draftTitle: Writable<Default<string, "">>;
   draftBody: Writable<Default<string, "">>;
-  savedTitle: Writable<Default<string, "">>;
-  savedBody: Writable<Default<string, "">>;
-  reviewedTitle: Writable<Default<string, "">>;
-  reviewedBody: Writable<Default<string, "">>;
-  publishedTitle: Writable<Default<string, "">>;
-  publishedBody: Writable<Default<string, "">>;
+  savedTitle: Writable<Default<TrustedSavedDraftTitleUiContract, "">>;
+  savedBody: Writable<Default<TrustedSavedDraftBodyUiContract, "">>;
+  reviewedTitle: Writable<Default<TrustedReviewedTitleUiContract, "">>;
+  reviewedBody: Writable<Default<TrustedReviewedBodyUiContract, "">>;
+  publishedTitle: Writable<Default<TrustedPublishedTitleUiContract, "">>;
+  publishedBody: Writable<Default<TrustedPublishedBodyUiContract, "">>;
 }
 
 interface StagedPublishOutput {
@@ -36,42 +35,12 @@ interface StagedPublishOutput {
   [UI]: unknown;
   draftTitle: string;
   draftBody: string;
-  savedTitle: TrustedActionWrite<
-    string,
-    typeof saveTrustedDraftSnapshot,
-    "TrustedSaveDraft",
-    typeof TRUSTED_SAVE_DRAFT_SURFACE
-  >;
-  savedBody: TrustedActionWrite<
-    string,
-    typeof saveTrustedDraftSnapshot,
-    "TrustedSaveDraft",
-    typeof TRUSTED_SAVE_DRAFT_SURFACE
-  >;
-  reviewedTitle: TrustedActionWrite<
-    string,
-    typeof reviewTrustedSnapshot,
-    "TrustedReviewSnapshot",
-    typeof TRUSTED_REVIEW_SURFACE
-  >;
-  reviewedBody: TrustedActionWrite<
-    string,
-    typeof reviewTrustedSnapshot,
-    "TrustedReviewSnapshot",
-    typeof TRUSTED_REVIEW_SURFACE
-  >;
-  publishedTitle: TrustedActionWrite<
-    string,
-    typeof publishTrustedSnapshot,
-    "TrustedPublishSnapshot",
-    typeof TRUSTED_PUBLISH_SURFACE
-  >;
-  publishedBody: TrustedActionWrite<
-    string,
-    typeof publishTrustedSnapshot,
-    "TrustedPublishSnapshot",
-    typeof TRUSTED_PUBLISH_SURFACE
-  >;
+  savedTitle: TrustedSavedDraftTitleUiContract;
+  savedBody: TrustedSavedDraftBodyUiContract;
+  reviewedTitle: TrustedReviewedTitleUiContract;
+  reviewedBody: TrustedReviewedBodyUiContract;
+  publishedTitle: TrustedPublishedTitleUiContract;
+  publishedBody: TrustedPublishedBodyUiContract;
   stage: "drafting" | "saved" | "reviewed" | "published";
   saveDraft: Stream<void>;
   reviewSaved: Stream<void>;

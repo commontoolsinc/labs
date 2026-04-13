@@ -184,7 +184,11 @@ const recordRelevantSchemaWritePolicyInput = (
     return;
   }
   tx.markCfcRelevant(`schema-ifc-write:${link.id}`);
-  recordSchemaWritePolicyInput(tx, link, resolvedSchema);
+  recordSchemaWritePolicyInput(
+    tx,
+    link,
+    schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+  );
 };
 
 /**

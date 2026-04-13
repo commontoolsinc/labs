@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import * as V2Storage from "../src/storage/v2.ts";
 import { raw } from "../src/module.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -16,6 +20,24 @@ import { CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION } from "../src/cfc/types.ts"
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
+
+class SharedV2SessionFactory implements V2Storage.SessionFactory {
+  constructor(private readonly server: MemoryV2Server.Server) {}
+
+  async create(space: MemorySpace) {
+    const client = await MemoryV2Client.connect({
+      transport: MemoryV2Client.loopback(this.server),
+    });
+    const session = await client.mount(space);
+    return { client, session };
+  }
+}
+
+class SharedV2StorageManager extends V2Storage.StorageManager {
+  constructor(options: V2Storage.Options, server: MemoryV2Server.Server) {
+    super(options, new SharedV2SessionFactory(server));
+  }
+}
 
 describe("CFC canonicalization helpers", () => {
   it("strips the value wrapper and sorts metadata entries canonically", () => {
@@ -1658,6 +1680,88 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }
     } finally {
       await storageManager.close();
+    }
+  });
+
+  it("syncs cfc schema documents into separate v2 runtime caches", async () => {
+    const server = new MemoryV2Server.Server();
+    const createStorageManager = () =>
+      new SharedV2StorageManager({
+        as: signer,
+        address: new URL("memory://"),
+        memoryVersion: "v2",
+      }, server);
+    const storageManager1 = createStorageManager();
+    const runtime1 = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storageManager1,
+      memoryVersion: "v2",
+    });
+    const cellSchema = {
+      type: "object",
+      properties: {
+        secret: {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+      },
+      required: ["secret"],
+    } as const satisfies JSONSchema;
+    try {
+      const firstTx = runtime1.edit();
+      firstTx.setCfcEnforcementMode("enforce-explicit");
+      const firstCell = runtime1.getCell(
+        signer.did(),
+        "cfc-schema-remote-sync",
+        cellSchema,
+        firstTx,
+      );
+      firstCell.set({ secret: "hello" });
+      firstTx.prepareCfc();
+      const firstResult = await firstTx.commit();
+      expect(firstResult.ok).toBeDefined();
+      await storageManager1.synced();
+    } finally {
+      await runtime1.dispose();
+      await storageManager1.close();
+    }
+
+    const storageManager2 = createStorageManager();
+    const runtime2 = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storageManager2,
+      memoryVersion: "v2",
+    });
+    try {
+      const secondSchema = {
+        type: "object",
+        properties: {
+          secret: {
+            type: "string",
+            ifc: { confidentiality: ["secret"] },
+          },
+          title: { type: "string", default: "" },
+        },
+        required: ["secret", "title"],
+      } as const satisfies JSONSchema;
+      const secondCell = runtime2.getCell(
+        signer.did(),
+        "cfc-schema-remote-sync",
+        secondSchema,
+      );
+      await secondCell.sync();
+
+      const secondTx = runtime2.edit();
+      secondTx.setCfcEnforcementMode("enforce-explicit");
+      secondCell.withTx(secondTx).set({ secret: "hello", title: "synced" });
+      secondTx.prepareCfc();
+      const secondResult = await secondTx.commit();
+      expect(secondResult.error).toBeUndefined();
+      expect(secondResult.ok).toBeDefined();
+    } finally {
+      await runtime2.dispose();
+      await storageManager2.close();
+      await server.close();
     }
   });
 

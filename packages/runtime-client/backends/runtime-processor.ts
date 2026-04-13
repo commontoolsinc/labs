@@ -456,19 +456,19 @@ export class RuntimeProcessor {
     return { value: converted };
   }
 
-  handleCellSet(request: CellSetRequest): void {
+  async handleCellSet(request: CellSetRequest): Promise<void> {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
     cell.withTx(tx).set(value);
-    tx.commit();
+    await tx.commit();
   }
 
-  handleCellSend(request: CellSendRequest): void {
+  async handleCellSend(request: CellSendRequest): Promise<void> {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
-    tx.commit();
+    await tx.commit();
   }
 
   handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {

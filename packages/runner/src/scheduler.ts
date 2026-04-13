@@ -112,6 +112,81 @@ function hasAnnotatedWrites(
   return "writes" in handler && Array.isArray(handler.writes);
 }
 
+function trustedEventWriteCandidatesFromTransaction(
+  tx: IExtendedStorageTransaction,
+  handler: EventHandler,
+  fallbackSpaces: Iterable<MemorySpace> = [],
+): NormalizedFullLink[] {
+  const candidates: NormalizedFullLink[] = [];
+  const seen = new Map<string, number>();
+  const detailSpaces = new Set<MemorySpace>(fallbackSpaces);
+
+  const addCandidate = (write: NormalizedFullLink | IMemorySpaceAddress) => {
+    const path = write.path[0] === "value" ? write.path.slice(1) : write.path;
+    const candidate: NormalizedFullLink = {
+      space: write.space,
+      id: write.id,
+      type: write.type ?? "application/json",
+      path: [...path],
+      ...("schema" in write && write.schema !== undefined
+        ? { schema: write.schema }
+        : {}),
+    };
+    const key = `${candidate.space}/${candidate.id}/${candidate.type}/${
+      candidate.path.join("/")
+    }`;
+    const existingIndex = seen.get(key);
+    if (existingIndex !== undefined) {
+      if (
+        candidates[existingIndex].schema === undefined &&
+        candidate.schema !== undefined
+      ) {
+        candidates[existingIndex] = {
+          ...candidates[existingIndex],
+          schema: candidate.schema,
+        };
+      }
+      return;
+    }
+    seen.set(key, candidates.length);
+    candidates.push(candidate);
+  };
+
+  if (hasAnnotatedWrites(handler)) {
+    for (const write of handler.writes) {
+      addCandidate(write);
+      detailSpaces.add(write.space);
+    }
+  }
+
+  const log = txToReactivityLog(tx);
+  for (const write of [...log.writes, ...(log.potentialWrites ?? [])]) {
+    addCandidate(write);
+    detailSpaces.add(write.space);
+  }
+
+  for (const input of tx.getCfcState().writePolicyInputs) {
+    if (input.kind === "schema") {
+      addCandidate({
+        space: input.target.space,
+        id: input.target.id as URI,
+        type: input.target.type as MediaType,
+        path: input.target.path,
+        ...(input.schema !== undefined ? { schema: input.schema } : {}),
+      });
+      detailSpaces.add(input.target.space);
+    }
+  }
+
+  for (const space of detailSpaces) {
+    for (const detail of getTransactionWriteDetails(tx, space)) {
+      addCandidate(detail.address);
+    }
+  }
+
+  return candidates;
+}
+
 /**
  * Callback to populate a transaction with an action's read dependencies.
  * Called by the scheduler to discover what cells the action will read.
@@ -290,6 +365,7 @@ function toActionRunTraceAddress(
 }
 
 type QueuedEvent = {
+  eventLink: NormalizedFullLink;
   action: Action;
   handler: EventHandler;
   event: any;
@@ -1327,6 +1403,7 @@ export class Scheduler {
         handlerFound = true;
         this.queueExecution();
         this.eventQueue.push({
+          eventLink,
           action: (tx: IExtendedStorageTransaction) => handler(tx, event),
           handler,
           event,
@@ -3608,6 +3685,7 @@ export class Scheduler {
                 );
                 this.eventQueue.unshift({
                   action,
+                  eventLink: queuedEvent.eventLink,
                   handler,
                   event: eventValue,
                   retriesLeft: retriesLeft - 1,
@@ -3641,9 +3719,15 @@ export class Scheduler {
             this.runningPromise = Promise.resolve(
               this.runtime.harness.invoke(() => action(tx)),
             ).then(() => {
-              if (hasAnnotatedWrites(handler)) {
-                recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
-              }
+              const trustedEventCandidates =
+                trustedEventWriteCandidatesFromTransaction(tx, handler, [
+                  queuedEvent.eventLink.space,
+                ]);
+              recordTrustedEventPolicyInputs(
+                tx,
+                trustedEventCandidates,
+                eventValue,
+              );
               const duration = (performance.now() - actionStartTime) / 1000;
               if (duration > 10) {
                 console.warn(`Slow action: ${duration.toFixed(3)}s`, action);

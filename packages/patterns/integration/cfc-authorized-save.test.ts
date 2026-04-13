@@ -1,4 +1,4 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -6,6 +6,12 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
+import {
+  clickTrustedActionAndWaitForText,
+  fillCfInput,
+  waitForRuntimeIdle,
+  waitForTextAbsent,
+} from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -58,44 +64,26 @@ describe("cfc authorized save integration test", () => {
       identity,
     });
 
-    const input = await page.waitForSelector("[data-cf-input]", {
-      strategy: "pierce",
-    });
-    await input.type("Saved from UI");
+    await fillCfInput(page, "#trusted-save-draft-input", "Saved from UI");
 
     const legacyButton = await page.waitForSelector("#legacy-save-button", {
       strategy: "pierce",
     });
     await legacyButton.click();
 
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitForRuntimeIdle(page);
+    await waitForTextAbsent(page, "#saved-title", "Saved from UI");
     const savedTitleBeforeTrustedClick = await page.waitForSelector(
       "#saved-title",
       { strategy: "pierce" },
     );
     assertEquals((await savedTitleBeforeTrustedClick.innerText())?.trim(), "");
 
-    const trustedButton = await page.waitForSelector(
-      '[data-ui-action="TrustedSaveTitle"]',
-      {
-        strategy: "pierce",
-      },
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedSaveTitle",
+      "#saved-title",
+      "Saved from UI",
     );
-    await trustedButton.click();
-
-    await waitForSavedTitle(page, "Saved from UI");
   });
 });
-
-async function waitForSavedTitle(page: Page, text: string) {
-  await waitFor(async () => {
-    try {
-      const savedTitle = await page.waitForSelector("#saved-title", {
-        strategy: "pierce",
-      });
-      return (await savedTitle.innerText())?.trim() === text;
-    } catch (_) {
-      return false;
-    }
-  });
-}

@@ -1,4 +1,4 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
   clickTrustedActionAndWaitForText,
+  fillCfInput,
   waitForText,
 } from "./cfc-browser-helpers.ts";
 
@@ -61,9 +62,16 @@ describe("cfc staged publish integration test", () => {
       identity,
     });
 
-    const inputs = await waitForCount(page, "[data-cf-input]", 2);
-    await inputs[0].type("Launch checklist");
-    await inputs[1].type("Ship the staged publish demo with trusted UI gates.");
+    await fillCfInput(
+      page,
+      "#trusted-save-draft-title-input",
+      "Launch checklist",
+    );
+    await fillCfInput(
+      page,
+      "#trusted-save-draft-body-input",
+      "Ship the staged publish demo with trusted UI gates.",
+    );
 
     await clickTrustedActionAndWaitForText(
       page,
@@ -95,11 +103,3 @@ describe("cfc staged publish integration test", () => {
     );
   });
 });
-
-async function waitForCount(page: Page, selector: string, count: number) {
-  await waitFor(async () => {
-    const nodes = await page.$$(selector, { strategy: "pierce" });
-    return nodes.length >= count;
-  });
-  return await page.$$(selector, { strategy: "pierce" });
-}

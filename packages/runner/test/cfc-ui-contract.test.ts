@@ -6,9 +6,11 @@ import { Runtime } from "../src/runtime.ts";
 import type { EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
+  recordTrustedEventPolicyInputs,
   trustedEventMatchesUiContract,
   uiContractFromSchema,
 } from "../src/cfc/ui-contract.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-ui-contract");
 const space = signer.did();
@@ -150,6 +152,32 @@ describe("CFC UI contract matching", () => {
       }, contract),
     ).toBe(false);
   });
+
+  it("resolves UiAction contracts through local $defs refs", () => {
+    const contract = uiContractFromSchema({
+      $ref: "#/$defs/TrustedAction",
+      $defs: {
+        TrustedAction: trustedPatternUiActionSchema,
+      },
+    });
+
+    expect(
+      trustedEventMatchesUiContract({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }, contract),
+    ).toBe(true);
+  });
 });
 
 describe("CFC trusted UI event enforcement", () => {
@@ -227,6 +255,307 @@ describe("CFC trusted UI event enforcement", () => {
     cancel();
   });
 
+  it("records trusted event policy inputs for nested contracts from ancestor schemas", () => {
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [{
+      kind: "schema",
+      target: {
+        space,
+        id: "of:cfc-ui-contract-nested-document",
+        type: "application/json",
+        path: [],
+      },
+      schema: {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedTitle: { $ref: "#/$defs/TrustedAction" },
+            },
+          },
+        },
+        $defs: {
+          TrustedAction: trustedPatternUiActionSchema,
+        },
+      },
+    }];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        id: "of:cfc-ui-contract-nested-document",
+        type: "application/json",
+        path: ["argument", "savedTitle"],
+      }],
+      {
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      },
+    );
+
+    expect(
+      writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.target.space === space &&
+        input.target.id === "of:cfc-ui-contract-nested-document" &&
+        input.target.type === "application/json" &&
+        input.target.path.join("/") === "argument/savedTitle"
+      ),
+    ).toBe(true);
+  });
+
+  it("records trusted event policy inputs from linked handler event envelopes", () => {
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [{
+      kind: "schema",
+      target: {
+        space,
+        id: "of:cfc-ui-contract-linked-event-document",
+        type: "application/json",
+        path: [],
+      },
+      schema: {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedTitle: { $ref: "#/$defs/TrustedAction" },
+            },
+          },
+        },
+        $defs: {
+          TrustedAction: trustedPatternUiActionSchema,
+        },
+      },
+    }];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+    const rawTrustedEvent = {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    };
+    const eventEnvelopeLink = {
+      "/": {
+        [LINK_V1_TAG]: {
+          id: `data:application/json,${
+            encodeURIComponent(JSON.stringify({
+              value: { $event: rawTrustedEvent },
+            }))
+          }`,
+          path: ["$event"],
+          space,
+        },
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        id: "of:cfc-ui-contract-linked-event-document",
+        type: "application/json",
+        path: ["argument", "savedTitle"],
+      }],
+      eventEnvelopeLink,
+    );
+
+    expect(
+      writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.eventId ===
+          "trusted-event:click:of:cfc-ui-contract-linked-event-document:argument/savedTitle" &&
+        input.target.id === "of:cfc-ui-contract-linked-event-document" &&
+        input.target.path.join("/") === "argument/savedTitle"
+      ),
+    ).toBe(true);
+  });
+
+  it("uses handler event context aliases as UI contract schema hints", () => {
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+    const rawTrustedEvent = {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    };
+    const eventEnvelopeLink = {
+      "/": {
+        [LINK_V1_TAG]: {
+          id: `data:application/json,${
+            encodeURIComponent(JSON.stringify({
+              value: {
+                $ctx: {
+                  savedTitle: {
+                    $alias: {
+                      cell: { "/": "cfc-ui-contract-context-document" },
+                      path: ["argument", "savedTitle"],
+                      schema: {
+                        $ref: "#/$defs/TrustedAction",
+                        $defs: {
+                          TrustedAction: trustedPatternUiActionSchema,
+                        },
+                      },
+                    },
+                  },
+                },
+                $event: rawTrustedEvent,
+              },
+            }))
+          }`,
+          path: ["$event"],
+          space,
+        },
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        id: "of:cfc-ui-contract-context-document",
+        type: "application/json",
+        path: ["argument", "savedTitle"],
+      }],
+      eventEnvelopeLink,
+    );
+
+    expect(
+      writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.eventId ===
+          "trusted-event:click:of:cfc-ui-contract-context-document:argument/savedTitle" &&
+        input.target.id === "of:cfc-ui-contract-context-document" &&
+        input.target.path.join("/") === "argument/savedTitle"
+      ),
+    ).toBe(true);
+  });
+
+  it("uses a single leaf $defs uiContract hint for exact write schemas", () => {
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [{
+      kind: "schema",
+      target: {
+        space,
+        id: "of:cfc-ui-contract-leaf-defs-document",
+        type: "application/json",
+        path: ["argument", "savedTitle"],
+      },
+      schema: {
+        type: "unknown",
+        $defs: {
+          TrustedAction: trustedPatternUiActionSchema,
+          UnrelatedRenderNode: { type: "object" },
+        },
+      },
+    }];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        id: "of:cfc-ui-contract-leaf-defs-document",
+        type: "application/json",
+        path: ["argument", "savedTitle"],
+      }],
+      {
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      },
+    );
+
+    expect(
+      writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.target.id === "of:cfc-ui-contract-leaf-defs-document" &&
+        input.target.path.join("/") === "argument/savedTitle"
+      ),
+    ).toBe(true);
+  });
+
   it("commits trusted event writes when the handler write annotation is untyped", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
@@ -264,6 +593,70 @@ describe("CFC trusted UI event enforcement", () => {
       {
         reads: [],
         writes: [untypedWrite],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    });
+    await runtime.idle();
+
+    expect(output.get()).toBe("accepted");
+    cancel();
+  });
+
+  it("commits trusted event writes discovered from the handler transaction", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-dynamic-write",
+      { asStream: true },
+    );
+    const output = runtime.getCell(
+      space,
+      "cfc-ui-contract-output-dynamic-write",
+      {
+        type: "string",
+        ifc: {
+          ...trustedPatternUiActionSchema.ifc,
+        },
+      },
+    );
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        output.withTx(tx).set("accepted");
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [],
         module: { type: "javascript" as const },
         pattern: {} as never,
       },
@@ -363,6 +756,89 @@ describe("CFC trusted UI event enforcement", () => {
     await runtime.idle();
 
     expect(output.get()).toBeUndefined();
+    cancel();
+  });
+
+  it("recovers after a mismatched trusted event is rejected", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-recover",
+      { asStream: true },
+    );
+    const output = runtime.getCell(
+      space,
+      "cfc-ui-contract-output-recover",
+      {
+        type: "string",
+        ifc: {
+          ...trustedPatternUiActionSchema.ifc,
+        },
+      },
+    );
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction, event: { value: string }) => {
+        output.withTx(tx).set(event.value);
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [output.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+      type: "click",
+      value: "rejected",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "UntrustedLookalikeSurface",
+          eventIntegrity: ["UntrustedLookalikeSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    });
+    await runtime.idle();
+    expect(output.get()).toBeUndefined();
+
+    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+      type: "click",
+      value: "accepted",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    });
+    await runtime.idle();
+
+    expect(output.get()).toBe("accepted");
     cancel();
   });
 });
