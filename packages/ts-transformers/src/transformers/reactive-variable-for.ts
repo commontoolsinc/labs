@@ -732,6 +732,7 @@ function shouldRetargetReactiveReference(
 ): boolean {
   const target = unwrapExpression(expression);
   return ts.isIdentifier(target) &&
+    !isPatternFactoryHelperExpression(target, context.checker) &&
     isReactiveValueExpression(target, context.checker);
 }
 

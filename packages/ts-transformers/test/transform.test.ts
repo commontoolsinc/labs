@@ -303,6 +303,37 @@ export default pattern(() => {
     assertStringIncludes(main, '.for(["child", "value"], true)');
   });
 
+  it("does not re-root pattern factory identifiers in tool descriptors", async () => {
+    const source = `
+import { BuiltInLLMTool, pattern, patternTool } from "commonfabric";
+
+export const searchWeb = pattern<{ query: string }, { results: string[] }>(
+  ({ query }) => ({ results: [query] }),
+);
+
+export default pattern(() => {
+  const tools: Record<string, BuiltInLLMTool> = {
+    searchWeb: {
+      pattern: searchWeb,
+    },
+    wrappedSearch: patternTool(searchWeb),
+  };
+  return { tools };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, "pattern: searchWeb");
+    assertStringIncludes(main, "wrappedSearch: patternTool(searchWeb)");
+    assert(!main.includes("searchWeb.for("));
+  });
+
   it("does not add shared property causes inside dynamic array callbacks", async () => {
     const source = `
 import { lift, Writable } from "commonfabric";

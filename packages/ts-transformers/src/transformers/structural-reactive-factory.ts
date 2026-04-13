@@ -57,6 +57,7 @@ export function isPatternFactoryHelperExpression(
     (target, nextSeenSymbols) =>
       ts.isCallExpression(target) &&
       (
+        isPatternBuilderCall(target, checker) ||
         isPatternFactoryCalleeExpression(target.expression, checker) ||
         isPatternFactoryHelperExpression(
           target.expression,
@@ -66,6 +67,14 @@ export function isPatternFactoryHelperExpression(
       ),
     seenSymbols,
   );
+}
+
+function isPatternBuilderCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const callKind = detectCallKind(call, checker);
+  return callKind?.kind === "builder" && callKind.builderName === "pattern";
 }
 
 export function isStructuralReactiveFactoryExpression(
