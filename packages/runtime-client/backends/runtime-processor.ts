@@ -456,19 +456,23 @@ export class RuntimeProcessor {
     return { value: converted };
   }
 
-  async handleCellSet(request: CellSetRequest): Promise<void> {
+  handleCellSet(request: CellSetRequest): void {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
     cell.withTx(tx).set(value);
-    await tx.commit();
+    // Local visibility is established by commit(); the promise tracks remote
+    // confirmation/rollback and must not block cell IPC.
+    tx.commit();
   }
 
-  async handleCellSend(request: CellSendRequest): Promise<void> {
+  handleCellSend(request: CellSendRequest): void {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
-    await tx.commit();
+    // Local visibility is established by commit(); the promise tracks remote
+    // confirmation/rollback and must not block cell IPC.
+    tx.commit();
   }
 
   handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {
