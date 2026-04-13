@@ -21,6 +21,13 @@ try {
 }
 
 /**
+ * Throws an error indicating that this module is not usable.
+ */
+function cantUse(): never {
+  throw new Error("Cannot use `sha256-wasm` in this environment.");
+}
+
+/**
  * WASM-specific incremental hasher.
  */
 class WasmHasher implements IncrementalHasher {
@@ -34,7 +41,7 @@ class WasmHasher implements IncrementalHasher {
   digest(): Uint8Array;
   digest(encoding: "base64url"): string;
   digest(encoding?: string): Uint8Array | string {
-    const hasher = theHasher!;
+    const hasher = theHasher ?? cantUse();
     hasher.init();
 
     for (const chunk of this.#chunks) {
@@ -68,9 +75,13 @@ export function canUseWasm() {
  * Performs a hash on a single array.
  */
 export function sha256Wasm(payload: Uint8Array): Uint8Array {
-  theHasher!.init();
-  theHasher!.update(payload);
-  return theHasher!.digest("binary");
+  if (theHasher === null) {
+    cantUse();
+  }
+
+  theHasher.init();
+  theHasher.update(payload);
+  return theHasher.digest("binary");
 }
 
 /**
