@@ -1,6 +1,13 @@
 /**
  * Test fixtures for hashing.
+ *
+ * **Note:** To add tests and have the hashes calculated for you, add entries
+ * to `FIXTURES` with the hash as `xx` and then run the unit test. The console
+ * output will give you the values.
  */
+
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import { sha256 } from "@commonfabric/content-hash";
 
 interface NumbersHashTuple {
   numbers: readonly number[];
@@ -17,6 +24,19 @@ const BIG_TEXT_FILE = Deno.readTextFileSync(
 
 function repeatByte(count: number, value: number): number[] {
   return new Array(count).fill(value);
+}
+
+function rainbowBytes(count: number, seed: number): number[] {
+  const result = new Array(count);
+  let value = seed;
+
+  for (let i = 0; i < count; i++) {
+    result[i] = value & 0xff;
+    value = (value * 543) ^ (value << 5) ^ (value >> 2);
+    value = Math.floor(Math.abs(value) * 1.2345) & 0xffffff;
+  }
+
+  return result;
 }
 
 const NUMBERS_FIXTURES: readonly NumbersHashTuple[] = [
@@ -97,18 +117,71 @@ const NUMBERS_FIXTURES: readonly NumbersHashTuple[] = [
     sha256: "n6_r803mJ88PloqDmCorxjQ0a2eTfD9TWfMxp0wvS8g",
   },
   {
+    numbers: rainbowBytes(5, 5),
+    sha256: "4B_erEROmBo1GFfHyuqloBR4BKBwUFdyq33q_uEF-a8",
+  },
+  {
+    numbers: rainbowBytes(6, 50),
+    sha256: "Xr5j1g0TkW_GOHfWUxKc9k9bYq2Wmz3L_7O7Ur1uo3I",
+  },
+  {
+    numbers: rainbowBytes(7, 500),
+    sha256: "9oBnZb_jeFcii9RKTYFG3gTRhCSX8aPA-8qyF7rceQg",
+  },
+  {
+    numbers: rainbowBytes(8, 5000),
+    sha256: "iLYHtjky0lafAjqBt_vFsaSdF2jE52zIVjKN-_EAwKI",
+  },
+  {
+    numbers: rainbowBytes(9, 50000),
+    sha256: "wai-7t_ww2G03mSxSy9m8eK0e18UBj5eU5NAMk6JQrc",
+  },
+  {
+    numbers: rainbowBytes(100, 1),
+    sha256: "E6BbH-dzBowLZ0WWjdeKcfbx_2DngSYOccwgfKo6fHE",
+  },
+  {
+    numbers: rainbowBytes(235, 7),
+    sha256: "5w7_tbfxM-lGLQEgrLvBZ22cAjykQKhIlzGzciRAbeU",
+  },
+  {
+    numbers: rainbowBytes(99999, 765),
+    sha256: "AXSZe6EIEni2GvoEsj9mTur4SN2chadIcdrqVf8yqEo",
+  },
+  {
+    numbers: rainbowBytes(501921, 998877),
+    sha256: "vA6wQSFCPVfwTczyM2Xl6nSXI6YD2vv6LBdcuGmrWn0",
+  },
+  {
+    numbers: rainbowBytes(12345678, 98765),
+    sha256: "EbqQZVDfzhasH7qBmxLA1A57mDKz3jyGld_HmNRItfk",
+  },
+  {
     numbers: [...BIG_TEXT_FILE].map((c) => c.charCodeAt(0)),
     sha256: "YXDqseQm9n0pXjTFlvopfttK2yLpUQQDs1llL7rst1A",
   },
 ] as const;
 
+/**
+ * Were there any hashes to fill in?
+ */
+let anyMissingHashes = false;
+
 export const FIXTURES: readonly ContentHashTuple[] = Object.freeze(
   NUMBERS_FIXTURES.map(
     (one: NumbersHashTuple): ContentHashTuple => {
-      return {
-        bytes: new Uint8Array(one.numbers),
-        ...one,
-      };
+      const bytes = new Uint8Array(one.numbers);
+      if (one.sha256 === "xx") {
+        // Produce a missing hash.
+        const hashStr = toUnpaddedBase64url(sha256(bytes));
+        console.log("    sha256: %o,", hashStr);
+        anyMissingHashes = true;
+      }
+      return { bytes, ...one };
     },
   ),
 );
+
+if (anyMissingHashes) {
+  throw new Error("See console output for missing hashes.");
+}
