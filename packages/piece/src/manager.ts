@@ -866,7 +866,7 @@ export class PieceManager {
     );
     const knownPatternId = (() => {
       try {
-        return this.runtime.patternManager.getPatternMeta(pattern).id;
+        return this.runtime.patternManager.getPatternMeta(pattern).id as URI;
       } catch {
         return undefined;
       }
@@ -948,7 +948,7 @@ export class PieceManager {
     );
   }
 
-  async syncPatternById(patternId: string) {
+  async syncPatternById(patternId: URI) {
     if (!patternId) throw new Error("patternId is required");
     const pattern = await this.runtime.patternManager.loadPattern(
       patternId,

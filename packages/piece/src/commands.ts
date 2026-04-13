@@ -1,4 +1,9 @@
-import { createJsonSchema, type JSONSchema, NAME } from "@commonfabric/runner";
+import {
+  createJsonSchema,
+  type JSONSchema,
+  NAME,
+  URI,
+} from "@commonfabric/runner";
 import { DEFAULT_MODEL_NAME, fixPatternPrompt } from "@commonfabric/llm";
 import { Cell } from "@commonfabric/runner";
 
@@ -17,7 +22,8 @@ export const castSpellAsPiece = async (
 ) => {
   if (patternKey && argument) {
     console.log("Syncing...");
-    const patternId = patternKey.replace("spell-", "");
+    const patternHash = patternKey.replace("spell-", "");
+    const patternId: URI = `of:${patternHash}`;
     const pattern = await pieceManager.syncPatternById(patternId);
     if (!pattern) return;
 

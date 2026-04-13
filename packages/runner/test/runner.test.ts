@@ -1253,7 +1253,7 @@ describe("setup/start", () => {
 
     // Verify a pattern link is present after setup without passing the pattern
     const source = resultCell.getSourceCell()!;
-    const patternValue = source.key("pattern").get();
+    const patternValue = source.key("pattern").getRaw();
     expect(patternValue).toBeDefined();
 
     // Also verify the argument was updated in the process cell

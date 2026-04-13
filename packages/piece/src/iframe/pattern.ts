@@ -1,6 +1,7 @@
 import {
   Cell,
   getPatternIdFromPiece,
+  URI,
   type JSONSchema,
   type Runtime,
 } from "@commonfabric/runner";
@@ -69,7 +70,7 @@ export const getIframePattern = (
   piece: Cell<unknown>,
   runtime: Runtime,
 ): {
-  patternId?: string;
+  patternId?: URI;
   // `src` is either a single file string source, or the entry
   // file source code in a pattern.
   src?: string;

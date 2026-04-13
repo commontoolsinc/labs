@@ -107,6 +107,7 @@ import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import { WorkerReconciler } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
+import { URI } from "../../runner/src/sigil-types.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 
@@ -769,7 +770,7 @@ export class RuntimeProcessor {
         seen.add(node.patternId);
         try {
           const meta = this.runtime.patternManager.getPatternMeta({
-            patternId: node.patternId,
+            patternId: node.patternId as URI,
           });
           if (meta?.program && typeof meta.program === "object") {
             const program = meta.program as {

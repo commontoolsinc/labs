@@ -138,7 +138,7 @@ describe("PatternManager.loadPattern error handling", () => {
   });
 
   it("throws descriptive error for missing pattern, not TypeError", async () => {
-    const bogusId = "nonexistent-pattern-id";
+    const bogusId = "of:nonexistent-pattern-id";
     try {
       await runtime.patternManager.loadPattern(bogusId, space);
       throw new Error("should have thrown");

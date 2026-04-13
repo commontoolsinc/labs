@@ -422,7 +422,7 @@ describe("effect/computation tracking", () => {
     } = (actionTx) => {
       output.withTx(actionTx).set(1);
       childProcess.withTx(actionTx).setRaw({
-        pattern: getPatternLink("child-pattern"),
+        pattern: getPatternLink("of:child-pattern"),
       });
     };
 

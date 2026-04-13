@@ -14,7 +14,6 @@ import {
   NAME,
   type NodeFactory,
   type Pattern,
-  TYPE,
   UI,
   unsafe_materializeFactory,
   unsafe_originalPattern,
@@ -247,11 +246,11 @@ export class Runner {
 
   private resolveSetupPattern(
     patternOrModule: Pattern | Module | undefined,
-    previousPatternId: string | undefined,
+    previousPatternId: URI | undefined,
   ):
     | {
       pattern: Pattern;
-      patternId: string;
+      patternId: URI;
       resolvedPatternOrModule: Pattern | Module;
     }
     | undefined {
@@ -356,7 +355,7 @@ export class Runner {
   private applySetupState<T, R>(
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
-    patternId: string,
+    patternId: URI,
     previousPatternId: string | undefined,
     argument: T,
     resultCell: Cell<R>,
@@ -432,9 +431,7 @@ export class Runner {
       }`,
     ]);
 
-    const previousPatternId = processCell.withTx(tx).key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    });
+    const previousPatternId = getPatternId(processCell.withTx(tx));
     const resolvedPattern = this.resolveSetupPattern(
       patternOrModule,
       previousPatternId,
@@ -565,7 +562,7 @@ export class Runner {
     const key = this.getDocKey(resultCell);
     this.locallyPreparedResults.delete(key);
 
-    // Create cancel group early - before the $TYPE sink
+    // Create cancel group early, before wiring pattern/node sinks.
     const [cancel, addCancel] = useCancelGroup();
     this.cancels.set(key, cancel);
     this.allCancels.add(cancel);
@@ -578,7 +575,7 @@ export class Runner {
     };
 
     // Track pattern ID and node cancellation
-    let currentPatternId: string | undefined;
+    let currentPatternId: URI | undefined;
     let cancelNodes: Cancel | undefined;
 
     // Helper to instantiate nodes for a pattern
@@ -614,13 +611,10 @@ export class Runner {
 
     // Helper to set up the pattern watcher
     const setupPatternWatcher = () => {
-      const patternCell = processCell.key("pattern").asSchema({
-        type: "object",
-      });
+      const patternCell = processCell.key("pattern");
       addCancel(
-        patternCell.sink((newPatternLinkObj) => {
-          if (!newPatternLinkObj) return;
-          const newPatternLink = parseLink(newPatternLinkObj, processCell);
+        patternCell.sink((_newPatternValue) => {
+          const newPatternLink = parseLink(patternCell.getRaw(), processCell);
           const newPatternId = newPatternLink?.id;
           if (newPatternId === currentPatternId) return; // No change
           if (!newPatternId) return;
@@ -670,15 +664,12 @@ export class Runner {
       );
     };
 
-    // Get initial pattern ID
     const processCellForRead = tx ? processCell.withTx(tx) : processCell;
-    const initialPatternId = processCellForRead.key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    }) as string | undefined;
+    const initialPatternId = getPatternId(processCellForRead);
 
     if (!initialPatternId) {
       cleanup();
-      throw new Error("Cannot start: no pattern ID ($TYPE)");
+      throw new Error("Cannot start: no pattern ID (pattern)");
     }
 
     // Determine initial pattern
@@ -848,7 +839,7 @@ export class Runner {
     options: { doNotUpdateOnPatternChange?: boolean } = {},
   ): void {
     const key = this.getDocKey(resultCell);
-    if (this.cancels.has(key)) return; // Already started
+    if (this.cancels.has(key)) return;
 
     const processCell = resultCell.withTx(tx).getSourceCell();
     if (!processCell) {
@@ -1053,10 +1044,10 @@ export class Runner {
     const processCellSchema: any = {
       type: "object",
       properties: {
-        [TYPE]: { type: "string" },
+        pattern: { type: "object", asCell: ["readonly"] },
         argument: pattern.argumentSchema ?? true,
       },
-      required: [TYPE],
+      required: ["pattern"],
     };
 
     if (
@@ -2361,6 +2352,5 @@ function getPatternId(processCell: Cell<any>): URI | undefined {
   }) ?? processCell.key("spell").getRaw({
     meta: ignoreReadForScheduling,
   });
-  const patternLink = parseLink(patternLinkRaw, processCell);
-  return patternLink?.id;
+  return parseLink(patternLinkRaw, processCell)?.id;
 }

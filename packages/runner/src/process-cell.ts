@@ -1,22 +1,20 @@
 import type { Cell } from "./cell.ts";
 import type { Schema } from "./builder/types.ts";
 import { processLinkSchema } from "./schemas.ts";
-
-function getPatternCellFromSourceCell(
-  sourceCell: Cell<Schema<typeof processLinkSchema>>,
-) {
-  return sourceCell.key("pattern").get() ?? sourceCell.key("spell").get();
-}
+import { parseLink } from "./link-utils.ts";
+import { URI } from "./sigil-types.ts";
 
 export function getPatternIdFromSourceCell(
   sourceCell: Cell<Schema<typeof processLinkSchema>>,
-): string | undefined {
-  return getPatternCellFromSourceCell(sourceCell)?.sourceURI;
+): URI | undefined {
+  const patternValue = sourceCell.key("pattern").getRaw() ??
+    sourceCell.key("spell").getRaw();
+  return parseLink(patternValue, sourceCell)?.id;
 }
 
 export function getPatternIdFromPiece(
   piece: Cell<unknown>,
-): string | undefined {
+): URI | undefined {
   const sourceCell = piece.getSourceCell(processLinkSchema);
   return sourceCell ? getPatternIdFromSourceCell(sourceCell) : undefined;
 }
