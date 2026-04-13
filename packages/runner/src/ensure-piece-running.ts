@@ -71,7 +71,8 @@ export async function ensurePieceRunning(
         return false;
       }
 
-      const patternLinkObj = (processData as Record<string, unknown>).pattern;
+      const patternLinkObj = (processData as Record<string, unknown>).pattern ??
+        (processData as Record<string, unknown>).spell;
       const patternId = parseLink(patternLinkObj, currentCell)?.id;
       const resultRef = (processData as Record<string, unknown>).resultRef;
 
