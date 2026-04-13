@@ -28,9 +28,7 @@ function cantUse(): never {
  * Deno-specific incremental hasher.
  */
 class DenoHasher implements IncrementalHasher {
-  #hasher = (crypto === null)
-    ? cantUse()
-    : crypto.createHash("sha256");
+  #hasher = (crypto === null) ? cantUse() : crypto.createHash("sha256");
 
   update(data: Uint8Array) {
     this.#hasher.update(data);

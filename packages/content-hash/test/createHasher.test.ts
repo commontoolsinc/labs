@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
 import {
   createHasher,
-  type IncrementalHasher
+  type IncrementalHasher,
 } from "@commonfabric/content-hash";
 import { createHasherDeno } from "../src/sha256-deno.ts";
 import { createHasherNoble } from "../src/sha256-noble.ts";
