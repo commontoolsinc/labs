@@ -88,7 +88,7 @@ export const getIframePattern = (
         ?.contents)
     : undefined;
   if (!src) {
-    return { patternId, src: "", iframe: undefined };
+    return { patternId };
   }
   try {
     return { patternId, src, iframe: parseIframePattern(src) };
