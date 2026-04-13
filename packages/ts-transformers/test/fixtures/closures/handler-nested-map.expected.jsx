@@ -59,7 +59,7 @@ export default pattern((state) => {
             }
         })}>
         Compute
-      </button>),
+      </button>)
     };
 }, {
     type: "object",

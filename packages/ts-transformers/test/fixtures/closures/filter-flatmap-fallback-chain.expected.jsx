@@ -79,7 +79,7 @@ export default pattern((__cf_pattern_input) => {
                 }
             } as const satisfies __cfHelpers.JSONSchema, { item: {
                     tags: item.key("tags")
-                } }, ({ item }) => item.tags ?? []);
+                } }, ({ item }) => item.tags ?? []).for("__patternResult", true);
         }, {
             type: "object",
             properties: {
@@ -142,7 +142,7 @@ export default pattern((__cf_pattern_input) => {
                 }
             }
         } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

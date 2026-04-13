@@ -82,7 +82,7 @@ export default pattern((__cf_pattern_input) => {
     const state = __cf_pattern_input.key("state");
     return {
         state,
-        increment: increment({ state }).for("increment", true),
+        increment: increment({ state }).for(["__patternResult", "increment"], true)
     };
 }, {
     type: "object",

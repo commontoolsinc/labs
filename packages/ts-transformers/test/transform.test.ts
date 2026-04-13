@@ -69,7 +69,7 @@ export default pattern<{ count: number }, { doubled: number }>((state) => ({
     const main = output["/main.tsx"]!;
 
     assertStringIncludes(main, "doubled: __cfHelpers.derive(");
-    assertStringIncludes(main, '.for("doubled", true)');
+    assertStringIncludes(main, '.for(["__patternResult", "doubled"], true)');
     assertNotMatch(main, /state\.key\("count"\)\.for/);
   });
 

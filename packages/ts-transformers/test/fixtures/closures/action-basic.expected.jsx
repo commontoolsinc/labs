@@ -31,7 +31,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => count.set(count.get() + 1))({
             count: count
-        }).for("inc", true),
+        }).for(["__patternResult", "inc"], true)
     };
 }, {
     type: "object",

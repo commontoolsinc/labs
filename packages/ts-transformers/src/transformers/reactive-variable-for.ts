@@ -4,11 +4,17 @@ import {
   classifyArrayMethodCallSite,
   detectCallKind,
   detectDirectBuilderCall,
+  getPatternBuilderCallbackArgument,
   getTypeAtLocationWithFallback,
   isCellLikeType,
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+
+type CausePathElement = string | number;
+type CausePath = readonly CausePathElement[];
+
+const PATTERN_RESULT_CAUSE = "__patternResult";
 
 export class ReactiveVariableForTransformer extends HelpersOnlyTransformer {
   override transform(context: TransformationContext): ts.SourceFile {
@@ -21,26 +27,42 @@ function createReactiveVariableForVisitor(
   context: TransformationContext,
 ): ts.Visitor {
   const visit: ts.Visitor = (node: ts.Node): ts.Node => {
-    if (ts.isPropertyAssignment(node)) {
-      const visited = ts.visitEachChild(
+    if (ts.isCallExpression(node)) {
+      const patternCallback = getPatternBuilderCallbackArgument(
         node,
-        visit,
-        context.tsContext,
-      ) as ts.PropertyAssignment;
+        context.checker,
+      );
+      if (patternCallback) {
+        return visitPatternCall(node, patternCallback, context, visit);
+      }
+    }
 
-      const propertyName = getStablePropertyName(visited.name);
+    if (ts.isPropertyAssignment(node)) {
+      const propertyName = getStablePropertyName(node.name);
       if (
         !propertyName ||
-        isInternalSyntheticName(propertyName) ||
-        !shouldAddPropertyFor(visited.initializer, context)
+        isInternalSyntheticName(propertyName)
       ) {
+        const visited = ts.visitEachChild(
+          node,
+          visit,
+          context.tsContext,
+        ) as ts.PropertyAssignment;
         return visited;
       }
 
+      const visitedInitializer = visitExpressionWithCausePath(
+        node.initializer,
+        [propertyName],
+        context,
+        visit,
+        { includeRoot: true },
+      );
+
       return context.factory.updatePropertyAssignment(
-        visited,
-        visited.name,
-        createForCall(visited.initializer, propertyName, context),
+        node,
+        node.name,
+        visitedInitializer,
       );
     }
 
@@ -48,24 +70,43 @@ function createReactiveVariableForVisitor(
       return ts.visitEachChild(node, visit, context.tsContext);
     }
 
-    const visited = ts.visitEachChild(
-      node,
-      visit,
-      context.tsContext,
-    ) as ts.VariableDeclarationList;
-
-    if ((visited.flags & ts.NodeFlags.Const) === 0) {
-      return visited;
+    if ((node.flags & ts.NodeFlags.Const) === 0) {
+      return ts.visitEachChild(node, visit, context.tsContext);
     }
 
     let changed = false;
-    const declarations = visited.declarations.map((declaration) => {
+    const declarations = node.declarations.map((declaration) => {
       if (
         !ts.isIdentifier(declaration.name) ||
         isInternalSyntheticName(declaration.name.text) ||
-        !declaration.initializer ||
-        !shouldAddVariableFor(declaration.initializer, context)
+        !declaration.initializer
       ) {
+        const visited = ts.visitEachChild(
+          declaration,
+          visit,
+          context.tsContext,
+        ) as ts.VariableDeclaration;
+        changed ||= visited !== declaration;
+        return visited;
+      }
+
+      let initializer = visitExpressionWithCausePath(
+        declaration.initializer,
+        [declaration.name.text],
+        context,
+        visit,
+        { includeRoot: false },
+      );
+
+      if (shouldAddVariableFor(initializer, context)) {
+        initializer = createForCall(
+          initializer,
+          declaration.name.text,
+          context,
+        );
+      }
+
+      if (initializer === declaration.initializer) {
         return declaration;
       }
 
@@ -75,23 +116,370 @@ function createReactiveVariableForVisitor(
         declaration.name,
         declaration.exclamationToken,
         declaration.type,
-        createForCall(
-          declaration.initializer,
-          declaration.name.text,
-          context,
-        ),
+        initializer,
       );
     });
 
     return changed
       ? context.factory.updateVariableDeclarationList(
-        visited,
+        node,
         declarations,
       )
-      : visited;
+      : node;
   };
 
   return visit;
+}
+
+function visitPatternCall(
+  node: ts.CallExpression,
+  patternCallback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  visit: ts.Visitor,
+): ts.CallExpression {
+  let changed = false;
+  const callTarget = ts.visitNode(node.expression, visit) as ts.Expression;
+  changed ||= callTarget !== node.expression;
+
+  const args = node.arguments.map((argument) => {
+    const visited = visitPatternCallbackArgument(
+      argument,
+      patternCallback,
+      context,
+      visit,
+    );
+    changed ||= visited !== argument;
+    return visited;
+  });
+
+  return changed
+    ? context.factory.updateCallExpression(
+      node,
+      callTarget,
+      node.typeArguments,
+      args,
+    )
+    : node;
+}
+
+function visitPatternCallbackArgument(
+  argument: ts.Expression,
+  patternCallback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  visit: ts.Visitor,
+): ts.Expression {
+  if (argument === patternCallback) {
+    return visitPatternCallbackFunction(patternCallback, context, visit);
+  }
+
+  return ts.visitEachChild(
+    argument,
+    (child) =>
+      child === patternCallback
+        ? visitPatternCallbackFunction(patternCallback, context, visit)
+        : visit(child),
+    context.tsContext,
+  ) as ts.Expression;
+}
+
+function visitPatternCallbackFunction(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  visit: ts.Visitor,
+): ts.ArrowFunction | ts.FunctionExpression {
+  if (ts.isArrowFunction(callback) && !ts.isBlock(callback.body)) {
+    const body = visitExpressionWithCausePath(
+      callback.body,
+      [PATTERN_RESULT_CAUSE],
+      context,
+      visit,
+      { includeRoot: true },
+    );
+    return context.factory.updateArrowFunction(
+      callback,
+      callback.modifiers,
+      callback.typeParameters,
+      callback.parameters,
+      callback.type,
+      callback.equalsGreaterThanToken,
+      body,
+    );
+  }
+
+  const body = ts.visitNode(
+    callback.body,
+    (node) => visitPatternCallbackBodyNode(node, context, visit),
+    ts.isBlock,
+  );
+  if (!body || body === callback.body) {
+    return callback;
+  }
+
+  return ts.isArrowFunction(callback)
+    ? context.factory.updateArrowFunction(
+      callback,
+      callback.modifiers,
+      callback.typeParameters,
+      callback.parameters,
+      callback.type,
+      callback.equalsGreaterThanToken,
+      body,
+    )
+    : context.factory.updateFunctionExpression(
+      callback,
+      callback.modifiers,
+      callback.asteriskToken,
+      callback.name,
+      callback.typeParameters,
+      callback.parameters,
+      callback.type,
+      body,
+    );
+}
+
+function visitPatternCallbackBodyNode(
+  node: ts.Node,
+  context: TransformationContext,
+  visit: ts.Visitor,
+): ts.Node {
+  if (
+    node !== undefined &&
+    (
+      ts.isArrowFunction(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isFunctionDeclaration(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node) ||
+      ts.isConstructorDeclaration(node)
+    )
+  ) {
+    return ts.visitEachChild(node, visit, context.tsContext);
+  }
+
+  if (ts.isReturnStatement(node) && node.expression) {
+    return context.factory.updateReturnStatement(
+      node,
+      visitExpressionWithCausePath(
+        node.expression,
+        [PATTERN_RESULT_CAUSE],
+        context,
+        visit,
+        { includeRoot: true },
+      ),
+    );
+  }
+
+  if (ts.isExpression(node) || ts.isVariableDeclarationList(node)) {
+    return visit(node) as ts.Node;
+  }
+
+  return ts.visitEachChild(
+    node,
+    (child) => visitPatternCallbackBodyNode(child, context, visit),
+    context.tsContext,
+  );
+}
+
+function visitExpressionWithCausePath(
+  expression: ts.Expression,
+  causePath: CausePath,
+  context: TransformationContext,
+  visit: ts.Visitor,
+  options: {
+    includeRoot: boolean;
+  },
+): ts.Expression {
+  const addRootFor = options.includeRoot &&
+    shouldAddPropertyFor(expression, context);
+  if (
+    ts.isArrowFunction(expression) ||
+    ts.isFunctionExpression(expression)
+  ) {
+    return ts.visitEachChild(
+      expression,
+      visit,
+      context.tsContext,
+    ) as ts.Expression;
+  }
+
+  const visited = visitExpressionChildrenWithCausePath(
+    expression,
+    causePath,
+    context,
+    visit,
+    { skipCallArguments: addRootFor },
+  );
+
+  if (!addRootFor) {
+    return visited;
+  }
+
+  return createForCall(visited, causePath, context);
+}
+
+function visitExpressionChildrenWithCausePath(
+  expression: ts.Expression,
+  causePath: CausePath,
+  context: TransformationContext,
+  visit: ts.Visitor,
+  options: {
+    skipCallArguments: boolean;
+  },
+): ts.Expression {
+  if (ts.isObjectLiteralExpression(expression)) {
+    let changed = false;
+    const properties = expression.properties.map((property) => {
+      if (!ts.isPropertyAssignment(property)) {
+        const visited = ts.visitEachChild(
+          property,
+          visit,
+          context.tsContext,
+        ) as ts.ObjectLiteralElementLike;
+        changed ||= visited !== property;
+        return visited;
+      }
+
+      const propertyName = getStablePropertyName(property.name);
+      if (
+        !propertyName ||
+        isInternalSyntheticName(propertyName)
+      ) {
+        const visited = ts.visitEachChild(
+          property,
+          visit,
+          context.tsContext,
+        ) as ts.PropertyAssignment;
+        changed ||= visited !== property;
+        return visited;
+      }
+
+      const initializer = visitExpressionWithCausePath(
+        property.initializer,
+        [...causePath, propertyName],
+        context,
+        visit,
+        { includeRoot: true },
+      );
+      if (initializer === property.initializer) {
+        return property;
+      }
+
+      changed = true;
+      return context.factory.updatePropertyAssignment(
+        property,
+        property.name,
+        initializer,
+      );
+    });
+
+    return changed
+      ? context.factory.updateObjectLiteralExpression(expression, properties)
+      : expression;
+  }
+
+  if (ts.isArrayLiteralExpression(expression)) {
+    let changed = false;
+    const elements = expression.elements.map((element, index) => {
+      if (ts.isOmittedExpression(element) || ts.isSpreadElement(element)) {
+        const visited = ts.visitEachChild(
+          element,
+          visit,
+          context.tsContext,
+        ) as ts.Expression;
+        changed ||= visited !== element;
+        return visited;
+      }
+
+      const visited = visitExpressionWithCausePath(
+        element,
+        [...causePath, index],
+        context,
+        visit,
+        { includeRoot: true },
+      );
+      changed ||= visited !== element;
+      return visited;
+    });
+
+    return changed
+      ? context.factory.updateArrayLiteralExpression(expression, elements)
+      : expression;
+  }
+
+  if (ts.isCallExpression(expression)) {
+    if (options.skipCallArguments) {
+      return expression;
+    }
+
+    let changed = false;
+    const callTarget = ts.visitNode(
+      expression.expression,
+      visit,
+    ) as ts.Expression;
+    changed ||= callTarget !== expression.expression;
+
+    const argumentsArray = expression.arguments.map((argument, index) => {
+      const argumentPath = getCallArgumentCausePath(
+        causePath,
+        argument,
+        index,
+        expression.arguments.length,
+      );
+      const visited = visitExpressionWithCausePath(
+        argument,
+        argumentPath,
+        context,
+        visit,
+        { includeRoot: true },
+      );
+      changed ||= visited !== argument;
+      return visited;
+    });
+
+    return changed
+      ? context.factory.updateCallExpression(
+        expression,
+        callTarget,
+        expression.typeArguments,
+        argumentsArray,
+      )
+      : expression;
+  }
+
+  return ts.visitEachChild(
+    expression,
+    (child) =>
+      ts.isExpression(child)
+        ? visitExpressionWithCausePath(
+          child,
+          causePath,
+          context,
+          visit,
+          { includeRoot: true },
+        )
+        : visit(child),
+    context.tsContext,
+  ) as ts.Expression;
+}
+
+function getCallArgumentCausePath(
+  causePath: CausePath,
+  argument: ts.Expression,
+  index: number,
+  argumentCount: number,
+): CausePath {
+  if (
+    argumentCount === 1 &&
+    (
+      ts.isObjectLiteralExpression(argument) ||
+      ts.isArrayLiteralExpression(argument)
+    )
+  ) {
+    return causePath;
+  }
+
+  return [...causePath, index];
 }
 
 function shouldAddVariableFor(
@@ -267,14 +655,14 @@ function isForAccess(expression: ts.Expression): boolean {
 
 function createForCall(
   initializer: ts.Expression,
-  variableName: string,
+  cause: string | CausePath,
   context: TransformationContext,
 ): ts.Expression {
   const call = context.factory.createCallExpression(
     context.factory.createPropertyAccessExpression(initializer, "for"),
     undefined,
     [
-      context.factory.createStringLiteral(variableName),
+      createCauseExpression(cause, context),
       context.factory.createTrue(),
     ],
   );
@@ -282,5 +670,27 @@ function createForCall(
     call,
     initializer,
     initializer,
+  );
+}
+
+function createCauseExpression(
+  cause: string | CausePath,
+  context: TransformationContext,
+): ts.Expression {
+  if (typeof cause === "string") {
+    return context.factory.createStringLiteral(cause);
+  }
+
+  if (cause.length === 1 && typeof cause[0] === "string") {
+    return context.factory.createStringLiteral(cause[0]);
+  }
+
+  return context.factory.createArrayLiteralExpression(
+    cause.map((part) =>
+      typeof part === "number"
+        ? context.factory.createNumericLiteral(part)
+        : context.factory.createStringLiteral(part)
+    ),
+    false,
   );
 }

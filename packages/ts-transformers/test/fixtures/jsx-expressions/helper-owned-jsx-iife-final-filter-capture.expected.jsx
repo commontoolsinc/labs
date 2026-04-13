@@ -74,7 +74,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []).for("p", true);
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()).for(["p", 3], true), []).for("p", true);
                 const visible = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -217,7 +217,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } as const satisfies __cfHelpers.JSONSchema), {});
             })()}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

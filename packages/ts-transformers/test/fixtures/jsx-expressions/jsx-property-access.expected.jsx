@@ -410,7 +410,7 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "beta"), state.key("config", "features", "darkMode")), "Yes", "No")}
         </p>
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

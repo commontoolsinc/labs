@@ -172,7 +172,7 @@ export default pattern((__cf_pattern_input) => {
             } as const satisfies __cfHelpers.JSONSchema), {
                 logs: logs,
                 todayDate: todayDate
-            })}</div>,
+            })}</div>
     };
 }, {
     type: "object",

@@ -188,7 +188,7 @@ export default pattern((state) => {
                 state: {
                     threshold: state.key("threshold")
                 }
-            }, ({ x, state }) => x > state.threshold);
+            }, ({ x, state }) => x > state.threshold).for("__patternResult", true);
         }, {
             type: "object",
             properties: {
@@ -915,7 +915,7 @@ export default pattern((state) => {
                 words: state.key("words"),
                 separator: state.key("separator")
             } }, ({ state }) => state.words.join(state.separator).toUpperCase())}</p>
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

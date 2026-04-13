@@ -699,7 +699,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["No completed sections", "No sections"]
         } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), "No completed sections", "No sections")}</p>)}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

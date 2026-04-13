@@ -44,7 +44,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["value"]
         } as const satisfies __cfHelpers.JSONSchema, (e, { value }) => value.set(e.data))({
             value: value
-        }).for("update", true),
+        }).for(["__patternResult", "update"], true)
     };
 }, {
     type: "object",

@@ -87,7 +87,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

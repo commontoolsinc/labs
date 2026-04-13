@@ -355,7 +355,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["a", "b"]
-                    } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b").for("background", true) }}>
+                    } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b") }}>
                 expand
               </button>
               {__cfHelpers.when({
@@ -391,7 +391,7 @@ export default pattern((__cf_pattern_input) => {
                     })}>
                   trash
                 </button>)}
-            </div>, null);
+            </div>, null).for("__patternResult", true);
             }, {
                 type: "object",
                 properties: {
@@ -499,7 +499,7 @@ export default pattern((__cf_pattern_input) => {
                 expandedIndex: expandedIndex,
                 trashedSubPieces: trashedSubPieces
             })}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

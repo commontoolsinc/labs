@@ -223,8 +223,7 @@ export default pattern((state) => {
         thread,
         outerIndex,
         visibleComments: state.showFlagged
-            ? thread.comments.filter((comment) => comment.flagged)
-            : thread.comments,
+            ? thread.comments.filter((comment) => comment.flagged).for("visibleComments", true) : thread.comments,
     }))).for("visibleThreads", true);
     // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
     const threadRows = __cfHelpers.derive({

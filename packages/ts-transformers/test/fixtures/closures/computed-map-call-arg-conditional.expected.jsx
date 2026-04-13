@@ -83,7 +83,7 @@ export default pattern((state) => {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     "enum": ["Done", "Pending"]
-                } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending"));
+                } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for(["label", 0], true));
                 return <span>{label}</span>;
             }, {
                 type: "object",
@@ -125,7 +125,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

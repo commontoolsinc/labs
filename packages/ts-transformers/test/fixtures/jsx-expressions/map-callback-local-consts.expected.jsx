@@ -78,7 +78,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, { file: {
                         contentType: file.key("contentType")
-                    } }, ({ file }) => file.contentType !== "binary")).for("isOpenable", true);
+                    } }, ({ file }) => file.contentType !== "binary").for(["isOpenable", 4], true)).for("isOpenable", true);
                 return <span>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -134,7 +134,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

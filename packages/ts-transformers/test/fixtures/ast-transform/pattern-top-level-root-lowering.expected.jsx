@@ -98,7 +98,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, { state: {
                 a: state.key("a"),
                 b: state.key("b")
-            } }, ({ state }) => Math.max(state.a, state.b)).for("maxValue", true),
+            } }, ({ state }) => Math.max(state.a, state.b)).for(["__patternResult", "maxValue"], true),
         parsedValue: __cfHelpers.derive({
             type: "object",
             properties: {
@@ -117,7 +117,7 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, { state: {
                 float: state.key("float")
-            } }, ({ state }) => parseInt(state.float)).for("parsedValue", true),
+            } }, ({ state }) => parseInt(state.float)).for(["__patternResult", "parsedValue"], true),
         fallbackLabel: __cfHelpers.derive({
             type: "object",
             properties: {
@@ -135,8 +135,8 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, { state: {
                 label: state.key("label")
-            } }, ({ state }) => state.label ?? "Pending").for("fallbackLabel", true),
-        firstItem: state.key("items", "0"),
+            } }, ({ state }) => state.label ?? "Pending").for(["__patternResult", "fallbackLabel"], true),
+        firstItem: state.key("items", "0")
     };
 }, {
     type: "object",

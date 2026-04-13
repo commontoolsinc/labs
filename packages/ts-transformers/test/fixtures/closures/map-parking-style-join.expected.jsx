@@ -442,7 +442,7 @@ export default pattern((state) => {
                     spots: state.key("spots")
                 }
             })}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

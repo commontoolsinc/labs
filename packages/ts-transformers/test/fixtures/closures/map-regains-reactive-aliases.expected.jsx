@@ -19,7 +19,7 @@ const __cfModuleCallback_1 = __cfHardenFn(() => {
             type: "string"
         },
         "default": []
-    } as const satisfies __cfHelpers.JSONSchema).result!;
+    } as const satisfies __cfHelpers.JSONSchema).for("foo", true).result!;
     return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const item = __cf_pattern_input.key("element");
         return item + "!";

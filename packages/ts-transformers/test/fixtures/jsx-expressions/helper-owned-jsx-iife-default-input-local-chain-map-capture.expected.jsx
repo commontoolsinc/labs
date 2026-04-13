@@ -119,7 +119,7 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
         {(() => {
-                const tree = ((__cfHelpers.unless({
+                const tree = (__cfHelpers.unless({
                     $ref: "#/$defs/AnonymousType_1",
                     $defs: {
                         AnonymousType_1: {
@@ -184,8 +184,8 @@ export default pattern((__cf_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, entries, [])) as Entry[]).for("tree", true);
-                const p = ((__cfHelpers.unless({
+                } as const satisfies __cfHelpers.JSONSchema, entries, []).for("tree", true)).for("tree", true) as Entry[];
+                const p = (__cfHelpers.unless({
                     type: "array",
                     items: {
                         type: "string"
@@ -215,7 +215,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), [])) as string[]).for("p", true);
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []).for("p", true)).for("p", true) as string[];
                 const unsorted = findChildren(tree, p) as Entry[];
                 const items = __cfHelpers.derive({
                     type: "object",
@@ -477,7 +477,7 @@ export default pattern((__cf_pattern_input) => {
                     handleOpenFile: handleOpenFile
                 });
             })()}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",
