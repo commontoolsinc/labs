@@ -73,6 +73,70 @@ export default pattern<{ count: number }, { doubled: number }>((state) => ({
     assertNotMatch(main, /state\.key\("count"\)\.for/);
   });
 
+  it("adds stable nested causes to pattern result cells", async () => {
+    const source = `
+import { pattern, Writable } from "commonfabric";
+
+export default pattern<{ count: number }>((state) => ({
+  foo: state.count * 2,
+  nested: {
+    bar: Writable.of("bar"),
+  },
+  tuple: [Writable.of("tuple")],
+}));
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, '.for(["__patternResult", "foo"], true)');
+    assertStringIncludes(
+      main,
+      '.for(["__patternResult", "nested", "bar"], true)',
+    );
+    assertStringIncludes(
+      main,
+      '.for(["__patternResult", "tuple", 0], true)',
+    );
+    assertNotMatch(main, /state\.key\("count"\)\.for/);
+  });
+
+  it("adds stable nested causes to constructed variable values", async () => {
+    const source = `
+import { computed, Writable } from "commonfabric";
+
+declare function f(input: unknown): unknown;
+
+export function make() {
+  const foo = f({
+    param: Writable.of(1),
+    nested: {
+      result: computed(() => 2),
+    },
+    tuple: [Writable.of("tuple")],
+    already: Writable.of(3).for("manual"),
+  });
+  return foo;
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(main, '.for(["foo", "param"], true)');
+    assertStringIncludes(main, '.for(["foo", "nested", "result"], true)');
+    assertStringIncludes(main, '.for(["foo", "tuple", 0], true)');
+    assert(!main.includes('.for(["foo", "already"], true)'));
+  });
+
   it("transforms by default and supports cf-disable-transform opt-out", async () => {
     const source = `
 import { computed } from "commonfabric";
