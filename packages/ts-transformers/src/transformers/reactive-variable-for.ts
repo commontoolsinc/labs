@@ -263,6 +263,7 @@ function visitExpressionWithCausePath(
   visit: ts.Visitor,
   options: {
     includeRoot: boolean;
+    allowReactiveIdentifierRetargeting?: boolean;
   },
 ): ts.Expression {
   const addRootFor = options.includeRoot &&
@@ -283,7 +284,11 @@ function visitExpressionWithCausePath(
     causePath,
     context,
     visit,
-    { skipCallArguments: addRootFor },
+    {
+      skipCallArguments: addRootFor,
+      allowReactiveIdentifierRetargeting:
+        options.allowReactiveIdentifierRetargeting ?? true,
+    },
   );
 
   if (!addRootFor) {
@@ -300,6 +305,7 @@ function visitExpressionChildrenWithCausePath(
   visit: ts.Visitor,
   options: {
     skipCallArguments: boolean;
+    allowReactiveIdentifierRetargeting: boolean;
   },
 ): ts.Expression {
   if (ts.isObjectLiteralExpression(expression)) {
@@ -340,6 +346,10 @@ function visitExpressionChildrenWithCausePath(
         [...causePath, propertyName],
         context,
         visit,
+        {
+          allowReactiveIdentifierRetargeting:
+            options.allowReactiveIdentifierRetargeting,
+        },
       );
       if (initializer === initializerExpression) {
         return property;
@@ -380,7 +390,11 @@ function visitExpressionChildrenWithCausePath(
         [...causePath, index],
         context,
         visit,
-        { includeRoot: true },
+        {
+          includeRoot: true,
+          allowReactiveIdentifierRetargeting:
+            options.allowReactiveIdentifierRetargeting,
+        },
       );
       changed ||= visited !== element;
       return visited;
@@ -397,6 +411,9 @@ function visitExpressionChildrenWithCausePath(
     }
 
     let changed = false;
+    const allowArgumentReactiveIdentifierRetargeting =
+      options.allowReactiveIdentifierRetargeting &&
+      !shouldPreserveStructuralCallArgumentReferences(expression, context);
     const callTarget = ts.visitNode(
       expression.expression,
       visit,
@@ -415,7 +432,11 @@ function visitExpressionChildrenWithCausePath(
         argumentPath,
         context,
         visit,
-        { includeRoot: true },
+        {
+          includeRoot: true,
+          allowReactiveIdentifierRetargeting:
+            allowArgumentReactiveIdentifierRetargeting,
+        },
       );
       changed ||= visited !== argument;
       return visited;
@@ -444,7 +465,11 @@ function visitExpressionChildrenWithCausePath(
             causePath,
             context,
             visit,
-            { includeRoot: false },
+            {
+              includeRoot: false,
+              allowReactiveIdentifierRetargeting:
+                options.allowReactiveIdentifierRetargeting,
+            },
           )
           : visit(child),
       context.tsContext,
@@ -460,7 +485,11 @@ function visitExpressionChildrenWithCausePath(
           causePath,
           context,
           visit,
-          { includeRoot: true },
+          {
+            includeRoot: true,
+            allowReactiveIdentifierRetargeting:
+              options.allowReactiveIdentifierRetargeting,
+          },
         )
         : visit(child),
     context.tsContext,
@@ -492,15 +521,23 @@ function visitObjectPropertyInitializerWithCausePath(
   causePath: CausePath,
   context: TransformationContext,
   visit: ts.Visitor,
+  options: {
+    allowReactiveIdentifierRetargeting: boolean;
+  },
 ): ts.Expression {
   const visited = visitExpressionWithCausePath(
     expression,
     causePath,
     context,
     visit,
-    { includeRoot: true },
+    {
+      includeRoot: true,
+      allowReactiveIdentifierRetargeting:
+        options.allowReactiveIdentifierRetargeting,
+    },
   );
-  return shouldRetargetReactiveReference(visited, context)
+  return options.allowReactiveIdentifierRetargeting &&
+      shouldRetargetReactiveReference(visited, context)
     ? createForCall(visited, causePath, context)
     : visited;
 }
@@ -716,6 +753,123 @@ function shouldRetargetReactiveReference(
   const target = unwrapExpression(expression);
   return ts.isIdentifier(target) &&
     isReactiveValueExpression(target, context.checker);
+}
+
+function shouldPreserveStructuralCallArgumentReferences(
+  call: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  return isPatternFactoryCall(call, context) ||
+    isStructuralPatternFactoryHelperExpression(
+      call.expression,
+      context,
+      new Set(),
+    );
+}
+
+function isStructuralPatternFactoryHelperExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+  seenSymbols: Set<ts.Symbol>,
+): boolean {
+  const target = unwrapExpression(expression);
+
+  if (ts.isCallExpression(target)) {
+    return isPatternFactoryCall(target, context) ||
+      isStructuralPatternFactoryHelperExpression(
+        target.expression,
+        context,
+        seenSymbols,
+      );
+  }
+
+  if (
+    !ts.isIdentifier(target) &&
+    !ts.isPropertyAccessExpression(target)
+  ) {
+    return false;
+  }
+
+  const symbol = context.checker.getSymbolAtLocation(target);
+  if (!symbol) {
+    return false;
+  }
+
+  const resolvedSymbol = getAliasedSymbol(symbol, context.checker);
+  if (seenSymbols.has(resolvedSymbol)) {
+    return false;
+  }
+  seenSymbols.add(resolvedSymbol);
+
+  return (resolvedSymbol.getDeclarations() ?? []).some((declaration) => {
+    const returnedExpression = getReturnedExpression(declaration);
+    return !!returnedExpression &&
+      isStructuralPatternFactoryHelperExpression(
+        returnedExpression,
+        context,
+        seenSymbols,
+      );
+  });
+}
+
+function getAliasedSymbol(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): ts.Symbol {
+  if (!(symbol.flags & ts.SymbolFlags.Alias)) {
+    return symbol;
+  }
+
+  try {
+    return checker.getAliasedSymbol(symbol);
+  } catch {
+    return symbol;
+  }
+}
+
+function getReturnedExpression(
+  declaration: ts.Declaration,
+): ts.Expression | undefined {
+  if (
+    ts.isFunctionDeclaration(declaration) ||
+    ts.isMethodDeclaration(declaration) ||
+    ts.isFunctionExpression(declaration) ||
+    ts.isArrowFunction(declaration)
+  ) {
+    if (!declaration.body) {
+      return undefined;
+    }
+    if (ts.isBlock(declaration.body)) {
+      if (declaration.body.statements.length !== 1) {
+        return undefined;
+      }
+      const [statement] = declaration.body.statements;
+      return ts.isReturnStatement(statement) ? statement.expression : undefined;
+    }
+    return declaration.body;
+  }
+
+  if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) {
+    return undefined;
+  }
+
+  const initializer = unwrapExpression(declaration.initializer);
+  if (
+    ts.isArrowFunction(initializer) ||
+    ts.isFunctionExpression(initializer)
+  ) {
+    return getReturnedExpression(initializer);
+  }
+
+  if (
+    ts.isIdentifier(initializer) ||
+    ts.isCallExpression(initializer) ||
+    ts.isPropertyAccessExpression(initializer)
+  ) {
+    return initializer;
+  }
+
+  return undefined;
 }
 
 function chainContainsForCall(expression: ts.Expression): boolean {
