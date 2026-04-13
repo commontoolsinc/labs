@@ -172,7 +172,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema), {
                     labelPrefix: labelPrefix
-                });
+                }).for("filtered", true);
                 return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     return <button type="button">{entry.key("name")}</button>;

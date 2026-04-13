@@ -79,7 +79,7 @@ export default pattern((_) => {
                 required: ["name", "value"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema).for("items", true).result!;
+    } as const satisfies __cfHelpers.JSONSchema).result!;
     return {
         [NAME]: "Test",
         [UI]: (<ul>

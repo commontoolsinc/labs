@@ -132,7 +132,7 @@ export default pattern((state) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, section.key("accent"), section.key("accent"), state.key("globalAccent")).for("color", true),
+                    } as const satisfies __cfHelpers.JSONSchema, section.key("accent"), section.key("accent"), state.key("globalAccent")),
                 }}>
                   {section.key("title")}
                 </h2>
@@ -699,7 +699,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["No completed sections", "No sections"]
         } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), "No completed sections", "No sections")}</p>)}
-      </div>)
+      </div>),
     };
 }, {
     type: "object",

@@ -121,7 +121,7 @@ const createSimplePattern = handler({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("isInitialized", true);
     // Create the charm
-    const charm = SimplePattern({}).for("charm", true);
+    const charm = SimplePattern({});
     // Store the charm in the array and navigate
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
 });
@@ -151,8 +151,8 @@ export default pattern(() => {
     const { cellRef } = createCellRef({
         isInitialized: cell(false, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema).for("isInitialized", true),
-        storedCellRef: cell().for("storedCellRef", true),
+        } as const satisfies __cfHelpers.JSONSchema),
+        storedCellRef: cell(),
     }) as {
         cellRef: any[];
     };

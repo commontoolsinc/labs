@@ -137,6 +137,138 @@ export function make() {
     assert(!main.includes('.for(["foo", "already"], true)'));
   });
 
+  it("does not add causes to plain array methods in lift callbacks", async () => {
+    const source = `
+import { lift } from "commonfabric";
+
+interface Summary {
+  label: string;
+  count: number;
+}
+
+export const summarize = lift((summaries: Summary[]) => {
+  const labels = summaries.map((summary) => summary.label);
+  const active = summaries.filter((summary) => summary.count > 0);
+  return {
+    labels: summaries.map((summary) => summary.label),
+    active,
+    label: labels.join(", "),
+  };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assert(!main.includes('.for("labels", true)'));
+    assert(!main.includes('.for("active", true)'));
+    assert(!main.includes('.for(["labels"], true)'));
+  });
+
+  it("does not add causes to plain array methods in lowered handler callbacks", async () => {
+    const source = `
+import { action, pattern, Stream } from "commonfabric";
+
+const Child = pattern<{}, { deleteHandlers: Stream<void>[] }>(() => {
+  return { deleteHandlers: [] as Stream<void>[] };
+});
+
+export default pattern(() => {
+  const subject = Child({});
+  const remove = action(() => {
+    const handlers = subject.deleteHandlers.filter(() => true);
+    handlers[0]?.send();
+  });
+  return { remove };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assert(!main.includes('.filter(() => true).for("handlers", true)'));
+  });
+
+  it("does not add causes to receiver calls in property access chains", async () => {
+    const source = `
+import { Default, pattern, wish, Writable } from "commonfabric";
+
+type MentionablePiece = { name: string };
+declare function make(input: unknown): { result: unknown };
+
+export default pattern(() => {
+  const mentionable =
+    wish<Default<MentionablePiece[], []>>({ query: "#mentionable" }).result;
+  const picked = make({ param: Writable.of(1) }).result;
+  return { mentionable, picked };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assert(!main.includes('.for("mentionable", true).result'));
+    assertStringIncludes(main, '.for(["picked", "param"], true)');
+  });
+
+  it("does not add root causes to pattern factory outputs", async () => {
+    const source = `
+import { pattern, Writable } from "commonfabric";
+
+const Child = pattern<{ value: number }>(() => {
+  return { value: Writable.of(1) };
+});
+
+export default pattern(() => {
+  const child = Child({ value: Writable.of(2) });
+  return { child };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assert(!main.includes('.for("child", true)'));
+    assertStringIncludes(main, '.for(["child", "value"], true)');
+  });
+
+  it("does not add shared property causes inside dynamic array callbacks", async () => {
+    const source = `
+import { lift, Writable } from "commonfabric";
+
+export const build = lift((values: number[]) =>
+  values.map((_value, index) => ({
+    token: Writable.of(index),
+  }))
+);
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assert(!main.includes('.for("token", true)'));
+  });
+
   it("transforms by default and supports cf-disable-transform opt-out", async () => {
     const source = `
 import { computed } from "commonfabric";

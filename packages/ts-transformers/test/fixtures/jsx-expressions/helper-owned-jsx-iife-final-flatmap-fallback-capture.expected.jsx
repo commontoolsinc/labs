@@ -178,7 +178,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } as const satisfies __cfHelpers.JSONSchema), {
                     labelPrefix: labelPrefix
-                });
+                }).for("labels", true);
                 return labels.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const label = __cf_pattern_input.key("element");
                     return <button type="button">{label}</button>;

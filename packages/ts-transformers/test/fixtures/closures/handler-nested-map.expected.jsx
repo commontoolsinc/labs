@@ -50,7 +50,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => {
-            const scaled = state.items.map((item) => item.value * state.multiplier).for("scaled", true);
+            const scaled = state.items.map((item) => item.value * state.multiplier);
             console.log(scaled);
         })({
             state: {
@@ -59,7 +59,7 @@ export default pattern((state) => {
             }
         })}>
         Compute
-      </button>)
+      </button>),
     };
 }, {
     type: "object",

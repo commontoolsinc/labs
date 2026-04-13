@@ -1,11 +1,14 @@
 import ts from "typescript";
 
 import {
+  classifyArrayMethodCall,
   classifyArrayMethodCallSite,
   detectCallKind,
   detectDirectBuilderCall,
+  getEnclosingFunctionLikeDeclaration,
   getPatternBuilderCallbackArgument,
   getTypeAtLocationWithFallback,
+  hasReactiveCollectionProvenance,
   isCellLikeType,
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
@@ -35,35 +38,6 @@ function createReactiveVariableForVisitor(
       if (patternCallback) {
         return visitPatternCall(node, patternCallback, context, visit);
       }
-    }
-
-    if (ts.isPropertyAssignment(node)) {
-      const propertyName = getStablePropertyName(node.name);
-      if (
-        !propertyName ||
-        isInternalSyntheticName(propertyName)
-      ) {
-        const visited = ts.visitEachChild(
-          node,
-          visit,
-          context.tsContext,
-        ) as ts.PropertyAssignment;
-        return visited;
-      }
-
-      const visitedInitializer = visitExpressionWithCausePath(
-        node.initializer,
-        [propertyName],
-        context,
-        visit,
-        { includeRoot: true },
-      );
-
-      return context.factory.updatePropertyAssignment(
-        node,
-        node.name,
-        visitedInitializer,
-      );
     }
 
     if (!ts.isVariableDeclarationList(node)) {
@@ -447,6 +421,26 @@ function visitExpressionChildrenWithCausePath(
       : expression;
   }
 
+  if (
+    ts.isPropertyAccessExpression(expression) ||
+    ts.isElementAccessExpression(expression)
+  ) {
+    return ts.visitEachChild(
+      expression,
+      (child) =>
+        child === expression.expression
+          ? visitExpressionWithCausePath(
+            child as ts.Expression,
+            causePath,
+            context,
+            visit,
+            { includeRoot: false },
+          )
+          : visit(child),
+      context.tsContext,
+    ) as ts.Expression;
+  }
+
   return ts.visitEachChild(
     expression,
     (child) =>
@@ -516,6 +510,10 @@ function shouldAddReactiveFor(
 
   const expression = unwrapExpression(initializer);
   if (!ts.isCallExpression(expression)) {
+    return false;
+  }
+
+  if (isPatternFactoryCall(expression, context)) {
     return false;
   }
 
@@ -610,8 +608,76 @@ function isReactiveArrayMethodCall(
   call: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  return classifyArrayMethodCallSite(call, context.checker)?.ownership ===
-    "reactive";
+  const access = classifyArrayMethodCall(call);
+  if (!access) {
+    return false;
+  }
+
+  const callSite = classifyArrayMethodCallSite(call, context.checker);
+  if (access.lowered && callSite?.ownership === "reactive") {
+    return true;
+  }
+
+  const target = unwrapExpression(call.expression);
+  if (
+    !ts.isPropertyAccessExpression(target) &&
+    !ts.isElementAccessExpression(target)
+  ) {
+    return false;
+  }
+
+  return hasReactiveCollectionProvenance(
+    target.expression,
+    context.checker,
+    {
+      allowTypeBasedRoot: false,
+      allowImplicitReactiveParameters: false,
+      allowReactiveArrayCallbackParameters: false,
+      sameScope: getEnclosingFunctionLikeDeclaration(call),
+      typeRegistry: context.options.typeRegistry,
+      syntheticReactiveCollectionRegistry:
+        context.options.syntheticReactiveCollectionRegistry,
+      logger: context.options.logger,
+    },
+  ) || isExplicitReactiveCall(target.expression, context);
+}
+
+function isPatternFactoryCall(
+  call: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  const target = unwrapExpression(call.expression);
+  try {
+    const type = context.checker.getTypeAtLocation(target);
+    const signatures = context.checker.getSignaturesOfType(
+      type,
+      ts.SignatureKind.Call,
+    );
+    if (signatures.length === 0) {
+      return false;
+    }
+
+    const propertyNames = new Set(
+      type.getProperties().map((property) => property.getName()),
+    );
+    return propertyNames.has("argumentSchema") &&
+      propertyNames.has("resultSchema") &&
+      !propertyNames.has("with");
+  } catch {
+    return false;
+  }
+}
+
+function isExplicitReactiveCall(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const target = unwrapExpression(expression);
+  return ts.isCallExpression(target) &&
+    shouldAddReactiveFor(target, context, {
+      includeRuntimeCalls: true,
+      useTypeFallback: true,
+    });
 }
 
 function chainContainsForCall(expression: ts.Expression): boolean {
