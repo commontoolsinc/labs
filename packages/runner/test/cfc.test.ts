@@ -29,6 +29,52 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
     };
     expect(ContextualFlowControl.isTrueSchema(schema)).toBe(true);
   });
+
+  it("carries nested property $defs while traversing through array item refs", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        argument: {
+          type: "object",
+          $defs: {
+            Item: {
+              type: "object",
+              properties: {
+                values: {
+                  type: "array",
+                  items: { type: "number" },
+                },
+              },
+            },
+          },
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/$defs/Item" },
+            },
+          },
+        },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["argument", "items", "0", "values"]))
+      .toEqual({
+        type: "array",
+        items: { type: "number" },
+        $defs: {
+          Item: {
+            type: "object",
+            properties: {
+              values: {
+                type: "array",
+                items: { type: "number" },
+              },
+            },
+          },
+        },
+      });
+  });
 });
 
 describe("ContextualFlowControl atom joins", () => {

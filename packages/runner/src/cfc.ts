@@ -585,6 +585,9 @@ export class ContextualFlowControl {
         // we can only descend into objects and arrays or unknown
         return false;
       }
+      if (isRecord(cursor) && cursor.$defs) {
+        defs = cursor.$defs;
+      }
     }
     if (isRecord(cursor) && cursor.ifc !== undefined) {
       ContextualFlowControl.addIfcAtoms(joined, cursor.ifc.confidentiality);
