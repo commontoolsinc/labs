@@ -80,15 +80,25 @@ describe("CFC runtime stats", () => {
     const rejectTx = runtime.edit();
     rejectTx.setCfcEnforcementMode("enforce-explicit");
     rejectTx.markCfcRelevant("stats-reject");
-    rejectTx.writeValueOrThrow({
+    const rejectCell = runtime.getCell(
       space,
-      id: "of:cfc-runtime-stats-reject",
-      type: "application/json",
-      path: [],
-    }, { ok: true });
+      "cfc-runtime-stats-reject",
+      {
+        type: "object",
+        properties: {
+          value: {
+            type: "string",
+            ifc: { collection: ["unsupported"] },
+          },
+        },
+        required: ["value"],
+      },
+      rejectTx,
+    );
+    rejectCell.set({ value: "blocked" });
     expect(rejectTx.prepareCfc()).toBe("");
     expect((await rejectTx.commit()).error?.message).toContain(
-      "relevant transaction was not prepared",
+      "unsupported trust-sensitive claim collection",
     );
 
     const invalidationTx = runtime.edit();

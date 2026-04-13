@@ -488,6 +488,9 @@ Deno.test("DomApplicator - event handling", async (t) => {
       ui: {
         pattern: "TrustedDirectCommandSurface",
         eventIntegrity: ["TrustedDirectCommandSurface"],
+        uiContractDataset: {
+          uiAction: "SubmitDirectCommand",
+        },
       },
     });
   });

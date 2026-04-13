@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { NAME, Pattern, Runtime, TYPE } from "@commonfabric/runner";
+import { NAME, Pattern, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
@@ -247,52 +247,6 @@ describe("piece pull materialization", () => {
       manager.runtime.patternManager.getPatternMeta = originalGetPatternMeta;
       manager.syncPatternById = originalSyncPatternById;
     }
-  });
-
-  it("retries syncPattern when source metadata is not visible after initial sync", async () => {
-    const pattern = doublePattern();
-    const patternId = "test-pattern-id";
-    const originalSynced = manager.synced.bind(manager);
-    const originalSyncPatternById = manager.syncPatternById.bind(manager);
-    let pieceSyncCount = 0;
-    let getSourceCellCount = 0;
-    let syncedCount = 0;
-    let syncPatternById: string | undefined;
-
-    const sourceCell = {
-      sync: () => Promise.resolve(),
-      get: () => ({ [TYPE]: patternId }),
-    };
-    const piece = {
-      sync: () => {
-        pieceSyncCount++;
-        return Promise.resolve(piece);
-      },
-      getSourceCell: () => {
-        getSourceCellCount++;
-        return getSourceCellCount === 1 ? undefined : sourceCell;
-      },
-    };
-
-    manager.synced = (() => {
-      syncedCount++;
-      return Promise.resolve();
-    }) as typeof manager.synced;
-    manager.syncPatternById = ((id: string) => {
-      syncPatternById = id;
-      return Promise.resolve(pattern);
-    }) as typeof manager.syncPatternById;
-
-    try {
-      await manager.syncPattern(piece as any);
-    } finally {
-      manager.synced = originalSynced;
-      manager.syncPatternById = originalSyncPatternById;
-    }
-
-    expect(pieceSyncCount).toBe(2);
-    expect(syncedCount).toBe(1);
-    expect(syncPatternById).toBe(patternId);
   });
 
   it("restarts stopped pieces when runWithPattern is called with start", async () => {

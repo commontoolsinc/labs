@@ -247,12 +247,12 @@ const setupProjectionSourceMatchesValue = (
   if (projected === undefined) {
     return false;
   }
-  const projectedPath = canonicalizeLogicalPath(projected.path);
+  const projectedPath = projected.path.map((entry) => String(entry));
   return projection.sources.some((source) =>
     (projected.space === undefined || projected.space === source.space) &&
     (projected.id === undefined || projected.id === source.id) &&
     (projected.type === undefined || projected.type === source.type) &&
-    arraysEqual(projectedPath, canonicalizeLogicalPath(source.path))
+    arraysEqual(projectedPath, source.path)
   );
 };
 
@@ -444,8 +444,8 @@ const writeValueForTarget = (
     if (write.address.path[0] !== "value") {
       continue;
     }
-    const writePath = canonicalizeLogicalPath(write.address.path);
-    const targetPath = canonicalizeLogicalPath(target.path);
+    const writePath = write.address.path.slice(1).map((entry) => String(entry));
+    const targetPath = target.path.map((entry) => String(entry));
     if (writePath.length > targetPath.length) {
       continue;
     }
@@ -465,7 +465,7 @@ const writeValueForTarget = (
   if (value === undefined || matchingWritePath === undefined) {
     return undefined;
   }
-  const targetPath = canonicalizeLogicalPath(target.path);
+  const targetPath = target.path.map((entry) => String(entry));
   if (matchingWritePath.length === targetPath.length) {
     return value;
   }
