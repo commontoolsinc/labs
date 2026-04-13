@@ -667,6 +667,8 @@ export class Runtime {
   > {
     const tx = this.edit();
     tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
     let result: T;
     try {
       result = fn(tx);

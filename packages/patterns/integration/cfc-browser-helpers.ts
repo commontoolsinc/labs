@@ -43,6 +43,49 @@ export async function clickTrustedAction(
   }
 }
 
+export async function clickTrustedActionAndWaitForText(
+  page: Page,
+  action: string,
+  selector: string,
+  text: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  let actionProbe: TrustedActionProbe | undefined;
+  let textProbe: TextProbe | undefined;
+  try {
+    await waitFor(async () => {
+      if (await textIsPresent(page, selector, text)) {
+        return true;
+      }
+      try {
+        await clickTrustedAction(page, action, { timeout: 2_000 });
+      } catch {
+        actionProbe = await readTrustedActionProbe(page, action).catch(() =>
+          undefined
+        );
+        textProbe = await readTextProbe(page, selector).catch(() => undefined);
+        return false;
+      }
+      const updated = await textIsPresent(page, selector, text);
+      if (!updated) {
+        textProbe = await readTextProbe(page, selector).catch(() => undefined);
+      }
+      return updated;
+    }, { timeout, delay: 1_000 });
+  } catch (cause) {
+    actionProbe ??= await readTrustedActionProbe(page, action).catch(() =>
+      undefined
+    );
+    textProbe ??= await readTextProbe(page, selector).catch(() => undefined);
+    throw new Error(
+      `Timed out clicking trusted action "${action}" until "${selector}" contained "${text}". Last probes: ${
+        JSON.stringify({ actionProbe, textProbe }, null, 2)
+      }`,
+      { cause },
+    );
+  }
+}
+
 export async function waitForText(
   page: Page,
   selector: string,
@@ -102,6 +145,22 @@ export async function waitForTextAbsent(
       }`,
       { cause },
     );
+  }
+}
+
+async function textIsPresent(
+  page: Page,
+  selector: string,
+  text: string,
+): Promise<boolean> {
+  try {
+    const node = await page.waitForSelector(selector, {
+      strategy: "pierce",
+      timeout: 500,
+    });
+    return (await node.innerText())?.includes(text) === true;
+  } catch {
+    return false;
   }
 }
 

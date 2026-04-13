@@ -5,6 +5,10 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import {
+  clickTrustedActionAndWaitForText,
+  waitForText,
+} from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -61,17 +65,29 @@ describe("cfc staged publish integration test", () => {
     await inputs[0].type("Launch checklist");
     await inputs[1].type("Ship the staged publish demo with trusted UI gates.");
 
-    await clickButtonAtIndex(page, 0);
-    await waitForStage(page, "saved");
-    await waitForText(page, "#saved-title", "Launch checklist");
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedSaveDraft",
+      "#saved-title",
+      "Launch checklist",
+    );
+    await waitForText(page, "#stage-pill", "saved");
 
-    await clickButtonAtIndex(page, 1);
-    await waitForStage(page, "reviewed");
-    await waitForText(page, "#reviewed-title", "Launch checklist");
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedReviewSnapshot",
+      "#reviewed-title",
+      "Launch checklist",
+    );
+    await waitForText(page, "#stage-pill", "reviewed");
 
-    await clickButtonAtIndex(page, 2);
-    await waitForStage(page, "published");
-    await waitForText(page, "#published-title", "Launch checklist");
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedPublishSnapshot",
+      "#published-title",
+      "Launch checklist",
+    );
+    await waitForText(page, "#stage-pill", "published");
     await waitForText(
       page,
       "#published-body",
@@ -80,49 +96,10 @@ describe("cfc staged publish integration test", () => {
   });
 });
 
-async function waitForStage(page: Page, stage: string) {
-  await waitFor(async () => {
-    try {
-      const stageNode = await page.waitForSelector("#stage-pill", {
-        strategy: "pierce",
-      });
-      return (await stageNode.innerText())?.trim() === stage;
-    } catch {
-      return false;
-    }
-  });
-}
-
-async function waitForText(page: Page, selector: string, text: string) {
-  await waitFor(async () => {
-    try {
-      const node = await page.waitForSelector(selector, {
-        strategy: "pierce",
-      });
-      return (await node.innerText())?.trim() === text;
-    } catch {
-      return false;
-    }
-  });
-}
-
 async function waitForCount(page: Page, selector: string, count: number) {
   await waitFor(async () => {
     const nodes = await page.$$(selector, { strategy: "pierce" });
     return nodes.length >= count;
   });
   return await page.$$(selector, { strategy: "pierce" });
-}
-
-async function clickButtonAtIndex(page: Page, index: number) {
-  await waitFor(async () => {
-    const buttons = await page.$$("[data-cf-button]", { strategy: "pierce" });
-    if (buttons.length <= index) return false;
-    try {
-      await buttons[index].click();
-      return true;
-    } catch {
-      return false;
-    }
-  });
 }

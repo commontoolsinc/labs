@@ -1041,6 +1041,52 @@ export class Runner {
     });
   }
 
+  private startAfterSuccessfulCommit<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    givenPattern?: Pattern,
+    options: { doNotUpdateOnPatternChange?: boolean } = {},
+  ): void {
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        return;
+      }
+
+      const startTx = this.runtime.edit();
+      const committedResultCell = this.runtime.getCellFromLink<T>(
+        resultLink,
+        undefined,
+        startTx,
+      );
+      try {
+        this.startWithTx(startTx, committedResultCell, givenPattern, options);
+        this.runtime.prepareTxForCommit(startTx);
+        startTx.commit().then(({ error }) => {
+          if (error) {
+            this.stop(committedResultCell);
+            logger.error(
+              "tx-commit-error",
+              "Error committing deferred start transaction",
+              error,
+            );
+          }
+        }).catch((error) => {
+          this.stop(committedResultCell);
+          logger.error(
+            "tx-commit-error",
+            "Deferred start transaction commit rejected",
+            error,
+          );
+        });
+      } catch (error) {
+        startTx.abort(error);
+        logger.error("runner-start", "Deferred start failed", error);
+        throw error;
+      }
+    });
+  }
+
   /**
    * Run a pattern.
    *
@@ -1104,7 +1150,15 @@ export class Runner {
     );
 
     if (needsStart) {
-      this.startWithTx(tx, resultCell, pattern, options);
+      if (
+        tx.tx.immediate === true &&
+        (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+            .deferRunnerStartUntilCommit === true
+      ) {
+        this.startAfterSuccessfulCommit(tx, resultCell, pattern, options);
+      } else {
+        this.startWithTx(tx, resultCell, pattern, options);
+      }
     }
 
     if (!providedTx) {
@@ -1744,17 +1798,26 @@ export class Runner {
     }
 
     const resultPattern = patternFromFrame(() => result);
-    const resultCell = this.run(
-      tx,
-      resultPattern,
-      undefined,
-      this.runtime.getCell(
-        processCell.space,
-        { resultFor: cause },
-        undefined,
+    const resultCell = this.handlerResultPatternMustStartAfterCommit(
+        resultPattern,
+      )
+      ? this.setupDeferredHandlerResultPattern(
         tx,
-      ),
-    );
+        resultPattern,
+        processCell,
+        cause,
+      )
+      : this.run(
+        tx,
+        resultPattern,
+        undefined,
+        this.runtime.getCell(
+          processCell.space,
+          { resultFor: cause },
+          undefined,
+          tx,
+        ),
+      );
 
     const rawResult = tx.readValueOrThrow(
       resultCell.getAsNormalizedFullLink(),
@@ -1775,12 +1838,48 @@ export class Runner {
       readResultAction,
       { isEffect: true },
     );
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        cancel();
+        this.stop(resultCell);
+      }
+    });
     addCancel(() => {
       cancel();
       this.stop(resultCell);
     });
 
     return result;
+  }
+
+  private handlerResultPatternMustStartAfterCommit(pattern: Pattern): boolean {
+    return pattern.nodes.some(({ module }) =>
+      module.type === "ref" && module.implementation === "navigateTo"
+    );
+  }
+
+  private setupDeferredHandlerResultPattern(
+    tx: IExtendedStorageTransaction,
+    resultPattern: Pattern,
+    processCell: Cell<any>,
+    cause: Record<string, any>,
+  ): Cell<any> {
+    const resultCell = this.runtime.getCell(
+      processCell.space,
+      { resultFor: cause },
+      undefined,
+      tx,
+    );
+    const resultSetup = this.setupInternal(
+      tx,
+      resultPattern,
+      undefined,
+      resultCell,
+    );
+    if (resultSetup.needsStart) {
+      this.startAfterSuccessfulCommit(tx, resultCell, resultSetup.pattern);
+    }
+    return resultCell;
   }
 
   private writeJavaScriptActionResult(

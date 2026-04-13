@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
+import { schemaHasIfc } from "../src/schema.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 
@@ -59,6 +60,37 @@ describe("ContextualFlowControl atom joins", () => {
         confidentiality: [caveatAtom, provenanceAtom],
       },
     });
+  });
+});
+
+describe("schemaHasIfc", () => {
+  it("resolves nested $defs while scanning child schemas", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          $ref: "#/$defs/Nested",
+          $defs: {
+            Nested: {
+              type: "object",
+              properties: {
+                value: {
+                  $ref: "#/$defs/SecretValue",
+                },
+              },
+            },
+            SecretValue: {
+              type: "string",
+              ifc: {
+                confidentiality: [cfcAtom.resource("NestedSecret")],
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(schemaHasIfc(schema)).toBe(true);
   });
 });
 

@@ -96,6 +96,7 @@ export function resolveSchema(
 export function schemaHasIfc(
   schema: JSONSchema | undefined,
   seen: Set<JSONSchema> = new Set(),
+  fullSchema: JSONSchema | undefined = schema,
 ): boolean {
   if (schema === undefined || typeof schema === "boolean") {
     return false;
@@ -105,12 +106,14 @@ export function schemaHasIfc(
   }
   seen.add(schema);
 
+  const schemaRoot = schema.$defs !== undefined ? schema : fullSchema ?? schema;
   const resolved = typeof schema.$ref === "string"
-    ? ContextualFlowControl.resolveSchemaRefs(schema)
+    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
     : schema;
   if (resolved === true || resolved === false || !isRecord(resolved)) {
     return false;
   }
+  const childFullSchema = resolved.$defs !== undefined ? resolved : fullSchema;
   if (resolved.ifc !== undefined) {
     return true;
   }
@@ -120,24 +123,26 @@ export function schemaHasIfc(
     ...(resolved.oneOf ?? []),
     ...(resolved.allOf ?? []),
   ];
-  if (compound.some((item) => schemaHasIfc(item, seen))) {
+  if (compound.some((item) => schemaHasIfc(item, seen, childFullSchema))) {
     return true;
   }
   if (
     resolved.properties !== undefined &&
-    Object.values(resolved.properties).some((item) => schemaHasIfc(item, seen))
+    Object.values(resolved.properties).some((item) =>
+      schemaHasIfc(item, seen, childFullSchema)
+    )
   ) {
     return true;
   }
   if (
     typeof resolved.additionalProperties === "object" &&
-    schemaHasIfc(resolved.additionalProperties, seen)
+    schemaHasIfc(resolved.additionalProperties, seen, childFullSchema)
   ) {
     return true;
   }
   if (
     typeof resolved.items === "object" &&
-    schemaHasIfc(resolved.items, seen)
+    schemaHasIfc(resolved.items, seen, childFullSchema)
   ) {
     return true;
   }
@@ -242,7 +247,10 @@ export function processDefaultValue(
         const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
         const propSchema =
           (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
-            ? ContextualFlowControl.resolveSchemaRefs(rawPropSchema)
+            ? ContextualFlowControl.resolveSchemaRefs(
+              rawPropSchema,
+              resolvedSchema,
+            )
             : rawPropSchema;
         if (key in defaultValue) {
           result[key] = processDefaultValue(

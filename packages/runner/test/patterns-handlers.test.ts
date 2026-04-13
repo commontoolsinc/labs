@@ -87,6 +87,45 @@ describe("Pattern Runner - Handlers", () => {
     expect(value).toMatchObject({ counter: { value: 3 } });
   });
 
+  it("defers handler registration for retryable setup transactions until commit", async () => {
+    const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
+
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incPattern = pattern<{ counter: { value: number } }>(
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const result = await runtime.editWithRetry((retryTx) => {
+      const resultCell = runtime.getCell<
+        { counter: { value: number }; stream: any }
+      >(space, "defer retryable handler start", undefined, retryTx);
+      const cell = runtime.run(retryTx, incPattern, {
+        counter: { value: 0 },
+      }, resultCell);
+
+      expect(addEventHandlerSpy.calls.length).toBe(0);
+      return cell;
+    });
+    if (result.error) throw new Error(result.error.message);
+
+    await result.ok.pull();
+
+    expect(addEventHandlerSpy.calls.length).toBe(1);
+
+    addEventHandlerSpy.restore();
+  });
+
   it("should propagate handler source location to scheduler via .name", async () => {
     // Spy on addEventHandler to capture the handler passed to it
     const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
