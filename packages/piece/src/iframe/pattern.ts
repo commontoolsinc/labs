@@ -1,9 +1,9 @@
 import {
   Cell,
   getPatternIdFromPiece,
-  URI,
   type JSONSchema,
   type Runtime,
+  URI,
 } from "@commonfabric/runner";
 
 export type IFramePattern = {
