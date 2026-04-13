@@ -64,6 +64,8 @@ export function navigateTo(
       const resolvedTarget = target.resolveAsCell();
 
       navigated = true;
+      // TODO(seefeld): This post-commit handoff regresses the previous
+      // speculative-navigation latency. Model navigation as an event instead.
       tx.enqueuePostCommitEffect({
         id: `navigate-to:${JSON.stringify(resolvedTarget.getAsLink())}`,
         kind: "navigate-to",

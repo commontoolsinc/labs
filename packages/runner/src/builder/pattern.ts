@@ -45,25 +45,6 @@ import {
 } from "../storage/interface.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
-const setSchemaAtPath = (
-  schema: Record<string, any>,
-  path: readonly PropertyKey[],
-  value: JSONSchema,
-): void => {
-  let cursor = schema;
-  for (let index = 0; index < path.length; index++) {
-    const segment = String(path[index]);
-    cursor.type ??= "object";
-    cursor.properties ??= {};
-    if (index === path.length - 1) {
-      cursor.properties[segment] = value;
-      return;
-    }
-    cursor.properties[segment] ??= { type: "object", properties: {} };
-    cursor = cursor.properties[segment] as Record<string, any>;
-  }
-};
-
 /** Declare a pattern
  *
  * @param fn A function that creates the pattern graph
@@ -513,6 +494,38 @@ export function popFrame(frame?: Frame): void {
 export function getTopFrame(): Frame | undefined {
   return frames.length ? frames[frames.length - 1] : undefined;
 }
+
+const setSchemaAtPath = (
+  schema: Record<string, any>,
+  path: readonly PropertyKey[],
+  value: JSONSchema,
+): void => {
+  if (path.length !== 1) {
+    throw new Error(
+      `Internal cell schemas must be leaf paths, got ${path.length} segments`,
+    );
+  }
+  if (typeof path[0] === "symbol") {
+    throw new Error("Internal cell schema paths cannot use symbol keys");
+  }
+  if (schema.$ref !== undefined) {
+    throw new Error("Cannot add internal cell schemas to a $ref schema");
+  }
+  if (schema.type !== undefined && schema.type !== "object") {
+    throw new Error("Internal cell schema root must be an object schema");
+  }
+  if (schema.properties !== undefined && !isRecord(schema.properties)) {
+    throw new Error("Internal cell schema properties must be an object");
+  }
+
+  schema.type ??= "object";
+  schema.properties ??= {};
+  const segment = String(path[0]);
+  if (segment in schema.properties) {
+    throw new Error(`Duplicate internal cell schema path: ${segment}`);
+  }
+  schema.properties[segment] = value;
+};
 
 /** The full type of the `pattern` function including all overloads. */
 export type PatternBuilder = typeof pattern;
