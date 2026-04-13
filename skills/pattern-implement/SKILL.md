@@ -46,10 +46,9 @@ const submit = action(() => {
 ```
 
 Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient `Date.now()` and
-`Math.random()` when a pattern needs explicit time or randomness.
-If a control already uses `$value` or `$checked`, let that binding own the
-control value. Use `oncf-change` / `oncf-input` only for dependent state or
-other side effects.
+`Math.random()` when a pattern needs explicit time or randomness. If a control
+already uses `$value` or `$checked`, let that binding own the control value. Use
+`oncf-change` / `oncf-input` only for dependent state or other side effects.
 
 **handler()** - Reused with different bindings:
 
