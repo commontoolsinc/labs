@@ -7,7 +7,11 @@
 
 import type { CommandContext, CommandResult } from "./context.ts";
 import { type Label, labels } from "../labels.ts";
-import { defaultConfig } from "../sandbox/config.ts";
+import {
+  defaultConfig,
+  mergeConfig,
+  type SandboxedExecConfig,
+} from "../sandbox/config.ts";
 
 /**
  * Check if a label has sufficient integrity for execution
@@ -83,6 +87,29 @@ function shellSingleQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+function envFlag(...names: string[]): boolean | undefined {
+  for (const name of names) {
+    const value = Deno.env.get(name)?.trim().toLowerCase();
+    if (!value) continue;
+    if (["1", "true", "yes", "on"].includes(value)) return true;
+    if (["0", "false", "no", "off"].includes(value)) return false;
+  }
+  return undefined;
+}
+
+function bashSandboxConfig(): SandboxedExecConfig {
+  const allowNetwork = envFlag(
+    "BRIGHID_BASH_SANDBOX_ALLOW_NETWORK",
+    "BRIGHID_SANDBOX_ALLOW_NETWORK",
+    "CFC_SHELL_BASH_SANDBOX_ALLOW_NETWORK",
+    "CFC_SHELL_ALLOW_NETWORK",
+  );
+
+  return mergeConfig(defaultConfig, {
+    allowNetwork: allowNetwork ?? true,
+  });
+}
+
 function guestPathForVfsPath(vfsPath: string, guestWorkspacePath: string): string {
   if (vfsPath === "/") {
     return guestWorkspacePath;
@@ -100,7 +127,7 @@ async function runSandboxedBash(
   command: string,
   ctx: CommandContext,
 ): Promise<CommandResult> {
-  const executor = ctx.getSandboxExecutor(defaultConfig);
+  const executor = ctx.getSandboxExecutor(bashSandboxConfig());
   const guestWorkspacePath = executor.getConfig().guestWorkspacePath;
   const guestCwd = guestPathForVfsPath(ctx.vfs.cwd, guestWorkspacePath);
   const wrappedCommand = `cd ${shellSingleQuote(guestCwd)} && ${command}`;
@@ -168,7 +195,7 @@ export async function bash(
         return blockExecution(ctx, scriptLabel);
       }
 
-      const executor = ctx.getSandboxExecutor(defaultConfig);
+      const executor = ctx.getSandboxExecutor(bashSandboxConfig());
       const stdinData = await ctx.stdin.readAll();
       const scriptStdin = {
         value: stdinData.value.length > 0

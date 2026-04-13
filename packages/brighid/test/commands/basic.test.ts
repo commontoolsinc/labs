@@ -11,7 +11,10 @@ import {
   createEnvironment,
 } from "../../src/commands/context.ts";
 import { createDefaultRegistry } from "../../src/commands/mod.ts";
-import { defaultConfig } from "../../src/sandbox/config.ts";
+import {
+  defaultConfig,
+  type SandboxedExecConfig,
+} from "../../src/sandbox/config.ts";
 import { SandboxedExecutor } from "../../src/sandbox/executor.ts";
 
 /**
@@ -193,6 +196,31 @@ Deno.test("exec blocks low-integrity content", async () => {
   const errorOutput = await stderr.readAll();
   assertEquals(errorOutput.value.includes("Blocked"), true);
   assertEquals(errorOutput.value.includes("integrity"), true);
+});
+
+Deno.test("bash opts into networked sandbox execution by default", async () => {
+  const registry = createDefaultRegistry();
+  const { ctx } = createTestContext();
+  let capturedConfig: SandboxedExecConfig | undefined;
+
+  ctx.getSandboxExecutor = (config = defaultConfig) => {
+    capturedConfig = config;
+    return {
+      getConfig: () => config,
+      execute: async () => ({
+        stdout: { value: "", label: labels.bottom() },
+        stderr: { value: "", label: labels.bottom() },
+        exitCode: 0,
+        modifiedFiles: new Map(),
+      }),
+    } as unknown as SandboxedExecutor;
+  };
+
+  const bash = registry.get("bash")!;
+  const result = await bash(["-c", "curl https://www.google.com"], ctx);
+
+  assertEquals(result.exitCode, 0);
+  assertEquals(capturedConfig?.allowNetwork, true);
 });
 
 Deno.test("curl fails gracefully without network access", async () => {
