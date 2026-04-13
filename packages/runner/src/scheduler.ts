@@ -3641,6 +3641,9 @@ export class Scheduler {
             this.runningPromise = Promise.resolve(
               this.runtime.harness.invoke(() => action(tx)),
             ).then(() => {
+              if (hasAnnotatedWrites(handler)) {
+                recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
+              }
               const duration = (performance.now() - actionStartTime) / 1000;
               if (duration > 10) {
                 console.warn(`Slow action: ${duration.toFixed(3)}s`, action);

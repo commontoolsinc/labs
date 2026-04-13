@@ -227,6 +227,72 @@ describe("CFC trusted UI event enforcement", () => {
     cancel();
   });
 
+  it("commits trusted event writes when the handler write annotation is untyped", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-untyped-write",
+      { asStream: true },
+    );
+    const output = runtime.getCell(
+      space,
+      "cfc-ui-contract-output-untyped-write",
+      {
+        type: "string",
+        ifc: {
+          ...trustedPatternUiActionSchema.ifc,
+        },
+      },
+    );
+    const untypedWrite = { ...output.getAsNormalizedFullLink() };
+    delete untypedWrite.schema;
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        output.withTx(tx).set("accepted");
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [untypedWrite],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    });
+    await runtime.idle();
+
+    expect(output.get()).toBe("accepted");
+    cancel();
+  });
+
   it("fails closed when trusted event markers are missing or mismatched", async () => {
     storageManager = StorageManager.emulate({
       as: signer,

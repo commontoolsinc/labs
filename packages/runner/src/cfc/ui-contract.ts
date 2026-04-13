@@ -2,6 +2,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { CfcAddress } from "./types.ts";
 
 type UiContractTrustRequirements = {
   trustedPattern?: string;
@@ -40,6 +41,18 @@ type SerializedTrustedEvent = {
       uiContractDataset?: unknown;
     };
   };
+};
+
+type TrustedEventPolicyTx = Pick<
+  IExtendedStorageTransaction,
+  "getCfcState" | "recordCfcWritePolicyInput"
+>;
+
+type AddressLike = {
+  space: string;
+  id: string;
+  type: string;
+  path: readonly unknown[];
 };
 
 type TrustedDomProvenance = {
@@ -185,28 +198,89 @@ export const trustedEventMatchesUiContract = (
   }
 };
 
+const pathsEqual = (
+  left: readonly unknown[],
+  right: readonly unknown[],
+): boolean =>
+  left.length === right.length &&
+  left.every((segment, index) => String(segment) === String(right[index]));
+
+const targetMatchesWrite = (
+  target: CfcAddress,
+  write: AddressLike,
+): boolean =>
+  target.space === write.space &&
+  target.id === write.id &&
+  target.type === write.type &&
+  pathsEqual(target.path, write.path);
+
+const schemaCandidatesForWrite = (
+  tx: TrustedEventPolicyTx,
+  write: NormalizedFullLink,
+): JSONSchema[] => {
+  const schemas: JSONSchema[] = [];
+  if (write.schema !== undefined) {
+    schemas.push(write.schema);
+  }
+  for (const input of tx.getCfcState().writePolicyInputs) {
+    if (
+      input.kind === "schema" &&
+      input.schema !== undefined &&
+      targetMatchesWrite(input.target, write)
+    ) {
+      schemas.push(input.schema);
+    }
+  }
+  return schemas;
+};
+
+const trustedEventPolicyInputAlreadyRecorded = (
+  tx: TrustedEventPolicyTx,
+  target: CfcAddress,
+  eventId: string,
+): boolean =>
+  tx.getCfcState().writePolicyInputs.some((input) =>
+    input.kind === "trusted-event" &&
+    input.eventId === eventId &&
+    targetMatchesWrite(input.target, target)
+  );
+
+const trustedEventId = (
+  event: unknown,
+  write: NormalizedFullLink,
+): string =>
+  `trusted-event:${
+    String((event as { type?: string }).type ?? "event")
+  }:${write.id}:${write.path.join("/")}`;
+
 export const recordTrustedEventPolicyInputs = (
-  tx: Pick<IExtendedStorageTransaction, "recordCfcWritePolicyInput">,
+  tx: TrustedEventPolicyTx,
   writes: readonly NormalizedFullLink[],
   event: unknown,
 ): void => {
   for (const write of writes) {
-    const contract = uiContractFromSchema(write.schema);
-    if (!trustedEventMatchesUiContract(event, contract)) {
-      continue;
-    }
-    tx.recordCfcWritePolicyInput({
-      kind: "trusted-event",
-      target: {
+    for (const schema of schemaCandidatesForWrite(tx, write)) {
+      const contract = uiContractFromSchema(schema);
+      if (!trustedEventMatchesUiContract(event, contract)) {
+        continue;
+      }
+      const target = {
         space: write.space,
         id: write.id,
         type: write.type,
         path: [...write.path],
-      },
-      eventId: `trusted-event:${
-        String((event as { type?: string }).type ?? "event")
-      }:${write.id}:${write.path.join("/")}`,
-      provenance: (event as SerializedTrustedEvent).provenance,
-    });
+      };
+      const eventId = trustedEventId(event, write);
+      if (trustedEventPolicyInputAlreadyRecorded(tx, target, eventId)) {
+        break;
+      }
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target,
+        eventId,
+        provenance: (event as SerializedTrustedEvent).provenance,
+      });
+      break;
+    }
   }
 };
