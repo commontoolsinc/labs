@@ -391,13 +391,13 @@ export class CFAutocomplete extends BaseElement {
 
     // Internal state
     @state()
-    private _isOpen = false;
+    private accessor _isOpen = false;
     @state()
-    private _query = "";
+    private accessor _query = "";
     @state()
-    private _highlightedIndex = 0;
+    private accessor _highlightedIndex = 0;
     @state()
-    private _dropdownStyle = "";
+    private accessor _dropdownStyle = "";
 
     // Cached/memoized filter results - updated in willUpdate, not on every render
     private _cachedFilteredItems: AutocompleteItem[] = [];
@@ -433,7 +433,7 @@ export class CFAutocomplete extends BaseElement {
     // Theme consumption
     @consume({ context: cfThemeContext, subscribe: true })
     @property({ attribute: false })
-    declare theme?: CFTheme;
+    accessor theme: CFTheme = defaultTheme;
 
     override connectedCallback() {
       super.connectedCallback();

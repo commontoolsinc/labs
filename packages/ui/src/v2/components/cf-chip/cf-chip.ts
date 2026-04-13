@@ -139,16 +139,16 @@ export class CFChip extends BaseElement {
     ];
 
     @property({ type: String })
-    label = "";
+    accessor label = "";
 
     @property({ type: String })
-    variant: "default" | "primary" | "accent" = "default";
+    accessor variant: "default" | "primary" | "accent" = "default";
 
     @property({ type: Boolean })
-    removable = false;
+    accessor removable = false;
 
     @property({ type: Boolean })
-    interactive = false;
+    accessor interactive = false;
 
     private _handleRemove(e: Event): void {
       e.stopPropagation();

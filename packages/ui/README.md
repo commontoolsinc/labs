@@ -55,6 +55,19 @@ registerAllComponents();
 </cf-card>
 ```
 
+## 🎨 Theme System
+
+`cf-theme` provides subtree-level theme tokens for typography, colors, spacing,
+border radius, and motion. Use it for overall visual direction, then refine
+individual components with their documented `--cf-*` custom properties.
+
+Useful references:
+
+- `src/v2/components/cf-theme/cf-theme.ts`
+- `src/v2/components/theme-context.ts`
+- `../../docs/common/patterns/style.md`
+- `../../docs/common/components/COMPONENTS.md`
+
 ## 📖 V2 Components (39 total)
 
 ### Core UI Components (23)

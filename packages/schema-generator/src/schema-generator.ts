@@ -158,7 +158,7 @@ export class SchemaGenerator implements ISchemaGenerator {
    * When TypeScript widens a type to 'any' (e.g., for array element types or synthetic nodes),
    * the TypeNode structure is more reliable than the Type.
    *
-   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueRef) erase to their inner type,
+   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueCell) erase to their inner type,
    * which may appear as 'any', but they should use type-based analysis because
    * CommonFabricFormatter handles them specially via typeNode context.
    */
@@ -245,7 +245,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         return `Default_${type.flags}_${argTexts}_${locationHash}_${position}`;
       }
 
-      // Cell-like wrappers (Cell, Writable, Stream, OpaqueRef) share their
+      // Cell-like wrappers (Cell, Writable, Stream, OpaqueCell) share their
       // ts.Type identity with the same wrapper instantiation at other positions.
       // When a recursive type like TodoItem contains `Writable<TodoItem[]>`,
       // TypeScript reuses the same Cell<TodoItem[]> type object, causing the
@@ -300,7 +300,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Handle conditional types that arise from unresolved type parameters.
-    // When a generic type like OpaqueRef<T | undefined> is used where T is a
+    // When a generic type like OpaqueCell<T | undefined> is used where T is a
     // type parameter, TypeScript represents this as a conditional type for
     // deferred evaluation. We treat these as "any" schema since the concrete
     // type isn't known at compile time.
@@ -313,7 +313,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     // by getNamedTypeKey) into definitions and return $ref for non-root uses.
     // Cycle detection still applies via definitionStack.
 
-    // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueRef).
+    // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueCell).
     // Wrapper types erase to their inner type, so we must check typeNode to
     // distinguish wrapper context from inner context.
     // This now handles both direct wrappers and aliases (e.g., type MyDefault<T> = Default<T, T>)
@@ -652,7 +652,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
-          const propName = getPropertyNameText(member.name);
+          const propName = getPropertyNameText(member.name, checker);
           if (!propName) {
             continue;
           }
@@ -730,6 +730,12 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Resolve by name from source scope as a fallback (e.g., CharmEntry in
     // Cell<CharmEntry[]>).
     if (ts.isTypeReferenceNode(typeNode)) {
+      if (detectWrapperViaNode(typeNode, checker)) {
+        const wrapperType = typeRegistry?.get(typeNode) ??
+          checker.getTypeFromTypeNode(typeNode);
+        return this.formatChildType(wrapperType, context, typeNode);
+      }
+
       const resolved = this.resolveTypeReferenceFromScope(
         typeNode,
         checker,

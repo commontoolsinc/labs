@@ -5,7 +5,7 @@
   },
   "tasks": {
     "bundle": "../../scripts/bundle.ts src/index.ts",
-    "test": "deno test --no-check --allow-env --allow-ffi --allow-read --ignore=src/v2/components/cf-svg/sanitize-svg.test.ts && deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts src/v2/components/cf-svg/sanitize-svg.test.ts"
+    "test": "deno test --no-check --allow-env --allow-ffi --allow-read --allow-write --allow-run --ignore=src/v2/components/cf-svg/sanitize-svg.test.ts && deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts src/v2/components/cf-svg/sanitize-svg.test.ts"
   },
   "imports": {
     "@codemirror/commands": "npm:@codemirror/commands@^6.8.1",

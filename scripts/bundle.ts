@@ -15,11 +15,6 @@ console.log(`Bundling graph at ${input} to ${output}...`);
 await build({
   entryPoints: [input],
   outfile: output,
-  tsconfigRaw: {
-    compilerOptions: {
-      experimentalDecorators: true,
-    },
-  },
 });
 
 console.log(`Successfully bundled!`);

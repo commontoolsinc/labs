@@ -114,25 +114,25 @@ export class CFCellContext extends BaseElement {
   ];
 
   @property({ attribute: false })
-  cell?: CellHandle;
+  accessor cell: CellHandle | undefined = undefined;
 
   @property({ type: String })
-  label?: string;
+  accessor label: string | undefined = undefined;
 
   @property({ type: Boolean, reflect: true })
-  inline?: boolean;
+  accessor inline: boolean | undefined = undefined;
 
   @state()
-  private _modifierHeld: boolean = false;
+  private accessor _modifierHeld: boolean = false;
 
   @state()
-  private _isHovered: boolean = false;
+  private accessor _isHovered: boolean = false;
 
   @state()
-  private _isWatching: boolean = false;
+  private accessor _isWatching: boolean = false;
 
   @state()
-  private _updateCount: number = 0;
+  private accessor _updateCount: number = 0;
 
   private _boundHandleKeyDown = this._handleKeyDown.bind(this);
   private _boundHandleKeyUp = this._handleKeyUp.bind(this);

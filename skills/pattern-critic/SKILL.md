@@ -90,9 +90,8 @@ export default pattern<Input>(({ deck }) => ({
 ### Correct Conditional Rendering
 
 ```typescript
-// Both are valid - ternaries auto-transform to ifElse()
+// Prefer plain ternaries in normal pattern code
 return <>{showDetails ? <div>Details content</div> : null}</>;
-return <>{ifElse(showDetails, <div>Details content</div>, null)}</>;
 ```
 
 ### Visual Review Reminder

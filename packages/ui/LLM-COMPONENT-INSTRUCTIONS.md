@@ -14,6 +14,19 @@ shadcn/ui design system. All components:
 - Emit custom events prefixed with `cf-`
 - Follow strict security constraints (no external resources, limited events)
 
+## Theme System First
+
+When composing a polished UI with `cf-*` components, prefer `cf-theme` for
+overall typography, color, spacing, radius, and motion, then use component
+`--cf-*` custom properties only for local refinement.
+
+Working references:
+
+- `src/v2/components/cf-theme/cf-theme.ts`
+- `src/v2/components/theme-context.ts`
+- `../../docs/common/patterns/style.md`
+- `../../docs/common/components/COMPONENTS.md`
+
 ## Component Reference
 
 ### 1. cf-button

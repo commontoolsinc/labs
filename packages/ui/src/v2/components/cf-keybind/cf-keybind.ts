@@ -63,7 +63,7 @@ export class CFKeybind extends BaseElement {
 
   // Optional router provided by host app
   @consume({ context: keyboardRouterContext, subscribe: false })
-  private _router?: KeyboardRouter;
+  private accessor _router!: KeyboardRouter;
   #dispose?: () => void;
 
   constructor() {

@@ -126,22 +126,22 @@ export class XACLView extends LitElement {
   `;
 
   @property({ attribute: false })
-  rt?: RuntimeInternals;
+  accessor rt: RuntimeInternals | undefined = undefined;
 
   @state()
-  private expanded = false;
+  private accessor expanded = false;
 
   @state()
-  private showAddForm = false;
+  private accessor showAddForm = false;
 
   @state()
-  private newUser = "";
+  private accessor newUser = "";
 
   @state()
-  private newCapability: Capability = "READ";
+  private accessor newCapability: Capability = "READ";
 
   @state()
-  private error?: string;
+  private accessor error: string | undefined = undefined;
 
   private _aclTask = new Task(this, {
     task: ([_rt]) => {

@@ -117,6 +117,11 @@ export const fuse = new Command()
   )
   .option("--background", "Run in the background (detached).")
   .option("--debug", "Enable FUSE debug output.")
+  .option(
+    "-s, --space <name:string>",
+    "Space(s) to connect (repeatable, default: home).",
+    { collect: true },
+  )
   .example(
     cliText("cf fuse mount /tmp/cf-fuse"),
     "Mount with settings from CF_API_URL / CF_IDENTITY env vars.",
@@ -170,6 +175,7 @@ export const fuse = new Command()
       if (apiUrl) spawnArgs.push("--api-url", apiUrl);
       if (identity) spawnArgs.push("--identity", identity);
       if (execCli) spawnArgs.push("--exec-cli", execCli);
+      for (const s of options.space ?? []) spawnArgs.push("--space", s);
     } else {
       const modPath = fuseMod(import.meta.url);
       spawnCmd = "deno";
@@ -180,6 +186,7 @@ export const fuse = new Command()
         identity,
         execCli,
       });
+      for (const s of options.space ?? []) spawnArgs.push("--space", s);
     }
 
     if (options.background) {

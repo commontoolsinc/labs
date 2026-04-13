@@ -89,16 +89,16 @@ export class XQuickJumpView extends BaseView {
   `;
 
   @property({ type: Boolean, reflect: true })
-  visible = false;
+  accessor visible = false;
 
   @property({ attribute: false })
-  rt?: RuntimeInternals;
+  accessor rt: RuntimeInternals | undefined = undefined;
 
   @state()
-  private query = "";
+  private accessor query = "";
 
   @state()
-  private selectedIndex = 0;
+  private accessor selectedIndex = 0;
 
   private inputEl?: HTMLInputElement | null;
 

@@ -65,3 +65,32 @@ export default pattern<Input>(({ count, items, user }) => ({
   ),
 }));
 ```
+
+### Conditional Expressions And Other Lowered Value Sites
+
+Plain ternaries work in more than just JSX children. In current main, they
+also work across most ordinary value-expression positions in normal pattern
+code.
+
+```tsx
+export default pattern<Input>(({ count, items, user }) => {
+  const badgeText = count > 10 ? "High" : "Low";
+
+  return {
+    [UI]: (
+      <div
+        style={{ opacity: count > 0 ? 1 : 0.5 }}
+        data-state={user.name ? "ready" : "empty"}
+      >
+        <button disabled={items.length === 0}>
+          {items.length === 0 ? "No items" : "Open list"}
+        </button>
+        <span>{badgeText}</span>
+      </div>
+    ),
+  };
+});
+```
+
+If you're debugging a less common site, inspect the emitted source with
+`deno task cf check <pattern>.tsx --show-transformed`.

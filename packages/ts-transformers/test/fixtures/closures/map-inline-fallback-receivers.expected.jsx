@@ -115,7 +115,16 @@ export default pattern((__cf_pattern_input) => {
                         type: "object",
                         properties: {
                             element: {
-                                $ref: "#/$defs/Reaction"
+                                type: "object",
+                                properties: {
+                                    userNames: {
+                                        type: "array",
+                                        items: {
+                                            type: "unknown"
+                                        }
+                                    }
+                                },
+                                required: ["userNames"]
                             },
                             params: {
                                 type: "object",
@@ -133,24 +142,7 @@ export default pattern((__cf_pattern_input) => {
                                 required: ["msg"]
                             }
                         },
-                        required: ["element", "params"],
-                        $defs: {
-                            Reaction: {
-                                type: "object",
-                                properties: {
-                                    emoji: {
-                                        type: "string"
-                                    },
-                                    userNames: {
-                                        type: "array",
-                                        items: {
-                                            type: "string"
-                                        }
-                                    }
-                                },
-                                required: ["emoji", "userNames"]
-                            }
-                        }
+                        required: ["element", "params"]
                     } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{
                                 $ref: "https://commonfabric.org/schemas/vnode.json"

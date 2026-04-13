@@ -36,13 +36,13 @@ export class CFSpaceLink extends BaseElement {
   ];
 
   @property({ type: String })
-  spaceName?: string;
+  accessor spaceName: string | undefined = undefined;
 
   @property({ type: String })
-  spaceDid?: DID;
+  accessor spaceDid: DID | undefined = undefined;
 
   @property({ type: String })
-  label?: string;
+  accessor label: string | undefined = undefined;
 
   private _truncateDid(did: string): string {
     if (did.length <= 20) return did;

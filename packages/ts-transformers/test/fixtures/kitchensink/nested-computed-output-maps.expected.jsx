@@ -236,19 +236,49 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         thread: {
-                            $ref: "#/$defs/Thread"
-                        },
-                        outerIndex: {
-                            type: "number"
+                            type: "object",
+                            properties: {
+                                title: {
+                                    type: "string"
+                                },
+                                id: {
+                                    type: "string"
+                                },
+                                muted: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["title", "id", "muted"]
                         },
                         visibleComments: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Comment"
+                                type: "object",
+                                properties: {
+                                    id: {
+                                        type: "string"
+                                    },
+                                    flagged: {
+                                        type: "boolean"
+                                    },
+                                    text: {
+                                        type: "string"
+                                    },
+                                    reactions: {
+                                        type: "array",
+                                        items: {
+                                            type: "string"
+                                        }
+                                    }
+                                },
+                                required: ["id", "flagged", "text", "reactions"]
                             }
+                        },
+                        outerIndex: {
+                            type: "number"
                         }
                     },
-                    required: ["thread", "outerIndex", "visibleComments"]
+                    required: ["thread", "visibleComments", "outerIndex"]
                 }
             },
             selectedCommentId: {
@@ -265,51 +295,7 @@ export default pattern((state) => {
                 required: ["lane"]
             }
         },
-        required: ["visibleThreads", "selectedCommentId", "state"],
-        $defs: {
-            Comment: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    text: {
-                        type: "string"
-                    },
-                    flagged: {
-                        type: "boolean"
-                    },
-                    reactions: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    }
-                },
-                required: ["id", "text", "flagged", "reactions"]
-            },
-            Thread: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    title: {
-                        type: "string"
-                    },
-                    muted: {
-                        type: "boolean"
-                    },
-                    comments: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Comment"
-                        }
-                    }
-                },
-                required: ["id", "title", "muted", "comments"]
-            }
-        }
+        required: ["visibleThreads", "selectedCommentId", "state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -517,7 +503,16 @@ export default pattern((state) => {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/Comment"
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            text: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "text"]
                     },
                     index: {
                         type: "number"
@@ -541,30 +536,7 @@ export default pattern((state) => {
                         required: ["outerIndex", "state"]
                     }
                 },
-                required: ["element", "params"],
-                $defs: {
-                    Comment: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "string"
-                            },
-                            text: {
-                                type: "string"
-                            },
-                            flagged: {
-                                type: "boolean"
-                            },
-                            reactions: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            }
-                        },
-                        required: ["id", "text", "flagged", "reactions"]
-                    }
-                }
+                required: ["element", "params"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

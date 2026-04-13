@@ -184,6 +184,123 @@ type CalculatorRequest = {
         },
       ]);
     });
+
+    it("preserves wrapper semantics for synthetic union members", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const unionNode = ts.factory.createUnionTypeNode([
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.UndefinedKeyword),
+        ts.factory.createTypeReferenceNode(
+          ts.factory.createQualifiedName(
+            ts.factory.createIdentifier("__cfHelpers"),
+            ts.factory.createIdentifier("OpaqueCell"),
+          ),
+          [
+            ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+          ],
+        ),
+      ]);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        unionNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.anyOf).toEqual([
+        { type: "undefined" },
+        { type: "unknown", asCell: ["opaque"] },
+      ]);
+    });
+
+    it("preserves computed Common Fabric UI keys in synthetic type literals", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+declare const UI: unique symbol;
+type VNode = {
+  type: "vnode";
+};
+type Output = { [UI]: VNode };
+`;
+      const { checker, typeNode } = await getTypeFromCode(code, "Output");
+      if (!typeNode) {
+        throw new Error("Expected Output type node.");
+      }
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({
+        $UI: {
+          $ref: "https://commonfabric.org/schemas/vnode.json",
+        },
+      });
+      expect(schema.required).toEqual(["$UI"]);
+    });
+
+    it("preserves local const string computed keys in synthetic type literals", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+const UI = "title" as const;
+type Output = { [UI]: string; metadata: number };
+`;
+      const { checker, typeNode } = await getTypeFromCode(code, "Output");
+      if (!typeNode) {
+        throw new Error("Expected Output type node.");
+      }
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({
+        title: { type: "string" },
+        metadata: { type: "number" },
+      });
+      expect(schema.required).toEqual(["title", "metadata"]);
+    });
+  });
+
+  describe("union members", () => {
+    it("uses source union member nodes when semantic order is canonicalized", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+type Event =
+  | { a: string }
+  | { b: number }
+  | undefined;
+`;
+      const { type, checker, typeNode } = await getTypeFromCode(code, "Event");
+
+      const schema = generator.generateSchema(
+        type,
+        checker,
+        typeNode,
+      ) as Record<string, unknown>;
+
+      expect(schema.anyOf).toEqual([
+        { type: "undefined" },
+        {
+          type: "object",
+          properties: {
+            a: { type: "string" },
+          },
+          required: ["a"],
+        },
+        {
+          type: "object",
+          properties: {
+            b: { type: "number" },
+          },
+          required: ["b"],
+        },
+      ]);
+    });
   });
 
   describe("anonymous recursion", () => {

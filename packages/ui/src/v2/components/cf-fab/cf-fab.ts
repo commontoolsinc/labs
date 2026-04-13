@@ -411,67 +411,68 @@ export class CFFab extends BaseElement {
          * Whether the FAB is expanded (controlled by parent)
          */
         @property({ type: Boolean, reflect: true })
-        declare expanded: boolean;
+        accessor expanded = false;
 
         /**
          * Visual variant
          */
         @property({ type: String, reflect: true })
-        declare variant: "default" | "primary";
+        accessor variant: "default" | "primary" = "default";
 
         /**
          * Screen position
          */
         @property({ type: String, reflect: true })
-        declare position:
+        accessor position:
           | "bottom-right"
           | "bottom-left"
           | "top-right"
           | "top-left"
-          | "bottom-center";
+          | "bottom-center" = "bottom-right";
 
         /**
          * Latest message to show as preview notification
          */
         @property({ type: Object, attribute: false })
-        declare previewMessage: CellHandle<string> | string | undefined;
+        accessor previewMessage: CellHandle<string> | string | undefined =
+          undefined;
 
         // The resolved value from `previewMessage`
         @state()
-        _resolvedPreviewMessage: string | undefined;
+        accessor _resolvedPreviewMessage: string | undefined = undefined;
 
         /**
          * Whether the FAB is in pending/loading state
          */
         @property({ type: Boolean, reflect: true })
-        declare pending: boolean;
+        accessor pending = false;
 
         /**
          * Messages cell handle for beads display in collapsed state
          */
         @property({ type: Object, attribute: false })
-        declare messages: CellHandle | undefined;
+        accessor messages: CellHandle | undefined = undefined;
 
         /**
          * Placeholder text shown in collapsed state when no messages
          */
         @property({ type: String, attribute: "placeholder" })
-        declare placeholderText: string;
+        accessor placeholderText = "Ask about anything...";
 
         /**
          * Number of pinned items to show as dots in collapsed state
          */
         @property({ type: Number, attribute: false })
-        declare pinCount: number;
+        accessor pinCount = 0;
 
         /**
          * Internal collapsing state for animation timing
          */
         @state()
-        private collapsing = false;
+        private accessor collapsing = false;
 
         @state()
-        private showPreview = false;
+        private accessor showPreview = false;
 
         private collapseTimeout: number | null = null;
         private _previewUnsubscribe: (() => void) | null = null;
@@ -479,12 +480,6 @@ export class CFFab extends BaseElement {
 
         constructor() {
           super();
-          this.expanded = false;
-          this.variant = "default";
-          this.position = "bottom-right";
-          this.pending = false;
-          this.placeholderText = "Ask about anything...";
-          this.pinCount = 0;
         }
 
         override connectedCallback() {

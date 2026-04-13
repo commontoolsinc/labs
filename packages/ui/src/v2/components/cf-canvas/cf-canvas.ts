@@ -5,9 +5,9 @@ import { BaseElement } from "../../core/base-element.ts";
 @customElement("cf-canvas")
 export class CFCanvas extends BaseElement {
   @property({ type: Number })
-  width = 800;
+  accessor width = 800;
   @property({ type: Number })
-  height = 600;
+  accessor height = 600;
 
   static override styles = css`
     :host {

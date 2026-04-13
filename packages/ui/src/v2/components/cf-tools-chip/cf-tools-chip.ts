@@ -296,26 +296,26 @@ export class CFToolsChip extends BaseElement {
       declare open: boolean;
       /** Tools array shown in the panel. Accepts array, record, or CellHandle. */
       @property({ attribute: false })
-      declare tools:
+      accessor tools:
         | CellHandle<ToolsInput>
         | ToolsChipTool[]
         | ToolsRecord
-        | undefined;
+        | undefined = undefined;
       /** Delay in ms before closing on hover-out. */
       declare closeDelay: number;
 
       // Track pointer-in to support hover open/close reliably.
       @state()
-      private _hovering = false;
+      private accessor _hovering = false;
       // Track user toggle state to keep panel open until clicked again.
       @state()
-      private _toggledOpen = false;
+      private accessor _toggledOpen = false;
       #closeTimer?: number;
 
       // Consume theme and keep overlay/popover state
       @consume({ context: cfThemeContext, subscribe: true })
       @property({ attribute: false })
-      declare theme?: CFTheme;
+      accessor theme: CFTheme = defaultTheme;
 
       #overlay: HTMLDivElement | null = null;
       #resizeObs?: ResizeObserver;

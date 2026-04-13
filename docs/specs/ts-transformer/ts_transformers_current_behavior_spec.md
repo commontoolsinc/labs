@@ -326,6 +326,44 @@ structurally representable.
 This inference runs through `collectFunctionSchemaTypeNodes` via
 `inferReturnType`, object-literal recovery, and direct projection recovery.
 
+### 6.7 Lowerable Expression-Site Categories
+
+The shared expression-site policy recognizes six authored container kinds via
+`getExpressionContainerKind`:
+
+- `jsx-expression`
+- `return-expression`
+- `variable-initializer`
+- `call-argument`
+- `object-property`
+- `array-element`
+
+Those container kinds are the raw building blocks for the author-facing buckets
+described in the target-language spec:
+
+- JSX expressions
+- top-level pattern-body value-expression sites
+- callback-local value-expression sites inside supported reactive collection
+  callbacks
+
+`findLowerableExpressionSite` walks outward through enclosing pattern-context
+containers until it finds the nearest lowerable site admitted by
+`classifyExpressionSiteHandling`.
+
+`findPreferredNestedLowerableExpressionSite` is narrower: it only picks nested
+structural sites with container kinds `call-argument`, `object-property`, or
+`array-element`.
+
+These categories do not mean "rewrite every descendant expression." Explicit
+computation callbacks still create their own ownership boundary, and every site
+must separately satisfy the shared handling policy.
+
+In particular, explicit compute callbacks remain an ownership boundary for
+recursive lowering. That boundary does not disappear just because the callback
+returns JSX: ternaries and logical control flow inside the compute callback
+body stay authored JavaScript rather than recursively lowered helper control
+flow.
+
 ## 7. JSX Expression Site Routing And Early Rewriting
 
 `JsxExpressionSiteRouterTransformer` runs only when helper import is present.

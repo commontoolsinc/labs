@@ -1063,64 +1063,67 @@ export class XSchedulerGraph extends LitElement {
   `;
 
   @property({ attribute: false })
-  debuggerController?: DebuggerController;
+  accessor debuggerController: DebuggerController | undefined = undefined;
 
   /** Bumped when pattern sources arrive; forces re-render of source view */
   @property({ type: Number })
-  patternSourcesVersion = 0;
+  accessor patternSourcesVersion = 0;
 
   @state()
-  private layoutNodes = new Map<string, LayoutNode>();
+  private accessor layoutNodes = new Map<string, LayoutNode>();
 
   @state()
-  private layoutEdges: LayoutEdge[] = [];
+  private accessor layoutEdges: LayoutEdge[] = [];
 
   @state()
-  private svgWidth = 800;
+  private accessor svgWidth = 800;
 
   @state()
-  private svgHeight = 400;
+  private accessor svgHeight = 400;
 
   @state()
-  private selectedEdge: LayoutEdge | null = null;
+  private accessor selectedEdge: LayoutEdge | null = null;
 
   @state()
-  private selectedNode: LayoutNode | null = null;
+  private accessor selectedNode: LayoutNode | null = null;
 
   @state()
-  private tooltipPosition = { x: 0, y: 0 };
+  private accessor tooltipPosition = { x: 0, y: 0 };
 
   @state()
-  private triggeredNodes = new Map<string, number>(); // id -> timestamp
+  private accessor triggeredNodes = new Map<string, number>(); // id -> timestamp
 
   @state()
-  private isPullMode = false;
+  private accessor isPullMode = false;
 
   @state()
-  private zoomLevel = 1.0;
+  private accessor zoomLevel = 1.0;
 
   @state()
-  private collapsedParents = new Set<string>();
+  private accessor collapsedParents = new Set<string>();
 
   @state()
-  private viewMode: "graph" | "table" | "flags" | "source" = "table";
+  private accessor viewMode: "graph" | "table" | "flags" | "source" = "table";
 
   @state()
-  private tableSortColumn: "totalTime" | "runCount" | "avgTime" | "lastTime" =
-    "totalTime";
+  private accessor tableSortColumn:
+    | "totalTime"
+    | "runCount"
+    | "avgTime"
+    | "lastTime" = "totalTime";
 
   @state()
-  private tableSortAscending = false;
+  private accessor tableSortAscending = false;
 
   @state()
-  private tableExpandedParents = new Set<string>();
+  private accessor tableExpandedParents = new Set<string>();
 
   // When true, sort table by delta values instead of lifetime totals
   @state()
-  private sortByDelta = false;
+  private accessor sortByDelta = false;
 
   @query(".graph-container")
-  private graphContainer?: HTMLElement;
+  private accessor graphContainer: HTMLElement | null = null;
 
   private lastGraphVersion = -1;
   private lastPatternSourcesVersion = -1;

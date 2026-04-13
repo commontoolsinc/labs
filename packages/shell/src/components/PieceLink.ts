@@ -11,13 +11,13 @@ export class PieceLinkElement extends LitElement {
   `;
 
   @property()
-  pieceId?: string;
+  accessor pieceId: string | undefined = undefined;
 
   @property()
-  spaceName?: string;
+  accessor spaceName: string | undefined = undefined;
 
   @property({ attribute: false })
-  spaceDid?: DID;
+  accessor spaceDid: DID | undefined = undefined;
 
   #onClick = (e: Event) => {
     e.preventDefault();

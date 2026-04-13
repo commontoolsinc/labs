@@ -55,55 +55,20 @@ export default pattern((state) => {
                     projects: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Project"
+                            type: "object",
+                            properties: {
+                                archived: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["archived"]
                         }
                     }
                 },
                 required: ["showArchived", "projects"]
             }
         },
-        required: ["state"],
-        $defs: {
-            Project: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    name: {
-                        type: "string"
-                    },
-                    archived: {
-                        type: "boolean"
-                    },
-                    members: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    },
-                    badges: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Badge"
-                        }
-                    }
-                },
-                required: ["id", "name", "archived", "members", "badges"]
-            },
-            Badge: {
-                type: "object",
-                properties: {
-                    text: {
-                        type: "string"
-                    },
-                    active: {
-                        type: "boolean"
-                    }
-                },
-                required: ["text", "active"]
-            }
-        }
+        required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -163,7 +128,34 @@ export default pattern((state) => {
             visibleProjects: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Project"
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        badges: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    active: {
+                                        type: "boolean"
+                                    },
+                                    text: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["active", "text"]
+                            }
+                        },
+                        members: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    },
+                    required: ["name", "badges", "members"]
                 }
             },
             state: {
@@ -183,48 +175,7 @@ export default pattern((state) => {
                 asCell: ["cell"]
             }
         },
-        required: ["visibleProjects", "state", "fallbackMembers"],
-        $defs: {
-            Project: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    name: {
-                        type: "string"
-                    },
-                    archived: {
-                        type: "boolean"
-                    },
-                    members: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    },
-                    badges: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Badge"
-                        }
-                    }
-                },
-                required: ["id", "name", "archived", "members", "badges"]
-            },
-            Badge: {
-                type: "object",
-                properties: {
-                    text: {
-                        type: "string"
-                    },
-                    active: {
-                        type: "boolean"
-                    }
-                },
-                required: ["text", "active"]
-            }
-        }
+        required: ["visibleProjects", "state", "fallbackMembers"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {

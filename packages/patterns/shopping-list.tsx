@@ -422,22 +422,14 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
               {statsText}
             </span>
             <cf-button
-              variant={ifElse(
-                computed(() => viewMode.get() === "quick"),
-                "primary",
-                "secondary",
-              )}
+              variant={viewMode.get() === "quick" ? "primary" : "secondary"}
               size="sm"
               onClick={() => viewMode.set("quick")}
             >
               Quick
             </cf-button>
             <cf-button
-              variant={ifElse(
-                computed(() => viewMode.get() === "sorted"),
-                "primary",
-                "secondary",
-              )}
+              variant={viewMode.get() === "sorted" ? "primary" : "secondary"}
               size="sm"
               onClick={() => viewMode.set("sorted")}
             >
@@ -496,12 +488,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                           flex: 1,
                           border: "none",
                           background: "transparent",
-                          textDecoration: ifElse(
-                            item.done,
-                            "line-through",
-                            "none",
-                          ),
-                          opacity: ifElse(item.done, 0.6, 1),
+                          textDecoration: item.done ? "line-through" : "none",
+                          opacity: item.done ? 0.6 : 1,
                         }}
                       />
                       <cf-button
@@ -550,12 +538,10 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                         style={{
                           flex: 1,
                           color: "#111827",
-                          textDecoration: ifElse(
-                            itemWithAisle.item.done,
-                            "line-through",
-                            "none",
-                          ),
-                          opacity: ifElse(itemWithAisle.item.done, 0.6, 1),
+                          textDecoration: itemWithAisle.item.done
+                            ? "line-through"
+                            : "none",
+                          opacity: itemWithAisle.item.done ? 0.6 : 1,
                         }}
                       >
                         {itemWithAisle.item.title}

@@ -63,20 +63,20 @@ export default pattern((state) => {
                 state: {
                     type: "object",
                     properties: {
-                        factor: {
-                            type: "number"
-                        },
                         items: {
                             type: "array",
                             items: {
                                 type: "number"
                             }
                         },
+                        factor: {
+                            type: "number"
+                        },
                         threshold: {
                             type: "number"
                         }
                     },
-                    required: ["factor", "items", "threshold"]
+                    required: ["items", "factor", "threshold"]
                 }
             },
             required: ["state"]

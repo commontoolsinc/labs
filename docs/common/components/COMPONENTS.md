@@ -37,10 +37,10 @@ Use camelCase for Common Fabric component properties. Kebab-case JSX attributes 
 When you need to style Common Fabric components, look for these public
 affordances in this order:
 
-1. documented component props and layout primitives
-2. CSS custom properties
-3. CSS parts
-4. `cf-theme` when the environment already provides or intentionally adds it
+1. `cf-theme` and theme-level CSS custom properties
+2. documented component props and layout primitives
+3. component-specific CSS custom properties
+4. CSS parts
 5. current component stories and cookbook examples
 
 Useful companion references:
@@ -49,6 +49,10 @@ Useful companion references:
 - `docs/common/patterns/ui-cookbook.md`
 - `packages/ui/README.md`
 - `packages/ui/LLM-COMPONENT-INSTRUCTIONS.md`
+
+This ordering is intentional: Common Fabric components are meant to be restyled
+through ambient theme tokens and other public affordances, not by reaching into
+opaque subtree internals.
 
 This document does not yet enumerate every custom property or part for every
 component. When a component exposes those affordances, prefer them over
@@ -73,6 +77,13 @@ const increment = action(() => {
 Use `safeDateNow()` rather than `Date.now()` when authored pattern code needs a
 timestamp snapshot.
 
+Useful styling hooks include:
+
+- `--cf-button-color-primary`
+- `--cf-button-color-surface`
+- `--cf-button-color-text`
+- `--cf-button-border-radius`
+
 ---
 
 ## cf-input
@@ -90,6 +101,13 @@ timestamp snapshot.
   console.log("Changed:", e.detail.value);
 }} />
 ```
+
+Useful styling hooks include:
+
+- `--cf-input-color-border`
+- `--cf-input-color-primary`
+- `--cf-input-color-background`
+- `--cf-input-border-radius`
 
 ---
 
@@ -173,6 +191,13 @@ Styled card with built-in padding (1rem). Don't add extra padding to children.
   <div style="padding: 1rem;">Content</div>
 </cf-card>
 ```
+
+Useful styling hooks include:
+
+- `--cf-card-color-surface`
+- `--cf-card-color-border`
+- `--cf-card-color-hover-surface`
+- `--cf-card-border-radius`
 
 ---
 

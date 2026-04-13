@@ -118,19 +118,16 @@ export class CFChevronButton extends BaseElement {
   };
 
   @property({ type: Boolean, reflect: true })
-  declare expanded: boolean;
+  accessor expanded = false;
 
   @property({ type: Boolean, reflect: true })
-  declare loading: boolean;
+  accessor loading = false;
 
   @property({ type: String, reflect: true })
-  declare size: "sm" | "md" | "lg";
+  accessor size: "sm" | "md" | "lg" = "md";
 
   constructor() {
     super();
-    this.expanded = false;
-    this.loading = false;
-    this.size = "md";
   }
 
   private _handleClick = () => {

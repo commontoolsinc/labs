@@ -31,7 +31,7 @@ describe("Schema: Capability wrapper types", () => {
     expect(op).toBeDefined();
     expect(op.properties?.baz?.type).toBe("boolean");
     expect(op.asCell).toEqual(["opaque"]);
-    expect(op.asOpaque).toBeUndefined();
+    expect(op).not.toHaveProperty("asOpaque");
   });
 
   it("resolves alias chains for capability wrappers", async () => {
@@ -62,7 +62,7 @@ describe("Schema: Capability wrapper types", () => {
 
     expect(op.properties?.enabled?.type).toBe("boolean");
     expect(op.asCell).toEqual(["opaque"]);
-    expect(op.asOpaque).toBeUndefined();
+    expect(op).not.toHaveProperty("asOpaque");
   });
 
   it("Writable<unknown> produces { type: 'unknown', asCell: ['cell'] }", async () => {
@@ -76,6 +76,22 @@ describe("Schema: Capability wrapper types", () => {
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const value = result.properties?.value as Record<string, any>;
     expect(value).toEqual({ type: "unknown", asCell: ["cell"] });
+  });
+
+  it("OpaqueRef<T> erases to T without wrapper metadata", async () => {
+    const code = `
+      interface X {
+        value: OpaqueRef<{ foo: string }>;
+      }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker));
+    const value = result.properties?.value as Record<string, any>;
+
+    expect(value.properties?.foo?.type).toBe("string");
+    expect(value).not.toHaveProperty("asCell");
+    expect(value).not.toHaveProperty("asOpaque");
   });
 
   it("Array<Writable<unknown>> produces { type: 'array', items: { type: 'unknown', asCell: ['cell'] } }", async () => {

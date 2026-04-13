@@ -82,12 +82,9 @@ export default pattern((__cf_pattern_input) => {
                         properties: {
                             id: {
                                 type: "number"
-                            },
-                            title: {
-                                type: "string"
                             }
                         },
-                        required: ["id", "title"]
+                        required: ["id"]
                     },
                     index: {
                         type: "number"

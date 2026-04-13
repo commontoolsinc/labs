@@ -278,6 +278,12 @@ export class CellBridge {
   private startedAt = new Date().toISOString();
   /** Inode of the .status file (created by initStatus). */
   private statusIno: bigint | null = null;
+  /**
+   * Set to true when a write fails due to a transport/connection error.
+   * Once disconnected, all files appear read-only (EACCES on write)
+   * so agents get immediate feedback rather than silent data loss.
+   */
+  disconnected = false;
 
   constructor(tree: FsTree, execCli = "") {
     this.tree = tree;

@@ -65,6 +65,81 @@ addPiece.send({ piece: ann });
 
 ---
 
+## `agent/agent.tsx`
+
+An agent piece — autonomous worker with directive, learned state, and run
+status. Consolidates agent configuration (directive, enable/disable), memory
+(learned observations), and operational metadata (status, last run timestamp and
+summary) into a single reactive piece. Agents discover their own piece via
+`wish({ query: "#agent" })` and read/write state through FUSE or handlers.
+Automatically logs lifecycle events to the Activity Log when one is deployed in
+the same space.
+
+**Keywords:** agent, directive, learned, status, autonomous, loop, briefing,
+worker, bot, automation
+
+### Input Schema
+
+```ts
+type AgentStatus = "idle" | "running" | "error";
+
+interface AgentInput {
+  agentName?: Writable<Default<string, "Unnamed Agent">>;
+  directive?: Writable<Default<string, "">>;
+  enabled?: Writable<Default<boolean, true>>;
+  learned?: Writable<Default<string, "">>;
+  status?: Writable<Default<AgentStatus, "idle">>;
+  lastRun?: Writable<Default<string, "">>;
+  lastRunSummary?: Writable<Default<string, "">>;
+  isAgent?: Default<boolean, true>;
+}
+```
+
+### Output Schema
+
+```ts
+interface AgentOutput {
+  [NAME]: string; // "🤖 AgentName"
+  [UI]: VNode;
+  agentName: string;
+  directive: string;
+  enabled: boolean;
+  learned: string;
+  status: AgentStatus;
+  lastRun: string; // ISO 8601 timestamp
+  lastRunSummary: string;
+  isAgent: boolean; // always true — enables wish("#agent")
+  summary: string;
+  // Handlers
+  setDirective: Stream<{ value: string }>;
+  setLearned: Stream<{ value: string }>; // full replace
+  appendLearned: Stream<{ entry: string }>; // append dated entry
+  toggleEnabled: Stream<void>;
+  markRunning: Stream<void>;
+  markIdle: Stream<{ summary: string; learned?: string }>; // appends learned entry
+  markError: Stream<{ summary: string }>;
+}
+```
+
+### Agent usage
+
+```ts
+// Find all agents in the space
+const agents = wish<AgentPiece[]>({ query: "#agent" }).result;
+
+// Bootstrap: agent finds its own piece
+const self = wish<AgentPiece>({ query: "Wisher" }).result;
+const directive = self.directive; // read directive
+self.markRunning.send({}); // mark as running
+// ... do work ...
+self.markIdle.send({
+  summary: "Processed 3 notes",
+  learned: "## 2026-04-07\nNew observation",
+});
+```
+
+---
+
 ## `counter/counter.tsx`
 
 A simple counter demo.

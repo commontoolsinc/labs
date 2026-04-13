@@ -94,6 +94,69 @@ const CAPTURE_HOME_LOAD_SERIES = (() => {
     return 0;
   }
 })();
+const NOTE_CREATE_TIMING_SERIES = (() => {
+  try {
+    const raw = Deno.env.get("CF_NOTE_CREATE_TIMING_SERIES");
+    return raw ? Number(raw) : 0;
+  } catch {
+    return 0;
+  }
+})();
+const CAPTURE_NOTE_CREATE_PROFILE_SERIES = (() => {
+  try {
+    const raw = Deno.env.get("CF_CAPTURE_NOTE_CREATE_PROFILE_SERIES");
+    return raw ? Number(raw) : 0;
+  } catch {
+    return 0;
+  }
+})();
+
+type NoteCreateTimingEntry = {
+  noteIndex: number;
+  noteTitle: string;
+  noteCountBefore: number;
+  noteCountAfter: number;
+  createToViewMs: number;
+  returnToHomeMs: number;
+  totalMs: number;
+};
+
+type NoteCreateProfileEntry = {
+  noteIndex: number;
+  focusTiming: Array<{
+    logger: string;
+    key: string;
+    count: number;
+    totalTime: number;
+    average: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }>;
+  topTiming: Array<{
+    logger: string;
+    key: string;
+    count: number;
+    totalTime: number;
+    average: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }>;
+  settle: {
+    executeCalls: number;
+    totalDurationMs: number;
+    maxDurationMs: number;
+    latestDurationMs: number;
+    maxIterations: number;
+    latestIterations: number;
+    recent: Array<{
+      totalDurationMs: number;
+      iterations: number;
+      actionsRun: number;
+    }>;
+  };
+};
 
 describe("default-app flow test", () => {
   const shell = new ShellIntegration();
@@ -165,9 +228,13 @@ describe("default-app flow test", () => {
 
     const actionRunSeries: unknown[] = [];
     const homeLoadSeries: unknown[] = [];
+    const noteCreateTimings: NoteCreateTimingEntry[] = [];
+    const noteCreateProfiles: NoteCreateProfileEntry[] = [];
     const noteIterations = Math.max(
       CAPTURE_ACTION_RUN_SERIES > 0 ? CAPTURE_ACTION_RUN_SERIES : 1,
       CAPTURE_HOME_LOAD_SERIES,
+      NOTE_CREATE_TIMING_SERIES,
+      CAPTURE_NOTE_CREATE_PROFILE_SERIES,
     );
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
@@ -194,6 +261,18 @@ describe("default-app flow test", () => {
     }
 
     for (let noteIndex = 1; noteIndex <= noteIterations; noteIndex++) {
+      const noteTitlesBefore = await collectNoteTitlesInList(page);
+      const noteCountBefore = noteTitlesBefore.length;
+
+      if (noteIndex <= CAPTURE_NOTE_CREATE_PROFILE_SERIES) {
+        console.log(
+          `Reset note-create profiling baselines (note ${noteIndex})...`,
+        );
+        await waitFor(async () => {
+          return await resetNoteCreateProfiling(page);
+        });
+      }
+
       if (CAPTURE_ACTION_RUN_SERIES > 0) {
         console.log(`Enable action run trace for note ${noteIndex}...`);
         await waitFor(async () => {
@@ -206,6 +285,7 @@ describe("default-app flow test", () => {
         return !!(await clickButtonWithText(page, "Notes"));
       });
 
+      const noteCreateStartedAt = performance.now();
       console.log(`Click 'New Note' (note ${noteIndex})...`);
       await waitFor(async () => {
         return !!(await clickButtonWithText(page, "New Note"));
@@ -227,6 +307,7 @@ describe("default-app flow test", () => {
       await waitFor(async () => {
         return await waitForRuntimeIdle(page);
       });
+      const noteViewReadyAt = performance.now();
 
       if (CAPTURE_ACTION_RUN_SERIES > 0) {
         const actionRunSummary = await collectActionRunSummary(page);
@@ -321,8 +402,54 @@ describe("default-app flow test", () => {
         return await waitForRuntimeIdle(page);
       });
 
-      console.log(`Wait for note in list (note ${noteIndex})...`);
-      await waitFor(() => findNoteInList(page));
+      console.log(`Wait for note count to increase (note ${noteIndex})...`);
+      await waitFor(async () => {
+        const noteTitles = await collectNoteTitlesInList(page);
+        return noteTitles.length > noteCountBefore;
+      });
+
+      const noteTitlesAfter = await collectNoteTitlesInList(page);
+      const newNoteTitles = noteTitlesAfter.filter((title) =>
+        !noteTitlesBefore.includes(title)
+      );
+      assert(
+        newNoteTitles.length > 0,
+        `Expected a new note title in the list for note ${noteIndex}`,
+      );
+
+      const noteCreateFinishedAt = performance.now();
+      const noteCreateTiming: NoteCreateTimingEntry = {
+        noteIndex,
+        noteTitle: newNoteTitles[0]!,
+        noteCountBefore,
+        noteCountAfter: noteTitlesAfter.length,
+        createToViewMs: Number(
+          (noteViewReadyAt - noteCreateStartedAt).toFixed(3),
+        ),
+        returnToHomeMs: Number(
+          (noteCreateFinishedAt - noteViewReadyAt).toFixed(3),
+        ),
+        totalMs: Number(
+          (noteCreateFinishedAt - noteCreateStartedAt).toFixed(3),
+        ),
+      };
+      noteCreateTimings.push(noteCreateTiming);
+      console.log(
+        `Note creation timing (note ${noteIndex}):`,
+        JSON.stringify(noteCreateTiming, null, 2),
+      );
+
+      if (noteIndex <= CAPTURE_NOTE_CREATE_PROFILE_SERIES) {
+        const noteCreateProfile = await collectNoteCreateProfile(page);
+        assert(
+          noteCreateProfile,
+          `Expected note-create profile for note ${noteIndex}`,
+        );
+        noteCreateProfiles.push({
+          noteIndex,
+          ...(noteCreateProfile as Omit<NoteCreateProfileEntry, "noteIndex">),
+        });
+      }
 
       if (noteIndex <= CAPTURE_HOME_LOAD_SERIES) {
         console.log(
@@ -368,6 +495,20 @@ describe("default-app flow test", () => {
       console.log(
         "Home load series comparison:",
         JSON.stringify(compareHomeLoadSeries(homeLoadSeries), null, 2),
+      );
+    }
+
+    if (noteCreateTimings.length > 0) {
+      console.log(
+        "Note creation timing summary:",
+        JSON.stringify(summarizeNoteCreateTimings(noteCreateTimings), null, 2),
+      );
+    }
+
+    if (noteCreateProfiles.length > 0) {
+      console.log(
+        "Note creation profile summary:",
+        JSON.stringify(compareNoteCreateProfiles(noteCreateProfiles), null, 2),
       );
     }
 
@@ -457,6 +598,17 @@ async function resetLoggerBaselines(page: Page): Promise<boolean> {
     const api = globalThis.commonfabric?.rt;
     if (!api) return false;
     await api.resetLoggerBaselines();
+    return true;
+  });
+}
+
+async function resetNoteCreateProfiling(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric?.rt;
+    if (!api) return false;
+    await api.resetLoggerBaselines();
+    await api.setSettleStatsEnabled(false);
+    await api.setSettleStatsEnabled(true);
     return true;
   });
 }
@@ -1008,6 +1160,119 @@ function compareActionRunSeries(series: unknown[]): unknown {
   };
 }
 
+function summarizeNoteCreateTimings(
+  series: NoteCreateTimingEntry[],
+): unknown {
+  const summarizeValues = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const percentile = (value: number) =>
+      sorted[
+        Math.min(
+          sorted.length - 1,
+          Math.max(0, Math.ceil(sorted.length * value) - 1),
+        )
+      ] ?? 0;
+
+    const sum = sorted.reduce((total, current) => total + current, 0);
+    return {
+      minMs: Number((sorted[0] ?? 0).toFixed(3)),
+      avgMs: Number((sum / Math.max(sorted.length, 1)).toFixed(3)),
+      p50Ms: Number(percentile(0.5).toFixed(3)),
+      p95Ms: Number(percentile(0.95).toFixed(3)),
+      maxMs: Number((sorted[sorted.length - 1] ?? 0).toFixed(3)),
+    };
+  };
+
+  return {
+    count: series.length,
+    totals: summarizeValues(series.map((entry) => entry.totalMs)),
+    createToView: summarizeValues(series.map((entry) => entry.createToViewMs)),
+    returnToHome: summarizeValues(series.map((entry) => entry.returnToHomeMs)),
+    notes: series,
+  };
+}
+
+function compareNoteCreateProfiles(
+  series: NoteCreateProfileEntry[],
+): unknown {
+  const noteIndices = series.map((entry) => entry.noteIndex);
+  const byTimingKey = new Map<string, {
+    logger: string;
+    key: string;
+    totalTimes: Record<number, number>;
+    averages: Record<number, number>;
+    counts: Record<number, number>;
+    p95s: Record<number, number>;
+  }>();
+
+  for (const entry of series) {
+    for (const row of entry.focusTiming) {
+      const key = `${row.logger}:${row.key}`;
+      const existing = byTimingKey.get(key) ?? {
+        logger: row.logger,
+        key: row.key,
+        totalTimes: {},
+        averages: {},
+        counts: {},
+        p95s: {},
+      };
+      existing.totalTimes[entry.noteIndex] = row.totalTime;
+      existing.averages[entry.noteIndex] = row.average;
+      existing.counts[entry.noteIndex] = row.count;
+      existing.p95s[entry.noteIndex] = row.p95;
+      byTimingKey.set(key, existing);
+    }
+  }
+
+  const focusTimingGrowth = [...byTimingKey.values()]
+    .map((row) => {
+      const totals = noteIndices.map((noteIndex) =>
+        row.totalTimes[noteIndex] ?? 0
+      );
+      const averages = noteIndices.map((noteIndex) =>
+        row.averages[noteIndex] ?? 0
+      );
+      const counts = noteIndices.map((noteIndex) => row.counts[noteIndex] ?? 0);
+      const p95s = noteIndices.map((noteIndex) => row.p95s[noteIndex] ?? 0);
+      return {
+        logger: row.logger,
+        key: row.key,
+        totalTimes: totals,
+        averages,
+        counts,
+        p95s,
+        deltaLastVsFirst: Number(
+          (
+            (totals[totals.length - 1] ?? 0) -
+            (totals[0] ?? 0)
+          ).toFixed(3),
+        ),
+      };
+    })
+    .sort((a, b) =>
+      b.deltaLastVsFirst - a.deltaLastVsFirst ||
+      (b.totalTimes[b.totalTimes.length - 1] ?? 0) -
+        (a.totalTimes[a.totalTimes.length - 1] ?? 0) ||
+      `${a.logger}:${a.key}`.localeCompare(`${b.logger}:${b.key}`)
+    );
+
+  const lastEntry = series[series.length - 1];
+
+  return {
+    notes: series.map((entry) => ({
+      noteIndex: entry.noteIndex,
+      settleExecuteCalls: entry.settle.executeCalls,
+      settleTotalDurationMs: entry.settle.totalDurationMs,
+      settleMaxDurationMs: entry.settle.maxDurationMs,
+      settleMaxIterations: entry.settle.maxIterations,
+    })),
+    focusTimingGrowth,
+    focusTimingAtMaxNoteCount: lastEntry?.focusTiming ?? [],
+    topTimingAtMaxNoteCount: lastEntry?.topTiming ?? [],
+    settleAtMaxNoteCount: lastEntry?.settle ?? null,
+  };
+}
+
 async function collectHomeLoadSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
     const rt = globalThis.commonfabric?.rt;
@@ -1109,6 +1374,143 @@ async function collectHomeLoadSummary(page: Page): Promise<unknown> {
       },
       topSchedulerTiming,
       topActions,
+    };
+  });
+}
+
+async function collectNoteCreateProfile(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric?.rt;
+    if (!api?.getLoggerCounts || !api?.getSettleStatsHistory || !api?.idle) {
+      return null;
+    }
+
+    await api.idle();
+
+    type TimingRow = {
+      count: number;
+      totalTime: number;
+      average: number;
+      p50: number;
+      p95: number;
+      max: number;
+    };
+
+    const { timing } = await api.getLoggerCounts();
+    const focusKeys = [
+      ["scheduler", "scheduler/execute"],
+      ["scheduler", "scheduler/execute/settle"],
+      ["scheduler", "scheduler/execute/event"],
+      ["scheduler", "scheduler/run"],
+      ["scheduler", "scheduler/run/action"],
+      ["scheduler", "scheduler/run/commit"],
+      ["traverse", "traverse"],
+      ["runner", "action/readInputs"],
+      ["runner", "action/postRun"],
+      ["runner", "action/populateDependencies"],
+    ] as const;
+
+    const focusTiming = focusKeys
+      .map(([loggerName, key]) => {
+        const row = (timing[loggerName] ?? {})[key] as TimingRow | undefined;
+        if (!row) return null;
+        return {
+          logger: loggerName,
+          key,
+          count: row.count ?? 0,
+          totalTime: Number((row.totalTime ?? 0).toFixed(3)),
+          average: Number((row.average ?? 0).toFixed(3)),
+          p50: Number((row.p50 ?? 0).toFixed(3)),
+          p95: Number((row.p95 ?? 0).toFixed(3)),
+          max: Number((row.max ?? 0).toFixed(3)),
+        };
+      })
+      .filter((row) => row !== null);
+
+    const topTiming = Object.entries(timing)
+      .filter(([loggerName]) =>
+        [
+          "scheduler",
+          "traverse",
+          "storage.cache",
+          "worker-reconciler",
+          "runner",
+        ].includes(loggerName)
+      )
+      .flatMap(([loggerName, rows]) =>
+        Object.entries(rows as Record<string, TimingRow>).map(([key, row]) => ({
+          logger: loggerName,
+          key,
+          count: row.count ?? 0,
+          totalTime: Number((row.totalTime ?? 0).toFixed(3)),
+          average: Number((row.average ?? 0).toFixed(3)),
+          p50: Number((row.p50 ?? 0).toFixed(3)),
+          p95: Number((row.p95 ?? 0).toFixed(3)),
+          max: Number((row.max ?? 0).toFixed(3)),
+        }))
+      )
+      .sort((a, b) =>
+        b.totalTime - a.totalTime ||
+        b.count - a.count ||
+        `${a.logger}:${a.key}`.localeCompare(`${b.logger}:${b.key}`)
+      )
+      .slice(0, 20);
+
+    type SettleHistoryEntry = {
+      recordedAt: number;
+      stats: {
+        iterations: Array<{
+          workSetSize: number;
+          orderSize: number;
+          actionsRun: number;
+          durationMs: number;
+        }>;
+        totalDurationMs: number;
+      };
+    };
+
+    const settleHistory = await api
+      .getSettleStatsHistory() as SettleHistoryEntry[];
+    const recentHistory = settleHistory.slice(-8);
+    const settle = {
+      executeCalls: settleHistory.length,
+      totalDurationMs: Number(
+        recentHistory.reduce(
+          (sum, entry) => sum + entry.stats.totalDurationMs,
+          0,
+        )
+          .toFixed(3),
+      ),
+      maxDurationMs: Number(
+        Math.max(
+          0,
+          ...recentHistory.map((entry) => entry.stats.totalDurationMs),
+        ).toFixed(3),
+      ),
+      latestDurationMs: Number(
+        (recentHistory[recentHistory.length - 1]?.stats.totalDurationMs ?? 0)
+          .toFixed(3),
+      ),
+      maxIterations: Math.max(
+        0,
+        ...recentHistory.map((entry) => entry.stats.iterations.length),
+      ),
+      latestIterations:
+        recentHistory[recentHistory.length - 1]?.stats.iterations.length ?? 0,
+      recent: recentHistory.map((entry) => ({
+        totalDurationMs: Number(entry.stats.totalDurationMs.toFixed(3)),
+        iterations: entry.stats.iterations.length,
+        actionsRun: entry.stats.iterations.reduce(
+          (sum, iteration) => sum + iteration.actionsRun,
+          0,
+        ),
+      })),
+    };
+
+    return {
+      focusTiming,
+      topTiming,
+      settle,
     };
   });
 }
@@ -1562,27 +1964,34 @@ async function clickPieceLinkWithText(
 
 // Helper to find note in list using regex pattern
 async function findNoteInList(page: Page): Promise<boolean> {
+  return (await collectNoteTitlesInList(page)).length > 0;
+}
+
+async function collectNoteTitlesInList(page: Page): Promise<string[]> {
   try {
     return await page.evaluate(() => {
-      function search(root: Document | ShadowRoot): boolean {
+      const titles = new Set<string>();
+
+      function search(root: Document | ShadowRoot): void {
         const allElements = root.querySelectorAll("*");
         for (const el of allElements) {
           const text = el.textContent;
-          // Match pattern: emoji + "New Note #" + hash chars
-          if (text && /📝 New Note #[a-z0-9]+/.test(text)) {
-            return true;
-          }
-          if (el.shadowRoot) {
-            if (search(el.shadowRoot)) {
-              return true;
+          if (text) {
+            for (
+              const match of text.matchAll(/📝 New Note #[a-z0-9]+/g)
+            ) {
+              titles.add(match[0]);
             }
           }
+          if (el.shadowRoot) {
+            search(el.shadowRoot);
+          }
         }
-        return false;
       }
-      return search(document);
+      search(document);
+      return [...titles].sort();
     });
   } catch (_) {
-    return false;
+    return [];
   }
 }

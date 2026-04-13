@@ -138,4 +138,4 @@ The `.for("activeTab")` call makes the tab state durable (persisted by key). See
 
 - [Pattern Composition](./composition.md) — embedding sub-patterns in the vdom
 - [Navigation](./navigation.md) — `navigateTo()` for drill-down to detail views
-- [Conditional Rendering](./conditional.md) — `ifElse` for show/hide
+- [Conditional Rendering](./conditional.md) — plain ternaries for show/hide

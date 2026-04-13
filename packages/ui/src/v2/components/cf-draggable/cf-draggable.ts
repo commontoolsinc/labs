@@ -5,16 +5,16 @@ import { BaseElement } from "../../core/base-element.ts";
 @customElement("cf-draggable")
 export class CFDraggable extends BaseElement {
   @property({ type: Number })
-  x = 0;
+  accessor x = 0;
 
   @property({ type: Number })
-  y = 0;
+  accessor y = 0;
 
   @property({ type: Boolean, reflect: true })
-  override hidden = false;
+  override accessor hidden = false;
 
   @state()
-  private isDragging = false;
+  private accessor isDragging = false;
 
   private dragStartX = 0;
   private dragStartY = 0;

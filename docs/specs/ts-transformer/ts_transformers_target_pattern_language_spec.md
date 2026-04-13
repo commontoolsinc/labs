@@ -30,7 +30,9 @@ not silently let implementation accident become language policy.
 
 This v1 draft focuses on the **reactive expression language inside patterns**:
 
-- JSX expression sites
+- supported lowered value-expression sites (`jsx-expression`,
+  `return-expression`, `variable-initializer`, `call-argument`,
+  `object-property`, `array-element`)
 - helper-owned control flow (`ifElse`, `when`, `unless`)
 - collection operators over reactive receivers
 - direct reactive property/element access
@@ -59,7 +61,8 @@ Each construct family is classified as one of:
 | --- | --- | --- |
 | Reactive property access in JSX or helper-owned expressions | Supported | Authored reactive reads like `state.user.name` should remain natural and lower to explicit reactive access as needed |
 | Reactive element access with static or known-symbol keys | Supported | Forms like `items[0]`, `item[NAME]`, `state["foo"]` should lower predictably when the access path is statically representable |
-| Reactive control flow in JSX (`?:`, `&&`, `||`, `??`) | Supported | Reactive conditions and branch values should preserve authored JavaScript control-flow meaning |
+| Reactive ternary control flow in supported lowered value-expression sites | Supported | Authored `cond ? x : y` should preserve JavaScript branch meaning in JSX, top-level pattern-body value sites, and callback-local values inside supported collection callbacks |
+| Reactive logical control flow in supported lowered pattern-owned expression sites (`&&`, `||`, `??`) | Supported | Reactive short-circuiting should preserve authored JavaScript meaning where the expression-site policy admits lowering |
 | Authored helper control flow (`ifElse`, `when`, `unless`) | Supported | These are first-class reactive control-flow forms, not mere implementation helpers |
 | `map` / `filter` / `flatMap` on reactive receivers in pattern-facing contexts | Supported | These operators are core language forms and may be structurally rewritten to explicit reactive collection operators |
 | Callback-local plain JS arrays in rewritten callbacks | Supported | Plain JS arrays inside callbacks stay plain; they are not implicitly promoted into pattern-owned array operators |
@@ -85,6 +88,33 @@ The matrix above is the policy summary. This section states the same boundary
 in author-facing terms: **what kinds of expressions belong in each authored
 context.**
 
+### Supported Lowered Value-Expression Sites
+
+The shared lowering model starts from a small set of recognized authored
+container kinds:
+
+- `jsx-expression`
+- `return-expression`
+- `variable-initializer`
+- `call-argument`
+- `object-property`
+- `array-element`
+
+Those container kinds appear to authors in three main buckets:
+
+1. JSX expressions
+2. top-level pattern-body value-expression sites such as returned object
+   property values, variable initializers, call arguments, array elements, and
+   direct function return expressions
+3. callback-local value-expression sites inside supported reactive collection
+   callbacks
+
+Explicit computation callbacks such as `computed`, `derive`, `action`, `lift`,
+and `handler` are important boundaries, but their bodies are **not** blanket
+"lower everything here" regions. The shared container list above does not imply
+that nested compute-context JSX/control-flow receives pattern-context lowering;
+current-main behavior preserves authored JavaScript control flow there.
+
 ### Top-Level Pattern Body
 
 The top-level pattern body should stay declarative.
@@ -94,6 +124,7 @@ The top-level pattern body should stay declarative.
 ```ts
 pattern(({ items, show }) => ({
   upper: items[0].name.toUpperCase(),
+  title: show ? "Visible" : "Hidden",
   visibleCount: ifElse(show, items.length, 0),
   [UI]: <div>{items.map((item) => item.name)}</div>,
 }));
@@ -109,6 +140,8 @@ pattern(({ user, count }) => ({
 
 Why:
 
+- top-level pattern-body value-expression sites participate in the shared
+  lowering model
 - top-level helper control flow is part of the language
 - top-level receiver-method roots are supported at lowerable non-JSX
   expression sites
@@ -202,6 +235,7 @@ items.map((item) => <span>{item.name.toUpperCase()}</span>)
 Why:
 
 - the outer callback belongs to the supported reactive collection operator
+- callback-local value-expression sites participate in the shared lowering model
 - structural access, receiver-method value expressions, helper control flow,
   and nested JSX-local expressions are valid here
 - inner plain arrays stay plain JS and are not implicitly promoted into

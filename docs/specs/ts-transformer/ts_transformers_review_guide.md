@@ -44,8 +44,12 @@ for this PR is:
   - explicit computation callbacks (`computed`, `derive`, `action`, `lift`,
     `handler`)
   - supported reactive collection callbacks (`map` / `filter` / `flatMap`)
-  - top-level lowerable value expressions such as direct property access,
-    element access with representable keys, and direct receiver-method roots
+  - top-level pattern-body lowerable value-expression sites such as returned
+    object property values, variable initializers, call arguments, array
+    elements, return expressions, direct property/element access, and direct
+    receiver-method roots
+  - callback-local lowerable value-expression sites inside supported reactive
+    collection callbacks
   - JSX sink chains over structural array values, for example
     `.filter(...).join(", ")`
   - true-cell `.key(...)`, plus true-cell `.get()` only inside JSX, authored

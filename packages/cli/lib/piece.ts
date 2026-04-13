@@ -142,21 +142,24 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
             // Emit greppable line immediately so scripts can capture without waiting
             console.log(`navigateTo new piece id ${id}`);
             // Best-effort: ensure piece is present in list
-            runtime.storageManager.synced().then(async () => {
-              try {
-                const mgr = pieceManagerRef.current!;
-                const piecesCell = await mgr.getPieces();
-                const list = piecesCell.get();
-                const exists = list.some((c) => pieceId(c) === id);
-                if (!exists) {
-                  await mgr.add([target]);
+            runtime.storageManager
+              .synced()
+              .then(async () => {
+                try {
+                  const mgr = pieceManagerRef.current!;
+                  const piecesCell = await mgr.getPieces();
+                  const list = piecesCell.get();
+                  const exists = list.some((c) => pieceId(c) === id);
+                  if (!exists) {
+                    await mgr.add([target]);
+                  }
+                } catch (e) {
+                  console.error("navigateTo add error:", e);
                 }
-              } catch (e) {
-                console.error("navigateTo add error:", e);
-              }
-            }).catch((_err: unknown) => {
-              // ignore; we already emitted the id
-            });
+              })
+              .catch((_err: unknown) => {
+                // ignore; we already emitted the id
+              });
           } catch (e) {
             console.error("navigateTo callback error:", e);
           }
@@ -214,8 +217,9 @@ export async function listPieces(
     allPieces.map(async (piece) => {
       try {
         const livePiece = await pieces.get(piece.id, true);
-        const name = await (livePiece.getCell().key(NAME) as Cell<unknown>)
-          .pull() as string | undefined;
+        const name = (await (
+          livePiece.getCell().key(NAME) as Cell<unknown>
+        ).pull()) as string | undefined;
         const patternMeta = await livePiece.getPatternMeta();
         return {
           id: piece.id,
@@ -267,28 +271,24 @@ export async function newPiece(
     () => getProgramFromFile(manager, entry),
   );
   const PIECE_START_TIMEOUT_MS = 60_000;
-  const piece = await timeCliPhase(
-    "newPiece.create",
-    () => {
-      const createPromise = pieces.create(program, options);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(
-            new Error(
-              `Piece created but failed to start within ${
-                PIECE_START_TIMEOUT_MS / 1000
-              }s. ` +
-                `Check toolshed logs for runtime errors.`,
-            ),
-          );
-        }, PIECE_START_TIMEOUT_MS);
-      });
-      return Promise.race([createPromise, timeout]).finally(() =>
-        clearTimeout(timer)
-      );
-    },
-  );
+  const piece = await timeCliPhase("newPiece.create", () => {
+    const createPromise = pieces.create(program, options);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new Error(
+            `Piece created but failed to start within ${
+              PIECE_START_TIMEOUT_MS / 1000
+            }s. ` + `Check toolshed logs for runtime errors.`,
+          ),
+        );
+      }, PIECE_START_TIMEOUT_MS);
+    });
+    return Promise.race([createPromise, timeout]).finally(() =>
+      clearTimeout(timer)
+    );
+  });
 
   // Explicitly add the piece to the space's allPieces list
   await timeCliPhase(
@@ -331,10 +331,7 @@ export async function savePiecePattern(
         `No user code found in iframe pattern "${config.piece}".`,
       );
     }
-    await Deno.writeTextFile(
-      join(outPath, "main.iframe.js"),
-      userCode,
-    );
+    await Deno.writeTextFile(join(outPath, "main.iframe.js"), userCode);
   } else if (meta.src) {
     // Write the main source file
     await Deno.writeTextFile(join(outPath, "main.tsx"), meta.src);
@@ -354,10 +351,7 @@ export async function savePiecePattern(
   }
 }
 
-export async function applyPieceInput(
-  config: PieceConfig,
-  input: object,
-) {
+export async function applyPieceInput(config: PieceConfig, input: object) {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(config.piece, false);
@@ -366,7 +360,8 @@ export async function applyPieceInput(
 
 function getCallableValue(rootValue: unknown, callableName: string): unknown {
   if (
-    typeof rootValue !== "object" || rootValue === null ||
+    typeof rootValue !== "object" ||
+    rootValue === null ||
     Array.isArray(rootValue)
   ) {
     return undefined;
@@ -499,19 +494,21 @@ async function resolvePieceCallable(
       : pieces.get(config.piece, true));
   const space = manager.getSpace?.() ?? config.space;
 
-  const resolved = await tryResolvePieceCallableAt(
+  const resolved = (await tryResolvePieceCallableAt(
     piece,
     manager,
     space,
     callableName,
     "result",
-  ) ?? await tryResolvePieceCallableAt(
-    piece,
-    manager,
-    space,
-    callableName,
-    "input",
-  ) ?? await tryResolvePieceHandler(piece, manager, space, callableName);
+  )) ??
+    (await tryResolvePieceCallableAt(
+      piece,
+      manager,
+      space,
+      callableName,
+      "input",
+    )) ??
+    (await tryResolvePieceHandler(piece, manager, space, callableName));
   if (!resolved) {
     throw new Error(
       `Callable "${callableName}" not found on piece ${config.piece}`,
@@ -600,7 +597,9 @@ export async function linkPieces(
         if (current == null || typeof current !== "object") {
           errors.push(
             `Source path "${
-              sourcePath.join("/")
+              sourcePath.join(
+                "/",
+              )
             }" does not exist on piece ${sourcePieceId}`,
           );
           break;
@@ -610,7 +609,9 @@ export async function linkPieces(
       if (current === undefined) {
         errors.push(
           `Source path "${
-            sourcePath.join("/")
+            sourcePath.join(
+              "/",
+            )
           }" does not exist on piece ${sourcePieceId}`,
         );
       }
@@ -636,7 +637,9 @@ export async function linkPieces(
         if (current == null || typeof current !== "object") {
           errors.push(
             `Target path "${
-              targetPath.join("/")
+              targetPath.join(
+                "/",
+              )
             }" does not exist on piece ${targetPieceId}`,
           );
           break;
@@ -646,7 +649,9 @@ export async function linkPieces(
       if (current === undefined) {
         errors.push(
           `Target path "${
-            targetPath.join("/")
+            targetPath.join(
+              "/",
+            )
           }" does not exist on piece ${targetPieceId}`,
         );
       }
@@ -654,8 +659,7 @@ export async function linkPieces(
 
     if (errors.length > 0) {
       throw new LinkValidationError(
-        errors.join("\n") +
-          "\n\nUse --allow-non-existing to link anyway.",
+        errors.join("\n") + "\n\nUse --allow-non-existing to link anyway.",
       );
     }
   }
@@ -752,7 +756,8 @@ function generateAsciiMap(connections: PieceConnectionMap): string {
   // Sort pieces by connection count for better visualization
   const sortedPieces = Array.from(connections.entries()).sort(
     ([, a], [, b]) =>
-      (b.readingFrom.length + b.readBy.length) -
+      b.readingFrom.length +
+      b.readBy.length -
       (a.readingFrom.length + a.readBy.length),
   );
 
@@ -838,9 +843,7 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectPiece(
-  config: PieceConfig,
-): Promise<{
+export async function inspectPiece(config: PieceConfig): Promise<{
   id: string;
   name?: string;
   patternName?: string;
@@ -856,8 +859,8 @@ export async function inspectPiece(
   const id = piece.id;
   const name = piece.name();
   const patternName = (await piece.getPatternMeta()).patternName;
-  const source = await piece.input.get() as Readonly<unknown>;
-  const result = await piece.result.get() as Readonly<unknown>;
+  const source = (await piece.input.get()) as Readonly<unknown>;
+  const result = (await piece.result.get()) as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
     id: piece.id,
     name: piece.name(),
@@ -878,19 +881,13 @@ export async function inspectPiece(
   };
 }
 
-export async function getPieceView(
-  config: PieceConfig,
-): Promise<unknown> {
-  const data = await inspectPiece(config) as any;
+export async function getPieceView(config: PieceConfig): Promise<unknown> {
+  const data = (await inspectPiece(config)) as any;
   return data.result?.[UI] as VNode;
 }
 
 export function formatViewTree(view: unknown): string {
-  const format = (
-    node: unknown,
-    prefix: string,
-    last: boolean,
-  ): string => {
+  const format = (node: unknown, prefix: string, last: boolean): string => {
     const branch = last ? "└─ " : "├─ ";
     if (!isVNodeLike(node)) {
       return `${prefix}${branch}${String(node)}`;
@@ -962,9 +959,7 @@ export async function callPieceHandler<T = any>(
   );
 }
 
-export async function stepPiece(
-  config: PieceConfig,
-): Promise<void> {
+export async function stepPiece(config: PieceConfig): Promise<void> {
   const manager = await timeCliPhase(
     "stepPiece.loadManager",
     () => loadManager(config),
@@ -982,9 +977,7 @@ export async function stepPiece(
 /**
  * Removes a piece from the space.
  */
-export async function removePiece(
-  config: PieceConfig,
-): Promise<void> {
+export async function removePiece(config: PieceConfig): Promise<void> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
   const removed = await pieces.remove(config.piece);

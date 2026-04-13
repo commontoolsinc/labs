@@ -43,16 +43,16 @@ export class CFAudioVisualizer extends BaseElement {
   ];
 
   @property({ type: Number })
-  bars = 8;
+  accessor bars = 8;
 
   @property({ type: String })
-  color = "white";
+  accessor color = "white";
 
   @property({ type: Number })
-  height = 40;
+  accessor height = 40;
 
   @property({ type: Array })
-  private waveformData: number[] = [];
+  private accessor waveformData: number[] = [];
 
   private audioContext?: AudioContext;
   private analyser?: AnalyserNode;

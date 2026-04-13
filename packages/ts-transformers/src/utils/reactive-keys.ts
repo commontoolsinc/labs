@@ -1,12 +1,23 @@
 import ts from "typescript";
+import {
+  type CommonFabricKeyName,
+  getCommonFabricComputedKeyName,
+  getComputedPropertyKeyInfo,
+} from "@commonfabric/schema-generator/property-name";
 
 import {
   CF_HELPERS_IDENTIFIER,
-  resolvesToCommonFabricSymbol,
   type TransformationContext,
 } from "../core/mod.ts";
 
-type CommonFabricKeyName = "NAME" | "UI" | "SELF" | "FS";
+export function getCommonFabricKeyName(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): CommonFabricKeyName | undefined {
+  return getCommonFabricComputedKeyName(expr, checker, {
+    commonFabricHelperIdentifier: CF_HELPERS_IDENTIFIER,
+  });
+}
 
 export function cloneKeyExpression(
   expr: ts.Expression,
@@ -32,14 +43,8 @@ export function isCommonFabricKeyIdentifier(
   context: TransformationContext,
   targetName: CommonFabricKeyName,
 ): expr is ts.Identifier {
-  if (!ts.isIdentifier(expr)) return false;
-  const symbol = context.checker.getSymbolAtLocation(expr);
-  if (resolvesToCommonFabricSymbol(symbol, context.checker, targetName)) {
-    return true;
-  }
-  // Fall back to name matching for synthetic/transformed contexts where symbol
-  // resolution may not find the Common Fabric origin (e.g. virtual test setups).
-  return expr.text === targetName;
+  return ts.isIdentifier(expr) &&
+    getCommonFabricKeyName(expr, context.checker) === targetName;
 }
 
 /**
@@ -66,23 +71,32 @@ export function isCommonFabricKeyExpression(
   context: TransformationContext,
   targetName: CommonFabricKeyName,
 ): boolean {
-  return isCommonFabricKeyIdentifier(expr, context, targetName) ||
-    isCtHelpersKeyAccess(expr, targetName);
+  return getCommonFabricKeyName(expr, context.checker) === targetName;
+}
+
+export function getKnownComputedKeyPathSegment(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): string | undefined {
+  return getComputedPropertyKeyInfo(expr, checker, {
+    commonFabricHelperIdentifier: CF_HELPERS_IDENTIFIER,
+  })?.text;
 }
 
 export function getKnownComputedKeyExpression(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.Expression | undefined {
-  for (const name of ["NAME", "UI", "SELF", "FS"] as const) {
-    if (
-      isCommonFabricKeyIdentifier(expr, context, name) ||
-      isCtHelpersKeyAccess(expr, name)
-    ) {
-      return context.cfHelpers.getHelperExpr(name);
-    }
+  const keyInfo = getComputedPropertyKeyInfo(expr, context.checker, {
+    commonFabricHelperIdentifier: CF_HELPERS_IDENTIFIER,
+  });
+  if (!keyInfo) {
+    return undefined;
   }
-  return undefined;
+  if (keyInfo.kind === "literal") {
+    return cloneKeyExpression(expr, context.factory);
+  }
+  return context.cfHelpers.getHelperExpr(keyInfo.name);
 }
 
 export function isFallbackOperator(kind: ts.SyntaxKind): boolean {

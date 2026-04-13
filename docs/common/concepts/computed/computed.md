@@ -71,20 +71,25 @@ export default pattern<Input>(({ deck }) => ({
 
 Static strings like `[NAME]: "My Pattern"` don't need `computed()`.
 
-**Never wrap JSX in `computed()`** — the transformer automatically handles
-reactivity in JSX expressions. Ternaries in JSX children position are
-automatically converted to `ifElse()`, which correctly unwraps
-OpaqueRefs. Nested ternaries work too — a ternary inside the truthy branch of
-another ternary is also transformed. See `docs/common/patterns/conditional.md`.
+**Never wrap JSX in `computed()`** — normal pattern code already handles
+reactive expressions directly. In current main, plain ternaries usually work
+the way you want in ordinary authored pattern code, including nested ternaries.
+See `docs/common/patterns/conditional.md`.
 
 Inside a `computed()` body, ternaries are **not** transformed — they execute
 as plain JS where a `Writable<boolean>` object is always truthy. This is
 the most common source of "conditional section always renders" bugs.
 
+That current-main behavior includes ternaries nested inside returned JSX,
+callback-local aliases, object properties, and logical `&&` / `||` forms. The
+recent recursive lowering work helps in pattern-owned sites and supported
+collection callbacks, but it does not currently rescue explicit compute
+callback bodies.
+
 ```tsx
 // ❌ WRONG - computed() for conditional JSX. The ternary inside the
-// computed body is plain JS, not transformed to ifElse(). `showForm`
-// is a Writable object (always truthy), so the form always renders.
+// computed body is plain JS, not a transformer-lowered conditional.
+// `showForm` is a Writable object (always truthy), so the form always renders.
 {computed(() => {
   if (!adminMode.get()) return null;
   return (
@@ -104,12 +109,12 @@ the most common source of "conditional section always renders" bugs.
 // This "works" because .get() returns the actual boolean, but it's
 // still unnecessary — use a JSX ternary instead.
 
-// ✅ RIGHT - Use JSX ternaries. They nest correctly.
+// ✅ RIGHT - Use plain ternaries at supported lowered sites.
 {adminMode
   ? (
     <>
       {showForm
-        ? <div>Form content — both ternaries get ifElse() transforms</div>
+        ? <div>Form content — both ternaries are lowered correctly</div>
         : null}
     </>
   )
@@ -117,7 +122,10 @@ the most common source of "conditional section always renders" bugs.
 ```
 
 **Rule of thumb:** `computed()` is for deriving data (strings, numbers,
-arrays, objects). For conditional rendering, use JSX ternaries.
+arrays, objects). For conditional rendering or other simple conditional values
+in normal pattern code, use plain ternaries. If you're unsure whether a site
+lowers, inspect it with
+`deno task cf check <pattern>.tsx --show-transformed`.
 
 Example of correct usage:
 

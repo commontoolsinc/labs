@@ -829,16 +829,16 @@ export class XDebuggerView extends LitElement {
   `;
 
   @property({ type: Boolean })
-  visible = false;
+  accessor visible = false;
 
   @property({ attribute: false })
-  telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
+  accessor telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
 
   @property({ attribute: false })
-  debuggerController?: DebuggerController;
+  accessor debuggerController: DebuggerController | undefined = undefined;
 
   @state()
-  private _activeTab:
+  private accessor _activeTab:
     | "events"
     | "watch"
     | "scheduler"
@@ -846,55 +846,58 @@ export class XDebuggerView extends LitElement {
     | "diagnosis" = "events";
 
   @state()
-  private activeSubtopics = new Set<string>();
+  private accessor activeSubtopics = new Set<string>();
 
   // Logger stats tracking
   @state()
-  private loggerBaseline: Record<string, LoggerBreakdown | number> | null =
-    null;
+  private accessor loggerBaseline:
+    | Record<string, LoggerBreakdown | number>
+    | null = null;
 
   @state()
-  private loggerSample: Record<string, LoggerBreakdown | number> | null = null;
+  private accessor loggerSample:
+    | Record<string, LoggerBreakdown | number>
+    | null = null;
 
   @state()
-  private workerLoggerMetadata: LoggerMetadata | null = null;
+  private accessor workerLoggerMetadata: LoggerMetadata | null = null;
 
   @state()
-  private loggerTimingSample:
+  private accessor loggerTimingSample:
     | Record<string, Record<string, TimingStats>>
     | null = null;
 
   @state()
-  private workerLoggerTiming:
+  private accessor workerLoggerTiming:
     | Record<string, Record<string, TimingStats>>
     | null = null;
 
   @state()
-  private expandedLoggers = new Set<string>();
+  private accessor expandedLoggers = new Set<string>();
 
   @state()
-  private openDropdowns = new Set<TopicKey>();
+  private accessor openDropdowns = new Set<TopicKey>();
 
   @state()
-  private _isRecreatingSpaceRootPattern = false;
+  private accessor _isRecreatingSpaceRootPattern = false;
 
   @state()
-  private searchText = "";
+  private accessor searchText = "";
 
   @state()
-  private expandedEvents = new Set<number>();
+  private accessor expandedEvents = new Set<number>();
 
   @state()
-  private fullHeightEvents = new Set<number>();
+  private accessor fullHeightEvents = new Set<number>();
 
   @state()
-  private isPaused = false;
+  private accessor isPaused = false;
 
   @state()
-  private pausedMarkers: RuntimeTelemetryMarkerResult[] = [];
+  private accessor pausedMarkers: RuntimeTelemetryMarkerResult[] = [];
 
   @state()
-  private tooltipData: {
+  private accessor tooltipData: {
     x: number;
     y: number;
     content: string;
@@ -902,7 +905,7 @@ export class XDebuggerView extends LitElement {
   } | null = null;
 
   @state()
-  private diagnosisDurationMs = 5000;
+  private accessor diagnosisDurationMs = 5000;
 
   private resizeController = new ResizableDrawerController(this, {
     initialHeight: 300,

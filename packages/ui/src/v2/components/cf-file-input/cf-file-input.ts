@@ -230,48 +230,48 @@ export class CFFileInput extends BaseElement {
   ];
 
   @property({ type: Boolean })
-  multiple = false;
+  accessor multiple = false;
 
   @property({ type: Number })
-  maxFiles?: number;
+  accessor maxFiles: number | undefined = undefined;
 
   @property({ type: String })
-  accept = "*/*";
+  accessor accept = "*/*";
 
   @property({ type: String })
-  buttonText = "📎 Add File";
+  accessor buttonText = "📎 Add File";
 
   @property({ type: String })
-  variant: ButtonVariant = "outline";
+  accessor variant: ButtonVariant = "outline";
 
   @property({ type: String })
-  size: ButtonSize = "default";
+  accessor size: ButtonSize = "default";
 
   @property({ type: Boolean })
-  showPreview = true;
+  accessor showPreview = true;
 
   @property({ type: String })
-  previewSize: "sm" | "md" | "lg" = "md";
+  accessor previewSize: "sm" | "md" | "lg" = "md";
 
   @property({ type: Boolean })
-  removable = true;
+  accessor removable = true;
 
   @property({ type: Boolean })
-  disabled = false;
+  accessor disabled = false;
 
   @property({ type: Number })
-  maxSizeBytes?: number;
+  accessor maxSizeBytes: number | undefined = undefined;
 
   @property({ type: Array })
-  files: CellHandle<FileData[]> | FileData[] = [];
+  accessor files: CellHandle<FileData[]> | FileData[] = [];
 
   @property({ type: Boolean })
-  protected loading = false;
+  protected accessor loading = false;
 
   // Theme consumption
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  accessor theme: CFTheme = defaultTheme;
 
   protected _cellController = createArrayCellController<FileData>(this, {
     onChange: (_newFiles: FileData[], _oldFiles: FileData[]) => {

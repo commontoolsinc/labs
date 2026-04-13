@@ -17,7 +17,7 @@ import {
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
-import { cf } from "./utils.ts";
+import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -727,8 +727,7 @@ describe("exec command user-facing errors", () => {
     expect(stdout).toEqual([]);
 
     const relevantStderr = stderr.filter((line) =>
-      !line.includes("deno run ") &&
-      !line.includes("experimentalDecorators compiler option")
+      !line.includes("deno run ") && !isIgnorableDenoWarningLine(line)
     );
 
     expect(relevantStderr).toEqual([

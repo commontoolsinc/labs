@@ -90,6 +90,26 @@ cf fuse mount /tmp/cf-mount --background && sleep 3
 
 Add `sleep 2` before verification reads if you see repeated stalls.
 
+### Transport disconnection (silent write failures)
+
+Long-running FUSE mounts (24h+) can lose their backend transport. Symptom: all
+writes appear to succeed (no error), but values don't persist — cells stay empty
+or revert. The FUSE process is still running but useless.
+
+**Diagnose:**
+
+```bash
+tail -20 /tmp/ct-fuse-<mount-name>.log
+# Look for: "ConnectionError: memory/v2 transport closed"
+```
+
+**Fix:** Kill and remount. Remount before each experiment run to be safe.
+
+Agent handlers (`markIdle.handler`, `appendLearned.handler`, etc.) will also
+fail silently with a dead transport — the handler appears to execute but no
+state changes. If agents report "learned" entries that don't show up in
+`input/learned`, check the transport first.
+
 ---
 
 ## Activity Log Pattern
@@ -179,6 +199,91 @@ import json, sys
 p = json.load(sys.stdin)
 for x in p:
     if x.get('patternName','') == 'annotation':
+        print(x['name'], '—', x.get('summary','')[:60])
+"
+```
+
+---
+
+## Agent Piece (`agent/agent.tsx`)
+
+Each agent is a piece in the space with its own cells for directive, learned
+state, and lifecycle. Deploy one per agent in the space.
+
+```
+MOUNT/SPACE/pieces/🤖 Deployer/
+  result/
+    summary                  ← "Deployer: last run summary" or "Deployer (no runs yet)"
+    markRunning.handler      ← call at start of run (auto-logs to Activity Log)
+    markIdle.handler         ← call when done: --summary "what you did"
+    markError.handler        ← call on failure: --summary "what went wrong"
+    appendLearned.handler    ← append a learning: --entry "today I learned X"
+    setDirective.handler     ← update directive: --value "new directive text"
+    setLearned.handler       ← replace all learned: --value "full learned text"
+  input/
+    agentName                ← raw text: "Deployer"
+    directive                ← raw text: the agent's full directive/instructions
+    enabled                  ← raw text: "true" or "false"
+    learned                  ← raw text: accumulated learnings
+    status                   ← raw text: "idle" | "running" | "error"
+    lastRun                  ← raw text: ISO timestamp of last run
+    lastRunSummary           ← raw text: summary from last markIdle/markError
+  .handlers
+  meta.json
+```
+
+### Agent lifecycle
+
+**Important:** Always re-resolve the piece name before each handler call. Piece
+name suffixes can change after handler invocations (e.g. `Counter-1` becomes
+`Counter-2`), so a stale `$AGENT_NAME` will target a non-existent path.
+
+```bash
+# Helper function: resolve current piece name (call before each handler use)
+resolve_agent() {
+  cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
+    "import json,sys; p=json.load(sys.stdin); \
+     print(next(x['name'] for x in p if 'Deployer' in x['name']))"
+}
+
+# 1. Read your directive
+AGENT_NAME=$(resolve_agent)
+cat "MOUNT/SPACE/pieces/$AGENT_NAME/input/directive"
+
+# 2. Mark running (auto-logs "started" to Activity Log)
+AGENT_NAME=$(resolve_agent)
+"MOUNT/SPACE/pieces/$AGENT_NAME/result/markRunning.handler"
+
+# 3. Do your work...
+# Log individual actions to Activity Log as you go (see Activity Log section)
+
+# 4. Record learnings
+AGENT_NAME=$(resolve_agent)
+"MOUNT/SPACE/pieces/$AGENT_NAME/result/appendLearned.handler" \
+  --entry "2026-04-07: Calendar addEvent throws pattern-load-error but succeeds"
+
+# 5. Mark idle when done (auto-logs "completed" to Activity Log)
+AGENT_NAME=$(resolve_agent)
+"MOUNT/SPACE/pieces/$AGENT_NAME/result/markIdle.handler" \
+  --summary "Deployed Contact Book and Calendar, left 2 wishes for Populator"
+# Or on error:
+AGENT_NAME=$(resolve_agent)
+"MOUNT/SPACE/pieces/$AGENT_NAME/result/markError.handler" \
+  --summary "FUSE mount unresponsive after 3 retries"
+```
+
+`markRunning`, `markIdle`, and `markError` automatically log to the Activity Log
+via `wish("#activity-log")`. You still log individual actions (deploys,
+populates, links) manually — the lifecycle handlers just record start/stop.
+
+### Discovering agents
+
+```bash
+cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c "
+import json, sys
+p = json.load(sys.stdin)
+for x in p:
+    if x.get('patternName','') == 'agent':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```

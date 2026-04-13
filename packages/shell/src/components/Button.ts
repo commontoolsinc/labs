@@ -45,16 +45,16 @@ export class XButtonElement extends LitElement {
     }
   `;
   @property()
-  size: ButtonSize = "medium";
+  accessor size: ButtonSize = "medium";
 
   @property()
-  type: ButtonType = "text";
+  accessor type: ButtonType = "text";
 
   @property({ attribute: true })
-  disabled = false;
+  accessor disabled = false;
 
   @property({ attribute: true })
-  variant: VariantType = "none";
+  accessor variant: VariantType = "none";
 
   private onClick(e: Event) {
     // If this is a "submit" button, then we need

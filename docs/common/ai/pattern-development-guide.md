@@ -73,6 +73,8 @@ Use the runtime, not just static reasoning:
 
 - `deno task cf check <pattern>.tsx`
 - `deno task cf check <pattern>.tsx --no-run` for faster type validation
+- `deno task cf check <pattern>.tsx --show-transformed` when you need to
+  inspect how the transformer lowered a conditional or reactive expression site
 - `deno task cf test <pattern>.test.tsx` when tests are justified
 
 Primary verification is still runtime behavior. Tests are for logic that is
@@ -195,8 +197,13 @@ callbacks.
 
 ### Conditional JSX
 
-Do not use `computed()` to gate JSX sections. Use JSX conditionals directly.
-The JSX transformer handles ternaries correctly, including nested ternaries.
+Do not use `computed()` to gate JSX sections. Use direct authored expressions
+instead, usually plain ternaries.
+
+Current main handles ordinary ternaries correctly in normal pattern code, not
+just in JSX children. If you're debugging a less common site, inspect the
+emitted output with `cf check --show-transformed` instead of reasoning from old
+transformer limitations.
 
 ```tsx
 // Wrong
@@ -212,7 +219,13 @@ The JSX transformer handles ternaries correctly, including nested ternaries.
 ```
 
 Inside `computed()`, a `Writable<boolean>` is just a JS object and therefore
-truthy. That leads to subtle incorrect rendering.
+truthy. That leads to subtle incorrect rendering because ternaries inside the
+`computed()` body are plain JS, not transformer-lowered conditionals.
+
+That distinction matters because explicit computation callbacks like
+`computed`, `derive`, `action`, `lift`, and `handler` are preserved-JavaScript
+control-flow boundaries. Inside those callback bodies, use `.get()` when you
+need the raw boolean value.
 
 ### CORS and `fetchData`
 

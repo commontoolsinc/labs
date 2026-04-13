@@ -250,10 +250,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
         isArrayPropertyOnlyAccess = true;
-        const itemsOverride: JSONSchema = (wrapperKind === "Cell")
-          ? { type: "object", properties: {}, asCell: ["cell"] }
+        const propertyValue = wrapperKindToBrand(wrapperKind);
+        const itemsOverride: JSONSchema = propertyValue
+          ? { type: "object", properties: {}, asCell: [propertyValue] }
           : { type: "object", properties: {} };
-        // OpaqueRef needs no items override — it's just T
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -378,10 +378,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (hint?.items === false) {
         isArrayPropertyOnlyAccess = true;
         // Build items override with object stub and the appropriate wrapper semantic
-        const itemsOverride: JSONSchema = (wrapperKind === "Cell")
-          ? { type: "unknown", asCell: ["cell"] }
+        const propertyValue = wrapperKindToBrand(wrapperKind);
+        const itemsOverride: JSONSchema = propertyValue
+          ? { type: "unknown", asCell: [propertyValue] }
           : { type: "unknown" };
-        // OpaqueRef needs no items override — it's just T
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -728,7 +728,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       const obj: Record<string, unknown> = {};
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
-          const propName = getPropertyNameText(member.name);
+          const propName = getPropertyNameText(
+            member.name,
+            context.typeChecker,
+          );
           if (!propName) {
             continue;
           }
@@ -925,11 +928,6 @@ export class CommonFabricFormatter implements TypeFormatter {
     schema: JSONSchemaMutable,
     wrapperKind: WrapperKind,
   ): JSONSchemaMutable {
-    // OpaqueRef is just T — no wrapper semantics needed
-    if (wrapperKind === "OpaqueRef") {
-      return schema;
-    }
-
     const propertyValue = wrapperKindToBrand(wrapperKind);
     // If we couldn't determine a valid wrapper brand, return the schema as-is
     if (propertyValue === undefined) {

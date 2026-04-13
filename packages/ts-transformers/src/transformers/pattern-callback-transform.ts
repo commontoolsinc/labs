@@ -16,6 +16,7 @@ import {
   reportComputationError,
   rewritePatternCallbackBody,
 } from "./pattern-body-reactive-root-lowering.ts";
+import { uniquePaths } from "../utils/path-serialization.ts";
 
 /** Property names that correspond to reactive data in map callback params. */
 const MAP_REACTIVE_PROPERTIES = new Set(["element", "index", "array"]);
@@ -108,8 +109,10 @@ export function registerCapabilitySummary(
       if (!defaults || defaults.length === 0) {
         return param;
       }
+      const defaultPaths = defaults.map((entry) => entry.path);
       return {
         ...param,
+        readPaths: uniquePaths([...param.readPaths, ...defaultPaths]),
         defaults,
       };
     }),

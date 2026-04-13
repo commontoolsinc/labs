@@ -198,16 +198,16 @@ export class CFMessageBeads extends BaseElement {
   } as const;
 
   @property({ attribute: false })
-  declare messages:
+  accessor messages:
     | CellHandle<BuiltInLLMMessage[]>
     | BuiltInLLMMessage[]
-    | undefined;
+    | undefined = undefined;
 
   @property({ type: Boolean, reflect: true })
-  declare pending: boolean;
+  accessor pending = false;
 
   @property({ type: String })
-  declare label: string;
+  accessor label = "";
 
   #tooltip: HTMLDivElement | null = null;
 

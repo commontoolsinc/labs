@@ -357,7 +357,7 @@ export class CFPromptInput extends BaseElement {
 
         @consume({ context: cfThemeContext, subscribe: true })
         @property({ attribute: false })
-        declare theme?: CFTheme;
+        accessor theme: CFTheme = defaultTheme;
 
         private _textareaElement?: HTMLElement;
         private _modelSelectElement?: HTMLSelectElement;
