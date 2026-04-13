@@ -72,8 +72,8 @@ Otherwise, prefer it over scattered ad hoc overrides.
   inspecting or mutating its internals.
 - The component set is intentionally opinionated. Defaults plus theme tokens
   should carry most of the visual system.
-- If public theme/hooks are not enough, treat that as either a design-system
-  gap worth naming or an `iframe` / artifact case, not an excuse to guess at
+- If public theme/hooks are not enough, treat that as either a design-system gap
+  worth naming or an `iframe` / artifact case, not an excuse to guess at
   unsupported structure.
 
 ## Available Components
