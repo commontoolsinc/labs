@@ -351,11 +351,11 @@ export const emitCallExpression: Emitter = ({
     return undefined;
   }
 
-  // Preserve authored zero-arg IIFEs in the derive-preferring post-closure
-  // path so the existing inner expression-site machinery can decompose their
-  // local aliases instead of forcing a blanket wrapper around the whole call.
+  // Preserve authored zero-arg IIFEs so the existing inner expression-site
+  // machinery can decompose their local aliases instead of forcing a blanket
+  // wrapper around the whole call. If they still contain direct cell reads,
+  // wrap the IIFE so those reads happen under a reactive cause context.
   if (
-    preferDeriveWrappers &&
     isAuthoredCall &&
     isZeroArgInlineIifeCall(expression)
   ) {

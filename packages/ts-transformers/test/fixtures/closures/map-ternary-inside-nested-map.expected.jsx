@@ -113,28 +113,41 @@ export default pattern((__cf_pattern_input) => {
             const showInactive = __cf_pattern_input.key("params", "showInactive");
             return (<div>
               {/* Ternary in outer map, outside inner map - should also be ifElse */}
-              <strong>{__cfHelpers.ifElse(true as const satisfies __cfHelpers.JSONSchema, {
+              <strong>{__cfHelpers.ifElse({
+                type: "boolean"
+            } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-                type: "unknown"
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            tags: {
+                                type: "object",
+                                properties: {
+                                    length: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["length"]
+                            }
+                        },
+                        required: ["tags"]
+                    }
+                },
+                required: ["item"]
             } as const satisfies __cfHelpers.JSONSchema, {
-                type: "unknown"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                input: { item: {
-                        tags: {
-                            length: item.key("tags", "length")
-                        }
-                    } },
-                item: {
+                type: "boolean"
+            } as const satisfies __cfHelpers.JSONSchema, { item: {
                     tags: {
                         length: item.key("tags", "length")
                     }
-                }
-            }, ({ input: { item }, item: item_1 }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
+                } }, ({ item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
               <ul>
                 {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const tag = __cf_pattern_input.key("element");

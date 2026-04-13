@@ -119,28 +119,39 @@ export default pattern((__cf_pattern_input) => {
                     const i = __cf_pattern_input.key("index");
                     const item = __cf_pattern_input.key("params", "item");
                     return (<li>
-                    {__cfHelpers.ifElse(true as const satisfies __cfHelpers.JSONSchema, {
+                    {__cfHelpers.ifElse({
+                        type: "boolean"
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["", "* "]
                     } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-                        type: "unknown"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "unknown"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        input: {
-                            i: i,
+                        type: "object",
+                        properties: {
+                            i: {
+                                type: "number"
+                            },
                             item: {
-                                selectedIndex: item.key("selectedIndex")
+                                type: "object",
+                                properties: {
+                                    selectedIndex: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["selectedIndex"]
                             }
                         },
+                        required: ["i", "item"]
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        type: "boolean"
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         i: i,
                         item: {
                             selectedIndex: item.key("selectedIndex")
                         }
-                    }, ({ input: { i, item }, i: i_1, item: item_1 }) => i === item.selectedIndex), "* ", "")}
+                    }, ({ i, item }) => i === item.selectedIndex), "* ", "")}
                     {tag.key("name")}
                   </li>);
                 }, {

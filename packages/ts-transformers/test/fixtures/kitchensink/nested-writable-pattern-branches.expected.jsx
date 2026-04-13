@@ -194,22 +194,30 @@ export default pattern((state) => {
                                             type: "object",
                                             properties: {}
                                         }]
-                                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.when(true as const satisfies __cfHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.when({
+                                    type: "boolean"
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
                                 } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
                                 } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-                                    type: "unknown"
+                                    type: "object",
+                                    properties: {
+                                        task: {
+                                            type: "object",
+                                            properties: {
+                                                note: {
+                                                    type: "string"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    required: ["task"]
                                 } as const satisfies __cfHelpers.JSONSchema, {
-                                    type: "unknown"
-                                } as const satisfies __cfHelpers.JSONSchema, {
-                                    input: { task: {
-                                            note: task.key("note")
-                                        } },
-                                    task: {
+                                    type: "boolean"
+                                } as const satisfies __cfHelpers.JSONSchema, { task: {
                                         note: task.key("note")
-                                    }
-                                }, ({ input: { task }, task: task_1 }) => task.note !== undefined), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
+                                    } }, ({ task }) => task.note !== undefined), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
                         </button>
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
@@ -222,24 +230,31 @@ export default pattern((state) => {
                                     const state = __cf_pattern_input.key("params", "state");
                                     const task = __cf_pattern_input.key("params", "task");
                                     return (<span>
-                            {__cfHelpers.ifElse(true as const satisfies __cfHelpers.JSONSchema, {
+                            {__cfHelpers.ifElse({
+                                            type: "boolean"
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
                                         } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
                                         } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
                                         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-                                            type: "unknown"
-                                        } as const satisfies __cfHelpers.JSONSchema, {
-                                            type: "unknown"
-                                        } as const satisfies __cfHelpers.JSONSchema, {
-                                            input: {
-                                                tagIndex: tagIndex,
-                                                taskIndex: taskIndex
+                                            type: "object",
+                                            properties: {
+                                                tagIndex: {
+                                                    type: "number"
+                                                },
+                                                taskIndex: {
+                                                    type: "number"
+                                                }
                                             },
+                                            required: ["tagIndex", "taskIndex"]
+                                        } as const satisfies __cfHelpers.JSONSchema, {
+                                            type: "boolean"
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             tagIndex: tagIndex,
                                             taskIndex: taskIndex
-                                        }, ({ input: { tagIndex, taskIndex }, tagIndex: tagIndex_1, taskIndex: taskIndex_1 }) => tagIndex === taskIndex), `${section.key("title")}:${tag}`, __cfHelpers.ifElse({
+                                        }, ({ tagIndex, taskIndex }) => tagIndex === taskIndex), `${section.key("title")}:${tag}`, __cfHelpers.ifElse({
                                             type: "boolean"
                                         } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"

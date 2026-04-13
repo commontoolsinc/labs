@@ -196,13 +196,12 @@ export default pattern(() => {
                 <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-                    type: "unknown"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "unknown"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    input: { charm: charm },
-                    charm: charm
-                }, ({ input: { charm }, charm: charm_1 }) => charm[__cfHelpers.NAME]), "Unnamed")}</span>
+                    type: "object",
+                    properties: {
+                        charm: true
+                    },
+                    required: ["charm"]
+                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[__cfHelpers.NAME]), "Unnamed")}</span>
               </li>);
             }, {
                 type: "object",
