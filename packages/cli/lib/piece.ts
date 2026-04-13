@@ -102,9 +102,8 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
 
 export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   setLLMUrl(config.apiUrl);
-  const session = await timeCliPhase(
-    "loadManager.makeSession",
-    () => makeSession(config),
+  const session = await timeCliPhase("loadManager.makeSession", () =>
+    makeSession(config),
   );
   // Use a const ref object so we can assign later while keeping const binding
   const pieceManagerRef: { current?: PieceManager } = {};
@@ -142,21 +141,24 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
             // Emit greppable line immediately so scripts can capture without waiting
             console.log(`navigateTo new piece id ${id}`);
             // Best-effort: ensure piece is present in list
-            runtime.storageManager.synced().then(async () => {
-              try {
-                const mgr = pieceManagerRef.current!;
-                const piecesCell = await mgr.getPieces();
-                const list = piecesCell.get();
-                const exists = list.some((c) => pieceId(c) === id);
-                if (!exists) {
-                  await mgr.add([target]);
+            runtime.storageManager
+              .synced()
+              .then(async () => {
+                try {
+                  const mgr = pieceManagerRef.current!;
+                  const piecesCell = await mgr.getPieces();
+                  const list = piecesCell.get();
+                  const exists = list.some((c) => pieceId(c) === id);
+                  if (!exists) {
+                    await mgr.add([target]);
+                  }
+                } catch (e) {
+                  console.error("navigateTo add error:", e);
                 }
-              } catch (e) {
-                console.error("navigateTo add error:", e);
-              }
-            }).catch((_err: unknown) => {
-              // ignore; we already emitted the id
-            });
+              })
+              .catch((_err: unknown) => {
+                // ignore; we already emitted the id
+              });
           } catch (e) {
             console.error("navigateTo callback error:", e);
           }
@@ -168,9 +170,8 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   ] = runtimeErrors;
 
   if (
-    !(await timeCliPhase(
-      "loadManager.healthCheck",
-      () => runtime.healthCheck(),
+    !(await timeCliPhase("loadManager.healthCheck", () =>
+      runtime.healthCheck(),
     ))
   ) {
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
@@ -181,9 +182,8 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
     () => new PieceManager(session, runtime),
   );
   pieceManagerRef.current = pieceManager;
-  await timeCliPhase(
-    "loadManager.synced",
-    () => awaitSyncWithTimeout(pieceManager.synced()),
+  await timeCliPhase("loadManager.synced", () =>
+    awaitSyncWithTimeout(pieceManager.synced()),
   );
   return pieceManager;
 }
@@ -214,8 +214,9 @@ export async function listPieces(
     allPieces.map(async (piece) => {
       try {
         const livePiece = await pieces.get(piece.id, true);
-        const name = await (livePiece.getCell().key(NAME) as Cell<unknown>)
-          .pull() as string | undefined;
+        const name = (await (
+          livePiece.getCell().key(NAME) as Cell<unknown>
+        ).pull()) as string | undefined;
         const patternMeta = await livePiece.getPatternMeta();
         return {
           id: piece.id,
@@ -238,17 +239,15 @@ export async function newPiece(
   entry: EntryConfig,
   options?: { start?: boolean },
 ): Promise<string> {
-  const manager = await timeCliPhase(
-    "newPiece.loadManager",
-    () => loadManager(config),
+  const manager = await timeCliPhase("newPiece.loadManager", () =>
+    loadManager(config),
   );
   const pieces = new PiecesController(manager);
 
   // Try to ensure default pattern, but don't fail the entire operation
   try {
-    await timeCliPhase(
-      "newPiece.ensureDefaultPattern",
-      () => pieces.ensureDefaultPattern(),
+    await timeCliPhase("newPiece.ensureDefaultPattern", () =>
+      pieces.ensureDefaultPattern(),
     );
   } catch (error) {
     console.warn(
@@ -262,38 +261,32 @@ export async function newPiece(
     // Continue anyway - user's pattern might not need defaultPattern
   }
 
-  const program = await timeCliPhase(
-    "newPiece.getProgramFromFile",
-    () => getProgramFromFile(manager, entry),
+  const program = await timeCliPhase("newPiece.getProgramFromFile", () =>
+    getProgramFromFile(manager, entry),
   );
   const PIECE_START_TIMEOUT_MS = 60_000;
-  const piece = await timeCliPhase(
-    "newPiece.create",
-    () => {
-      const createPromise = pieces.create(program, options);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(
-            new Error(
-              `Piece created but failed to start within ${
-                PIECE_START_TIMEOUT_MS / 1000
-              }s. ` +
-                `Check toolshed logs for runtime errors.`,
-            ),
-          );
-        }, PIECE_START_TIMEOUT_MS);
-      });
-      return Promise.race([createPromise, timeout]).finally(() =>
-        clearTimeout(timer)
-      );
-    },
-  );
+  const piece = await timeCliPhase("newPiece.create", () => {
+    const createPromise = pieces.create(program, options);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new Error(
+            `Piece created but failed to start within ${
+              PIECE_START_TIMEOUT_MS / 1000
+            }s. ` + `Check toolshed logs for runtime errors.`,
+          ),
+        );
+      }, PIECE_START_TIMEOUT_MS);
+    });
+    return Promise.race([createPromise, timeout]).finally(() =>
+      clearTimeout(timer),
+    );
+  });
 
   // Explicitly add the piece to the space's allPieces list
-  await timeCliPhase(
-    "newPiece.addToDefaultPattern",
-    () => manager.add([piece.getCell()]),
+  await timeCliPhase("newPiece.addToDefaultPattern", () =>
+    manager.add([piece.getCell()]),
   );
 
   return piece.id;
@@ -331,10 +324,7 @@ export async function savePiecePattern(
         `No user code found in iframe pattern "${config.piece}".`,
       );
     }
-    await Deno.writeTextFile(
-      join(outPath, "main.iframe.js"),
-      userCode,
-    );
+    await Deno.writeTextFile(join(outPath, "main.iframe.js"), userCode);
   } else if (meta.src) {
     // Write the main source file
     await Deno.writeTextFile(join(outPath, "main.tsx"), meta.src);
@@ -354,10 +344,7 @@ export async function savePiecePattern(
   }
 }
 
-export async function applyPieceInput(
-  config: PieceConfig,
-  input: object,
-) {
+export async function applyPieceInput(config: PieceConfig, input: object) {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(config.piece, false);
@@ -366,7 +353,8 @@ export async function applyPieceInput(
 
 function getCallableValue(rootValue: unknown, callableName: string): unknown {
   if (
-    typeof rootValue !== "object" || rootValue === null ||
+    typeof rootValue !== "object" ||
+    rootValue === null ||
     Array.isArray(rootValue)
   ) {
     return undefined;
@@ -493,25 +481,27 @@ async function resolvePieceCallable(
     }
   }
 
-  const piece =
-    await (deps.loadPiece
-      ? deps.loadPiece(manager, config.piece)
-      : pieces.get(config.piece, true));
+  const piece = await (deps.loadPiece
+    ? deps.loadPiece(manager, config.piece)
+    : pieces.get(config.piece, true));
   const space = manager.getSpace?.() ?? config.space;
 
-  const resolved = await tryResolvePieceCallableAt(
-    piece,
-    manager,
-    space,
-    callableName,
-    "result",
-  ) ?? await tryResolvePieceCallableAt(
-    piece,
-    manager,
-    space,
-    callableName,
-    "input",
-  ) ?? await tryResolvePieceHandler(piece, manager, space, callableName);
+  const resolved =
+    (await tryResolvePieceCallableAt(
+      piece,
+      manager,
+      space,
+      callableName,
+      "result",
+    )) ??
+    (await tryResolvePieceCallableAt(
+      piece,
+      manager,
+      space,
+      callableName,
+      "input",
+    )) ??
+    (await tryResolvePieceHandler(piece, manager, space, callableName));
   if (!resolved) {
     throw new Error(
       `Callable "${callableName}" not found on piece ${config.piece}`,
@@ -554,10 +544,10 @@ export async function executePieceCallable(
       parsed.showHelpJson
         ? renderExecHelpJson(commandSpec)
         : renderPieceCallHelp(
-          deps.helpCommandPrefix ??
-            cliCommand(["piece", "call", "...", callableName]),
-          commandSpec,
-        ),
+            deps.helpCommandPrefix ??
+              cliCommand(["piece", "call", "...", callableName]),
+            commandSpec,
+          ),
   });
 }
 
@@ -569,9 +559,8 @@ export async function linkPieces(
   targetPath: (string | number)[],
   options?: { start?: boolean; allowNonExisting?: boolean },
 ): Promise<void> {
-  const manager = await timeCliPhase(
-    "linkPieces.loadManager",
-    () => loadManager(config),
+  const manager = await timeCliPhase("linkPieces.loadManager", () =>
+    loadManager(config),
   );
   const pieces = new PiecesController(manager);
 
@@ -581,27 +570,25 @@ export async function linkPieces(
 
     // Check source piece exists by verifying it has a source/process cell
     // (i.e., was created via cf piece new, not just written to with cf piece set)
-    const sourcePiece = await timeCliPhase(
-      "linkPieces.getSourcePiece",
-      () => pieces.get(sourcePieceId, false),
+    const sourcePiece = await timeCliPhase("linkPieces.getSourcePiece", () =>
+      pieces.get(sourcePieceId, false),
     );
     const sourceHasProcess =
       sourcePiece.getCell().getSourceCell() !== undefined;
     if (!sourceHasProcess) {
       errors.push(`Source piece ${sourcePieceId} does not exist`);
     } else if (sourcePath.length > 0) {
-      const sourceData = await timeCliPhase(
-        "linkPieces.readSourceResult",
-        () => sourcePiece.result.get(),
+      const sourceData = await timeCliPhase("linkPieces.readSourceResult", () =>
+        sourcePiece.result.get(),
       );
       // Check source path resolves
       let current: any = sourceData;
       for (const segment of sourcePath) {
         if (current == null || typeof current !== "object") {
           errors.push(
-            `Source path "${
-              sourcePath.join("/")
-            }" does not exist on piece ${sourcePieceId}`,
+            `Source path "${sourcePath.join(
+              "/",
+            )}" does not exist on piece ${sourcePieceId}`,
           );
           break;
         }
@@ -609,17 +596,16 @@ export async function linkPieces(
       }
       if (current === undefined) {
         errors.push(
-          `Source path "${
-            sourcePath.join("/")
-          }" does not exist on piece ${sourcePieceId}`,
+          `Source path "${sourcePath.join(
+            "/",
+          )}" does not exist on piece ${sourcePieceId}`,
         );
       }
     }
 
     // Check target piece exists by verifying it has a source/process cell
-    const targetPiece = await timeCliPhase(
-      "linkPieces.getTargetPiece",
-      () => pieces.get(targetPieceId, false),
+    const targetPiece = await timeCliPhase("linkPieces.getTargetPiece", () =>
+      pieces.get(targetPieceId, false),
     );
     const targetHasProcess =
       targetPiece.getCell().getSourceCell() !== undefined;
@@ -627,17 +613,16 @@ export async function linkPieces(
       errors.push(`Target piece ${targetPieceId} does not exist`);
     } else if (targetPath.length > 0) {
       // Check target path resolves on the input cell
-      const targetData = await timeCliPhase(
-        "linkPieces.readTargetInput",
-        () => targetPiece.input.get(),
+      const targetData = await timeCliPhase("linkPieces.readTargetInput", () =>
+        targetPiece.input.get(),
       );
       let current: any = targetData;
       for (const segment of targetPath) {
         if (current == null || typeof current !== "object") {
           errors.push(
-            `Target path "${
-              targetPath.join("/")
-            }" does not exist on piece ${targetPieceId}`,
+            `Target path "${targetPath.join(
+              "/",
+            )}" does not exist on piece ${targetPieceId}`,
           );
           break;
         }
@@ -645,31 +630,22 @@ export async function linkPieces(
       }
       if (current === undefined) {
         errors.push(
-          `Target path "${
-            targetPath.join("/")
-          }" does not exist on piece ${targetPieceId}`,
+          `Target path "${targetPath.join(
+            "/",
+          )}" does not exist on piece ${targetPieceId}`,
         );
       }
     }
 
     if (errors.length > 0) {
       throw new LinkValidationError(
-        errors.join("\n") +
-          "\n\nUse --allow-non-existing to link anyway.",
+        errors.join("\n") + "\n\nUse --allow-non-existing to link anyway.",
       );
     }
   }
 
-  await timeCliPhase(
-    "linkPieces.manager.link",
-    () =>
-      manager.link(
-        sourcePieceId,
-        sourcePath,
-        targetPieceId,
-        targetPath,
-        options,
-      ),
+  await timeCliPhase("linkPieces.manager.link", () =>
+    manager.link(sourcePieceId, sourcePath, targetPieceId, targetPath, options),
   );
 }
 
@@ -752,7 +728,8 @@ function generateAsciiMap(connections: PieceConnectionMap): string {
   // Sort pieces by connection count for better visualization
   const sortedPieces = Array.from(connections.entries()).sort(
     ([, a], [, b]) =>
-      (b.readingFrom.length + b.readBy.length) -
+      b.readingFrom.length +
+      b.readBy.length -
       (a.readingFrom.length + a.readBy.length),
   );
 
@@ -763,8 +740,8 @@ function generateAsciiMap(connections: PieceConnectionMap): string {
     if (info.readingFrom.length > 0) {
       output += "  ← reads from:\n";
       for (const sourceId of info.readingFrom) {
-        const sourceName = connections.get(sourceId)?.name ||
-          createShortId(sourceId);
+        const sourceName =
+          connections.get(sourceId)?.name || createShortId(sourceId);
         output += `    • ${sourceName}\n`;
       }
     }
@@ -772,8 +749,8 @@ function generateAsciiMap(connections: PieceConnectionMap): string {
     if (info.readBy.length > 0) {
       output += "  → read by:\n";
       for (const targetId of info.readBy) {
-        const targetName = connections.get(targetId)?.name ||
-          createShortId(targetId);
+        const targetName =
+          connections.get(targetId)?.name || createShortId(targetId);
         output += `    • ${targetName}\n`;
       }
     }
@@ -838,9 +815,7 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectPiece(
-  config: PieceConfig,
-): Promise<{
+export async function inspectPiece(config: PieceConfig): Promise<{
   id: string;
   name?: string;
   patternName?: string;
@@ -856,8 +831,8 @@ export async function inspectPiece(
   const id = piece.id;
   const name = piece.name();
   const patternName = (await piece.getPatternMeta()).patternName;
-  const source = await piece.input.get() as Readonly<unknown>;
-  const result = await piece.result.get() as Readonly<unknown>;
+  const source = (await piece.input.get()) as Readonly<unknown>;
+  const result = (await piece.result.get()) as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
     id: piece.id,
     name: piece.name(),
@@ -878,19 +853,13 @@ export async function inspectPiece(
   };
 }
 
-export async function getPieceView(
-  config: PieceConfig,
-): Promise<unknown> {
-  const data = await inspectPiece(config) as any;
+export async function getPieceView(config: PieceConfig): Promise<unknown> {
+  const data = (await inspectPiece(config)) as any;
   return data.result?.[UI] as VNode;
 }
 
 export function formatViewTree(view: unknown): string {
-  const format = (
-    node: unknown,
-    prefix: string,
-    last: boolean,
-  ): string => {
+  const format = (node: unknown, prefix: string, last: boolean): string => {
     const branch = last ? "└─ " : "├─ ";
     if (!isVNodeLike(node)) {
       return `${prefix}${branch}${String(node)}`;
@@ -949,30 +918,24 @@ export async function callPieceHandler<T = any>(
   handlerName: string,
   args: T,
 ): Promise<void> {
-  const resolved = await timeCliPhase(
-    "callPieceHandler.resolve",
-    () => resolvePieceCallable(config, handlerName),
+  const resolved = await timeCliPhase("callPieceHandler.resolve", () =>
+    resolvePieceCallable(config, handlerName),
   );
   if (resolved.callableKind !== "handler") {
     throw new Error(`Callable "${handlerName}" is not a handler`);
   }
-  await timeCliPhase(
-    "callPieceHandler.execute",
-    () => executeResolvedCallable(resolved, args),
+  await timeCliPhase("callPieceHandler.execute", () =>
+    executeResolvedCallable(resolved, args),
   );
 }
 
-export async function stepPiece(
-  config: PieceConfig,
-): Promise<void> {
-  const manager = await timeCliPhase(
-    "stepPiece.loadManager",
-    () => loadManager(config),
+export async function stepPiece(config: PieceConfig): Promise<void> {
+  const manager = await timeCliPhase("stepPiece.loadManager", () =>
+    loadManager(config),
   );
   const pieces = new PiecesController(manager);
-  const piece = await timeCliPhase(
-    "stepPiece.getPiece",
-    () => pieces.get(config.piece, true),
+  const piece = await timeCliPhase("stepPiece.getPiece", () =>
+    pieces.get(config.piece, true),
   );
   await timeCliPhase("stepPiece.pull", () => piece.getCell().pull());
   await timeCliPhase("stepPiece.manager.synced", () => manager.synced());
@@ -982,9 +945,7 @@ export async function stepPiece(
 /**
  * Removes a piece from the space.
  */
-export async function removePiece(
-  config: PieceConfig,
-): Promise<void> {
+export async function removePiece(config: PieceConfig): Promise<void> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
   const removed = await pieces.remove(config.piece);
