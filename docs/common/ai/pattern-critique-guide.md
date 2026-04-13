@@ -77,6 +77,7 @@ Ternaries are valid in JSX. The transformer auto-converts them to `ifElse()`.
 | `value={title}` | `$value={title}` |
 | `$checked={item}` | `$checked={item.done}` |
 | wrong event name | Use `oncf-send`, `oncf-input`, or `oncf-change` |
+| `$value={status}` with `oncf-change` writing `status.set(...)` | Let the binding own the control value; use the handler only for dependent state or side effects |
 
 ### 6. Custom Component Props and Styling Affordances
 

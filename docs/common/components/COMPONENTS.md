@@ -137,6 +137,11 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 />
 ```
 
+When a select already uses `$value`, treat that binding as the primary value
+path. Avoid `oncf-change` handlers that simply write the same value back into
+the same bound cell. Use `oncf-change` only for dependent state updates or
+other side effects.
+
 ---
 
 ## cf-message-input

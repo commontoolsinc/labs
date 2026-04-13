@@ -247,6 +247,30 @@ const updateStatus = action(() => {
 
 Use `computed()` for derivation and `action()` for side effects.
 
+### Bound Control Self-Feedback
+
+If a control already uses `$value` or `$checked`, treat that binding as the
+control's primary value path. Do not add `oncf-change` / `oncf-input` handlers
+that merely write the same value back into that same bound cell.
+
+```tsx
+// Wrong
+<cf-select
+  $value={entryType}
+  items={typeItems}
+  oncf-change={(event) => entryType.set(event.detail.value)}
+/>
+
+// Right
+<cf-select
+  $value={entryType}
+  items={typeItems}
+  oncf-change={(event) => syncCategoryForType.send(event.detail.value)}
+/>
+```
+
+Use the handler only for dependent state updates or other side effects.
+
 ### Composition Contracts
 
 When one pattern feeds another, output field names and input field names must

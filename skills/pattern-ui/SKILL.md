@@ -57,6 +57,10 @@ Layout: `cf-screen`, `cf-vstack`, `cf-hstack` Input: `cf-input`, `cf-textarea`,
 <cf-checkbox $checked={done} />
 ```
 
+If a control already uses `$value` or `$checked`, do not add a change handler
+that simply writes the same value back into that same bound cell. Use handlers
+only for dependent state updates or other side effects.
+
 **Layout structure:**
 
 ```tsx
