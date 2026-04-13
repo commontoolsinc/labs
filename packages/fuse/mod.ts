@@ -716,20 +716,50 @@ export async function main(argv: string[] = Deno.args) {
           return EACCES;
         }
 
-        if (!meta?.program) {
+        // Normalise to a files array, mirroring buildSourceTree:
+        // multi-file programs use program.files, single-file use meta.src.
+        let baseMain: string;
+        let baseMainExport: string | undefined;
+        let baseFiles: { name: string; contents: string }[];
+        if (meta?.program?.files?.length) {
+          baseMain = meta.program.main;
+          baseMainExport = meta.program.mainExport;
+          baseFiles = meta.program.files;
+        } else if (meta?.src) {
+          baseMain = "/main.tsx";
+          baseMainExport = undefined;
+          baseFiles = [{ name: "/main.tsx", contents: meta.src }];
+        } else {
+          console.error(
+            `[source] No program or src in pattern meta for ${relPath}`,
+          );
           return EACCES;
         }
 
         // Replace the written file's content in the files array
-        const updatedFiles = meta.program.files.map((f) => {
+        let matched = false;
+        const updatedFiles = baseFiles.map((f) => {
           const fRelPath = f.name.startsWith("/") ? f.name.slice(1) : f.name;
-          return fRelPath === relPath ? { ...f, contents: text } : f;
+          if (fRelPath === relPath) {
+            matched = true;
+            return { ...f, contents: text };
+          }
+          return f;
         });
+
+        if (!matched) {
+          console.error(
+            `[source] File "${relPath}" not found in pattern files: [${
+              baseFiles.map((f) => f.name).join(", ")
+            }]`,
+          );
+          return EACCES;
+        }
 
         try {
           await piece.setPattern({
-            main: meta.program.main,
-            mainExport: meta.program.mainExport,
+            main: baseMain,
+            mainExport: baseMainExport,
             files: updatedFiles,
           });
           // Clear error.log on success
