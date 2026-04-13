@@ -55,6 +55,15 @@ export function execute(
   return executeProgram(ast, session);
 }
 
+export function executeWithStdio(
+  input: string,
+  session: ShellSession,
+  stdio: { stdout: LabeledStream; stderr: LabeledStream },
+): Promise<CommandResult> {
+  const ast = parse(input);
+  return executeProgram(ast, session, stdio);
+}
+
 // ============================================================================
 // Program Execution (with connectors: &&, ||, ;, &)
 // ============================================================================
@@ -829,6 +838,16 @@ interface RedirectionResult {
   flushers: Flusher[];
 }
 
+function closeSupersededRedirect(
+  stream: LabeledStream,
+  preserved: LabeledStream[],
+): void {
+  if (preserved.includes(stream)) {
+    return;
+  }
+  stream.close();
+}
+
 async function applyRedirections(
   redirections: Redirection[],
   session: ShellSession,
@@ -860,6 +879,7 @@ async function applyRedirections(
 
       case ">": {
         // Output redirection - write to file (truncate)
+        closeSupersededRedirect(effectiveStdout, [stdout, effectiveStderr]);
         const captureStream = new LabeledStream();
         effectiveStdout = captureStream;
 
@@ -877,6 +897,7 @@ async function applyRedirections(
 
       case ">>": {
         // Output redirection - append to file
+        closeSupersededRedirect(effectiveStdout, [stdout, effectiveStderr]);
         const captureStream = new LabeledStream();
         effectiveStdout = captureStream;
 
@@ -910,6 +931,7 @@ async function applyRedirections(
 
       case "2>": {
         // Stderr redirection - write to file (truncate)
+        closeSupersededRedirect(effectiveStderr, [stderr, effectiveStdout]);
         const captureStream = new LabeledStream();
         effectiveStderr = captureStream;
 
@@ -926,6 +948,7 @@ async function applyRedirections(
 
       case "2>>": {
         // Stderr redirection - append to file
+        closeSupersededRedirect(effectiveStderr, [stderr, effectiveStdout]);
         const captureStream = new LabeledStream();
         effectiveStderr = captureStream;
 
@@ -959,6 +982,8 @@ async function applyRedirections(
 
       case "&>": {
         // Redirect both stdout and stderr to file
+        closeSupersededRedirect(effectiveStdout, [stdout, effectiveStderr]);
+        closeSupersededRedirect(effectiveStderr, [stderr, effectiveStdout]);
         const captureStream = new LabeledStream();
         effectiveStdout = captureStream;
         effectiveStderr = captureStream;

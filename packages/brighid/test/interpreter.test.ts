@@ -204,6 +204,18 @@ Deno.test("interpreter: append redirection >>", async () => {
   assertEquals(content.value, "first\nsecond\n");
 });
 
+Deno.test("interpreter: later stdout redirection overrides earlier target", async () => {
+  const session = createTestSession();
+
+  await execute("echo hello > /tmp/first.txt > /tmp/final.txt", session);
+
+  const first = session.vfs.readFileText("/tmp/first.txt");
+  const final = session.vfs.readFileText("/tmp/final.txt");
+
+  assertEquals(first.value, "");
+  assertEquals(final.value, "hello\n");
+});
+
 Deno.test("interpreter: input redirection <", async () => {
   const session = createTestSession();
 

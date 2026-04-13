@@ -20,12 +20,13 @@
 
 import { type Label, labels } from "../labels.ts";
 import { createSession, ShellSession } from "../session.ts";
-import { execute } from "../interpreter.ts";
+import { execute, executeWithStdio } from "../interpreter.ts";
 import { VFS } from "../vfs.ts";
 import { createDefaultRegistry } from "../commands/mod.ts";
 import { createEnvironment, type Environment } from "../commands/context.ts";
 import { type AgentPolicy, filterOutput, policies } from "./policy.ts";
 import { AgentEvent, ToolCall, ToolResult } from "./protocol.ts";
+import { LabeledStream } from "../labeled-stream.ts";
 
 /** Unique ID generator */
 let agentCounter = 0;
@@ -37,10 +38,6 @@ function nextAgentId(): string {
 let toolCallCounter = 0;
 function nextToolCallId(): string {
   return `tc-${++toolCallCounter}`;
-}
-
-function shellSingleQuote(value: string): string {
-  return `'${value.replaceAll("'", `"'"'"`)}'`;
 }
 
 export interface AgentSessionOptions {
@@ -367,15 +364,14 @@ export class AgentSession {
     label: Label;
     stderrLabel: Label;
   }> {
-    const ts = Date.now();
-    const outFile = `/tmp/.agent-out-${this.id}-${ts}`;
-    const errFile = `/tmp/.agent-err-${this.id}-${ts}`;
+    const stdout = new LabeledStream();
+    const stderr = new LabeledStream();
 
     try {
-      const result = await execute(
-        `bash -c ${shellSingleQuote(command)} > ${outFile} 2>${errFile}`,
-        this.shell,
-      );
+      const result = await executeWithStdio(command, this.shell, {
+        stdout,
+        stderr,
+      });
 
       // Accumulate taint: join the result label into the session PC so that
       // subsequent commands reflect any taint from data this command touched.
@@ -384,62 +380,36 @@ export class AgentSession {
       this.shell.popPC();
       this.shell.pushPC(labels.join(prevPC, result.label));
 
-      let stdout = "";
-      let stderr = "";
+      stdout.close();
+      stderr.close();
+
+      const captured = await stdout.readAll();
+      const errCaptured = await stderr.readAll();
+
       let outputLabel = result.label;
-      try {
-        const captured = this.shell.vfs.readFileText(outFile);
-        stdout = captured.value;
-        // The file's label comes from actual stream writes; result.label
-        // includes fixedOutputFormat endorsements. Use whichever has
-        // InjectionFree — the file label tracks actual data flow, while
-        // result.label carries structural endorsements.
-        const fileHasIF = captured.label.integrity.some(
-          (a) => a.kind === "InjectionFree",
-        );
-        const resultHasIF = result.label.integrity.some(
-          (a) => a.kind === "InjectionFree",
-        );
-        if (fileHasIF || resultHasIF) {
-          outputLabel = fileHasIF ? captured.label : result.label;
-        } else {
+      const streamHasIF = captured.label.integrity.some((a) =>
+        a.kind === "InjectionFree"
+      );
+      const resultHasIF = result.label.integrity.some((a) =>
+        a.kind === "InjectionFree"
+      );
+      if (captured.value) {
+        if (streamHasIF || !resultHasIF) {
           outputLabel = captured.label;
         }
-      } catch {
-        // Command may not have produced output
       }
-      let stderrLabel = result.label;
-      try {
-        const errCaptured = this.shell.vfs.readFileText(errFile);
-        stderr = errCaptured.value;
-        stderrLabel = errCaptured.label;
-      } catch {
-        // No stderr
-      }
-
-      try {
-        this.shell.vfs.rm(outFile);
-      } catch { /* ignore */ }
-      try {
-        this.shell.vfs.rm(errFile);
-      } catch { /* ignore */ }
+      const stderrLabel = errCaptured.value ? errCaptured.label : result.label;
 
       return {
-        stdout,
-        stderr,
+        stdout: captured.value,
+        stderr: errCaptured.value,
         exitCode: result.exitCode,
         label: outputLabel,
         stderrLabel,
       };
     } catch (e) {
-      try {
-        this.shell.vfs.rm(outFile);
-      } catch { /* ignore */ }
-      try {
-        this.shell.vfs.rm(errFile);
-      } catch {
-        // ignore
-      }
+      stdout.close();
+      stderr.close();
 
       return {
         stdout: "",
