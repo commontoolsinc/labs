@@ -184,7 +184,7 @@ export default pattern((__cf_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, entries, []).for("tree", true)).for("tree", true) as Entry[];
+                } as const satisfies __cfHelpers.JSONSchema, entries, [])).for("tree", true) as Entry[];
                 const p = (__cfHelpers.unless({
                     type: "array",
                     items: {
@@ -215,7 +215,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []).for("p", true)).for("p", true) as string[];
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), [])).for("p", true) as string[];
                 const unsorted = findChildren(tree, p) as Entry[];
                 const items = __cfHelpers.derive({
                     type: "object",

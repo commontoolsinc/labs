@@ -192,6 +192,34 @@ export function make() {
     assert(!main.includes('.for(["foo", 0, "param"], true)'));
   });
 
+  it("does not duplicate stable causes on asserted reactive initializers", async () => {
+    const source = `
+import { Default, pattern } from "commonfabric";
+
+interface Entry {
+  id: string;
+}
+
+export default pattern<{ entries: Default<Entry[], []> }>(({ entries }) => {
+  const tree = (entries || []) as Entry[];
+  return { tree };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    const treeCauseCount = main.match(/\.for\("tree", true\)/g)?.length ?? 0;
+    assert(
+      treeCauseCount === 1,
+      `expected one tree cause, found ${treeCauseCount}`,
+    );
+  });
+
   it("does not add causes to plain array methods in lift callbacks", async () => {
     const source = `
 import { lift } from "commonfabric";

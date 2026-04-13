@@ -282,6 +282,9 @@ function visitExpressionWithCausePath(
       context.tsContext,
     ) as ts.Expression;
   }
+  if (addRootFor && isTransparentExpressionWrapper(expression)) {
+    return createForCall(expression, causePath, context);
+  }
 
   const visited = visitExpressionChildrenWithCausePath(
     expression,
@@ -300,6 +303,15 @@ function visitExpressionWithCausePath(
   }
 
   return createForCall(visited, causePath, context);
+}
+
+function isTransparentExpressionWrapper(expression: ts.Expression): boolean {
+  return ts.isParenthesizedExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isTypeAssertionExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isNonNullExpression(expression) ||
+    ts.isPartiallyEmittedExpression(expression);
 }
 
 function visitExpressionChildrenWithCausePath(
