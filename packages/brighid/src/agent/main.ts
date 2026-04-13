@@ -18,6 +18,11 @@ import {
   fmtStatus,
 } from "./tui.ts";
 
+type ReadLineInterface = {
+  question(prompt: string): Promise<string>;
+  close(): void;
+};
+
 // ---------------------------------------------------------------------------
 // Minimal fetch-based LLM client (no dependency on @commontools/llm)
 // ---------------------------------------------------------------------------
@@ -111,7 +116,7 @@ class FetchLLMClient implements LLMClient {
         }))
         : undefined,
       tool_choice: request.tools ? "auto" : undefined,
-      max_tokens: request.maxTokens,
+      max_tokens: request.maxTokens ?? 4096,
     };
   }
 
@@ -345,7 +350,7 @@ async function runOnce(
 
 async function main(): Promise<void> {
   const { prompt: oneShot } = parseArgs(Deno.args);
-  const model = Deno.env.get("MODEL") ?? "moonshotai/kimi-k2.5";
+  const model = Deno.env.get("MODEL") ?? "claude-sonnet-4-6";
   const llm = new FetchLLMClient();
   const vfs = new VFS();
   const agent = new AgentSession({ policy: policies.main(), vfs });
@@ -369,23 +374,57 @@ async function main(): Promise<void> {
 
   let history: Message[] = [];
 
-  while (true) {
-    const input = prompt(">");
-    if (input === null || input.trim() === "exit") {
-      await write("\nGoodbye.\n");
-      break;
-    }
-    if (!input.trim()) continue;
+  const rl = await createReadline();
 
-    try {
-      history = await runOnce(input, agent, llm, model, write, history);
-      await write("\n");
-    } catch (e) {
-      await write(
-        `\n[error: ${e instanceof Error ? e.message : String(e)}]\n\n`,
-      );
+  try {
+    while (true) {
+      const line = await readLine(rl, "> ");
+      if (line === null || line.trim() === "exit") {
+        await write("\nGoodbye.\n");
+        break;
+      }
+      if (!line.trim()) continue;
+
+      try {
+        history = await runOnce(line, agent, llm, model, write, history);
+        await write("\n");
+      } catch (e) {
+        await write(
+          `\n[error: ${e instanceof Error ? e.message : String(e)}]\n\n`,
+        );
+      }
     }
+  } finally {
+    rl.close();
   }
+}
+
+async function readLine(
+  rl: ReadLineInterface,
+  promptText: string,
+): Promise<string | null> {
+  try {
+    return await rl.question(promptText);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("readline was closed")) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function createReadline(): Promise<ReadLineInterface> {
+  const [{ default: readline }, { stdin: input, stdout: output }] = await Promise.all([
+    import("node:readline/promises"),
+    import("node:process"),
+  ]);
+
+  return readline.createInterface({
+    input,
+    output,
+    historySize: 1000,
+    removeHistoryDuplicates: true,
+  });
 }
 
 if (import.meta.main) {

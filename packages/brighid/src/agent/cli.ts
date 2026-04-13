@@ -2,6 +2,11 @@ import { AgentSession } from "./agent-session.ts";
 import { AgentPolicy, policies } from "./policy.ts";
 import { VFS } from "../vfs.ts";
 
+type ReadLineInterface = {
+  question(prompt: string): Promise<string>;
+  close(): void;
+};
+
 /** Prefix each line with >> markers to indicate sub-agent nesting depth. */
 function prefixLines(text: string, depth: number): string {
   if (depth <= 0) return text;
@@ -169,15 +174,49 @@ export class AgentCLI {
     console.log("Brighid — Label-aware agent execution environment");
     console.log("Type !help for commands.\n");
 
-    while (this.running) {
-      const input = prompt(this.prompt);
-      if (input === null) break;
+    const rl = await this.createReadline();
 
-      const output = await this.processLine(input);
-      if (output) {
-        const encoder = new TextEncoder();
-        await Deno.stdout.write(encoder.encode(output));
+    try {
+      while (this.running) {
+        const line = await this.readLine(rl, this.prompt);
+        if (line === null) break;
+
+        const result = await this.processLine(line);
+        if (result) {
+          const encoder = new TextEncoder();
+          await Deno.stdout.write(encoder.encode(result));
+        }
       }
+    } finally {
+      rl.close();
+    }
+  }
+
+  private async createReadline(): Promise<ReadLineInterface> {
+    const [{ default: readline }, { stdin: input, stdout: output }] = await Promise.all([
+      import("node:readline/promises"),
+      import("node:process"),
+    ]);
+
+    return readline.createInterface({
+      input,
+      output,
+      historySize: 1000,
+      removeHistoryDuplicates: true,
+    });
+  }
+
+  private async readLine(
+    rl: ReadLineInterface,
+    promptText: string,
+  ): Promise<string | null> {
+    try {
+      return await rl.question(promptText);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("readline was closed")) {
+        return null;
+      }
+      throw error;
     }
   }
 
