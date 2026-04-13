@@ -18,10 +18,19 @@ if (isDeno()) {
 }
 
 /**
+ * Throws an error indicating that this module is not usable.
+ */
+function cantUse(): never {
+  throw new Error("Cannot use `sha256-deno` in this environment.");
+}
+
+/**
  * Deno-specific incremental hasher.
  */
 class DenoHasher implements IncrementalHasher {
-  #hasher = crypto!.createHash("sha256");
+  #hasher = (crypto === null)
+    ? cantUse()
+    : crypto.createHash("sha256");
 
   update(data: Uint8Array) {
     this.#hasher.update(data);
@@ -61,10 +70,14 @@ export function canUseDeno() {
  * Performs a hash on a single array.
  */
 export function sha256Deno(payload: Uint8Array): Uint8Array {
+  if (crypto === null) {
+    cantUse();
+  }
+
   // `node:crypto digest()` returns a `Buffer` (a `Uint8Array` subclass);
   // normalize it to plain `Uint8Array`, so downstream equality checks work
   // correctly.
-  const buf = crypto!.createHash("sha256").update(payload).digest();
+  const buf = crypto.createHash("sha256").update(payload).digest();
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
