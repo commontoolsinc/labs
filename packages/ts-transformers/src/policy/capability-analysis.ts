@@ -1254,6 +1254,26 @@ export function analyzeFunctionCapabilities(
       }
     };
 
+    const visitScopedLocalCollectionBindings = (visitor: () => void): void => {
+      const savedLocalArrayElementBindings = new Map(
+        localArrayElementBindings,
+      );
+      const savedLocalMapValueBindings = new Map(localMapValueBindings);
+      const scopedLocalCollectionNames = new Set<string>();
+      scopedLocalCollectionNamesStack.push(scopedLocalCollectionNames);
+
+      try {
+        visitor();
+      } finally {
+        scopedLocalCollectionNamesStack.pop();
+        restoreScopedLocalCollectionBindings(
+          scopedLocalCollectionNames,
+          savedLocalArrayElementBindings,
+          savedLocalMapValueBindings,
+        );
+      }
+    };
+
     const recordLocalArrayPush = (
       arrayName: string,
       args: readonly ts.Expression[],
@@ -2078,6 +2098,15 @@ export function analyzeFunctionCapabilities(
             savedLocalMapValueBindings,
           );
         }
+        return;
+      }
+
+      if (ts.isBlock(node)) {
+        visitScopedLocalCollectionBindings(() => {
+          for (const statement of node.statements) {
+            visit(statement);
+          }
+        });
         return;
       }
 
