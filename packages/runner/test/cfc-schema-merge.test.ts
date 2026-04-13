@@ -86,6 +86,38 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/maxConfidentiality/i);
   });
 
+  it("preserves uiContract metadata when merging schema envelopes", () => {
+    const uiContract = {
+      helper: "UiAction",
+      action: "SubmitDirectCommand",
+      trustedPattern: "TrustedDirectCommandSurface",
+      requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+    } as const;
+
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {
+        savedTitle: {
+          type: "string",
+          ifc: { uiContract },
+        },
+      },
+    }, {
+      type: "object",
+      properties: {
+        savedTitle: {
+          type: "string",
+          ifc: { uiContract },
+        },
+      },
+    });
+
+    const mergedObject = merged as JSONSchemaObj;
+    expect(
+      (mergedObject.properties?.savedTitle as JSONSchemaObj).ifc?.uiContract,
+    ).toEqual(uiContract);
+  });
+
   it("rejects branch-local ifc labels in divergent schemas", () => {
     expect(() =>
       mergeCfcSchemaEnvelopes({

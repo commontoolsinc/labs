@@ -14,6 +14,7 @@ const IFC_KEYS = [
   "projection",
   "collection",
   "flowPrecisionClaim",
+  "uiContract",
 ] as const;
 
 const asSchemaObject = (
@@ -105,6 +106,7 @@ const mergeSetLikeIfcArray = (
       }
       return existing;
     case "flowPrecisionClaim":
+    case "uiContract":
       if (!deepEqual(existing, candidate)) {
         throw new Error(`${key} must remain stable`);
       }

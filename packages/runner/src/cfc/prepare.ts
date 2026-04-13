@@ -32,7 +32,7 @@ import {
   type WritePolicyInput,
 } from "./types.ts";
 import {
-  trustedEventProvenanceMatchesUiContract,
+  trustedEventMatchesUiContract,
   uiContractsFromSchema,
 } from "./ui-contract.ts";
 
@@ -562,7 +562,10 @@ const verifyTrustedEventRequirements = (
       input.target.id === target.id &&
       input.target.type === target.type &&
       arraysEqual(input.target.path, entry.path) &&
-      trustedEventProvenanceMatchesUiContract(input.provenance, entry.contract)
+      trustedEventMatchesUiContract(
+        { provenance: input.provenance },
+        entry.contract,
+      )
     );
     if (!matched) {
       return `missing trusted-event policy input for ${target.id} at /${

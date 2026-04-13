@@ -759,6 +759,80 @@ describe("CFC trusted UI event enforcement", () => {
     cancel();
   });
 
+  it("does not let one same-path uiContract satisfy a different contract", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-same-path-mismatch",
+      { asStream: true },
+    );
+    const output = runtime.getCell(
+      space,
+      "cfc-ui-contract-output-same-path-mismatch",
+      {
+        allOf: [
+          trustedPatternUiActionSchema,
+          {
+            type: "string",
+            ifc: {
+              uiContract: {
+                helper: "UiAction",
+                action: "ApproveDifferentAction",
+                trustedPattern: "TrustedDirectCommandSurface",
+                requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+              },
+            },
+          },
+        ],
+      },
+    );
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        output.withTx(tx).set("rejected");
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [output.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    });
+    await runtime.idle();
+
+    expect(output.get()).toBeUndefined();
+    cancel();
+  });
+
   it("recovers after a mismatched trusted event is rejected", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
