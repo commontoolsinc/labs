@@ -770,15 +770,12 @@ export class Runner {
     }
 
     // Step 5: Check whether the pattern is available, otherwise load it
-    const patternLinkObj = processCell.key("pattern").getRaw() as
-      | object
-      | undefined;
-    if (!patternLinkObj) {
+    const patternId = getPatternId(processCell);
+    if (!patternId) {
       return Promise.reject(
         new Error(`Cannot start: no pattern ID (pattern)`),
       );
     }
-    const patternId = parseLink(patternLinkObj, processCell)!.id;
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
       return this.runtime.patternManager.loadPattern(
