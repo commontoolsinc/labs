@@ -1,18 +1,27 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
-import { createHasher } from "@commonfabric/content-hash";
+import {
+  createHasher,
+  type IncrementalHasher
+} from "@commonfabric/content-hash";
 import { createHasherDeno } from "../src/sha256-deno.ts";
 import { createHasherNoble } from "../src/sha256-noble.ts";
 import { createHasherWasm } from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
 const createFuncs = [
-  createHasher,
   createHasherDeno,
   createHasherNoble,
   createHasherWasm,
 ] as const;
+
+describe("createHasher()", () => {
+  it("is one of the implementation functions", () => {
+    const found = createFuncs.indexOf(createHasher);
+    expect(found).not.toBe(-1);
+  });
+});
 
 for (const createFunc of createFuncs) {
   describe(`${createFunc.name}()`, () => {
@@ -62,5 +71,53 @@ for (const createFunc of createFuncs) {
         });
       });
     }
+
+    it("can operate concurrently", () => {
+      const CONCURRENT_COUNT = 10;
+      let inProgress: {
+        hasher: IncrementalHasher;
+        bytes: Uint8Array;
+        hashStr: string;
+        done: boolean;
+      }[] = [];
+
+      let fixtureAt = 0;
+      let chunkSize = 10;
+
+      while (true) {
+        while (inProgress.length < CONCURRENT_COUNT) {
+          if (fixtureAt >= FIXTURES.length) {
+            break;
+          }
+          inProgress.push({
+            hasher: createFunc(),
+            bytes: FIXTURES[fixtureAt].bytes,
+            hashStr: FIXTURES[fixtureAt].sha256,
+            done: false,
+          });
+          fixtureAt++;
+        }
+
+        if (inProgress.length === 0) {
+          break;
+        }
+
+        for (const one of inProgress) {
+          const chunk = one.bytes.subarray(0, chunkSize);
+          one.bytes = one.bytes.subarray(chunkSize);
+          one.hasher.update(chunk);
+          if (one.bytes.length === 0) {
+            const got = one.hasher.digest("base64url");
+            expect(got).toBe(one.hashStr);
+            one.done = true;
+          }
+        }
+
+        // Filter out finished entries.
+        inProgress = inProgress.filter((one) => !one.done);
+
+        chunkSize = (Math.floor(chunkSize * 1.5) % 12345) + 1;
+      }
+    });
   });
 }
