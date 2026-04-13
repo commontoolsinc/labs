@@ -51,7 +51,7 @@ export default pattern((state: State) => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         state: {
             config: {
                 multiplier: state.key("config", "multiplier")

@@ -45,7 +45,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        a,
+        a: a.for(["result", 2, "a"], true),
         b: b,
         c: c
     }, ({ a: aVal, b, c }) => {

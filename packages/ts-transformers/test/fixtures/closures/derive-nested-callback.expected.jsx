@@ -49,7 +49,7 @@ export default pattern(() => {
             type: "number"
         }
     } as const satisfies __cfHelpers.JSONSchema, {
-        numbers,
+        numbers: numbers.for(["result", 2, "numbers"], true),
         multiplier: multiplier
     }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const n = __cf_pattern_input.key("element");

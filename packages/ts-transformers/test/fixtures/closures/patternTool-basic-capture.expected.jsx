@@ -59,7 +59,7 @@ type Output = {
 // Context: Module-scoped `content` cell is referenced inside the patternTool
 //   callback. The transformer threads it through the existing extraParams object.
 export default pattern(() => {
-    const grepTool = patternTool(__cfModuleCallback_1, { content });
+    const grepTool = patternTool(__cfModuleCallback_1, { content: content.for(["grepTool", 1, "content"], true) });
     return { grepTool };
 }, {
     type: "object",

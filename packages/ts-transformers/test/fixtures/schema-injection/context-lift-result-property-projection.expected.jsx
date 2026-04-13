@@ -54,7 +54,7 @@ const liftSummary = lift({
 export default pattern((__cf_pattern_input) => {
     const primary = __cf_pattern_input.key("primary");
     const secondary = __cf_pattern_input.key("secondary");
-    const summary = liftSummary({ primary, secondary }).for("summary", true);
+    const summary = liftSummary({ primary: primary.for(["summary", "primary"], true), secondary: secondary.for(["summary", "secondary"], true) }).for("summary", true);
     const difference = derive({
         type: "object",
         properties: {

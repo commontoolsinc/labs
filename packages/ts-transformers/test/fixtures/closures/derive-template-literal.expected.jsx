@@ -37,7 +37,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         prefix: prefix
     }, ({ value: v, prefix }) => `${prefix.get()}${v}`).for("result", true);
     return result;

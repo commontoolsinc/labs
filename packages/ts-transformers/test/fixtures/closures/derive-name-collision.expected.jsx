@@ -37,7 +37,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        multiplier,
+        multiplier: multiplier.for(["result", 2, "multiplier"], true),
         multiplier_1: multiplier
     }, ({ multiplier: m, multiplier_1 }) => m.get() * 3 + multiplier_1.get()).for("result", true);
     return result;

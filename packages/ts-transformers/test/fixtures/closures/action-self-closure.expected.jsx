@@ -109,7 +109,7 @@ export default pattern((__cf_pattern_input) => {
           <cf-button onClick={incrementWithSelf}>Increment with Self</cf-button>
         </div>),
         title,
-        count,
+        count: count.for(["__patternResult", "count"], true)
     };
 }, {
     type: "object",

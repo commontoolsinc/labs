@@ -55,7 +55,7 @@ export default pattern(() => {
         },
         required: ["value", "data"]
     } as const satisfies __cfHelpers.JSONSchema, {
-        multiplier,
+        multiplier: multiplier.for(["result", 2, "multiplier"], true),
         multiplier_1: multiplier
     }, ({ multiplier: m, multiplier_1 }) => ({
         value: m.get() * 3,

@@ -21,7 +21,7 @@ export default pattern((state) => {
             type: "number"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("typedValues", true);
-    return { typedValues };
+    return { typedValues: typedValues.for(["__patternResult", "typedValues"], true) };
 }, {
     type: "object",
     properties: {

@@ -86,7 +86,7 @@ type Output = {
 //   must not be hoisted into extraParams. Only module-scoped reactive bindings
 //   (here, `content` from Writable.of) should be captured.
 export default pattern(() => {
-    const tool = patternTool(__cfModuleCallback_1, { content });
+    const tool = patternTool(__cfModuleCallback_1, { content: content.for(["tool", 1, "content"], true) });
     return { tool };
 }, {
     type: "object",

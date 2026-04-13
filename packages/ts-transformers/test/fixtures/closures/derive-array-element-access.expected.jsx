@@ -38,7 +38,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         factors: factors
     }, ({ value: v, factors }) => v.get() * factors[1]!).for("result", true);
     return result;

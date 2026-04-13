@@ -29,8 +29,8 @@ export default pattern(() => {
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema).for("_emptyObject", true);
     return {
-        emptyArray: _emptyArray,
-        emptyObject: _emptyObject,
+        emptyArray: _emptyArray.for(["__patternResult", "emptyArray"], true),
+        emptyObject: _emptyObject.for(["__patternResult", "emptyObject"], true)
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

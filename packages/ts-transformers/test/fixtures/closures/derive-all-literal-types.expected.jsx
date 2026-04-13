@@ -49,7 +49,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         numLiteral: numLiteral,
         floatLiteral: floatLiteral,
         boolLiteral: boolLiteral,

@@ -61,8 +61,8 @@ export default pattern((__cf_pattern_input) => {
         <span>{title} {label}: {counter}</span>
         <cf-button onClick={reset}>Reset</cf-button>
       </div>),
-        counter,
-        label,
+        counter: counter.for(["__patternResult", "counter"], true),
+        label: label.for(["__patternResult", "label"], true)
     };
 }, {
     type: "object",

@@ -105,6 +105,37 @@ export default pattern<{ count: number }>((state) => ({
     assertNotMatch(main, /state\.key\("count"\)\.for/);
   });
 
+  it("re-roots reactive identifier members in pattern results", async () => {
+    const source = `
+import { pattern, Writable } from "commonfabric";
+
+export default pattern(() => {
+  const foo = Writable.of(1);
+  return {
+    foo,
+    explicit: foo,
+  };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, '.for("foo", true);');
+    assertStringIncludes(
+      main,
+      'foo: foo.for(["__patternResult", "foo"], true)',
+    );
+    assertStringIncludes(
+      main,
+      'explicit: foo.for(["__patternResult", "explicit"], true)',
+    );
+  });
+
   it("adds stable nested causes to constructed variable values", async () => {
     const source = `
 import { computed, Writable } from "commonfabric";
@@ -135,6 +166,30 @@ export function make() {
     assertStringIncludes(main, '.for(["foo", "nested", "result"], true)');
     assertStringIncludes(main, '.for(["foo", "tuple", 0], true)');
     assert(!main.includes('.for(["foo", "already"], true)'));
+  });
+
+  it("does not add positional cause segments for wrapped single object arguments", async () => {
+    const source = `
+import { Writable } from "commonfabric";
+
+declare function f<T>(arg: T): T;
+
+export function make() {
+  const param = Writable.of(1);
+  const foo = f(({ param }) as const);
+  return foo;
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(main, '.for(["foo", "param"], true)');
+    assert(!main.includes('.for(["foo", 0, "param"], true)'));
   });
 
   it("does not add causes to plain array methods in lift callbacks", async () => {

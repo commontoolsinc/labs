@@ -116,7 +116,7 @@ export default pattern((__cf_pattern_input) => {
         savedContent: savedContent,
         onSaveFile: onSaveFile
     }).for("trigger", true);
-    return { trigger };
+    return { trigger: trigger.for(["__patternResult", "trigger"], true) };
 }, {
     type: "object",
     properties: {

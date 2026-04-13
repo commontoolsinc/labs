@@ -66,7 +66,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        point,
+        point: point.for(["result", 2, "point"], true),
         multiplier: multiplier
     }, ({ point: p, multiplier }) => {
         const { x, y } = p.get();

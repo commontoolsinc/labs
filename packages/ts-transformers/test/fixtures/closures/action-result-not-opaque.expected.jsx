@@ -62,7 +62,7 @@ export default pattern((__cf_pattern_input) => {
         <cf-button onClick={increment}>+</cf-button>
         <cf-button onClick={decrement}>-</cf-button>
       </div>),
-        count,
+        count: count.for(["__patternResult", "count"], true)
     };
 }, {
     type: "object",

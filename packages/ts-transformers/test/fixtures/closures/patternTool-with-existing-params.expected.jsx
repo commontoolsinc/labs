@@ -56,7 +56,7 @@ export default pattern(() => {
         });
     }, {
         multiplier: multiplier,
-        offset
+        offset: offset.for(["tool", 1, "offset"], true)
     });
     return { tool };
 }, {

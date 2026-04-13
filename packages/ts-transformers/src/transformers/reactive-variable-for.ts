@@ -10,6 +10,7 @@ import {
   getTypeAtLocationWithFallback,
   hasReactiveCollectionProvenance,
   isCellLikeType,
+  isReactiveValueExpression,
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -304,7 +305,10 @@ function visitExpressionChildrenWithCausePath(
   if (ts.isObjectLiteralExpression(expression)) {
     let changed = false;
     const properties = expression.properties.map((property) => {
-      if (!ts.isPropertyAssignment(property)) {
+      if (
+        !ts.isPropertyAssignment(property) &&
+        !ts.isShorthandPropertyAssignment(property)
+      ) {
         const visited = ts.visitEachChild(
           property,
           visit,
@@ -328,22 +332,28 @@ function visitExpressionChildrenWithCausePath(
         return visited;
       }
 
-      const initializer = visitExpressionWithCausePath(
-        property.initializer,
+      const initializerExpression = ts.isPropertyAssignment(property)
+        ? property.initializer
+        : property.name;
+      const initializer = visitObjectPropertyInitializerWithCausePath(
+        initializerExpression,
         [...causePath, propertyName],
         context,
         visit,
-        { includeRoot: true },
       );
-      if (initializer === property.initializer) {
+      if (initializer === initializerExpression) {
         return property;
       }
 
       changed = true;
-      return context.factory.updatePropertyAssignment(
-        property,
+      const updatedProperty = context.factory.createPropertyAssignment(
         property.name,
         initializer,
+      );
+      return context.cfHelpers.preserveNodeSourceMap(
+        updatedProperty,
+        property,
+        property,
       );
     });
 
@@ -463,17 +473,36 @@ function getCallArgumentCausePath(
   index: number,
   argumentCount: number,
 ): CausePath {
+  const unwrappedArgument = unwrapExpression(argument);
   if (
     argumentCount === 1 &&
     (
-      ts.isObjectLiteralExpression(argument) ||
-      ts.isArrayLiteralExpression(argument)
+      ts.isObjectLiteralExpression(unwrappedArgument) ||
+      ts.isArrayLiteralExpression(unwrappedArgument)
     )
   ) {
     return causePath;
   }
 
   return [...causePath, index];
+}
+
+function visitObjectPropertyInitializerWithCausePath(
+  expression: ts.Expression,
+  causePath: CausePath,
+  context: TransformationContext,
+  visit: ts.Visitor,
+): ts.Expression {
+  const visited = visitExpressionWithCausePath(
+    expression,
+    causePath,
+    context,
+    visit,
+    { includeRoot: true },
+  );
+  return shouldRetargetReactiveReference(visited, context)
+    ? createForCall(visited, causePath, context)
+    : visited;
 }
 
 function shouldAddVariableFor(
@@ -678,6 +707,15 @@ function isExplicitReactiveCall(
       includeRuntimeCalls: true,
       useTypeFallback: true,
     });
+}
+
+function shouldRetargetReactiveReference(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const target = unwrapExpression(expression);
+  return ts.isIdentifier(target) &&
+    isReactiveValueExpression(target, context.checker);
 }
 
 function chainContainsForCall(expression: ts.Expression): boolean {

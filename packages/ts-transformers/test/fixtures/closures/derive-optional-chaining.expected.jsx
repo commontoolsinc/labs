@@ -42,7 +42,7 @@ export default pattern((config: Config) => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         config: {
             multiplier: config.key("multiplier")
         }
