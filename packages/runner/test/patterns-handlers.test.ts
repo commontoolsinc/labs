@@ -12,7 +12,6 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
-import { isPrimitiveCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { getPatternIdFromPiece } from "@commonfabric/runner";
 
