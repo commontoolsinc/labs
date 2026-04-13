@@ -35,7 +35,7 @@ export default pattern((state) => {
                     properties: {},
                     additionalProperties: {
                         type: "number",
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 }
             },
@@ -54,7 +54,7 @@ export default pattern((state) => {
             properties: {},
             additionalProperties: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             }
         }
     },

@@ -89,6 +89,42 @@ export const readValueAtPath = (
   return current as FabricValue | undefined;
 };
 
+const shallowCloneContainer = <
+  Container extends Record<string, unknown> | unknown[],
+>(
+  value: Container,
+): Container => {
+  if (Array.isArray(value)) {
+    const copy = new Array(value.length);
+    Object.assign(copy, value);
+    return copy as Container;
+  }
+
+  const copy = Object.create(Object.getPrototypeOf(value)) as Record<
+    string,
+    unknown
+  >;
+  Object.assign(copy, value);
+  return copy as Container;
+};
+
+const getPathSegmentValue = (
+  value: Record<string, unknown> | unknown[],
+  segment: string,
+): unknown => Array.isArray(value) ? value[Number(segment)] : value[segment];
+
+const setPathSegmentValue = (
+  value: Record<string, unknown> | unknown[],
+  segment: string,
+  next: unknown,
+): void => {
+  if (Array.isArray(value)) {
+    value[Number(segment)] = next;
+    return;
+  }
+  value[segment] = next;
+};
+
 export const cloneWithValueAtPath = (
   root: EntityDocument | undefined,
   path: readonly string[],
@@ -102,39 +138,32 @@ export const cloneWithValueAtPath = (
       }) as EntityDocument;
   }
 
-  const nextRoot = cloneIfNecessary((root ?? {}) as FabricValue, {
-    frozen: false,
-  }) as Record<string, unknown>;
-  let current: Record<string, unknown> | unknown[] = nextRoot;
+  const baseRoot = (root ?? {}) as Record<string, unknown>;
+  const nextRoot = shallowCloneContainer(baseRoot);
+  let currentClone: Record<string, unknown> | unknown[] = nextRoot;
+  let currentBase: unknown = baseRoot;
   for (let index = 0; index < path.length - 1; index += 1) {
     const segment = path[index]!;
     const nextSegment = path[index + 1]!;
-    if (Array.isArray(current)) {
-      const slot = Number(segment);
-      const existing = current[slot];
-      if (!isRecord(existing) && !Array.isArray(existing)) {
-        current[slot] = createPathContainer(nextSegment);
-      }
-      current = current[slot] as Record<string, unknown> | unknown[];
-      continue;
-    }
-
-    const existing = current[segment];
-    if (!isRecord(existing) && !Array.isArray(existing)) {
-      current[segment] = createPathContainer(nextSegment);
-    }
-    current = current[segment] as Record<string, unknown> | unknown[];
+    const existing = currentBase !== null && typeof currentBase === "object"
+      ? getPathSegmentValue(
+        currentBase as Record<string, unknown> | unknown[],
+        segment,
+      )
+      : undefined;
+    const nextChild = isRecord(existing) || Array.isArray(existing)
+      ? shallowCloneContainer(existing)
+      : createPathContainer(nextSegment);
+    setPathSegmentValue(currentClone, segment, nextChild);
+    currentClone = nextChild as Record<string, unknown> | unknown[];
+    currentBase = existing;
   }
 
   const last = path[path.length - 1]!;
   const nextValue = value === undefined
     ? undefined
     : cloneIfNecessary(value as FabricValue, { frozen: false });
-  if (Array.isArray(current)) {
-    current[Number(last)] = nextValue;
-  } else {
-    current[last] = nextValue;
-  }
+  setPathSegmentValue(currentClone, last, nextValue);
   return nextRoot as EntityDocument;
 };
 
@@ -146,38 +175,46 @@ export const cloneWithoutPath = (
     return undefined;
   }
 
-  const nextRoot = cloneIfNecessary(root as FabricValue, {
-    frozen: false,
-  }) as Record<string, unknown>;
-  let current: Record<string, unknown> | unknown[] = nextRoot;
+  let parentBase: Record<string, unknown> | unknown[] = root;
   for (let index = 0; index < path.length - 1; index += 1) {
     const segment = path[index]!;
-    if (Array.isArray(current)) {
-      const slot = Number(segment);
-      const next = current[slot];
-      if (!isRecord(next) && !Array.isArray(next)) {
-        return nextRoot as EntityDocument;
-      }
-      current = next as Record<string, unknown> | unknown[];
-      continue;
-    }
-
-    const next = current[segment];
+    const next = getPathSegmentValue(parentBase, segment);
     if (!isRecord(next) && !Array.isArray(next)) {
-      return nextRoot as EntityDocument;
+      return root;
     }
-    current = next as Record<string, unknown> | unknown[];
+    parentBase = next as Record<string, unknown> | unknown[];
   }
 
   const last = path[path.length - 1]!;
-  if (Array.isArray(current)) {
+  if (Array.isArray(parentBase)) {
     const slot = Number(last);
-    if (slot >= 0 && slot < current.length) {
-      current.splice(slot, 1);
+    if (slot < 0 || slot >= parentBase.length) {
+      return root;
     }
-  } else {
-    delete current[last];
+  } else if (!hasOwnPathSegment(parentBase, last)) {
+    return root;
   }
+
+  const nextRoot = shallowCloneContainer(root);
+  let currentClone: Record<string, unknown> | unknown[] = nextRoot;
+  let currentBase: Record<string, unknown> | unknown[] = root;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const segment = path[index]!;
+    const next = getPathSegmentValue(currentBase, segment) as
+      | Record<string, unknown>
+      | unknown[];
+    const nextClone = shallowCloneContainer(next);
+    setPathSegmentValue(currentClone, segment, nextClone);
+    currentClone = nextClone;
+    currentBase = next;
+  }
+
+  if (Array.isArray(currentClone)) {
+    currentClone.splice(Number(last), 1);
+  } else {
+    delete currentClone[last];
+  }
+
   return nextRoot as EntityDocument;
 };
 

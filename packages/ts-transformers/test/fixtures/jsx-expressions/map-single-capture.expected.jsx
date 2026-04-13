@@ -67,7 +67,7 @@ export default pattern((_state) => {
                         },
                         required: ["id", "name"]
                     },
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["people"]
@@ -84,14 +84,11 @@ export default pattern((_state) => {
                     element: {
                         type: "object",
                         properties: {
-                            id: {
-                                type: "string"
-                            },
                             name: {
                                 type: "string"
                             }
                         },
-                        required: ["id", "name"]
+                        required: ["name"]
                     },
                     index: {
                         type: "number"

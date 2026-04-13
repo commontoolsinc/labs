@@ -6,6 +6,7 @@ import "../src/globals.ts";
 import { Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { clickPierce } from "./shadow-dom.ts";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 
@@ -170,12 +171,12 @@ describe("shell piece tests", () => {
         (await currentPiece.result.get(["value"])) === 0
       );
 
-      await clickPieceButton(page, "#counter-decrement");
+      await clickPierce(page, "#counter-decrement");
       await waitFor(async () =>
         (await currentPiece.result.get(["value"])) === -1
       );
 
-      await clickPieceButton(page, "#counter-decrement");
+      await clickPierce(page, "#counter-decrement");
       await waitFor(async () =>
         (await currentPiece.result.get(["value"])) === -2
       );
@@ -190,20 +191,3 @@ describe("shell piece tests", () => {
     }
   });
 });
-
-function clickPieceButton(
-  page: ReturnType<ShellIntegration["page"]>,
-  selector: string,
-) {
-  return waitFor(async () => {
-    try {
-      const button = await page.waitForSelector(selector, {
-        strategy: "pierce",
-      });
-      await button.click();
-      return true;
-    } catch (_) {
-      return false;
-    }
-  });
-}

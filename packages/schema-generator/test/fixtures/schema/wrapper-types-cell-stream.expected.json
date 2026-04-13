@@ -1,19 +1,27 @@
 {
   "properties": {
     "counter": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "type": "number"
     },
     "events": {
-      "asStream": true,
+      "asCell": [
+        "stream"
+      ],
       "type": "string"
     },
     "maybeCell": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "type": "string"
     },
     "user": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "properties": {
         "age": {
           "type": "number"

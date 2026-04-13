@@ -19,13 +19,13 @@ import { BaseElement } from "../../core/base-element.ts";
 
 export class CFTile extends BaseElement {
   @property()
-  item: { title: string; [key: string]: any } = { title: "" };
+  accessor item: { title: string; [key: string]: any } = { title: "" };
 
   @property()
-  summary: string = "";
+  accessor summary: string = "";
 
   @property()
-  clickable: boolean = true;
+  accessor clickable: boolean = true;
 
   static override styles = css`
     :host {

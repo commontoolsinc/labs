@@ -37,7 +37,7 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
 - **Map callback parity** – parameters annotated as `any`/`number` now derive
   correctly inside `.map` callbacks.
 - **Unary `!`** – predicates like `!flag` wrap into `derive` where necessary.
-- **Docs fixture** – `opaque-ref-cell-map` fixture reproduces the ct-891 case so
+- **Docs fixture** – `opaque-ref-cell-map` fixture reproduces the CT-891 case so
   we keep coverage on the new transformer.
 - **Optional import handling** – the modular path defers import insertion until
   all rules run, preventing duplicate helper imports.
@@ -122,7 +122,7 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
   architecture to identify candidates and apply appropriate transformations
 - **Import flexibility**: Expand helper resolution so the rewrite pipeline works
   when authors:
-  - Glob-import (`import * as ct from "commonfabric"`) and access helpers via
+  - Glob-import (`import * as cf from "commonfabric"`) and access helpers via
     namespace members.
   - Rename specific imports
     (`import { derive as ctDerive } from

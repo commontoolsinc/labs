@@ -170,7 +170,7 @@ async function runCharm(data: RunData): Promise<void> {
       console.log(`Loading charm ${pieceId} for the first time`);
       runningCharm = await manager.get(charmsEntryCell, true, {
         type: "object",
-        properties: { bgUpdater: { asStream: true } },
+        properties: { bgUpdater: { asCell: ["stream"] } },
         required: ["bgUpdater"],
       });
 

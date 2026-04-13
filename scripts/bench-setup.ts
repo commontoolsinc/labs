@@ -58,11 +58,11 @@ const NOTES = [
   },
   {
     title: "Deep dive: cell reactivity",
-    content: `# Cell Reactivity in CommonTools
+    content: `# Cell Reactivity in Common Fabric
 
 ## Overview
 
-Cells are the fundamental unit of state in the CommonTools runtime. Each cell holds a typed value and notifies subscribers when that value changes. Cells are stored in Spaces, addressed by DID.
+Cells are the fundamental unit of state in the Common Fabric runtime. Each cell holds a typed value and notifies subscribers when that value changes. Cells are stored in Spaces, addressed by DID.
 
 ## Subscription model
 
@@ -96,7 +96,7 @@ The runtime processes cell updates in topological order (dependencies before dep
     title: "FUSE filesystem spec summary",
     content: `The FUSE filesystem layout:
 
-  /tmp/ct/
+  /tmp/cf/
     <space>/
       pieces/
         <piece-name>/
@@ -109,7 +109,7 @@ The runtime processes cell updates in topological order (dependencies before dep
 Writing to input/ triggers reactive recomputation. The result/ subtree updates within ~150-300ms on a local dev server.
 
 Handlers are exposed as .handler files under result/. Write JSON to them to invoke.
-Tools are exposed as .tool files — read them to get a shell script that calls ct exec.
+Tools are exposed as .tool files — read them to get a shell script that calls cf exec.
 
 Performance characteristics:
 - Directory listing: O(children), fast

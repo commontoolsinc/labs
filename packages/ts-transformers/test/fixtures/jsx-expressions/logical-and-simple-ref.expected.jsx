@@ -27,7 +27,7 @@ export default pattern((_state) => {
         {/* Simple opaque ref with JSX on right - SHOULD use when for short-circuit optimization */}
         {__cfHelpers.when({
             type: "boolean",
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
@@ -43,7 +43,7 @@ export default pattern((_state) => {
         {/* Another simple ref */}
         {__cfHelpers.when({
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",

@@ -1,22 +1,33 @@
 {
   "properties": {
     "comparableValue": {
-      "asCell": true,
+      "asCell": [
+        "comparable"
+      ],
       "type": "number"
     },
     "opaqueValue": {
+      "asCell": [
+        "opaque"
+      ],
       "type": "boolean"
     },
     "readonlyValue": {
-      "asCell": true,
+      "asCell": [
+        "readonly"
+      ],
       "type": "string"
     },
     "streamValue": {
-      "asStream": true,
+      "asCell": [
+        "stream"
+      ],
       "type": "number"
     },
     "writeonlyValue": {
-      "asCell": true,
+      "asCell": [
+        "writeonly"
+      ],
       "type": "boolean"
     }
   },

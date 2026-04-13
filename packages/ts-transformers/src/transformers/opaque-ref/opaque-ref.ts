@@ -1,5 +1,6 @@
 import ts from "typescript";
 import {
+  type CellBrand,
   getCellBrand,
   getCellKind as utilGetCellKind,
 } from "@commonfabric/schema-generator/cell-brand";
@@ -45,7 +46,7 @@ export function isOpaqueRefType(
 export function getCellKind(
   type: ts.Type,
   checker: ts.TypeChecker,
-): "opaque" | "cell" | "stream" | undefined {
+): CellBrand | undefined {
   return utilGetCellKind(type, checker);
 }
 

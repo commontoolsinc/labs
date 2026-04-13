@@ -26,7 +26,7 @@ const handleClick = handler({
     properties: {
         count: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["count"]
@@ -69,7 +69,7 @@ export default pattern((state) => {
                                 properties: {
                                     count: {
                                         type: "number",
-                                        asCell: true
+                                        asCell: ["cell"]
                                     }
                                 },
                                 required: ["count"]
@@ -131,7 +131,7 @@ export default pattern((state) => {
         },
         count: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["items", "count"],

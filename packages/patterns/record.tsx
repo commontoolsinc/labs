@@ -896,8 +896,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     //   computed() transforms .map() callbacks to properly unwrap reactive values
     const allEntriesWithIndex = computed(() => {
       const expandedIdx = expandedIndex.get();
-      // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
-      // subPieces is guaranteed to be an array by the Default type
       return subPieces.map((entry, index) => {
         // Get display info using plain helper function
         // This works because CTS transforms .map() to properly unwrap reactive values
@@ -934,7 +932,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     const hasTypesToAdd = getAddableTypes().length > 0;
 
     // Build dropdown items from registry, separating new types from existing ones
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
     const addSelectItems = computed(() => {
       const types = [...new Set(subPieces.map((e) => e?.type).filter(Boolean))];
       const existingTypes = new Set<string>(types);
@@ -974,7 +971,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     });
 
     // Check for manual icon override from record-icon module
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
     const manualIcon = computed(() => {
       const iconModule = subPieces.find((e) => e?.type === "record-icon");
       if (!iconModule) return null;
@@ -994,7 +990,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     });
 
     // Extract nicknames from nickname modules for display in NAME
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
     const nicknamesList = computed(() => {
       const nicknameModules = subPieces.filter((e) => e?.type === "nickname");
       const nicknames: string[] = [];
@@ -1024,7 +1019,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     // ===== Trash Section Computed Values =====
 
     // Pre-compute trashed entries with displayInfo using getDisplayInfo helper
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
     const trashedEntriesWithDisplay = computed(() => {
       return trashedSubPieces.map((entry, trashIndex) => {
         // Get display info using plain helper function

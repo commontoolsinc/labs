@@ -139,25 +139,25 @@ export class CFQuestion extends BaseElement {
   ];
 
   @property({ type: String })
-  question = "";
+  accessor question = "";
 
   @property({ type: Array })
-  options: string[] = [];
+  accessor options: string[] = [];
 
   @property({ type: Boolean, attribute: "allow-custom" })
-  allowCustom = false;
+  accessor allowCustom = false;
 
   @state()
-  private _selectedOption: string | null = null;
+  private accessor _selectedOption: string | null = null;
 
   @state()
-  private _customAnswer = "";
+  private accessor _customAnswer = "";
 
   @state()
-  private _isSubmitted = false;
+  private accessor _isSubmitted = false;
 
   @state()
-  private _answer = "";
+  private accessor _answer = "";
 
   private _handleOptionClick(option: string): void {
     this._selectedOption = option;

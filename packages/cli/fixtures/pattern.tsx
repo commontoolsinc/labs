@@ -6,7 +6,7 @@ import "commonfabric/schema";
 const model = schema({
   type: "object",
   properties: {
-    value: { type: "number", default: 0, asCell: true },
+    value: { type: "number", default: 0, asCell: ["cell"] },
   },
   default: { value: 0 },
 });

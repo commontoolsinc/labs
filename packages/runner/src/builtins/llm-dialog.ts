@@ -187,7 +187,7 @@ function resolveRefsForLLM(
 
 /**
  * Prepare a schema for use in LLM tool definitions by:
- * 1. Stripping internal markers (asCell, asStream, asOpaque)
+ * 1. Stripping internal `asCell` markers and removing cycles
  * 2. Inlining all $ref references
  */
 function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
@@ -255,7 +255,7 @@ function buildMinimalSchemaFromValue(piece: Cell<any>): JSONSchema | undefined {
  *
  * Simplifies a schema for LLM context documentation.
  * Removes $defs and $ref which can make schemas very large with recursive types.
- * Preserves essential type information including wrapper markers (asStream, asCell, asOpaque),
+ * Preserves essential type information including wrapper markers (asCell),
  * nested properties, required arrays, and small enums.
  *
  * @param schema - The schema to simplify
@@ -277,9 +277,7 @@ function simplifySchemaForContext(
   if (depth >= maxDepth) {
     const minimal: Record<string, unknown> = {};
     if (schemaObj.type) minimal.type = schemaObj.type;
-    if (schemaObj.asStream) minimal.asStream = schemaObj.asStream;
     if (schemaObj.asCell) minimal.asCell = schemaObj.asCell;
-    if (schemaObj.asOpaque) minimal.asOpaque = schemaObj.asOpaque;
     return minimal as JSONSchema;
   }
 
@@ -289,9 +287,7 @@ function simplifySchemaForContext(
   const PRESERVE_KEYS = [
     "type",
     "description",
-    "asStream",
     "asCell",
-    "asOpaque",
     "default",
     "required",
     "additionalProperties",
@@ -548,8 +544,8 @@ const resultSchema = toDeepFrozenSchema(
     properties: {
       pending: { type: "boolean", default: false },
       result: {},
-      addMessage: { ...LLMMessageSchema, asStream: true },
-      cancelGeneration: { asStream: true },
+      addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+      cancelGeneration: { asCell: ["stream"] },
       pinCell: {
         type: "object",
         properties: {
@@ -557,9 +553,9 @@ const resultSchema = toDeepFrozenSchema(
           name: { type: "string" },
         },
         required: ["path", "name"],
-        asStream: true,
+        asCell: ["stream"],
       },
-      unpinAllCells: { asStream: true },
+      unpinAllCells: { asCell: ["stream"] },
       flattenedTools: { type: "object", default: {} },
       pinnedCells: {
         type: "array",

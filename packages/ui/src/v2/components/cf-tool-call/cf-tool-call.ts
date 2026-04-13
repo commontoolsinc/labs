@@ -10,6 +10,7 @@ import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
+  defaultTheme,
   resolveColor,
   resolveColorScheme,
 } from "../theme-context.ts";
@@ -213,17 +214,17 @@ export class CFToolCall extends BaseElement {
     ];
 
     @property({ type: Object })
-    declare call: BuiltInLLMToolCallPart;
+    accessor call!: BuiltInLLMToolCallPart;
 
     @property({ type: Object })
-    declare result?: BuiltInLLMToolResultPart;
+    accessor result: BuiltInLLMToolResultPart | undefined = undefined;
 
     @property({ type: Boolean, reflect: true })
-    declare expanded: boolean;
+    accessor expanded = false;
 
     @consume({ context: cfThemeContext, subscribe: true })
     @property({ attribute: false })
-    declare theme?: CFTheme;
+    accessor theme: CFTheme = defaultTheme;
 
     constructor() {
       super();

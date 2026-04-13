@@ -108,7 +108,7 @@ export default pattern((__cf_pattern_input) => {
                 $ref: "#/$defs/Item"
             },
             "default": [],
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["showItems", "items"],

@@ -157,7 +157,7 @@ export class FavoritesManager {
     const patternWithSchema = defaultPattern.asSchema({
       type: "object",
       properties: {
-        [handlerName]: { asStream: true },
+        [handlerName]: { asCell: ["stream"] },
       },
       required: [handlerName],
     }) as CellHandle<Record<HandlerName, unknown>>;

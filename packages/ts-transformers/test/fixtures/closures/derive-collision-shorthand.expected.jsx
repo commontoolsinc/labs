@@ -28,11 +28,11 @@ export default pattern(() => {
         properties: {
             multiplier: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             multiplier_1: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["multiplier", "multiplier_1"]
@@ -47,7 +47,7 @@ export default pattern(() => {
                 properties: {
                     multiplier: {
                         type: "number",
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 },
                 required: ["multiplier"]
@@ -73,7 +73,7 @@ export default pattern(() => {
             properties: {
                 multiplier: {
                     type: "number",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["multiplier"]

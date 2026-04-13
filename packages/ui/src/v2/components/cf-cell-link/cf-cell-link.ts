@@ -59,36 +59,36 @@ export class CFCellLink extends BaseElement {
   ];
 
   @property({ type: String })
-  link?: string;
+  accessor link: string | undefined = undefined;
 
   @property({ type: String })
-  label?: string;
+  accessor label: string | undefined = undefined;
 
   @property({ type: String })
-  spaceName?: string;
+  accessor spaceName: string | undefined = undefined;
 
   @property({ attribute: false })
-  cell?: CellHandle;
+  accessor cell: CellHandle | undefined = undefined;
 
   @property({ type: Boolean, reflect: true, attribute: "static" })
-  isStatic?: boolean;
+  accessor isStatic: boolean | undefined = undefined;
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
-  runtime?: RuntimeClient;
+  accessor runtime: RuntimeClient | undefined = undefined;
 
   @consume({ context: spaceContext, subscribe: true })
   @property({ attribute: false })
-  space?: DID;
+  accessor space: DID | undefined = undefined;
 
   @state()
-  private _resolvedCell?: CellHandle;
+  private accessor _resolvedCell: CellHandle | undefined = undefined;
 
   @state()
-  private _name?: string;
+  private accessor _name: string | undefined = undefined;
 
   @state()
-  private _handle?: string;
+  private accessor _handle: string | undefined = undefined;
 
   private _unsubscribe?: () => void;
 

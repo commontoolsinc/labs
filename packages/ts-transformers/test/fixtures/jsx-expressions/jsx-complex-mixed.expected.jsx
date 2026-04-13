@@ -46,7 +46,13 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["name"]
                             }
                         },
                         filter: {
@@ -56,27 +62,7 @@ export default pattern((state) => {
                     required: ["items", "filter"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, { state: {
@@ -255,34 +241,20 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    active: {
+                                        type: "boolean"
+                                    }
+                                },
+                                required: ["active"]
                             }
                         }
                     },
                     required: ["items"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, { state: {
@@ -347,34 +319,20 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    active: {
+                                        type: "boolean"
+                                    }
+                                },
+                                required: ["active"]
                             }
                         }
                     },
                     required: ["items"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, { state: {
@@ -397,34 +355,20 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    active: {
+                                        type: "boolean"
+                                    }
+                                },
+                                required: ["active"]
                             }
                         }
                     },
                     required: ["items"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, { state: {
@@ -449,34 +393,20 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    price: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["price"]
                             }
                         }
                     },
                     required: ["items"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, { state: {

@@ -44,11 +44,11 @@ export default pattern((state) => {
                     properties: {
                         changeCount: {
                             type: "number",
-                            asCell: true
+                            asCell: ["cell"]
                         },
                         selectedValue: {
                             type: "string",
-                            asCell: true
+                            asCell: ["cell"]
                         }
                     },
                     required: ["changeCount", "selectedValue"]
@@ -70,11 +70,11 @@ export default pattern((state) => {
     properties: {
         selectedValue: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         },
         changeCount: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["selectedValue", "changeCount"]

@@ -139,6 +139,71 @@ describe("scheduler", () => {
     expect(c.get()).toBe(4);
   });
 
+  it("should re-run an async read-only effect when invalidated while paused", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "paused-read-only-effect-source",
+      undefined,
+      tx,
+    );
+    source.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const seen: number[] = [];
+    let runCount = 0;
+    let startedResolve = () => {};
+    let started = Promise.resolve();
+    let allowResolve = () => {};
+    let allowFinish = Promise.resolve();
+
+    const effect: Action = async (actionTx) => {
+      runCount++;
+      const value = source.withTx(actionTx).get();
+      if (runCount === 2) {
+        startedResolve();
+        await allowFinish;
+      }
+      seen.push(value);
+    };
+
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+    await runtime.scheduler.idle();
+
+    expect(seen).toEqual([0]);
+
+    started = new Promise((resolve) => {
+      startedResolve = resolve;
+    });
+    allowFinish = new Promise((resolve) => {
+      allowResolve = resolve;
+    });
+
+    source.withTx(tx).send(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await started;
+
+    const conflictingTx = runtime.edit();
+    source.withTx(conflictingTx).send(2);
+    await conflictingTx.commit();
+
+    allowResolve();
+
+    await runtime.scheduler.idle();
+
+    expect(seen).toEqual([0, 1, 2]);
+  });
+
   it("captures trigger trace for a change and downstream scheduled effects", async () => {
     runtime.scheduler.enablePullMode();
 
@@ -677,6 +742,58 @@ describe("scheduler", () => {
     expect(counter.get()).toBe(3);
 
     assertSpyCalls(stopped, 0);
+  });
+
+  it("should ignore its own optimistic commit notifications but react to external commits", async () => {
+    let runCount = 0;
+    const counter = runtime.getCell<number>(
+      space,
+      "self-commit-ignore-counter",
+      undefined,
+      tx,
+    );
+    counter.set(0);
+    const step = runtime.getCell<number>(
+      space,
+      "self-commit-ignore-step",
+      undefined,
+      tx,
+    );
+    step.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const increment: Action = (actionTx) => {
+      runCount++;
+      counter.withTx(actionTx).send(
+        counter.withTx(actionTx).get() + step.withTx(actionTx).get(),
+      );
+    };
+
+    runtime.scheduler.subscribe(
+      increment,
+      {
+        reads: [
+          counter.getAsNormalizedFullLink(),
+          step.getAsNormalizedFullLink(),
+        ],
+        shallowReads: [],
+        writes: [counter.getAsNormalizedFullLink()],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+    expect(runCount).toBe(1);
+    expect(counter.get()).toBe(1);
+
+    counter.withTx(tx).send(10);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await runtime.scheduler.idle();
+    expect(runCount).toBe(2);
+    expect(counter.get()).toBe(11);
   });
 
   it("should immediately run actions that have no dependencies", async () => {

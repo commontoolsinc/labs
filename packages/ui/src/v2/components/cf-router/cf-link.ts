@@ -4,7 +4,7 @@ import { BaseElement } from "../../core/base-element.ts";
 
 export class CFLink extends BaseElement {
   @property({ type: String })
-  declare to: string;
+  accessor to = "";
 
   private onClick = (e: Event) => {
     e.preventDefault();

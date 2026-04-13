@@ -38,7 +38,7 @@ export async function main(args: string[]) {
   // Extract --log-level before Cliffy parses
   const { level, args: cleanArgs } = extractLogLevel(args);
   Deno.env.set("CF_CLI_NAME", cliName());
-  const profileDoneMarker = Deno.env.get("CT_PROFILE_DONE_MARKER");
+  const profileDoneMarker = Deno.env.get("CF_PROFILE_DONE_MARKER");
 
   if (level) {
     setGlobalLogFloor(level as LogLevel);
@@ -62,7 +62,7 @@ export async function main(args: string[]) {
     if (e instanceof TransformerError || e instanceof CompilerError) {
       console.error(e.message);
     } else if (e instanceof Error) {
-      console.error(e.stack ?? e.message);
+      console.error(e.stack || e.message);
     } else {
       console.error(e);
     }

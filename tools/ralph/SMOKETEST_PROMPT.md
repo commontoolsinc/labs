@@ -14,8 +14,8 @@ Goal: implement the task below
 
 2. Format with `deno fmt` for the changed files.
 
-3. Once tests pass, deploy it locally using the repo-local `ct` skill at
-   `skills/ct/` for deployment commands. It should deploy to
+3. Once tests pass, deploy it locally using the repo-local `cf` skill at
+   `skills/cf/` for deployment commands. It should deploy to
    http://localhost:8000. Servers are already running.
 
    Remember to use space name "ralph${RALPH_ID}" when deploying.

@@ -859,6 +859,9 @@ In the current implementation, the trusted runtime module identifiers are:
 - `commonfabric/schema`
 - `turndown`
 
+Other internal `@commonfabric/*` packages exist in the monorepo, but they are
+not currently exposed to authored SES modules through `runtimeDeps`.
+
 These runtime modules may export:
 
 - module-scope trusted builder entrypoints: `pattern`, `lift`, `handler`,
@@ -1316,7 +1319,7 @@ Implementation guidance:
 - the same mapper supports direct `parseStack()` and `mapPosition()` calls for
   both the module-load and lazy-callback SES paths
 - after source-map parsing, runner-internal SES plumbing frames should collapse
-  to `<CT_INTERNAL>` so user-facing errors show authored code first without
+  to `<CF_INTERNAL>` so user-facing errors show authored code first without
   leaking harness implementation details
 
 #### 8.4.2 ErrorMappingOptions and MappedError
@@ -1510,7 +1513,7 @@ const RUNTIME_PATTERNS = [
   /\/harness\//,
   /\/scheduler\//,
   /AMDLoader/,
-  /<CT_INTERNAL>/,
+  /<CF_INTERNAL>/,
   /\beval\b/,
 ];
 
@@ -1895,7 +1898,7 @@ module fallback.
 
 #### 3.3 Minimal globals plus trusted runtime modules (Priority: Medium)
 
-Keep ambient Compartment globals intentionally narrow and supply Common Tools
+Keep ambient Compartment globals intentionally narrow and supply Common Fabric
 capabilities through trusted runtime modules registered via `runtimeDeps`.
 Future reintroduction of time/network/randomness helpers for authored code
 remains a separate scoped decision.

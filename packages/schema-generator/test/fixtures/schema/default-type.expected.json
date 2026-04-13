@@ -58,12 +58,16 @@
     "CellDefaults": {
       "properties": {
         "counter": {
-          "asCell": true,
+          "asCell": [
+            "cell"
+          ],
           "default": 0,
           "type": "number"
         },
         "messages": {
-          "asCell": true,
+          "asCell": [
+            "cell"
+          ],
           "default": [],
           "items": {
             "type": "string"

@@ -1,6 +1,6 @@
 # Platform Tour
 
-Interactively tour the Common Tools platform as a user, exercising core workflows through browser automation. You are LARPing as a curious user exploring the platform. Narrate what you see as you go — the user is watching.
+Interactively tour the Common Fabric platform as a user, exercising core workflows through browser automation. You are LARPing as a curious user exploring the platform. Narrate what you see as you go — the user is watching.
 
 ## Usage
 
@@ -75,7 +75,7 @@ These reusable JS eval snippets help navigate shadow DOM. To avoid shell quoting
     if (depth > 10) return [];
     const results = [];
     if (node.shadowRoot) {
-      const links = node.shadowRoot.querySelectorAll("ct-cell-link");
+      const links = node.shadowRoot.querySelectorAll("cf-cell-link");
       links.forEach((l) => {
         const rect = l.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
@@ -182,7 +182,7 @@ Find the **"Notes ▾"** dropdown button in the content toolbar area. Click it t
 
 The note has two parts to edit:
 
-**Title:** The title is inside nested shadow DOM: `x-root-view > shadowRoot > x-app-view > shadowRoot > x-body-view > shadowRoot > ct-render > shadowRoot > div > ct-screen > ct-vstack`. It will NOT appear in accessibility snapshots.
+**Title:** The title is inside nested shadow DOM: `x-root-view > shadowRoot > x-app-view > shadowRoot > x-body-view > shadowRoot > cf-render > shadowRoot > div > cf-screen > cf-vstack`. It will NOT appear in accessibility snapshots.
 
 1. Write a JS eval to find the title span:
 ```js
@@ -190,7 +190,7 @@ The note has two parts to edit:
   const rv = document.querySelector("x-root-view");
   const av = rv.shadowRoot.querySelector("x-app-view");
   const bv = av.shadowRoot.querySelector("x-body-view");
-  const cr = bv.shadowRoot.querySelector("ct-render");
+  const cr = bv.shadowRoot.querySelector("cf-render");
   const spans = cr.shadowRoot.querySelectorAll("span");
   for (const span of spans) {
     if (span.textContent.trim() === "New Note") {
@@ -202,15 +202,15 @@ The note has two parts to edit:
 })()
 ```
 2. Click at the returned coordinates to activate edit mode
-3. A `ct-input` appears. Find the input inside it:
+3. A `cf-input` appears. Find the input inside it:
 ```js
 (() => {
   const rv = document.querySelector("x-root-view");
   const av = rv.shadowRoot.querySelector("x-app-view");
   const bv = av.shadowRoot.querySelector("x-body-view");
-  const cr = bv.shadowRoot.querySelector("ct-render");
-  const ctInput = cr.shadowRoot.querySelector("ct-input");
-  const input = ctInput.shadowRoot.querySelector("input");
+  const cr = bv.shadowRoot.querySelector("cf-render");
+  const cfInput = cr.shadowRoot.querySelector("cf-input");
+  const input = cfInput.shadowRoot.querySelector("input");
   input.focus();
   input.value = "YOUR TITLE HERE";
   input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -272,14 +272,14 @@ In the chat, type: "Please launch the counter pattern with an initial value of 5
 
 The counter view shows: a heading "Simple Counter", a large number (5), text like "Counter is the 5th number", and "- Decrement" / "+ Increment" buttons. Take a screenshot. Note: the counter pattern may not appear in `listPatternIndex`, but the LLM can still launch it via `fetchAndRunPattern` using the path `counter/counter.tsx`.
 
-**Testing interactivity:** The `ct-button` component wraps a native `<button>` inside its shadow root. Use this approach:
+**Testing interactivity:** The `cf-button` component wraps a native `<button>` inside its shadow root. Use this approach:
 ```js
 (() => {
   const rv = document.querySelector("x-root-view");
   const av = rv.shadowRoot.querySelector("x-app-view");
   const bv = av.shadowRoot.querySelector("x-body-view");
-  const cr = bv.shadowRoot.querySelector("ct-render");
-  const buttons = cr.shadowRoot.querySelectorAll("ct-button");
+  const cr = bv.shadowRoot.querySelector("cf-render");
+  const buttons = cr.shadowRoot.querySelectorAll("cf-button");
   return Array.from(buttons).map(b => {
     const rect = b.getBoundingClientRect();
     return { x: rect.x + rect.width/2, y: rect.y + rect.height/2, w: rect.width };
@@ -313,9 +313,9 @@ Each do-list item has a collapsible **"AI Suggestions"** section (a `<details>` 
 Click the disclosure summary on one of the items (e.g. "Plan a weekend camping trip") to expand it.
 
 A Suggestion pattern will activate and begin generating. Watch for:
-- **`ct-message-beads`** — colored dots representing the LLM conversation. A spinning gray dot means the LLM is working. Blue = user, green = assistant text, amber = assistant tool calls, purple = tool results.
+- **`cf-message-beads`** — colored dots representing the LLM conversation. A spinning gray dot means the LLM is working. Blue = user, green = assistant text, amber = assistant tool calls, purple = tool results.
 - The LLM (Claude Sonnet) will call tools like `listPatternIndex`, `fetchAndRunPattern`, or `bash` to find/create a relevant result.
-- When done, a **`ct-cell-link`** chip (pill) appears showing the resulting piece.
+- When done, a **`cf-cell-link`** chip (pill) appears showing the resulting piece.
 
 Narrate the bead activity as it happens — describe what tools are being called and what's appearing. Wait for the suggestion to complete. Take a screenshot.
 
@@ -323,7 +323,7 @@ Expand the AI Suggestions on a second item too (e.g. "Research the best noise-ca
 
 ### Step 12: Click Suggestions and Explore Results
 
-Use the **Find Cell Link Chips** helper to locate `ct-cell-link` chips. The `text` field from the helper shows the chip's display name. Click the `ct-cell-link` chip on a completed suggestion to navigate to the resulting piece. Describe what the piece looks like — it could be a note with content, a web search result, a pattern output, etc.
+Use the **Find Cell Link Chips** helper to locate `cf-cell-link` chips. The `text` field from the helper shows the chip's display name. Click the `cf-cell-link` chip on a completed suggestion to navigate to the resulting piece. Describe what the piece looks like — it could be a note with content, a web search result, a pattern output, etc.
 
 Navigate back to the space home (breadcrumb). Check the **Recent** section in the right column — the piece you just visited should now appear there at the top of the list. Take a screenshot showing the recent list with the new piece.
 
@@ -337,7 +337,7 @@ Navigate back to the space home.
 
 ### Step 14: Suggestion Refinement / Follow-up
 
-Back on the space home, find a do-list item with a completed suggestion (expand it if collapsed). The **"Refine suggestion..."** input is hidden by default. To reveal it, click the **"+"** button on the `ct-message-beads` widget (the row of colored dots at the bottom of the suggestion). Use the **Find Shadow DOM Buttons** helper (searching for '+') to locate the button coordinates. This toggles the `ct-prompt-input` visible, which allows you to continue the conversation with the suggestion LLM.
+Back on the space home, find a do-list item with a completed suggestion (expand it if collapsed). The **"Refine suggestion..."** input is hidden by default. To reveal it, click the **"+"** button on the `cf-message-beads` widget (the row of colored dots at the bottom of the suggestion). Use the **Find Shadow DOM Buttons** helper (searching for '+') to locate the button coordinates. This toggles the `cf-prompt-input` visible, which allows you to continue the conversation with the suggestion LLM.
 
 The refinement input and Send button appear in the accessibility snapshot after clicking '+'. Use refs to interact with them.
 
@@ -381,7 +381,7 @@ Spend 2-3 minutes freely exploring the platform. This is intentionally unstructu
 - Open more AI Suggestions on do-list items you haven't expanded yet
 - Send more refinement messages on existing suggestions
 - Ask Omnibot to do other things with the do-list: mark items done, remove items, add new ones
-- Navigate between pieces using breadcrumbs and `ct-cell-link` chips
+- Navigate between pieces using breadcrumbs and `cf-cell-link` chips
 - Check if any suggestion results have their own interactive elements
 - Try creating another note or pattern from the Omnibot
 - Hover over the message beads in suggestions to see conversation details
@@ -463,7 +463,7 @@ These are persistent platform/tooling quirks that affect multiple steps. Step-sp
 - **Prefer `agent-browser`, fall back to Playwright MCP.** Check availability at startup and adapt.
 - **Always snapshot before interacting.** Never assume element refs from a previous snapshot are still valid.
 - **Use `snapshot -i` for interactive refs.** The `-i` flag returns only interactive elements with unique refs, avoiding the duplicate-ref problem that occurs with full snapshots.
-- **Use coordinate-based clicks for ALL shadow DOM custom elements.** This includes `ct-button`, `ct-cell-link`, `ct-input`, `<details>` summaries, and `ct-message-beads`. Ref-based clicks may hang or fail on these.
+- **Use coordinate-based clicks for ALL shadow DOM custom elements.** This includes `cf-button`, `cf-cell-link`, `cf-input`, `<details>` summaries, and `cf-message-beads`. Ref-based clicks may hang or fail on these.
 - **Write JS eval snippets to temp files.** See Known Gotchas for details.
 - **Be descriptive.** The user is watching — narrate what you see, what you're clicking, and what happened.
 - **Don't block on failures.** If a step fails, document it and move on. The tour is about coverage, not perfection.

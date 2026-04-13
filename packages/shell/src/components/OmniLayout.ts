@@ -124,16 +124,16 @@ export class XOmniLayout extends LitElement {
   `;
 
   @property({ type: Boolean })
-  sidebarOpen = false;
+  accessor sidebarOpen = false;
 
   @state()
-  private hasSidebarContent = false;
+  private accessor hasSidebarContent = false;
 
   @state()
-  private sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+  private accessor sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
 
   @state()
-  private isResizing = false;
+  private accessor isResizing = false;
 
   private resizeStartX = 0;
   private resizeStartWidth = 0;

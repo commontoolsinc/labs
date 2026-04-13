@@ -40,12 +40,12 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {/* unless(condition, fallback) where fallback is a reactive map */}
         {__cfHelpers.unless({
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {}
         } as const satisfies __cfHelpers.JSONSchema, {
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, customContent, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return <li>{item.key("label")}</li>;
@@ -95,7 +95,7 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         customContent: {
-            asCell: true
+            asCell: ["cell"]
         },
         items: {
             type: "array",
@@ -103,7 +103,7 @@ export default pattern((__cf_pattern_input) => {
                 $ref: "#/$defs/Item"
             },
             "default": [],
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["customContent", "items"],

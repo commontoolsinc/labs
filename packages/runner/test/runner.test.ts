@@ -689,6 +689,51 @@ describe("runPattern", () => {
     expect(cellValue?.counter).toEqual(2);
   });
 
+  it("should refresh NAME when the pattern changes", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      initial: { internal: { counter: 0 } },
+      result: {
+        [NAME]: "counter",
+        counter: { $alias: { path: ["internal", "counter"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (input: any) => input.value,
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "counter"] } },
+        },
+      ],
+    };
+
+    const renamedPattern: Pattern = {
+      ...pattern,
+      result: {
+        [NAME]: "renamed counter",
+        counter: { $alias: { path: ["internal", "counter"] } },
+      },
+    };
+
+    const resultCell = runtime.getCell<any>(
+      space,
+      "state preservation across pattern changes test",
+    );
+
+    runTrusted(runtime, undefined, pattern, { value: 1 }, resultCell);
+    let cellValue = await resultCell.pull();
+    expect(cellValue?.[NAME]).toEqual("counter");
+    expect(cellValue?.counter).toEqual(1);
+
+    runTrusted(runtime, undefined, renamedPattern, { value: 2 }, resultCell);
+    cellValue = await resultCell.pull();
+    expect(cellValue?.[NAME]).toEqual("renamed counter");
+    expect(cellValue?.counter).toEqual(2);
+  });
+
   it("should create separate copies of initial values for each pattern instance", async () => {
     // Use a local runtime with modernDataModel OFF so getRaw() returns
     // mutable objects (the legacy behavior this test was written for).
@@ -1395,6 +1440,7 @@ describe("runner utils", () => {
       setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
       const result = await runtime.start(resultCell);
       expect(result).toBe(true);
+      await resultCell.pull();
       await runtime.idle();
       expect(resultCell.getAsQueryResult()).toEqual({ output: 10 });
     });
@@ -1454,12 +1500,14 @@ describe("runner utils", () => {
 
       // start() should execute synchronously when data is available
       // The piece should be registered in cancels map immediately
-      runtime.start(resultCell);
+      const started = runtime.start(resultCell);
       // Should be running now (check via runner.cancels having the key)
       expect(
         runtime.runner["cancels"].has(runtime.runner["getDocKey"](resultCell)),
       ).toBe(true);
 
+      expect(await started).toBe(true);
+      await resultCell.pull();
       await runtime.idle();
       expect(resultCell.getAsQueryResult()).toEqual({ output: 12 });
     });
@@ -1498,6 +1546,7 @@ describe("runner utils", () => {
       const result = await runtime.start(subpathCell);
       expect(result).toBe(true);
 
+      await subpathCell.pull();
       await runtime.idle();
       expect(resultCell.getAsQueryResult()).toEqual({ nested: { value: 10 } });
 

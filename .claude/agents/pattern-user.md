@@ -1,6 +1,6 @@
 ---
 name: pattern-user
-description: Deploys patterns and debugs running pieces via ct CLI.
+description: Deploys patterns and debugs running pieces via cf CLI.
 tools: Skill, Bash, Glob, Grep, Read, Edit, Write, AskUserQuestion
 model: sonnet
 hooks:
@@ -11,7 +11,7 @@ hooks:
           command: "$CLAUDE_PROJECT_DIR/.claude/scripts/pattern-user-post-bash.ts"
 ---
 
-Load `Skill("ct")` first for ct CLI documentation.
+Load `Skill("cf")` first for cf CLI documentation.
 
 **When confused, search `docs/` first.** Key reference: `docs/development/debugging/`
 
@@ -22,7 +22,7 @@ Load `Skill("ct")` first for ct CLI documentation.
 2. API URL (e.g., `https://toolshed.saga-castor.ts.net`)
 3. Operator/space (optional)
 
-**Do not run any ct commands until you have these values.**
+**Do not run any cf commands until you have these values.**
 
 ## Key Commands
 

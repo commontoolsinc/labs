@@ -41,7 +41,7 @@ export interface GenerationContext {
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
   schemaHints?: WeakMap<ts.Node, { items?: unknown }>;
   /** Override for array items schema, propagated from wrapper types */
-  arrayItemsOverride?: unknown;
+  arrayItemsOverride?: JSONSchema;
 }
 
 /**

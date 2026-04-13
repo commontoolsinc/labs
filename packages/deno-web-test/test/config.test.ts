@@ -14,9 +14,9 @@ Deno.test("config is applied", async function () {
 
   assert(/deno run/.test(stderrText), "stderr has deno task run");
   assert(
-    /experimentalDecorators/.test(stderrText),
-    "stderr has compiler options warning",
+    !/experimentalDecorators/.test(stderrText),
+    "stderr has no compiler options warning",
   );
-  assert(stderrText.split("\n").length === 3, "stderr has no other messages");
-  assert(stderrText.split("\n")[2] === "", "stderr has no other messages");
+  assert(stderrText.split("\n").length === 2, "stderr has no other messages");
+  assert(stderrText.split("\n")[1] === "", "stderr has no other messages");
 });

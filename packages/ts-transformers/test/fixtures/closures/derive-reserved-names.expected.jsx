@@ -27,11 +27,11 @@ export default pattern(() => {
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             __cf_reserved: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["value", "__cf_reserved"]

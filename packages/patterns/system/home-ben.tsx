@@ -761,32 +761,36 @@ IMPORTANT:
               </cf-vstack>
 
               {/* Question Answering */}
-              {computed(() => topQuestion !== null) && (
-                <cf-vstack
-                  gap="2"
-                  style={{
-                    padding: "16px",
-                    background: "#fffbeb",
-                    border: "1px solid #fbbf24",
-                    borderRadius: "8px",
-                  }}
-                >
-                  <h3 style={{ margin: 0, fontSize: "14px", color: "#92400e" }}>
-                    Help me understand you better
-                  </h3>
-                  <p style={{ margin: 0, fontSize: "14px" }}>
-                    {computed(() => topQuestion?.question || "")}
-                  </p>
-                  <cf-message-input
-                    placeholder="Type your answer..."
-                    appearance="rounded"
-                    oncf-send={submitAnswer}
-                  />
-                  <span style={{ fontSize: "11px", color: "#92400e" }}>
-                    Category: {computed(() => topQuestion?.category || "")}
-                  </span>
-                </cf-vstack>
-              )}
+              {computed(() => topQuestion !== null)
+                ? (
+                  <cf-vstack
+                    gap="2"
+                    style={{
+                      padding: "16px",
+                      background: "#fffbeb",
+                      border: "1px solid #fbbf24",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    <h3
+                      style={{ margin: 0, fontSize: "14px", color: "#92400e" }}
+                    >
+                      Help me understand you better
+                    </h3>
+                    <p style={{ margin: 0, fontSize: "14px" }}>
+                      {computed(() => topQuestion?.question || "")}
+                    </p>
+                    <cf-message-input
+                      placeholder="Type your answer..."
+                      appearance="rounded"
+                      oncf-send={submitAnswer}
+                    />
+                    <span style={{ fontSize: "11px", color: "#92400e" }}>
+                      Category: {computed(() => topQuestion?.category || "")}
+                    </span>
+                  </cf-vstack>
+                )
+                : null}
 
               <hr
                 style={{
@@ -805,204 +809,216 @@ IMPORTANT:
                 <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
                   Facts ({computed(() => learned.get().facts.length)})
                 </h3>
-                {computed(() => learned.get().facts.length === 0) && (
-                  <p style={{ color: "#888", fontStyle: "italic" }}>
-                    No facts learned yet.
-                  </p>
-                )}
-                {computed(() => learned.get().facts.length > 0) && (
-                  <table
-                    style={{
-                      width: "100%",
-                      borderCollapse: "collapse",
-                      fontSize: "13px",
-                      border: "1px solid #e5e5e7",
-                      borderRadius: "8px",
-                    }}
-                  >
-                    <thead>
-                      <tr style={{ background: "#f9fafb" }}>
-                        <th
-                          style={{
-                            padding: "8px 12px",
-                            textAlign: "left",
-                            borderBottom: "1px solid #e5e5e7",
-                          }}
-                        >
-                          Fact
-                        </th>
-                        <th
-                          style={{
-                            padding: "8px 12px",
-                            textAlign: "center",
-                            borderBottom: "1px solid #e5e5e7",
-                            width: "70px",
-                          }}
-                        >
-                          Conf
-                        </th>
-                        <th
-                          style={{
-                            padding: "8px 12px",
-                            textAlign: "left",
-                            borderBottom: "1px solid #e5e5e7",
-                            width: "120px",
-                          }}
-                        >
-                          Source
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {computed(() => learned.get().facts).map((fact) => (
-                        <tr>
-                          <td
+                {computed(() => learned.get().facts.length === 0)
+                  ? (
+                    <p style={{ color: "#888", fontStyle: "italic" }}>
+                      No facts learned yet.
+                    </p>
+                  )
+                  : null}
+                {computed(() => learned.get().facts.length > 0)
+                  ? (
+                    <table
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                        fontSize: "13px",
+                        border: "1px solid #e5e5e7",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <thead>
+                        <tr style={{ background: "#f9fafb" }}>
+                          <th
                             style={{
                               padding: "8px 12px",
+                              textAlign: "left",
                               borderBottom: "1px solid #e5e5e7",
                             }}
                           >
-                            {fact.content}
-                          </td>
-                          <td
+                            Fact
+                          </th>
+                          <th
                             style={{
                               padding: "8px 12px",
-                              borderBottom: "1px solid #e5e5e7",
                               textAlign: "center",
+                              borderBottom: "1px solid #e5e5e7",
+                              width: "70px",
                             }}
                           >
-                            {`${Math.round(fact.confidence * 100)}%`}
-                          </td>
-                          <td
+                            Conf
+                          </th>
+                          <th
                             style={{
                               padding: "8px 12px",
+                              textAlign: "left",
                               borderBottom: "1px solid #e5e5e7",
-                              color: "#888",
-                              fontSize: "12px",
+                              width: "120px",
                             }}
                           >
-                            {fact.source}
-                          </td>
+                            Source
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+                      </thead>
+                      <tbody>
+                        {computed(() => learned.get().facts).map((fact) => (
+                          <tr>
+                            <td
+                              style={{
+                                padding: "8px 12px",
+                                borderBottom: "1px solid #e5e5e7",
+                              }}
+                            >
+                              {fact.content}
+                            </td>
+                            <td
+                              style={{
+                                padding: "8px 12px",
+                                borderBottom: "1px solid #e5e5e7",
+                                textAlign: "center",
+                              }}
+                            >
+                              {`${Math.round(fact.confidence * 100)}%`}
+                            </td>
+                            <td
+                              style={{
+                                padding: "8px 12px",
+                                borderBottom: "1px solid #e5e5e7",
+                                color: "#888",
+                                fontSize: "12px",
+                              }}
+                            >
+                              {fact.source}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+                  : null}
               </cf-vstack>
 
               {/* Preferences */}
-              {computed(() => learned.get().preferences.length > 0) && (
-                <cf-vstack gap="2">
-                  <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
-                    Preferences
-                  </h3>
-                  <table
-                    style={{
-                      width: "100%",
-                      borderCollapse: "collapse",
-                      fontSize: "13px",
-                      border: "1px solid #e5e5e7",
-                    }}
-                  >
-                    <thead>
-                      <tr style={{ background: "#f9fafb" }}>
-                        <th
-                          style={{
-                            padding: "8px 12px",
-                            textAlign: "left",
-                            borderBottom: "1px solid #e5e5e7",
-                          }}
-                        >
-                          Key
-                        </th>
-                        <th
-                          style={{
-                            padding: "8px 12px",
-                            textAlign: "left",
-                            borderBottom: "1px solid #e5e5e7",
-                          }}
-                        >
-                          Value
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {computed(() => learned.get().preferences).map((pref) => (
-                        <tr>
-                          <td
+              {computed(() => learned.get().preferences.length > 0)
+                ? (
+                  <cf-vstack gap="2">
+                    <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
+                      Preferences
+                    </h3>
+                    <table
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                        fontSize: "13px",
+                        border: "1px solid #e5e5e7",
+                      }}
+                    >
+                      <thead>
+                        <tr style={{ background: "#f9fafb" }}>
+                          <th
                             style={{
                               padding: "8px 12px",
-                              borderBottom: "1px solid #e5e5e7",
-                              fontWeight: "500",
-                            }}
-                          >
-                            {pref.key}
-                          </td>
-                          <td
-                            style={{
-                              padding: "8px 12px",
+                              textAlign: "left",
                               borderBottom: "1px solid #e5e5e7",
                             }}
                           >
-                            {pref.value}
-                          </td>
+                            Key
+                          </th>
+                          <th
+                            style={{
+                              padding: "8px 12px",
+                              textAlign: "left",
+                              borderBottom: "1px solid #e5e5e7",
+                            }}
+                          >
+                            Value
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </cf-vstack>
-              )}
+                      </thead>
+                      <tbody>
+                        {computed(() => learned.get().preferences).map((
+                          pref,
+                        ) => (
+                          <tr>
+                            <td
+                              style={{
+                                padding: "8px 12px",
+                                borderBottom: "1px solid #e5e5e7",
+                                fontWeight: "500",
+                              }}
+                            >
+                              {pref.key}
+                            </td>
+                            <td
+                              style={{
+                                padding: "8px 12px",
+                                borderBottom: "1px solid #e5e5e7",
+                              }}
+                            >
+                              {pref.value}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </cf-vstack>
+                )
+                : null}
 
               {/* Questions */}
-              {computed(() => learned.get().openQuestions.length > 0) && (
-                <cf-vstack gap="2">
-                  <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
-                    Open Questions
-                  </h3>
-                  <cf-vstack
-                    gap="1"
-                    style={{
-                      padding: "12px",
-                      background: "#f9fafb",
-                      borderRadius: "8px",
-                      fontFamily: "monospace",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {computed(() => learned.get().openQuestions).map((q) => (
-                      <div>
-                        <span style={{ color: "#888" }}>[{q.category}]</span>
-                        {" "}
-                        {q.question}
-                      </div>
-                    ))}
+              {computed(() => learned.get().openQuestions.length > 0)
+                ? (
+                  <cf-vstack gap="2">
+                    <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
+                      Open Questions
+                    </h3>
+                    <cf-vstack
+                      gap="1"
+                      style={{
+                        padding: "12px",
+                        background: "#f9fafb",
+                        borderRadius: "8px",
+                        fontFamily: "monospace",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {computed(() => learned.get().openQuestions).map((q) => (
+                        <div>
+                          <span style={{ color: "#888" }}>[{q.category}]</span>
+                          {" "}
+                          {q.question}
+                        </div>
+                      ))}
+                    </cf-vstack>
                   </cf-vstack>
-                </cf-vstack>
-              )}
+                )
+                : null}
 
               {/* Personas */}
-              {computed(() => learned.get().personas.length > 0) && (
-                <cf-vstack gap="2">
-                  <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
-                    Personas
-                  </h3>
-                  <cf-hstack gap="2" style={{ flexWrap: "wrap" }}>
-                    {computed(() => learned.get().personas).map((persona) => (
-                      <span
-                        style={{
-                          padding: "4px 12px",
-                          background: "#eff6ff",
-                          color: "#3b82f6",
-                          borderRadius: "16px",
-                          fontSize: "13px",
-                        }}
-                      >
-                        {persona}
-                      </span>
-                    ))}
-                  </cf-hstack>
-                </cf-vstack>
-              )}
+              {computed(() => learned.get().personas.length > 0)
+                ? (
+                  <cf-vstack gap="2">
+                    <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
+                      Personas
+                    </h3>
+                    <cf-hstack gap="2" style={{ flexWrap: "wrap" }}>
+                      {computed(() => learned.get().personas).map((persona) => (
+                        <span
+                          style={{
+                            padding: "4px 12px",
+                            background: "#eff6ff",
+                            color: "#3b82f6",
+                            borderRadius: "16px",
+                            fontSize: "13px",
+                          }}
+                        >
+                          {persona}
+                        </span>
+                      ))}
+                    </cf-hstack>
+                  </cf-vstack>
+                )
+                : null}
             </cf-vstack>
           </cf-tab-panel>
           <cf-tab-panel value="spaces">
@@ -1027,17 +1043,19 @@ IMPORTANT:
                     </cf-button>
                   </cf-hstack>
                 ))}
-                {computed(() => spaces.get().length === 0) && (
-                  <p
-                    style={{
-                      color: "#888",
-                      fontStyle: "italic",
-                      textAlign: "center",
-                    }}
-                  >
-                    No spaces yet. Add one below.
-                  </p>
-                )}
+                {computed(() => spaces.get().length === 0)
+                  ? (
+                    <p
+                      style={{
+                        color: "#888",
+                        fontStyle: "italic",
+                        textAlign: "center",
+                      }}
+                    >
+                      No spaces yet. Add one below.
+                    </p>
+                  )
+                  : null}
               </cf-vstack>
 
               <hr style={{ border: "none", borderTop: "1px solid #e5e5e7" }} />

@@ -599,7 +599,7 @@ const ownedOrSkippedJsxRouteCases: JsxRouteCase[] = [
 
       const view = pattern((_state: any) => {
         const rows = ["a", "b", "c"];
-        const index = 1;
+        let index = 1;
         return <div>{rows[index]}</div>;
       });
     `,

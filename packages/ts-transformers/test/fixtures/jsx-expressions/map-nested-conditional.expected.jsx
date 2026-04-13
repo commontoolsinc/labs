@@ -35,7 +35,7 @@ export default pattern((_state) => {
         [UI]: (<div>
         {__cfHelpers.when({
             type: "boolean",
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",

@@ -194,9 +194,9 @@ describe("Stack trace source mapping", () => {
     expect(runtime.parseStack(stack).split("\n")).toEqual([
       "Error: boom",
       "    at eval (main.tsx:6:12)",
-      "    at <CT_INTERNAL>",
-      "    at <CT_INTERNAL>",
-      "    at <CT_INTERNAL>",
+      "    at <CF_INTERNAL>",
+      "    at <CF_INTERNAL>",
+      "    at <CF_INTERNAL>",
       "  at callback (ext:deno_web/02_timers.js:42:7)",
     ]);
   });

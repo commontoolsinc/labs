@@ -13,6 +13,7 @@ import {
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
+  isCellLikeType,
   isFunctionLikeExpression,
   isUnresolvedSchemaType,
   registerSyntheticCallType,
@@ -116,6 +117,50 @@ function extractCellLikeInnerTypeNode(
   if (!ts.isTypeReferenceNode(node)) return undefined;
   if (!node.typeArguments || node.typeArguments.length === 0) return undefined;
   return node.typeArguments[0];
+}
+
+function parameterUsesCellLikeMethods(
+  fn: ts.ArrowFunction | ts.FunctionExpression,
+  index: number,
+): boolean {
+  const parameter = fn.parameters[index];
+  if (!parameter || !ts.isIdentifier(parameter.name)) {
+    return false;
+  }
+
+  const parameterName = parameter.name.text;
+  let usesCellLikeMethods = false;
+
+  const visit = (node: ts.Node): void => {
+    if (usesCellLikeMethods) return;
+    if (
+      node !== fn && (ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+    ) {
+      return;
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === parameterName &&
+      (
+        node.expression.name.text === "get" ||
+        node.expression.name.text === "key"
+      )
+    ) {
+      usesCellLikeMethods = true;
+      return;
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  if (fn.body) {
+    visit(fn.body);
+  }
+
+  return usesCellLikeMethods;
 }
 
 function getSymbolTypeAtSource(
@@ -542,6 +587,10 @@ function normalizeSchemaInjectionTypeNode(
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
 ): ts.TypeNode {
+  if (typeNodeContainsWrapperSemantics(typeNode)) {
+    return typeNode;
+  }
+
   try {
     const type = getTypeFromTypeNodeWithFallback(
       typeNode,
@@ -556,6 +605,20 @@ function normalizeSchemaInjectionTypeNode(
   }
 
   return typeNode;
+}
+
+function typeNodeContainsWrapperSemantics(typeNode: ts.TypeNode): boolean {
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return typeNodeContainsWrapperSemantics(typeNode.type);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    return typeNode.types.some((member) =>
+      typeNodeContainsWrapperSemantics(member)
+    );
+  }
+
+  return isCellLikeTypeNode(typeNode);
 }
 
 function inferSchemaContextualType(
@@ -837,6 +900,50 @@ function resolveDualSchemaBuilderTypes(
       inferred?.argumentType,
       typeRegistry,
     );
+  }
+
+  if (
+    callback &&
+    !callback.parameters[0]?.type &&
+    options?.fallbackArgumentType &&
+    isCellLikeType(options.fallbackArgumentType, checker) &&
+    parameterUsesCellLikeMethods(callback, 0)
+  ) {
+    argumentTypeValue = options.fallbackArgumentType;
+    argumentTypeNode = typeToSchemaTypeNode(
+      options.fallbackArgumentType,
+      checker,
+      sourceFile,
+    ) ?? argumentTypeNode;
+  }
+
+  if (
+    callback &&
+    !callback.parameters[0]?.type &&
+    options?.fallbackArgumentType &&
+    isCellLikeType(options.fallbackArgumentType, checker) &&
+    containsAnyOrUnknownTypeNode(argumentTypeNode)
+  ) {
+    const fallbackArgumentNode = typeToSchemaTypeNode(
+      options.fallbackArgumentType,
+      checker,
+      sourceFile,
+    );
+    if (fallbackArgumentNode) {
+      ({
+        argumentTypeNode,
+        argumentTypeValue,
+      } = applyCallbackBuilderArgumentCapabilitySummary(
+        callback,
+        fallbackArgumentNode,
+        options.fallbackArgumentType,
+        checker,
+        sourceFile,
+        factory,
+        capabilityRegistry,
+        context,
+      ));
+    }
   }
 
   const resultTypeNode = options?.explicitResultTypeNode ??
@@ -2076,18 +2183,19 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             // node is synthetic and the recovered argumentType may be undefined).
             const eventTypeBase = inferred.argument ??
               getParameterSchemaType(factory, handlerFn.parameters[0]);
-            const eventType = applyCapabilitySummaryToParameter(
-              handlerFn,
-              0,
-              eventTypeBase,
-              inferred.argumentType,
-              checker,
-              sourceFile,
-              factory,
-              capabilityRegistry,
-              undefined,
-              handlerFn,
-            ) ?? eventTypeBase;
+            const eventType = inferred.argument ??
+              applyCapabilitySummaryToParameter(
+                handlerFn,
+                0,
+                eventTypeBase,
+                inferred.argumentType,
+                checker,
+                sourceFile,
+                factory,
+                capabilityRegistry,
+                undefined,
+                handlerFn,
+              ) ?? eventTypeBase;
 
             // State type: use helper for second parameter
             const stateTypeBase = inferParameterSchemaType(

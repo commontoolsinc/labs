@@ -38,7 +38,7 @@ const selectMessage = handler({
     properties: {
         selectedId: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         },
         msgId: {
             type: "string"
@@ -176,7 +176,7 @@ export default pattern((__cf_pattern_input) => {
                         properties: {
                             selectedId: {
                                 type: "string",
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["selectedId"]

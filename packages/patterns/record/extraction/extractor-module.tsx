@@ -1665,18 +1665,9 @@ export const ExtractorModule = pattern<
       errorDetailsExpanded,
     },
   ) => {
-    // ===== TRANSFORMER BUG WORKAROUND =====
-    // The TypeScript transformer has a bug where .map()/.filter()/.some() called on
-    // a computed variable aren't properly transformed to their reactive equivalents.
-    // See: packages/ts-transformers/test/fixtures/pending/computed-var-then-map.issue.md
-    // GitHub Issue: https://github.com/commontoolsinc/labs/issues/2442
-    //
-    // WORKAROUND: Compute ALL source-derived data in a SINGLE computed block, then
-    // expose individual values as simple property accesses. This avoids calling
-    // scanExtractableSources() 10+ times in separate computed blocks.
-    //
-    // PERFORMANCE IMPACT: Before this fix, extraction took 2+ minutes with 113% CPU
-    // due to O(n * 10) reactive operations. Now it's O(n) with a single scan.
+    // Compute all source-derived data in one pass so downstream views can read
+    // simple properties instead of re-running scanExtractableSources() in
+    // separate computed blocks. This keeps the extraction path O(n).
 
     // Single computed that derives ALL source-related data
     const sourceData = computed(() => {
@@ -2471,7 +2462,7 @@ export const ExtractorModule = pattern<
             }}
           >
             <span style={{ color: "#92400e", fontWeight: "500" }}>
-              {ifElse(isPreviewPhase, "Review Changes", "Select Sources")}
+              {isPreviewPhase ? "Review Changes" : "Select Sources"}
             </span>
             {ifElse(
               isExtractingPhase,
@@ -2526,11 +2517,9 @@ export const ExtractorModule = pattern<
                       color: "#6b7280",
                     }}
                   >
-                    {ifElse(
-                      hasNoUsableSources,
-                      "Add content to sources below:",
-                      "Select sources to extract from:",
-                    )}
+                    {hasNoUsableSources
+                      ? "Add content to sources below:"
+                      : "Select sources to extract from:"}
                   </div>
                   <div
                     style={{
@@ -2697,7 +2686,7 @@ export const ExtractorModule = pattern<
                       }}
                     >
                       Extract from {selectedSourceCount} source
-                      {ifElse(isSingleSource, "", "s")}
+                      {isSingleSource ? "" : "s"}
                     </button>
                   </div>
                 </div>,
@@ -2761,7 +2750,7 @@ export const ExtractorModule = pattern<
                     textDecoration: "underline",
                   }}
                 >
-                  {ifElse(showErrorDetails, "Hide details", "Show details")}
+                  {showErrorDetails ? "Hide details" : "Show details"}
                 </button>
                 {ifElse(
                   showErrorDetails,
@@ -3207,11 +3196,9 @@ export const ExtractorModule = pattern<
                             fontStyle: "italic",
                           }}
                         >
-                          {ifElse(
-                            cleanupDisabled,
-                            "Cleanup disabled - Notes will remain unchanged",
-                            "No changes needed to Notes content",
-                          )}
+                          {cleanupDisabled
+                            ? "Cleanup disabled - Notes will remain unchanged"
+                            : "No changes needed to Notes content"}
                         </div>,
                       )}
                     </div>,

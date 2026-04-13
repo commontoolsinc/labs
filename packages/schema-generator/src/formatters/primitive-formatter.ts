@@ -104,9 +104,8 @@ export class PrimitiveFormatter implements TypeFormatter {
       return { type: "undefined" };
     }
     if (flags & ts.TypeFlags.Void) {
-      // void: return true to indicate "accept any value"
-      // void functions don't return meaningful values, so schema validation is permissive
-      return true;
+      // Keep resolved `void` types aligned with `VoidKeyword` handling.
+      return { asCell: ["opaque"] };
     }
     if (flags & ts.TypeFlags.Never) {
       // never: return false to reject all values

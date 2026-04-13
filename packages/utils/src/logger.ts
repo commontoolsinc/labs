@@ -558,16 +558,16 @@ function getEnvTimingOutputConfig(): TimingOutputConfig | undefined {
   if (!isDeno()) return undefined;
 
   try {
-    const include = parseTimingInclude(Deno.env.get("CT_LOG_TIMING"));
+    const include = parseTimingInclude(Deno.env.get("CF_LOG_TIMING"));
     if (include.length === 0) return undefined;
 
     const consoleEnabled = parseBooleanEnv(
-      Deno.env.get("CT_LOG_TIMING_CONSOLE"),
+      Deno.env.get("CF_LOG_TIMING_CONSOLE"),
     ) ?? false;
     const measureEnabled = parseBooleanEnv(
-      Deno.env.get("CT_LOG_TIMING_MEASURE"),
+      Deno.env.get("CF_LOG_TIMING_MEASURE"),
     ) ?? true;
-    const minMsRaw = Deno.env.get("CT_LOG_TIMING_MIN_MS");
+    const minMsRaw = Deno.env.get("CF_LOG_TIMING_MIN_MS");
     const minMs = minMsRaw !== undefined ? Number(minMsRaw) : undefined;
 
     const config: TimingOutputConfig = {

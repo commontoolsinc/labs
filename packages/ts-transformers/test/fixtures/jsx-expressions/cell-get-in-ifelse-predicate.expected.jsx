@@ -47,7 +47,7 @@ export default pattern((__cf_pattern_input) => {
                 },
                 dismissedIndex: {
                     type: "number",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["showHistory", "messageCount", "dismissedIndex"]
@@ -71,7 +71,7 @@ export default pattern((__cf_pattern_input) => {
         },
         dismissedIndex: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["showHistory", "messageCount", "dismissedIndex"]

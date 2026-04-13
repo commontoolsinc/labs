@@ -24,7 +24,7 @@ const increment = handler({
     properties: {
         value: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"]
@@ -36,7 +36,7 @@ const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
     properties: {
         value: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"]

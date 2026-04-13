@@ -7,6 +7,7 @@ import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   cloneSchemaDefinition,
+  detectWrapperViaNode,
   getNativeTypeSchema,
   TypeWithInternals,
 } from "../type-utils.ts";
@@ -14,6 +15,52 @@ import { isRecord } from "@commonfabric/utils/types";
 
 // Simple primitive schemas only have these keys (possibly just one)
 const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);
+
+function getTypeNodeMemberType(
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  try {
+    return checker.getTypeFromTypeNode(node);
+  } catch {
+    return undefined;
+  }
+}
+
+function unionMemberTypesMatch(
+  left: ts.Type,
+  right: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  return checker.typeToString(left) === checker.typeToString(right);
+}
+
+function orderMemberNodesBySemanticType(
+  members: readonly ts.Type[],
+  memberNodes: readonly ts.TypeNode[],
+  checker: ts.TypeChecker,
+): Array<ts.TypeNode | undefined> {
+  const remaining = memberNodes.map((node) => ({
+    node,
+    type: getTypeNodeMemberType(node, checker),
+  }));
+
+  return members.map((member) => {
+    const matchIndex = remaining.findIndex(({ type }) =>
+      type !== undefined && unionMemberTypesMatch(type, member, checker)
+    );
+    if (matchIndex === -1) {
+      return undefined;
+    }
+
+    const [match] = remaining.splice(matchIndex, 1);
+    return match?.node;
+  });
+}
 
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -28,6 +75,20 @@ export class UnionFormatter implements TypeFormatter {
   ): JSONSchemaMutable {
     const union = type as ts.UnionType;
     const members = union.types ?? [];
+    const unionNode = context.typeNode &&
+        ts.isParenthesizedTypeNode(context.typeNode)
+      ? context.typeNode.type
+      : context.typeNode;
+    const memberNodes = unionNode && ts.isUnionTypeNode(unionNode)
+      ? unionNode.types
+      : undefined;
+    const orderedMemberNodes = memberNodes
+      ? orderMemberNodesBySemanticType(
+        members,
+        memberNodes,
+        context.typeChecker,
+      )
+      : undefined;
 
     if (members.length === 0) {
       throw new Error("UnionFormatter received empty union type");
@@ -41,13 +102,25 @@ export class UnionFormatter implements TypeFormatter {
 
     const generate = (
       t: ts.Type,
+      memberIndex: number,
       typeNode?: ts.TypeNode,
     ): JSONSchemaMutable => {
-      const native = getNativeTypeSchema(t, context.typeChecker);
+      const memberNode = typeNode ?? orderedMemberNodes?.[memberIndex];
+      const wrapperKind = detectWrapperViaNode(
+        memberNode,
+        context.typeChecker,
+      );
+      const native = wrapperKind === undefined
+        ? getNativeTypeSchema(t, context.typeChecker)
+        : undefined;
       if (native !== undefined) {
         return cloneSchemaDefinition(native);
       }
-      return this.schemaGenerator.formatChildType(t, context, typeNode);
+      return this.schemaGenerator.formatChildType(
+        t,
+        context,
+        memberNode,
+      );
     };
 
     // Case: exactly one non-null member + null => anyOf (nullable type).
@@ -57,7 +130,7 @@ export class UnionFormatter implements TypeFormatter {
     // Note: if undefined is also present (T | null | undefined), nonNull.length > 1,
     // so we fall through to the anyOf path which emits { type: "undefined" } explicitly.
     if (hasNull && nonNull.length === 1) {
-      const item = generate(nonNull[0]!);
+      const item = generate(nonNull[0]!, members.indexOf(nonNull[0]!));
       return { anyOf: [item, { type: "null" }] };
     }
 
@@ -107,7 +180,7 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // Fallback: anyOf of member schemas (excluding null/undefined handled above)
-    let unionOptions = members.map((m) => generate(m));
+    let unionOptions = members.map((m, index) => generate(m, index));
     // When widenLiterals is true, try to merge structurally identical schemas
     // that only differ in literal enum values
     if (context.widenLiterals && unionOptions.length > 1) {

@@ -4,7 +4,6 @@ import {
   type Default,
   equals,
   handler,
-  ifElse,
   llmDialog,
   NAME,
   pattern,
@@ -325,21 +324,23 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
         <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Knowledge Graph</h2>
           <div slot="end">
-            {ifElse(
-              hasBeenBuilt,
-              <cf-button
-                variant="ghost"
-                onClick={triggerRebuild({ addMessage, messages })}
-              >
-                Rebuild
-              </cf-button>,
-              <cf-button
-                variant="primary"
-                onClick={triggerBuild({ addMessage })}
-              >
-                Build Graph
-              </cf-button>,
-            )}
+            {hasBeenBuilt
+              ? (
+                <cf-button
+                  variant="ghost"
+                  onClick={triggerRebuild({ addMessage, messages })}
+                >
+                  Rebuild
+                </cf-button>
+              )
+              : (
+                <cf-button
+                  variant="primary"
+                  onClick={triggerBuild({ addMessage })}
+                >
+                  Build Graph
+                </cf-button>
+              )}
           </div>
         </cf-toolbar>
         <cf-vstack gap="4" padding="6">
@@ -359,30 +360,30 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
             pending={pending}
           />
 
-          {ifElse(
-            computed(() => compoundNodes.length > 0),
-            <div>
-              <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>Groups</h3>
-              <cf-table full-width>
-                <tbody>
-                  {compoundNodes.map((node: any) => (
-                    <tr>
-                      <td style={{ fontWeight: "500" }}>{node[NAME]}</td>
-                      <td
-                        style={{
-                          fontSize: "13px",
-                          color: "var(--cf-color-text-secondary)",
-                        }}
-                      >
-                        {node.summary}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </cf-table>
-            </div>,
-            null,
-          )}
+          {computed(() => compoundNodes.length > 0)
+            ? (
+              <div>
+                <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>Groups</h3>
+                <cf-table full-width>
+                  <tbody>
+                    {compoundNodes.map((node: any) => (
+                      <tr>
+                        <td style={{ fontWeight: "500" }}>{node[NAME]}</td>
+                        <td
+                          style={{
+                            fontSize: "13px",
+                            color: "var(--cf-color-text-secondary)",
+                          }}
+                        >
+                          {node.summary}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </cf-table>
+              </div>
+            )
+            : null}
 
           <h3 style={{ margin: "0", fontSize: "15px" }}>Links</h3>
           <cf-table full-width>

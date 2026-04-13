@@ -38,6 +38,7 @@ interface ActivityLogInput {
   mentioned?: Writable<Default<MentionablePiece[], []>>;
 }
 
+/** An #activity-log for recording structured agent events. */
 interface ActivityLogOutput {
   [NAME]: string;
   [UI]: VNode;
@@ -53,7 +54,9 @@ const logEventHandler = handler<
   { events: Writable<ActivityEvent[]>; mentioned: Writable<MentionablePiece[]> }
 >((args, { events, mentioned }) => {
   events.push({
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`,
+    id: `${new Date().getTime().toString(36)}-${
+      Math.random().toString(36).slice(2, 11)
+    }`,
     timestamp: new Date().toISOString(),
     ...args,
   });

@@ -1,5 +1,5 @@
 /**
- * Scale computation for ct-chart.
+ * Scale computation for cf-chart.
  *
  * Collects data domains across all marks and creates d3 scales.
  */

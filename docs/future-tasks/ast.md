@@ -241,7 +241,7 @@ const myHandler = handler(
   {
     type: "object",
     properties: {
-      count: { type: "number", asCell: true },
+      count: { type: "number", asCell: ["cell"] },
     },
     required: ["count"],
   } as const satisfies JSONSchema,

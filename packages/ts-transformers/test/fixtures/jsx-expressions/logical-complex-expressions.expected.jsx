@@ -53,11 +53,11 @@ export default pattern((_state) => {
                     items: {
                         type: "string"
                     },
-                    asCell: true
+                    asCell: ["cell"]
                 },
                 isEnabled: {
                     type: "boolean",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["items", "isEnabled"]
@@ -88,14 +88,14 @@ export default pattern((_state) => {
             properties: {
                 count: {
                     type: "number",
-                    asCell: true
+                    asCell: ["cell"]
                 },
                 items: {
                     type: "array",
                     items: {
                         type: "string"
                     },
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["count", "items"]

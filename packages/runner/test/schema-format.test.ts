@@ -74,6 +74,16 @@ Deno.test("schemaToTypeString converts Cell to Cell<T> syntax", () => {
   assert(result.includes("count"), "Cell contents should be included");
 });
 
+Deno.test('schemaToTypeString formats asCell: ["stream", "cell"] as Stream<Cell<T>>', () => {
+  const schema: any = {
+    type: "number",
+    asCell: ["stream", "cell"],
+  };
+
+  const result = schemaToTypeString(schema);
+  assertEquals(result, "(Cell<number>) => void");
+});
+
 Deno.test("schemaToTypeString handles enums as union literals", () => {
   const schema: any = {
     enum: ["open", "closed", "pending"],

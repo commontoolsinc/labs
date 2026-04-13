@@ -291,7 +291,7 @@ export class CFTextarea extends BaseElement {
         // Theme consumption
         @consume({ context: cfThemeContext, subscribe: true })
         @property({ attribute: false })
-        declare theme?: CFTheme;
+        accessor theme: CFTheme = defaultTheme;
 
         // Cache + initial setup
         private _textarea: HTMLTextAreaElement | null = null;

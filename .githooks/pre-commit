@@ -31,14 +31,17 @@ while IFS= read -r path; do
 done < <(git diff --name-only --diff-filter=ACMRTUXB)
 
 if (( ${#formatted_files[@]} > 0 )); then
-  declare -A staged_lookup=()
-  for path in "${staged_files[@]}"; do
-    staged_lookup["${path}"]=1
-  done
-
   unrelated_files=()
   for path in "${formatted_files[@]}"; do
-    if [[ -z "${staged_lookup[${path}]:-}" ]]; then
+    found_in_staged=0
+    for staged_path in "${staged_files[@]}"; do
+      if [[ "${staged_path}" == "${path}" ]]; then
+        found_in_staged=1
+        break
+      fi
+    done
+
+    if (( ! found_in_staged )); then
       unrelated_files+=("${path}")
     fi
   done

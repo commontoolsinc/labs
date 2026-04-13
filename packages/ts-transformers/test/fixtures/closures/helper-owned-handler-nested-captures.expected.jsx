@@ -11,7 +11,7 @@ import { __cfHelpers } from "commonfabric";
  * TRANSFORM REPRO: helper-owned handler with nested callback captures
  *
  * Compare on main vs transformer branch:
- *   deno task ct check packages/patterns/gideon-tests/test-helper-owned-handler-nested-captures.tsx --show-transformed --no-run
+ *   deno task cf check packages/patterns/gideon-tests/test-helper-owned-handler-nested-captures.tsx --show-transformed --no-run
  *
  * Expected main shape:
  * - generated handler state includes `timer`, `fileId`, `content`,
@@ -70,22 +70,22 @@ export default pattern((__cf_pattern_input) => {
                     }, {
                         type: "null"
                     }],
-                asCell: true
+                asCell: ["cell"]
             },
             fileId: {
                 type: "string",
                 "default": "",
-                asCell: true
+                asCell: ["cell"]
             },
             content: {
                 type: "string",
                 "default": "",
-                asCell: true
+                asCell: ["cell"]
             },
             savedContent: {
                 type: "string",
                 "default": "",
-                asCell: true
+                asCell: ["cell"]
             },
             onSaveFile: {
                 type: "object",
@@ -98,7 +98,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 },
                 required: ["fileId", "content"],
-                asStream: true
+                asCell: ["stream"]
             }
         },
         required: ["timer", "fileId", "content", "savedContent", "onSaveFile"]
@@ -123,17 +123,17 @@ export default pattern((__cf_pattern_input) => {
         fileId: {
             type: "string",
             "default": "",
-            asCell: true
+            asCell: ["cell"]
         },
         content: {
             type: "string",
             "default": "",
-            asCell: true
+            asCell: ["cell"]
         },
         savedContent: {
             type: "string",
             "default": "",
-            asCell: true
+            asCell: ["cell"]
         },
         onSaveFile: {
             type: "object",
@@ -146,7 +146,7 @@ export default pattern((__cf_pattern_input) => {
                 }
             },
             required: ["fileId", "content"],
-            asStream: true
+            asCell: ["stream"]
         }
     },
     required: ["fileId", "content", "savedContent", "onSaveFile"]
@@ -154,7 +154,7 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         trigger: {
-            asStream: true
+            asCell: ["stream", "opaque"]
         }
     },
     required: ["trigger"]

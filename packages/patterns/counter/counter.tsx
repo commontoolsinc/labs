@@ -114,7 +114,7 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
       </cf-screen>
     ),
     value,
-    // Both approaches can be exported and tested via the `ct` CLI
+    // Both approaches can be exported and tested via the `cf` CLI
     // and with automated pattern tests. See counter.test.tsx.
     increment: boundIncrement, // Module-scope handler, bound in pattern
     decrement, // Pattern-body action, closes over value directly

@@ -15,15 +15,20 @@
  */
 
 import type {
+  AsCellType,
   Cell,
+  ComparableCell,
   HandlerFactory,
   JSONSchema,
   ModuleFactory,
   Opaque,
+  OpaqueCell,
   OpaqueRef,
   PatternFactory,
+  ReadonlyCell,
   SELF,
   Stream,
+  WriteonlyCell,
 } from "commonfabric";
 
 // ===== Helper Types =====
@@ -37,6 +42,8 @@ import type {
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
+
+type IsAny<T> = 0 extends (1 & T) ? true : false;
 
 // ===== JSON Pointer Path Resolution Utilities =====
 
@@ -201,21 +208,56 @@ type SchemaCore<
     : Record<string, unknown>
   : any;
 
+type WrapperList<T extends JSONSchema> = T extends { asCell: true }
+  ? readonly ["cell"]
+  : T extends { asStream: true } ? readonly ["stream"]
+  : T extends { asCell: infer AC extends readonly AsCellType[] } ? AC
+  : readonly [];
+
+type StripWrappers<T extends JSONSchema> = Omit<T, "asCell" | "asStream">;
+
+type ShiftWrapper<T extends readonly AsCellType[]> = T extends
+  readonly [infer _First extends AsCellType, ...infer Rest extends AsCellType[]]
+  ? Rest
+  : readonly [];
+
+type FirstWrapper<T extends readonly AsCellType[]> = T extends
+  readonly [infer First extends AsCellType, ...infer _Rest extends AsCellType[]]
+  ? First
+  : T[number];
+
+type ReapplyWrappers<
+  T extends JSONSchema,
+  Wrappers extends readonly AsCellType[],
+> = Wrappers extends readonly [] ? StripWrappers<T>
+  : StripWrappers<T> & { asCell: Wrappers };
+
+type ApplyWrapper<W extends AsCellType, T> = W extends "cell" ? Cell<T>
+  : W extends "stream" ? Stream<T>
+  : W extends "opaque" ? OpaqueCell<T>
+  : W extends "readonly" ? ReadonlyCell<T>
+  : W extends "writeonly" ? WriteonlyCell<T>
+  : W extends "comparable" ? ComparableCell<T>
+  : T;
+
 type SchemaInner<
   T extends JSONSchema,
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
   WrapCells extends boolean = true,
-> = Depth extends 0 ? unknown
-  : T extends { asCell: true }
-    ? WrapCells extends true
-      ? Cell<SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>>
-    : SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>
-  : T extends { asStream: true }
-    ? WrapCells extends true
-      ? Stream<SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>>
-    : SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>
-  : SchemaCore<T, Root, Depth, WrapCells>;
+> = IsAny<T> extends true ? any
+  : Depth extends 0 ? unknown
+  : WrapperList<T> extends readonly [] ? SchemaCore<T, Root, Depth, WrapCells>
+  : WrapCells extends true ? ApplyWrapper<
+      FirstWrapper<WrapperList<T>>,
+      SchemaInner<
+        ReapplyWrappers<T, ShiftWrapper<WrapperList<T>>>,
+        Root,
+        Depth,
+        WrapCells
+      >
+    >
+  : SchemaInner<StripWrappers<T>, Root, Depth, WrapCells>;
 
 /**
  * Convert a JSONSchema type to its corresponding TypeScript type.

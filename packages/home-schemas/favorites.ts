@@ -10,7 +10,7 @@ export const favoriteEntrySchema = {
   type: "object",
   properties: {
     // we use type unknown to validate, but avoid including children
-    cell: { type: "unknown", asCell: true },
+    cell: { type: "unknown", asCell: ["cell"] },
     tag: { type: "string", default: "" },
     userTags: { type: "array", items: { type: "string" }, default: [] },
     spaceName: { type: "string" },

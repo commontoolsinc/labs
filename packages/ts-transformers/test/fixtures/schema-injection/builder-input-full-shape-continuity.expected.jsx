@@ -22,7 +22,7 @@ const liftWrapped = lift({
         }
     },
     required: ["foo"],
-    asCell: true
+    asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
@@ -42,10 +42,11 @@ const patternFullShape = pattern((input: Writable<{
             type: "string"
         }
     },
-    required: ["foo", "bar"]
+    required: ["foo", "bar"],
+    asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
-    asCell: true
+    asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
 const patternExplicit = pattern((input) => input.key("foo"), {
     type: "object",
@@ -57,10 +58,11 @@ const patternExplicit = pattern((input) => input.key("foo"), {
             type: "string"
         }
     },
-    required: ["foo", "bar"]
+    required: ["foo", "bar"],
+    asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
-    asCell: true
+    asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
 const liftPassthrough = lift({
     type: "object",
@@ -72,7 +74,8 @@ const liftPassthrough = lift({
             type: "string"
         }
     },
-    required: ["foo", "bar"]
+    required: ["foo", "bar"],
+    asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -84,7 +87,7 @@ const liftPassthrough = lift({
         }
     },
     required: ["foo", "bar"],
-    asCell: true
+    asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
     foo: string;
     bar: string;
@@ -106,10 +109,11 @@ const patternHelper = pattern((input: Writable<{
             type: "string"
         }
     },
-    required: ["foo", "bar"]
+    required: ["foo", "bar"],
+    asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
-    asCell: true
+    asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
 const wildcardLift = lift({
     type: "object",
@@ -122,7 +126,7 @@ const wildcardLift = lift({
         }
     },
     required: ["foo", "bar"],
-    asCell: true
+    asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, (input: Writable<{

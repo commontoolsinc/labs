@@ -296,17 +296,6 @@ Deno.test("simplifySchemaForContext preserves asCell marker with nested properti
   assertEquals(result.properties?.user?.required, ["name", "age"]);
 });
 
-Deno.test("simplifySchemaForContext preserves asOpaque marker", () => {
-  const schema: any = {
-    type: "object",
-    properties: {
-      state: { asOpaque: true, type: "object" },
-    },
-  };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.state?.asOpaque, true);
-});
-
 Deno.test("simplifySchemaForContext preserves small enums", () => {
   const schema: any = {
     type: "object",
@@ -373,7 +362,7 @@ Deno.test("simplifySchemaForContext limits recursion depth", () => {
             properties: {
               c: {
                 type: "object",
-                asStream: true, // wrapper marker to verify it's preserved at depth limit
+                asCell: ["stream"], // wrapper marker to verify it's preserved at depth limit
                 properties: {
                   d: { type: "string", description: "deep field" },
                 },
@@ -390,7 +379,7 @@ Deno.test("simplifySchemaForContext limits recursion depth", () => {
   const deep = result.properties?.a?.properties?.b?.properties?.c;
   // At max depth, only type and wrapper markers are preserved, properties are dropped
   assertEquals(deep?.type, "object");
-  assertEquals(deep?.asStream, true);
+  assertEquals(deep?.asCell, ["stream"]);
   assertEquals(deep?.properties, undefined); // nested properties dropped at max depth
 });
 
@@ -614,15 +603,19 @@ Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () =>
     },
     properties: {
       data: { $ref: "#/$defs/Item", asCell: true },
-      stream: { type: "number", asStream: true },
-      hidden: { type: "object", asOpaque: true },
+      otherData: { $ref: "#/$defs/Item", asCell: ["cell"] },
+      stream: { type: "number", asCell: ["stream"] },
+      otherStream: { type: "number", asStream: true }, // legacy asStream marker
+      hidden: { type: "object", asCell: ["opaque"] },
     },
   };
   const result = prepareSchemaForLLM(schema) as any;
   // asCell, asStream, asOpaque should be stripped
   assertEquals(result.properties?.data?.asCell, undefined);
-  assertEquals(result.properties?.stream?.asStream, undefined);
-  assertEquals(result.properties?.hidden?.asOpaque, undefined);
+  assertEquals(result.properties?.otherData?.asCell, undefined);
+  assertEquals(result.properties?.stream?.asCell, undefined);
+  assertEquals(result.properties?.otherStream?.asStream, undefined);
+  assertEquals(result.properties?.hidden?.asCell, undefined);
   // $ref should be resolved
   assertEquals(result.properties?.data?.type, "string");
   assertEquals(result.$defs, undefined);

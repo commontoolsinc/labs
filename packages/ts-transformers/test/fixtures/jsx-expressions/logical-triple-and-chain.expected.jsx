@@ -70,7 +70,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["active", "verified", "name"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]
@@ -93,7 +93,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["active", "verified", "name"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["user"]

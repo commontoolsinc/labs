@@ -50,7 +50,7 @@ export default pattern((__cf_pattern_input) => {
                     },
                     done: {
                         type: "boolean",
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 },
                 required: ["name", "done"]
@@ -79,7 +79,7 @@ export default pattern((__cf_pattern_input) => {
                     },
                     done: {
                         type: "boolean",
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 },
                 required: ["name", "done"]
@@ -119,7 +119,7 @@ export default pattern((__cf_pattern_input) => {
                     },
                     done: {
                         type: "boolean",
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 },
                 required: ["name", "done"]
@@ -155,7 +155,7 @@ export default pattern((__cf_pattern_input) => {
                     },
                     done: {
                         type: "boolean",
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 },
                 required: ["name", "done"]
@@ -208,7 +208,7 @@ export default pattern((__cf_pattern_input) => {
                     },
                     done: {
                         type: "boolean",
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 },
                 required: ["name", "done"]
@@ -270,7 +270,7 @@ export default pattern((__cf_pattern_input) => {
                                     },
                                     done: {
                                         type: "boolean",
-                                        asCell: true
+                                        asCell: ["cell"]
                                     }
                                 },
                                 required: ["name", "done"]
@@ -306,7 +306,7 @@ export default pattern((__cf_pattern_input) => {
                                     },
                                     done: {
                                         type: "boolean",
-                                        asCell: true
+                                        asCell: ["cell"]
                                     }
                                 },
                                 required: ["name", "done"]
@@ -350,7 +350,7 @@ export default pattern((__cf_pattern_input) => {
                                     },
                                     done: {
                                         type: "boolean",
-                                        asCell: true
+                                        asCell: ["cell"]
                                     }
                                 },
                                 required: ["name", "done"]
@@ -423,7 +423,7 @@ export default pattern((__cf_pattern_input) => {
                             },
                             done: {
                                 type: "boolean",
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["name", "done"]
@@ -474,7 +474,7 @@ export default pattern((__cf_pattern_input) => {
                 },
                 done: {
                     type: "boolean",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["name", "done"]

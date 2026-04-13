@@ -2,7 +2,6 @@ import {
   type BuiltInLLMMessage,
   computed,
   handler,
-  ifElse,
   llmDialog,
   NAME,
   pattern,
@@ -225,32 +224,36 @@ ${profileSection}`;
                 $messages={messages}
                 pending={pending}
               />
-              {ifElse(
-                hasMessages,
-                <cf-chat $messages={messages} pending={pending} />,
-                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
-                  Paste text, meeting notes, or ideas below. The agent will
-                  break them into linked notes.
-                </div>,
-              )}
+              {hasMessages
+                ? <cf-chat $messages={messages} pending={pending} />
+                : (
+                  <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
+                    Paste text, meeting notes, or ideas below. The agent will
+                    break them into linked notes.
+                  </div>
+                )}
             </cf-vstack>
           </cf-vscroll>
 
           <div slot="footer" style="padding: 0.5rem 1rem 1rem;">
-            {ifElse(
-              hasMessages,
-              <cf-hstack align="center" gap="1" style="padding-bottom: 0.5rem;">
-                <cf-button
-                  variant="pill"
-                  type="button"
-                  title="Clear chat"
-                  onClick={clearChat({ messages, pending })}
+            {hasMessages
+              ? (
+                <cf-hstack
+                  align="center"
+                  gap="1"
+                  style="padding-bottom: 0.5rem;"
                 >
-                  Clear
-                </cf-button>
-              </cf-hstack>,
-              <span />,
-            )}
+                  <cf-button
+                    variant="pill"
+                    type="button"
+                    title="Clear chat"
+                    onClick={clearChat({ messages, pending })}
+                  >
+                    Clear
+                  </cf-button>
+                </cf-hstack>
+              )
+              : <span />}
             <cf-prompt-input
               placeholder="Paste text to capture..."
               pending={pending}

@@ -730,7 +730,7 @@ export const styles = css`
 
     /* ================================================
     * Popup Theme Integration
-    * Override Leaflet popup styles with ct-* theme
+    * Override Leaflet popup styles with cf-* theme
     * ================================================ */
 
     .leaflet-popup-content-wrapper,

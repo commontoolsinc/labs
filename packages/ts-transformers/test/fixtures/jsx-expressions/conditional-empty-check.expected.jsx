@@ -47,7 +47,7 @@ export default pattern(() => {
                     items: {
                         type: "string"
                     },
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["items"]

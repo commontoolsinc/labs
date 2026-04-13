@@ -36,7 +36,7 @@ export default pattern(() => {
                     }
                 },
                 required: ["count"],
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["counter"]

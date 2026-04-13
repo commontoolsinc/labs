@@ -60,7 +60,7 @@ export default pattern((state) => {
                             },
                             limit: {
                                 type: "number",
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["label", "derived", "limit"]

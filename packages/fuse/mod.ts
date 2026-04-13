@@ -192,7 +192,9 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
   ) {
     return buildNodeStat(node, ino, {
-      isWritable: Boolean(
+      // When the backend transport is dead, report all files as read-only
+      // so writes fail with EACCES instead of silently succeeding.
+      isWritable: !bridge?.disconnected && Boolean(
         bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
       ),
       ownership: mountOwnership,
@@ -272,10 +274,12 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       if (bridge && bridge.shouldPrepareLookup(parent, name)) {
+        const mustSynchronize = bridge.shouldSynchronizeLookup?.(parent) ??
+          false;
         // Fast path: if entry is already in the tree (stubs, meta.json,
         // previously hydrated data), reply immediately and trigger
         // hydration in the background for not-yet-populated entries.
-        if (replyLookupFromTree(req, parent, name)) {
+        if (!mustSynchronize && replyLookupFromTree(req, parent, name)) {
           bridge.prepareLookup(parent, name).catch(() => {});
           return;
         }
@@ -712,20 +716,50 @@ export async function main(argv: string[] = Deno.args) {
           return EACCES;
         }
 
-        if (!meta?.program) {
+        // Normalise to a files array, mirroring buildSourceTree:
+        // multi-file programs use program.files, single-file use meta.src.
+        let baseMain: string;
+        let baseMainExport: string | undefined;
+        let baseFiles: { name: string; contents: string }[];
+        if (meta?.program?.files?.length) {
+          baseMain = meta.program.main;
+          baseMainExport = meta.program.mainExport;
+          baseFiles = meta.program.files;
+        } else if (meta?.src) {
+          baseMain = "/main.tsx";
+          baseMainExport = undefined;
+          baseFiles = [{ name: "/main.tsx", contents: meta.src }];
+        } else {
+          console.error(
+            `[source] No program or src in pattern meta for ${relPath}`,
+          );
           return EACCES;
         }
 
         // Replace the written file's content in the files array
-        const updatedFiles = meta.program.files.map((f) => {
+        let matched = false;
+        const updatedFiles = baseFiles.map((f) => {
           const fRelPath = f.name.startsWith("/") ? f.name.slice(1) : f.name;
-          return fRelPath === relPath ? { ...f, contents: text } : f;
+          if (fRelPath === relPath) {
+            matched = true;
+            return { ...f, contents: text };
+          }
+          return f;
         });
+
+        if (!matched) {
+          console.error(
+            `[source] File "${relPath}" not found in pattern files: [${
+              baseFiles.map((f) => f.name).join(", ")
+            }]`,
+          );
+          return EACCES;
+        }
 
         try {
           await piece.setPattern({
-            main: meta.program.main,
-            mainExport: meta.program.mainExport,
+            main: baseMain,
+            mainExport: baseMainExport,
             files: updatedFiles,
           });
           // Clear error.log on success
@@ -844,6 +878,24 @@ export async function main(argv: string[] = Deno.args) {
         ? "[fuse] handler flush error"
         : "[fuse] flush error";
       console.error(`${logPrefix}: ${e}`);
+
+      // Detect transport/connection failures and mark the bridge as
+      // disconnected so subsequent writes fail loudly (EACCES) instead
+      // of silently succeeding in the optimistic local tree.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (
+        bridge && !bridge.disconnected &&
+        (msg.includes("transport closed") ||
+          msg.includes("ConnectionError") ||
+          msg.includes("connection refused"))
+      ) {
+        bridge.disconnected = true;
+        console.error(
+          "[FUSE] ⚠️  Backend connection lost — mount is now READ-ONLY. " +
+            "Remount to restore write access.",
+        );
+      }
+
       return EIO;
     } finally {
       handle.flushing = false;

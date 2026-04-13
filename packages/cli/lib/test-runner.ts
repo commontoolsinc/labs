@@ -36,6 +36,7 @@ import type {
   Stream,
 } from "@commonfabric/runner";
 import type { OpaqueRef } from "@commonfabric/api";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
@@ -93,6 +94,54 @@ async function withPhase<T>(
 export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
   | { action: Stream<void>; skip?: boolean };
+
+type HarnessTestStepMeta = {
+  action?: unknown;
+  assertion?: unknown;
+  skip?: boolean;
+};
+
+type HarnessTestStepCell = Cell<unknown>;
+
+const testStepPeekSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      action: { type: "unknown" },
+      assertion: { type: "unknown" },
+      skip: { type: "boolean" },
+    },
+  },
+  true,
+);
+
+const testStepEntrySchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    asCell: true,
+  },
+  true,
+);
+
+const testStepListSchema = toDeepFrozenSchema(
+  {
+    type: "array",
+    items: testStepEntrySchema,
+    default: [],
+  },
+  true,
+);
+
+function actionStreamForStep(stepCell: HarnessTestStepCell): Stream<unknown> {
+  const actionCell = stepCell.key("action") as unknown;
+  if (
+    typeof actionCell !== "object" || actionCell === null ||
+    typeof (actionCell as { send?: unknown }).send !== "function"
+  ) {
+    throw new Error("Test step action is not a stream");
+  }
+  return actionCell as Stream<unknown>;
+}
 
 export interface TestResult {
   name: string;
@@ -814,9 +863,6 @@ export async function runTestPattern(
     () => new Engine(runtime),
   );
 
-  // Track sink subscription for cleanup
-  let sinkCancel: (() => void) | undefined;
-
   try {
     // 2. Compile the test pattern
     const program = await withPhase(
@@ -905,47 +951,41 @@ export async function runTestPattern(
       await runtime.idle();
     });
 
-    // Keep the pattern reactive - store cancel function for cleanup
-    sinkCancel = await withPhase(
-      ["runTestPattern", "sink"],
-      () => patternResult.sink(() => {}),
-    );
-
     // 4. Get the tests array from pattern output
     const testsCell = await withPhase(
       ["runTestPattern", "testsCell"],
       () => patternResult.key("tests") as Cell<unknown>,
     );
-    const testsValue = await withPhase(
+    const testSteps = await withPhase(
       ["runTestPattern", "testsValue"],
-      () => testsCell.get(),
+      () => testsCell.asSchema(testStepListSchema).get(),
     );
 
     // Validate it's an array
-    if (!Array.isArray(testsValue)) {
+    if (!Array.isArray(testSteps)) {
       throw new Error(
         "Test pattern must return { tests: TestStep[] }. Got: " +
-          JSON.stringify(typeof testsValue),
+          JSON.stringify(typeof testSteps),
       );
     }
 
     // Check for allowRuntimeErrors and expectNonIdempotent flags
     const allowRuntimeErrors = await withPhase(
       ["runTestPattern", "allowRuntimeErrors"],
-      () =>
-        (patternResult.key("allowRuntimeErrors") as Cell<unknown>).get() ===
-          true,
+      async () =>
+        await (patternResult.key("allowRuntimeErrors") as Cell<unknown>)
+          .pull() === true,
     );
     const expectNonIdempotent = await withPhase(
       ["runTestPattern", "expectNonIdempotent"],
-      () =>
-        (patternResult.key("expectNonIdempotent") as Cell<unknown>).get() ===
-          true,
+      async () =>
+        await (patternResult.key("expectNonIdempotent") as Cell<unknown>)
+          .pull() === true,
     );
 
     if (options.verbose) {
       console.log(`  Storage backend: ${storageManager.memoryVersion}`);
-      console.log(`  Found ${testsValue.length} test steps`);
+      console.log(`  Found ${testSteps.length} test steps`);
       printLoggerStats(
         performance.now() - startTime,
         false,
@@ -1020,21 +1060,19 @@ export async function runTestPattern(
     let assertionCount = 0;
     let actionCount = 0;
 
-    for (let i = 0; i < testsValue.length; i++) {
+    for (let i = 0; i < testSteps.length; i++) {
       if (options.verbose) {
         resetAllCountBaselines();
         resetAllTimingBaselines();
       }
       const itemStart = performance.now();
-      const stepValue = testsValue[i] as {
-        action?: unknown;
-        assertion?: unknown;
-        skip?: boolean;
-      };
+      const stepCell = testSteps[i] as HarnessTestStepCell;
+      const stepValue = stepCell.asSchema(testStepPeekSchema)
+        .get() as HarnessTestStepMeta;
 
       // Check if this step has 'action' or 'assertion' key
-      const isAction = "action" in stepValue;
-      const isAssertion = "assertion" in stepValue;
+      const isAction = Object.hasOwn(stepValue, "action");
+      const isAssertion = Object.hasOwn(stepValue, "assertion");
 
       if (!isAction && !isAssertion) {
         throw new Error(
@@ -1100,7 +1138,7 @@ export async function runTestPattern(
         // Get the action stream via .key()
         const actionStream = await withPhase(
           ["runTestPattern", "step", actionName, "stream"],
-          () => testsCell.key(i).key("action") as unknown as Stream<unknown>,
+          () => actionStreamForStep(stepCell),
         );
 
         // Send undefined for void streams
@@ -1269,13 +1307,13 @@ export async function runTestPattern(
         let passed = false;
         let error: string | undefined;
 
-        const evaluateAssertion = (): { passed: boolean; error?: string } => {
+        const evaluateAssertion = async (): Promise<
+          { passed: boolean; error?: string }
+        > => {
           // Get the assertion cell via .key()
           try {
-            const assertCell = testsCell.key(i).key("assertion") as Cell<
-              unknown
-            >;
-            const value = assertCell.get();
+            const assertCell = stepCell.key("assertion") as Cell<unknown>;
+            const value = await assertCell.pull();
             if (value === true) {
               return { passed: true };
             }
@@ -1409,9 +1447,6 @@ export async function runTestPattern(
     };
   } finally {
     // 6. Cleanup
-    await withPhase(["runTestPattern", "cleanup", "sinkCancel"], () => {
-      sinkCancel?.();
-    });
     await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
       engine.dispose();
     });

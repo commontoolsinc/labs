@@ -1,7 +1,9 @@
 {
   "properties": {
     "v": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "type": "string"
     }
   },

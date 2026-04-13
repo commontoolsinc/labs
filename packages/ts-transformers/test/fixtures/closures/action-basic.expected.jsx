@@ -25,7 +25,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 count: {
                     type: "number",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["count"]
@@ -38,7 +38,7 @@ export default pattern((__cf_pattern_input) => {
     properties: {
         count: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["count"]
@@ -46,7 +46,7 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         inc: {
-            asStream: true
+            asCell: ["stream", "opaque"]
         }
     },
     required: ["inc"]

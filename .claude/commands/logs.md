@@ -40,7 +40,7 @@ the logs of past sessions in this repository are stored in `~/.claude/projects/`
    rg "interrupt|distract|confused|forgot" logs/*.jsonl
    
    # Find specific feature work
-   rg "ct-render|ct-outliner" logs/*.jsonl
+   rg "cf-render|cf-message-beads" logs/*.jsonl
    
    # Extract conversation summary
    jq -r '.message.content | if type == "string" then . else .[0].text // "" end' file.jsonl | head -20

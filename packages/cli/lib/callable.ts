@@ -121,12 +121,12 @@ function mergeToolInput(
 }
 
 async function defaultWaitForResult(
-  resultCell: { get: () => unknown },
+  resultCell: { pull: () => Promise<unknown> },
   timeoutMs: number,
 ): Promise<unknown> {
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
-    const value = resultCell.get();
+    const value = await resultCell.pull();
     if (value !== undefined) {
       return value;
     }
@@ -260,11 +260,12 @@ export async function executeResolvedCallable(
     await tx.commit();
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
+    const waitForResult = deps.waitForResult ?? defaultWaitForResult;
+    const timeoutMs = deps.timeoutMs ?? 5000;
 
-    outputValue = await (deps.waitForResult ?? defaultWaitForResult)(
-      resultCell,
-      deps.timeoutMs ?? 5000,
-    );
+    await waitForResult(resultCell, timeoutMs);
+    await resolved.manager.runtime.storageManager.synced();
+    outputValue = await waitForResult(resultCell, timeoutMs);
   } finally {
     cancelSink?.();
   }

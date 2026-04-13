@@ -39,22 +39,23 @@ export class XAppView extends BaseView {
   `;
 
   @property({ attribute: false })
-  app = createDefaultAppState();
+  accessor app = createDefaultAppState();
 
   @property({ attribute: false })
-  rt?: RuntimeInternals;
+  accessor rt: RuntimeInternals | undefined = undefined;
 
   @property({ attribute: false })
-  keyStore?: KeyStore;
+  accessor keyStore: KeyStore | undefined = undefined;
 
   @state()
-  pieceTitle?: string;
+  accessor pieceTitle: string | undefined = undefined;
 
   @property({ attribute: false })
-  private titleSubscription?: CellEventTarget<string>;
+  private accessor titleSubscription: CellEventTarget<string> | undefined =
+    undefined;
 
   @state()
-  private _patternError?: Error;
+  private accessor _patternError: Error | undefined = undefined;
 
   private debuggerController = new DebuggerController(this);
   private _keyboard = new KeyboardController(this);

@@ -1441,6 +1441,178 @@ describe("handler dependency pulling", () => {
     expect(result.get()).toBe(33); // 30 + 3
   });
 
+  it("should park a head event until a throttled dependency becomes runnable", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "handler-throttle-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+
+    const computed = runtime.getCell<number>(
+      space,
+      "handler-throttle-computed",
+      undefined,
+      tx,
+    );
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-throttle-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+
+    const result = runtime.getCell<number>(
+      space,
+      "handler-throttle-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computedRuns = 0;
+    let handlerRuns = 0;
+
+    const computation: Action = (actionTx) => {
+      computedRuns++;
+      const value = source.withTx(actionTx).get();
+      computed.withTx(actionTx).send(value * 10);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [computed.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    await computed.pull();
+    expect(computedRuns).toBe(1);
+    expect(computed.get()).toBe(10);
+
+    runtime.scheduler.setThrottle(computation, 100);
+
+    runtime.scheduler.addEventHandler(
+      (handlerTx, event: number) => {
+        handlerRuns++;
+        const value = computed.withTx(handlerTx).get();
+        result.withTx(handlerTx).send(value + event);
+      },
+      eventStream.getAsNormalizedFullLink(),
+      (depTx) => {
+        computed.withTx(depTx).get();
+      },
+    );
+
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.resetFilterStats();
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 3);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(computedRuns).toBe(1);
+    expect(handlerRuns).toBe(0);
+    expect(runtime.scheduler.getFilterStats().filtered).toBeLessThan(5);
+
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    await runtime.scheduler.idle();
+
+    expect(computedRuns).toBe(2);
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(23);
+  });
+
+  it("should preserve FIFO order while the head event is parked", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "handler-throttle-fifo-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+
+    const computed = runtime.getCell<number>(
+      space,
+      "handler-throttle-fifo-computed",
+      undefined,
+      tx,
+    );
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-throttle-fifo-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computedRuns = 0;
+    const handledEvents: number[] = [];
+
+    const computation: Action = (actionTx) => {
+      computedRuns++;
+      computed.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [computed.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    await computed.pull();
+    expect(computedRuns).toBe(1);
+
+    runtime.scheduler.setThrottle(computation, 80);
+
+    runtime.scheduler.addEventHandler(
+      (handlerTx, event: number) => {
+        computed.withTx(handlerTx).get();
+        handledEvents.push(event);
+      },
+      eventStream.getAsNormalizedFullLink(),
+      (depTx) => {
+        computed.withTx(depTx).get();
+      },
+    );
+
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 2);
+
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    await runtime.scheduler.idle();
+
+    expect(computedRuns).toBe(2);
+    expect(handledEvents).toEqual([1, 2]);
+  });
+
   it("should wait for dynamically created lift before dispatching to downstream handler", async () => {
     // This test validates that when handler A triggers a lift and handler B
     // depends on that lift's output, the scheduler waits for the lift to
@@ -2522,7 +2694,7 @@ describe("inline idempotency check mode", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    // No pull mode — matches production test-runner behavior
+    // Inline idempotency mode should work regardless of the scheduler default.
     tx = runtime.edit();
   });
 
@@ -2533,33 +2705,36 @@ describe("inline idempotency check mode", () => {
   });
 
   it("detects non-idempotent via inline mode", async () => {
-    // Enable inline mode before subscribing
     runtime.scheduler.enableIdempotencyCheck();
 
-    // An accumulator: each run appends to the array
-    const log = runtime.getCell<string[]>(
+    const output = runtime.getCell<number>(
       space,
-      "inline-idempotency-accumulator",
+      "inline-random-output",
       undefined,
       tx,
     );
-    log.set([]);
+    output.set(0);
     await tx.commit();
     tx = runtime.edit();
 
-    const accumulator: Action = (tx) => {
-      const current = log.withTx(tx).get() ?? [];
-      log.withTx(tx).send([...current, "entry"]);
+    const randomWriter: Action = (tx) => {
+      output.withTx(tx).send(Math.random());
     };
+    (
+      randomWriter as Action & {
+        writes: ReturnType<typeof output.getAsNormalizedFullLink>[];
+      }
+    ).writes = [output.getAsNormalizedFullLink()];
     runtime.scheduler.subscribe(
-      accumulator,
-      { reads: [], shallowReads: [], writes: [] },
+      randomWriter,
+      () => {},
       {},
     );
-    await runtime.scheduler.idle();
+    await output.pull();
 
-    const violations = runtime.scheduler.getIdempotencyViolations();
-    expect(violations.length).toBeGreaterThan(0);
+    expect(runtime.scheduler.getIdempotencyViolations().length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("does not flag idempotent computations in inline mode", async () => {
@@ -2585,14 +2760,20 @@ describe("inline idempotency check mode", () => {
     const doubler: Action = (tx) => {
       output.withTx(tx).send(input.withTx(tx).get() * 2);
     };
-    runtime.scheduler.subscribe(doubler, {
-      reads: [],
-      shallowReads: [],
-      writes: [],
-    }, {});
-    await runtime.scheduler.idle();
+    (
+      doubler as Action & {
+        writes: ReturnType<typeof output.getAsNormalizedFullLink>[];
+      }
+    ).writes = [output.getAsNormalizedFullLink()];
+    runtime.scheduler.subscribe(
+      doubler,
+      (tx) => {
+        input.withTx(tx).get();
+      },
+      {},
+    );
+    expect(await output.pull()).toBe(10);
 
-    // Filter for our specific action
     const violations = runtime.scheduler.getIdempotencyViolations()
       .filter((r) =>
         r.runs.some((run) =>

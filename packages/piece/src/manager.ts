@@ -61,7 +61,7 @@ function filterOutCell(
 }
 
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
-  Deno.env.get("CT_CLI_TRACE_TIMINGS") === "1";
+  Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
 async function timePiecePhase<T>(
   label: string,
@@ -185,7 +185,7 @@ export class PieceManager {
    * Reads from the default pattern's allPieces export.
    */
   async getPieces(): Promise<Cell<Cell<unknown>[]>> {
-    const defaultPattern = await this.getDefaultPattern(false);
+    const defaultPattern = await this.getDefaultPattern(true);
     if (!defaultPattern) {
       // Return empty array cell if no default pattern
       return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
@@ -205,7 +205,7 @@ export class PieceManager {
   async add(newPieces: Cell<unknown>[]): Promise<void> {
     const defaultPattern = await timePiecePhase(
       "add.getDefaultPattern",
-      () => this.getDefaultPattern(false),
+      () => this.getDefaultPattern(true),
     );
     if (!defaultPattern) {
       throw new Error("Cannot add pieces: default pattern not available");
@@ -214,11 +214,11 @@ export class PieceManager {
     const cell = defaultPattern.asSchema({
       type: "object",
       properties: {
-        addPiece: { asStream: true },
+        addPiece: { asCell: ["stream"] },
       },
     });
 
-    const addPieceHandler = cell.key("addPiece").get();
+    const addPieceHandler = await cell.key("addPiece").pull();
     if (!isStream(addPieceHandler)) {
       throw new Error(
         "Cannot add pieces: addPiece handler not found on default pattern",
@@ -264,7 +264,7 @@ export class PieceManager {
     // Our request for the piece list will walk the schema tree, and that will
     // take us into classified data of pieces. If that happens, we still want
     // this bit to work, so we elevate this request.
-    return cell.asSchema(PRIVILEGED_PIECE_LIST_SCHEMA).sync();
+    return cell.asSchema(PRIVILEGED_PIECE_LIST_SCHEMA).pull();
   }
 
   async get<S extends JSONSchema = JSONSchema>(

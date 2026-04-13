@@ -3,7 +3,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { Immutable, isRecord } from "@commonfabric/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
-import type { JSONValue } from "@commonfabric/api";
+import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   type FabricValue,
@@ -55,9 +55,12 @@ const logger = getLogger("validateAndTransform", {
  *      based on the first non-alias value. This is because writes will follow
  *      aliases as well.
  *
- *  Calling `effect` on returned cells within a higher-level `effect` works as
- *  expected. Be sure to track the cancels, though. (Tracking cancels isn't
- *  necessary when using the schedueler directly)
+ * `asCell` can also be an array, so it can indicate a `Cell<Cell<T>>` or
+ * capture other options like opaque or stream types.
+ *
+ * Calling `effect` on returned cells within a higher-level `effect` works as
+ * expected. Be sure to track the cancels, though. (Tracking cancels isn't
+ * necessary when using the schedueler directly)
  */
 
 export function resolveSchema(
@@ -115,68 +118,67 @@ export function processDefaultValue(
   if (!schema) return defaultValue;
 
   let resolvedSchema = resolveSchema(schema);
-  let asCell = false;
-  let asStream = false;
-  if (isRecord(resolvedSchema)) {
-    asCell = resolvedSchema.asCell === true;
-    asStream = resolvedSchema.asStream === true;
-    if (
-      resolvedSchema.asCell !== undefined ||
-      resolvedSchema.asStream !== undefined
-    ) {
-      const { asCell: _asCell, asStream: _asStream, ...restSchema } =
-        resolvedSchema;
-      resolvedSchema = restSchema;
-    }
+  if (!isRecord(resolvedSchema)) {
+    // For primitive types, return as is
+    return annotateWithBackToCellSymbols(
+      defaultValue,
+      runtime,
+      link,
+      tx,
+      synced,
+    );
   }
 
-  // If schema indicates this should be a cell
-  if (asCell) {
-    // If the cell itself has a default value, make it its own (immutable)
-    // doc, to emulate the behavior of .get() returning a different underlying
-    // document when the value is changed. A classic example is
-    // `currentlySelected` with a default of `null`.
-    if (
-      defaultValue === undefined && isRecord(resolvedSchema) &&
-      resolvedSchema.default !== undefined
-    ) {
+  const asCellValues = ContextualFlowControl.getAsCellValues(resolvedSchema);
+  if (asCellValues.length > 0) {
+    // Remove the asCell flags from the schema
+    const { asCell: _c, asStream: _s, ...restSchema } = resolvedSchema;
+    resolvedSchema = restSchema;
+
+    if (asCellValues.at(0) === "stream") {
+      logger.warn(
+        "Created asStream as a default value, but this is likely unintentional",
+      );
+      // This can receive events, but at first nothing will be bound to it.
+      // Normally these get created by a handler call.
       return runtime.getImmutableCell(
         link.space,
-        resolvedSchema.default,
+        { $stream: true },
         resolvedSchema,
         tx,
       );
     } else {
-      return createCell(
-        runtime,
-        {
-          ...link,
-          schema: mergeDefaults(resolvedSchema, defaultValue),
-        },
-        getTransactionForChildCells(tx),
-        synced,
-      );
+      // If schema indicates this should be some sort of a cell
+      // If the cell itself has a default value, make it its own (immutable)
+      // doc, to emulate the behavior of .get() returning a different underlying
+      // document when the value is changed. A classic example is
+      // `currentlySelected` with a default of `null`.
+      if (defaultValue === undefined && resolvedSchema.default !== undefined) {
+        return runtime.getImmutableCell(
+          link.space,
+          resolvedSchema.default,
+          resolvedSchema,
+          tx,
+        );
+      } else {
+        return createCell(
+          runtime,
+          {
+            ...link,
+            schema: mergeDefaults(resolvedSchema, defaultValue),
+          },
+          getTransactionForChildCells(tx),
+          synced,
+          asCellValues.at(0),
+        );
+      }
     }
-  }
-
-  if (asStream) {
-    logger.warn(
-      "Created asStream as a default value, but this is likely unintentional",
-    );
-    // This can receive events, but at first nothing will be bound to it.
-    // Normally these get created by a handler call.
-    return runtime.getImmutableCell(
-      link.space,
-      { $stream: true },
-      resolvedSchema,
-      tx,
-    );
   }
 
   // Handle object type defaults
   if (
-    isRecord(resolvedSchema) && resolvedSchema?.type === "object" &&
-    isRecord(defaultValue) && !Array.isArray(defaultValue)
+    resolvedSchema?.type === "object" && isRecord(defaultValue) &&
+    !Array.isArray(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -199,7 +201,10 @@ export function processDefaultValue(
           );
           processedKeys.add(key);
         } else if (isRecord(propSchema)) {
-          if (propSchema.asCell) {
+          const asCellValues = ContextualFlowControl.getAsCellValues(
+            propSchema,
+          );
+          if (asCellValues.length > 0 && asCellValues.at(0) !== "stream") {
             // asCell are always created, it's their value that can be `undefined`
             result[key] = processDefaultValue(
               runtime,
@@ -262,8 +267,8 @@ export function processDefaultValue(
 
   // Handle array type defaults
   if (
-    isRecord(resolvedSchema) && resolvedSchema.type === "array" &&
-    Array.isArray(defaultValue) && resolvedSchema.items
+    resolvedSchema.type === "array" && Array.isArray(defaultValue) &&
+    resolvedSchema.items
   ) {
     // TODO(@ubik2): Need to handle prefixItems
     // Handle boolean items values
@@ -387,6 +392,24 @@ export function validateAndTransform(
   const schema = link.schema;
   const resolvedSchema = resolveSchema(schema);
 
+  const objectCreator = new TransformObjectCreator(
+    runtime,
+    tx!,
+    options?.synced ?? false,
+  );
+
+  // For opaque cells, create the cell directly from the current link.
+  // We intentionally avoid traversing redirect chains or reading through the
+  // transaction, since opaque cells should preserve identity without materializing
+  // the pointed-to value.
+  const asCellValues = ContextualFlowControl.getAsCellValues(resolvedSchema);
+  if (asCellValues.at(0) === "opaque") {
+    return objectCreator.createObject(
+      { ...link, schema: resolvedSchema },
+      undefined,
+    );
+  }
+
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
@@ -410,7 +433,7 @@ export function validateAndTransform(
   if (
     (
       effectiveSchema === undefined ||
-      !SchemaObjectTraverser.asCellOrStream(effectiveSchema)
+      !SchemaObjectTraverser.hasAsCell(effectiveSchema)
     ) &&
     filteredSchema === undefined
   ) {
@@ -421,15 +444,10 @@ export function validateAndTransform(
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
   const ref = resolveLink(runtime, tx, link);
-  const objectCreator = new TransformObjectCreator(
-    runtime,
-    tx!,
-    options?.synced ?? false,
-  );
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.
-  if (SchemaObjectTraverser.asCellOrStream(effectiveSchema)) {
+  if (SchemaObjectTraverser.hasAsCell(effectiveSchema)) {
     // We check for a link value, since we will follow links one step in get
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
@@ -499,9 +517,14 @@ class TransformObjectCreator
   ) {
   }
 
+  /**
+   * @param matches
+   * @param schema An allOf or anyOf schema
+   * @returns
+   */
   mergeMatches<T>(
     matches: T[],
-    schema?: JSONSchema,
+    schema: JSONSchemaObj,
   ): T | Record<string, T> | undefined {
     // These value objects should be merged. While this isn't JSONSchema
     // spec, when we have an anyOf with branches where name is set in one
@@ -513,11 +536,36 @@ class TransformObjectCreator
       // anymore.
       const cellMatch = matches.find((v) => isCell(v));
       if (cellMatch !== undefined) {
-        if (typeof schema === "object") {
-          const { asCell: _, ...restSchema } = schema;
-          return cellMatch.asSchema(restSchema) as any;
+        // At least one match is a cell. If they are all cells, we should be
+        // able to combine them. If some are not, we could alter our schema on
+        // the cell to include the anyOf. Since that's already a cell, we want
+        // to remove the first "cell" entry from the asCell array.
+        // I'm not going to fully support legacy streams here, since this is
+        // already a super edge case.
+        if (schema.asCell !== undefined) {
+          // Use the asCell from the anyOf/allOf schema
+          // This code isn't typically reached, since a cell with an asCell
+          // schema will have just removed one level from asCell and returned
+          // that instead. However, I include it here for completeness.
+          const unwrappedSchema = unwrapAsCellSchema(schema);
+          return cellMatch.asSchema(unwrappedSchema) as any;
         } else {
-          return cellMatch.asSchema(schema) as any;
+          // at least one of the entries should have had an asCell or we
+          // wouldn't have a cell. We will use the asCell used for creating
+          // this cell, but change the rest of the schema to be the logical
+          // combination schema.
+          const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
+          const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
+          const asCellValues = ContextualFlowControl.getAsCellValues(
+            cellMatch.schema,
+          );
+          const combinedSchema = {
+            ...schema,
+            ...(allOfItems.length > 0) && { allOf: allOfItems },
+            ...(anyOfItems.length > 0) && { anyOf: anyOfItems },
+            ...(asCellValues.length > 0) && { asCell: asCellValues },
+          };
+          return cellMatch.asSchema(combinedSchema) as any;
         }
       }
     }
@@ -556,15 +604,25 @@ class TransformObjectCreator
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(this.runtime, this.tx, link);
     } else if (isRecord(link.schema)) {
-      const { asCell, asStream, ...restSchema } = link.schema;
-      if (asCell || asStream) {
+      const { asCell: _c, asStream: _s, ...restSchema } = link.schema;
+      const asCellValues = ContextualFlowControl.getAsCellValues(link.schema);
+      if (asCellValues.length > 0) {
+        // We'll use the first asCell for the outermost, and pass the rest
+        // in with the schema for the created cell.
+        const cellKind = asCellValues[0];
         // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
-        // TODO(@ubik2): Figure out if we should purge asCell/asStream from restSchema children
         return createCell(
           this.runtime,
-          { ...link, schema: restSchema },
+          {
+            ...link,
+            schema: {
+              ...restSchema,
+              ...(asCellValues.length > 1) && { asCell: asCellValues.slice(1) },
+            },
+          },
           getTransactionForChildCells(this.tx),
           this.synced,
+          cellKind,
         ) as AnyCellWrapping<FabricValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
@@ -673,4 +731,21 @@ export function generateHandlerSchema(
     ...(Object.keys(mergedDefinitions).length &&
       { definitions: mergedDefinitions }),
   }, true);
+}
+
+function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
+  const { asCell: _c, asStream: _s, ...restSchema } = schema;
+  const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+  return {
+    ...restSchema,
+    ...(asCellValues.length > 1 && { asCell: asCellValues.slice(1) }),
+  };
+}
+
+function removeAsCellFromSchema(schema: JSONSchema): JSONSchema {
+  if (isRecord(schema)) {
+    const { asCell: _c, asStream: _s, ...restSchema } = schema;
+    return restSchema;
+  }
+  return schema;
 }

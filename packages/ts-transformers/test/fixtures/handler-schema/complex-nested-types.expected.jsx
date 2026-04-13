@@ -70,18 +70,18 @@ const userHandler = handler({
                 },
                 required: ["id", "name", "email"]
             },
-            asCell: true
-        },
-        lastAction: {
-            type: "string",
-            asCell: true
+            asCell: ["cell"]
         },
         count: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
+        },
+        lastAction: {
+            type: "string",
+            asCell: ["cell"]
         }
     },
-    required: ["users", "lastAction", "count"]
+    required: ["users", "count", "lastAction"]
 } as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     if (event.action === "create") {
         state.users.push({
@@ -118,7 +118,7 @@ const _updateTags = handler({
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["tags"]

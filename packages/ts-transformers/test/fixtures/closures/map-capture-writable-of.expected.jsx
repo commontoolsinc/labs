@@ -55,7 +55,7 @@ export default pattern((state) => {
                                     }, {
                                         type: "null"
                                     }],
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["selected"]

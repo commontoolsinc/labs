@@ -1,7 +1,9 @@
 {
   "properties": {
     "s": {
-      "asStream": true,
+      "asCell": [
+        "stream"
+      ],
       "type": "string"
     }
   },

@@ -30,7 +30,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 a: {
                     type: "string",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             }
         } as const satisfies __cfHelpers.JSONSchema, (_, { a }) => console.log(a))({
@@ -41,7 +41,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 b: {
                     type: "number",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             }
         } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => console.log(b))({
@@ -53,21 +53,21 @@ export default pattern((__cf_pattern_input) => {
     properties: {
         a: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         },
         b: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         readA: {
-            asStream: true
+            asCell: ["stream", "opaque"]
         },
         readB: {
-            asStream: true
+            asCell: ["stream", "opaque"]
         }
     },
     required: ["readA", "readB"]

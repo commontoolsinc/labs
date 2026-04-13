@@ -243,34 +243,35 @@ export class CFLocation extends BaseElement {
   // Theme context
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  accessor theme: CFTheme = defaultTheme;
 
   // Cell binding for location data
   @property({ attribute: false })
-  location: CellHandle<LocationData | null> | LocationData | null = null;
+  accessor location: CellHandle<LocationData | null> | LocationData | null =
+    null;
 
   // Configuration
   @property({ type: Boolean })
-  enableHighAccuracy = false;
+  accessor enableHighAccuracy = false;
 
   @property({ type: Number })
-  timeout = 10000;
+  accessor timeout = 10000;
 
   @property({ type: Number })
-  maximumAge = 0;
+  accessor maximumAge = 0;
 
   @property({ type: Boolean })
-  continuous = false;
+  accessor continuous = false;
 
   @property({ type: Boolean })
-  disabled = false;
+  accessor disabled = false;
 
   // Internal state
   @state()
-  private _state: LocationState = "idle";
+  private accessor _state: LocationState = "idle";
 
   @state()
-  private _errorMessage = "";
+  private accessor _errorMessage = "";
 
   private _watchId: number | null = null;
 

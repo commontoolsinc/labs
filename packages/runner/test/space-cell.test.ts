@@ -120,7 +120,9 @@ describe("Runtime.getSpaceCell", () => {
       };
       expect(schema.type).toBe("object");
       expect(schema.properties).toHaveProperty("defaultPattern");
-      expect(schema.properties.defaultPattern).toHaveProperty("asCell", true);
+      expect(schema.properties.defaultPattern).toHaveProperty("asCell", [
+        "cell",
+      ]);
     });
 
     it("should accept custom schema when provided", () => {

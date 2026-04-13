@@ -75,12 +75,12 @@ export async function verifyWebhookSecret(
 
 // Compute entity ID for a webhook registration in toolshed's service space
 export async function webhookEntityId(webhookId: string): Promise<string> {
-  return `of:${await sha256("ct:webhook:" + webhookId)}`;
+  return `of:${await sha256("cf:webhook:" + webhookId)}`;
 }
 
 // Compute entity ID for a per-space webhook index in toolshed's service space
 async function spaceIndexEntityId(space: string): Promise<string> {
-  return `of:${await sha256("ct:webhooks-for:" + space)}`;
+  return `of:${await sha256("cf:webhooks-for:" + space)}`;
 }
 
 // Build a cell link targeting toolshed's own service space
@@ -209,15 +209,16 @@ export async function removeFromServiceIndex(
 }
 
 // Send incoming webhook payload to the target inbox stream.
-// The cell must be schema'd with asStream so .send() dispatches through the
-// stream/handler system rather than being treated as a regular cell set.
+// The cell must be schema with `asCell: ["stream"]` so .send() dispatches
+// through the stream/handler system rather than being treated as a regular
+// cell set.
 export async function sendToStream(
   cellLink: string,
   payload: unknown,
 ): Promise<void> {
   const parsedCellLink = JSON.parse(cellLink);
   const cell = runtime.getCellFromLink(parsedCellLink);
-  const streamCell = cell.asSchema({ asStream: true });
+  const streamCell = cell.asSchema({ asCell: ["stream"] });
   await streamCell.sync();
   await runtime.storageManager.synced();
 

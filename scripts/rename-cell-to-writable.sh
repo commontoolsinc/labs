@@ -3,7 +3,7 @@
 #
 # This script:
 # 1. Replaces Cell< with Writable< (type annotations only)
-# 2. Adds Writable to commontools imports using perl for proper multi-line handling
+# 2. Adds Writable to commonfabric imports using perl for proper multi-line handling
 #
 # Preserves Cell.of(), Cell.equals(), Cell.for() method calls
 
@@ -34,7 +34,7 @@ count2=0
 for file in $files; do
     # Check if file uses Writable< anywhere
     if grep -q 'Writable<' "$file"; then
-        # Check if there's an import from commontools
+        # Check if there's an import from commonfabric
         if grep -q 'from "commonfabric"' "$file"; then
             # Get the import block (everything between import { and } from "commonfabric")
             import_block=$(perl -0777 -ne 'print $1 if /import\s*\{([^}]*)\}\s*from\s*"commonfabric"/s' "$file")

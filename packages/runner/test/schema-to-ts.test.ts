@@ -12,7 +12,7 @@ import {
   Schema,
 } from "../src/builder/types.ts";
 import { pattern } from "../src/builder/pattern.ts";
-import { Cell, Runtime } from "@commonfabric/runner";
+import { type Cell, Runtime, type Stream } from "@commonfabric/runner";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -194,6 +194,47 @@ describe("Schema-to-TS Type Conversion", () => {
     type ExpectedCell = Cell<{ value?: number }>;
 
     expectType<ExpectedCell, CellSchema>();
+  });
+
+  it('should handle asCell: ["cell"] attribute', () => {
+    type CellSchema = Schema<{
+      type: "object";
+      properties: {
+        value: { type: "number" };
+      };
+      asCell: ["cell"];
+    }>;
+
+    type ExpectedCell = Cell<{ value?: number }>;
+
+    expectType<ExpectedCell, CellSchema>();
+  });
+
+  it('should handle readonly asCell: ["cell"] from const schemas', () => {
+    const schema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+      },
+      asCell: ["cell"],
+    } as const;
+
+    type CellSchema = Schema<typeof schema>;
+    type ExpectedCell = Cell<{ value?: number }>;
+
+    expectType<ExpectedCell, CellSchema>();
+  });
+
+  it('should interpret ["stream", "cell"] as Stream<Cell<T>>', () => {
+    type GeneratedSchema = {
+      type: "number";
+      asCell: ["stream", "cell"];
+    };
+
+    type Actual = Schema<GeneratedSchema>;
+    type IntendedInterpretation = Stream<Cell<number>>;
+
+    expectType<IntendedInterpretation, Actual>();
   });
 
   it("should handle nested asCell attributes", () => {

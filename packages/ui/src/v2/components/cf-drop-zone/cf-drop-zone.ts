@@ -48,10 +48,10 @@ export class CFDropZone extends BaseElement {
   ];
 
   @property({ type: String })
-  accept?: string;
+  accessor accept: string | undefined = undefined;
 
   @state()
-  private _isDragOver: boolean = false;
+  private accessor _isDragOver: boolean = false;
 
   private _unsubscribeDrag?: () => void;
   private _unsubscribeEndDrag?: () => void;

@@ -74,7 +74,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["timeout", "retries"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["config"]
@@ -107,7 +107,7 @@ export default pattern((_state) => {
                         }
                     },
                     required: ["timeout", "retries"],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["config"]
@@ -131,7 +131,7 @@ export default pattern((_state) => {
                     items: {
                         type: "string"
                     },
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["items"]

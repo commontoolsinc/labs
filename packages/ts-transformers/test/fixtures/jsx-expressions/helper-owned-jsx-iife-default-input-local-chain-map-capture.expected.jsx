@@ -67,7 +67,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 },
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["path"]
@@ -206,7 +206,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: true
+                            asCell: ["cell"]
                         }
                     },
                     required: ["path"]
@@ -315,7 +315,7 @@ export default pattern((__cf_pattern_input) => {
                                             }
                                         },
                                         required: ["name"],
-                                        asStream: true
+                                        asCell: ["stream"]
                                     },
                                     item: {
                                         type: "object",
@@ -347,7 +347,7 @@ export default pattern((__cf_pattern_input) => {
                                             }
                                         },
                                         required: ["item"],
-                                        asStream: true
+                                        asCell: ["stream"]
                                     },
                                     item: {
                                         $ref: "#/$defs/Entry"
@@ -406,7 +406,7 @@ export default pattern((__cf_pattern_input) => {
                                         }
                                     },
                                     required: ["name"],
-                                    asStream: true
+                                    asCell: ["stream"]
                                 },
                                 handleOpenFile: {
                                     type: "object",
@@ -416,7 +416,7 @@ export default pattern((__cf_pattern_input) => {
                                         }
                                     },
                                     required: ["item"],
-                                    asStream: true
+                                    asCell: ["stream"]
                                 }
                             },
                             required: ["handleNavigateInto", "handleOpenFile"]

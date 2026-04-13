@@ -75,7 +75,7 @@ export default pattern((state) => {
                             properties: {
                                 selectedIndex: {
                                     type: "number",
-                                    asCell: true
+                                    asCell: ["cell"]
                                 }
                             },
                             required: ["selectedIndex"]
@@ -117,7 +117,7 @@ export default pattern((state) => {
                                     },
                                     selectedIndex: {
                                         type: "number",
-                                        asCell: true
+                                        asCell: ["cell"]
                                     }
                                 },
                                 required: ["discount", "selectedIndex"]
@@ -174,7 +174,7 @@ export default pattern((state) => {
                         },
                         selectedIndex: {
                             type: "number",
-                            asCell: true
+                            asCell: ["cell"]
                         }
                     },
                     required: ["items", "selectedIndex"]
@@ -207,7 +207,7 @@ export default pattern((state) => {
                         },
                         selectedIndex: {
                             type: "number",
-                            asCell: true
+                            asCell: ["cell"]
                         },
                         discount: {
                             type: "number"
@@ -247,7 +247,7 @@ export default pattern((state) => {
         },
         selectedIndex: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["items", "discount", "selectedIndex"]

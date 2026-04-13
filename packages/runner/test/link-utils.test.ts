@@ -696,8 +696,8 @@ describe("link-utils", () => {
       expect(originalSchema.properties.name.asStream).toBe(true);
 
       // Result should have flags removed
-      expect((result as any).asCell).toBeUndefined();
-      expect((result as any).properties.name.asStream).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
+      expect((result as any).properties.name).not.toHaveProperty("asStream");
     });
 
     it("should handle circular schema references without stack overflow", () => {
@@ -725,7 +725,7 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // Should have removed asCell from top level
-      expect((result as any).asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       // Should have processed nested properties
       expect((result as any).properties.name.type).toBe("string");
       // CT-1142: Result should be JSON-serializable without exponential growth
@@ -748,8 +748,8 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // Top level flags should be removed
-      expect((result as any).asCell).toBeUndefined();
-      expect((result as any).asStream).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
+      expect(result).not.toHaveProperty("asStream");
       // Cycle reference should be replaced with $ref
       expect((result as any).self.$ref).toBeDefined();
       expect((result as any).self.$ref).toMatch(/^#\/\$defs\//);
@@ -770,9 +770,9 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(a);
 
       // All flags should be removed in the processed chain
-      expect((result as any).asCell).toBeUndefined();
-      expect((result as any).next.asStream).toBeUndefined();
-      expect((result as any).next.next.asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
+      expect((result as any).next).not.toHaveProperty("asStream");
+      expect((result as any).next.next).not.toHaveProperty("asCell");
       // The cycle back should be a $ref
       expect((result as any).next.next.next.$ref).toBeDefined();
       expect((result as any).next.next.next.$ref).toMatch(/^#\/\$defs\//);
@@ -790,7 +790,7 @@ describe("link-utils", () => {
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       // Cycle reference should be a $ref
       expect((result as any).items.$ref).toBeDefined();
       expect((result as any).items.$ref).toMatch(/^#\/\$defs\//);
@@ -808,7 +808,7 @@ describe("link-utils", () => {
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       expect((result as any).anyOf[0].type).toBe("string");
       // Cycle reference should be a $ref
       expect((result as any).anyOf[1].$ref).toBeDefined();
@@ -826,23 +826,23 @@ describe("link-utils", () => {
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).a.asCell).toBeUndefined();
-      expect((result as any).b.asStream).toBeUndefined();
+      expect((result as any).a).not.toHaveProperty("asCell");
+      expect((result as any).b).not.toHaveProperty("asStream");
     });
 
     it("should handle keepStreams option with circular schemas", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
         asStream: true,
       };
       schema.self = schema;
 
       const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
 
-      expect((result as any).asCell).toBeUndefined();
-      // asStream should be kept
-      expect((result as any).asStream).toBe(true);
+      // Expect the new version of asStream (where it's an entry in asCell)
+      expect((result as any).asCell).toEqual(["stream"]);
+      // asStream should be gone
+      expect(result).not.toHaveProperty("asStream");
     });
 
     it("should handle shared references (diamond pattern) correctly", () => {
@@ -856,10 +856,10 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // First encounter should strip asCell
-      expect((result as any).left.path.asCell).toBeUndefined();
+      expect((result as any).left.path).not.toHaveProperty("asCell");
       // Second encounter returns the same processed result (consistent!)
       expect((result as any).right.path).toBe((result as any).left.path);
-      expect((result as any).right.path.asCell).toBeUndefined();
+      expect((result as any).right.path).not.toHaveProperty("asCell");
     });
 
     it("should process schemas inside existing $defs", () => {
@@ -885,13 +885,13 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // $defs schemas should have asCell/asStream stripped
-      expect((result as any).$defs.MyType.asCell).toBeUndefined();
-      expect((result as any).$defs.MyType.asStream).toBeUndefined();
+      expect((result as any).$defs.MyType).not.toHaveProperty("asCell");
+      expect((result as any).$defs.MyType).not.toHaveProperty("asStream");
       expect((result as any).$defs.MyType.type).toBe("string");
       // Nested properties too
       expect(
-        (result as any).$defs.NestedType.properties.nested.asCell,
-      ).toBeUndefined();
+        (result as any).$defs.NestedType.properties.nested,
+      ).not.toHaveProperty("asCell");
       // $ref should be preserved
       expect((result as any).$ref).toBe("#/$defs/MyType");
     });
@@ -936,7 +936,7 @@ describe("link-utils", () => {
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       expect((result as any).oneOf[0].type).toBe("null");
       expect((result as any).oneOf[1].$ref).toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
@@ -945,14 +945,14 @@ describe("link-utils", () => {
     it("should handle cycles through allOf", () => {
       const schema: any = {
         type: "object",
-        asStream: true,
+        asCell: ["stream"],
         allOf: [{ type: "object" }, null],
       };
       schema.allOf[1] = { properties: { nested: schema } };
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asStream).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       expect((result as any).allOf[1].properties.nested.$ref).toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
     });
@@ -973,7 +973,7 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // asCell should be stripped
-      expect((result as any).$defs.MyRecursiveDef.asCell).toBeUndefined();
+      expect((result as any).$defs.MyRecursiveDef).not.toHaveProperty("asCell");
       // The internal cycle should be converted to $ref
       expect(
         (result as any).$defs.MyRecursiveDef.properties.child.$ref,
@@ -984,16 +984,16 @@ describe("link-utils", () => {
     it("should handle keepAsOpaque option", () => {
       const schema: any = {
         type: "object",
-        asOpaque: true,
+        asCell: ["opaque"],
       };
 
-      // By default, asOpaque should be removed
+      // By default, asCell should be removed
       const resultDefault = sanitizeSchemaForLinks(schema);
-      expect((resultDefault as any).asOpaque).toBeUndefined();
+      expect(resultDefault).not.toHaveProperty("asCell");
 
-      // With keepAsOpaque: true, it should be preserved
-      const resultKept = sanitizeSchemaForLinks(schema, { keepAsOpaque: true });
-      expect((resultKept as any).asOpaque).toBe(true);
+      // With keepAsCell: true, it should be preserved
+      const resultKept = sanitizeSchemaForLinks(schema, { keepAsCell: true });
+      expect((resultKept as any).asCell).toEqual(["opaque"]);
     });
   });
 

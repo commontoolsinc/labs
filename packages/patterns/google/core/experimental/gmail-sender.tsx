@@ -671,7 +671,7 @@ export default pattern<Input, Output>(({ draft }) => {
                     opacity: computed(() => sending.get() ? 0.7 : 1),
                   }}
                 >
-                  {ifElse(sending, "Sending...", "Send Email")}
+                  {sending ? "Sending..." : "Send Email"}
                 </button>
               </div>
             </div>

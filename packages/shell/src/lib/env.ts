@@ -6,12 +6,9 @@ declare global {
   var $COMMIT_SHA: string | undefined;
   var $MEMORY_VERSION: string | undefined;
   var $EXPERIMENTAL_MODERN_DATA_MODEL: string | undefined;
-  var $EXPERIMENTAL_RICH_STORABLE_VALUES: string | undefined;
-  var $EXPERIMENTAL_STORABLE_PROTOCOL: string | undefined;
   var $EXPERIMENTAL_UNIFIED_JSON_ENCODING: string | undefined;
   var $EXPERIMENTAL_MODERN_SCHEMA_HASH: string | undefined;
   var $EXPERIMENTAL_MODERN_HASH: string | undefined;
-  var $EXPERIMENTAL_CANONICAL_HASHING: string | undefined;
   var $COMPILATION_CACHE_CLIENT: string | undefined;
 }
 
@@ -29,14 +26,6 @@ const EXPERIMENTAL_MODERN_DATA_MODEL_DEFINE =
   typeof $EXPERIMENTAL_MODERN_DATA_MODEL === "string"
     ? $EXPERIMENTAL_MODERN_DATA_MODEL
     : undefined;
-const EXPERIMENTAL_RICH_STORABLE_VALUES_DEFINE =
-  typeof $EXPERIMENTAL_RICH_STORABLE_VALUES === "string"
-    ? $EXPERIMENTAL_RICH_STORABLE_VALUES
-    : undefined;
-const EXPERIMENTAL_STORABLE_PROTOCOL_DEFINE =
-  typeof $EXPERIMENTAL_STORABLE_PROTOCOL === "string"
-    ? $EXPERIMENTAL_STORABLE_PROTOCOL
-    : undefined;
 const EXPERIMENTAL_UNIFIED_JSON_ENCODING_DEFINE =
   typeof $EXPERIMENTAL_UNIFIED_JSON_ENCODING === "string"
     ? $EXPERIMENTAL_UNIFIED_JSON_ENCODING
@@ -48,10 +37,6 @@ const EXPERIMENTAL_MODERN_SCHEMA_HASH_DEFINE =
 const EXPERIMENTAL_MODERN_HASH_DEFINE =
   typeof $EXPERIMENTAL_MODERN_HASH === "string"
     ? $EXPERIMENTAL_MODERN_HASH
-    : undefined;
-const EXPERIMENTAL_CANONICAL_HASHING_DEFINE =
-  typeof $EXPERIMENTAL_CANONICAL_HASHING === "string"
-    ? $EXPERIMENTAL_CANONICAL_HASHING
     : undefined;
 const COMPILATION_CACHE_CLIENT_DEFINE =
   typeof $COMPILATION_CACHE_CLIENT === "string"
@@ -82,12 +67,9 @@ function flagValue(flag: string | undefined): boolean | undefined {
 /** Build-time experimental flags, injected via felt.config.ts defines. */
 export const EXPERIMENTAL = {
   modernDataModel: flagValue(EXPERIMENTAL_MODERN_DATA_MODEL_DEFINE),
-  richStorableValues: flagValue(EXPERIMENTAL_RICH_STORABLE_VALUES_DEFINE),
-  storableProtocol: flagValue(EXPERIMENTAL_STORABLE_PROTOCOL_DEFINE),
   unifiedJsonEncoding: flagValue(EXPERIMENTAL_UNIFIED_JSON_ENCODING_DEFINE),
   modernHash: flagValue(EXPERIMENTAL_MODERN_HASH_DEFINE),
   modernSchemaHash: flagValue(EXPERIMENTAL_MODERN_SCHEMA_HASH_DEFINE),
-  canonicalHashing: flagValue(EXPERIMENTAL_CANONICAL_HASHING_DEFINE),
 };
 
 export const COMPILATION_CACHE_CLIENT =

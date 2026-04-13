@@ -40,7 +40,7 @@ export default pattern((__cf_pattern_input) => {
         properties: {
             isEditing: {
                 type: "boolean",
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["isEditing"]
@@ -53,7 +53,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<cf-card>
         {__cfHelpers.ifElse({
             type: "boolean",
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
@@ -86,7 +86,7 @@ export default pattern((__cf_pattern_input) => {
                         required: ["description"]
                     },
                     startEditing: {
-                        asStream: true
+                        asCell: ["stream", "opaque"]
                     }
                 },
                 required: ["card", "startEditing"]

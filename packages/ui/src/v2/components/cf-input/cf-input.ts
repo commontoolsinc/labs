@@ -435,7 +435,7 @@ export class CFInput extends BaseElement {
       @consume({ context: cfThemeContext, subscribe: true })
       @property({ attribute: false })
       // deno-lint-ignore no-explicit-any
-      declare theme?: CFTheme;
+      accessor theme: CFTheme = defaultTheme;
 
       private get input(): HTMLInputElement | null {
         if (!this._input) {

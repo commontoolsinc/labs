@@ -30,7 +30,7 @@ const myHandler = handler({
     properties: {
         value: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"]

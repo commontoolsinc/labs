@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import { ContextualFlowControl } from "../runner/src/cfc.ts";
 
 const encoder = new TextEncoder();
 
@@ -28,7 +29,9 @@ function isPatternSchemaValue(value: unknown): boolean {
 
 function isPatternSchemaSchema(schema: JSONSchema | undefined): boolean {
   if (!isSchemaRecord(schema)) return false;
-  if (schema.asCell === true) return true;
+  if (ContextualFlowControl.getAsCellValues(schema).at(0) === "cell") {
+    return true;
+  }
 
   const properties = schema.properties;
   if (
@@ -107,7 +110,7 @@ export function buildCallableScript(
   typeStr?: string,
 ): Uint8Array {
   const shim = execCli || "/usr/bin/false";
-  // Comments are readable via `cat` and `head`; ct exec handles --help and
+  // Comments are readable via `cat` and `head`; cf exec handles --help and
   // flag-based invocation (--value <x> for scalars, --flag <v> for objects).
   const schemaComment = schema !== undefined
     ? `# schema: ${JSON.stringify(schema)}\n`

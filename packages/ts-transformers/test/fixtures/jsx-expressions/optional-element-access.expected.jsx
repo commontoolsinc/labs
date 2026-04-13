@@ -55,7 +55,7 @@ export default pattern(() => {
                                 type: "string"
                             }
                         }],
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["list"]

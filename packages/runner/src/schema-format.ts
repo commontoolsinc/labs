@@ -7,6 +7,8 @@
  */
 
 import type { JSONSchema } from "commonfabric";
+import { ContextualFlowControl } from "./cfc.ts";
+import { AsCellType } from "@commonfabric/api";
 
 export interface SchemaFormatOptions {
   /** Definitions map for resolving $ref references */
@@ -39,17 +41,17 @@ export interface SchemaFormatOptions {
  * // → "{ name?: string }"
  *
  * @example
- * // Stream handlers (asStream: true)
+ * // Stream handlers (asCell: ["stream"])
  * schemaToTypeString({
- *   asStream: true,
+ *   asCell: ["stream"],
  *   properties: { value: { type: "string" } }
  * })
  * // → "({ value?: string }) => void"
  *
  * @example
- * // Cell wrappers (asCell: true)
+ * // Cell wrappers (asCell: ["cell"])
  * schemaToTypeString({
- *   asCell: true,
+ *   asCell: ["cell"],
  *   properties: { count: { type: "number" } }
  * })
  * // → "Cell<{ count?: number }>"
@@ -97,7 +99,7 @@ export function schemaToTypeString(
   const s = schema as Record<string, unknown>;
 
   // Handle $ref - resolve from definitions
-  if (s.$ref && typeof s.$ref === "string") {
+  if (schema.$ref && typeof schema.$ref === "string") {
     const refPath = s.$ref as string;
     const match = refPath.match(/^#\/\$defs\/(.+)$/);
     if (match) {
@@ -116,37 +118,33 @@ export function schemaToTypeString(
     return "unknown"; // Can't resolve ref
   }
 
+  // Normalize asCell/asStream into a single asCellValues array for easier handling
+  const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+
   // At max depth, return simplified representation
   if (depth >= maxDepth) {
-    if (s.asStream) return "(...) => void";
-    if (s.asCell) return "Cell<...>";
-    if (s.type === "object") return "{...}";
-    if (s.type === "array") return "[...]";
-    return String(s.type || "unknown");
+    if (asCellValues.length > 0) {
+      let innerType = "...";
+      for (let i = asCellValues.length - 1; i >= 0; i--) {
+        innerType = getWrappedTypeString(asCellValues[i], innerType);
+      }
+      return innerType;
+    } else {
+      if (schema.type === "object") return "{...}";
+      if (schema.type === "array") return "[...]";
+      return String(schema.type || "unknown");
+    }
   }
 
-  // Handle wrapper types first
-  if (s.asStream) {
-    // Stream handler: ({ props }) => void
-    const innerType = schemaToTypeString(
-      { ...s, asStream: undefined } as JSONSchema,
-      nextOpts,
-    );
-    return `(${innerType}) => void`;
-  }
-
-  if (s.asCell) {
-    // Cell wrapper: Cell<T>
-    const innerType = schemaToTypeString(
-      { ...s, asCell: undefined } as JSONSchema,
-      nextOpts,
-    );
-    return `Cell<${innerType}>`;
-  }
-
-  if (s.asOpaque) {
-    // Opaque wrapper - just note it's opaque
-    return "Opaque";
+  // Normalize asCell/asStream into a single asCellValue array for easier handling
+  if (asCellValues.length > 0) {
+    const { asCell: _c, asStream: _s, ...restSchema } = schema;
+    // Wrapper arrays are ordered outermost-first, so apply them from the end.
+    let innerType = schemaToTypeString(restSchema, nextOpts);
+    for (let i = asCellValues.length - 1; i >= 0; i--) {
+      innerType = getWrappedTypeString(asCellValues[i], innerType);
+    }
+    return innerType;
   }
 
   // Handle PatternToolResult - objects with { pattern, extraParams } structure
@@ -233,4 +231,26 @@ export function schemaToTypeString(
 
   // Fallback
   return type ? String(type) : "unknown";
+}
+
+function getWrappedTypeString(
+  wrapper: AsCellType,
+  innerType: string,
+): string {
+  switch (wrapper) {
+    case "cell":
+      return `Cell<${innerType}>`;
+    case "readonly":
+      return `ReadonlyCell<${innerType}>`;
+    case "writeonly":
+      return `WriteonlyCell<${innerType}>`;
+    case "comparable":
+      return `ComparableCell<${innerType}>`;
+    case "stream":
+      return `(${innerType}) => void`;
+    case "opaque":
+      return "Opaque";
+    default:
+      return "UnknownWrapper";
+  }
 }

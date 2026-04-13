@@ -9,7 +9,14 @@ export type CellBrand =
   | "readonly"
   | "writeonly";
 
-export type CellWrapperKind = "Cell" | "Stream" | "OpaqueRef";
+export type CellWrapperKind =
+  | "OpaqueCell"
+  | "Cell"
+  | "Stream"
+  | "ComparableCell"
+  | "ReadonlyCell"
+  | "WriteonlyCell"
+  | "OpaqueRef"; // this last one may be obsolete.
 
 export interface CellWrapperInfo {
   brand: CellBrand;
@@ -104,39 +111,53 @@ export function isCellBrand(
   return getCellBrand(type, checker) === brand;
 }
 
+/**
+ * It's possible we'll support different brands and cellkind values,
+ * but for now, these are the same.
+ */
 export function getCellKind(
   type: ts.Type,
   checker: ts.TypeChecker,
-): "opaque" | "cell" | "stream" | undefined {
-  const brand = getCellBrand(type, checker);
-  if (brand === undefined) return undefined;
-
-  switch (brand) {
-    case "opaque":
-      return "opaque";
-    case "stream":
-      return "stream";
-    case "cell":
-    case "comparable":
-    case "readonly":
-    case "writeonly":
-      return "cell";
-    default:
-      return undefined;
-  }
+): CellBrand | undefined {
+  return getCellBrand(type, checker);
 }
 
 function brandToWrapperKind(brand: CellBrand): CellWrapperKind | undefined {
   switch (brand) {
     case "opaque":
-      return "OpaqueRef";
+      return "OpaqueCell";
     case "stream":
       return "Stream";
     case "cell":
-    case "comparable":
-    case "readonly":
-    case "writeonly":
       return "Cell";
+    case "comparable":
+      return "ComparableCell";
+    case "readonly":
+      return "ReadonlyCell";
+    case "writeonly":
+      return "WriteonlyCell";
+    default:
+      return undefined;
+  }
+}
+
+export function wrapperKindToBrand(
+  wrapperKind: CellWrapperKind,
+): CellBrand | undefined {
+  switch (wrapperKind) {
+    case "OpaqueCell":
+    case "OpaqueRef":
+      return "opaque";
+    case "Stream":
+      return "stream";
+    case "Cell":
+      return "cell";
+    case "ComparableCell":
+      return "comparable";
+    case "ReadonlyCell":
+      return "readonly";
+    case "WriteonlyCell":
+      return "writeonly";
     default:
       return undefined;
   }

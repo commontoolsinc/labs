@@ -21,6 +21,21 @@ import { createDebugUtils } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
 import { provide } from "@lit/context";
 
+type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
+  rt?: RuntimeClient;
+  vdom?: ReturnType<typeof createVDomDebugHelpers>;
+  detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+  space?: DID;
+};
+
+function getCommonfabricGlobal(): typeof globalThis & {
+  commonfabric?: CommonfabricDebugState;
+} {
+  return globalThis as typeof globalThis & {
+    commonfabric?: CommonfabricDebugState;
+  };
+}
+
 // The root element for the shell application.
 //
 // Derives `RuntimeInternals` for the application from its `AppState`.
@@ -42,18 +57,18 @@ export class XRootView extends BaseView {
   `;
 
   @state()
-  app = createDefaultAppState();
+  accessor app = createDefaultAppState();
 
   @property()
-  keyStore?: KeyStore;
+  accessor keyStore: KeyStore | undefined = undefined;
 
   @provide({ context: runtimeContext })
   @state()
-  private runtime?: RuntimeClient;
+  private accessor runtime: RuntimeClient | undefined = undefined;
 
   @provide({ context: spaceContext })
   @state()
-  private space?: DID;
+  private accessor space: DID | undefined = undefined;
 
   // The runtime task runs when AppState changes, and determines
   // if a new RuntimeInternals must be created, like when
@@ -79,8 +94,9 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
-          if (globalThis.commonfabric) {
-            globalThis.commonfabric.rt = undefined;
+          const global = getCommonfabricGlobal();
+          if (global.commonfabric) {
+            global.commonfabric.rt = undefined;
           }
           return undefined;
         }
@@ -95,8 +111,9 @@ export class XRootView extends BaseView {
           rt.dispose().catch(console.error);
           this.runtime = undefined;
           this.space = undefined;
-          if (globalThis.commonfabric) {
-            globalThis.commonfabric.rt = undefined;
+          const global = getCommonfabricGlobal();
+          if (global.commonfabric) {
+            global.commonfabric.rt = undefined;
           }
           return;
         }
@@ -107,12 +124,11 @@ export class XRootView extends BaseView {
 
         // Expose RuntimeClient for console debugging
         // (e.g. commonfabric.rt.setLoggerLevel("debug"))
-        if (!globalThis.commonfabric) {
-          (globalThis as any).commonfabric = {};
-        }
-        globalThis.commonfabric.rt = this.runtime;
-        globalThis.commonfabric.vdom = createVDomDebugHelpers();
-        globalThis.commonfabric.detectNonIdempotent = async (
+        const global = getCommonfabricGlobal();
+        global.commonfabric ??= {};
+        global.commonfabric.rt = this.runtime;
+        global.commonfabric.vdom = createVDomDebugHelpers();
+        global.commonfabric.detectNonIdempotent = async (
           durationMs = 5000,
         ) => {
           const result = await rt.runtime().detectNonIdempotent(durationMs);
@@ -127,18 +143,17 @@ export class XRootView extends BaseView {
         };
 
         // Debug utilities for inspecting cell values from the console
-        globalThis.commonfabric.space = this.space;
+        global.commonfabric.space = this.space;
         const debugUtils = createDebugUtils(
           () => this.space as DID,
           () => this.runtime,
         );
-        globalThis.commonfabric.readCell = debugUtils.readCell;
-        globalThis.commonfabric.readArgumentCell = debugUtils.readArgumentCell;
-        globalThis.commonfabric.subscribeToCell = debugUtils.subscribeToCell;
-        globalThis.commonfabric.watchWrites = debugUtils.watchWrites;
-        globalThis.commonfabric.getWriteStackTrace =
-          debugUtils.getWriteStackTrace;
-        globalThis.commonfabric.explainTriggerTrace =
+        global.commonfabric.readCell = debugUtils.readCell;
+        global.commonfabric.readArgumentCell = debugUtils.readArgumentCell;
+        global.commonfabric.subscribeToCell = debugUtils.subscribeToCell;
+        global.commonfabric.watchWrites = debugUtils.watchWrites;
+        global.commonfabric.getWriteStackTrace = debugUtils.getWriteStackTrace;
+        global.commonfabric.explainTriggerTrace =
           debugUtils.explainTriggerTrace;
 
         return rt;

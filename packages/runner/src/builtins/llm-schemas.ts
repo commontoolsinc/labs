@@ -53,7 +53,7 @@ export const LLMToolSchema = toDeepFrozenSchema(
       inputSchema: { type: "object" },
       handler: {
         // Deliberately no schema, so it gets populated from the handler
-        asStream: true,
+        asCell: ["stream"],
       },
       pattern: {
         type: "object",
@@ -65,12 +65,12 @@ export const LLMToolSchema = toDeepFrozenSchema(
           initial: { type: "object" },
         },
         required: ["argumentSchema", "resultSchema", "nodes"],
-        asCell: true,
+        asCell: ["cell"],
       },
       extraParams: { type: "object" },
       piece: {
         // Accept whole piece - its own schema defines its handlers
-        asCell: true,
+        asCell: ["cell"],
       },
     },
     required: [],
@@ -107,7 +107,7 @@ export const LLMParamsSchema = toDeepFrozenSchema(
       },
       context: {
         type: "object",
-        additionalProperties: { asCell: true },
+        additionalProperties: { asCell: ["cell"] },
         default: {},
       },
       resultSchema: { type: "object" },
@@ -126,7 +126,7 @@ export const GenerateTextParamsSchema = toDeepFrozenSchema(
       messages: { type: "array", items: LLMMessageSchema },
       context: {
         type: "object",
-        additionalProperties: { asCell: true },
+        additionalProperties: { asCell: ["cell"] },
         default: {},
       },
       system: { type: "string" },
@@ -151,7 +151,7 @@ export const GenerateObjectParamsSchema = toDeepFrozenSchema(
       messages: { type: "array", items: LLMMessageSchema },
       context: {
         type: "object",
-        additionalProperties: { asCell: true },
+        additionalProperties: { asCell: ["cell"] },
         default: {},
       },
       schema: { type: "object" },

@@ -2231,6 +2231,29 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows nested .get() on Cell<Cell<string>> pattern input",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, computed, Cell } from "commonfabric";
+
+      export default pattern<{ nested: Cell<Cell<string>> }>(({ nested }) => {
+        const upper = computed(() => nested.get().get().toUpperCase());
+        return { upper };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "nested .get() on Cell<Cell<string>> should be allowed",
+      );
+    },
+  );
+
+  await t.step(
     "allows .get() on Writable inside authored ifElse branch",
     async () => {
       const source =

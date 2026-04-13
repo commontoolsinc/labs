@@ -79,22 +79,22 @@ export class XBodyView extends BaseView {
   `;
 
   @property({ attribute: false })
-  rt?: RuntimeInternals;
+  accessor rt: RuntimeInternals | undefined = undefined;
 
   @property({ attribute: false })
-  activePattern?: PageHandle;
+  accessor activePattern: PageHandle | undefined = undefined;
 
   @property({ attribute: false })
-  spaceRootPattern?: PageHandle;
+  accessor spaceRootPattern: PageHandle | undefined = undefined;
 
   @property()
-  showShellPieceListView = false;
+  accessor showShellPieceListView = false;
 
   @property({ type: Boolean })
-  showSidebar = false;
+  accessor showSidebar = false;
 
   @property({ attribute: false })
-  patternError?: Error;
+  accessor patternError: Error | undefined = undefined;
 
   override connectedCallback() {
     super.connectedCallback();

@@ -19,17 +19,17 @@ FUSE mounting, filesystem layout, and low-level read/write mechanics, see the
 
 ```bash
 cd ~/code/labs
-export CT_IDENTITY=./shared.key CT_API_URL=http://localhost:8000
+export CF_IDENTITY=./shared.key CF_API_URL=http://localhost:8000
 
 # 1. Deploy and capture piece ID
-ID=$(ct piece new packages/patterns/<path>.tsx \
+ID=$(cf piece new packages/patterns/<path>.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 
 # 2. Set title
-ct piece call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
+cf piece call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
 
 # 3. Step to materialise
-ct piece step --piece $ID --space SPACE
+cf piece step --piece $ID --space SPACE
 
 # 4. Re-read pieces.json immediately — stale after deploy
 cat "MOUNT/SPACE/pieces/pieces.json"
@@ -63,17 +63,17 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
   "import json,sys; p=json.load(sys.stdin); print(next(x['name'] for x in p if 'Reading' in x['name']))"
 ```
 
-### When to run `ct piece step`
+### When to run `cf piece step`
 
 | Operation                     | Step needed?                               |
 | ----------------------------- | ------------------------------------------ |
-| `ct piece call` (CLI)         | Always                                     |
-| `ct piece set` (CLI)          | Always                                     |
+| `cf piece call` (CLI)         | Always                                     |
+| `cf piece set` (CLI)          | Always                                     |
 | FUSE handler invocation       | Sometimes — if count suffix doesn't update |
 | Read/Write/Edit on `index.md` | Never                                      |
 
 When in doubt after a FUSE handler call: run
-`ct piece step --piece $ID --space SPACE`, then re-read `pieces.json`.
+`cf piece step --piece $ID --space SPACE`, then re-read `pieces.json`.
 
 ### NFS timeout and remount
 
@@ -82,13 +82,33 @@ load. Reads stall during the window.
 
 ```bash
 # Detect: mount is stale if this hangs or returns empty
-ls /tmp/ct-mount/
+ls /tmp/cf-mount/
 
 # Remount:
-ct fuse mount /tmp/ct-mount --background && sleep 3
+cf fuse mount /tmp/cf-mount --background && sleep 3
 ```
 
 Add `sleep 2` before verification reads if you see repeated stalls.
+
+### Transport disconnection (silent write failures)
+
+Long-running FUSE mounts (24h+) can lose their backend transport. Symptom: all
+writes appear to succeed (no error), but values don't persist — cells stay empty
+or revert. The FUSE process is still running but useless.
+
+**Diagnose:**
+
+```bash
+tail -20 /tmp/ct-fuse-<mount-name>.log
+# Look for: "ConnectionError: memory/v2 transport closed"
+```
+
+**Fix:** Kill and remount. Remount before each experiment run to be safe.
+
+Agent handlers (`markIdle.handler`, `appendLearned.handler`, etc.) will also
+fail silently with a dead transport — the handler appears to execute but no
+state changes. If agents report "learned" entries that don't show up in
+`input/learned`, check the transport first.
 
 ---
 
@@ -138,15 +158,15 @@ cat "MOUNT/SPACE/pieces/Activity Log (N)/result/summary"
 Annotations (`annotation.tsx`) are pieces that record observations, flags, and
 wishes. Use them to leave notes about things noticed without necessarily acting.
 
-**Deploy and configure via CT CLI:**
+**Deploy and configure via CF CLI:**
 
 ```bash
-ID=$(ct piece new packages/patterns/annotation.tsx \
+ID=$(cf piece new packages/patterns/annotation.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 echo '"Standup notes mention 5 people with no structured contact list"' \
-  | ct piece set --piece $ID content --space SPACE
-echo '"wish"' | ct piece set --piece $ID kind --space SPACE
-ct piece step --piece $ID --space SPACE
+  | cf piece set --piece $ID content --space SPACE
+echo '"wish"' | cf piece set --piece $ID kind --space SPACE
+cf piece step --piece $ID --space SPACE
 # Re-read pieces.json — name now reflects content: "Standup notes mention..."
 ```
 
@@ -166,8 +186,8 @@ ct piece step --piece $ID --space SPACE
 **Mark a wish resolved** (when fulfilling another agent's annotation):
 
 ```bash
-echo '"resolved"' | ct piece set --piece $WISH_ID status --space SPACE
-ct piece step --piece $WISH_ID --space SPACE
+echo '"resolved"' | cf piece set --piece $WISH_ID status --space SPACE
+cf piece step --piece $WISH_ID --space SPACE
 ```
 
 **Discover open annotations** — deploy `annotation-manager.tsx` for an
@@ -185,10 +205,95 @@ for x in p:
 
 ---
 
+## Agent Piece (`agent/agent.tsx`)
+
+Each agent is a piece in the space with its own cells for directive, learned
+state, and lifecycle. Deploy one per agent in the space.
+
+```
+MOUNT/SPACE/pieces/🤖 Deployer/
+  result/
+    summary                  ← "Deployer: last run summary" or "Deployer (no runs yet)"
+    markRunning.handler      ← call at start of run (auto-logs to Activity Log)
+    markIdle.handler         ← call when done: --summary "what you did"
+    markError.handler        ← call on failure: --summary "what went wrong"
+    appendLearned.handler    ← append a learning: --entry "today I learned X"
+    setDirective.handler     ← update directive: --value "new directive text"
+    setLearned.handler       ← replace all learned: --value "full learned text"
+  input/
+    agentName                ← raw text: "Deployer"
+    directive                ← raw text: the agent's full directive/instructions
+    enabled                  ← raw text: "true" or "false"
+    learned                  ← raw text: accumulated learnings
+    status                   ← raw text: "idle" | "running" | "error"
+    lastRun                  ← raw text: ISO timestamp of last run
+    lastRunSummary           ← raw text: summary from last markIdle/markError
+  .handlers
+  meta.json
+```
+
+### Agent lifecycle
+
+**Important:** Always re-resolve the piece name before each handler call. Piece
+name suffixes can change after handler invocations (e.g. `Counter-1` becomes
+`Counter-2`), so a stale `$AGENT_NAME` will target a non-existent path.
+
+```bash
+# Helper function: resolve current piece name (call before each handler use)
+resolve_agent() {
+  cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
+    "import json,sys; p=json.load(sys.stdin); \
+     print(next(x['name'] for x in p if 'Deployer' in x['name']))"
+}
+
+# 1. Read your directive
+AGENT_NAME=$(resolve_agent)
+cat "MOUNT/SPACE/pieces/$AGENT_NAME/input/directive"
+
+# 2. Mark running (auto-logs "started" to Activity Log)
+AGENT_NAME=$(resolve_agent)
+"MOUNT/SPACE/pieces/$AGENT_NAME/result/markRunning.handler"
+
+# 3. Do your work...
+# Log individual actions to Activity Log as you go (see Activity Log section)
+
+# 4. Record learnings
+AGENT_NAME=$(resolve_agent)
+"MOUNT/SPACE/pieces/$AGENT_NAME/result/appendLearned.handler" \
+  --entry "2026-04-07: Calendar addEvent throws pattern-load-error but succeeds"
+
+# 5. Mark idle when done (auto-logs "completed" to Activity Log)
+AGENT_NAME=$(resolve_agent)
+"MOUNT/SPACE/pieces/$AGENT_NAME/result/markIdle.handler" \
+  --summary "Deployed Contact Book and Calendar, left 2 wishes for Populator"
+# Or on error:
+AGENT_NAME=$(resolve_agent)
+"MOUNT/SPACE/pieces/$AGENT_NAME/result/markError.handler" \
+  --summary "FUSE mount unresponsive after 3 retries"
+```
+
+`markRunning`, `markIdle`, and `markError` automatically log to the Activity Log
+via `wish("#activity-log")`. You still log individual actions (deploys,
+populates, links) manually — the lifecycle handlers just record start/stop.
+
+### Discovering agents
+
+```bash
+cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c "
+import json, sys
+p = json.load(sys.stdin)
+for x in p:
+    if x.get('patternName','') == 'agent':
+        print(x['name'], '—', x.get('summary','')[:60])
+"
+```
+
+---
+
 ## Cleanup
 
 ```bash
-ct piece rm --piece $ID --space SPACE
+cf piece rm --piece $ID --space SPACE
 ```
 
 Use this to clean up duplicate pieces deployed by accident (no `--confirm`

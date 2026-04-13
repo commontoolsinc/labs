@@ -2,7 +2,6 @@ import {
   computed,
   equals,
   handler,
-  ifElse,
   NAME,
   navigateTo,
   pattern,
@@ -456,29 +455,29 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             </div>
 
             <div style={{ flex: "1", minWidth: "0" }}>
-              {ifElse(
-                computed(() => recentPieces.get().length > 0),
-                <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
-                  <cf-hstack gap="2" align="center">
-                    <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
-                    <cf-cell-link $cell={recentGridView} />
-                  </cf-hstack>
-                  <cf-table full-width hover>
-                    <tbody>
-                      {recentPieces.map((piece: any) => (
-                        <tr>
-                          <td>
-                            <cf-cell-context $cell={piece}>
-                              <cf-cell-link $cell={piece} />
-                            </cf-cell-context>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </cf-table>
-                </cf-vstack>,
-                undefined,
-              )}
+              {computed(() => recentPieces.get().length > 0)
+                ? (
+                  <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
+                    <cf-hstack gap="2" align="center">
+                      <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
+                      <cf-cell-link $cell={recentGridView} />
+                    </cf-hstack>
+                    <cf-table full-width hover>
+                      <tbody>
+                        {recentPieces.map((piece: any) => (
+                          <tr>
+                            <td>
+                              <cf-cell-context $cell={piece}>
+                                <cf-cell-link $cell={piece} />
+                              </cf-cell-context>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </cf-table>
+                  </cf-vstack>
+                )
+                : undefined}
 
               <cf-vstack gap="4">
                 <cf-hstack gap="2" align="center">
@@ -507,18 +506,18 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       return (
                         <tr>
                           <td>
-                            {ifElse(
-                              isNotebook,
-                              <cf-drop-zone
-                                accept="note"
-                                oncf-drop={dropOntoNotebook({
-                                  notebook: piece as any,
-                                })}
-                              >
-                                {link}
-                              </cf-drop-zone>,
-                              link,
-                            )}
+                            {isNotebook
+                              ? (
+                                <cf-drop-zone
+                                  accept="note"
+                                  oncf-drop={dropOntoNotebook({
+                                    notebook: piece as any,
+                                  })}
+                                >
+                                  {link}
+                                </cf-drop-zone>
+                              )
+                              : link}
                           </td>
                           <td>
                             <cf-button

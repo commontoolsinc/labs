@@ -85,6 +85,18 @@ const logger = getLogger("storage.v2", {
   level: "error",
 });
 
+function withCommitTiming<T>(
+  keys: string[],
+  fn: () => T,
+): T {
+  logger.timeStart(...keys);
+  try {
+    return fn();
+  } finally {
+    logger.timeEnd(...keys);
+  }
+}
+
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
@@ -104,6 +116,11 @@ type CachedTransactionValue =
   | typeof UNCACHED_TRANSACTION_VALUE
   | undefined;
 
+type MaterializedVersion = {
+  value: EntityDocument | undefined;
+  transactionValue: CachedTransactionValue;
+};
+
 type PendingVersion =
   | {
     localSeq: number;
@@ -121,15 +138,23 @@ type PendingVersion =
     op: "delete";
   };
 
-type ConfirmedVersion = {
+type ConfirmedVersion = MaterializedVersion & {
   seq: number;
-  value: EntityDocument | undefined;
-  transactionValue: CachedTransactionValue;
+};
+
+type PendingMaterializedPrefix = MaterializedVersion & {
+  localSeq: number;
+};
+
+type PendingMaterializationCache = {
+  confirmed: ConfirmedVersion;
+  prefixes: PendingMaterializedPrefix[];
 };
 
 type DocumentRecord = {
   confirmed: ConfirmedVersion;
   pending: PendingVersion[];
+  materialized?: PendingMaterializationCache;
 };
 
 type ConfirmedCommitRead = {
@@ -164,7 +189,7 @@ const confirmedVersion = (
 });
 
 const transactionValueForVersion = (
-  version: ConfirmedVersion,
+  version: MaterializedVersion,
 ): FabricValue | undefined => {
   if (version.transactionValue === UNCACHED_TRANSACTION_VALUE) {
     version.transactionValue = toTransactionDocumentValue(version.value);
@@ -265,6 +290,69 @@ const applyPendingVersion = (
       }
       return next;
     }
+  }
+};
+
+const ensurePendingMaterializationCache = (
+  record: DocumentRecord,
+): PendingMaterializationCache => {
+  const existing = record.materialized;
+  if (existing && existing.confirmed === record.confirmed) {
+    return existing;
+  }
+  const cache: PendingMaterializationCache = {
+    confirmed: record.confirmed,
+    prefixes: [],
+  };
+  record.materialized = cache;
+  return cache;
+};
+
+const materializedVersionThroughPending = (
+  record: DocumentRecord,
+  pendingCount = record.pending.length,
+): MaterializedVersion => {
+  if (pendingCount <= 0) {
+    return record.confirmed;
+  }
+
+  const cache = ensurePendingMaterializationCache(record);
+  while (cache.prefixes.length < pendingCount) {
+    const nextIndex = cache.prefixes.length;
+    const base = nextIndex === 0
+      ? record.confirmed
+      : cache.prefixes[nextIndex - 1]!;
+    const pending = record.pending[nextIndex]!;
+    cache.prefixes.push({
+      localSeq: pending.localSeq,
+      value: applyPendingVersion(base.value, pending),
+      transactionValue: UNCACHED_TRANSACTION_VALUE,
+    });
+  }
+  return cache.prefixes[pendingCount - 1]!;
+};
+
+const dropMaterializedSuffix = (
+  record: DocumentRecord,
+  pendingIndex: number,
+): void => {
+  if (pendingIndex <= 0) {
+    record.materialized = undefined;
+    return;
+  }
+
+  const cache = record.materialized;
+  if (!cache) {
+    return;
+  }
+  if (cache.confirmed !== record.confirmed) {
+    record.materialized = undefined;
+    return;
+  }
+
+  cache.prefixes.length = Math.min(cache.prefixes.length, pendingIndex);
+  if (cache.prefixes.length === 0) {
+    record.materialized = undefined;
   }
 };
 
@@ -932,30 +1020,37 @@ class SpaceReplica implements ISpaceReplica {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const operations = transaction.operations
-      .filter((operation) => operation.type === DOCUMENT_MIME)
-      .map((operation) =>
-        operation.op === "delete"
-          ? { op: "delete" as const, id: operation.id }
-          : operation.op === "patch"
-          ? {
-            op: "patch" as const,
-            id: operation.id,
-            patches: operation.patches,
-            value: toExplicitDocument(operation.value),
-          }
-          : {
-            op: "set" as const,
-            id: operation.id,
-            value: toExplicitDocument(operation.value),
-          }
-      );
+    const operations = withCommitTiming(
+      ["commitNative", "normalize"],
+      () =>
+        transaction.operations
+          .filter((operation) => operation.type === DOCUMENT_MIME)
+          .map((operation) =>
+            operation.op === "delete"
+              ? { op: "delete" as const, id: operation.id }
+              : operation.op === "patch"
+              ? {
+                op: "patch" as const,
+                id: operation.id,
+                patches: operation.patches,
+                value: toExplicitDocument(operation.value),
+              }
+              : {
+                op: "set" as const,
+                id: operation.id,
+                value: toExplicitDocument(operation.value),
+              }
+          ),
+    );
 
     if (operations.length === 0) {
       return { ok: {} };
     }
 
-    return await this.commitOperations(operations, source);
+    return await withCommitTiming(
+      ["commitNative", "commitOperations"],
+      () => this.commitOperations(operations, source),
+    );
   }
 
   reset(): void {
@@ -1085,62 +1180,77 @@ class SpaceReplica implements ISpaceReplica {
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const localSeq = this.#nextLocalSeq++;
-    const commit = {
-      localSeq,
-      reads: this.buildReads(source, localSeq),
-      operations: operations.map((operation) => {
-        switch (operation.op) {
-          case "delete":
-            return operation;
-          case "patch":
-            return {
-              op: "patch" as const,
-              id: operation.id,
-              patches: operation.patches,
-            };
-          case "set":
-            return {
-              op: "set" as const,
-              id: operation.id,
-              value: operation.value,
-            };
-        }
+    const commit = withCommitTiming(
+      ["commitOperations", "buildCommit"],
+      () => ({
+        localSeq,
+        reads: this.buildReads(source, localSeq),
+        operations: operations.map((operation) => {
+          switch (operation.op) {
+            case "delete":
+              return operation;
+            case "patch":
+              return {
+                op: "patch" as const,
+                id: operation.id,
+                patches: operation.patches,
+              };
+            case "set":
+              return {
+                op: "set" as const,
+                id: operation.id,
+                value: operation.value,
+              };
+          }
+        }),
       }),
-    };
+    );
     const touched = operations.map((operation) => operation.id);
     const shouldNotifySubscribers = this.hasNotificationSubscribers();
     const shouldNotifySinks = this.hasSinkSubscribers(touched);
-    const before = shouldNotifySubscribers
-      ? Differential.checkout(
-        this,
-        touched.map((id) => snapshotState(this, id)),
-      )
-      : undefined;
+    const before = withCommitTiming(
+      ["commitOperations", "snapshotBefore"],
+      () =>
+        shouldNotifySubscribers
+          ? Differential.checkout(
+            this,
+            touched.map((id) => snapshotState(this, id)),
+          )
+          : undefined,
+    );
 
-    for (const operation of operations) {
-      this.applyPending(operation, localSeq);
-    }
-
-    if (before !== undefined) {
-      const optimistic = before.compare(this);
-      this.#subscription.next({
-        type: "commit",
-        space: this.#space,
-        changes: optimistic,
-        source,
-      });
-      if (shouldNotifySinks) {
-        this.notifySinks(optimistic);
+    withCommitTiming(["commitOperations", "applyPending"], () => {
+      for (const operation of operations) {
+        this.applyPending(operation, localSeq);
       }
-    } else if (shouldNotifySinks) {
-      this.notifySinksForIds(touched);
-    }
+    });
 
-    const promise = this.pushCommit(
-      localSeq,
-      operations,
-      commit as any,
-      source,
+    withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
+      if (before !== undefined) {
+        const optimistic = before.compare(this);
+        this.#subscription.next({
+          type: "commit",
+          space: this.#space,
+          changes: optimistic,
+          source,
+        });
+        if (shouldNotifySinks) {
+          this.notifySinks(optimistic);
+        }
+      } else if (shouldNotifySinks) {
+        this.notifySinksForIds(touched);
+      }
+    });
+
+    const promise = withCommitTiming(
+      ["commitOperations", "pushCommitStart"],
+      () =>
+        this.pushCommit(
+          localSeq,
+          operations,
+          commit as any,
+          source,
+        ),
     );
     this.#commitPromises.add(promise);
     const result = await promise;
@@ -1281,12 +1391,14 @@ class SpaceReplica implements ISpaceReplica {
         upsert.seq,
         upsert.deleted === true ? undefined : upsert.doc,
       );
+      record.materialized = undefined;
       this.#watchedIds.add(upsert.id as URI);
     }
     for (const remove of sync.removes) {
       const id = remove.id as URI;
       const record = this.record(id);
       record.confirmed = confirmedVersion(0, undefined);
+      record.materialized = undefined;
       this.#watchedIds.delete(id);
     }
 
@@ -1313,6 +1425,7 @@ class SpaceReplica implements ISpaceReplica {
       record = {
         confirmed: confirmedVersion(0, undefined),
         pending: [],
+        materialized: undefined,
       };
       this.#docs.set(id, record);
     }
@@ -1342,52 +1455,107 @@ class SpaceReplica implements ISpaceReplica {
   ): void {
     for (const id of new Set(operations.map((operation) => operation.id))) {
       const record = this.record(id);
-      const pending = [...record.pending].findLast((entry) =>
-        entry.localSeq === localSeq
+      const pendingIndexes = record.pending.flatMap((entry, index) =>
+        entry.localSeq === localSeq ? [index] : []
       );
-      if (!pending) {
+      if (pendingIndexes.length === 0) {
         logger.warn?.(
           `confirmPending: no pending entry for localSeq=${localSeq} on ${id}`,
         );
         continue;
       }
-      record.confirmed = confirmedVersion(
-        applied.seq,
-        record.confirmed.seq < applied.seq
-          ? applyPendingVersion(record.confirmed.value, pending)
-          : record.confirmed.value,
-      );
+      const firstPendingIndex = pendingIndexes[0]!;
+      const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
+      const pending = record.pending[lastPendingIndex]!;
+      const previousConfirmed = record.confirmed;
+      let promoted: ConfirmedVersion | undefined;
+      let reusedSuffix: PendingMaterializedPrefix[] | undefined;
+
+      if (record.confirmed.seq < applied.seq) {
+        if (firstPendingIndex === 0) {
+          const prefix = materializedVersionThroughPending(
+            record,
+            lastPendingIndex + 1,
+          );
+          const cache = ensurePendingMaterializationCache(record);
+          promoted = confirmedVersion(
+            applied.seq,
+            prefix.value,
+          );
+          promoted.transactionValue = prefix.transactionValue;
+          if (cache.confirmed === previousConfirmed) {
+            reusedSuffix = cache.prefixes.slice(lastPendingIndex + 1);
+          }
+        } else {
+          promoted = confirmedVersion(
+            applied.seq,
+            applyPendingVersion(record.confirmed.value, pending),
+          );
+        }
+      }
+
       record.pending = record.pending.filter((entry) =>
         entry.localSeq !== localSeq
       );
+
+      if (promoted) {
+        record.confirmed = promoted;
+        record.materialized = reusedSuffix && reusedSuffix.length > 0
+          ? {
+            confirmed: promoted,
+            prefixes: reusedSuffix,
+          }
+          : undefined;
+        continue;
+      }
+
+      dropMaterializedSuffix(record, firstPendingIndex);
     }
   }
 
   private dropPending(localSeq: number): void {
     for (const record of this.#docs.values()) {
+      const firstPendingIndex = record.pending.findIndex((entry) =>
+        entry.localSeq === localSeq
+      );
+      if (firstPendingIndex === -1) {
+        continue;
+      }
       record.pending = record.pending.filter((entry) =>
         entry.localSeq !== localSeq
       );
+      dropMaterializedSuffix(record, firstPendingIndex);
     }
   }
 
-  private visibleValue(id: URI): FabricValue | undefined {
+  private visibleVersion(id: URI): {
+    record: DocumentRecord;
+    version: MaterializedVersion;
+  } | undefined {
     const record = this.#docs.get(id);
     if (!record) {
       return undefined;
     }
-    if (record.pending.length === 0) {
-      return transactionValueForVersion(record.confirmed);
+    return {
+      record,
+      version: materializedVersionThroughPending(record),
+    };
+  }
+
+  private visibleValue(id: URI): FabricValue | undefined {
+    const visible = this.visibleVersion(id);
+    if (!visible) {
+      return undefined;
     }
-    let value = record.confirmed.value;
-    for (const pending of record.pending) {
-      value = applyPendingVersion(value, pending);
-    }
-    return toTransactionDocumentValue(value);
+    return transactionValueForVersion(visible.version);
   }
 
   private getState(id: URI): State | undefined {
-    const value = this.visibleValue(id);
+    const visible = this.visibleVersion(id);
+    if (!visible) {
+      return undefined;
+    }
+    const value = transactionValueForVersion(visible.version);
     if (value === undefined) {
       return undefined;
     }
@@ -1398,23 +1566,12 @@ class SpaceReplica implements ISpaceReplica {
         is: value,
         cause: null,
       }),
-      since: this.#docs.get(id)?.confirmed.seq ?? 0,
+      since: visible.record.confirmed.seq,
     } as State;
   }
 
   private visibleDocument(id: URI): EntityDocument | undefined {
-    const record = this.#docs.get(id);
-    if (!record) {
-      return undefined;
-    }
-    if (record.pending.length === 0) {
-      return record.confirmed.value;
-    }
-    let value = record.confirmed.value;
-    for (const pending of record.pending) {
-      value = applyPendingVersion(value, pending);
-    }
-    return value;
+    return this.visibleVersion(id)?.version.value;
   }
 
   private notifySinks(changes: IMergedChanges): void {

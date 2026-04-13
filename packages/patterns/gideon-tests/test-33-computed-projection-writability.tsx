@@ -4,7 +4,7 @@
  * Tests whether computed() creates read-only projections vs property access maintaining writability.
  *
  * Claim:
- * - computed(() => obj.property) creates a read-only projection (writes silently fail)
+ * - computed(() => obj.property) creates a read-only projection (writes are ineffective)
  * - obj.property maintains live Cell reference (writes work)
  *
  * This pattern creates a "source" object with an auth-like structure, then tests
@@ -128,7 +128,8 @@ export default pattern<InputSchema, Output>(({ source }) => {
           <ul>
             <li>
               <code>computed(() =&gt; obj.property)</code> creates a{" "}
-              <strong>read-only projection</strong> - writes silently fail
+              <strong>read-only projection</strong>{" "}
+              - writes do not update the source
             </li>
             <li>
               <code>obj.key("property")</code> maintains{" "}
@@ -257,7 +258,7 @@ export default pattern<InputSchema, Output>(({ source }) => {
           <ul>
             <li>
               <strong style={{ color: "#e74c3c" }}>Computed:</strong>{" "}
-              Click should NOT update token (silent failure)
+              Click should NOT update token
             </li>
             <li>
               <strong style={{ color: "#27ae60" }}>.key():</strong>{" "}

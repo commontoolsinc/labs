@@ -4,8 +4,8 @@ import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 const FILTER_INPUT_SCHEMA = toDeepFrozenSchema({
   type: "object",
   properties: {
-    list: { type: "array", items: { asCell: true, type: "unknown" } },
-    op: { asCell: true },
+    list: { type: "array", items: { asCell: ["cell"], type: "unknown" } },
+    op: { asCell: ["cell"] },
   },
   required: ["op"],
 });

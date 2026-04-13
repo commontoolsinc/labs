@@ -124,7 +124,7 @@ export class CFRender extends BaseElement {
   private _renderingCellId?: string;
 
   @state()
-  private _hasRendered = false;
+  private accessor _hasRendered = false;
   private _startPromise?: Promise<boolean>;
 
   // Debug helpers

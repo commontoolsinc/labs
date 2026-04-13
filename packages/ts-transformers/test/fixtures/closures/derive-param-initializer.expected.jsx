@@ -29,7 +29,7 @@ export default pattern(() => {
             },
             multiplier: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["value", "multiplier"]

@@ -303,7 +303,6 @@ export function findAndInlineDataURILinks(value: any): any {
             ...(schema !== undefined && { schema }),
           }, {
             includeSchema: true,
-            keepStreams: true,
             keepAsCell: true,
           });
           return findAndInlineDataURILinks(newSigilLink);
@@ -397,9 +396,10 @@ export function createDataCellURI(
 }
 
 export type SanitizeSchemaForLinksOptions = {
+  // Keep the entire asCell entry, which preserves cell, opaque, and stream
   keepAsCell?: boolean;
+  // Only keep the asCell property if it's a stream
   keepStreams?: boolean;
-  keepAsOpaque?: boolean;
 };
 
 /**
@@ -423,17 +423,13 @@ export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
   options?: SanitizeSchemaForLinksOptions,
 ): JSONSchema | undefined {
-  if (
-    schema === null ||
-    schema === undefined ||
-    typeof schema === "boolean"
-  ) {
+  if (schema === undefined || typeof schema === "boolean") {
     return schema;
   }
 
   // Collect existing $defs names to avoid collisions
   const existingDefNames = new Set<string>();
-  if (typeof schema === "object" && schema !== null && "$defs" in schema) {
+  if ("$defs" in schema) {
     const existingDefs = schema.$defs;
     if (existingDefs && typeof existingDefs === "object") {
       for (const name of Object.keys(existingDefs)) {
@@ -452,7 +448,7 @@ export function sanitizeSchemaForLinks(
     options: options ?? {},
   };
 
-  const result = recursiveStripAsCellStreamOrOpaqueFromSchema(
+  const result = recursiveStripAsCellFromSchema(
     schema,
     context,
     0,
@@ -486,7 +482,17 @@ interface SanitizeContext {
   options: SanitizeSchemaForLinksOptions;
 }
 
-function recursiveStripAsCellStreamOrOpaqueFromSchema(
+/**
+ * Recursively strips asCell flags from a JSON schema.
+ * This also ensures there are no circular references in the output schema
+ * by using $ref and $defs.
+ *
+ * @param schema
+ * @param context
+ * @param depth
+ * @returns
+ */
+function recursiveStripAsCellFromSchema(
   schema: any,
   context: SanitizeContext,
   depth: number,
@@ -530,16 +536,21 @@ function recursiveStripAsCellStreamOrOpaqueFromSchema(
   // Mark as in-progress
   context.inProgress.add(schema);
 
-  // TODO(danfuzz): This shallow-copy-then-mutate pattern will need vetting
-  // before turning on modern data-model.
+  let result;
   // Shallow copy — only top-level keys are deleted/replaced; children are
   // handled by recursive calls that create their own copies.
-  const result: any = { ...schema };
-
-  // Remove asCell and asStream flags from this level
-  if (!context.options.keepAsCell) delete result.asCell;
-  if (!context.options.keepStreams) delete result.asStream;
-  if (!context.options.keepAsOpaque) delete result.asOpaque;
+  if (context.options.keepAsCell) {
+    result = { ...schema };
+  } else {
+    const { asCell: _c, asStream: _s, ...restSchema } = schema;
+    const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+    // If we're keeping streams and the outermost is a stream, keep it
+    if (context.options.keepStreams && asCellValues.at(0) === "stream") {
+      result = { asCell: asCellValues, ...restSchema };
+    } else {
+      result = restSchema;
+    }
+  }
 
   // Recursively process all object properties
   for (const [key, value] of Object.entries(result)) {
@@ -556,12 +567,11 @@ function recursiveStripAsCellStreamOrOpaqueFromSchema(
           )
         ) {
           if (defSchema && typeof defSchema === "object") {
-            processedDefs[defName] =
-              recursiveStripAsCellStreamOrOpaqueFromSchema(
-                defSchema,
-                context,
-                depth + 1,
-              );
+            processedDefs[defName] = recursiveStripAsCellFromSchema(
+              defSchema,
+              context,
+              depth + 1,
+            );
           } else {
             processedDefs[defName] = defSchema;
           }
@@ -571,7 +581,7 @@ function recursiveStripAsCellStreamOrOpaqueFromSchema(
         // Handle arrays
         result[key] = value.map((item) =>
           typeof item === "object" && item !== null
-            ? recursiveStripAsCellStreamOrOpaqueFromSchema(
+            ? recursiveStripAsCellFromSchema(
               item,
               context,
               depth + 1,
@@ -580,7 +590,7 @@ function recursiveStripAsCellStreamOrOpaqueFromSchema(
         );
       } else {
         // Handle objects
-        result[key] = recursiveStripAsCellStreamOrOpaqueFromSchema(
+        result[key] = recursiveStripAsCellFromSchema(
           value,
           context,
           depth + 1,

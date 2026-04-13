@@ -208,7 +208,7 @@ export default pattern((state) => {
             </div>)}
         {__cfHelpers.ifElse({
             type: "boolean",
-            asCell: true
+            asCell: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",

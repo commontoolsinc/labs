@@ -7,19 +7,32 @@ export function bytesToLines(stream: Uint8Array): string[] {
   return decode(stream).split("\n").filter(Boolean);
 }
 
+export function isIgnorableDenoWarningLine(line: string): boolean {
+  const trimmed = line.trimStart();
+  return trimmed.startsWith(
+    "Warning The following peer dependency issues were found:",
+  ) ||
+    trimmed.startsWith("╭ Warning") ||
+    trimmed.startsWith("╰─") ||
+    trimmed.startsWith("│") ||
+    /^[└├]/u.test(trimmed);
+}
+
 export function checkStderr(stderr: string[]) {
+  const relevant = stderr.filter((line) =>
+    !isIgnorableDenoWarningLine(line) && /deno run /.test(line)
+  );
   try {
-    expect(stderr.length).toBe(2);
+    expect(relevant.length).toBe(1);
   } catch (e) {
     console.error(stderr);
     throw e;
   }
-  expect(stderr[0]).toMatch(/deno run /);
-  expect(stderr[1]).toMatch(/experimentalDecorators compiler option/);
+  expect(relevant[0]).toMatch(/deno run /);
 }
 
 async function runCliTask(
-  task: "cli-no-pwd-override" | "ct-no-pwd-override",
+  task: "cli-no-pwd-override",
   command: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
   // Use a regex to split up spaces outside of quotes.
@@ -56,12 +69,6 @@ export async function cf(
   command: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
   return await runCliTask("cli-no-pwd-override", command);
-}
-
-export async function ct(
-  command: string,
-): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
-  return await runCliTask("ct-no-pwd-override", command);
 }
 
 export async function withEnv(

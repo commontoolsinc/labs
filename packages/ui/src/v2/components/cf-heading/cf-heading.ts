@@ -27,7 +27,7 @@ export class CFHeading extends BaseElement {
 
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  accessor theme: CFTheme = defaultTheme;
 
   declare level: number;
   declare noMargin: boolean;

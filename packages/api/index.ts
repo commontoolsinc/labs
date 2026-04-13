@@ -1266,6 +1266,13 @@ export type JSONSchemaTypes =
   | "undefined" // undefined is a non-standard addition
   | "unknown"; // unknown is a non-standard addition
 
+// We can use a more complex asCell specifier to handle things like
+// `Cell<Cell<T>>` with `{ asCell: ["cell", "cell"] }`.
+// We can also do an `{ asCell: ["stream"] }` or `{ asCell: ["opaque"] }`.
+// While this is currently tightly coupled to the CellKind type, we can restrict it
+// to a subset
+export type AsCellType = CellKind;
+
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation
 // There is a lot of potential validation that is not handled, but this object
@@ -1350,10 +1357,10 @@ export type JSONSchemaObj = {
   readonly [ID]?: unknown;
   readonly [ID_FIELD]?: unknown;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
-  readonly asCell?: boolean;
-  // marks values that are OpaqueRef - tracked reactive references
-  readonly asOpaque?: boolean;
+  // A value of `true` is treated the same as `["cell"]`
+  readonly asCell?: boolean | readonly AsCellType[];
   // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
+  /** @deprecated Use `asCell: ["stream"]` for streams  */
   readonly asStream?: boolean;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {

@@ -14,7 +14,7 @@ count=0
 for file in $files; do
     # Check if file uses Writable<
     if grep -q 'Writable<' "$file"; then
-        # Check if file has import from commontools
+        # Check if file has import from commonfabric
         if grep -q 'from "commonfabric"' "$file"; then
             # Extract just the import block (20 lines before 'from "commonfabric"')
             import_block=$(grep -B 20 'from "commonfabric"' "$file" | head -21)

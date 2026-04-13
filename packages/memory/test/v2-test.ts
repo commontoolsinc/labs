@@ -159,3 +159,71 @@ Deno.test("memory v2 boundary encoding follows unified JSON dispatch", () => {
 
   resetJsonEncodingConfig();
 });
+
+Deno.test("memory v2 legacy boundary decode returns mutable plain JSON trees", () => {
+  resetDataModelConfig();
+  resetJsonEncodingConfig();
+
+  const decoded = decodeMemoryV2Boundary<{
+    value: {
+      nested: {
+        count: number;
+      };
+    };
+  }>('{"value":{"nested":{"count":1}}}');
+
+  assertEquals(decoded, {
+    value: {
+      nested: {
+        count: 1,
+      },
+    },
+  });
+  assertFalse(Object.isFrozen(decoded));
+  assertFalse(Object.isFrozen(decoded.value));
+  assertFalse(Object.isFrozen(decoded.value.nested));
+
+  decoded.value.nested.count = 2;
+  assertEquals(decoded.value.nested.count, 2);
+});
+
+Deno.test("memory v2 unified boundary decode still returns mutable results", () => {
+  resetDataModelConfig();
+  resetJsonEncodingConfig();
+
+  setDataModelConfig(true);
+  setJsonEncodingConfig(true);
+
+  const decoded = decodeMemoryV2Boundary<{
+    value: {
+      nested: {
+        count: number;
+      };
+    };
+  }>(
+    encodeMemoryV2Boundary({
+      value: {
+        nested: {
+          count: 1,
+        },
+      },
+    }),
+  );
+
+  assertEquals(decoded, {
+    value: {
+      nested: {
+        count: 1,
+      },
+    },
+  });
+  assertFalse(Object.isFrozen(decoded));
+  assertFalse(Object.isFrozen(decoded.value));
+  assertFalse(Object.isFrozen(decoded.value.nested));
+
+  decoded.value.nested.count = 2;
+  assertEquals(decoded.value.nested.count, 2);
+
+  resetDataModelConfig();
+  resetJsonEncodingConfig();
+});

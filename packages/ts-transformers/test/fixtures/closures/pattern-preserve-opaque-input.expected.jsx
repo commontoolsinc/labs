@@ -28,7 +28,7 @@ export default pattern((input: Writable<State>) => {
             properties: {
                 input: {
                     $ref: "#/$defs/State",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["input"],
@@ -52,6 +52,7 @@ export default pattern((input: Writable<State>) => {
     };
 }, {
     $ref: "#/$defs/State",
+    asCell: ["opaque"],
     $defs: {
         State: {
             type: "object",

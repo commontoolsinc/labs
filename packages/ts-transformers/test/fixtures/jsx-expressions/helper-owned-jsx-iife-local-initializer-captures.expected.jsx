@@ -67,7 +67,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 },
-                asCell: true
+                asCell: ["cell"]
             }
         },
         required: ["path"]
@@ -101,7 +101,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: true
+                            asCell: ["cell"]
                         }
                     },
                     required: ["path"]
@@ -116,7 +116,7 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         tree: {
                             $ref: "#/$defs/AnonymousType_1",
-                            asCell: true
+                            asCell: ["cell"]
                         },
                         p: {
                             type: "array",
@@ -267,7 +267,7 @@ export default pattern((__cf_pattern_input) => {
                                     }
                                 },
                                 required: ["name"],
-                                asStream: true
+                                asCell: ["stream"]
                             },
                             item: {
                                 type: "object",
@@ -305,7 +305,7 @@ export default pattern((__cf_pattern_input) => {
                                         }
                                     },
                                     required: ["name"],
-                                    asStream: true
+                                    asCell: ["stream"]
                                 }
                             },
                             required: ["pushPath"]
@@ -370,7 +370,7 @@ export default pattern((__cf_pattern_input) => {
         entries: {
             $ref: "#/$defs/AnonymousType_1",
             "default": [],
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["entries"],

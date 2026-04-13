@@ -528,7 +528,7 @@ export interface IObjectCreator<T> {
   // combine them (for example, merging properties)
   mergeMatches(
     matches: T[],
-    schema?: JSONSchema,
+    schema: JSONSchemaObj,
   ): T | undefined;
   // In the SchemaObjectTraverser system, we'll copy the object's value into
   // the new version
@@ -564,7 +564,7 @@ export interface IObjectCreator<T> {
 class StandardObjectCreator implements IObjectCreator<FabricValue> {
   mergeMatches(
     matches: FabricValue[],
-    _schema?: JSONSchema,
+    _schema: JSONSchemaObj,
   ): FabricValue {
     // These value objects should be merged. While this isn't JSONSchema
     // spec, when we have an anyOf with branches where name is set in one
@@ -1452,10 +1452,7 @@ function _mergeSchemaFlagsUncached(
     // the value in the schema
     const { asCell, asStream } = flagSchema;
     if (asCell || asStream) {
-      const props = {
-        ...(asCell && { asCell: true }),
-        ...(asStream && { asStream: true }),
-      };
+      const props = { asCell: asCell ?? ["stream"] };
       return schemaWithProperties(schema, props);
     }
   }
@@ -2066,7 +2063,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         ]);
         if (
           nextSelector?.schema === undefined ||
-          SchemaObjectTraverser.asCellOrStream(nextSelector.schema)
+          SchemaObjectTraverser.hasAsCell(nextSelector.schema)
         ) {
           // If we don't have a schema, we don't allow undefined
           // If we have a schema with asCell, we can't create a cell for this,
@@ -2171,10 +2168,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // Consider items without asCell or asStream first, since if we aren't
         // traversing cells, we consider them a match.
         const sortedAnyOf = [
-          ...anyOf.filter((option) =>
-            !SchemaObjectTraverser.asCellOrStream(option)
-          ),
-          ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
+          ...anyOf.filter((option) => !SchemaObjectTraverser.hasAsCell(option)),
+          ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
         ];
 
         // Branch-by-branch traversal; fast-reject after merge so canBranchMatch
@@ -2227,10 +2222,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // Consider items without asCell or asStream first, since if we aren't
         // traversing cells, we consider them a match.
         const sortedOneOf = [
-          ...oneOf.filter((option) =>
-            !SchemaObjectTraverser.asCellOrStream(option)
-          ),
-          ...oneOf.filter(SchemaObjectTraverser.asCellOrStream),
+          ...oneOf.filter((option) => !SchemaObjectTraverser.hasAsCell(option)),
+          ...oneOf.filter(SchemaObjectTraverser.hasAsCell),
         ];
         let matchCount = 0;
         let match: Immutable<FabricValue> | undefined = undefined;
@@ -2320,7 +2313,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }
     if (
       ContextualFlowControl.isTrueSchema(resolved) &&
-      !SchemaObjectTraverser.asCellOrStream(resolved)
+      !SchemaObjectTraverser.hasAsCell(resolved)
     ) {
       const defaultValue = isRecord(resolved) ? resolved["default"] : undefined;
       // A value of true or {} means we match anything.
@@ -2345,7 +2338,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       return { ok: this.traverseDAG(doc, defaultValue, link) };
     } else if (
       ContextualFlowControl.isFalseSchema(resolved) &&
-      !SchemaObjectTraverser.asCellOrStream(resolved)
+      !SchemaObjectTraverser.hasAsCell(resolved)
     ) {
       // This value rejects all objects - just return
       return fail(TRAVERSE_FAILURES.falseSchema);
@@ -2357,6 +2350,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
       throw new Error("Schema is neither boolean nor an object");
     }
     const schemaObj = resolved;
+    const asCellValues = ContextualFlowControl.getAsCellValues(schemaObj);
+    // Don't walk into opaque cells
+    if (asCellValues.at(0) === "opaque") {
+      const newLink = link ?? getNormalizedLink(
+        doc.address,
+        schemaObj,
+      );
+      return { ok: this.objectCreator.createObject(newLink, doc.value) };
+    }
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
@@ -2695,7 +2697,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         }
       } else if (
         isRecord(item) &&
-        !SchemaObjectTraverser.asCellOrStream(curSelector.schema)
+        !SchemaObjectTraverser.hasAsCell(curSelector.schema)
       ) {
         // We create an element link, but this is just to establish the id if we encounter
         // other links in our data value and we need to construct a relative link.
@@ -2729,7 +2731,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // parent's reactive transaction.
       if (
         !this.traverseCells &&
-        SchemaObjectTraverser.asCellOrStream(curSelector.schema)
+        SchemaObjectTraverser.hasAsCell(curSelector.schema)
       ) {
         if (curDoc.value === undefined) {
           // If we hit a broken link following write redirects, I think we have
@@ -2796,7 +2798,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       return false;
     }
 
-    if (SchemaObjectTraverser.asCellOrStream(schema)) {
+    if (SchemaObjectTraverser.hasAsCell(schema)) {
       return true;
     }
 
@@ -2864,7 +2866,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // If we have a value, we instead need to handle it ourselves
       if (
         !this.traverseCells &&
-        SchemaObjectTraverser.asCellOrStream(propSchema) &&
+        SchemaObjectTraverser.hasAsCell(propSchema) &&
         !isPrimitiveCellLink(propValue)
       ) {
         // Intentionally treat asCell/asStream as an opaque boundary in
@@ -2903,7 +2905,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           ...doc.address,
           path: appendToPath(doc.address.path, propKey),
         };
-        if (SchemaObjectTraverser.asCellOrStream(propSchema)) {
+        if (SchemaObjectTraverser.hasAsCell(propSchema)) {
           const { ok: val, error } = this.traverseWithSchema({
             address: propAddress,
             value: undefined,
@@ -2966,6 +2968,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): TraverseResult<Immutable<FabricValue>> {
     this.traversePointerCalls++;
     const selector = { path: doc.address.path, schema };
+
+    // In the case of an opaque cell, we want to skip any deeper reads
+    // This means we don't follow any redirects
+    const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+    if (asCellValues.at(0) === "opaque") {
+      const cellLink = getNextCellLink(doc, schema);
+      return { ok: this.objectCreator.createObject(cellLink, undefined) };
+    }
+
     const [redirDoc, redirSelector] = this.getDocAtPath(
       doc,
       [],
@@ -2984,7 +2995,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       );
       if (
         redirSelector?.schema === undefined ||
-        SchemaObjectTraverser.asCellOrStream(redirSelector.schema)
+        SchemaObjectTraverser.hasAsCell(redirSelector.schema)
       ) {
         // If we don't have a schema, we don't allow undefined
         // If we have a schema with asCell, we can't create a cell for this,
@@ -3004,7 +3015,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // since we still need to get the connected objects.
     if (
       !this.traverseCells &&
-      SchemaObjectTraverser.asCellOrStream(schema)
+      SchemaObjectTraverser.hasAsCell(schema)
     ) {
       const combinedSchema = combineOptionalSchema(
         schema,
@@ -3042,7 +3053,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
   ): Immutable<FabricValue> {
-    if (SchemaObjectTraverser.asCellOrStream(schema)) {
+    if (SchemaObjectTraverser.hasAsCell(schema)) {
       return this.objectCreator.createObject(
         getNormalizedLink(doc.address, schema),
         doc.value,
@@ -3068,20 +3079,19 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * @param schema
    * @returns
    */
-  static asCellOrStream(schema: JSONSchema | undefined): boolean {
+  static hasAsCell(schema: JSONSchema | undefined): boolean {
     if (schema === undefined || typeof schema === "boolean") {
       return false;
     }
+    const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     if (
-      schema.asCell || schema.asStream ||
+      asCellValues.length > 0 ||
       (Array.isArray(schema.anyOf) &&
         schema.anyOf.every((option) =>
-          SchemaObjectTraverser.asCellOrStream(option)
+          SchemaObjectTraverser.hasAsCell(option)
         )) ||
       (Array.isArray(schema.oneOf) &&
-        schema.oneOf.every((option) =>
-          SchemaObjectTraverser.asCellOrStream(option)
-        ))
+        schema.oneOf.every((option) => SchemaObjectTraverser.hasAsCell(option)))
     ) {
       return true;
     }
@@ -3163,7 +3173,7 @@ export function canBranchMatch(
   if (typeof branch === "boolean") return branch;
 
   // Never reject asCell/asStream branches
-  if (branch.asCell || branch.asStream) return true;
+  if (SchemaObjectTraverser.hasAsCell(branch)) return true;
 
   // If the value is an object that could be a link/pointer, bail out entirely.
   // Links are dereferenced during traversal, so the current shape of the value
@@ -3349,8 +3359,8 @@ function _mergeAnyOfBranchSchemasUncached(
     ...(requiredSet.size > 0 && { required: [...requiredSet] }),
     ...(!anyAllowsAdditional && { additionalProperties: false }),
     ...(mergedDefs && { $defs: mergedDefs }),
-    ...(outerSchema.asCell && { asCell: true }),
-    ...(outerSchema.asStream && { asStream: true }),
+    ...((outerSchema.asCell || outerSchema.asStream) &&
+      { asCell: outerSchema.asCell ?? ["stream"] }),
   } as JSONSchemaObj;
 }
 

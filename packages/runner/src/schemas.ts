@@ -21,7 +21,7 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
           { type: "undefined" },
           {
             type: "array",
-            items: { $ref: "#/$defs/vdomRenderNode", asCell: true },
+            items: { $ref: "#/$defs/vdomRenderNode", asCell: ["cell"] },
           },
         ],
       },
@@ -53,16 +53,16 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
                 type: "array",
                 items: { type: "null" }, // stop query from descending
               }, {
-                asStream: true,
+                asCell: ["stream"],
                 type: "unknown",
               }],
             },
-            asCell: true,
+            asCell: ["cell"],
           },
           children: {
             type: "array",
-            items: { $ref: "#/$defs/vdomRenderNode", asCell: true },
-            asCell: true,
+            items: { $ref: "#/$defs/vdomRenderNode", asCell: ["cell"] },
+            asCell: ["cell"],
           },
           [UI]: { $ref: "#/$defs/vdomNode" },
         },
@@ -103,7 +103,7 @@ export const debugVDOMSchema = toDeepFrozenSchema(
           name: { type: "string" },
           props: {
             type: "object",
-            additionalProperties: { asCell: true },
+            additionalProperties: { asCell: ["cell"] },
           },
           children: {
             type: "array",
@@ -168,7 +168,6 @@ export const vnodeSchema = toDeepFrozenSchema(
           properties: {},
         }, {
           $ref: "#/$defs/UIRenderable",
-          asOpaque: true,
         }, {
           type: "object",
           properties: {},
@@ -189,27 +188,38 @@ export const vnodeSchema = toDeepFrozenSchema(
           style: { anyOf: [{ type: "object" }, { type: "string" }] },
         },
         additionalProperties: {
-          anyOf: [{
-            type: "string",
-          }, {
-            type: "number",
-          }, {
-            type: "boolean",
-          }, {
-            type: "object",
-            properties: {}, // stop query from descending
-          }, {
-            type: "array",
-            items: { type: "null" }, // stop query from descending
-          }, {
-            asCell: true,
-          }, {
-            asStream: true,
-          }, {
-            type: "null",
-          }, {
-            type: "undefined",
-          }],
+          anyOf: [
+            {
+              type: "string",
+            },
+            {
+              type: "number",
+            },
+            {
+              type: "boolean",
+            },
+            {
+              type: "object",
+              properties: {}, // stop query from descending
+            },
+            {
+              type: "array",
+              items: { type: "null" }, // stop query from descending
+            }, // this was generated, but is a bit problematic to have
+            //    both cell and stream, since both will always match.
+            {
+              asCell: ["cell"],
+            },
+            {
+              asCell: ["stream"],
+            },
+            {
+              type: "null",
+            },
+            {
+              type: "undefined",
+            },
+          ],
         },
       },
     },
@@ -244,7 +254,7 @@ export type UISchema = Schema<typeof uiSchema>;
 export const pieceListSchema = toDeepFrozenSchema(
   {
     type: "array",
-    items: { type: "unknown", asCell: true },
+    items: { type: "unknown", asCell: ["cell"] },
     default: [],
   },
   true,
@@ -254,7 +264,7 @@ export const pieceLineageSchema = toDeepFrozenSchema(
   {
     type: "object",
     properties: {
-      piece: { type: "object", properties: {}, asCell: true },
+      piece: { type: "object", properties: {}, asCell: ["cell"] },
       relation: { type: "string" },
       timestamp: { type: "number" },
     },

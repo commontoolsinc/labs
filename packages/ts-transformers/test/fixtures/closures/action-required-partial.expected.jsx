@@ -30,7 +30,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 a: {
                     type: "string",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["a"]
@@ -42,7 +42,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 b: {
                     type: "number",
-                    asCell: true
+                    asCell: ["cell"]
                 }
             },
             required: ["b"]
@@ -55,11 +55,11 @@ export default pattern((__cf_pattern_input) => {
     properties: {
         a: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         },
         b: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["a", "b"]
@@ -67,10 +67,10 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         setA: {
-            asStream: true
+            asCell: ["stream", "opaque"]
         },
         setB: {
-            asStream: true
+            asCell: ["stream", "opaque"]
         }
     },
     required: ["setA", "setB"]

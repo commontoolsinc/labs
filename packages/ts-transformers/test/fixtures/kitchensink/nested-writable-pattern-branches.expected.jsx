@@ -85,7 +85,7 @@ export default pattern((state) => {
                         items: {
                             type: "unknown"
                         },
-                        asCell: true
+                        asCell: ["cell"]
                     }
                 },
                 required: ["sections"]
@@ -423,11 +423,11 @@ export default pattern((state) => {
                                     properties: {
                                         selectedTaskId: {
                                             type: ["string", "undefined"],
-                                            asCell: true
+                                            asCell: ["cell"]
                                         },
                                         hoveredSectionId: {
                                             type: ["string", "undefined"],
-                                            asCell: true
+                                            asCell: ["cell"]
                                         },
                                         section: {
                                             type: "object",
@@ -598,11 +598,11 @@ export default pattern((state) => {
                             },
                             selectedTaskId: {
                                 type: ["string", "undefined"],
-                                asCell: true
+                                asCell: ["cell"]
                             },
                             hoveredSectionId: {
                                 type: ["string", "undefined"],
-                                asCell: true
+                                asCell: ["cell"]
                             }
                         },
                         required: ["state", "selectedTaskId", "hoveredSectionId"]
@@ -709,7 +709,7 @@ export default pattern((state) => {
             items: {
                 $ref: "#/$defs/Section"
             },
-            asCell: true
+            asCell: ["cell"]
         },
         showCompleted: {
             type: "boolean"

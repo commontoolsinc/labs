@@ -202,8 +202,28 @@ automatically.
 
 ### Writes Are Fire-and-Forget
 
-FUSE returns success before the cell write completes. If toolshed is down,
-writes silently fail. Check the browser to confirm writes landed.
+FUSE returns success before the cell write completes. If toolshed is down or the
+transport has disconnected, writes silently fail. Check the browser or re-read
+the cell to confirm writes landed.
+
+**Diagnosing silent write failures:** If writes succeed (no error) but values
+revert or stay empty, check the FUSE log for transport errors:
+
+```bash
+tail -20 /tmp/ct-fuse-<mount-name>.log
+# Look for: "ConnectionError: memory/v2 transport closed"
+```
+
+If the transport is dead, the FUSE process is running but can't commit to the
+backend. Fix: unmount and remount:
+
+```bash
+cf fuse unmount /tmp/my-mount
+cf fuse mount /tmp/my-mount --background
+```
+
+Long-running FUSE mounts (24h+) can lose their transport connection under
+sustained agent load. Remount before each experiment run to be safe.
 
 ### FUSE-T Cache TTL
 
@@ -335,7 +355,7 @@ path = "MOUNT/SPACE/pieces/My Piece/.src/main.tsx"
 src = open(path).read()
 # ... modify src ...
 open(path, "w").write(modified_src)
-# Write triggers setsrc automatically — no ct piece setsrc needed
+# Write triggers setsrc automatically — no cf piece setsrc needed
 ```
 
 **Check for errors after modifying:**

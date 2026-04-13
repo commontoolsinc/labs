@@ -2,7 +2,6 @@ import {
   computed,
   fetchData,
   handler,
-  ifElse,
   NAME,
   navigateTo,
   nonPrivateRandom,
@@ -266,89 +265,89 @@ Be matter-of-fact. Prefer action to explanation.`;
             oncf-fab-escape={closeFab({ fabExpanded })}
             onClick={toggle({ value: fabExpanded })}
           >
-            {ifElse(
-              fabExpanded,
-              <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
-                {/* Chevron to expand chat history */}
-                <div style="display: flex; justify-content: center; flex-shrink: 0;">
-                  <cf-chevron-button
-                    expanded={showHistory}
-                    loading={omnibot.pending}
-                    oncf-toggle={toggle({ value: showHistory })}
-                  />
-                </div>
-
-                {/* Pinned items / attachments - always visible */}
-                <div style="padding: 4px 8px; flex-shrink: 0;">
-                  {omnibot.ui.attachmentsAndTools}
-                </div>
-
-                {/* Expandable chat history */}
-                <div
-                  style={computed(() => {
-                    const show = showHistory.get();
-                    return `flex: ${
-                      show ? "1" : "0"
-                    }; min-height: 0; display: flex; flex-direction: column; opacity: ${
-                      show ? "1" : "0"
-                    }; max-height: ${
-                      show ? "480px" : "0"
-                    }; overflow: hidden; transition: opacity 200ms ease, max-height 300ms ease; pointer-events: ${
-                      show ? "auto" : "none"
-                    };`;
-                  })}
-                >
-                  <div style="flex: 1; overflow-y: auto; min-height: 0;">
-                    <cf-cell-context $cell={omnibot}>
-                      {omnibot.ui.chatLog}
-                    </cf-cell-context>
+            {fabExpanded
+              ? (
+                <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
+                  {/* Chevron to expand chat history */}
+                  <div style="display: flex; justify-content: center; flex-shrink: 0;">
+                    <cf-chevron-button
+                      expanded={showHistory}
+                      loading={omnibot.pending}
+                      oncf-toggle={toggle({ value: showHistory })}
+                    />
                   </div>
-                </div>
 
-                {ifElse(
-                  computed(() => {
-                    const show = showHistory.get();
-                    const dismissedIdx = peekDismissedIndex.get();
-                    return !show && latestAssistantMessage &&
-                      assistantMessageCount !== dismissedIdx;
-                  }),
-                  <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
-                    <cf-button
-                      variant="ghost"
-                      size="icon"
-                      onClick={dismissPeek({
-                        peekDismissedIndex,
-                        assistantMessageCount,
-                      })}
-                      style="position: absolute; top: 0px; right: 0px; z-index: 1; font-size: 16px;"
-                      title="Dismiss"
-                    >
-                      ×
-                    </cf-button>
-                    <div
-                      onClick={toggle({ value: showHistory })}
-                      style="cursor: pointer;"
-                    >
-                      <cf-cell-context $cell={latestAssistantMessage}>
-                        <cf-chat-message
-                          role="assistant"
-                          compact
-                          content={latestAssistantMessage ?? ""}
-                          pending={omnibot.pending}
-                        />
+                  {/* Pinned items / attachments - always visible */}
+                  <div style="padding: 4px 8px; flex-shrink: 0;">
+                    {omnibot.ui.attachmentsAndTools}
+                  </div>
+
+                  {/* Expandable chat history */}
+                  <div
+                    style={computed(() => {
+                      const show = showHistory.get();
+                      return `flex: ${
+                        show ? "1" : "0"
+                      }; min-height: 0; display: flex; flex-direction: column; opacity: ${
+                        show ? "1" : "0"
+                      }; max-height: ${
+                        show ? "480px" : "0"
+                      }; overflow: hidden; transition: opacity 200ms ease, max-height 300ms ease; pointer-events: ${
+                        show ? "auto" : "none"
+                      };`;
+                    })}
+                  >
+                    <div style="flex: 1; overflow-y: auto; min-height: 0;">
+                      <cf-cell-context $cell={omnibot}>
+                        {omnibot.ui.chatLog}
                       </cf-cell-context>
                     </div>
-                  </div>,
-                  null,
-                )}
+                  </div>
 
-                {/* Prompt input */}
-                <div style="padding: 4px 8px 8px; flex-shrink: 0;">
-                  {omnibot.ui.promptInput}
+                  {computed(() => {
+                      const show = showHistory.get();
+                      const dismissedIdx = peekDismissedIndex.get();
+                      return !show && latestAssistantMessage &&
+                        assistantMessageCount !== dismissedIdx;
+                    })
+                    ? (
+                      <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
+                        <cf-button
+                          variant="ghost"
+                          size="icon"
+                          onClick={dismissPeek({
+                            peekDismissedIndex,
+                            assistantMessageCount,
+                          })}
+                          style="position: absolute; top: 0px; right: 0px; z-index: 1; font-size: 16px;"
+                          title="Dismiss"
+                        >
+                          ×
+                        </cf-button>
+                        <div
+                          onClick={toggle({ value: showHistory })}
+                          style="cursor: pointer;"
+                        >
+                          <cf-cell-context $cell={latestAssistantMessage}>
+                            <cf-chat-message
+                              role="assistant"
+                              compact
+                              content={latestAssistantMessage ?? ""}
+                              pending={omnibot.pending}
+                            />
+                          </cf-cell-context>
+                        </div>
+                      </div>
+                    )
+                    : null}
+
+                  {/* Prompt input */}
+                  <div style="padding: 4px 8px 8px; flex-shrink: 0;">
+                    {omnibot.ui.promptInput}
+                  </div>
                 </div>
-              </div>,
-              null,
-            )}
+              )
+              : null}
           </cf-fab>
         </cf-drop-zone>
       ),

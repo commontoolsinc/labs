@@ -137,20 +137,20 @@ export class CFForm extends BaseElement {
   `;
 
   @property()
-  method: "GET" | "POST" = "GET";
+  accessor method: "GET" | "POST" = "GET";
 
   @property()
-  action = "";
+  accessor action = "";
 
   @query("form")
-  private _form!: HTMLFormElement;
+  private accessor _form: HTMLFormElement | null = null;
 
   /** Track registered fields for coordinated submit/reset */
   private _fields = new Map<HTMLElement, FieldRegistration>();
 
   /** Provide FormContext to descendant fields */
   @provide({ context: formContext })
-  private _formContext: FormContext = {
+  private accessor _formContext: FormContext = {
     registerField: (reg) => this._registerField(reg),
   };
 

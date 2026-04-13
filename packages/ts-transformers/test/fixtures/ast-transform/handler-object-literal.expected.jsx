@@ -21,7 +21,7 @@ const myHandler = handler(false as const satisfies __cfHelpers.JSONSchema, {
     properties: {
         value: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"]
@@ -48,11 +48,11 @@ export default pattern((state) => {
     properties: {
         value: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         },
         name: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"]
@@ -61,15 +61,15 @@ export default pattern((state) => {
     properties: {
         onClick1: {
             type: "unknown",
-            asStream: true
+            asCell: ["stream"]
         },
         onClick2: {
             type: "unknown",
-            asStream: true
+            asCell: ["stream"]
         },
         onClick3: {
             type: "unknown",
-            asStream: true
+            asCell: ["stream"]
         }
     },
     required: ["onClick1", "onClick2", "onClick3"]

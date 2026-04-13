@@ -19,7 +19,7 @@ const model = __cfHelpers.__cf_data({
     properties: {
         value: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"],
@@ -50,7 +50,7 @@ export default pattern((cell) => {
     properties: {
         value: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"]
@@ -59,7 +59,7 @@ export default pattern((cell) => {
     properties: {
         value: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["value"]

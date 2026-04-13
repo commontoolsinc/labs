@@ -30,7 +30,7 @@ export default pattern((state: State) => {
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                asCell: ["cell"]
             },
             state: {
                 type: "object",

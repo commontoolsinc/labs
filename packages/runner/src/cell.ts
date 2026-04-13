@@ -80,6 +80,7 @@ import {
   isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
+  type SanitizeSchemaForLinksOptions,
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
@@ -173,9 +174,7 @@ declare module "@commonfabric/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
-        keepStreams?: boolean;
-        keepAsCell?: boolean;
-      },
+      } & SanitizeSchemaForLinksOptions,
     ): SigilLink;
     getAsWriteRedirectLink(
       options?: {
@@ -1007,10 +1006,10 @@ export class CellImpl<T extends FabricValue>
     // Determine the kind based on schema flags
     let kind: CellKind = this._kind;
     if (isRecord(childSchema)) {
-      if (childSchema.asStream) {
-        kind = "stream";
-      } else if (childSchema.asCell) {
-        kind = "cell";
+      const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
+      // we can override the kind of cell we use for a key
+      if (asCellValues.length > 0) {
+        kind = asCellValues[0];
       }
     }
 
@@ -1073,7 +1072,7 @@ export class CellImpl<T extends FabricValue>
     if (!schema) {
       const sourceCell = this.getSourceCell<{ resultRef: Cell<unknown> }>({
         type: "object",
-        properties: { resultRef: { asCell: true } },
+        properties: { resultRef: { asCell: ["cell"] } },
       });
       const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
       if (sourceCellSchema !== undefined) {
@@ -1182,9 +1181,7 @@ export class CellImpl<T extends FabricValue>
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
-      keepStreams?: boolean;
-      keepAsCell?: boolean;
-    },
+    } & SanitizeSchemaForLinksOptions,
   ): SigilLink {
     return createSigilLinkFromParsedLink(this.link, {
       ...options,
@@ -2084,10 +2081,8 @@ export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
   options: {
     includeSchema?: boolean;
-    keepStreams?: boolean;
-    keepAsCell?: boolean;
     doNotConvertCellResults?: boolean;
-  } = {},
+  } & SanitizeSchemaForLinksOptions = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
 ): any {

@@ -849,12 +849,10 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           color: cal.foregroundColor,
                           fontSize: "12px",
                           cursor: "pointer",
-                          opacity: ifElse(calendarSelectionMap[cal.id], 1, 0.4),
-                          textDecoration: ifElse(
-                            calendarSelectionMap[cal.id],
-                            "none",
-                            "line-through",
-                          ),
+                          opacity: calendarSelectionMap[cal.id] ? 1 : 0.4,
+                          textDecoration: calendarSelectionMap[cal.id]
+                            ? "none"
+                            : "line-through",
                           transition: "opacity 0.15s, text-decoration 0.15s",
                         }}
                         onClick={toggleCalendarSelection({
@@ -902,7 +900,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   onClick={toggleShowEvents({ showEvents })}
                 >
                   <span style={{ fontSize: "14px" }}>
-                    {ifElse(showEvents, "▼", "▶")}
+                    {showEvents ? "▼" : "▶"}
                   </span>
                   <h4 style={{ fontSize: "16px", margin: 0 }}>
                     {derive(

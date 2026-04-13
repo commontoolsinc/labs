@@ -54,9 +54,11 @@ When a cell changes:
 
 A computation stays dirty until an effect pulls it. If no effect ever needs it, it never runs.
 
-### The mightWrite Set
+### Current-Known Writes
 
-Each action tracks what it has *ever* written (cumulative across all runs). This is necessary because write behavior can vary:
+Each action tracks its current known write set from the latest run plus
+declared/potential writes. This keeps the dependency graph precise while still
+handling no-op runs and declared outputs:
 
 ```typescript
 // Sometimes writes A, sometimes B
@@ -64,7 +66,10 @@ if (condition) cellA.set(x);
 else cellB.set(x);
 ```
 
-The dependency graph uses `mightWrite` (cumulative) rather than `dependencies.writes` (last run only) to conservatively track what might need to run.
+By default the scheduler uses the latest known writes rather than cumulative
+history, so stale branches can disappear when an action changes what it writes.
+The old cumulative `mightWrite` behavior is retained behind the experimental
+`schedulerHistoricalMightWrite` flag.
 
 ## Execution Flow
 
@@ -304,7 +309,9 @@ Unlike debounce, throttled actions stay dirty and will run when:
 1. The throttle period expires, AND
 2. An effect pulls them
 
-Good for rate-limiting expensive operations.
+Queued events whose head dependency is throttled are parked until the earliest
+eligible wake time instead of being polled in a tight loop. FIFO ordering is
+preserved while the head event is parked.
 
 ### Cycle-Aware Debounce
 
@@ -331,7 +338,8 @@ class Scheduler {
   // Dependency tracking
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private dependents = new WeakMap<Action, Set<Action>>();  // Reverse graph
-  private mightWrite = new WeakMap<Action, Address[]>();    // Cumulative writes
+  private currentKnownWrites = new WeakMap<Action, Address[]>();
+  private historicalMightWrite = new WeakMap<Action, Address[]>(); // Experimental
 
   // Triggers: cell → actions that read it
   private triggers = new Map<SpaceAndURI, Map<Action, Paths>>();
@@ -435,6 +443,8 @@ scheduler.getFilterStats()        // { filtered, executed }
 - Check throttle settings
 - Ensure the reading action is marked as an effect
 - Verify dependencies are correctly declared
+- Effects currently run eagerly/speculatively and are assumed to be UI-safe;
+  irreversible side effects should not rely on that behavior
 
 **Max iterations hit:**
 - Action has self-referential dependency (writes to what it reads)

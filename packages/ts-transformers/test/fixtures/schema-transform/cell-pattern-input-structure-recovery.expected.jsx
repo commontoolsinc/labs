@@ -41,7 +41,7 @@ export default pattern((state) => {
             items: {
                 type: "number"
             },
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["typedValues"]

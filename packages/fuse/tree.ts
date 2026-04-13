@@ -39,8 +39,23 @@ export class FsTree {
   private untrackPath(ino: bigint): void {
     const path = this.inoPaths.get(ino);
     if (path !== undefined) {
-      this.paths.delete(path);
+      if (this.paths.get(path) === ino) {
+        this.paths.delete(path);
+      }
       this.inoPaths.delete(ino);
+    }
+  }
+
+  private unlinkFromParent(ino: bigint): void {
+    const parentIno = this.parents.get(ino);
+    if (parentIno === undefined) return;
+    const parent = this.inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir") return;
+    for (const [name, childIno] of parent.children) {
+      if (childIno === ino) {
+        parent.children.delete(name);
+        break;
+      }
     }
   }
 
@@ -183,6 +198,12 @@ export class FsTree {
     return childIno;
   }
 
+  /** Unlink a subtree from its parent while keeping its inodes temporarily live. */
+  detach(ino: bigint): void {
+    if (!this.inodes.has(ino)) return;
+    this.unlinkFromParent(ino);
+  }
+
   /** Recursively remove an inode and all its descendants from tracking maps. */
   private clearSubtree(ino: bigint): void {
     const node = this.inodes.get(ino);
@@ -266,30 +287,7 @@ export class FsTree {
     const node = this.inodes.get(ino);
     if (!node) return;
 
-    // Recursively clear children
-    if (node.kind === "dir") {
-      for (const [, childIno] of node.children) {
-        this.clear(childIno);
-      }
-    }
-
-    // Remove from parent's children
-    const parentIno = this.parents.get(ino);
-    if (parentIno !== undefined) {
-      const parent = this.inodes.get(parentIno);
-      if (parent && parent.kind === "dir") {
-        for (const [name, childIno] of parent.children) {
-          if (childIno === ino) {
-            parent.children.delete(name);
-            break;
-          }
-        }
-      }
-    }
-
-    // Remove from tracking maps
-    this.inodes.delete(ino);
-    this.parents.delete(ino);
-    this.untrackPath(ino);
+    this.unlinkFromParent(ino);
+    this.clearSubtree(ino);
   }
 }

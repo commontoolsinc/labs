@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import env from "@/env.ts";
+import { sha256 } from "@/lib/sha2.ts";
 import {
   extractSpaceFromCellLink,
   generateWebhookId,
@@ -151,6 +152,11 @@ describe("Webhook Utilities", () => {
       const id = await webhookEntityId("wh_test123");
       const hash = id.slice(3); // strip "of:"
       expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("uses the cf webhook salt", async () => {
+      const id = await webhookEntityId("wh_test123");
+      expect(id).toBe(`of:${await sha256("cf:webhook:wh_test123")}`);
     });
   });
 });

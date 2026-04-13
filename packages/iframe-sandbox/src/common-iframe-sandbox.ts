@@ -40,11 +40,11 @@ type CommonIframeLoadState = "" | "loading" | "loaded";
 // @event {CustomEvent} error - An error from the iframe.
 // @event {CustomEvent} load - The iframe was successfully loaded.
 export class CommonIframeSandboxElement extends LitElement {
-  @property()
   get src() {
     return this.#src;
   }
 
+  @property()
   set src(value: string) {
     const previousValue = this.#src;
     this.#src = value;
@@ -55,13 +55,13 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   @property()
-  context?: object;
+  accessor context: object | undefined = undefined;
 
   @property()
-  crashed = false;
+  accessor crashed = false;
 
   @property({ attribute: "load-state", reflect: true })
-  loadState: CommonIframeLoadState = "";
+  accessor loadState: CommonIframeLoadState = "";
 
   static override styles = css`
     :host {

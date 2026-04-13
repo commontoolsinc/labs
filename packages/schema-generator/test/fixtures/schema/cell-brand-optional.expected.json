@@ -6,7 +6,9 @@
           "type": "null"
         },
         {
-          "asCell": true,
+          "asCell": [
+            "cell"
+          ],
           "type": "string"
         }
       ]
@@ -17,7 +19,9 @@
           "type": "undefined"
         },
         {
-          "asCell": true,
+          "asCell": [
+            "cell"
+          ],
           "type": "number"
         }
       ]

@@ -32,14 +32,14 @@ interface Output {
 const model = schema({
   type: "object",
   properties: {
-    lastMessage: { type: "string", default: "", asCell: true },
-    messageCount: { type: "number", default: 0, asCell: true },
-    legacyCount: { type: "number", default: 0, asCell: true },
+    lastMessage: { type: "string", default: "", asCell: ["cell"] },
+    messageCount: { type: "number", default: 0, asCell: ["cell"] },
+    legacyCount: { type: "number", default: 0, asCell: ["cell"] },
     messages: {
       type: "array",
       items: { type: "string" },
       default: [],
-      asCell: true,
+      asCell: ["cell"],
     },
   },
   default: {

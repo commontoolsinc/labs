@@ -28,9 +28,13 @@ export interface CapabilityParamSummary {
   readonly name: string;
   readonly capability: ReactiveCapability;
   readonly readPaths: readonly (readonly string[])[];
+  readonly fullShapePaths?: readonly (readonly string[])[];
   readonly writePaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  readonly identityOnly?: boolean;
+  readonly identityPaths?: readonly (readonly string[])[];
+  readonly identityCellPaths?: readonly (readonly string[])[];
   readonly defaults?: readonly CapabilityParamDefault[];
 }
 
