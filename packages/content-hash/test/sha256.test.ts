@@ -8,14 +8,26 @@ import { sha256Wasm } from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
 const sha256Funcs = [
-  sha256,
   sha256Deno,
   sha256Noble,
   sha256Wasm,
 ] as const;
 
+describe("sha256()", () => {
+  it("is one of the implementation functions", () => {
+    const found = sha256Funcs.indexOf(sha256);
+    expect(found).not.toBe(-1);
+  });
+});
+
 for (const shaFunc of sha256Funcs) {
-  describe(`${shaFunc.name}()`, () => {
+  // Tweak the name for `sha256Noble` because the actual function is a
+  // re-`export`.
+  const funcName = (shaFunc === sha256Noble)
+    ? "sha256Noble"
+    : shaFunc.name;
+
+  describe(`${funcName}()`, () => {
     let i = 1;
     for (const { bytes, sha256: hashStr } of FIXTURES) {
       const hashMsg = `${hashStr.slice(0, 8)}...`;
