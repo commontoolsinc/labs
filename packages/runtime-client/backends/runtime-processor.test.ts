@@ -431,6 +431,77 @@ describe("RuntimeProcessor CFC label IPC", () => {
   });
 });
 
+describe("RuntimeProcessor CFC commit preparation", () => {
+  const ref: CellRef = {
+    id: "of:cfc-client-write" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    type: "application/json",
+    path: [],
+    schema: {
+      type: "string",
+      ifc: { confidentiality: ["client-write"] },
+    },
+  };
+
+  const createProcessor = () => {
+    let prepared = false;
+    const tx = {
+      commit: () => {
+        expect(prepared).toBe(true);
+        return Promise.resolve({ ok: {} });
+      },
+    };
+    const cellWithTx = {
+      set: (value: unknown) => {
+        expect(value).toBe("new value");
+      },
+      send: (value: unknown) => {
+        expect(value).toBe("new value");
+      },
+    };
+    return {
+      processor: {
+        runtime: {
+          edit: () => tx,
+          prepareTxForCommit: (candidate: unknown) => {
+            expect(candidate).toBe(tx);
+            prepared = true;
+          },
+          getCellFromLink: (candidate: unknown) => {
+            expect(candidate).toBe(ref);
+            return {
+              withTx: (candidateTx: unknown) => {
+                expect(candidateTx).toBe(tx);
+                return cellWithTx;
+              },
+            };
+          },
+        },
+      } as unknown as RuntimeProcessor,
+    };
+  };
+
+  it("prepares cell set transactions before committing", async () => {
+    const { processor } = createProcessor();
+
+    await RuntimeProcessor.prototype.handleCellSet.call(processor, {
+      type: RequestType.CellSet,
+      cell: ref,
+      value: "new value",
+    });
+  });
+
+  it("prepares cell send transactions before committing", async () => {
+    const { processor } = createProcessor();
+
+    await RuntimeProcessor.prototype.handleCellSend.call(processor, {
+      type: RequestType.CellSend,
+      cell: ref,
+      event: "new value",
+    });
+  });
+});
+
 describe("runtimeOptionsFromInitializationData", () => {
   it("threads CFC initialization settings into runtime options", () => {
     const telemetry = { marker() {} } as unknown as Parameters<
