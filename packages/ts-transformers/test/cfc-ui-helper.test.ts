@@ -202,6 +202,30 @@ Deno.test(
 );
 
 Deno.test(
+  "UI helper contract hints require all required semantic props to be literal",
+  async () => {
+    const source = `/// <cts-enable />
+      import { pattern, UI, UiPromptSlot } from "commonfabric";
+
+      const dynamicRole = "assistant";
+
+      export default pattern<{ title: string }>((state) => ({
+        [UI]: <UiPromptSlot surface="PromptPane" role={dynamicRole} />,
+        title: state.title,
+      }));
+    `;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, 'data-ui-surface="PromptPane"');
+    assertStringIncludes(output, "data-ui-role={dynamicRole}");
+    assertEquals(output.includes("uiContract"), false);
+  },
+);
+
+Deno.test(
   "UI helper contract hints also reach explicit output schemas",
   async () => {
     const source = `/// <cts-enable />

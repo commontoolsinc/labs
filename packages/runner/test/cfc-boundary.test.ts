@@ -2504,6 +2504,56 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("rejects writeAuthorizedBy when the verified bundle identity differs", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-1",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/main.tsx",
+        bindingPath: ["localFunction"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-rejected-verified-bundle-write",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    bundleId: "bundle-hash-2",
+                    file: "/main.tsx",
+                    path: ["localFunction"],
+                  },
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "rejected" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("writeAuthorizedBy failed");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("records diagnostics for unsupported trust-sensitive claims in observe mode", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

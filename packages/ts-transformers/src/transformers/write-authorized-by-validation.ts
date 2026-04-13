@@ -13,12 +13,37 @@ export class WriteAuthorizedByValidationTransformer
           validateWriteAuthorizedByUsage(typeArg, context);
         }
       }
+      if (isPatternNode(node)) {
+        const resultTypeArg = node.typeArguments?.[1];
+        if (resultTypeArg) {
+          validateWriteAuthorizedByUsage(resultTypeArg, context);
+        }
+      }
 
       return ts.visitEachChild(node, visit, context.tsContext);
     };
 
     return ts.visitNode(sourceFile, visit) as ts.SourceFile;
   }
+}
+
+function isPatternNode(node: ts.Node): node is ts.CallExpression {
+  if (!ts.isCallExpression(node)) return false;
+  const { typeArguments, expression } = node;
+  if (!typeArguments || typeArguments.length < 2) return false;
+
+  if (ts.isIdentifier(expression) && expression.text === "pattern") {
+    return true;
+  }
+
+  if (
+    ts.isPropertyAccessExpression(expression) &&
+    expression.name.text === "pattern"
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function isToSchemaNode(node: ts.Node): node is ts.CallExpression {
@@ -44,7 +69,7 @@ function validateWriteAuthorizedByUsage(
   typeNode: ts.TypeNode,
   context: TransformationContext,
 ): void {
-  const references = findWriteAuthorizedByReferences(typeNode);
+  const references = findWriteAuthorizedByReferences(typeNode, context);
   for (const reference of references) {
     const [schemaType, bindingType] = reference.typeArguments ?? [];
     if (!schemaType || !bindingType || !ts.isTypeQueryNode(bindingType)) {
@@ -85,19 +110,72 @@ function validateWriteAuthorizedByUsage(
 
 function findWriteAuthorizedByReferences(
   node: ts.TypeNode,
+  context: TransformationContext,
 ): ts.TypeReferenceNode[] {
   const matches: ts.TypeReferenceNode[] = [];
-  const visit = (current: ts.Node): void => {
+  const visited = new Set<string>();
+  const visit = (
+    current: ts.Node,
+    typeParamMap: ReadonlyMap<string, ts.TypeNode>,
+  ): void => {
+    if (ts.isTypeReferenceNode(current) && ts.isIdentifier(current.typeName)) {
+      const mapped = typeParamMap.get(current.typeName.text);
+      if (mapped && !current.typeArguments?.length) {
+        visit(mapped, typeParamMap);
+        return;
+      }
+    }
+
     if (
       ts.isTypeReferenceNode(current) &&
       ts.isIdentifier(current.typeName) &&
       current.typeName.text === "WriteAuthorizedBy"
     ) {
-      matches.push(current);
+      matches.push(substituteTypeReferenceNode(current, typeParamMap));
+      return;
     }
-    ts.forEachChild(current, visit);
+
+    if (ts.isTypeReferenceNode(current) && ts.isIdentifier(current.typeName)) {
+      const declaration = getLocalTypeDeclaration(current, context);
+      if (declaration) {
+        const key = declarationKey(declaration, current);
+        if (visited.has(key)) {
+          return;
+        }
+        visited.add(key);
+
+        const nextParamMap = new Map<string, ts.TypeNode>(typeParamMap);
+        const typeParameters = declaration.typeParameters ?? [];
+        for (let i = 0; i < typeParameters.length; i++) {
+          const paramName = typeParameters[i]?.name.text;
+          const actual = current.typeArguments?.[i];
+          if (paramName && actual) {
+            nextParamMap.set(
+              paramName,
+              substituteTypeNode(actual, typeParamMap),
+            );
+          }
+        }
+
+        if (ts.isTypeAliasDeclaration(declaration)) {
+          visit(declaration.type, nextParamMap);
+          return;
+        }
+
+        for (const member of declaration.members) {
+          if (ts.isPropertySignature(member) && member.type) {
+            visit(member.type, nextParamMap);
+          }
+          if (ts.isIndexSignatureDeclaration(member) && member.type) {
+            visit(member.type, nextParamMap);
+          }
+        }
+        return;
+      }
+    }
+    ts.forEachChild(current, (child) => visit(child, typeParamMap));
   };
-  visit(node);
+  visit(node, new Map());
   return matches;
 }
 
@@ -105,21 +183,25 @@ function isSupportedWriteAuthorizedByBindingName(
   name: string,
   sourceFile: ts.SourceFile,
 ): boolean {
-  let supported = false;
+  let found = false;
 
   const visit = (node: ts.Node): void => {
-    if (supported) return;
+    if (found) return;
 
-    if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
-      supported = true;
+    if (
+      ts.isFunctionDeclaration(node) && node.name?.text === name &&
+      node.getSourceFile() === sourceFile
+    ) {
+      found = true;
       return;
     }
 
     if (
       ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
-      node.name.text === name
+      node.name.text === name && node.getSourceFile() === sourceFile
     ) {
-      supported = node.initializer !== undefined;
+      found = node.initializer !== undefined &&
+        isSupportedWriteAuthorizedByInitializer(node.initializer);
       return;
     }
 
@@ -127,5 +209,155 @@ function isSupportedWriteAuthorizedByBindingName(
   };
 
   visit(sourceFile);
-  return supported;
+  return found;
+}
+
+function getLocalTypeDeclaration(
+  node: ts.TypeReferenceNode,
+  context: TransformationContext,
+): ts.TypeAliasDeclaration | ts.InterfaceDeclaration | undefined {
+  const symbol = context.checker.getSymbolAtLocation(node.typeName);
+  const declaration = symbol?.declarations?.find((
+    decl,
+  ): decl is ts.TypeAliasDeclaration | ts.InterfaceDeclaration =>
+    (ts.isTypeAliasDeclaration(decl) || ts.isInterfaceDeclaration(decl)) &&
+    decl.getSourceFile() === context.sourceFile
+  );
+  return declaration;
+}
+
+function declarationKey(
+  declaration: ts.Declaration,
+  reference: ts.TypeReferenceNode,
+): string {
+  const args = reference.typeArguments?.map((arg) => arg.getText()).join(",") ??
+    "";
+  return `${declaration.getSourceFile().fileName}:${declaration.pos}:${args}`;
+}
+
+function substituteTypeReferenceNode(
+  node: ts.TypeReferenceNode,
+  paramMap: ReadonlyMap<string, ts.TypeNode>,
+): ts.TypeReferenceNode {
+  return substituteTypeNode(node, paramMap) as ts.TypeReferenceNode;
+}
+
+function substituteTypeNode(
+  node: ts.TypeNode,
+  paramMap: ReadonlyMap<string, ts.TypeNode>,
+): ts.TypeNode {
+  if (paramMap.size === 0) {
+    return node;
+  }
+  if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+    const mapped = paramMap.get(node.typeName.text);
+    if (mapped && !node.typeArguments?.length) {
+      return mapped;
+    }
+    if (node.typeArguments?.length) {
+      return ts.factory.updateTypeReferenceNode(
+        node,
+        node.typeName,
+        ts.factory.createNodeArray(
+          node.typeArguments.map((arg) => substituteTypeNode(arg, paramMap)),
+        ),
+      );
+    }
+    return node;
+  }
+  if (ts.isTypeLiteralNode(node)) {
+    return ts.factory.updateTypeLiteralNode(
+      node,
+      ts.factory.createNodeArray(node.members.map((member) => {
+        if (ts.isPropertySignature(member) && member.type) {
+          return ts.factory.updatePropertySignature(
+            member,
+            member.modifiers,
+            member.name,
+            member.questionToken,
+            substituteTypeNode(member.type, paramMap),
+          );
+        }
+        if (ts.isIndexSignatureDeclaration(member) && member.type) {
+          return ts.factory.updateIndexSignature(
+            member,
+            member.modifiers,
+            member.parameters,
+            substituteTypeNode(member.type, paramMap),
+          );
+        }
+        return member;
+      })),
+    );
+  }
+  if (ts.isTupleTypeNode(node)) {
+    return ts.factory.updateTupleTypeNode(
+      node,
+      node.elements.map((element) =>
+        substituteTypeNode(element as ts.TypeNode, paramMap) as ts.TypeNode
+      ),
+    );
+  }
+  if (ts.isArrayTypeNode(node)) {
+    return ts.factory.updateArrayTypeNode(
+      node,
+      substituteTypeNode(node.elementType, paramMap),
+    );
+  }
+  if (ts.isUnionTypeNode(node)) {
+    return ts.factory.updateUnionTypeNode(
+      node,
+      ts.factory.createNodeArray(
+        node.types.map((type) => substituteTypeNode(type, paramMap)),
+      ),
+    );
+  }
+  if (ts.isIntersectionTypeNode(node)) {
+    return ts.factory.updateIntersectionTypeNode(
+      node,
+      ts.factory.createNodeArray(
+        node.types.map((type) => substituteTypeNode(type, paramMap)),
+      ),
+    );
+  }
+  if (ts.isTypeOperatorNode(node)) {
+    return ts.factory.updateTypeOperatorNode(
+      node,
+      substituteTypeNode(node.type, paramMap),
+    );
+  }
+  if (ts.isParenthesizedTypeNode(node)) {
+    return ts.factory.updateParenthesizedType(
+      node,
+      substituteTypeNode(node.type, paramMap),
+    );
+  }
+  return node;
+}
+
+function isSupportedWriteAuthorizedByInitializer(
+  initializer: ts.Expression,
+): boolean {
+  const expression = unwrapInitializer(initializer);
+  return ts.isCallExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    (
+      expression.expression.text === "handler" ||
+      expression.expression.text === "module" ||
+      expression.expression.text === "requireEventIntegrity"
+    );
+}
+
+function unwrapInitializer(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
 }

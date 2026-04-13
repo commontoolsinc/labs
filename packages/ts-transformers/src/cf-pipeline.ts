@@ -47,10 +47,6 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
     create: (options) => new PatternContextValidationTransformer(options),
   },
   {
-    name: "WriteAuthorizedByValidationTransformer",
-    create: (options) => new WriteAuthorizedByValidationTransformer(options),
-  },
-  {
     name: "JsxExpressionSiteRouterTransformer",
     create: (options) => new JsxExpressionSiteRouterTransformer(options),
   },
@@ -71,6 +67,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
     name: "HelperOwnedExpressionSiteLoweringTransformer",
     create: (options) =>
       new HelperOwnedExpressionSiteLoweringTransformer(options),
+  },
+  {
+    name: "WriteAuthorizedByValidationTransformer",
+    create: (options) => new WriteAuthorizedByValidationTransformer(options),
   },
   {
     name: "PatternCallbackLoweringTransformer",

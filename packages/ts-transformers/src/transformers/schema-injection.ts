@@ -1696,9 +1696,7 @@ function extractUiContractFromLoweredJsx(
   const surface = getLiteralAttr("data-ui-surface");
   if (surface) {
     const role = getLiteralAttr("data-ui-role");
-    return role
-      ? { helper: "UiPromptSlot", surface, role }
-      : { helper: "UiPromptSlot", surface };
+    return role ? { helper: "UiPromptSlot", surface, role } : undefined;
   }
 
   const kind = getLiteralAttr("data-ui-disclosure-kind");

@@ -208,16 +208,13 @@ function createUiContractHint(
   const hint: Partial<NonNullable<SchemaHint["cfcUiContract"]>> = {
     helper: spec.helper,
   };
-  let populated = false;
   for (const entry of spec.dataAttrs) {
     const literal = getStringLiteralAttributeValue(attributes, entry.prop);
-    if (literal) {
-      (hint as Record<string, string>)[entry.prop] = literal.text;
-      populated = true;
+    if (!literal) {
+      return undefined;
     }
+    (hint as Record<string, string>)[entry.prop] = literal.text;
   }
 
-  return populated
-    ? { cfcUiContract: hint as SchemaHint["cfcUiContract"] }
-    : undefined;
+  return { cfcUiContract: hint as SchemaHint["cfcUiContract"] };
 }

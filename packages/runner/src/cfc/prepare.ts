@@ -29,6 +29,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcMetadata,
   type IFCLabel,
+  type ImplementationIdentity,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -148,6 +149,9 @@ const writeAuthorizedByReason = (
     }`;
   }
   if (
+    typeof identity.bundleId !== "string" ||
+    identity.bundleId.length === 0 ||
+    identity.bundleId !== bindingIdentity.bundleId ||
     normalizeIdentitySource(identity.sourceFile) !==
       normalizeIdentitySource(bindingIdentity.file) ||
     !arraysEqual(identity.bindingPath, bindingIdentity.path)
@@ -159,7 +163,7 @@ const writeAuthorizedByReason = (
 
 const parseWriteAuthorizedByBindingIdentity = (
   claim: unknown,
-): { file: string; path: string[] } | undefined => {
+): { bundleId?: string; file: string; path: string[] } | undefined => {
   if (!isRecord(claim) || !isRecord(claim.__ctWriterIdentityOf)) {
     return undefined;
   }
@@ -172,6 +176,9 @@ const parseWriteAuthorizedByBindingIdentity = (
     return undefined;
   }
   return {
+    ...(typeof identity.bundleId === "string"
+      ? { bundleId: identity.bundleId }
+      : {}),
     file: identity.file,
     path: [...identity.path],
   };
@@ -277,6 +284,7 @@ const storedMetadataFor = (
 
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
+  implementationIdentity?: ImplementationIdentity,
 ): Map<string, JSONSchema> => {
   const result = new Map<string, JSONSchema>();
   for (const input of inputs) {
@@ -285,8 +293,12 @@ const candidateSchemasByTarget = (
     }
     const key =
       `${input.target.space}\u0000${input.target.id}\u0000${input.target.type}`;
-    const candidate = schemaEnvelopeForTargetPath(
+    const schema = rebindWriteAuthorizedByClaims(
       input.schema,
+      implementationIdentity,
+    );
+    const candidate = schemaEnvelopeForTargetPath(
+      schema,
       input.target.path,
     );
     const existing = result.get(key);
@@ -298,6 +310,70 @@ const candidateSchemasByTarget = (
     );
   }
   return result;
+};
+
+const rebindWriteAuthorizedByClaims = (
+  schema: JSONSchema,
+  identity: ImplementationIdentity | undefined,
+): JSONSchema => {
+  if (
+    !identity || identity.kind !== "verified" ||
+    typeof identity.bundleId !== "string" ||
+    identity.bundleId.length === 0
+  ) {
+    return schema;
+  }
+  return rebindWriteAuthorizedByClaimsInner(
+    schema,
+    identity.bundleId,
+  ) as JSONSchema;
+};
+
+const rebindWriteAuthorizedByClaimsInner = (
+  value: unknown,
+  bundleId: string,
+): unknown => {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((entry) => {
+      const rebound = rebindWriteAuthorizedByClaimsInner(entry, bundleId);
+      changed ||= rebound !== entry;
+      return rebound;
+    });
+    return changed ? next : value;
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const rebound = rebindWriteAuthorizedByClaimsInner(entry, bundleId);
+    changed ||= rebound !== entry;
+    next[key] = rebound;
+  }
+
+  if (isRecord(value.ifc) && isRecord(value.ifc.writeAuthorizedBy)) {
+    const claim = value.ifc.writeAuthorizedBy;
+    if (
+      isRecord(claim.__ctWriterIdentityOf) &&
+      claim.__ctWriterIdentityOf.bundleId === undefined
+    ) {
+      const nextIfc = { ...value.ifc };
+      nextIfc.writeAuthorizedBy = {
+        ...claim,
+        __ctWriterIdentityOf: {
+          ...claim.__ctWriterIdentityOf,
+          bundleId,
+        },
+      };
+      next.ifc = nextIfc;
+      changed = true;
+    }
+  }
+
+  return changed ? next : value;
 };
 
 const schemaEnvelopeForTargetPath = (
@@ -686,6 +762,7 @@ export const prepareBoundaryCommit = (
   const reasons: string[] = [];
   const candidates = candidateSchemasByTarget(
     tx.getCfcState().writePolicyInputs,
+    tx.getCfcState().implementationIdentity,
   );
   for (const [key, target] of valueWriteTargets(tx)) {
     if (candidates.has(key)) {

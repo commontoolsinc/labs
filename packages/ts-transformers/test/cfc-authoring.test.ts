@@ -288,6 +288,114 @@ Deno.test(
 );
 
 Deno.test(
+  "WriteAuthorizedBy accepts direct supported builder binding initializers",
+  async () => {
+    const source = `/// <cts-enable />
+      import { toSchema, WriteAuthorizedBy } from "commonfabric";
+
+      declare function module<T>(fn: T): T;
+      declare function requireEventIntegrity<T>(fn: T): T;
+
+      const moduleWriter = module(() => undefined);
+      const eventWriter = requireEventIntegrity(() => undefined);
+
+      const moduleSchema = toSchema<
+        WriteAuthorizedBy<{ title: string }, typeof moduleWriter>
+      >();
+      const eventSchema = toSchema<
+        WriteAuthorizedBy<{ title: string }, typeof eventWriter>
+      >();
+
+      export { moduleSchema, eventSchema };
+    `;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertEquals(
+      diagnostics.some((diagnostic) =>
+        diagnostic.type === "cfc-write-authorized-by"
+      ),
+      false,
+    );
+  },
+);
+
+Deno.test(
+  "WriteAuthorizedBy validates concrete pattern output schemas",
+  async () => {
+    const source = `/// <cts-enable />
+      import { pattern, WriteAuthorizedBy } from "commonfabric";
+
+      const arbitrary = 123;
+
+      interface InvalidQueryOutput {
+        savedTitle: WriteAuthorizedBy<string, string>;
+      }
+
+      interface InvalidBindingOutput {
+        savedTitle: WriteAuthorizedBy<string, typeof arbitrary>;
+      }
+
+      const invalidQuery = pattern<{ title: string }, InvalidQueryOutput>(
+        (state) => ({ savedTitle: state.title }),
+      );
+      const invalidBinding = pattern<{ title: string }, InvalidBindingOutput>(
+        (state) => ({ savedTitle: state.title }),
+      );
+
+      export { invalidQuery, invalidBinding };
+    `;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const cfcDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "cfc-write-authorized-by"
+    );
+
+    assertEquals(cfcDiagnostics.length >= 2, true);
+  },
+);
+
+Deno.test(
+  "WriteAuthorizedBy validates concrete alias chains without rejecting unused generic aliases",
+  async () => {
+    const source = `/// <cts-enable />
+      import { handler, pattern, WriteAuthorizedBy } from "commonfabric";
+
+      type TrustedWrite<T, Binding> = WriteAuthorizedBy<T, Binding>;
+
+      const saveTitle = handler<void, { title: { get(): string; savedTitle: { set(value: string): void } } }>(
+        () => undefined,
+      );
+
+      interface Output {
+        savedTitle: TrustedWrite<string, typeof saveTitle>;
+      }
+
+      const valid = pattern<{ title: string }, Output>(
+        (state) => ({ savedTitle: state.title }),
+      );
+
+      export { valid };
+    `;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertEquals(
+      diagnostics.some((diagnostic) =>
+        diagnostic.type === "cfc-write-authorized-by"
+      ),
+      false,
+    );
+  },
+);
+
+Deno.test(
   "Schema injection keeps explicit and inferred CFC-aware pattern schemas aligned",
   async () => {
     const source = `/// <cts-enable />
@@ -346,15 +454,19 @@ Deno.test("WriteAuthorizedBy rejects unsupported binding declarations", async ()
     import { toSchema, WriteAuthorizedBy } from "commonfabric";
 
     declare const missingInitializer: () => void;
+    const arbitrary = 123;
     const invalidSchema = toSchema<
       WriteAuthorizedBy<{ title: string }, typeof missingInitializer>
+    >();
+    const invalidBindingSchema = toSchema<
+      WriteAuthorizedBy<{ title: string }, typeof arbitrary>
     >();
 
     const invalidQuerySchema = toSchema<
       WriteAuthorizedBy<{ title: string }, string>
     >();
 
-    export { invalidSchema, invalidQuerySchema };
+    export { invalidSchema, invalidBindingSchema, invalidQuerySchema };
   `;
 
   const { diagnostics } = await validateSource(source, {
@@ -362,9 +474,9 @@ Deno.test("WriteAuthorizedBy rejects unsupported binding declarations", async ()
   });
 
   assertEquals(
-    diagnostics.some((diagnostic) =>
+    diagnostics.filter((diagnostic) =>
       diagnostic.type === "cfc-write-authorized-by"
-    ),
+    ).length >= 3,
     true,
   );
 });

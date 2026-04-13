@@ -1373,6 +1373,7 @@ export type JSONSchemaObj = {
       | readonly string[]
       | {
         readonly __ctWriterIdentityOf?: {
+          readonly bundleId?: string;
           readonly file?: string;
           readonly path?: readonly string[];
         };
