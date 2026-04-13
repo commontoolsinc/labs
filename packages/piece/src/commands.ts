@@ -22,7 +22,7 @@ export const castSpellAsPiece = async (
 ) => {
   if (patternKey && argument) {
     console.log("Syncing...");
-    const patternHash = patternKey.replace("spell-", "");
+    const patternHash = patternKey.replace("spell-", "").replace("of:", "");
     const patternId: URI = `of:${patternHash}`;
     const pattern = await pieceManager.syncPatternById(patternId);
     if (!pattern) return;
