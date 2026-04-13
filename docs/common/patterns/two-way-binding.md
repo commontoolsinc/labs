@@ -47,12 +47,13 @@ export default pattern<Input, Input>(({ items }) => ({
 
 **Key points:**
 - `$checked` automatically syncs - no handler needed
-- if a control already uses `$value` or `$checked`, do not add a change handler
-  that merely writes the same value back into that same bound cell
+- if a control is already bound to a cell, usually via `$value` or
+  `$checked`, do not add a change handler that merely writes the same value
+  back into that same cell
 - Inline handlers for add/remove operations
 - **Uses `equals()` for item identity**
 - Ternary in `style` attribute works fine
 - Type inference works in `.map()` - no annotations needed
 
-Use change handlers on bound controls only when they update dependent state or
-perform another side effect.
+Use change handlers on cell-bound controls only when they update dependent state
+or perform another side effect.

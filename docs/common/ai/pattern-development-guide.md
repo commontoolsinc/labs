@@ -249,9 +249,10 @@ Use `computed()` for derivation and `action()` for side effects.
 
 ### Bound Control Self-Feedback
 
-If a control already uses `$value` or `$checked`, treat that binding as the
-control's primary value path. Do not add `oncf-change` / `oncf-input` handlers
-that merely write the same value back into that same bound cell.
+If a control is already bound to a cell, usually via `$value` or `$checked`,
+treat that binding as the control's primary value path. Do not add
+`oncf-change` / `oncf-input` handlers that merely write the same value back
+into that same cell.
 
 ```tsx
 // Wrong

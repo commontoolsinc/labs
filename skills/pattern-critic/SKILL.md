@@ -12,10 +12,10 @@ Read that guide first. It is the canonical reference.
 Be explicit about SES and determinism issues: direct `Date.now()` or
 `Math.random()`, authored timers, and non-idempotent `computed()` use of
 `safeDateNow()` or `nonPrivateRandom()` should all be flagged. Also flag
-bound-control self-feedback: if a `cf-*` form control already uses `$value` or
-`$checked`, treat an event handler that writes the same value back into that
-same cell as a reactive-loop hazard unless it is clearly necessary and
-idempotent.
+bound-control self-feedback: if a `cf-*` form control is already bound to a
+cell, usually via `$value` or `$checked`, treat an event handler that writes the
+same value back into that same cell as a reactive-loop hazard unless it is
+clearly necessary and idempotent.
 
 Then use the detailed references already maintained in the repo for:
 
