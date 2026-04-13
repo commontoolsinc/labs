@@ -1,5 +1,5 @@
-import { computed, handler, pattern, Stream } from "commonfabric";
-import RenderPolicyDemo from "./main.tsx";
+import { computed, handler, pattern, Stream, Writable } from "commonfabric";
+import RenderPolicyDemo, { TrustedHealthDisclosureSurface } from "./main.tsx";
 
 const trigger = handler<void, { stream: Stream<unknown> }>((_, { stream }) => {
   stream.send(undefined);
@@ -7,15 +7,20 @@ const trigger = handler<void, { stream: Stream<unknown> }>((_, { stream }) => {
 
 export default pattern(() => {
   const demo = RenderPolicyDemo({});
+  const revealSensitive = Writable.of(false);
+  const trustedDisclosure = TrustedHealthDisclosureSurface({
+    content: Writable.of("Sensitive health data") as never,
+    revealSensitive,
+  });
 
-  const action_reveal = trigger({ stream: demo.reveal });
-  const action_conceal = trigger({ stream: demo.conceal });
+  const action_reveal = trigger({ stream: trustedDisclosure.reveal });
+  const action_conceal = trigger({ stream: trustedDisclosure.conceal });
 
   const assert_initially_hidden = computed(() =>
-    demo.revealSensitive === false
+    revealSensitive.get() === false
   );
-  const assert_revealed = computed(() => demo.revealSensitive === true);
-  const assert_concealed = computed(() => demo.revealSensitive === false);
+  const assert_revealed = computed(() => revealSensitive.get() === true);
+  const assert_concealed = computed(() => revealSensitive.get() === false);
 
   return {
     tests: [
@@ -26,5 +31,6 @@ export default pattern(() => {
       { assertion: assert_concealed },
     ],
     demo,
+    trustedDisclosure,
   };
 });
