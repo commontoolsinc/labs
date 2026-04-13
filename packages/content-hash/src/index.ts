@@ -9,8 +9,8 @@
  * 3. `merkle-reference`'s `sha256` (fallback) -- pure JS via @noble/hashes
  */
 
-import { isDeno } from "@commonfabric/utils/env";
 import type { IncrementalHasher, Sha256Fn } from "./interface.ts";
+import { canUseDeno, createHasherDeno, sha256Deno } from "./sha256-deno.ts";
 import { createHasherNoble, sha256Noble } from "./sha256-noble.ts";
 import { canUseWasm, createHasherWasm, sha256Wasm } from "./sha256-wasm.ts";
 
@@ -18,32 +18,19 @@ export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
 let sha256: Sha256Fn;
 let createHasher: () => IncrementalHasher;
-let setupComplete: boolean = false;
 
-// Try the Deno setup, if we seem to be running in a Deno environment.
-if (isDeno()) {
-  try {
-    const denoVersion = await import("./sha256-deno.ts");
-    sha256 = denoVersion.sha256Deno;
-    createHasher = denoVersion.createHasherDeno;
-    setupComplete = true;
-  } catch {
-    // node:crypto not available
-  }
-}
-
-// Try `hash-wasm` if we didn't succeed in getting the Deno setup to work.
-if (!setupComplete && canUseWasm()) {
+if (canUseDeno()) {
+  // The Deno implementation is available.
+  sha256 = sha256Deno;
+  createHasher = createHasherDeno;
+} else if (canUseWasm()) {
+  // The `hash-wasm` imolementation is available.
   sha256 = sha256Wasm;
   createHasher = createHasherWasm;
-  setupComplete = true;
-}
-
-// Use Noble if none of the previous were successfully set up.
-if (!setupComplete) {
+} else {
+  // Final fallback: Use the Noble implementation.
   sha256 = sha256Noble;
   createHasher = createHasherNoble;
-  setupComplete = true;
 }
 
 /**

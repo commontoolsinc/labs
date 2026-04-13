@@ -1,24 +1,27 @@
 /**
- * Deno version of SHA256. This should not be `import`ed unless the caller
- * knows they are operating in a Deno environment.
+ * Deno version of SHA256.
  */
 
 import { isDeno } from "@commonfabric/utils/env";
 import type { IncrementalHasher } from "./interface.ts";
 
-if (!isDeno()) {
-  throw new Error("Do not import `sha256-deno` in a non-Deno environment.");
-}
+// Can't `import` at the top, because then `import`ing this module would fail
+// in a non-Deno environment.
+let crypto: { createHash: (algorithm: string) => any } | null = null;
 
-// Can't `import` at the top, because then we couldn't do the check for Deno and
-// issue the nice diagnostic message.
-const crypto = await import("node:crypto");
+if (isDeno()) {
+  try {
+    crypto = await import("node:crypto");
+  } catch {
+    // We're not in a Deno environment.
+  }
+}
 
 /**
  * Deno-specific incremental hasher.
  */
 class DenoHasher implements IncrementalHasher {
-  #hasher = crypto.createHash("sha256");
+  #hasher = crypto!.createHash("sha256");
 
   update(data: Uint8Array) {
     this.#hasher.update(data);
@@ -48,13 +51,20 @@ class DenoHasher implements IncrementalHasher {
 }
 
 /**
+ * Is this module usable?
+ */
+export function canUseDeno() {
+  return crypto !== null;
+}
+
+/**
  * Performs a hash on a single array.
  */
 export function sha256Deno(payload: Uint8Array): Uint8Array {
   // `node:crypto digest()` returns a `Buffer` (a `Uint8Array` subclass);
   // normalize it to plain `Uint8Array`, so downstream equality checks work
   // correctly.
-  const buf = crypto.createHash("sha256").update(payload).digest();
+  const buf = crypto!.createHash("sha256").update(payload).digest();
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
