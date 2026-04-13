@@ -115,8 +115,16 @@ deterministic way, using dependency graphs of reactive cells.
 
 ## Pattern
 
-A function that defines a reactive graph. Can produce UI, derived data, or
-streams. Used like components in other reactive frameworks.
+A unit of computation that defines a reactive graph and describes a
+transformation from a set of inputs to a set of outputs. In practice it is
+manifested as a TypeScript function that takes an object with a set of
+properties and returns an object with a set of outputs. Patterns can produce UI,
+derived data, or streams and are used like components in other reactive
+frameworks.
+
+It is worth pointing out that while a TypeScript function is used it does not
+actually define a computation, instead it is a way to build a computation
+pipeline that flows through input [cell]s into output [cell]s.
 
 ## CTS (Common TypeScript)
 
@@ -129,16 +137,6 @@ make appropriate transformations.
 
 The secure, isolated rendering of pattern-generated UI, considered part of the
 Trusted Computing Base (TCB).
-
-## Pattern
-
-Unit of computation that describes transformation from the set of inputs to the
-set of outputs. In practice it is manifested as a typescript function that takes
-an object with set of properties and returns an object with a set of outputs.
-
-It is worth pointing out that while typescript function is used it does not
-actually defines a computation, instead it is a way to build a computation
-pipeline that flows through input [cell]s into output [cell]s.
 
 ## Storage - Cache (IndexDB)
 
