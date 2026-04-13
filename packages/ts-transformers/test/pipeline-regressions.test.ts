@@ -160,7 +160,7 @@ const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, "return c.key(__cfHelpers.NAME)!");
+    assertStringIncludes(output, "c[__cfHelpers.NAME]");
     assert(!output.includes("return c.key(NAME)!"));
   },
 );

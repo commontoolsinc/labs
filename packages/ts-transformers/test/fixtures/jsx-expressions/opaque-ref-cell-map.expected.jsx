@@ -202,7 +202,7 @@ export default pattern(() => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     input: { charm: charm },
                     charm: charm
-                }, ({ input: { charm }, charm: charm_1 }) => charm[NAME]), "Unnamed")}</span>
+                }, ({ input: { charm }, charm: charm_1 }) => charm[__cfHelpers.NAME]), "Unnamed")}</span>
               </li>);
             }, {
                 type: "object",

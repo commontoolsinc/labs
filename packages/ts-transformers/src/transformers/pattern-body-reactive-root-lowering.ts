@@ -10,6 +10,7 @@ import { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
+  getCommonFabricKeyName,
   isCommonFabricKeyExpression,
 } from "../utils/reactive-keys.ts";
 import {
@@ -883,11 +884,20 @@ function rewriteNestedDeriveCallbackBodies(
       processedBody,
       context,
     );
+    const localOpaqueRoots = new Set<string>();
+    for (const parameter of callbackArg.parameters) {
+      collectBindingNames(parameter.name, localOpaqueRoots);
+    }
 
     processedBody = rewriteTrackedOpaquePatternBody(
       processedBody,
       new Set(),
       localOpaqueRootSymbols,
+      context,
+    );
+    processedBody = rewriteDeriveCallbackComputedKeyAccesses(
+      processedBody,
+      localOpaqueRoots,
       context,
     );
 
@@ -932,4 +942,71 @@ function rewriteNestedDeriveCallbackBodies(
     ) as ts.Block;
   }
   return visit(body) as ts.Expression;
+}
+
+function rewriteDeriveCallbackComputedKeyAccesses(
+  body: ts.ConciseBody,
+  opaqueRoots: ReadonlySet<string>,
+  context: TransformationContext,
+): ts.ConciseBody {
+  if (opaqueRoots.size === 0) {
+    return body;
+  }
+
+  const visit = (node: ts.Node): ts.Node => {
+    if (ts.isFunctionLike(node)) {
+      return node;
+    }
+
+    const visited = visitEachChildWithJsx(node, visit, context.tsContext);
+    if (
+      !ts.isElementAccessExpression(visited) ||
+      !isTopmostMemberAccess(visited) ||
+      !ts.isIdentifier(visited.expression) ||
+      !opaqueRoots.has(visited.expression.text) ||
+      !visited.argumentExpression
+    ) {
+      return visited;
+    }
+
+    const keyName = getCommonFabricKeyName(
+      visited.argumentExpression,
+      context.checker,
+    );
+    if (!keyName) {
+      return visited;
+    }
+
+    const rewritten = context.factory.createElementAccessExpression(
+      context.factory.createIdentifier(visited.expression.text),
+      context.cfHelpers.getHelperExpr(keyName),
+    );
+    registerReplacementType(rewritten, visited, context);
+    return rewritten;
+  };
+
+  if (ts.isBlock(body)) {
+    return visitEachChildWithJsx(
+      body,
+      visit,
+      context.tsContext,
+    ) as ts.Block;
+  }
+  return visit(body) as ts.Expression;
+}
+
+function collectBindingNames(
+  name: ts.BindingName,
+  names: Set<string>,
+): void {
+  if (ts.isIdentifier(name)) {
+    names.add(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) {
+      continue;
+    }
+    collectBindingNames(element.name, names);
+  }
 }
