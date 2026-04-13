@@ -7,6 +7,23 @@ Use this page when you are in a UI polish or UI design pass and need to make a
 pattern feel intentional, distinctive, and coherent rather than merely
 functional.
 
+## Why This System Works This Way
+
+Common Fabric UI is designed for composition across opaque subtrees.
+
+- Theme and public component affordances are the styling boundary.
+- Restyle embedded UI by wrapping it in `cf-theme`, not by reaching into its
+  internals.
+- Start with component defaults, then use theme tokens, then use documented
+  component-specific overrides for local refinement.
+- If a needed visual treatment cannot be expressed that way, treat it as a
+  design-system gap to address explicitly, or as an `iframe` / artifact case
+  where you take full control yourself.
+
+This is intentionally more opinionated than general-purpose CSS. The goal is
+safe, composable UI that still gives agents enough room to form a strong visual
+point of view.
+
 ## Start Here
 
 For pattern-building work, use this guidance stack in order:

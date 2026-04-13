@@ -50,6 +50,10 @@ Useful companion references:
 - `packages/ui/README.md`
 - `packages/ui/LLM-COMPONENT-INSTRUCTIONS.md`
 
+This ordering is intentional: Common Fabric components are meant to be restyled
+through ambient theme tokens and other public affordances, not by reaching into
+opaque subtree internals.
+
 This document does not yet enumerate every custom property or part for every
 component. When a component exposes those affordances, prefer them over
 guessing at unsupported shadow-internal structure.

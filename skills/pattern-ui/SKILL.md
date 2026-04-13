@@ -66,6 +66,16 @@ When polishing a non-trivial UI, default to this workflow:
 If `cf-theme` is clearly unavailable in the environment, fall back gracefully.
 Otherwise, prefer it over scattered ad hoc overrides.
 
+## Why This Works
+
+- Embedded UI should be themed through context and public styling hooks, not by
+  inspecting or mutating its internals.
+- The component set is intentionally opinionated. Defaults plus theme tokens
+  should carry most of the visual system.
+- If public theme/hooks are not enough, treat that as either a design-system
+  gap worth naming or an `iframe` / artifact case, not an excuse to guess at
+  unsupported structure.
+
 ## Available Components
 
 Layout: `cf-theme`, `cf-screen`, `cf-vstack`, `cf-hstack`, `cf-vgroup`,
