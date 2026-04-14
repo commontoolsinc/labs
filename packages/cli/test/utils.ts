@@ -7,8 +7,11 @@ export function bytesToLines(stream: Uint8Array): string[] {
   return decode(stream).split("\n").filter(Boolean);
 }
 
+// deno-lint-ignore no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
 export function isIgnorableDenoWarningLine(line: string): boolean {
-  const trimmed = line.trimStart();
+  const trimmed = line.replace(ANSI_RE, "").trimStart();
   return trimmed.startsWith(
     "Warning The following peer dependency issues were found:",
   ) ||
@@ -19,9 +22,7 @@ export function isIgnorableDenoWarningLine(line: string): boolean {
 }
 
 export function checkStderr(stderr: string[]) {
-  const relevant = stderr.filter((line) =>
-    !isIgnorableDenoWarningLine(line) && /deno run /.test(line)
-  );
+  const relevant = stderr.filter((line) => !isIgnorableDenoWarningLine(line));
   try {
     expect(relevant.length).toBe(1);
   } catch (e) {
