@@ -10,7 +10,10 @@ import {
   type CommandContext,
   createEnvironment,
 } from "../../src/commands/context.ts";
-import { createDefaultRegistry } from "../../src/commands/mod.ts";
+import {
+  createAgentRegistry,
+  createDefaultRegistry,
+} from "../../src/commands/mod.ts";
 import {
   defaultConfig,
   type SandboxedExecConfig,
@@ -44,7 +47,8 @@ function createTestContext(): {
     stderr,
     pcLabel: labels.userInput(),
     requestIntent: () => Promise.resolve(false),
-    getSandboxExecutor: (config = defaultConfig) => new SandboxedExecutor(config),
+    getSandboxExecutor: (config = defaultConfig) =>
+      new SandboxedExecutor(config),
   };
 
   return { vfs, ctx, stdout, stderr };
@@ -207,7 +211,7 @@ Deno.test("bash opts into networked sandbox execution by default", async () => {
     capturedConfig = config;
     return {
       getConfig: () => config,
-      execute: async () => ({
+      execute: () => ({
         stdout: { value: "", label: labels.bottom() },
         stderr: { value: "", label: labels.bottom() },
         exitCode: 0,
@@ -221,6 +225,41 @@ Deno.test("bash opts into networked sandbox execution by default", async () => {
 
   assertEquals(result.exitCode, 0);
   assertEquals(capturedConfig?.allowNetwork, true);
+});
+
+Deno.test("agent registry routes cat through sandboxed bash", async () => {
+  const registry = createAgentRegistry();
+  const { ctx, stdout } = createTestContext();
+  let capturedCommand: { command: string; args: string[] } | undefined;
+
+  ctx.getSandboxExecutor = (config = defaultConfig) => {
+    return {
+      getConfig: () => ({ ...config, guestWorkspacePath: "/workspace" }),
+      execute: (command: string, args: string[]) => {
+        capturedCommand = { command, args };
+        return {
+          stdout: { value: "sandbox-data", label: labels.bottom() },
+          stderr: { value: "", label: labels.bottom() },
+          exitCode: 0,
+          modifiedFiles: new Map(),
+        };
+      },
+    } as unknown as SandboxedExecutor;
+  };
+
+  const cat = registry.get("cat")!;
+  const result = await cat(["/test.txt"], ctx);
+
+  assertEquals(result.exitCode, 0);
+  assertEquals(capturedCommand?.command, "/bin/bash");
+  assertEquals(capturedCommand?.args[0], "-lc");
+  assertEquals(capturedCommand?.args[1].includes("cd '/workspace' &&"), true);
+  assertEquals(capturedCommand?.args[1].includes("cat"), true);
+  assertEquals(capturedCommand?.args[1].includes("test.txt"), true);
+
+  stdout.close();
+  const output = await stdout.readAll();
+  assertEquals(output.value, "sandbox-data");
 });
 
 Deno.test("curl fails gracefully without network access", async () => {
