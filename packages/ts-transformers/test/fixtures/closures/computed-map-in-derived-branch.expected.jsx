@@ -83,26 +83,12 @@ export default pattern((__cf_pattern_input) => {
             people: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Person"
+                    type: "unknown"
                 },
                 asCell: ["cell"]
             }
         },
-        required: ["people"],
-        $defs: {
-            Person: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    rank: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "rank"]
-            }
-        }
+        required: ["people"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length).for("count", true);
