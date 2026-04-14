@@ -9,6 +9,7 @@
     "integration:cfc": "TEST_BRIGHID_CFC_SANDBOX=1 deno test --allow-env --allow-read --allow-write --allow-run --allow-net $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
     "integration:docker": "TEST_BRIGHID_DOCKER_CFC=1 deno test --allow-env --allow-read --allow-write --allow-run --allow-net $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
     "integration:runsc": "TEST_BRIGHID_RUNSC_DIRECT=1 deno test --allow-env --allow-read --allow-write --allow-run --allow-net $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
+    "setup:docker-desktop": "deno run --allow-env --allow-read --allow-write --allow-run ./integration/docker-cfc-setup.ts",
     "agent": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net src/agent/main.ts",
     "brighid": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net src/agent/main.ts"
   },
