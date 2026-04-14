@@ -83,4 +83,40 @@ describe("Schema: Default in unions", () => {
     expect(config.required).toEqual(["theme"]);
     expect(result.default).toEqual({ theme: "dark" });
   });
+
+  it("rejects object defaults that would widen an existing object member", async () => {
+    const code = `
+      interface Default<T, V extends T = T> {}
+      interface Config {
+        theme: string;
+        retries: number;
+      }
+      type T = Config | Default<{ theme: "dark" }>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+
+    expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
+      "Default object union member is not assignable",
+    );
+  });
+
+  it("rejects nested object defaults that would widen an existing object member", async () => {
+    const code = `
+      interface Default<T, V extends T = T> {}
+      interface Config {
+        profile: {
+          name: string;
+          email: string;
+        };
+      }
+      type T = Config | Default<{ profile: { name: "Ada" } }>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+
+    expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
+      "Default object union member is not assignable",
+    );
+  });
 });

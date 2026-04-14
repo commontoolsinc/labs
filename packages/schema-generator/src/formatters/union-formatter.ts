@@ -254,13 +254,19 @@ export class UnionFormatter implements TypeFormatter {
       schemas.push(this.formatTypeNodeMember(node, context));
     }
 
-    if (
-      !this.isDefaultCoveredByUnion(
-        defaultEntry.entry,
-        nonDefaultNodes,
-        context.typeChecker,
-      )
-    ) {
+    const isCovered = this.isDefaultCoveredByUnion(
+      defaultEntry.entry,
+      nonDefaultNodes,
+      context.typeChecker,
+    );
+    this.assertDefaultObjectDoesNotWidenExistingObject(
+      defaultEntry.entry,
+      nonDefaultNodes,
+      isCovered,
+      context.typeChecker,
+    );
+
+    if (!isCovered) {
       schemas.push(
         this.formatTypeNodeMember(defaultEntry.entry.valueTypeNode, context),
       );
@@ -339,6 +345,44 @@ export class UnionFormatter implements TypeFormatter {
         memberType,
       );
     });
+  }
+
+  private assertDefaultObjectDoesNotWidenExistingObject(
+    defaultEntry: DefaultUnionEntry,
+    nonDefaultNodes: readonly ts.TypeNode[],
+    isCovered: boolean,
+    checker: ts.TypeChecker,
+  ): void {
+    if (
+      isCovered || !this.isPlainObjectType(defaultEntry.defaultType, checker)
+    ) {
+      return;
+    }
+
+    const hasObjectTarget = nonDefaultNodes.some((node) =>
+      this.isPlainObjectType(checker.getTypeFromTypeNode(node), checker)
+    );
+    if (!hasObjectTarget) {
+      return;
+    }
+
+    throw new Error(
+      "Default object union member is not assignable to the existing object type. Use Default<T, V> for full defaults or DeepDefault<T, V> for partial object defaults.",
+    );
+  }
+
+  private isPlainObjectType(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): boolean {
+    if ((type.flags & ts.TypeFlags.Object) === 0) {
+      return false;
+    }
+    if (checker.isArrayType(type) || checker.isTupleType(type)) {
+      return false;
+    }
+    const symbolName = type.getSymbol()?.getName();
+    return symbolName !== "Array" && symbolName !== "ReadonlyArray";
   }
 
   private formatTypeNodeMember(
