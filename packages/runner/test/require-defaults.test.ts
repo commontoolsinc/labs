@@ -11,7 +11,7 @@ import type {
   RequireDefaults,
   StripDefaultBrand,
 } from "../src/builder/types.ts";
-import type { Default } from "@commonfabric/api";
+import type { DeepDefault, Default } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
 
 // ============================================================================
@@ -204,6 +204,22 @@ const _nullDefaultRequired: MustBeTrue<
   AssertEqual<
     Simplify<RequireDefaults<{ value?: Default<null> }>>,
     { value: null }
+  >
+> = true;
+
+type DeepDefaultConfig = {
+  theme: string;
+  retries: number;
+};
+
+const _deepDefaultUnion: MustBeTrue<
+  AssertEqual<
+    Simplify<
+      RequireDefaults<
+        { config?: DeepDefaultConfig | DeepDefault<{ theme: "dark" }> }
+      >
+    >,
+    { config: DeepDefaultConfig }
   >
 > = true;
 

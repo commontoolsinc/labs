@@ -119,4 +119,52 @@ describe("Schema: Default in unions", () => {
       "Default object union member is not assignable",
     );
   });
+
+  it("applies recursive object defaults from T | DeepDefault<V>", async () => {
+    const code = `
+      interface DeepDefault<V> {}
+      interface Config {
+        theme: string;
+        profile: {
+          name: string;
+          email: string;
+        };
+      }
+      type T = Config | DeepDefault<{
+        theme: "dark";
+        profile: {
+          name: "Ada";
+        };
+      }>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+    );
+
+    expect(result.$ref).toBe("#/$defs/Config");
+    expect(result.default).toEqual({
+      theme: "dark",
+      profile: { name: "Ada" },
+    });
+    expect((result.properties?.theme as any)?.default).toBe("dark");
+
+    const profile = result.properties?.profile as any;
+    expect(profile.default).toEqual({ name: "Ada" });
+    expect(profile.properties?.name?.default).toBe("Ada");
+    expect(profile.properties?.email).toBeUndefined();
+  });
+
+  it("rejects DeepDefault without an existing object member", async () => {
+    const code = `
+      interface DeepDefault<V> {}
+      type T = string | DeepDefault<{ theme: "dark" }>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+
+    expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
+      "DeepDefault must be unioned with an object type",
+    );
+  });
 });

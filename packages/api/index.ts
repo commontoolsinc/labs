@@ -1925,6 +1925,14 @@ export type Default<T, V extends T = T> =
     : T & DefaultMarker<T>)
   | T;
 
+/**
+ * Marker for partial, recursive object defaults in `T | DeepDefault<V>` schema
+ * declarations. It is stripped from pattern body types by RequireDefaults<T>;
+ * schema generation reads `V` from the AST and applies it as object/property
+ * defaults.
+ */
+export type DeepDefault<V> = DefaultMarker<V>;
+
 /** Detect if T is `any` (used to avoid false positives in brand detection). */
 type IsAny<T> = 0 extends 1 & T ? true : false;
 

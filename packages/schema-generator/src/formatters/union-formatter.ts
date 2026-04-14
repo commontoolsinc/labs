@@ -18,7 +18,10 @@ import { isRecord } from "@commonfabric/utils/types";
 // Simple primitive schemas only have these keys (possibly just one)
 const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);
 
+type DefaultUnionKind = "Default" | "DeepDefault";
+
 interface DefaultUnionEntry {
+  readonly kind: DefaultUnionKind;
   readonly valueTypeNode: ts.TypeNode;
   readonly defaultTypeNode: ts.TypeNode;
   readonly valueType: ts.Type;
@@ -254,6 +257,18 @@ export class UnionFormatter implements TypeFormatter {
       schemas.push(this.formatTypeNodeMember(node, context));
     }
 
+    if (defaultEntry.entry.kind === "DeepDefault") {
+      this.assertDeepDefaultHasObjectTarget(
+        defaultEntry.entry,
+        nonDefaultNodes,
+        context.typeChecker,
+      );
+      return this.applyDeepDefaultToSchema(
+        this.combineUnionSchemas(schemas, context),
+        defaultEntry.entry.defaultValue,
+      );
+    }
+
     const isCovered = this.isDefaultCoveredByUnion(
       defaultEntry.entry,
       nonDefaultNodes,
@@ -272,23 +287,10 @@ export class UnionFormatter implements TypeFormatter {
       );
     }
 
-    const combined = this.combineUnionSchemas(schemas, context);
-    if (defaultEntry.entry.defaultValue === undefined) {
-      return combined;
-    }
-    const defaultValue = defaultEntry.entry
-      .defaultValue as NonNullable<JSONSchemaObjMutable["default"]>;
-
-    if (typeof combined === "boolean") {
-      return combined === false
-        ? { not: true, default: defaultValue }
-        : { default: defaultValue };
-    }
-
-    return {
-      ...combined,
-      default: defaultValue,
-    };
+    return this.applySchemaDefault(
+      this.combineUnionSchemas(schemas, context),
+      defaultEntry.entry.defaultValue,
+    );
   }
 
   private getDefaultUnionEntry(
@@ -299,11 +301,30 @@ export class UnionFormatter implements TypeFormatter {
       return undefined;
     }
 
+    const directName = this.getTypeReferenceName(memberNode);
+    if (directName === "DeepDefault") {
+      const typeArgs = memberNode.typeArguments;
+      if (!typeArgs || typeArgs.length !== 1 || !typeArgs[0]) {
+        throw new Error("DeepDefault<V> requires exactly 1 type argument");
+      }
+      const valueTypeNode = typeArgs[0];
+      return {
+        kind: "DeepDefault",
+        valueTypeNode,
+        defaultTypeNode: valueTypeNode,
+        valueType: context.typeChecker.getTypeFromTypeNode(valueTypeNode),
+        defaultType: context.typeChecker.getTypeFromTypeNode(valueTypeNode),
+        defaultValue: this.extractDefaultValueFromNode(
+          valueTypeNode,
+          context,
+        ),
+      };
+    }
+
     const resolved = resolveWrapperNode(memberNode, context.typeChecker);
     if (resolved?.kind !== "Default") {
       return undefined;
     }
-
     const defaultNode = memberNode.typeArguments ? memberNode : resolved.node;
     const typeArgs = defaultNode.typeArguments;
     if (!typeArgs || typeArgs.length < 1 || typeArgs.length > 2) {
@@ -325,12 +346,18 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     return {
+      kind: "Default",
       valueTypeNode,
       defaultTypeNode,
       valueType: context.typeChecker.getTypeFromTypeNode(valueTypeNode),
       defaultType: context.typeChecker.getTypeFromTypeNode(defaultTypeNode),
       defaultValue: this.extractDefaultValueFromNode(defaultTypeNode, context),
     };
+  }
+
+  private getTypeReferenceName(typeNode: ts.TypeReferenceNode): string {
+    const typeName = typeNode.typeName;
+    return ts.isIdentifier(typeName) ? typeName.text : typeName.right.text;
   }
 
   private isDefaultCoveredByUnion(
@@ -367,7 +394,27 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     throw new Error(
-      "Default object union member is not assignable to the existing object type. Use Default<T, V> for full defaults or DeepDefault<T, V> for partial object defaults.",
+      "Default object union member is not assignable to the existing object type. Use Default<T, V> for full defaults or DeepDefault<V> for partial object defaults.",
+    );
+  }
+
+  private assertDeepDefaultHasObjectTarget(
+    defaultEntry: DefaultUnionEntry,
+    nonDefaultNodes: readonly ts.TypeNode[],
+    checker: ts.TypeChecker,
+  ): void {
+    const hasObjectTarget = nonDefaultNodes.some((node) =>
+      this.isPlainObjectType(checker.getTypeFromTypeNode(node), checker)
+    );
+    if (
+      hasObjectTarget &&
+      this.isPlainObjectType(defaultEntry.defaultType, checker)
+    ) {
+      return;
+    }
+
+    throw new Error(
+      "DeepDefault must be unioned with an object type and must provide an object default.",
     );
   }
 
@@ -438,6 +485,76 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     return { anyOf };
+  }
+
+  private applySchemaDefault(
+    schema: JSONSchemaMutable,
+    defaultValue: unknown,
+  ): JSONSchemaMutable {
+    if (defaultValue === undefined) {
+      return schema;
+    }
+    const value = defaultValue as NonNullable<JSONSchemaObjMutable["default"]>;
+
+    if (typeof schema === "boolean") {
+      return schema === false
+        ? { not: true, default: value }
+        : { default: value };
+    }
+
+    return {
+      ...schema,
+      default: value,
+    };
+  }
+
+  private applyDeepDefaultToSchema(
+    schema: JSONSchemaMutable,
+    defaultValue: unknown,
+  ): JSONSchemaMutable {
+    const withDefault = this.applySchemaDefault(schema, defaultValue);
+    if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
+      return withDefault;
+    }
+
+    return this.applyObjectPropertyDefaults(withDefault, defaultValue);
+  }
+
+  private applyObjectPropertyDefaults(
+    schema: JSONSchemaObjMutable,
+    defaults: Record<string, unknown>,
+  ): JSONSchemaObjMutable {
+    const properties = isRecord(schema.properties)
+      ? { ...schema.properties }
+      : {};
+
+    for (const [name, value] of Object.entries(defaults)) {
+      properties[name] = this.applyDeepDefaultToProperty(
+        properties[name] as JSONSchemaMutable | undefined,
+        value,
+      );
+    }
+
+    return {
+      ...schema,
+      properties,
+    };
+  }
+
+  private applyDeepDefaultToProperty(
+    schema: JSONSchemaMutable | undefined,
+    defaultValue: unknown,
+  ): JSONSchemaMutable {
+    const withDefault = this.applySchemaDefault(schema ?? true, defaultValue);
+    if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
+      return withDefault;
+    }
+
+    return this.applyObjectPropertyDefaults(withDefault, defaultValue);
+  }
+
+  private isDefaultObject(value: unknown): value is Record<string, unknown> {
+    return isRecord(value) && !Array.isArray(value);
   }
 
   private extractDefaultValueFromNode(
