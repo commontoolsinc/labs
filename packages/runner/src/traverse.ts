@@ -163,21 +163,6 @@ export function stableStringify(value: unknown): string {
 }
 
 export const stableHash = stableStringify;
-
-function hashPathPart(part: string): string {
-  return `${part.length}:${part}`;
-}
-
-function hashSchemaPathSelector(value: SchemaPathSelector): string {
-  const pathHash = value.path.map(hashPathPart).join("/");
-  const schema = value.schema;
-  const schemaHash = schema === undefined
-    ? "u"
-    : typeof schema === "boolean"
-    ? (schema ? "t" : "f")
-    : `s:${hashSchema(schema)}`;
-  return `${value.path.length}|${pathHash}|${schemaHash}`;
-}
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
@@ -325,7 +310,7 @@ export class MapSetStringToPathSelectors extends MapSet<
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? hashSchemaPathSelector : undefined);
+    super(hashValues ? (v) => hashSchemaItem(v).toString() : undefined);
   }
 }
 
