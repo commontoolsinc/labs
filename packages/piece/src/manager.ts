@@ -902,7 +902,6 @@ export class PieceManager {
       "startPiece.result.pull",
       () => this.getResult(piece).pull(),
     );
-    await timePiecePhase("startPiece.synced", () => this.synced());
   }
 
   /** Stop a running piece (no-op if not running). */
