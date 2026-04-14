@@ -14,7 +14,9 @@ const sha256Funcs = [
 ] as const;
 
 beforeAll(async () => {
-  await initWasm();
+  if (!await initWasm()) {
+    throw new Error("`sha256-wasm not available!");
+  }
 });
 
 describe("sha256()", () => {
