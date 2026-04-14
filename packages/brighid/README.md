@@ -545,8 +545,8 @@ The sandbox runtime selection is stable across platforms:
   `runsc run --bundle ...`
 
 On macOS, `docker-cfc` is still a Linux-daemon-backed compatibility path, not a
-native `runsc` runtime. In practice that means Docker must be talking to a
-Linux VM or other Linux daemon that already exposes the configured runtime name
+native `runsc` runtime. In practice that means Docker must be talking to a Linux
+VM or other Linux daemon that already exposes the configured runtime name
 (default `runsc-cfc`).
 
 Useful environment overrides:
@@ -720,9 +720,27 @@ deno task brighid:setup:docker-desktop
 deno task brighid:integration:docker
 ```
 
-Important: the interactive Brighid agent still has many simulated built-in
-commands (`ls`, `cat`, `grep`, `mkdir`, etc.). The Docker-backed runtime is used
-when Brighid takes the real sandboxed bash path, for example:
+Important: the interactive Brighid agent now routes ordinary shell-like commands
+through the real sandboxed backend by default. Commands like `ls`, `cat`,
+`grep`, `mkdir`, `curl`, and `echo` now execute in the real runtime instead of a
+simulated builtin layer.
+
+Current-shell state commands still remain supervisor-side because they must
+mutate Brighid's in-process session state:
+
+```text
+cd
+export
+unset
+env
+printenv
+read
+source
+test
+[
+```
+
+You can still use explicit shell composition when needed:
 
 ```text
 bash -c 'echo hello from docker-cfc'
@@ -730,16 +748,17 @@ eval 'uname -a'
 bash /tmp/script.sh
 ```
 
-So `BRIGHID_SANDBOX_RUNTIME=docker-cfc` does not force every ordinary built-in
-command through Docker; it selects the backend used by real sandboxed bash.
+So `BRIGHID_SANDBOX_RUNTIME=docker-cfc` now gives the interactive agent a real
+sandbox-backed shell experience for ordinary commands, while preserving the
+minimal supervisor-only commands needed for session state.
 
 Also note that Brighid's sandboxed `bash` path currently enables network access
-by default unless you disable it with `BRIGHID_BASH_SANDBOX_ALLOW_NETWORK=0`
-or `BRIGHID_SANDBOX_ALLOW_NETWORK=0`.
+by default unless you disable it with `BRIGHID_BASH_SANDBOX_ALLOW_NETWORK=0` or
+`BRIGHID_SANDBOX_ALLOW_NETWORK=0`.
 
 The lower-level `TEST_BRIGHID_RUNSC_DIRECT=1` suite remains for direct `runsc`
-fallback and exports a rootfs from a Docker image before running Brighid
-through `runsc`.
+fallback and exports a rootfs from a Docker image before running Brighid through
+`runsc`.
 
 ## API Usage
 

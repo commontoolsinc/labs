@@ -77,12 +77,9 @@ export interface LLMClient {
 
 const EXEC_TOOL: ToolDef = {
   description: "Execute a command in the CFC sandbox shell. " +
-    "Built-in commands are available directly: " +
-    "cat, head, tail, wc, diff, grep, sed, sort, uniq, cut, tr, jq, " +
-    "base64, echo, printf, ls, pwd, cd, cp, mv, rm, mkdir, touch, tee, " +
-    "chmod, curl, date, test, true, false, sleep, read, which, xargs. " +
-    "Real sandboxed bash is also available through the bash command. " +
-    "Use built-ins for simple structured operations, and use bash -c or bash <script> when you need genuine shell behavior inside the gVisor sandbox.",
+    "Ordinary shell-like commands use the real sandboxed backend by default. " +
+    "Only current-shell state commands such as cd, export, unset, env, printenv, read, source, test, and [ remain supervisor-side. " +
+    "Use bash -c or bash <script> when you need explicit shell composition or multi-command syntax.",
   inputSchema: {
     type: "object",
     properties: {
