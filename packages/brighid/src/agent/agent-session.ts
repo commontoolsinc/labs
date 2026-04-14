@@ -24,6 +24,7 @@ import { executeWithStdio } from "../interpreter.ts";
 import { VFS } from "../vfs.ts";
 import { createAgentRegistry, createDefaultRegistry } from "../commands/mod.ts";
 import { createEnvironment, type Environment } from "../commands/context.ts";
+import { shellPassthrough } from "../commands/exec.ts";
 import { type AgentPolicy, filterOutput, policies } from "./policy.ts";
 import { AgentEvent, ToolCall, ToolResult } from "./protocol.ts";
 import { LabeledStream } from "../labeled-stream.ts";
@@ -95,6 +96,9 @@ export class AgentSession {
       registry: this.registryMode === "real-shell"
         ? createAgentRegistry()
         : createDefaultRegistry(),
+      commandNotFoundFallback: this.registryMode === "real-shell"
+        ? (commandName, args, ctx) => shellPassthrough(commandName)(args, ctx)
+        : undefined,
       requestIntent: () => {
         // Sub-agents auto-approve intents; main agents deny by default
         return Promise.resolve(this.parent !== null);

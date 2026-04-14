@@ -319,32 +319,6 @@ async function executeSimpleCommand(
 
   // Look up command in registry
   const commandName = expandedName.value;
-  const commandFn = session.registry.get(commandName);
-
-  if (!commandFn) {
-    // Command not found
-    effectiveStderr.write(
-      `${commandName}: command not found\n`,
-      session.pcLabel,
-    );
-
-    // Close streams: always close the ones we're using (effectiveStdout/Stderr),
-    // but only if they were created by redirections (different from passed-in).
-    // If they're the same as passed-in, the caller owns them.
-    if (effectiveStdout !== stdout) {
-      effectiveStdout.close();
-    }
-    if (effectiveStderr !== stderr) {
-      effectiveStderr.close();
-    }
-
-    // Flush redirections
-    for (const flush of flushers) {
-      await flush();
-    }
-
-    return { exitCode: 127, label: session.pcLabel };
-  }
 
   // Build command context
   const ctx: CommandContext = {
@@ -366,8 +340,34 @@ async function executeSimpleCommand(
   // Extract argument values
   const argValues = expandedArgs.map((a) => a.value);
 
+  const commandFn = session.registry.get(commandName);
+
   // Execute command
-  const result = await commandFn(argValues, ctx);
+  const result = commandFn
+    ? await commandFn(argValues, ctx)
+    : session.commandNotFoundFallback
+    ? await session.commandNotFoundFallback(commandName, argValues, ctx)
+    : null;
+
+  if (!result) {
+    effectiveStderr.write(
+      `${commandName}: command not found\n`,
+      session.pcLabel,
+    );
+
+    if (effectiveStdout !== stdout) {
+      effectiveStdout.close();
+    }
+    if (effectiveStderr !== stderr) {
+      effectiveStderr.close();
+    }
+
+    for (const flush of flushers) {
+      await flush();
+    }
+
+    return { exitCode: 127, label: session.pcLabel };
+  }
 
   // Join result label with argument labels and PC
   let commandLabel = labels.joinAll([

@@ -12,12 +12,11 @@
 import { Label, labels } from "./labels.ts";
 import { VFS } from "./vfs.ts";
 import { CommandRegistry } from "./commands/registry.ts";
-import {
-  defaultConfig,
-  type SandboxedExecConfig,
-} from "./sandbox/config.ts";
+import { defaultConfig, type SandboxedExecConfig } from "./sandbox/config.ts";
 import { SandboxedExecutor } from "./sandbox/executor.ts";
 import {
+  type CommandContext,
+  type CommandResult,
   createEnvironment,
   Environment,
   IntentCallback,
@@ -53,6 +52,11 @@ export interface ShellSession {
   /** Mock fetch for testing — if set, curl uses this instead of global fetch */
   mockFetch?: (url: string, init?: RequestInit) => Promise<Response>;
   getSandboxExecutor(config?: SandboxedExecConfig): SandboxedExecutor;
+  commandNotFoundFallback?: (
+    commandName: string,
+    args: string[],
+    ctx: CommandContext,
+  ) => Promise<CommandResult>;
 
   pushPC(label: Label): void;
   popPC(): void;
@@ -63,10 +67,12 @@ function stableStringify(value: unknown): string {
     return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   }
   if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-      .join(",")}}`;
+    return `{${
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+        .join(",")
+    }}`;
   }
   return JSON.stringify(value);
 }
@@ -80,6 +86,11 @@ class ShellSessionImpl implements ShellSession {
   requestIntent: IntentCallback;
   audit: AuditEntry[] = [];
   private sandboxExecutors = new Map<string, SandboxedExecutor>();
+  commandNotFoundFallback?: (
+    commandName: string,
+    args: string[],
+    ctx: CommandContext,
+  ) => Promise<CommandResult>;
 
   // PC label stack (for implicit flows)
   private pcStack: Label[] = [];
@@ -115,7 +126,9 @@ class ShellSessionImpl implements ShellSession {
     }
   }
 
-  getSandboxExecutor(config: SandboxedExecConfig = defaultConfig): SandboxedExecutor {
+  getSandboxExecutor(
+    config: SandboxedExecConfig = defaultConfig,
+  ): SandboxedExecutor {
     const key = stableStringify(config);
     const existing = this.sandboxExecutors.get(key);
     if (existing) {
@@ -137,11 +150,18 @@ export function createSession(options: {
   env?: Environment;
   registry: CommandRegistry;
   requestIntent?: IntentCallback;
+  commandNotFoundFallback?: (
+    commandName: string,
+    args: string[],
+    ctx: CommandContext,
+  ) => Promise<CommandResult>;
 }): ShellSession {
   const vfs = options.vfs || new VFS();
   const env = options.env || createEnvironment();
   const registry = options.registry;
   const requestIntent = options.requestIntent;
 
-  return new ShellSessionImpl(vfs, env, registry, requestIntent);
+  const session = new ShellSessionImpl(vfs, env, registry, requestIntent);
+  session.commandNotFoundFallback = options.commandNotFoundFallback;
+  return session;
 }
