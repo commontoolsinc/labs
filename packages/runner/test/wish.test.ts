@@ -2629,8 +2629,8 @@ describe("interval #now wish", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: ReturnType<Runtime["edit"]>;
-  let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let wish: ReturnType<typeof createBuilder>["commonfabric"]["wish"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -2641,8 +2641,8 @@ describe("interval #now wish", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ wish, pattern } = commontools);
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ wish, pattern } = commonfabric);
   });
 
   afterEach(async () => {
