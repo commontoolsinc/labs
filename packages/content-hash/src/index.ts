@@ -12,7 +12,7 @@
 import type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 import { canUseDeno, createHasherDeno, sha256Deno } from "./sha256-deno.ts";
 import { createHasherNoble, sha256Noble } from "./sha256-noble.ts";
-import { initWasm, createHasherWasm, sha256Wasm } from "./sha256-wasm.ts";
+import { createHasherWasm, initWasm, sha256Wasm } from "./sha256-wasm.ts";
 
 export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
