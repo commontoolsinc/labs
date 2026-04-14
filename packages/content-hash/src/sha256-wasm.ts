@@ -7,12 +7,18 @@ import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { IncrementalHasher } from "./interface.ts";
 
 /**
- * Unique instance of the WASM hasher. We need to do this at module init time
- * because (a) `createSHA256()` is `async` for creation (but synchronous in
- * post-creation operation), and (b) a single instance can be reused
- * sequentially, and (b) we expose an entirely synchronous interface.
+ * How many hashers to have available for concurrent use.
  */
-let theHasher: IHasher | null = null;
+const HASHER_CACHE_SIZE = 30;
+
+/**
+ * Cache of usable hasher instances. This array is populated at module init
+ * time, a tactic that is necessary since this module exposes a synchronous
+ * interface for actual hashing (once loaded), whereas `hash-wasm` only allows
+ * asynchronous hasher construction. Once constructed, though, hashers can be
+ * used synchronously).
+ */
+const theHashers: IHasher[] = [];
 
 /**
  * Promised result of the call to `initIfNecessaryAndPossible()` or `null` if
@@ -21,15 +27,32 @@ let theHasher: IHasher | null = null;
 let initResult: Promise<boolean> | null = null;
 
 /**
- * Gets the hasher instance, or throws an error indicating that this module is
- * not usable.
+ * Is this module actually usable?
  */
-function getHasher(): IHasher {
-  if (theHasher === null) {
+let moduleIsUsable: boolean = false;
+
+/**
+ * Gets a freshly-initialized hasher instance, or throws an error indicating
+ * that this module is not usable.
+ *
+ */
+function acquireHasher(): IHasher {
+  if (!moduleIsUsable) {
     throw new Error("Cannot use `sha256-wasm` in this environment.");
-  } else {
-    return theHasher;
+  } else if (theHashers.length === 0) {
+    throw new Error("Too many concurrent hashers.");
   }
+
+  const result = theHashers.pop()!;
+  result.init();
+  return result;
+}
+
+/**
+ * Releases a previously-acquired hasher, or adds one to the pool.
+ */
+function releaseHasher(hasher: IHasher) {
+  theHashers.push(hasher);
 }
 
 /**
@@ -40,12 +63,16 @@ export function initWasm() {
   if (!initResult) {
     initResult = (async () => {
       try {
-        theHasher = await createSHA256();
+        for (let i = 0; i < HASHER_CACHE_SIZE; i++) {
+          theHashers.push(await createSHA256());
+        }
       } catch {
-        // `hash-wasm` not available.
+        // `hash-wasm` not available, or couldn't be fully initialized.
+        theHashers.length = 0;
       }
 
-      return theHasher !== null;
+      moduleIsUsable = (theHashers.length !== 0);
+      return moduleIsUsable;
     })();
   }
 
@@ -56,24 +83,30 @@ export function initWasm() {
  * WASM-specific incremental hasher.
  */
 class WasmHasher implements IncrementalHasher {
-  #chunks: Uint8Array[] = [];
+  #hasher: IHasher | null = acquireHasher();
+
+  #getHasher(): IHasher {
+    const hasher = this.#hasher;
+
+    if (!hasher) {
+      throw new Error("Already digested.");
+    }
+
+    return hasher;
+  }
 
   update(data: Uint8Array) {
-    // Copy to avoid aliasing shared scratch buffers.
-    this.#chunks.push(new Uint8Array(data));
+    this.#getHasher().update(data);
   }
 
   digest(): Uint8Array;
   digest(encoding: "base64url"): string;
   digest(encoding?: string): Uint8Array | string {
-    const hasher = getHasher();
-    hasher.init();
-
-    for (const chunk of this.#chunks) {
-      hasher.update(chunk);
-    }
-
+    const hasher = this.#getHasher();
     const result: Uint8Array = hasher.digest("binary");
+
+    releaseHasher(hasher);
+    this.#hasher = null;
 
     switch (encoding) {
       case "base64url": {
@@ -93,11 +126,13 @@ class WasmHasher implements IncrementalHasher {
  * Performs a hash on a single array.
  */
 export function sha256Wasm(payload: Uint8Array): Uint8Array {
-  const hasher = getHasher();
+  const hasher = acquireHasher();
 
-  hasher.init();
   hasher.update(payload);
-  return hasher.digest("binary");
+  const result = hasher.digest("binary");
+  releaseHasher(hasher);
+
+  return result;
 }
 
 /**
