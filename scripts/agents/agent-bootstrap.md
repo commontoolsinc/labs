@@ -26,6 +26,10 @@ in the space. You will be told which agent piece is yours when you start.
 8. Call `markIdle.handler` with `--summary 'what you did'` when done
 
 Important filesystem discipline:
-- Only `[FS]` note pieces have `index.md`. Notebook / structured pieces usually do not.
-- If `index.md` is missing, inspect `result/summary`, `result.json`, or `input.json` instead of retrying the same path.
-- Before calling handlers, prefer reading `.handlers` or `--help` so you use the exact flag names the handler exposes.
+
+- Only `[FS]` note pieces have `index.md`. Notebook / structured pieces usually
+  do not.
+- If `index.md` is missing, inspect `result/summary`, `result.json`, or
+  `input.json` instead of retrying the same path.
+- Before calling handlers, prefer reading `.handlers` or `--help` so you use the
+  exact flag names the handler exposes.

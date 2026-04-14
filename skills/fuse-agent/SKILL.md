@@ -119,19 +119,34 @@ secure mode.
 Use Common Fabric safe builtins instead:
 
 ```ts
-import { safeDateNow, nonPrivateRandom } from "commonfabric";
+import { nonPrivateRandom, safeDateNow } from "commonfabric";
 
 const now = safeDateNow();
 const iso = new Date(now).toISOString();
-const id = `${now.toString(36)}-${nonPrivateRandom().toString(36).slice(2, 11)}`;
+const id = `${now.toString(36)}-${
+  nonPrivateRandom().toString(36).slice(2, 11)
+}`;
 ```
 
 This specifically matters for:
+
 - `activity-log.tsx` event creation / timestamps
 - `agent.tsx` lifecycle handlers (`markIdle`, `markError`)
 - any handler-generated IDs or timestamps in experiment support patterns
 
+For event IDs in authored patterns, avoid `Math.random()` too. A safe pattern
+is:
+
+```ts
+const now = safeDateNow();
+const id = `${now.toString(36)}-${
+  nonPrivateRandom().toString(36).slice(2, 11)
+}`;
+const timestamp = new Date(now).toISOString();
+```
+
 If a handler fails with messages like:
+
 - `secure mode Calling new %SharedDate%() with no arguments throws`
 - `secure mode %SharedMath%.random() throws`
 
