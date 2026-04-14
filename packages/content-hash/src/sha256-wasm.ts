@@ -17,7 +17,6 @@ let theHasher: IHasher | null = null;
 /**
  * Promised result of the call to `initIfNecessaryAndPossible()` or `null` if
  * not yet called.
- *
  */
 let initResult: Promise<boolean> | null = null;
 
