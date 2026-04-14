@@ -9,12 +9,22 @@ import {
   cloneSchemaDefinition,
   detectWrapperViaNode,
   getNativeTypeSchema,
+  getPropertyNameText,
+  resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
 import { isRecord } from "@commonfabric/utils/types";
 
 // Simple primitive schemas only have these keys (possibly just one)
 const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);
+
+interface DefaultUnionEntry {
+  readonly valueTypeNode: ts.TypeNode;
+  readonly defaultTypeNode: ts.TypeNode;
+  readonly valueType: ts.Type;
+  readonly defaultType: ts.Type;
+  readonly defaultValue: unknown;
+}
 
 function getTypeNodeMemberType(
   node: ts.TypeNode,
@@ -92,6 +102,13 @@ export class UnionFormatter implements TypeFormatter {
 
     if (members.length === 0) {
       throw new Error("UnionFormatter received empty union type");
+    }
+
+    const defaultUnionSchema = memberNodes
+      ? this.tryFormatDefaultUnion(memberNodes, context)
+      : undefined;
+    if (defaultUnionSchema) {
+      return defaultUnionSchema;
     }
 
     // Detect presence of null
@@ -200,6 +217,247 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     return { anyOf };
+  }
+
+  private tryFormatDefaultUnion(
+    memberNodes: readonly ts.TypeNode[],
+    context: GenerationContext,
+  ): JSONSchemaMutable | undefined {
+    const defaultEntries = memberNodes
+      .map((node, index) => ({
+        index,
+        node,
+        entry: this.getDefaultUnionEntry(node, context),
+      }))
+      .filter((item): item is {
+        index: number;
+        node: ts.TypeNode;
+        entry: DefaultUnionEntry;
+      } => item.entry !== undefined);
+
+    if (defaultEntries.length === 0) {
+      return undefined;
+    }
+    if (defaultEntries.length > 1) {
+      throw new Error(
+        "Union types may contain at most one Default<> member.",
+      );
+    }
+
+    const defaultEntry = defaultEntries[0]!;
+    const nonDefaultNodes = memberNodes.filter((_, index) =>
+      index !== defaultEntry.index
+    );
+
+    const schemas: JSONSchemaMutable[] = [];
+    for (const node of nonDefaultNodes) {
+      schemas.push(this.formatTypeNodeMember(node, context));
+    }
+
+    if (
+      !this.isDefaultCoveredByUnion(
+        defaultEntry.entry,
+        nonDefaultNodes,
+        context.typeChecker,
+      )
+    ) {
+      schemas.push(
+        this.formatTypeNodeMember(defaultEntry.entry.valueTypeNode, context),
+      );
+    }
+
+    const combined = this.combineUnionSchemas(schemas, context);
+    if (defaultEntry.entry.defaultValue === undefined) {
+      return combined;
+    }
+    const defaultValue = defaultEntry.entry
+      .defaultValue as NonNullable<JSONSchemaObjMutable["default"]>;
+
+    if (typeof combined === "boolean") {
+      return combined === false
+        ? { not: true, default: defaultValue }
+        : { default: defaultValue };
+    }
+
+    return {
+      ...combined,
+      default: defaultValue,
+    };
+  }
+
+  private getDefaultUnionEntry(
+    memberNode: ts.TypeNode,
+    context: GenerationContext,
+  ): DefaultUnionEntry | undefined {
+    if (!ts.isTypeReferenceNode(memberNode)) {
+      return undefined;
+    }
+
+    const resolved = resolveWrapperNode(memberNode, context.typeChecker);
+    if (resolved?.kind !== "Default") {
+      return undefined;
+    }
+
+    const defaultNode = memberNode.typeArguments ? memberNode : resolved.node;
+    const typeArgs = defaultNode.typeArguments;
+    if (!typeArgs || typeArgs.length < 1 || typeArgs.length > 2) {
+      throw new Error("Default<T,V> requires 1 or 2 type arguments");
+    }
+
+    const valueTypeNode = typeArgs[0];
+    const defaultTypeNode = typeArgs[1] ?? valueTypeNode;
+    if (!valueTypeNode || !defaultTypeNode) {
+      throw new Error("Default<T,V> type arguments cannot be undefined");
+    }
+    if (
+      typeArgs.length === 1 &&
+      valueTypeNode.kind === ts.SyntaxKind.UndefinedKeyword
+    ) {
+      throw new Error(
+        "Default<undefined> is unsupported; use an optional field or a JSON value default.",
+      );
+    }
+
+    return {
+      valueTypeNode,
+      defaultTypeNode,
+      valueType: context.typeChecker.getTypeFromTypeNode(valueTypeNode),
+      defaultType: context.typeChecker.getTypeFromTypeNode(defaultTypeNode),
+      defaultValue: this.extractDefaultValueFromNode(defaultTypeNode, context),
+    };
+  }
+
+  private isDefaultCoveredByUnion(
+    defaultEntry: DefaultUnionEntry,
+    nonDefaultNodes: readonly ts.TypeNode[],
+    checker: ts.TypeChecker,
+  ): boolean {
+    return nonDefaultNodes.some((node) => {
+      const memberType = checker.getTypeFromTypeNode(node);
+      return checker.isTypeAssignableTo(
+        defaultEntry.defaultType,
+        memberType,
+      );
+    });
+  }
+
+  private formatTypeNodeMember(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const type = context.typeChecker.getTypeFromTypeNode(typeNode);
+    const native = detectWrapperViaNode(typeNode, context.typeChecker) ===
+        undefined
+      ? getNativeTypeSchema(type, context.typeChecker)
+      : undefined;
+    if (native !== undefined) {
+      return cloneSchemaDefinition(native);
+    }
+    return this.schemaGenerator.formatChildType(type, context, typeNode);
+  }
+
+  private combineUnionSchemas(
+    schemas: JSONSchemaMutable[],
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    if (schemas.length === 0) {
+      return true;
+    }
+    if (schemas.length === 1) {
+      return schemas[0]!;
+    }
+    const nullSchema = schemas.find((schema) =>
+      isRecord(schema) && schema.type === "null"
+    );
+    const nonNullSchemas = schemas.filter((schema) => schema !== nullSchema);
+    if (nullSchema && nonNullSchemas.length === 1) {
+      return { anyOf: [nonNullSchemas[0]!, nullSchema] };
+    }
+
+    let unionOptions = schemas;
+    if (context.widenLiterals && unionOptions.length > 1) {
+      unionOptions = this.mergeIdenticalSchemas(unionOptions);
+    }
+
+    const anyOf: JSONSchemaObjMutable[] = [];
+    for (const option of unionOptions) {
+      if (this.mergePrimitiveSchemaIntoAnyOf(anyOf, option)) {
+        return true;
+      }
+    }
+
+    if (anyOf.length === 0) {
+      return false;
+    }
+    if (anyOf.length === 1) {
+      return anyOf[0]!;
+    }
+
+    return { anyOf };
+  }
+
+  private extractDefaultValueFromNode(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): unknown {
+    if (ts.isLiteralTypeNode(typeNode)) {
+      const literal = typeNode.literal;
+      if (ts.isStringLiteral(literal)) return literal.text;
+      if (ts.isNumericLiteral(literal)) return Number(literal.text);
+      if (literal.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (literal.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (literal.kind === ts.SyntaxKind.NullKeyword) return null;
+    }
+
+    if (ts.isTupleTypeNode(typeNode)) {
+      return typeNode.elements.map((element) =>
+        this.extractDefaultValueFromNode(element, context)
+      );
+    }
+
+    if (ts.isTypeLiteralNode(typeNode)) {
+      const obj: Record<string, unknown> = {};
+      for (const member of typeNode.members) {
+        if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+          continue;
+        }
+        const propName = getPropertyNameText(member.name, context.typeChecker);
+        if (!propName) {
+          continue;
+        }
+        obj[propName] = this.extractDefaultValueFromNode(
+          member.type,
+          context,
+        );
+      }
+      return obj;
+    }
+
+    if (typeNode.kind === ts.SyntaxKind.NullKeyword) return null;
+    if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+
+    return this.extractDefaultValue(
+      context.typeChecker.getTypeFromTypeNode(typeNode),
+    );
+  }
+
+  private extractDefaultValue(type: ts.Type): unknown {
+    if (type.flags & ts.TypeFlags.StringLiteral) {
+      return (type as ts.StringLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.NumberLiteral) {
+      return (type as ts.NumberLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.BooleanLiteral) {
+      return (type as TypeWithInternals).intrinsicName === "true";
+    }
+    if (type.flags & ts.TypeFlags.Null) {
+      return null;
+    }
+    if (type.flags & ts.TypeFlags.Undefined) {
+      return undefined;
+    }
+    return undefined;
   }
 
   /**
