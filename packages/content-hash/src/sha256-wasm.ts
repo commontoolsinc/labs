@@ -34,9 +34,9 @@ function getHasher(): IHasher {
 
 /**
  * Performs module-level setup if (a) possible and (b) not already done. Returns
- * `true` if initialization was successful, `false` if not.
+ * (a promise to) `true` if initialization was successful, `false` if not.
  */
-export async function initWasm() {
+export function initWasm() {
   if (!initResult) {
     initResult = (async () => {
       try {
