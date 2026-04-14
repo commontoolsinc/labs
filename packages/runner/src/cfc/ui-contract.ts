@@ -75,12 +75,36 @@ type TrustedDomProvenance = {
   };
 };
 
+const rendererTrustedEvents = new WeakSet<object>();
+
 const isTrustedDomProvenance = (
   provenance: unknown,
 ): provenance is TrustedDomProvenance =>
   isRecord(provenance) &&
   provenance.origin === "dom" &&
   provenance.trusted === true;
+
+export const markRendererTrustedEvent = (event: unknown): void => {
+  if (isRecord(event)) {
+    rendererTrustedEvents.add(event);
+  }
+};
+
+export const propagateRendererTrustedEvent = (
+  source: unknown,
+  target: unknown,
+): void => {
+  if (
+    isRecord(source) &&
+    rendererTrustedEvents.has(source) &&
+    isRecord(target)
+  ) {
+    rendererTrustedEvents.add(target);
+  }
+};
+
+const isRendererTrustedEvent = (event: unknown): boolean =>
+  isRecord(event) && rendererTrustedEvents.has(event);
 
 const trustRequirementsFromContract = (
   contract: Record<string, unknown>,
@@ -332,6 +356,33 @@ export const trustedEventProvenanceMatchesUiContract = (
   return true;
 };
 
+export const recordedTrustedEventProvenanceMatchesUiContract = (
+  provenance: unknown,
+  contract: UiContract | undefined,
+): boolean => {
+  if (!trustedEventProvenanceMatchesUiContract(provenance, contract)) {
+    return false;
+  }
+  const dataset = isRecord(provenance) && isRecord(provenance.ui)
+    ? provenance.ui.uiContractDataset
+    : undefined;
+  if (!isRecord(dataset)) {
+    return false;
+  }
+
+  switch (contract?.helper) {
+    case "UiAction":
+      return dataset.uiAction === contract.action;
+    case "UiPromptSlot":
+      return dataset.uiSurface === contract.surface &&
+        (contract.role === undefined || dataset.uiRole === contract.role);
+    case "UiDisclosure":
+      return dataset.uiDisclosureKind === contract.kind;
+    default:
+      return false;
+  }
+};
+
 export const trustedEventMatchesUiContract = (
   event: unknown,
   contract: UiContract | undefined,
@@ -340,34 +391,23 @@ export const trustedEventMatchesUiContract = (
     return false;
   }
   const serializedEvent = event as SerializedTrustedEvent;
-  if (
-    !trustedEventProvenanceMatchesUiContract(
-      serializedEvent.provenance,
-      contract,
-    )
-  ) {
+  if (!isRendererTrustedEvent(event)) {
     return false;
   }
-  const dataset = serializedEvent.provenance?.ui?.uiContractDataset;
-  if (!isRecord(dataset)) {
-    return false;
-  }
-
-  switch (contract.helper) {
-    case "UiAction":
-      return dataset.uiAction === contract.action;
-    case "UiPromptSlot":
-      return dataset.uiSurface === contract.surface &&
-        (contract.role === undefined || dataset.uiRole === contract.role);
-    case "UiDisclosure":
-      return dataset.uiDisclosureKind === contract.kind;
-  }
+  return recordedTrustedEventProvenanceMatchesUiContract(
+    serializedEvent.provenance,
+    contract,
+  );
 };
 
 const trustedEventMatchCandidates = (event: unknown): unknown[] => {
   const candidates: unknown[] = [];
+  const sourceIsRendererTrusted = isRendererTrustedEvent(event);
   const add = (candidate: unknown) => {
     if (candidate !== undefined && !candidates.includes(candidate)) {
+      if (sourceIsRendererTrusted) {
+        markRendererTrustedEvent(candidate);
+      }
       candidates.push(candidate);
     }
   };

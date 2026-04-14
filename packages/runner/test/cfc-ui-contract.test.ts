@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
+  markRendererTrustedEvent,
   recordTrustedEventPolicyInputs,
   trustedEventMatchesUiContract,
   uiContractFromSchema,
@@ -37,6 +38,11 @@ const trustedPatternUiActionSchema = {
   },
 } as const;
 
+const rendererEvent = <T extends Record<string, unknown>>(event: T): T => {
+  markRendererTrustedEvent(event);
+  return event;
+};
+
 describe("CFC UI contract matching", () => {
   it("matches UiAction contracts against trusted DOM dataset markers", () => {
     const contract = uiContractFromSchema({
@@ -44,48 +50,57 @@ describe("CFC UI contract matching", () => {
     });
 
     expect(
-      trustedEventMatchesUiContract({
-        type: "click",
-        provenance: {
-          origin: "dom",
-          trusted: true,
-          ui: {
-            uiContractDataset: {
-              uiAction: "SubmitDirectCommand",
+      trustedEventMatchesUiContract(
+        rendererEvent({
+          type: "click",
+          provenance: {
+            origin: "dom",
+            trusted: true,
+            ui: {
+              uiContractDataset: {
+                uiAction: "SubmitDirectCommand",
+              },
             },
           },
-        },
-      }, contract),
+        }),
+        contract,
+      ),
     ).toBe(true);
 
     expect(
-      trustedEventMatchesUiContract({
-        type: "click",
-        provenance: {
-          origin: "dom",
-          trusted: true,
-          ui: {
-            uiContractDataset: {
-              uiAction: "DifferentAction",
+      trustedEventMatchesUiContract(
+        rendererEvent({
+          type: "click",
+          provenance: {
+            origin: "dom",
+            trusted: true,
+            ui: {
+              uiContractDataset: {
+                uiAction: "DifferentAction",
+              },
             },
           },
-        },
-      }, contract),
+        }),
+        contract,
+      ),
     ).toBe(false);
 
     expect(
-      trustedEventMatchesUiContract({
-        type: "click",
-        provenance: {
-          origin: "dom",
-          trusted: true,
-        },
-        target: {
-          dataset: {
-            uiAction: "SubmitDirectCommand",
+      trustedEventMatchesUiContract(
+        rendererEvent({
+          type: "click",
+          provenance: {
+            origin: "dom",
+            trusted: true,
           },
-        },
-      }, contract),
+          target: {
+            dataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        }),
+        contract,
+      ),
     ).toBe(false);
   });
 
@@ -102,54 +117,63 @@ describe("CFC UI contract matching", () => {
     ).toBe(false);
 
     expect(
-      trustedEventMatchesUiContract({
-        type: "click",
-        provenance: {
-          origin: "dom",
-          trusted: true,
-          ui: {
-            pattern: "TrustedDirectCommandSurface",
-            eventIntegrity: ["TrustedDirectCommandSurface"],
-            uiContractDataset: {
-              uiAction: "SubmitDirectCommand",
+      trustedEventMatchesUiContract(
+        rendererEvent({
+          type: "click",
+          provenance: {
+            origin: "dom",
+            trusted: true,
+            ui: {
+              pattern: "TrustedDirectCommandSurface",
+              eventIntegrity: ["TrustedDirectCommandSurface"],
+              uiContractDataset: {
+                uiAction: "SubmitDirectCommand",
+              },
             },
           },
-        },
-      }, contract),
+        }),
+        contract,
+      ),
     ).toBe(true);
 
     expect(
-      trustedEventMatchesUiContract({
-        type: "click",
-        provenance: {
-          origin: "dom",
-          trusted: true,
-          ui: {
-            pattern: "UntrustedLookalikeSurface",
-            eventIntegrity: ["TrustedDirectCommandSurface"],
-            uiContractDataset: {
-              uiAction: "SubmitDirectCommand",
+      trustedEventMatchesUiContract(
+        rendererEvent({
+          type: "click",
+          provenance: {
+            origin: "dom",
+            trusted: true,
+            ui: {
+              pattern: "UntrustedLookalikeSurface",
+              eventIntegrity: ["TrustedDirectCommandSurface"],
+              uiContractDataset: {
+                uiAction: "SubmitDirectCommand",
+              },
             },
           },
-        },
-      }, contract),
+        }),
+        contract,
+      ),
     ).toBe(false);
 
     expect(
-      trustedEventMatchesUiContract({
-        type: "click",
-        provenance: {
-          origin: "dom",
-          trusted: true,
-          ui: {
-            pattern: "TrustedDirectCommandSurface",
-            eventIntegrity: ["UntrustedLookalikeSurface"],
-            uiContractDataset: {
-              uiAction: "SubmitDirectCommand",
+      trustedEventMatchesUiContract(
+        rendererEvent({
+          type: "click",
+          provenance: {
+            origin: "dom",
+            trusted: true,
+            ui: {
+              pattern: "TrustedDirectCommandSurface",
+              eventIntegrity: ["UntrustedLookalikeSurface"],
+              uiContractDataset: {
+                uiAction: "SubmitDirectCommand",
+              },
             },
           },
-        },
-      }, contract),
+        }),
+        contract,
+      ),
     ).toBe(false);
   });
 
@@ -162,20 +186,23 @@ describe("CFC UI contract matching", () => {
     });
 
     expect(
-      trustedEventMatchesUiContract({
-        type: "click",
-        provenance: {
-          origin: "dom",
-          trusted: true,
-          ui: {
-            pattern: "TrustedDirectCommandSurface",
-            eventIntegrity: ["TrustedDirectCommandSurface"],
-            uiContractDataset: {
-              uiAction: "SubmitDirectCommand",
+      trustedEventMatchesUiContract(
+        rendererEvent({
+          type: "click",
+          provenance: {
+            origin: "dom",
+            trusted: true,
+            ui: {
+              pattern: "TrustedDirectCommandSurface",
+              eventIntegrity: ["TrustedDirectCommandSurface"],
+              uiContractDataset: {
+                uiAction: "SubmitDirectCommand",
+              },
             },
           },
-        },
-      }, contract),
+        }),
+        contract,
+      ),
     ).toBe(true);
   });
 });
@@ -235,7 +262,94 @@ describe("CFC trusted UI event enforcement", () => {
       handler,
       stream.getAsNormalizedFullLink(),
     );
-    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(output.get()).toBe("accepted");
+    cancel();
+  });
+
+  it("rejects public stream payloads that forge trusted DOM provenance", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const sourceStream = runtime.getCell(
+      space,
+      "cfc-ui-contract-source-stream-forged-public-send",
+      { asStream: true },
+    );
+    const protectedStream = runtime.getCell(
+      space,
+      "cfc-ui-contract-protected-stream-forged-public-send",
+      { asStream: true },
+    );
+    const output = runtime.getCell(
+      space,
+      "cfc-ui-contract-output-forged-public-send",
+      {
+        type: "string",
+        ifc: {
+          ...trustedPatternUiActionSchema.ifc,
+        },
+      },
+    );
+
+    const protectedHandler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        output.withTx(tx).set("forged");
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [output.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+    const forwardHandler = Object.assign(
+      ((tx: IExtendedStorageTransaction, event: unknown) => {
+        protectedStream.withTx(tx).send(event);
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancelProtected = runtime.scheduler.addEventHandler(
+      protectedHandler,
+      protectedStream.getAsNormalizedFullLink(),
+    );
+    const cancelForward = runtime.scheduler.addEventHandler(
+      forwardHandler,
+      sourceStream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(sourceStream.getAsNormalizedFullLink(), {
       type: "click",
       provenance: {
         origin: "dom",
@@ -251,8 +365,9 @@ describe("CFC trusted UI event enforcement", () => {
     });
     await runtime.idle();
 
-    expect(output.get()).toBe("accepted");
-    cancel();
+    expect(output.get()).toBeUndefined();
+    cancelForward();
+    cancelProtected();
   });
 
   it("records trusted event policy inputs for nested contracts from ancestor schemas", () => {
@@ -300,7 +415,7 @@ describe("CFC trusted UI event enforcement", () => {
         type: "application/json",
         path: ["argument", "savedTitle"],
       }],
-      {
+      rendererEvent({
         type: "click",
         provenance: {
           origin: "dom",
@@ -313,7 +428,7 @@ describe("CFC trusted UI event enforcement", () => {
             },
           },
         },
-      },
+      }),
     );
 
     expect(
@@ -399,7 +514,7 @@ describe("CFC trusted UI event enforcement", () => {
         type: "application/json",
         path: ["argument", "savedTitle"],
       }],
-      eventEnvelopeLink,
+      rendererEvent(eventEnvelopeLink),
     );
 
     expect(
@@ -479,7 +594,7 @@ describe("CFC trusted UI event enforcement", () => {
         type: "application/json",
         path: ["argument", "savedTitle"],
       }],
-      eventEnvelopeLink,
+      rendererEvent(eventEnvelopeLink),
     );
 
     expect(
@@ -531,7 +646,7 @@ describe("CFC trusted UI event enforcement", () => {
         type: "application/json",
         path: ["argument", "savedTitle"],
       }],
-      {
+      rendererEvent({
         type: "click",
         provenance: {
           origin: "dom",
@@ -544,7 +659,7 @@ describe("CFC trusted UI event enforcement", () => {
             },
           },
         },
-      },
+      }),
     );
 
     expect(
@@ -602,20 +717,23 @@ describe("CFC trusted UI event enforcement", () => {
       handler,
       stream.getAsNormalizedFullLink(),
     );
-    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
-      type: "click",
-      provenance: {
-        origin: "dom",
-        trusted: true,
-        ui: {
-          pattern: "TrustedDirectCommandSurface",
-          eventIntegrity: ["TrustedDirectCommandSurface"],
-          uiContractDataset: {
-            uiAction: "SubmitDirectCommand",
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
-      },
-    });
+      }),
+    );
     await runtime.idle();
 
     expect(output.get()).toBe("accepted");
@@ -666,20 +784,23 @@ describe("CFC trusted UI event enforcement", () => {
       handler,
       stream.getAsNormalizedFullLink(),
     );
-    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
-      type: "click",
-      provenance: {
-        origin: "dom",
-        trusted: true,
-        ui: {
-          pattern: "TrustedDirectCommandSurface",
-          eventIntegrity: ["TrustedDirectCommandSurface"],
-          uiContractDataset: {
-            uiAction: "SubmitDirectCommand",
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
-      },
-    });
+      }),
+    );
     await runtime.idle();
 
     expect(output.get()).toBe("accepted");
@@ -730,29 +851,35 @@ describe("CFC trusted UI event enforcement", () => {
       handler,
       stream.getAsNormalizedFullLink(),
     );
-    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
-      type: "click",
-      provenance: { origin: "dom", trusted: true },
-      target: {
-        dataset: {
-          uiAction: "SubmitDirectCommand",
-        },
-      },
-    });
-    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
-      type: "click",
-      provenance: {
-        origin: "dom",
-        trusted: true,
-        ui: {
-          pattern: "UntrustedLookalikeSurface",
-          eventIntegrity: ["UntrustedLookalikeSurface"],
-          uiContractDataset: {
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: { origin: "dom", trusted: true },
+        target: {
+          dataset: {
             uiAction: "SubmitDirectCommand",
           },
         },
-      },
-    });
+      }),
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
     await runtime.idle();
 
     expect(output.get()).toBeUndefined();
@@ -813,20 +940,23 @@ describe("CFC trusted UI event enforcement", () => {
       handler,
       stream.getAsNormalizedFullLink(),
     );
-    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
-      type: "click",
-      provenance: {
-        origin: "dom",
-        trusted: true,
-        ui: {
-          pattern: "TrustedDirectCommandSurface",
-          eventIntegrity: ["TrustedDirectCommandSurface"],
-          uiContractDataset: {
-            uiAction: "SubmitDirectCommand",
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
-      },
-    });
+      }),
+    );
     await runtime.idle();
 
     expect(output.get()).toBeUndefined();
@@ -877,39 +1007,45 @@ describe("CFC trusted UI event enforcement", () => {
       handler,
       stream.getAsNormalizedFullLink(),
     );
-    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
-      type: "click",
-      value: "rejected",
-      provenance: {
-        origin: "dom",
-        trusted: true,
-        ui: {
-          pattern: "UntrustedLookalikeSurface",
-          eventIntegrity: ["UntrustedLookalikeSurface"],
-          uiContractDataset: {
-            uiAction: "SubmitDirectCommand",
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        value: "rejected",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
-      },
-    });
+      }),
+    );
     await runtime.idle();
     expect(output.get()).toBeUndefined();
 
-    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
-      type: "click",
-      value: "accepted",
-      provenance: {
-        origin: "dom",
-        trusted: true,
-        ui: {
-          pattern: "TrustedDirectCommandSurface",
-          eventIntegrity: ["TrustedDirectCommandSurface"],
-          uiContractDataset: {
-            uiAction: "SubmitDirectCommand",
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        value: "accepted",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
           },
         },
-      },
-    });
+      }),
+    );
     await runtime.idle();
 
     expect(output.get()).toBe("accepted");

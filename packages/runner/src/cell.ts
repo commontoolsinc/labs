@@ -102,6 +102,7 @@ import {
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
+import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 ensureNotRenderThread();
@@ -801,6 +802,7 @@ export class CellImpl<T extends FabricValue>
     if (this.isStream(resolvedToValueLink)) {
       // Stream behavior
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
+      propagateRendererTrustedEvent(newValue, event);
 
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(

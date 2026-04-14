@@ -1,5 +1,7 @@
 import { computed, handler, pattern, Writable } from "commonfabric";
 import {
+  DISCLAIMER_EXAMPLE_COUNT,
+  DISCLAIMER_RENDERED_EXAMPLE_COUNT,
   TrustedDisclaimerAckHost,
   TrustedFactCheckGateHost,
   TrustedProvenanceReviewHost,
@@ -126,6 +128,10 @@ export default pattern(() => {
       "The host lookalike never changed the trusted output." &&
     lookalikeAcknowledged.get() === ""
   );
+  const assert_gallery_renders_catalog = computed(() =>
+    DISCLAIMER_EXAMPLE_COUNT === 14 &&
+    DISCLAIMER_RENDERED_EXAMPLE_COUNT === DISCLAIMER_EXAMPLE_COUNT
+  );
 
   return {
     tests: [
@@ -137,6 +143,7 @@ export default pattern(() => {
       { assertion: assert_fact_check_disclosure_is_render_only },
       { action: runLookalikeOnly({ suite: lookalike }) },
       { assertion: assert_lookalike_stays_untrusted },
+      { assertion: assert_gallery_renders_catalog },
     ],
     influence,
     provenance,

@@ -84,32 +84,58 @@ type DisclosureContentArgument = {
   content: string;
 };
 
+const PROMPT_INFLUENCE_ATOM = {
+  type: "https://commonfabric.org/cfc/atom/Caveat",
+  kind: "prompt-influence",
+  source: {
+    type: "https://commonfabric.org/cfc/atom/Resource",
+    class: "PromptInfluenceSource",
+    subject: "did:example:cfc-spec-gallery",
+  },
+} as const;
+const SOURCE_PROVENANCE_ATOM = {
+  type: "https://commonfabric.org/cfc/atom/Resource",
+  class: "SourceProvenance",
+  subject: "did:example:cfc-spec-gallery",
+} as const;
+const FACT_CHECK_REQUIRED_ATOM = {
+  type: "https://commonfabric.org/cfc/atom/Caveat",
+  kind: "fact-check-required",
+  source: {
+    type: "https://commonfabric.org/cfc/atom/Resource",
+    class: "ExternalClaim",
+    subject: "did:example:cfc-spec-gallery",
+  },
+} as const;
+type PromptInfluenceLabel = readonly [typeof PROMPT_INFLUENCE_ATOM];
+type SourceProvenanceLabel = readonly [typeof SOURCE_PROVENANCE_ATOM];
+type FactCheckRequiredLabel = readonly [typeof FACT_CHECK_REQUIRED_ATOM];
+
 const makePromptInfluenceDisclosure = lift<
   DisclosureContentArgument,
-  Writable<Confidential<string, readonly ["prompt-influence"]>>
+  Writable<Confidential<string, PromptInfluenceLabel>>
 >((input) =>
-  Cell.for<Confidential<string, readonly ["prompt-influence"]>>(input.id).set(
-    input.content as Confidential<string, readonly ["prompt-influence"]>,
+  Cell.for<Confidential<string, PromptInfluenceLabel>>(input.id).set(
+    input.content as Confidential<string, PromptInfluenceLabel>,
   )
 );
 
 const makeSourceProvenanceDisclosure = lift<
   DisclosureContentArgument,
-  Writable<Confidential<string, readonly ["source-provenance"]>>
+  Writable<Confidential<string, SourceProvenanceLabel>>
 >((input) =>
-  Cell.for<Confidential<string, readonly ["source-provenance"]>>(input.id).set(
-    input.content as Confidential<string, readonly ["source-provenance"]>,
+  Cell.for<Confidential<string, SourceProvenanceLabel>>(input.id).set(
+    input.content as Confidential<string, SourceProvenanceLabel>,
   )
 );
 
 const makeFactCheckDisclosure = lift<
   DisclosureContentArgument,
-  Writable<Confidential<string, readonly ["fact-check-required"]>>
+  Writable<Confidential<string, FactCheckRequiredLabel>>
 >((input) =>
-  Cell.for<Confidential<string, readonly ["fact-check-required"]>>(input.id)
-    .set(
-      input.content as Confidential<string, readonly ["fact-check-required"]>,
-    )
+  Cell.for<Confidential<string, FactCheckRequiredLabel>>(input.id).set(
+    input.content as Confidential<string, FactCheckRequiredLabel>,
+  )
 );
 
 interface GalleryOutput {
@@ -474,7 +500,7 @@ export default pattern<Record<PropertyKey, never>, GalleryOutput>(() => {
                   </cf-vstack>
                   <cf-badge id="forward-stage">{forwardStage}</cf-badge>
                 </cf-hstack>
-                {forwardSurface}
+                <cf-render $cell={forwardSurface} />
               </cf-vstack>
             </cf-card>
 
@@ -490,7 +516,7 @@ export default pattern<Record<PropertyKey, never>, GalleryOutput>(() => {
                   </cf-vstack>
                   <cf-badge id="research-stage">{researchStage}</cf-badge>
                 </cf-hstack>
-                {directCommandSurface}
+                <cf-render $cell={directCommandSurface} />
               </cf-vstack>
             </cf-card>
 
@@ -506,7 +532,7 @@ export default pattern<Record<PropertyKey, never>, GalleryOutput>(() => {
                   </cf-vstack>
                   <cf-badge id="safe-link-stage">{safeLinkStage}</cf-badge>
                 </cf-hstack>
-                {safeLinkSurface}
+                <cf-render $cell={safeLinkSurface} />
               </cf-vstack>
             </cf-card>
 

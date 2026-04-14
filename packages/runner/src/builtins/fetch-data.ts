@@ -258,14 +258,15 @@ export function fetchData(
             // properties (like options.headers) fully resolved, safe to use
             // after commit.
             snapshotFetchDataInputs,
+            inputHash,
           ).then(
-            ({ claimed, inputs, inputHash }) => {
+            ({ claimed }) => {
               if (!claimed) {
                 // Another tab is handling this, we're done
                 return;
               }
 
-              const { url, mode, options } = inputs;
+              const { url, mode, options } = inputsSnapshot;
 
               // Clear any previous result/error when starting a new fetch
               // This ensures observers see a clean pending state
@@ -301,7 +302,7 @@ export function fetchData(
                 url,
                 mode,
                 options,
-                inputHash,
+                newRequestId,
                 pending,
                 result,
                 error,

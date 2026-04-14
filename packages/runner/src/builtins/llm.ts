@@ -126,7 +126,9 @@ function createUpdatePartialCallback(
 async function executeWithToolsLoop(params: {
   initialMessages: readonly BuiltInLLMMessage[];
   llmParams: LLMRequest;
-  toolCatalog: ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>;
+  toolCatalog?:
+    | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
+    | undefined;
   updatePartial: (text: string) => void;
   runtime: Runtime;
   space: any;
@@ -153,8 +155,10 @@ async function executeWithToolsLoop(params: {
     const requestParams: LLMRequest = {
       ...llmParams,
       messages: currentMessages,
-      tools: toolCatalog?.llmTools,
     };
+    if (toolCatalog && requestParams.tools === undefined) {
+      requestParams.tools = toolCatalog.llmTools;
+    }
 
     const llmResult = await client.sendRequest(requestParams, updatePartial);
 
@@ -382,7 +386,16 @@ export function llm(
       // tools will be added below if present
     };
 
-    const requestSnapshot = createFrozenRequestSnapshot(llmParams);
+    const toolsCell = inputs.key("tools").asSchema({
+      type: "object",
+      additionalProperties: LLMToolSchema,
+    });
+    const toolCatalog = toolsCell
+      ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+      : undefined;
+    const requestSnapshot = createFrozenRequestSnapshot(
+      toolCatalog ? { ...llmParams, tools: toolCatalog.llmTools } : llmParams,
+    );
     const hash = hashOf(requestSnapshot).toString();
     const queueName = inputs.key("queue").withTx(tx).get() as unknown as
       | string
@@ -429,21 +442,13 @@ export function llm(
       () => {
         const resultPromise = (async () => {
           try {
-            const toolsCell = inputs.key("tools").asSchema({
-              type: "object",
-              additionalProperties: LLMToolSchema,
-            });
-            const toolCatalog = toolsCell
-              ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-              : undefined;
-
             const doWork = () =>
               executeWithToolsLoop({
                 initialMessages:
                   (messages as unknown as readonly BuiltInLLMMessage[]) ??
                     [],
-                llmParams,
-                toolCatalog: toolCatalog!,
+                llmParams: requestSnapshot,
+                toolCatalog,
                 updatePartial,
                 runtime,
                 space: parentCell.space,
@@ -594,7 +599,16 @@ export function generateText(
       // tools will be added below if present
     };
 
-    const requestSnapshot = createFrozenRequestSnapshot(llmParams);
+    const toolsCell = inputs.key("tools").asSchema({
+      type: "object",
+      additionalProperties: LLMToolSchema,
+    });
+    const toolCatalog = toolsCell
+      ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+      : undefined;
+    const requestSnapshot = createFrozenRequestSnapshot(
+      toolCatalog ? { ...llmParams, tools: toolCatalog.llmTools } : llmParams,
+    );
     const hash = hashOf(requestSnapshot).toString();
     const queueName = inputs.key("queue").withTx(tx).get() as unknown as
       | string
@@ -653,19 +667,11 @@ export function generateText(
       () => {
         const resultPromise = (async () => {
           try {
-            const toolsCell = inputs.key("tools").asSchema({
-              type: "object",
-              additionalProperties: LLMToolSchema,
-            });
-            const toolCatalog = toolsCell
-              ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-              : undefined;
-
             const doWork = () =>
               executeWithToolsLoop({
                 initialMessages: requestMessages,
                 llmParams: requestSnapshot,
-                toolCatalog: toolCatalog!,
+                toolCatalog,
                 updatePartial,
                 runtime,
                 space: parentCell.space,
@@ -828,8 +834,36 @@ export function generateObject<T extends Record<string, unknown>>(
         cache: cache ?? true,
       };
 
+      const toolsCell = inputs.key("tools").asSchema({
+        type: "object",
+        additionalProperties: LLMToolSchema,
+      });
+      const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
+        toolsCell,
+      );
+
+      // Add presentResult builtin tool.
+      const toolCatalog = {
+        ...baseCatalog,
+        llmTools: {
+          ...baseCatalog.llmTools,
+          [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
+            description:
+              "Call this tool with the final structured result matching the required schema. This should be your last action.",
+            // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
+            // cloneSchemaMutable() before turning on modern data-model.
+            inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
+              JSON.parse(JSON.stringify(schema)),
+            ),
+          },
+        },
+      };
+      const llmParamsWithTools: LLMRequest = {
+        ...llmParams,
+        tools: toolCatalog.llmTools,
+      };
       const requestSnapshot = createFrozenRequestSnapshot(
-        JSON.parse(JSON.stringify({ ...llmParams, schema })),
+        JSON.parse(JSON.stringify({ ...llmParamsWithTools, schema })),
       );
       const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
@@ -886,31 +920,6 @@ export function generateObject<T extends Record<string, unknown>>(
         () => {
           const resultPromise = (async () => {
             try {
-              const toolsCell = inputs.key("tools").asSchema({
-                type: "object",
-                additionalProperties: LLMToolSchema,
-              });
-              const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
-                toolsCell,
-              );
-
-              // Add presentResult builtin tool
-              const toolCatalog = {
-                ...baseCatalog,
-                llmTools: {
-                  ...baseCatalog.llmTools,
-                  [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
-                    description:
-                      "Call this tool with the final structured result matching the required schema. This should be your last action.",
-                    // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-                    // cloneSchemaMutable() before turning on modern data-model.
-                    inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
-                      JSON.parse(JSON.stringify(schema)),
-                    ),
-                  },
-                },
-              };
-
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
 
@@ -921,9 +930,8 @@ export function generateObject<T extends Record<string, unknown>>(
                 if (isRunCancelled()) return;
 
                 const requestParams: LLMRequest = {
-                  ...llmParams,
+                  ...llmParamsWithTools,
                   messages: currentMessages,
-                  tools: toolCatalog.llmTools,
                 };
 
                 const llmResult = await client.sendRequest(

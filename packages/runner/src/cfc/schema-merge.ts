@@ -177,11 +177,6 @@ const assertNoDivergentIfcBranches = (
   ].filter((value) => value !== undefined);
 
   for (const [kind, branches] of branchGroups) {
-    if (object.ifc !== undefined) {
-      throw new Error(
-        `divergent ${kind} schemas cannot carry ifc at ${path || "/"}`,
-      );
-    }
     if (branches.some(branchContainsIfc)) {
       throw new Error(
         `ifc inside divergent ${kind} branches is unsupported at ${

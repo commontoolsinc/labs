@@ -37,6 +37,15 @@ export default pattern(() => {
   const action_membership = trigger({
     stream: instance.runHotelMembershipReturn,
   });
+  const action_select_search_result = trigger({
+    stream: instance.runSelectSearchResult,
+  });
+  const action_finalize_checklist = trigger({
+    stream: instance.runFinalizeChecklist,
+  });
+  const action_confirm_receipt = trigger({
+    stream: instance.runConfirmReceipt,
+  });
 
   const action_change_forward_recipient = sendString({
     stream: instance.setForwardRecipient,
@@ -78,8 +87,9 @@ export default pattern(() => {
     instance.completedCount === 3 &&
     instance.lastCompleted === "release-safe-link"
   );
-  const assert_placeholder_actions = computed(() =>
-    instance.totalExamples === 16
+  const assert_remaining_actions_do_not_regress_completed_flow = computed(() =>
+    instance.completedCount >= 3 &&
+    instance.lastCompleted !== ""
   );
 
   return {
@@ -103,7 +113,10 @@ export default pattern(() => {
       { action: action_release_safe_link },
       { assertion: assert_safe_link_released },
       { action: action_membership },
-      { assertion: assert_placeholder_actions },
+      { action: action_select_search_result },
+      { action: action_finalize_checklist },
+      { action: action_confirm_receipt },
+      { assertion: assert_remaining_actions_do_not_regress_completed_flow },
     ],
     instance,
   };

@@ -43,6 +43,7 @@ import { isWorkerVNode } from "./types.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForCell,
+  markRendererTrustedEvent,
 } from "@commonfabric/runner/cfc";
 import type { VDomOp } from "../vdom-ops.ts";
 import { generateChildKeys } from "./keying.ts";
@@ -238,6 +239,7 @@ export class WorkerReconciler {
     const handler = this.handlers.get(handlerId);
     if (handler) {
       try {
+        markRendererTrustedEvent(event);
         handler(event);
       } catch (error) {
         this.onError?.(
@@ -505,10 +507,10 @@ export class WorkerReconciler {
     parentMax: readonly unknown[] | undefined,
     localMax: readonly unknown[] | undefined,
   ): readonly unknown[] | undefined {
-    if (parentMax === undefined || parentMax.length === 0) {
+    if (parentMax === undefined) {
       return localMax;
     }
-    if (localMax === undefined || localMax.length === 0) {
+    if (localMax === undefined) {
       return parentMax;
     }
     return parentMax.filter((atom) =>

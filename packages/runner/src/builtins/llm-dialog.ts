@@ -605,6 +605,13 @@ type ToolCatalog = {
   dynamicToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
 };
 
+type DialogRequestSnapshot = {
+  llmParams: LLMRequest;
+  toolCatalog: ToolCatalog;
+  userResultSchema: unknown;
+  queueName?: string;
+};
+
 function collectToolEntries(
   toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
 ): { legacy: LegacyToolEntry[]; pieces: PieceToolEntry[] } {
@@ -1053,6 +1060,67 @@ function buildToolCatalog(
   };
 
   return { llmTools, dynamicToolCells };
+}
+
+function materializeDialogRequestSnapshot(
+  runtime: Runtime,
+  space: MemorySpace,
+  inputs: Cell<Schema<typeof LLMParamsSchema>>,
+  pinnedCells: Cell<PinnedCell[]>,
+  tx: IExtendedStorageTransaction,
+): DialogRequestSnapshot {
+  const { system, maxTokens, model } = inputs.withTx(tx).get();
+  const context = inputs.key("context").withTx(tx).get();
+  const toolsCell = inputs.key("tools").withTx(tx) as Cell<
+    Record<string, Schema<typeof LLMToolSchema>>
+  >;
+  const toolCatalog = buildToolCatalog(toolsCell);
+  const userResultSchema = inputs.key("resultSchema").withTx(tx).get();
+  if (userResultSchema) {
+    toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
+      description:
+        "Call this tool to present a structured result. This stores the result for the caller.",
+      inputSchema: prepareSchemaForLLM(
+        JSON.parse(JSON.stringify(userResultSchema)),
+      ),
+    };
+  }
+
+  const cellsDocs = buildAvailableCellsDocumentation(
+    runtime,
+    space,
+    context,
+    pinnedCells.withTx(tx),
+  );
+  const linkModelDocs =
+    "\n\n# Link and Cell Model\n\nThe system organizes all data and computation into cells. Use links to navigate between related data and compose tool operations.";
+  const listRecentHint =
+    "\n\nIf the user's request is unclear or you need context about what they're referring to, call listRecent() to see recently viewed pieces.";
+  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
+    listRecentHint;
+
+  const llmParams = {
+    system: augmentedSystem,
+    messages: inputs.key("messages").withTx(tx)
+      .get() as readonly BuiltInLLMMessage[],
+    maxTokens: maxTokens ?? 4096,
+    stream: true,
+    model: model ?? DEFAULT_MODEL_NAME,
+    metadata: { context: "piece" },
+    cache: true,
+    tools: toolCatalog.llmTools,
+  };
+
+  return {
+    llmParams: createFrozenRequestSnapshot(
+      JSON.parse(JSON.stringify(llmParams)),
+    ),
+    toolCatalog,
+    userResultSchema,
+    queueName: inputs.key("queue").withTx(tx).get() as unknown as
+      | string
+      | undefined,
+  };
 }
 
 /**
@@ -2067,15 +2135,16 @@ export function llmDialog(
             lastActivity: Date.now(),
           });
 
+          const capturedRequest = materializeDialogRequestSnapshot(
+            runtime,
+            parentCell.space,
+            inputs,
+            pinnedCells,
+            tx,
+          );
           const requestSnapshot = createFrozenRequestSnapshot({
-            requestId: nextRequestId,
-            model: inputs.key("model").withTx(tx).get() ?? DEFAULT_MODEL_NAME,
-            maxTokens: inputs.key("maxTokens").withTx(tx).get() ?? 4096,
-            messageCount: inputs.key("messages").withTx(tx).get()?.length ?? 0,
-            hasTools: Boolean(inputs.key("tools").withTx(tx).get()),
-            hasResultSchema: Boolean(
-              inputs.key("resultSchema").withTx(tx).get(),
-            ),
+            ...capturedRequest.llmParams,
+            resultSchema: capturedRequest.userResultSchema,
           });
 
           enqueueSinkRequestPostCommitEffect(
@@ -2101,6 +2170,7 @@ export function llmDialog(
                 result,
                 nextRequestId,
                 abortController.signal,
+                capturedRequest,
               );
             },
           );
@@ -2235,6 +2305,8 @@ async function startRequest(
   result: Cell<Schema<typeof resultSchema>>,
   requestId: string,
   abortSignal: AbortSignal,
+  capturedRequest?: DialogRequestSnapshot,
+  useCapturedMessages = true,
 ) {
   // Pull input dependencies to ensure they're computed in pull mode
   await inputs.pull();
@@ -2261,7 +2333,8 @@ async function startRequest(
   }
 
   const { system, maxTokens, model } = inputs.get();
-  const queueName = inputs.key("queue").get() as unknown as string | undefined;
+  const queueName = capturedRequest?.queueName ??
+    (inputs.key("queue").get() as unknown as string | undefined);
 
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools") as Cell<
@@ -2292,11 +2365,14 @@ async function startRequest(
     result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
   });
 
-  const toolCatalog = buildToolCatalog(toolsCell);
+  const toolCatalog = capturedRequest?.toolCatalog ?? buildToolCatalog(
+    toolsCell,
+  );
 
   // If resultSchema is provided, inject presentResult built-in tool
-  const userResultSchema = inputs.key("resultSchema").get();
-  if (userResultSchema) {
+  const userResultSchema = capturedRequest?.userResultSchema ??
+    inputs.key("resultSchema").get();
+  if (userResultSchema && capturedRequest === undefined) {
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
@@ -2366,16 +2442,24 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
   const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
     listRecentHint;
 
-  const llmParams: LLMRequest = {
-    system: augmentedSystem,
-    messages: messagesCell.get() as readonly BuiltInLLMMessage[],
-    maxTokens: maxTokens,
-    stream: true,
-    model: model ?? DEFAULT_MODEL_NAME,
-    metadata: { context: "piece" },
-    cache: true,
-    tools: toolCatalog.llmTools,
-  };
+  const liveMessages = messagesCell.get() as readonly BuiltInLLMMessage[];
+  const llmParams: LLMRequest = capturedRequest
+    ? {
+      ...capturedRequest.llmParams,
+      messages: useCapturedMessages
+        ? capturedRequest.llmParams.messages
+        : liveMessages,
+    }
+    : {
+      system: augmentedSystem,
+      messages: liveMessages,
+      maxTokens: maxTokens,
+      stream: true,
+      model: model ?? DEFAULT_MODEL_NAME,
+      metadata: { context: "piece" },
+      cache: true,
+      tools: toolCatalog.llmTools,
+    };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
   const doWork = () => client.sendRequest(llmParams, () => {}, abortSignal);
@@ -2574,6 +2658,8 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               result,
               requestId,
               abortSignal,
+              capturedRequest,
+              false,
             );
           } else {
             logger.info(

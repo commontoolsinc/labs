@@ -35,3 +35,4 @@ export {
   INITIAL_SINK_ROLLOUT_GATE,
   isInitialSinkInventoryName,
 } from "./sink-inventory.ts";
+export { markRendererTrustedEvent } from "./ui-contract.ts";

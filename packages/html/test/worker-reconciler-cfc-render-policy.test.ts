@@ -473,6 +473,42 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "preserves an outer unlabeled-only boundary through an unbounded child boundary",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: { maxConfidentiality: [] },
+          children: [{
+            type: "vnode",
+            name: "cf-cfc-render-boundary",
+            props: { $value: confidential },
+            children: ["Sensitive diagnosis: migraine"],
+          }],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "reveals materialized children when boundary updates to declassify",
       async () => {
         const collector = createOpsCollector();

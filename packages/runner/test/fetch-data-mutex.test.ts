@@ -11,7 +11,12 @@ import {
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
 import { setPatternEnvironment } from "../src/env.ts";
-import { computeInputHashFromValue } from "../src/builtins/fetch-utils.ts";
+import {
+  computeInputHashFromValue,
+  internalSchema,
+  tryClaimMutex,
+} from "../src/builtins/fetch-utils.ts";
+import type { Schema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-data mutex");
 const space = signer.did();
@@ -205,6 +210,60 @@ describe("fetch-data mutex mechanism", () => {
       txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
       wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
     }
+  });
+
+  it("does not claim a post-commit fetch mutex when live inputs differ from the approved snapshot", async () => {
+    const inputs = runtime.getCell<{
+      url?: string;
+      mode?: "json" | "text";
+    }>(space, "fetch-mutex-approved-inputs", undefined, tx);
+    const pending = runtime.getCell<boolean>(
+      space,
+      "fetch-mutex-approved-pending",
+      undefined,
+      tx,
+    );
+    const result = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-approved-result",
+      undefined,
+      tx,
+    );
+    const error = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-approved-error",
+      undefined,
+      tx,
+    );
+    const internal = runtime.getCell<Schema<typeof internalSchema>>(
+      space,
+      "fetch-mutex-approved-internal",
+      undefined,
+      tx,
+    );
+    inputs.set({ url: "/api/mutated", mode: "json" });
+    pending.set(false);
+    internal.set({ requestId: "", lastActivity: 0, inputHash: "" });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const approvedSnapshot = { url: "/api/approved", mode: "json" as const };
+    const approvedHash = computeInputHashFromValue(approvedSnapshot);
+    const claim = await tryClaimMutex(
+      runtime,
+      inputs,
+      pending,
+      result,
+      error,
+      internal,
+      approvedHash,
+      (cell) => cell.get() ?? {},
+      approvedHash,
+    );
+
+    expect(claim.claimed).toBe(false);
+    expect(claim.inputHash).not.toBe(approvedHash);
+    expect(pending.get()).toBe(false);
   });
 
   it("should handle concurrent requests with same inputs (mutex test)", async () => {

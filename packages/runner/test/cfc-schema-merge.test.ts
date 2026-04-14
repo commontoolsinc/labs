@@ -150,4 +150,22 @@ describe("mergeCfcSchemaEnvelopes", () => {
       })
     ).toThrow(/divergent.*ifc|ifc.*divergent/i);
   });
+
+  it("allows branch-external ifc labels beside divergent schemas", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      anyOf: [
+        { type: "string" },
+        { type: "number" },
+      ],
+      ifc: { confidentiality: ["secret"] },
+    }, {
+      anyOf: [
+        { type: "string" },
+        { type: "number" },
+      ],
+      ifc: { confidentiality: ["secret"] },
+    });
+
+    expect((merged as JSONSchemaObj).ifc?.confidentiality).toEqual(["secret"]);
+  });
 });

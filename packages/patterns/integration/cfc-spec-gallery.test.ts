@@ -127,7 +127,7 @@ describe("cfc spec gallery integration test", () => {
 
     await waitForCfcLabelText(page, [
       "prompt-influence",
-      "source-provenance",
+      "SourceProvenance",
       "fact-check-required",
     ]);
   });

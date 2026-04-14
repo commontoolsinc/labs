@@ -4,6 +4,8 @@ import {
   DirectMessageSendExample,
   HostLookalikeControlExample,
   ProjectUpdatePublishExample,
+  SEND_PUBLISH_EXAMPLE_COUNT,
+  SEND_PUBLISH_RENDERED_EXAMPLE_COUNT,
 } from "./send-publish-examples.tsx";
 
 type ChatThreadSuite = ReturnType<typeof ChatThreadSendExample>;
@@ -69,6 +71,10 @@ export default pattern(() => {
     directMessage.preparedBrief!.includes("Prepared outbound draft") &&
     directMessage.authorizedSend!.includes("Authorized outbound message")
   );
+  const assertGalleryRendersCatalog = computed(() =>
+    SEND_PUBLISH_EXAMPLE_COUNT === 30 &&
+    SEND_PUBLISH_RENDERED_EXAMPLE_COUNT === SEND_PUBLISH_EXAMPLE_COUNT
+  );
 
   return {
     tests: [
@@ -78,6 +84,7 @@ export default pattern(() => {
       { assertion: assertProjectUpdate },
       { action: runLookalike({ lookalike, directMessage }) },
       { assertion: assertLookalike },
+      { assertion: assertGalleryRendersCatalog },
     ],
     chatThread,
     projectUpdate,

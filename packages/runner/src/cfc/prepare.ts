@@ -33,7 +33,7 @@ import {
   type WritePolicyInput,
 } from "./types.ts";
 import {
-  trustedEventMatchesUiContract,
+  recordedTrustedEventProvenanceMatchesUiContract,
   uiContractsFromSchema,
 } from "./ui-contract.ts";
 
@@ -638,8 +638,8 @@ const verifyTrustedEventRequirements = (
       input.target.id === target.id &&
       input.target.type === target.type &&
       arraysEqual(input.target.path, entry.path) &&
-      trustedEventMatchesUiContract(
-        { provenance: input.provenance },
+      recordedTrustedEventProvenanceMatchesUiContract(
+        input.provenance,
         entry.contract,
       )
     );

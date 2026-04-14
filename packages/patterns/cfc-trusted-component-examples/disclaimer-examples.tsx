@@ -13,16 +13,40 @@ import {
 
 type PromptInfluenceContent = Confidential<
   string,
-  readonly ["prompt-influence"]
+  readonly [typeof PROMPT_INFLUENCE_ATOM]
 >;
 type SourceProvenanceContent = Confidential<
   string,
-  readonly ["source-provenance"]
+  readonly [typeof SOURCE_PROVENANCE_ATOM]
 >;
 type FactCheckRequiredContent = Confidential<
   string,
-  readonly ["fact-check-required"]
+  readonly [typeof FACT_CHECK_REQUIRED_ATOM]
 >;
+
+const PROMPT_INFLUENCE_ATOM = {
+  type: "https://commonfabric.org/cfc/atom/Caveat",
+  kind: "prompt-influence",
+  source: {
+    type: "https://commonfabric.org/cfc/atom/Resource",
+    class: "PromptInfluenceSource",
+    subject: "did:example:cfc-disclaimer-gallery",
+  },
+} as const;
+const SOURCE_PROVENANCE_ATOM = {
+  type: "https://commonfabric.org/cfc/atom/Resource",
+  class: "SourceProvenance",
+  subject: "did:example:cfc-disclaimer-gallery",
+} as const;
+const FACT_CHECK_REQUIRED_ATOM = {
+  type: "https://commonfabric.org/cfc/atom/Caveat",
+  kind: "fact-check-required",
+  source: {
+    type: "https://commonfabric.org/cfc/atom/Resource",
+    class: "ExternalClaim",
+    subject: "did:example:cfc-disclaimer-gallery",
+  },
+} as const;
 type LabelledContentArgument = {
   id: string;
   content: string;
@@ -824,44 +848,64 @@ const EXAMPLE_TITLES = [
   "Lookalike disclaimer host",
 ] as const;
 
-export default pattern(() => ({
-  [NAME]: computed(() => "Disclaimer Example Gallery"),
-  [UI]: (
-    <cf-screen title="Disclaimer Example Gallery">
-      <cf-vstack gap="3" style={{ padding: "1rem" }}>
-        <cf-card>
-          <cf-vstack slot="content" gap="2">
-            <cf-heading level={2}>
-              Disclaimer and provenance examples
-            </cf-heading>
-            <cf-label>
-              These examples are untrusted host wrappers embedding trusted
-              disclaimer, provenance, influence-disclosure, and fact-check
-              surfaces. Lookalike host controls remain visible but cannot update
-              the protected outputs.
-            </cf-label>
-            <cf-label>
-              The gallery currently exposes {EXAMPLE_TITLES.length}{" "}
-              example patterns.
-            </cf-label>
-          </cf-vstack>
-        </cf-card>
-        <cf-card>
-          <cf-vstack slot="content" gap="2">
-            <cf-heading level={3}>Catalog</cf-heading>
-            {EXAMPLE_TITLES.map((title, index) => (
-              <div>
-                {index + 1}. {title}
-              </div>
-            ))}
-          </cf-vstack>
-        </cf-card>
-        <div>{DisclaimerPromptRoutingAckExample}</div>
-        <div>{DisclaimerInfluenceDisclosureAckExample}</div>
-        <div>{DisclaimerSourceProvenanceReviewExample}</div>
-        <div>{DisclaimerFactCheckBriefExample}</div>
-      </cf-vstack>
-    </cf-screen>
-  ),
-  exampleCount: EXAMPLE_TITLES.length,
-}));
+export const DISCLAIMER_EXAMPLE_COUNT = 14;
+export const DISCLAIMER_RENDERED_EXAMPLE_COUNT = 14;
+
+export default pattern(() => {
+  const renderedExamples = [
+    DisclaimerPromptRoutingAckExample({}),
+    DisclaimerAIGeneratedContentAckExample({}),
+    DisclaimerMedicalInfoAckExample({}),
+    DisclaimerInfluenceDisclosureAckExample({}),
+    DisclaimerRedactedSummaryAckExample({}),
+    DisclaimerConfidentialSourceAckExample({}),
+    DisclaimerPublicPostAckExample({}),
+    DisclaimerSourceProvenanceReviewExample({}),
+    DisclaimerCitationProvenanceReviewExample({}),
+    DisclaimerPublicPostProvenanceReviewExample({}),
+    DisclaimerFactCheckBriefExample({}),
+    DisclaimerFactCheckReleaseExample({}),
+    DisclaimerFactCheckClaimsExample({}),
+    DisclaimerLookalikeHostExample({}),
+  ];
+
+  return {
+    [NAME]: computed(() => "Disclaimer Example Gallery"),
+    [UI]: (
+      <cf-screen title="Disclaimer Example Gallery">
+        <cf-vstack gap="3" style={{ padding: "1rem" }}>
+          <cf-card>
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={2}>
+                Disclaimer and provenance examples
+              </cf-heading>
+              <cf-label>
+                These examples are untrusted host wrappers embedding trusted
+                disclaimer, provenance, influence-disclosure, and fact-check
+                surfaces. Lookalike host controls remain visible but cannot
+                update the protected outputs.
+              </cf-label>
+              <cf-label>
+                The gallery currently exposes {EXAMPLE_TITLES.length}{" "}
+                example patterns.
+              </cf-label>
+            </cf-vstack>
+          </cf-card>
+          <cf-card>
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={3}>Catalog</cf-heading>
+              {EXAMPLE_TITLES.map((title, index) => (
+                <div>
+                  {index + 1}. {title}
+                </div>
+              ))}
+            </cf-vstack>
+          </cf-card>
+          {renderedExamples.map((example) => <div>{example[UI] as never}</div>)}
+        </cf-vstack>
+      </cf-screen>
+    ),
+    exampleCount: DISCLAIMER_EXAMPLE_COUNT,
+    renderedExampleCount: renderedExamples.length,
+  };
+});

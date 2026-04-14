@@ -106,7 +106,7 @@ export const ChatThreadSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -158,7 +158,7 @@ export const IncidentChannelSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -207,7 +207,7 @@ export const DirectMessageSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -261,7 +261,7 @@ export const SupportCaseReplyExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -314,7 +314,7 @@ export const ClassroomAnnouncementExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -369,7 +369,7 @@ export const ProjectUpdatePublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -438,9 +438,9 @@ export const ReleaseNotesPublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trustedSaveDraft}
-          {trustedReview}
-          {trustedPublish}
+          {trustedSaveDraft[UI] as never}
+          {trustedReview[UI] as never}
+          {trustedPublish[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -499,7 +499,7 @@ export const PublicStatusPublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -570,9 +570,9 @@ export const InternalRepostExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trustedSaveDraft}
-          {trustedReview}
-          {trustedPublish}
+          {trustedSaveDraft[UI] as never}
+          {trustedReview[UI] as never}
+          {trustedPublish[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -631,7 +631,7 @@ export const TeamDigestPublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -686,7 +686,7 @@ export const RoadmapUpdatePublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -743,7 +743,7 @@ export const IncidentSummaryPublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -812,9 +812,9 @@ export const PolicyPublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trustedSaveDraft}
-          {trustedReview}
-          {trustedPublish}
+          {trustedSaveDraft[UI] as never}
+          {trustedReview[UI] as never}
+          {trustedPublish[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -875,7 +875,7 @@ export const ChangelogPublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -930,7 +930,7 @@ export const LaunchReadinessPublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -983,7 +983,7 @@ export const EmbeddedComposerSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1032,7 +1032,7 @@ export const TeamDigestContextSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1083,7 +1083,7 @@ export const ExecutiveBriefSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1136,7 +1136,7 @@ export const SupportEscalationSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1185,7 +1185,7 @@ export const CustomerReplySendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1236,7 +1236,7 @@ export const ClassroomDigestSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1303,9 +1303,9 @@ export const InternalOnlyRepostExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trustedSaveDraft}
-          {trustedReview}
-          {trustedPublish}
+          {trustedSaveDraft[UI] as never}
+          {trustedReview[UI] as never}
+          {trustedPublish[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1364,7 +1364,7 @@ export const PublicBulletinExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1433,9 +1433,9 @@ export const StagedAnnouncementExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trustedSaveDraft}
-          {trustedReview}
-          {trustedPublish}
+          {trustedSaveDraft[UI] as never}
+          {trustedReview[UI] as never}
+          {trustedPublish[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1494,7 +1494,7 @@ export const AnnouncementQueueExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1549,7 +1549,7 @@ export const VisibleQueueExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1600,7 +1600,7 @@ export const ConversationTargetSendExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1651,7 +1651,7 @@ export const HostLookalikeControlExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1720,9 +1720,9 @@ export const InternalNoteRepostExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trustedSaveDraft}
-          {trustedReview}
-          {trustedPublish}
+          {trustedSaveDraft[UI] as never}
+          {trustedReview[UI] as never}
+          {trustedPublish[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1781,7 +1781,7 @@ export const MeetingRecapPublishExample = pattern<
               <div>{decoyResult}</div>
             </cf-vstack>
           </cf-card>
-          {trusted}
+          {trusted[UI] as never}
         </cf-vstack>
       </cf-screen>
     ),
@@ -1830,38 +1830,73 @@ const exampleTitles = [
   "Meeting Recap Publish",
 ] as const;
 
-export default pattern<Record<PropertyKey, never>>(() => ({
-  [NAME]: computed(() => "Send / Publish Trusted Component Examples"),
-  [UI]: (
-    <cf-screen title="Send / Publish Trusted Component Examples">
-      <cf-vstack gap="3" style={{ padding: "1rem" }}>
-        <cf-card>
-          <cf-vstack slot="content" gap="2">
-            <cf-heading level={2}>Untrusted host wrappers</cf-heading>
-            <cf-label>
-              These examples embed reviewed trusted send and publish surfaces in
-              deliberately untrusted hosts. The host controls are visible but do
-              not authorize protected writes.
-            </cf-label>
-          </cf-vstack>
-        </cf-card>
-        <cf-card>
-          <cf-vstack slot="content" gap="2">
-            <cf-heading level={3}>Catalog</cf-heading>
-            {exampleTitles.map((title, index) => (
-              <div>
-                {index + 1}. {title}
-              </div>
-            ))}
-          </cf-vstack>
-        </cf-card>
-        <div>{ChatThreadSendExample}</div>
-        <div>{IncidentChannelSendExample}</div>
-        <div>{DirectMessageSendExample}</div>
-        <div>{SupportCaseReplyExample}</div>
-        <div>{ClassroomAnnouncementExample}</div>
-        <div>{ProjectUpdatePublishExample}</div>
-      </cf-vstack>
-    </cf-screen>
-  ),
-}));
+export const SEND_PUBLISH_EXAMPLE_COUNT = 30;
+export const SEND_PUBLISH_RENDERED_EXAMPLE_COUNT = 30;
+
+export default pattern<Record<PropertyKey, never>>(() => {
+  const renderedExamples = [
+    ChatThreadSendExample({}),
+    IncidentChannelSendExample({}),
+    DirectMessageSendExample({}),
+    SupportCaseReplyExample({}),
+    ClassroomAnnouncementExample({}),
+    ProjectUpdatePublishExample({}),
+    ReleaseNotesPublishExample({}),
+    PublicStatusPublishExample({}),
+    InternalRepostExample({}),
+    TeamDigestPublishExample({}),
+    RoadmapUpdatePublishExample({}),
+    IncidentSummaryPublishExample({}),
+    PolicyPublishExample({}),
+    ChangelogPublishExample({}),
+    LaunchReadinessPublishExample({}),
+    EmbeddedComposerSendExample({}),
+    TeamDigestContextSendExample({}),
+    ExecutiveBriefSendExample({}),
+    SupportEscalationSendExample({}),
+    CustomerReplySendExample({}),
+    ClassroomDigestSendExample({}),
+    InternalOnlyRepostExample({}),
+    PublicBulletinExample({}),
+    StagedAnnouncementExample({}),
+    AnnouncementQueueExample({}),
+    VisibleQueueExample({}),
+    ConversationTargetSendExample({}),
+    HostLookalikeControlExample({}),
+    InternalNoteRepostExample({}),
+    MeetingRecapPublishExample({}),
+  ];
+
+  return {
+    [NAME]: computed(() => "Send / Publish Trusted Component Examples"),
+    [UI]: (
+      <cf-screen title="Send / Publish Trusted Component Examples">
+        <cf-vstack gap="3" style={{ padding: "1rem" }}>
+          <cf-card>
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={2}>Untrusted host wrappers</cf-heading>
+              <cf-label>
+                These examples embed reviewed trusted send and publish surfaces
+                in deliberately untrusted hosts. The host controls are visible
+                but do not authorize protected writes.
+              </cf-label>
+            </cf-vstack>
+          </cf-card>
+          <cf-card>
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={3}>Catalog</cf-heading>
+              {exampleTitles.map((title, index) => (
+                <div>
+                  {index + 1}. {title}
+                </div>
+              ))}
+            </cf-vstack>
+          </cf-card>
+          {renderedExamples.map((example) => <div>{example[UI] as never}</div>)}
+        </cf-vstack>
+      </cf-screen>
+    ),
+    exampleCount: SEND_PUBLISH_EXAMPLE_COUNT,
+    renderedExampleCount: renderedExamples.length,
+  };
+});
