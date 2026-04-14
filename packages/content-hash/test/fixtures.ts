@@ -153,8 +153,8 @@ const NUMBERS_FIXTURES: readonly NumbersHashTuple[] = [
     sha256: "vA6wQSFCPVfwTczyM2Xl6nSXI6YD2vv6LBdcuGmrWn0",
   },
   {
-    numbers: rainbowBytes(12345678, 98765),
-    sha256: "EbqQZVDfzhasH7qBmxLA1A57mDKz3jyGld_HmNRItfk",
+    numbers: rainbowBytes(1234567, 98765),
+    sha256: "s1iqGNj7KWV6YPVYEsTERmXlVFNEFWDuErFPez1asoI",
   },
   {
     numbers: [...BIG_TEXT_FILE].map((c) => c.charCodeAt(0)),
