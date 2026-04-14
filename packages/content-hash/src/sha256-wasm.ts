@@ -58,7 +58,6 @@ function canAcquireHasher(): boolean {
 /**
  * Gets a freshly-initialized hasher instance, or throws an error indicating
  * that this module is not usable.
- *
  */
 function acquireHasher(): IHasher {
   if (theHashers.length === 0) {
@@ -108,7 +107,7 @@ export function initWasm() {
         theHashers.length = 0;
       }
 
-      moduleIsUsable = (theHashers.length !== 0);
+      moduleIsUsable = theHashers.length !== 0;
       return moduleIsUsable;
     })();
   }
@@ -214,9 +213,7 @@ class WasmCollectingHasher extends BaseWasmHasher {
     const baseLength = (this.#chunks.length === 0)
       ? CHUNK_SIZE_FIRST
       : CHUNK_SIZE_USUAL;
-    const newLength = (length < (baseLength / 2))
-      ? baseLength
-      : length * 2;
+    const newLength = (length < (baseLength / 2)) ? baseLength : length * 2;
 
     const chunk = new Uint8Array(newLength);
     this.#currentChunk = chunk;

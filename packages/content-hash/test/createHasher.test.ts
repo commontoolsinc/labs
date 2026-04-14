@@ -10,7 +10,7 @@ import { createHasherNoble } from "../src/sha256-noble.ts";
 import {
   createHasherWasm,
   createHasherWasmCollecting,
-  initWasm
+  initWasm,
 } from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
