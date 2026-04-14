@@ -51,6 +51,20 @@ describe("Schema: Default<T,V>", () => {
     );
   });
 
+  it("rejects one-argument Default with aliased undefined", async () => {
+    const code = `
+      interface Default<T, V extends T = T> {}
+      type U = undefined;
+      type T = Default<U>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+
+    expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
+      "Default<undefined> is unsupported",
+    );
+  });
+
   it("applies default for primitive value", async () => {
     const code = `
       interface Default<T, V> {}

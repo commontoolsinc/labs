@@ -646,17 +646,13 @@ export class CommonFabricFormatter implements TypeFormatter {
     if (!valueTypeNode || !defaultTypeNode) {
       throw new Error("Default<T,V> type arguments cannot be undefined");
     }
-    if (
-      typeArgs.length === 1 &&
-      valueTypeNode.kind === ts.SyntaxKind.UndefinedKeyword
-    ) {
+    // Get the value type from the type nodes
+    const valueType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
+    if (typeArgs.length === 1 && this.isUndefinedType(valueType)) {
       throw new Error(
         "Default<undefined> is unsupported; use an optional field or a JSON value default.",
       );
     }
-
-    // Get the value type from the type nodes
-    const valueType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
 
     // Generate schema for the value type
     const valueSchema = this.schemaGenerator.formatChildType(

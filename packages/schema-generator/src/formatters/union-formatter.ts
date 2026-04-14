@@ -88,13 +88,11 @@ export class UnionFormatter implements TypeFormatter {
   ): JSONSchemaMutable {
     const union = type as ts.UnionType;
     const members = union.types ?? [];
-    const unionNode = context.typeNode &&
-        ts.isParenthesizedTypeNode(context.typeNode)
-      ? context.typeNode.type
-      : context.typeNode;
-    const memberNodes = unionNode && ts.isUnionTypeNode(unionNode)
-      ? unionNode.types
-      : undefined;
+    const unionNode = this.getUnionTypeNode(
+      context.typeNode,
+      context.typeChecker,
+    );
+    const memberNodes = unionNode ? unionNode.types : undefined;
     const orderedMemberNodes = memberNodes
       ? orderMemberNodesBySemanticType(
         members,
@@ -110,7 +108,7 @@ export class UnionFormatter implements TypeFormatter {
     const defaultUnionSchema = memberNodes
       ? this.tryFormatDefaultUnion(memberNodes, context)
       : undefined;
-    if (defaultUnionSchema) {
+    if (defaultUnionSchema !== undefined) {
       return defaultUnionSchema;
     }
 
@@ -266,6 +264,7 @@ export class UnionFormatter implements TypeFormatter {
       return this.applyDeepDefaultToSchema(
         this.combineUnionSchemas(schemas, context),
         defaultEntry.entry.defaultValue,
+        context.definitions,
       );
     }
 
@@ -291,6 +290,47 @@ export class UnionFormatter implements TypeFormatter {
       this.combineUnionSchemas(schemas, context),
       defaultEntry.entry.defaultValue,
     );
+  }
+
+  private getUnionTypeNode(
+    typeNode: ts.TypeNode | undefined,
+    checker: ts.TypeChecker,
+    visited = new Set<string>(),
+  ): ts.UnionTypeNode | undefined {
+    if (!typeNode) {
+      return undefined;
+    }
+
+    const unwrapped = ts.isParenthesizedTypeNode(typeNode)
+      ? typeNode.type
+      : typeNode;
+    if (ts.isUnionTypeNode(unwrapped)) {
+      return unwrapped;
+    }
+    if (
+      !ts.isTypeReferenceNode(unwrapped) ||
+      !ts.isIdentifier(unwrapped.typeName) ||
+      unwrapped.typeArguments?.length
+    ) {
+      return undefined;
+    }
+
+    const symbol = checker.getSymbolAtLocation(unwrapped.typeName);
+    const aliasDeclaration = symbol?.declarations?.find((
+      declaration,
+    ): declaration is ts.TypeAliasDeclaration =>
+      ts.isTypeAliasDeclaration(declaration)
+    );
+    if (!aliasDeclaration || aliasDeclaration.typeParameters?.length) {
+      return undefined;
+    }
+
+    const aliasName = aliasDeclaration.name.text;
+    if (visited.has(aliasName)) {
+      throw new Error(`Circular type alias detected: ${aliasName}`);
+    }
+    visited.add(aliasName);
+    return this.getUnionTypeNode(aliasDeclaration.type, checker, visited);
   }
 
   private getDefaultUnionEntry(
@@ -336,10 +376,11 @@ export class UnionFormatter implements TypeFormatter {
     if (!valueTypeNode || !defaultTypeNode) {
       throw new Error("Default<T,V> type arguments cannot be undefined");
     }
-    if (
-      typeArgs.length === 1 &&
-      valueTypeNode.kind === ts.SyntaxKind.UndefinedKeyword
-    ) {
+    const valueType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
+    const defaultType = context.typeChecker.getTypeFromTypeNode(
+      defaultTypeNode,
+    );
+    if (typeArgs.length === 1 && this.isUndefinedType(valueType)) {
       throw new Error(
         "Default<undefined> is unsupported; use an optional field or a JSON value default.",
       );
@@ -349,8 +390,8 @@ export class UnionFormatter implements TypeFormatter {
       kind: "Default",
       valueTypeNode,
       defaultTypeNode,
-      valueType: context.typeChecker.getTypeFromTypeNode(valueTypeNode),
-      defaultType: context.typeChecker.getTypeFromTypeNode(defaultTypeNode),
+      valueType,
+      defaultType,
       defaultValue: this.extractDefaultValueFromNode(defaultTypeNode, context),
     };
   }
@@ -511,27 +552,53 @@ export class UnionFormatter implements TypeFormatter {
   private applyDeepDefaultToSchema(
     schema: JSONSchemaMutable,
     defaultValue: unknown,
+    rootDefs?: Record<string, unknown>,
   ): JSONSchemaMutable {
     const withDefault = this.applySchemaDefault(schema, defaultValue);
     if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
       return withDefault;
     }
 
-    return this.applyObjectPropertyDefaults(withDefault, defaultValue);
+    return this.applyObjectPropertyDefaults(
+      withDefault,
+      defaultValue,
+      [],
+      this.getSchemaDefs(withDefault) ?? rootDefs,
+    );
   }
 
   private applyObjectPropertyDefaults(
     schema: JSONSchemaObjMutable,
     defaults: Record<string, unknown>,
+    path: string[] = [],
+    rootDefs?: Record<string, unknown>,
+    targetSchema?: JSONSchemaMutable,
   ): JSONSchemaObjMutable {
     const properties = isRecord(schema.properties)
       ? { ...schema.properties }
       : {};
+    const targetProperties = this.getObjectTargetProperties(
+      isRecord(targetSchema) ? targetSchema : schema,
+      rootDefs,
+    );
 
     for (const [name, value] of Object.entries(defaults)) {
+      const fullPath = [...path, name];
+      const targetExisting = (properties[name] ??
+        targetProperties?.[name]) as JSONSchemaMutable | undefined;
+      if (targetExisting === undefined) {
+        throw new Error(
+          `DeepDefault key "${
+            fullPath.join(".")
+          }" does not exist on the target object type.`,
+        );
+      }
       properties[name] = this.applyDeepDefaultToProperty(
         properties[name] as JSONSchemaMutable | undefined,
         value,
+        fullPath,
+        rootDefs,
+        targetExisting,
       );
     }
 
@@ -544,13 +611,64 @@ export class UnionFormatter implements TypeFormatter {
   private applyDeepDefaultToProperty(
     schema: JSONSchemaMutable | undefined,
     defaultValue: unknown,
+    path: string[] = [],
+    rootDefs?: Record<string, unknown>,
+    targetSchema?: JSONSchemaMutable,
   ): JSONSchemaMutable {
     const withDefault = this.applySchemaDefault(schema ?? true, defaultValue);
     if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
       return withDefault;
     }
 
-    return this.applyObjectPropertyDefaults(withDefault, defaultValue);
+    return this.applyObjectPropertyDefaults(
+      withDefault,
+      defaultValue,
+      path,
+      rootDefs,
+      targetSchema,
+    );
+  }
+
+  private getObjectTargetProperties(
+    schema: JSONSchemaObjMutable,
+    rootDefs?: Record<string, unknown>,
+  ): Record<string, unknown> | undefined {
+    if (isRecord(schema.properties)) {
+      return schema.properties;
+    }
+
+    const refSchema = this.resolveLocalRefSchema(schema, rootDefs);
+    if (refSchema && isRecord(refSchema.properties)) {
+      return refSchema.properties;
+    }
+
+    return undefined;
+  }
+
+  private resolveLocalRefSchema(
+    schema: JSONSchemaObjMutable,
+    rootDefs?: Record<string, unknown>,
+  ): JSONSchemaObjMutable | undefined {
+    if (typeof schema.$ref !== "string") {
+      return undefined;
+    }
+    const prefix = "#/$defs/";
+    if (!schema.$ref.startsWith(prefix)) {
+      return undefined;
+    }
+
+    const defs = this.getSchemaDefs(schema) ?? rootDefs;
+    const resolved = defs?.[schema.$ref.slice(prefix.length)];
+    return isRecord(resolved) ? resolved as JSONSchemaObjMutable : undefined;
+  }
+
+  private getSchemaDefs(
+    schema: JSONSchemaObjMutable,
+  ): Record<string, unknown> | undefined {
+    if (isRecord(schema.$defs)) {
+      return schema.$defs;
+    }
+    return isRecord(schema.definitions) ? schema.definitions : undefined;
   }
 
   private isDefaultObject(value: unknown): value is Record<string, unknown> {
@@ -561,6 +679,10 @@ export class UnionFormatter implements TypeFormatter {
     typeNode: ts.TypeNode,
     context: GenerationContext,
   ): unknown {
+    if (ts.isTypeQueryNode(typeNode)) {
+      return this.extractValueFromTypeQuery(typeNode, context);
+    }
+
     if (ts.isLiteralTypeNode(typeNode)) {
       const literal = typeNode.literal;
       if (ts.isStringLiteral(literal)) return literal.text;
@@ -599,10 +721,14 @@ export class UnionFormatter implements TypeFormatter {
 
     return this.extractDefaultValue(
       context.typeChecker.getTypeFromTypeNode(typeNode),
+      context,
     );
   }
 
-  private extractDefaultValue(type: ts.Type): unknown {
+  private extractDefaultValue(
+    type: ts.Type,
+    context: GenerationContext,
+  ): unknown {
     if (type.flags & ts.TypeFlags.StringLiteral) {
       return (type as ts.StringLiteralType).value;
     }
@@ -618,7 +744,98 @@ export class UnionFormatter implements TypeFormatter {
     if (type.flags & ts.TypeFlags.Undefined) {
       return undefined;
     }
+
+    const symbol = type.getSymbol();
+    if (symbol?.valueDeclaration) {
+      return this.extractValueFromSymbol(symbol, context);
+    }
+
     return undefined;
+  }
+
+  private extractValueFromTypeQuery(
+    typeQueryNode: ts.TypeQueryNode,
+    context: GenerationContext,
+  ): unknown {
+    const symbol = context.typeChecker.getSymbolAtLocation(
+      typeQueryNode.exprName,
+    );
+    return symbol ? this.extractValueFromSymbol(symbol, context) : undefined;
+  }
+
+  private extractValueFromSymbol(
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    const valueDeclaration = symbol.valueDeclaration;
+    if (
+      valueDeclaration &&
+      ts.isVariableDeclaration(valueDeclaration) &&
+      valueDeclaration.initializer
+    ) {
+      return this.extractValueFromExpression(
+        valueDeclaration.initializer,
+        context,
+      );
+    }
+
+    return undefined;
+  }
+
+  private extractValueFromExpression(
+    expr: ts.Expression,
+    context: GenerationContext,
+  ): unknown {
+    if (
+      ts.isAsExpression(expr) ||
+      ts.isTypeAssertionExpression(expr) ||
+      ts.isSatisfiesExpression(expr) ||
+      ts.isParenthesizedExpression(expr)
+    ) {
+      return this.extractValueFromExpression(expr.expression, context);
+    }
+
+    if (ts.isArrayLiteralExpression(expr)) {
+      return expr.elements.map((element) =>
+        this.extractValueFromExpression(element, context)
+      );
+    }
+
+    if (ts.isObjectLiteralExpression(expr)) {
+      const obj: Record<string, unknown> = {};
+      for (const property of expr.properties) {
+        if (ts.isPropertyAssignment(property)) {
+          const propName = getPropertyNameText(
+            property.name,
+            context.typeChecker,
+          );
+          if (propName) {
+            obj[propName] = this.extractValueFromExpression(
+              property.initializer,
+              context,
+            );
+          }
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          obj[property.name.text] = this.extractValueFromExpression(
+            property.name,
+            context,
+          );
+        }
+      }
+      return obj;
+    }
+
+    if (ts.isStringLiteral(expr)) return expr.text;
+    if (ts.isNumericLiteral(expr)) return Number(expr.text);
+    if (expr.kind === ts.SyntaxKind.TrueKeyword) return true;
+    if (expr.kind === ts.SyntaxKind.FalseKeyword) return false;
+    if (expr.kind === ts.SyntaxKind.NullKeyword) return null;
+
+    return undefined;
+  }
+
+  private isUndefinedType(type: ts.Type): boolean {
+    return (type.flags & ts.TypeFlags.Undefined) !== 0;
   }
 
   /**

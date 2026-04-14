@@ -31,6 +31,27 @@ describe("Schema: Default in unions", () => {
     expect(enabled.default).toBe(false);
   });
 
+  it("applies defaults through aliased union types", async () => {
+    const code = `
+      interface Default<T, V extends T = T> {}
+      type WithDefault = string | Default<"">;
+      interface X {
+        title: WithDefault;
+      }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const title = result.properties?.title as any;
+    expect(title.$ref).toBe("#/$defs/WithDefault");
+    expect((result as any).$defs?.WithDefault).toEqual({
+      type: "string",
+      default: "",
+    });
+  });
+
   it("applies null defaults from T | Default<null>", async () => {
     const code = `
       interface Default<T, V extends T = T> {}
@@ -82,6 +103,25 @@ describe("Schema: Default in unions", () => {
     expect(config.properties?.theme).toEqual({ type: "string" });
     expect(config.required).toEqual(["theme"]);
     expect(result.default).toEqual({ theme: "dark" });
+  });
+
+  it("applies object defaults from typeof values in T | Default<V>", async () => {
+    const code = `
+      interface Default<T, V extends T = T> {}
+      const DEFAULT_CONFIG = { theme: "dark", retries: 3 } as const;
+      interface Config {
+        theme: string;
+        retries: number;
+      }
+      type T = Config | Default<typeof DEFAULT_CONFIG>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+    );
+
+    expect(result.$ref).toBe("#/$defs/Config");
+    expect(result.default).toEqual({ theme: "dark", retries: 3 });
   });
 
   it("rejects object defaults that would widen an existing object member", async () => {
@@ -155,6 +195,44 @@ describe("Schema: Default in unions", () => {
     expect(profile.properties?.email).toBeUndefined();
   });
 
+  it("rejects unknown keys in DeepDefault object defaults", async () => {
+    const code = `
+      interface DeepDefault<V> {}
+      interface Config {
+        theme: string;
+      }
+      type T = Config | DeepDefault<{ typo: "x" }>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+
+    expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
+      'DeepDefault key "typo" does not exist',
+    );
+  });
+
+  it("rejects unknown nested keys in DeepDefault object defaults", async () => {
+    const code = `
+      interface DeepDefault<V> {}
+      interface Config {
+        profile: {
+          name: string;
+        };
+      }
+      type T = Config | DeepDefault<{
+        profile: {
+          typo: "x";
+        };
+      }>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+
+    expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
+      'DeepDefault key "profile.typo" does not exist',
+    );
+  });
+
   it("rejects DeepDefault without an existing object member", async () => {
     const code = `
       interface DeepDefault<V> {}
@@ -165,6 +243,20 @@ describe("Schema: Default in unions", () => {
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       "DeepDefault must be unioned with an object type",
+    );
+  });
+
+  it("rejects one-argument Default with aliased undefined in unions", async () => {
+    const code = `
+      interface Default<T, V extends T = T> {}
+      type U = undefined;
+      type T = string | Default<U>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+
+    expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
+      "Default<undefined> is unsupported",
     );
   });
 });
