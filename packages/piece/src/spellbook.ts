@@ -106,7 +106,7 @@ export async function saveSpell(
     const patternMetaResult = runtime.patternManager.getPatternMeta(
       spell as any,
     );
-    const { src, spec, parents } = patternMetaResult || {};
+    const { spec, parents } = patternMetaResult || {};
     if (!isRecord(spell)) {
       throw new Error("Invalid spell.");
     }
@@ -129,7 +129,6 @@ export async function saveSpell(
         title,
         description,
         tags,
-        src,
         spec,
         parents,
         ui,

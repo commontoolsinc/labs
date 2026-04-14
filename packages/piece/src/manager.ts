@@ -866,7 +866,7 @@ export class PieceManager {
     );
     const knownPatternId = (() => {
       try {
-        return this.runtime.patternManager.getPatternMeta(pattern).id as URI;
+        return this.runtime.patternManager.getPatternId(pattern);
       } catch {
         return undefined;
       }

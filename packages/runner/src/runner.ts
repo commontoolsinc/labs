@@ -64,7 +64,7 @@ import {
   cellAwareDeepCopy,
   describePatternOrModule,
   extractDefaultValues,
-  getPatternLink,
+  getSigilLink,
   mergeObjects,
   sanitizeDebugLabel,
   setRunnableName,
@@ -398,7 +398,7 @@ export class Runner {
           base: processCell,
         }),
       internal,
-      pattern: getPatternLink(patternId),
+      pattern: getSigilLink(patternId),
     }, false));
 
     if (nextArgument) {
@@ -611,9 +611,10 @@ export class Runner {
 
     // Helper to set up the pattern watcher
     const setupPatternWatcher = () => {
+      //const patternCell = resultCell.getPatternCell();
       const patternCell = processCell.key("pattern");
       addCancel(
-        patternCell.sink((_newPatternValue) => {
+        patternCell.sink((_newPatternValue: unknown) => {
           const newPatternLink = parseLink(patternCell.getRaw(), processCell);
           const newPatternId = newPatternLink?.id;
           if (newPatternId === currentPatternId) return; // No change

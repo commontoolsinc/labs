@@ -332,9 +332,6 @@ export async function savePiecePattern(
       );
     }
     await Deno.writeTextFile(join(outPath, "main.iframe.js"), userCode);
-  } else if (meta.src) {
-    // Write the main source file
-    await Deno.writeTextFile(join(outPath, "main.tsx"), meta.src);
   } else if (meta.program) {
     for (const { name, contents } of meta.program.files) {
       if (name[0] !== "/") {

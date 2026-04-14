@@ -7,6 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { patternMetaSchema } from "../src/pattern-manager.ts";
 import {
   CachedCompiler,
   MemoryCompilationCache,
@@ -69,7 +70,6 @@ describe("PatternManager program persistence", () => {
     await runtime.patternManager.saveAndSyncPattern({ patternId, space });
 
     const meta = runtime.patternManager.getPatternMeta({ patternId });
-    expect(meta.id).toEqual(patternId);
     expect(meta.program).toBeDefined();
     expect(meta.program?.main).toEqual("/main.tsx");
     const metaFileNames = (meta.program?.files ?? []).map((f) => f.name).sort();
@@ -117,6 +117,62 @@ describe("PatternManager program persistence", () => {
 
     const meta = runtime.patternManager.getPatternMeta({ patternId });
     expect(meta.program?.main).toEqual("/main.ts");
+  });
+
+  it("stores pattern metadata at the pattern id", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export default pattern<{ x: number }>(({ x }) => ({ x }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    await runtime.patternManager.saveAndSyncPattern({ patternId, space });
+
+    const metaCell = runtime.getCellFromEntityId(
+      space,
+      patternId,
+      [],
+      patternMetaSchema,
+    );
+    expect(metaCell.getAsNormalizedFullLink().id).toEqual(patternId);
+    await metaCell.sync();
+    expect(metaCell.get()?.program?.main).toEqual("/main.ts");
+  });
+
+  it("loads pattern metadata from the legacy causal cell", async () => {
+    const patternId = "of:legacy-pattern-meta";
+    const program = {
+      main: "/legacy.ts",
+      mainExport: "default",
+      files: [
+        {
+          name: "/legacy.ts",
+          contents: "export default undefined;",
+        },
+      ],
+    };
+    const legacyCell = runtime.getCell(
+      space,
+      { patternId, type: "pattern" },
+      patternMetaSchema,
+      tx,
+    );
+
+    legacyCell.set({ program } as any);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const meta = await runtime.patternManager.loadPatternMeta(patternId, space);
+    expect(meta.program?.main).toEqual("/legacy.ts");
   });
 });
 

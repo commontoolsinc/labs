@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Pattern } from "../src/builder/types.ts";
-import { getPatternLink } from "../src/runner-utils.ts";
+import { getSigilLink } from "../src/runner-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
@@ -125,7 +125,7 @@ describe("ensurePieceRunning", () => {
 
     // Process cell has a pattern but no resultRef
     processCell.set({
-      pattern: getPatternLink(patternId),
+      pattern: getSigilLink(patternId),
       argument: { value: 1 },
       // Missing resultRef!
     });
@@ -201,7 +201,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      pattern: getPatternLink(patternId),
+      pattern: getSigilLink(patternId),
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -267,7 +267,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      pattern: getPatternLink(patternId),
+      pattern: getSigilLink(patternId),
       argument: {},
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -340,7 +340,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      pattern: getPatternLink(patternId),
+      pattern: getSigilLink(patternId),
       argument: {},
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -502,7 +502,7 @@ describe("queueEvent with auto-start", () => {
     // Set up process cell - internal.events must be set to $stream: true
     // (both in pattern.initial and directly on the cell)
     processCell.set({
-      pattern: getPatternLink(patternId),
+      pattern: getSigilLink(patternId),
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {
@@ -655,7 +655,7 @@ describe("queueEvent with auto-start", () => {
     // Set up process cell - internal.events must be set to $stream: true
     // (both in pattern.initial and directly on the cell)
     processCell.set({
-      pattern: getPatternLink(patternId),
+      pattern: getSigilLink(patternId),
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {

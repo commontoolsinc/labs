@@ -30,8 +30,8 @@ export function sanitizeDebugLabel(label?: string): string | undefined {
   return label.replace(/^async\s+/, "").trim() || undefined;
 }
 
-export function getPatternLink(patternId: URI): SigilLink {
-  return { "/": { [LINK_V1_TAG]: { id: patternId } } };
+export function getSigilLink(id: URI): SigilLink {
+  return { "/": { [LINK_V1_TAG]: { id } } };
 }
 
 export function describePatternOrModule(

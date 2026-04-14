@@ -8,7 +8,7 @@ import {
   unsafe_verifiedLoadId,
 } from "./builder/types.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import { Cell } from "./cell.ts";
+import { Cell, createCell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
 import type { CompileResult } from "./harness/types.ts";
@@ -31,9 +31,6 @@ export const patternMetaSchema = toDeepFrozenSchema(
   {
     type: "object",
     properties: {
-      id: { type: "string" },
-      // @deprecated Represents a pattern with a single source file
-      src: { type: "string" },
       spec: { type: "string" },
       parents: { type: "array", items: { type: "string" } },
       patternName: { type: "string" },
@@ -57,7 +54,6 @@ export const patternMetaSchema = toDeepFrozenSchema(
         required: ["main", "files"],
       },
     },
-    required: ["id"],
   },
   true,
 );
@@ -121,24 +117,28 @@ export class PatternManager {
     { patternId, space }: { patternId: URI; space: MemorySpace },
     tx?: IExtendedStorageTransaction,
   ): Cell<PatternMeta> {
-    const cell = this.runtime.getCell(
-      space,
-      { patternId, type: "pattern" },
-      patternMetaSchema,
+    return createCell(
+      this.runtime,
+      {
+        id: patternId,
+        path: [],
+        space,
+        type: "application/json",
+        schema: patternMetaSchema,
+      },
       tx,
+      true,
     );
-
-    return cell;
   }
 
-  /** Legacy fallback: read pattern meta from the old {recipeId, type: "recipe"} cause. */
-  private getLegacyRecipeMetaCell(
+  /** Legacy fallback: read pattern meta from the old {patternId, type: "pattern"} cause. */
+  private getLegacyPatternMetaCell(
     { patternId, space }: { patternId: URI; space: MemorySpace },
     tx?: IExtendedStorageTransaction,
   ): Cell<PatternMeta> {
     return this.runtime.getCell(
       space,
-      { recipeId: patternId, type: "recipe" },
+      { patternId, type: "pattern" },
       patternMetaSchema,
       tx,
     );
@@ -209,19 +209,24 @@ export class PatternManager {
   ): Promise<PatternMeta> {
     const cell = this.getPatternMetaCell({ patternId, space });
     await cell.sync();
-    if (cell.get()?.id) {
+    if (cell.get() !== undefined) {
       // Cache so sync getPatternMeta({ patternId }) works afterward
       this.patternMetaCellById.set(patternId, cell);
       return cell.get();
     }
 
-    // Fall back to legacy {recipeId, type: "recipe"} cause
-    const legacyCell = this.getLegacyRecipeMetaCell({ patternId, space });
-    await legacyCell.sync();
-    if (legacyCell.get()?.id) {
-      this.patternMetaCellById.set(patternId, legacyCell);
+    // Fall back to legacy {patternId, type: "pattern"} cause
+    const legacyPatternCell = this.getLegacyPatternMetaCell({
+      patternId,
+      space,
+    });
+    await legacyPatternCell.sync();
+    if (legacyPatternCell.get() !== undefined) {
+      this.patternMetaCellById.set(patternId, legacyPatternCell);
+      return legacyPatternCell.get();
     }
-    return legacyCell.get();
+
+    return cell.get();
   }
 
   getPatternMeta(
@@ -248,8 +253,6 @@ export class PatternManager {
       throw new Error(`Pattern ${patternId} has no metadata available`);
     }
     const meta: PatternMeta = {
-      id: patternId,
-      ...(typeof source === "string" ? { src: source } : {}),
       ...(typeof source === "object" ? { program: source } : {}),
       ...(pending as Partial<PatternMeta>),
     } as PatternMeta;
@@ -332,7 +335,6 @@ export class PatternManager {
 
     const pending = this.pendingMetaById.get(patternId) ?? {};
     const patternMeta: PatternMeta = {
-      id: patternId,
       program,
       ...(pending as Partial<PatternMeta>),
     } as PatternMeta;
@@ -507,20 +509,18 @@ export class PatternManager {
     await metaCell.sync();
     let patternMeta = metaCell.get();
 
-    // Fall back to legacy {recipeId, type: "recipe"} cause
-    if (!patternMeta?.src && !patternMeta?.program) {
-      metaCell = this.getLegacyRecipeMetaCell({ patternId, space }, tx);
+    // Fall back to legacy {patternId, type: "pattern"} cause
+    if (!patternMeta?.program) {
+      metaCell = this.getLegacyPatternMetaCell({ patternId, space }, tx);
       await metaCell.sync();
       patternMeta = metaCell.get();
     }
 
-    if (!patternMeta?.src && !patternMeta?.program) {
+    if (!patternMeta?.program) {
       throw new Error(`Pattern ${patternId} has no stored source`);
     }
 
-    const source = patternMeta.program
-      ? (patternMeta.program as RuntimeProgram)
-      : patternMeta.src!;
+    const source = patternMeta.program!
     const pattern = await this.compilePattern(source);
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
@@ -568,7 +568,7 @@ export class PatternManager {
     if (cell) {
       const current = cell.get();
       await this.runtime.editWithRetry((tx) => {
-        cell.withTx(tx).set({ ...current, ...fields, id: patternId });
+        cell.withTx(tx).set({ ...current, ...fields });
       });
     } else {
       const pending = this.pendingMetaById.get(patternId) ?? {};

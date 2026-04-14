@@ -205,7 +205,7 @@ describe("piece pull materialization", () => {
     const pattern = doublePattern();
     const patternId = "test-pattern-id";
     const originalSetup = manager.runtime.setup.bind(manager.runtime);
-    const originalGetPatternMeta = manager.runtime.patternManager.getPatternMeta
+    const originalGetPatternId = manager.runtime.patternManager.getPatternId
       .bind(manager.runtime.patternManager);
     const originalSyncPatternById = manager.syncPatternById.bind(manager);
     let setupResolved = false;
@@ -221,11 +221,9 @@ describe("piece pull materialization", () => {
       });
     }) as typeof manager.runtime.setup;
 
-    const getPatternMetaStub: unknown = () => ({
-      id: patternId,
-    });
-    manager.runtime.patternManager.getPatternMeta =
-      getPatternMetaStub as typeof manager.runtime.patternManager.getPatternMeta;
+    const getPatternIdStub: unknown = () => patternId;
+    manager.runtime.patternManager.getPatternId =
+      getPatternIdStub as typeof manager.runtime.patternManager.getPatternId;
 
     manager.syncPatternById = ((id: string) => {
       expect(id).toBe(patternId);
@@ -244,7 +242,7 @@ describe("piece pull materialization", () => {
       await pending;
     } finally {
       manager.runtime.setup = originalSetup;
-      manager.runtime.patternManager.getPatternMeta = originalGetPatternMeta;
+      manager.runtime.patternManager.getPatternId = originalGetPatternId;
       manager.syncPatternById = originalSyncPatternById;
     }
   });

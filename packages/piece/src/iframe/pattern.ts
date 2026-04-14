@@ -82,11 +82,9 @@ export const getIframePattern = (
     return { src: "", iframe: undefined };
   }
   const meta = runtime.patternManager.getPatternMeta({ patternId });
-  const src = meta
-    ? (meta.src ??
-      meta.program?.files.find((file) => file.name === meta.program?.main)
-        ?.contents)
-    : undefined;
+  const src = meta?.program?.files.find((file) =>
+    file.name === meta.program?.main
+  )?.contents;
   if (!src) {
     return { patternId };
   }

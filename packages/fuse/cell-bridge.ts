@@ -2652,8 +2652,6 @@ export class CellBridge {
     let files: { name: string; contents: string }[];
     if (meta?.program?.files?.length) {
       files = meta.program.files;
-    } else if (meta?.src) {
-      files = [{ name: "main.tsx", contents: meta.src }];
     } else {
       // System piece or no source — skip .src/
       return;

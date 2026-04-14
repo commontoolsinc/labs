@@ -141,7 +141,7 @@ Cells are linked in an ownership hierarchy:
 ```
 resultCell ───source───> processCell
      ^                        │
-     │                        ├─ TYPE (pattern ID)
+     │                        ├─ pattern (pattern ID)
      └────── resultRef ───────┘
 ```
 

@@ -79,6 +79,7 @@ import {
   isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
+  parseLink,
   type SanitizeSchemaForLinksOptions,
 } from "./link-utils.ts";
 import type {
@@ -94,6 +95,8 @@ import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { PatternMeta, patternMetaSchema } from "./pattern-manager.ts";
+import { getSigilLink } from "./runner-utils.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -1241,6 +1244,7 @@ export class CellImpl<T extends FabricValue>
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
+  // TODO(@ubik2) - this should go away
   getSourceCell<T>(
     schema?: JSONSchema,
   ):
@@ -1288,6 +1292,7 @@ export class CellImpl<T extends FabricValue>
     }, this.tx) as Cell<any>;
   }
 
+  // TODO(@ubik2) - this should go away
   setSourceCell(sourceCell: Cell<any>): void {
     if (!this.tx) throw new Error("Transaction required for setSourceCell");
 
@@ -1324,6 +1329,40 @@ export class CellImpl<T extends FabricValue>
 
   isFrozen(): boolean {
     return !!this.readOnlyReason;
+  }
+
+  // We attach a pattern cell to a result cell
+  getPatternCell(): Cell<PatternMeta> | undefined {
+    if (!this.synced) this.sync(); // No await, just kicking this off
+    const patternCellLinkObj = this.runtime.readTx(this.tx).readOrThrow(
+      { ...this.link, path: ["pattern"] },
+    ) as string | undefined;
+    const patternCellId = parseLink(patternCellLinkObj, this.link)?.id;
+    if (!patternCellId) return undefined;
+    return createCell(this.runtime, {
+      space: this.link.space,
+      path: [],
+      id: patternCellId,
+      type: "application/json",
+      schema: patternMetaSchema,
+    }, this.tx) as Cell<any>;
+  }
+
+  // We attach a pattern cell to a result cell
+  setPatternCell(patternCell: Cell<PatternMeta>): void {
+    if (!this.tx) throw new Error("Transaction required for setPatternCell");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
+    if (patternCell.path.length > 0) {
+      throw new Error("Pattern cell must have empty path for now");
+    }
+    this.tx.writeOrThrow(
+      { ...this.link, path: ["pattern"] },
+      getSigilLink(patternCell.sourceURI),
+    );
   }
 
   /**
