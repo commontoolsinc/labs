@@ -19,6 +19,8 @@ import {
   type SandboxedExecConfig,
 } from "../../src/sandbox/config.ts";
 import { SandboxedExecutor } from "../../src/sandbox/executor.ts";
+import { AgentSession } from "../../src/agent/agent-session.ts";
+import { policies } from "../../src/agent/policy.ts";
 
 /**
  * Helper to create a test context
@@ -260,6 +262,38 @@ Deno.test("agent registry routes cat through sandboxed bash", async () => {
   stdout.close();
   const output = await stdout.readAll();
   assertEquals(output.value, "sandbox-data");
+});
+
+Deno.test("real-shell agent falls back unknown commands to sandboxed bash", async () => {
+  const agent = new AgentSession({
+    policy: policies.main(),
+    vfs: new VFS(),
+    registryMode: "real-shell",
+  });
+
+  let capturedCommand: { command: string; args: string[] } | undefined;
+  agent.shell.getSandboxExecutor = (config = defaultConfig) => {
+    return {
+      getConfig: () => ({ ...config, guestWorkspacePath: "/workspace" }),
+      execute: (command: string, args: string[]) => {
+        capturedCommand = { command, args };
+        return Promise.resolve({
+          stdout: { value: "Linux test-host 6.0\n", label: labels.bottom() },
+          stderr: { value: "", label: labels.bottom() },
+          exitCode: 0,
+          modifiedFiles: new Map(),
+        });
+      },
+    } as unknown as SandboxedExecutor;
+  };
+
+  const result = await agent.exec("uname -a");
+
+  assertEquals(result.exitCode, 0);
+  assertEquals(capturedCommand?.command, "/bin/bash");
+  assertEquals(capturedCommand?.args[0], "-lc");
+  assertEquals(capturedCommand?.args[1].includes("'uname' '-a'"), true);
+  assertEquals(result.filtered, true);
 });
 
 Deno.test("curl fails gracefully without network access", async () => {
