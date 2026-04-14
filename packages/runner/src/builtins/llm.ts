@@ -304,6 +304,21 @@ function enqueuePostCommitLLMWork(
   );
 }
 
+function markRequestHashPendingCommit(
+  tx: IExtendedStorageTransaction,
+  hash: string,
+  getPreviousCallHash: () => string | undefined,
+  setPreviousCallHash: (hash: string | undefined) => void,
+): void {
+  const previousCallHash = getPreviousCallHash();
+  setPreviousCallHash(hash);
+  tx.addCommitCallback((_committedTx, commitResult) => {
+    if (commitResult.error && getPreviousCallHash() === hash) {
+      setPreviousCallHash(previousCallHash);
+    }
+  });
+}
+
 /**
  * Generate data via an LLM.
  *
@@ -405,7 +420,6 @@ export function llm(
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
     if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
-    previousCallHash = hash;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       resultWithLog.set(undefined);
@@ -414,6 +428,15 @@ export function llm(
       pendingWithLog.set(false);
       return;
     }
+
+    markRequestHashPendingCommit(
+      tx,
+      hash,
+      () => previousCallHash,
+      (next) => {
+        previousCallHash = next;
+      },
+    );
 
     resultWithLog.set(undefined);
     errorWithLog.set(undefined);
@@ -631,7 +654,14 @@ export function generateText(
       return;
     }
 
-    previousCallHash = hash;
+    markRequestHashPendingCommit(
+      tx,
+      hash,
+      () => previousCallHash,
+      (next) => {
+        previousCallHash = next;
+      },
+    );
 
     // Only increment currentRun if this is a NEW request (different hash)
     // This prevents abandoning in-flight requests when the same params are re-evaluated
@@ -886,7 +916,14 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
-      previousCallHash = hash;
+      markRequestHashPendingCommit(
+        tx,
+        hash,
+        () => previousCallHash,
+        (next) => {
+          previousCallHash = next;
+        },
+      );
 
       if (hash !== currentRequestHash) {
         currentRun++;
@@ -1089,7 +1126,14 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
-      previousCallHash = hash;
+      markRequestHashPendingCommit(
+        tx,
+        hash,
+        () => previousCallHash,
+        (next) => {
+          previousCallHash = next;
+        },
+      );
 
       // Only increment currentRun if this is a NEW request (different hash)
       // This prevents abandoning in-flight requests when the same params are re-evaluated

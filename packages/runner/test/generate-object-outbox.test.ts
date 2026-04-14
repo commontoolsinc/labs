@@ -9,6 +9,7 @@ import {
   enableMockMode,
 } from "@commonfabric/llm/client";
 import { LLMClient } from "@commonfabric/llm";
+import type { BuiltInGenerateObjectParams } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -17,6 +18,7 @@ import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
+import { generateObject as rawGenerateObject } from "../src/builtins/llm.ts";
 
 const signer = await Identity.fromPassphrase("test generate-object outbox");
 const space = signer.did();
@@ -231,6 +233,192 @@ describe("generateObject outbox mechanism", () => {
       LLMClient.prototype.sendRequest = originalSendRequest;
     }
   });
+
+  it("retries generateObject work after a rejected post-commit transaction", async () => {
+    const prompt = "generate object rejected outbox retry";
+    addMockObjectResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(prompt)
+        ),
+      {
+        object: {
+          title: "retry title",
+          description: "retry description",
+        },
+        id: "mock-generate-object-retry-outbox",
+      },
+    );
+
+    const setupTx = runtime.edit();
+    const parentCell = runtime.getCell(
+      space,
+      "generateObject-retry-parent",
+      undefined,
+      setupTx,
+    );
+    const inputsCell = runtime.getCell<BuiltInGenerateObjectParams>(
+      space,
+      "generateObject-retry-inputs",
+      undefined,
+      setupTx,
+    );
+    inputsCell.set({
+      prompt,
+      schema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+        },
+        required: ["title"],
+      },
+    });
+    const setupResult = await setupTx.commit();
+    expect(setupResult.ok).toBeDefined();
+
+    let resultCell: any;
+    const action = rawGenerateObject(
+      inputsCell,
+      (_resultTx, result) => {
+        resultCell = result;
+      },
+      () => {},
+      [],
+      parentCell,
+      runtime,
+    );
+
+    const originalGenerateObject = LLMClient.prototype.generateObject;
+    const generateObjectCalls: number[] = [];
+    LLMClient.prototype.generateObject = async function (...args: unknown[]) {
+      generateObjectCalls.push(Date.now());
+      return await originalGenerateObject.apply(this, args as never);
+    };
+
+    try {
+      const rejectedTx = runtime.edit();
+      rejectedTx.setCfcEnforcementMode("enforce-explicit");
+      rejectedTx.markCfcRelevant("generateObject retry regression");
+      action(rejectedTx);
+      const rejectedResult = await rejectedTx.commit();
+      expect(rejectedResult.error).toBeDefined();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(generateObjectCalls).toEqual([]);
+
+      const retryTx = runtime.edit();
+      action(retryTx);
+      const retryResult = await retryTx.commit();
+      expect(retryResult.ok).toBeDefined();
+      await waitForCallCount(generateObjectCalls, 1);
+      await waitForPendingToBecomeFalse(resultCell);
+      await runtime.idle();
+
+      expect(generateObjectCalls.length).toBe(1);
+    } finally {
+      LLMClient.prototype.generateObject = originalGenerateObject;
+    }
+  });
+
+  it("retries generateObject tool work after a rejected post-commit transaction", async () => {
+    const prompt = "generate object tool rejected outbox retry";
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(prompt)
+        ) && req.tools?.["presentResult"] !== undefined,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_presentResult_tool_retry_outbox",
+            toolName: "presentResult",
+            input: {
+              title: "tool retry title",
+              description: "tool retry description",
+            },
+          },
+        ],
+        id: "mock-presentResult-tool-retry-outbox",
+      },
+    );
+
+    const setupTx = runtime.edit();
+    const parentCell = runtime.getCell(
+      space,
+      "generateObject-tool-retry-parent",
+      undefined,
+      setupTx,
+    );
+    const inputsCell = runtime.getCell<BuiltInGenerateObjectParams>(
+      space,
+      "generateObject-tool-retry-inputs",
+      undefined,
+      setupTx,
+    );
+    inputsCell.set({
+      prompt,
+      schema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+        },
+        required: ["title"],
+      },
+      tools: {
+        dummy: {
+          description: "A dummy tool to force tool-calling path",
+          pattern: dummyPattern,
+        },
+      },
+    });
+    const setupResult = await setupTx.commit();
+    expect(setupResult.ok).toBeDefined();
+
+    let resultCell: any;
+    const action = rawGenerateObject(
+      inputsCell,
+      (_resultTx, result) => {
+        resultCell = result;
+      },
+      () => {},
+      [],
+      parentCell,
+      runtime,
+    );
+
+    const originalSendRequest = LLMClient.prototype.sendRequest;
+    const sendRequestCalls: number[] = [];
+    LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
+      sendRequestCalls.push(Date.now());
+      return await originalSendRequest.apply(this, args as never);
+    };
+
+    try {
+      const rejectedTx = runtime.edit();
+      rejectedTx.setCfcEnforcementMode("enforce-explicit");
+      rejectedTx.markCfcRelevant("generateObject tool retry regression");
+      action(rejectedTx);
+      const rejectedResult = await rejectedTx.commit();
+      expect(rejectedResult.error).toBeDefined();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(sendRequestCalls).toEqual([]);
+
+      const retryTx = runtime.edit();
+      action(retryTx);
+      const retryResult = await retryTx.commit();
+      expect(retryResult.ok).toBeDefined();
+      await waitForCallCount(sendRequestCalls, 1);
+      await waitForPendingToBecomeFalse(resultCell);
+      await runtime.idle();
+
+      expect(sendRequestCalls.length).toBe(1);
+    } finally {
+      LLMClient.prototype.sendRequest = originalSendRequest;
+    }
+  });
 });
 
 function waitForPendingToBecomeFalse(result: any) {
@@ -246,4 +434,12 @@ function waitForPendingToBecomeFalse(result: any) {
       }
     });
   });
+}
+
+async function waitForCallCount(calls: unknown[], expected: number) {
+  for (let i = 0; i < 50; i++) {
+    if (calls.length >= expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timeout waiting for ${expected} call(s)`);
 }
