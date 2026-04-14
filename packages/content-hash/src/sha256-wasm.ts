@@ -32,6 +32,17 @@ const CHUNK_SIZE_USUAL = 65536;
 const theHashers: IHasher[] = [];
 
 /**
+ * Finalization registry used to re-pool instances that were in use but whose
+ * "public" facet (a `WasmUpdatingHasher`) never ended up releasing the
+ * instance.
+ */
+const hasherRepooler = new FinalizationRegistry((hasher: IHasher) => {
+  if (theHashers.indexOf(hasher) === -1) {
+    theHashers.push(hasher);
+  }
+});
+
+/**
  * A hasher instance which _isn't_ allowed to be acquired for concurrent use.
  * This is the one used to serve one-shot hash requests.
  */
@@ -59,13 +70,16 @@ function canAcquireHasher(): boolean {
  * Gets a freshly-initialized hasher instance, or throws an error indicating
  * that this module is not usable.
  */
-function acquireHasher(): IHasher {
+function acquireHasher(owner: WasmUpdatingHasher): IHasher {
   if (theHashers.length === 0) {
     throw new Error("Too many concurrent hashers.");
   }
 
   const result = theHashers.pop()!;
   result.init();
+
+  hasherRepooler.register(owner, result, result);
+
   return result;
 }
 
@@ -73,6 +87,7 @@ function acquireHasher(): IHasher {
  * Releases a previously-acquired hasher, or adds one to the pool.
  */
 function releaseHasher(hasher: IHasher) {
+  hasherRepooler.unregister(hasher);
   theHashers.push(hasher);
 }
 
@@ -226,7 +241,7 @@ class WasmCollectingHasher extends BaseWasmHasher {
  * can `update()` it.
  */
 class WasmUpdatingHasher extends BaseWasmHasher {
-  #hasher: IHasher | null = acquireHasher();
+  #hasher: IHasher | null = acquireHasher(this);
 
   update(data: Uint8Array) {
     this.#getHasher().update(data);
