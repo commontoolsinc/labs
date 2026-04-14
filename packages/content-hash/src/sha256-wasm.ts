@@ -21,6 +21,12 @@ const HASHER_CACHE_SIZE = 30;
 const theHashers: IHasher[] = [];
 
 /**
+ * A hasher instance which _isn't_ allowed to be acquired for concurrent use.
+ * This is the one used to serve one-shot hash requests.
+ */
+const theOneShotHasher: IHasher[] = [];
+
+/**
  * Promised result of the call to `initIfNecessaryAndPossible()` or `null` if
  * not yet called.
  */
@@ -63,6 +69,7 @@ export function initWasm() {
   if (!initResult) {
     initResult = (async () => {
       try {
+        theOneShotHasher.push(await createSHA256());
         for (let i = 0; i < HASHER_CACHE_SIZE; i++) {
           theHashers.push(await createSHA256());
         }
@@ -126,13 +133,11 @@ class WasmHasher implements IncrementalHasher {
  * Performs a hash on a single array.
  */
 export function sha256Wasm(payload: Uint8Array): Uint8Array {
-  const hasher = acquireHasher();
+  const hasher = theOneShotHasher[0];
 
+  hasher.init();
   hasher.update(payload);
-  const result = hasher.digest("binary");
-  releaseHasher(hasher);
-
-  return result;
+  return hasher.digest("binary");
 }
 
 /**
