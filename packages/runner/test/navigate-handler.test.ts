@@ -254,3 +254,80 @@ Deno.test("navigateTo is idempotent for one result process cell", async () => {
     await storageManager.close();
   }
 });
+
+Deno.test(
+  "navigateTo retries navigation after a rejected post-commit transaction",
+  async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const navigations: string[] = [];
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      navigateCallback: (target) => {
+        navigations.push(target.entityId?.["/"] ?? "");
+      },
+    });
+
+    try {
+      const setupTx: IExtendedStorageTransaction = runtime.edit();
+      const processCell = runtime.getCell(
+        space,
+        "navigateTo retry process cell",
+        undefined,
+        setupTx,
+      );
+      const target = runtime.getCell(
+        space,
+        "navigateTo retry target",
+        undefined,
+        setupTx,
+      );
+      target.set({ title: "retry target" });
+      const inputs = runtime.getImmutableCell(
+        space,
+        target.getAsLink(),
+        undefined,
+        setupTx,
+      );
+      const setupResult = await setupTx.commit();
+      assert(setupResult.ok !== undefined);
+
+      const sendResult = (
+        resultTx: IExtendedStorageTransaction,
+        result: unknown,
+      ) => {
+        processCell.withTx(resultTx).key("result").set(result);
+      };
+
+      const builtin = rawNavigateTo(
+        inputs,
+        sendResult,
+        () => {},
+        [],
+        processCell,
+        runtime,
+      );
+
+      const rejectedTx = runtime.edit();
+      rejectedTx.setCfcEnforcementMode("enforce-explicit");
+      rejectedTx.markCfcRelevant("navigateTo retry regression");
+      builtin.action(rejectedTx);
+      const rejectedResult = await rejectedTx.commit();
+      assert(rejectedResult.error !== undefined);
+      await runtime.idle();
+      assertEquals(navigations.length, 0);
+
+      const retryTx = runtime.edit();
+      builtin.action(retryTx);
+      const retryResult = await retryTx.commit();
+      assert(retryResult.ok !== undefined);
+      await runtime.idle();
+
+      assertEquals(navigations.length, 1);
+      assertEquals(navigations[0], target.entityId?.["/"]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  },
+);

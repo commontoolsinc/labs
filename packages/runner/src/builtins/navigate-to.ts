@@ -14,6 +14,7 @@ export function navigateTo(
 ): RawBuiltinResult {
   let isInitialized = false;
   let navigated = false;
+  let navigationAttempt = 0;
   let resultCell: Cell<boolean>;
   const targetCellSchema = {
     type: "object",
@@ -63,7 +64,14 @@ export function navigateTo(
       // Resolve to root piece - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
 
+      const previousNavigated = navigated;
+      const thisAttempt = ++navigationAttempt;
       navigated = true;
+      tx.addCommitCallback((_committedTx, commitResult) => {
+        if (commitResult.error && navigationAttempt === thisAttempt) {
+          navigated = previousNavigated;
+        }
+      });
       // TODO(seefeld): This post-commit handoff regresses the previous
       // speculative-navigation latency. Model navigation as an event instead.
       tx.enqueuePostCommitEffect({
@@ -76,7 +84,7 @@ export function navigateTo(
           await runtime.navigateCallback!(resolvedTarget);
         },
       });
-      resultCell.set(true);
+      resultCell.withTx(tx).set(true);
     }
   };
 
