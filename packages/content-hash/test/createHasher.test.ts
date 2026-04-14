@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
 import {
@@ -7,7 +7,7 @@ import {
 } from "@commonfabric/content-hash";
 import { createHasherDeno } from "../src/sha256-deno.ts";
 import { createHasherNoble } from "../src/sha256-noble.ts";
-import { createHasherWasm } from "../src/sha256-wasm.ts";
+import { createHasherWasm, initWasm } from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
 const createFuncs = [
@@ -15,6 +15,10 @@ const createFuncs = [
   createHasherNoble,
   createHasherWasm,
 ] as const;
+
+beforeAll(() => {
+  initWasm();
+});
 
 describe("createHasher()", () => {
   it("is one of the implementation functions", () => {

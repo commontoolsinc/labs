@@ -1,10 +1,10 @@
-import { describe, it } from "@std/testing/bdd";
+import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
 import { sha256 } from "@commonfabric/content-hash";
 import { sha256Deno } from "../src/sha256-deno.ts";
 import { sha256Noble } from "../src/sha256-noble.ts";
-import { sha256Wasm } from "../src/sha256-wasm.ts";
+import { initWasm, sha256Wasm } from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
 const sha256Funcs = [
@@ -12,6 +12,10 @@ const sha256Funcs = [
   sha256Noble,
   sha256Wasm,
 ] as const;
+
+beforeAll(() => {
+  initWasm();
+});
 
 describe("sha256()", () => {
   it("is one of the implementation functions", () => {

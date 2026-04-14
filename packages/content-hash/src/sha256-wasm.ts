@@ -14,17 +14,38 @@ import type { IncrementalHasher } from "./interface.ts";
  */
 let theHasher: IHasher | null = null;
 
-try {
-  theHasher = await createSHA256();
-} catch {
-  // `hash-wasm` not available.
+/**
+ * Has `initIfNecessaryAndPossible()` been called at least once?
+ */
+let initCalled = false;
+
+/**
+ * Gets the hasher instance, or throws an error indicating that this module is
+ * not usable.
+ */
+function getHasher(): IHasher {
+  if (theHasher === null) {
+    throw new Error("Cannot use `sha256-wasm` in this environment.");
+  } else {
+    return theHasher;
+  }
 }
 
 /**
- * Throws an error indicating that this module is not usable.
+ * Performs module-level setup if (a) possible and (b) not already done. Returns
+ * `true` if initialization was successful, `false` if not.
  */
-function cantUse(): never {
-  throw new Error("Cannot use `sha256-wasm` in this environment.");
+export async function initWasm() {
+  if (!initCalled) {
+    initCalled = true;
+    try {
+      theHasher = await createSHA256();
+    } catch {
+      // `hash-wasm` not available.
+    }
+  }
+
+  return theHasher !== null;
 }
 
 /**
@@ -41,7 +62,7 @@ class WasmHasher implements IncrementalHasher {
   digest(): Uint8Array;
   digest(encoding: "base64url"): string;
   digest(encoding?: string): Uint8Array | string {
-    const hasher = theHasher ?? cantUse();
+    const hasher = getHasher();
     hasher.init();
 
     for (const chunk of this.#chunks) {
@@ -65,23 +86,14 @@ class WasmHasher implements IncrementalHasher {
 }
 
 /**
- * Is this module usable?
- */
-export function canUseWasm() {
-  return theHasher !== null;
-}
-
-/**
  * Performs a hash on a single array.
  */
 export function sha256Wasm(payload: Uint8Array): Uint8Array {
-  if (theHasher === null) {
-    cantUse();
-  }
+  const hasher = getHasher();
 
-  theHasher.init();
-  theHasher.update(payload);
-  return theHasher.digest("binary");
+  hasher.init();
+  hasher.update(payload);
+  return hasher.digest("binary");
 }
 
 /**
