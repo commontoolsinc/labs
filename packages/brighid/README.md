@@ -636,22 +636,37 @@ For the current Docker Desktop proof-of-concept, Brighid includes a reproducible
 setup helper that copies the Linux `runsc` build and CFC policy into a stable
 host path and points Docker Desktop at those files through `/host_mnt/...`.
 
+If you are working with sibling `gvisor` + `labs` checkouts, prefer the
+gVisor-owned setup flow for build/install/runtime wiring:
+
+```bash
+cd ../../gvisor
+make docker-desktop-cfc-setup-build
+make docker-desktop-cfc-validate
+```
+
+The gVisor repo owns the low-level build/install/runtime docs for that path in:
+
+- `g3doc/user_guide/quick_start/docker_desktop_cfc.md`
+
+From the Labs repo root, the convenience wrapper prefers the gVisor-owned setup
+script when a sibling `gvisor*` checkout is present:
+
+```bash
+deno task brighid:setup:docker-desktop
+```
+
+Brighid's package-local helper remains available as a fallback when you only
+need the package-local workflow:
+
 ```bash
 cd packages/brighid
 deno task setup:docker-desktop
 ```
 
-By default the setup task:
-
-- looks for a sibling `gvisor*` checkout with:
-  - `bazel-bin/runsc/runsc_/runsc`
-  - `demo/cfc-policy.json`
-- copies them to:
-  - `~/.local/share/runsc-cfc/runsc`
-  - `~/.local/share/runsc-cfc/cfc-policy.json`
-- updates `~/.docker/daemon.json`
-- restarts Docker Desktop
-- verifies that `docker run --runtime=runsc-cfc ...` works
+The package-local helper performs the same host-backed runtime registration flow
+inside Brighid when you need it, but the gVisor repo remains the primary home
+for build/install/runtime wiring details.
 
 Useful overrides:
 
@@ -696,6 +711,13 @@ cd packages/brighid
 BRIGHID_SANDBOX_RUNTIME=docker-cfc \
 BRIGHID_DOCKER_RUNTIME=runsc-cfc \
 deno task brighid
+```
+
+From the Labs repo root you can also use:
+
+```bash
+deno task brighid:setup:docker-desktop
+deno task brighid:integration:docker
 ```
 
 Important: the interactive Brighid agent still has many simulated built-in

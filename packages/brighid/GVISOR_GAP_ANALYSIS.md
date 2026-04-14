@@ -218,6 +218,11 @@ compatibility path rather than a new native Apple runtime. `/fabric` also
 remains conservative there: the reliable contract is still an explicit
 host-backed path when one is needed.
 
+Operator note: the gVisor repo now owns the primary build/install/validate flow
+for the Docker Desktop proof-of-concept (build `runsc`, configure Docker
+Desktop, validate with `docker run`). Brighid documents how to consume that
+runtime and how its own simulated built-ins differ from explicit real bash.
+
 And it should continue to keep these responsibilities outside the sandbox:
 
 - command selection and policy decisions
