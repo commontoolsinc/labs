@@ -108,6 +108,7 @@ Deno.test(
       "PatternCallbackLoweringTransformer",
       "SchemaInjectionTransformer",
       "SchemaGeneratorTransformer",
+      "ReactiveVariableForTransformer",
       "ModuleScopeShadowingTransformer",
       "ModuleScopeCfDataTransformer",
       "ModuleScopeFunctionHardeningTransformer",
