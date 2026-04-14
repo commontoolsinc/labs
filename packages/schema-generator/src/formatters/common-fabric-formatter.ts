@@ -636,15 +636,23 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
   ): JSONSchemaMutable {
     const typeArgs = typeRefNode.typeArguments;
-    if (!typeArgs || typeArgs.length < 2) {
-      throw new Error("Default<T,V> requires exactly 2 type arguments");
+    if (!typeArgs || typeArgs.length < 1 || typeArgs.length > 2) {
+      throw new Error("Default<T,V> requires 1 or 2 type arguments");
     }
 
     const valueTypeNode = typeArgs[0];
-    const defaultTypeNode = typeArgs[1];
+    const defaultTypeNode = typeArgs[1] ?? valueTypeNode;
 
     if (!valueTypeNode || !defaultTypeNode) {
       throw new Error("Default<T,V> type arguments cannot be undefined");
+    }
+    if (
+      typeArgs.length === 1 &&
+      valueTypeNode.kind === ts.SyntaxKind.UndefinedKeyword
+    ) {
+      throw new Error(
+        "Default<undefined> is unsupported; use an optional field or a JSON value default.",
+      );
     }
 
     // Get the value type from the type nodes
