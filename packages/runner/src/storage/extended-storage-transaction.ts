@@ -584,8 +584,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     const result = await promise;
     if (result.ok && !readOnly) {
       for (const effect of this.cfcState.outbox) {
-        await effect.flush(this);
-        this.cfcInstrumentation.onOutboxFlush?.(effect);
+        try {
+          await effect.flush(this);
+          this.cfcInstrumentation.onOutboxFlush?.(effect);
+        } catch (error) {
+          logger.error(
+            "storage-error",
+            "Post-commit side effect failed:",
+            { effect, error },
+          );
+        }
       }
       this.outboxIdempotencyKeys.clear();
     } else {

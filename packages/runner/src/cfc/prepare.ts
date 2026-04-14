@@ -84,6 +84,19 @@ const mergeLabelValues = (
   return merged.length > 0 ? merged : undefined;
 };
 
+const hasLabelValues = (label: IFCLabel): boolean =>
+  (label.confidentiality?.length ?? 0) > 0 ||
+  (label.integrity?.length ?? 0) > 0;
+
+const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
+  if (!isRecord(schema) || !isRecord(schema.ifc)) {
+    return false;
+  }
+  return schema.ifc.writeAuthorizedBy !== undefined ||
+    schema.ifc.uiContract !== undefined ||
+    schema.ifc.exactCopyOf !== undefined;
+};
+
 const claimPathToLogicalPath = (
   claim: unknown,
 ): string[] | undefined => {
@@ -833,6 +846,23 @@ export const prepareBoundaryCommit = (
         entry.label,
       ]),
     );
+    const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
+      const label = derivePersistedLabel(
+        entry.schema,
+        entry.label,
+        mergedSchemaEntryLabels,
+      );
+      return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
+        ? [{
+          path: entry.path,
+          label,
+        }]
+        : [];
+    });
+
+    if (persistedLabelEntries.length === 0) {
+      continue;
+    }
 
     ensureSchemaDocument(
       tx,
@@ -845,14 +875,7 @@ export const prepareBoundaryCommit = (
       schemaHash: schemaAndHash.hashString,
       labelMap: {
         version: 1,
-        entries: mergedSchemaEntries.map((entry) => ({
-          path: entry.path,
-          label: derivePersistedLabel(
-            entry.schema,
-            entry.label,
-            mergedSchemaEntryLabels,
-          ),
-        })),
+        entries: persistedLabelEntries,
       },
     };
 

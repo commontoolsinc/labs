@@ -23,6 +23,15 @@ const isPrefix = (
   left.length <= right.length &&
   left.every((segment, index) => segment === right[index]);
 
+const hasLabelValues = (
+  label: {
+    confidentiality?: readonly unknown[];
+    integrity?: readonly unknown[];
+  },
+): boolean =>
+  (label.confidentiality?.length ?? 0) > 0 ||
+  (label.integrity?.length ?? 0) > 0;
+
 export const readStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -54,6 +63,7 @@ export const storedCfcMetadataAppliesToPath = (
   }
   const logicalPath = canonicalizeLogicalPath(target.path);
   return metadata.labelMap.entries.some((entry) =>
-    isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path)
+    hasLabelValues(entry.label) &&
+    (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
   );
 };

@@ -16,6 +16,7 @@ import {
   canonicalizeWritePolicyInput,
   logicalPathToPointer,
 } from "../src/cfc/mod.ts";
+import { flowPrecisionSchemaForBuiltin } from "../src/cfc/flow-precision.ts";
 import { CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION } from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 
@@ -874,6 +875,44 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const rejectedResult = await rejected.commit();
       expect(rejectedResult.error).toBeDefined();
       expect(flushed).toEqual(["effect-1"]);
+
+      const throwing = runtime.edit();
+      throwing.enqueuePostCommitEffect({
+        id: "effect-throws",
+        kind: "test",
+        flush() {
+          flushed.push("effect-throws");
+          throw new Error("post-commit effect failed");
+        },
+      });
+      throwing.writeValueOrThrow({
+        space: signer.did(),
+        id: "of:cfc-outbox-effect-throws",
+        type: "application/json",
+        path: [],
+      }, { ok: "committed" });
+
+      let thrown: unknown;
+      let throwingResult:
+        | Awaited<ReturnType<typeof throwing.commit>>
+        | undefined;
+      try {
+        throwingResult = await throwing.commit();
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeUndefined();
+      expect(throwingResult?.ok).toBeDefined();
+      expect(flushed).toEqual(["effect-1", "effect-throws"]);
+
+      const verify = runtime.edit();
+      expect(verify.readOrThrow({
+        space: signer.did(),
+        id: "of:cfc-outbox-effect-throws",
+        type: "application/json",
+        path: [],
+      })).toMatchObject({ value: { ok: "committed" } });
+      verify.abort();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -1336,6 +1375,39 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.error?.message).toContain(
         "writeAuthorizedBy requires a trusted builtin identity",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not persist CFC metadata for IFC claims without labels", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const schema = flowPrecisionSchemaForBuiltin("map");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-empty-label-ifc-noop",
+        schema,
+        tx,
+      );
+      cell.set([1, 2, 3]);
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const link = cell.getAsNormalizedFullLink();
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: link.space,
+        id: link.id,
+        type: link.type,
+        path: [],
+      }) as { cfc?: unknown };
+      expect(stored.cfc).toBeUndefined();
+      expect(storedCfcMetadataAppliesToPath(verify, link)).toBe(false);
+      verify.abort();
     } finally {
       await runtime.dispose();
       await storageManager.close();
