@@ -7,13 +7,18 @@ import {
 } from "@commonfabric/content-hash";
 import { createHasherDeno } from "../src/sha256-deno.ts";
 import { createHasherNoble } from "../src/sha256-noble.ts";
-import { createHasherWasm, initWasm } from "../src/sha256-wasm.ts";
+import {
+  createHasherWasm,
+  createHasherWasmCollecting,
+  initWasm
+} from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
 const createFuncs = [
   createHasherDeno,
   createHasherNoble,
   createHasherWasm,
+  createHasherWasmCollecting,
 ] as const;
 
 beforeAll(async () => {

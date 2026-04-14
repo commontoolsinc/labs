@@ -273,3 +273,14 @@ export function createHasherWasm(): IncrementalHasher {
     ? new WasmUpdatingHasher()
     : new WasmCollectingHasher();
 }
+
+/**
+ * Creates a collecting incremental hasher. This is exported just for
+ * testing. (We don't need to do this for the updating hasher, because it gets
+ * sufficiently tested via `createHasherWasm()` and would fail the concurrency
+ * test anyway because there aren't enough cached instances to satisfy the
+ * concurrency required by the test.)
+ */
+export function createHasherWasmCollecting(): IncrementalHasher {
+  return new WasmCollectingHasher();
+}
