@@ -446,28 +446,49 @@ export default pattern<Record<PropertyKey, never>, GalleryOutput>(() => {
       ? "prepared"
       : "screening"
   );
-  const completedEntries = computed(() => {
-    const entries = [] as string[];
-    if (hotelMembershipReturn.get()) entries.push("hotel-membership-return");
-    if (forwardHotelNoteValue.get()) entries.push("forward-hotel-note");
-    if (selectSearchResultValue.get()) entries.push("select-search-result");
-    if (acknowledgeDisclosureValue.get()) {
-      entries.push("acknowledge-disclosure");
-    }
-    if (acknowledgeAlertValue.get()) entries.push("acknowledge-alert");
-    if (acceptInviteValue.get()) entries.push("accept-invite");
-    if (releaseRedactedSummaryValue.get()) {
-      entries.push("release-redacted-summary");
-    }
-    if (escalateSupportCaseValue.get()) entries.push("escalate-support-case");
-    if (authorizeResearchSendValue.get()) {
-      entries.push("authorize-research-send");
-    }
-    if (finalizeChecklistValue.get()) entries.push("finalize-checklist");
-    if (confirmReceiptValue.get()) entries.push("confirm-receipt");
-    if (releaseSafeLinkValue.get()) entries.push("release-safe-link");
-    return entries;
+  const completedCount = computed(() => {
+    let count = 0;
+    if (hotelMembershipReturn.get()) count++;
+    if (forwardHotelNoteValue.get()) count++;
+    if (selectSearchResultValue.get()) count++;
+    if (acknowledgeDisclosureValue.get()) count++;
+    if (acknowledgeAlertValue.get()) count++;
+    if (acceptInviteValue.get()) count++;
+    if (releaseRedactedSummaryValue.get()) count++;
+    if (escalateSupportCaseValue.get()) count++;
+    if (authorizeResearchSendValue.get()) count++;
+    if (finalizeChecklistValue.get()) count++;
+    if (confirmReceiptValue.get()) count++;
+    if (releaseSafeLinkValue.get()) count++;
+    return count;
   });
+  const lastCompleted = computed(() =>
+    releaseSafeLinkValue.get()
+      ? "release-safe-link"
+      : confirmReceiptValue.get()
+      ? "confirm-receipt"
+      : finalizeChecklistValue.get()
+      ? "finalize-checklist"
+      : authorizeResearchSendValue.get()
+      ? "authorize-research-send"
+      : escalateSupportCaseValue.get()
+      ? "escalate-support-case"
+      : releaseRedactedSummaryValue.get()
+      ? "release-redacted-summary"
+      : acceptInviteValue.get()
+      ? "accept-invite"
+      : acknowledgeAlertValue.get()
+      ? "acknowledge-alert"
+      : acknowledgeDisclosureValue.get()
+      ? "acknowledge-disclosure"
+      : selectSearchResultValue.get()
+      ? "select-search-result"
+      : forwardHotelNoteValue.get()
+      ? "forward-hotel-note"
+      : hotelMembershipReturn.get()
+      ? "hotel-membership-return"
+      : ""
+  );
 
   return {
     [NAME]: computed(() => "CFC Worked Example Gallery"),
@@ -631,11 +652,8 @@ export default pattern<Record<PropertyKey, never>, GalleryOutput>(() => {
       </cf-screen>
     ),
     totalExamples: 16,
-    completedCount: computed(() => completedEntries.length),
-    lastCompleted: computed(() => {
-      const entries = completedEntries;
-      return entries[entries.length - 1] ?? "";
-    }),
+    completedCount,
+    lastCompleted,
     hotelMembershipReturn,
     forwardHotelNote: forwardHotelNoteValue,
     forwardSourceNote: computed(() => forwardSourceNote.get()),
