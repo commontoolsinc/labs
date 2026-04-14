@@ -435,7 +435,7 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     throw new Error(
-      "Default object union member is not assignable to the existing object type. Use Default<T, V> for full defaults or DeepDefault<V> for partial object defaults.",
+      "Default object union member is not assignable to the existing object type. Use T | Default<V> for full defaults or T | DeepDefault<V> for partial object defaults.",
     );
   }
 

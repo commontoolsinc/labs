@@ -1977,6 +1977,34 @@ export type StripDefaultBrand<T> = Exclude<
   { readonly [DEFAULT_MARKER]: any }
 >;
 
+type RemoveRedundantUnionMembers<T, All = T> = T extends any
+  ? [Exclude<All, T>] extends [never] ? T
+  : T extends Exclude<All, T> ? never
+  : T
+  : never;
+
+type StripDefaultUnion<T> = RemoveRedundantUnionMembers<StripDefaultBrand<T>>;
+
+/**
+ * Cell-aware default stripping for pattern input normalization. The public
+ * StripDefaultBrand<T> intentionally stays shallow because it is used by cell
+ * interfaces in variance-sensitive positions.
+ */
+type StripDefaultField<T> = IsAny<T> extends true ? T
+  : StripDefaultFieldInner<StripDefaultUnion<T>>;
+
+type StripDefaultFieldInner<T> = T extends Cell<infer U>
+  ? Cell<StripDefaultUnion<U>>
+  : T extends OpaqueCell<infer U> ? OpaqueCell<StripDefaultUnion<U>>
+  : T extends Stream<infer U> ? Stream<StripDefaultUnion<U>>
+  : T extends ComparableCell<infer U> ? ComparableCell<StripDefaultUnion<U>>
+  : T extends ReadonlyCell<infer U> ? ReadonlyCell<StripDefaultUnion<U>>
+  : T extends WriteonlyCell<infer U> ? WriteonlyCell<StripDefaultUnion<U>>
+  : T extends AnyCell<infer U> ? AnyCell<StripDefaultUnion<U>>
+  : T extends AnyBrandedCell<infer U, infer Kind>
+    ? AnyBrandedCell<StripDefaultUnion<U>, Kind>
+  : T;
+
 /**
  * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required
  * (removing `?`) and have their brand stripped, while all other fields are left
@@ -1996,7 +2024,7 @@ export type RequireDefaults<T> =
   // `Default<X,V> | undefined`. In a non-distributive conditional context, `boolean extends true`
   // is `false`, but `true extends boolean` is `true` — correctly triggering the true branch.
   & {
-    [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultBrand<T[K]>
+    [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultField<T[K]>
       : T[K];
   }
   // Refinement: remove `?` from keys that carry the Default brand.
@@ -2007,7 +2035,7 @@ export type RequireDefaults<T> =
   // possibly-undefined in the pattern body despite being required.
   & {
     [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?:
-      StripDefaultBrand<Exclude<T[K], undefined>>;
+      StripDefaultField<Exclude<T[K], undefined>>;
   };
 
 // Internal-only way to instantiate internal modules

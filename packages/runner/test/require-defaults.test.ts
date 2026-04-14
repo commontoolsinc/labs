@@ -200,6 +200,27 @@ const _unionNullDefault: MustBeTrue<
   >
 > = true;
 
+const _cellUnionNullDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ value?: Cell<string | Default<null>> }>>,
+    { value: Cell<string | null> }
+  >
+> = true;
+
+const _arrayUnionEmptyDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ items?: string[] | Default<[]> }>>,
+    { items: string[] }
+  >
+> = true;
+
+const _cellArrayUnionEmptyDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ items?: Cell<string[] | Default<[]>> }>>,
+    { items: Cell<string[]> }
+  >
+> = true;
+
 const _nullDefaultRequired: MustBeTrue<
   AssertEqual<
     Simplify<RequireDefaults<{ value?: Default<null> }>>,
