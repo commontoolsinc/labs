@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { basename, join, resolve, toFileUrl } from "@std/path";
+import { stub } from "@std/testing/mock";
 import {
   awaitBackgroundMountStartup,
   awaitForegroundMountExit,
@@ -491,6 +492,18 @@ describe("fuse help", () => {
 describe("isAlive", () => {
   it("returns true for the current process", () => {
     expect(isAlive(Deno.pid)).toBe(true);
+  });
+
+  it("returns true when signaling is denied", () => {
+    const killStub = stub(Deno, "kill", () => {
+      throw new Deno.errors.PermissionDenied("EPERM: Operation not permitted");
+    });
+
+    try {
+      expect(isAlive(18871)).toBe(true);
+    } finally {
+      killStub.restore();
+    }
   });
 
   it("returns false for a bogus PID", () => {

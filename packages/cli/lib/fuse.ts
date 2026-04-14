@@ -214,7 +214,13 @@ export function isAlive(pid: number): boolean {
     // stopped processes. We just need to check if the process exists.
     Deno.kill(pid, "SIGURG");
     return true;
-  } catch {
+  } catch (error) {
+    // EPERM means the process exists, but the caller cannot signal it.
+    // This happens when a sandboxed caller probes a live daemon started
+    // outside that sandbox.
+    if (error instanceof Deno.errors.PermissionDenied) {
+      return true;
+    }
     return false;
   }
 }
