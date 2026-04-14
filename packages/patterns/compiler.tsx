@@ -11,10 +11,11 @@ import {
 } from "commonfabric";
 
 type Input = {
-  code: Default<
-    string,
-    'import { computed, Default, handler, NAME, pattern, UI, Writable } from "commonfabric";\n\ninterface Input {\n  value: Default<number, 0>;\n}\n\nconst increment = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() + 1);\n});\n\nconst decrement = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() - 1);\n});\n\nexport default pattern<Input>(({ value }) => {\n  return {\n    [NAME]: computed(() => `Simple counter: ${value}`),\n    [UI]: (\n      <div>\n        <cf-button onClick={decrement({ value })}>-</cf-button>\n        <b>{value}</b>\n        <cf-button onClick={increment({ value })}>+</cf-button>\n      </div>\n    ),\n    value,\n  };\n});\n'
-  >;
+  code:
+    | string
+    | Default<
+      'import { computed, Default, handler, NAME, pattern, UI, Writable } from "commonfabric";\n\ninterface Input {\n  value: number | Default<0>;\n}\n\nconst increment = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() + 1);\n});\n\nconst decrement = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() - 1);\n});\n\nexport default pattern<Input>(({ value }) => {\n  return {\n    [NAME]: computed(() => `Simple counter: ${value}`),\n    [UI]: (\n      <div>\n        <cf-button onClick={decrement({ value })}>-</cf-button>\n        <b>{value}</b>\n        <cf-button onClick={increment({ value })}>+</cf-button>\n      </div>\n    ),\n    value,\n  };\n});\n'
+    >;
 };
 
 const updateCode = handler<

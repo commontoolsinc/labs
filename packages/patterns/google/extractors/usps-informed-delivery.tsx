@@ -262,7 +262,7 @@ const deleteMember = handler<
 // =============================================================================
 
 interface PatternInput {
-  householdMembers?: Default<HouseholdMember[], []>;
+  householdMembers?: HouseholdMember[] | Default<[]>;
   // Optional: Link auth directly from a Google Auth piece
   // Use: cf piece link googleAuthPiece/auth uspsPiece/overrideAuth
   overrideAuth?: Auth;

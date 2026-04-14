@@ -21,12 +21,12 @@ import {
 // ===== Types =====
 interface Bookmark {
   url: string;
-  title: Default<string, "">;
-  description: Default<string, "">;
+  title: string | Default<"">;
+  description: string | Default<"">;
 }
 
 interface BookmarksInput {
-  bookmarks?: Writable<Default<Bookmark[], []>>;
+  bookmarks?: Writable<Bookmark[] | Default<[]>>;
 }
 
 interface BookmarksOutput {

@@ -356,11 +356,11 @@ const toggleItemSelection = handler<
   unknown,
   {
     item: TrackedItem;
-    selectedItems: Writable<Default<string[], []>>;
+    selectedItems: Writable<string[] | Default<[]>>;
   }
 >((_, { item, selectedItems }) => {
   const key = item.key; // Access key inside handler context
-  const current = selectedItems.get() || [];
+  const current = (selectedItems.get() || []) as string[];
   const idx = current.indexOf(key);
   if (idx >= 0) {
     selectedItems.set(current.filter((k: string) => k !== key));
@@ -379,7 +379,7 @@ const toggleItemSelection = handler<
 const markAsReturnedHandler = handler<
   { title: string },
   {
-    manuallyReturned: Writable<Default<string[], []>>;
+    manuallyReturned: Writable<string[] | Default<[]>>;
     rawAnalyses: Array<{
       analysis?: { result?: LibraryEmailAnalysis };
     }>;
@@ -393,7 +393,7 @@ const markAsReturnedHandler = handler<
   const searchTitle = byMatch ? byMatch[1].trim() : normalizedInput;
   const searchAuthor = byMatch ? byMatch[2].trim() : "";
 
-  const current = manuallyReturned.get() || [];
+  const current = (manuallyReturned.get() || []) as string[];
   const keysToAdd: string[] = [];
 
   // Search through all analyzed emails for matching items
@@ -437,7 +437,7 @@ const markAsReturnedHandler = handler<
 const dismissHoldHandler = handler<
   { title: string },
   {
-    dismissedHolds: Writable<Default<string[], []>>;
+    dismissedHolds: Writable<string[] | Default<[]>>;
     rawAnalyses: Array<{
       analysis?: { result?: LibraryEmailAnalysis };
     }>;
@@ -451,7 +451,7 @@ const dismissHoldHandler = handler<
   const searchTitle = byMatch ? byMatch[1].trim() : normalizedInput;
   const searchAuthor = byMatch ? byMatch[2].trim() : "";
 
-  const current = dismissedHolds.get() || [];
+  const current = (dismissedHolds.get() || []) as string[];
   const keysToAdd: string[] = [];
 
   // Search through all analyzed emails for matching holds
@@ -492,9 +492,9 @@ const setDueDateForGroup = handler<
   unknown,
   {
     groupItems: TrackedItem[];
-    selectedItems: Writable<Default<string[], []>>;
+    selectedItems: Writable<string[] | Default<[]>>;
     dueDateOverrides: Writable<
-      Default<Record<string, string>, Record<string, never>>
+      Record<string, string> | Default<Record<string, never>>
     >;
   }
 >((event, { groupItems, selectedItems, dueDateOverrides }) => {
@@ -503,7 +503,7 @@ const setDueDateForGroup = handler<
   if (!newDueDate) return;
 
   // Get selected items in this group (not in deselected list = selected)
-  const deselectedKeys = selectedItems.get() || [];
+  const deselectedKeys = (selectedItems.get() || []) as string[];
   const selectedInThisGroup = groupItems.filter(
     (item: TrackedItem) => !deselectedKeys.includes(item.key),
   );
@@ -537,14 +537,14 @@ interface PatternInput {
   // Use: cf piece link googleAuthPiece/auth berkeleyLibraryPiece/overrideAuth
   overrideAuth?: Auth;
   // Track items manually marked as returned (persisted)
-  manuallyReturned?: Writable<Default<string[], []>>;
+  manuallyReturned?: Writable<string[] | Default<[]>>;
   // Track holds manually dismissed (persisted)
-  dismissedHolds?: Writable<Default<string[], []>>;
+  dismissedHolds?: Writable<string[] | Default<[]>>;
   // Track selected items for bulk operations (per-group checkboxes)
-  selectedItems?: Writable<Default<string[], []>>;
+  selectedItems?: Writable<string[] | Default<[]>>;
   // Track manual due date overrides (persisted)
   dueDateOverrides?: Writable<
-    Default<Record<string, string>, Record<string, never>>
+    Record<string, string> | Default<Record<string, never>>
   >;
 }
 

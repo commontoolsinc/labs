@@ -33,9 +33,9 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface EmailModuleInput {
   /** Label for this email (Personal, Work, School, etc.) */
-  label: Default<string, "Personal">;
+  label: string | Default<"Personal">;
   /** Email address */
-  address: Default<string, "">;
+  address: string | Default<"">;
 }
 
 // ===== The Pattern =====

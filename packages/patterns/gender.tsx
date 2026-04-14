@@ -42,7 +42,7 @@ type GenderValue =
 
 export interface GenderModuleInput {
   /** Gender identity - Writable<> required for setGender handler to call .set() */
-  gender: Writable<Default<GenderValue | "", "">>;
+  gender: Writable<GenderValue | "" | Default<"">>;
 }
 
 // ===== Constants =====

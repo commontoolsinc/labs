@@ -29,9 +29,9 @@ import StoreMapper from "./store-mapper.tsx";
 // Item with optional aisle override for manual corrections
 interface ShoppingItem {
   title: string;
-  done: Default<boolean, false>;
-  aisleSeed: Default<number, 0>;
-  aisleOverride: Default<string, "">; // User's manual aisle selection
+  done: boolean | Default<false>;
+  aisleSeed: number | Default<0>;
+  aisleOverride: string | Default<"">; // User's manual aisle selection
 }
 
 // AI categorization result
@@ -40,8 +40,8 @@ interface AisleResult {
 }
 
 interface Input {
-  items: Writable<Default<ShoppingItem[], []>>;
-  storeLayout: Writable<Default<string, "">>; // Markdown store layout from Store Mapper
+  items: Writable<ShoppingItem[] | Default<[]>>;
+  storeLayout: Writable<string | Default<"">>; // Markdown store layout from Store Mapper
 }
 
 /** Shopping list with AI-powered aisle sorting. #shoppingList */

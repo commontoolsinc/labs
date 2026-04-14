@@ -23,7 +23,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface NicknameModuleInput {
   /** Nickname or alias */
-  nickname: Default<string, "">;
+  nickname: string | Default<"">;
 }
 
 // ===== The Pattern =====

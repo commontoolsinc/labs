@@ -101,30 +101,27 @@ export interface DailyJournalPiece {
 // ===== Input Types =====
 
 export interface NoteInput {
-  title?: Writable<Default<string, "Untitled Note">>;
-  content?: Writable<Default<string, "">>;
-  isHidden?: Default<boolean, false>;
+  title?: Writable<string | Default<"Untitled Note">>;
+  content?: Writable<string | Default<"">>;
+  isHidden?: boolean | Default<false>;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
-  linkPattern?: Writable<Default<string, "">>;
+  linkPattern?: Writable<string | Default<"">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
-  parentNotebook?: Writable<Default<NotebookPiece | null, null>>;
+  parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
 }
 
 export interface NotebookInput {
-  title?: Writable<Default<string, "Notebook">>;
-  notes?: Writable<Default<NotePiece[], []>>;
-  isNotebook?: Default<boolean, true>;
-  isHidden?: Default<boolean, false>;
+  title?: Writable<string | Default<"Notebook">>;
+  notes?: Writable<NotePiece[] | Default<[]>>;
+  isNotebook?: boolean | Default<true>;
+  isHidden?: boolean | Default<false>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
-  parentNotebook?: Writable<Default<NotebookPiece | null, null>>;
+  parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
 }
 
 export interface NoteMdInput {
   /** Cell reference to note data (title + content + backlinks) */
-  note?: Default<
-    NotePiece,
-    { title: ""; content: ""; backlinks: [] }
-  >;
+  note?: NotePiece | Default<{ title: ""; content: ""; backlinks: [] }>;
   /** Direct reference to source note for Edit navigation */
   sourceNoteRef?: NotePiece;
   /** Writable content cell for checkbox updates */

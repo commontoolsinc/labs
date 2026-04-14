@@ -25,7 +25,7 @@ const PatternStateSchema = toSchema<PatternState>();
 // instead of storing the piece directly. This avoids a "pointer of pointers"
 // error that occurs when a Cell directly contains another Cell/piece reference.
 type PatternInOutput = {
-  cellRef: Default<{ piece: any }, { piece: null }>;
+  cellRef: { piece: any } | Default<{ piece: null }>;
 };
 
 // the simple piece (to which we'll store a reference within a cell)

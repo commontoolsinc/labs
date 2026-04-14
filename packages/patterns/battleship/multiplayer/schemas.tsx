@@ -103,18 +103,15 @@ export function createInitialShots(): ShotsState {
  * to provide initial values for the complex state objects.
  */
 export interface LobbyState {
-  gameName: Default<string, "Battleship">;
-  player1: Writable<Default<PlayerData | null, null>>;
-  player2: Writable<Default<PlayerData | null, null>>;
+  gameName: string | Default<"Battleship">;
+  player1: Writable<PlayerData | null | Default<null>>;
+  player2: Writable<PlayerData | null | Default<null>>;
   shots: Writable<
-    Default<
-      ShotsState,
-      { 1: []; 2: [] }
-    >
+    ShotsState | Default<{ 1: []; 2: [] }>
   >;
   gameState: Writable<
-    Default<
-      GameState,
+    | GameState
+    | Default<
       { phase: "waiting"; currentTurn: 1; winner: null; lastMessage: "" }
     >
   >;

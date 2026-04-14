@@ -33,13 +33,13 @@ import { FolksonomyTags } from "./folksonomy-tags.tsx";
 
 interface Input {
   /** Tags for item A (scope: demo-shared) */
-  itemATags: Default<string[], []>;
+  itemATags: string[] | Default<[]>;
   /** Tags for item B (scope: demo-shared - same as A) */
-  itemBTags: Default<string[], []>;
+  itemBTags: string[] | Default<[]>;
   /** Tags for item C (scope: demo-isolated - different scope) */
-  itemCTags: Default<string[], []>;
+  itemCTags: string[] | Default<[]>;
   /** Custom scope name */
-  customScope: Default<string, "demo-shared">;
+  customScope: string | Default<"demo-shared">;
 }
 
 interface Output {

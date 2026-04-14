@@ -44,13 +44,13 @@ type ClosenessLevel = "intimate" | "close" | "casual" | "distant";
 
 export interface RelationshipModuleInput {
   /** Relationship types (e.g., friend, family, colleague) */
-  relationTypes: Default<string[], []>;
+  relationTypes: string[] | Default<[]>;
   /** Closeness level */
-  closeness: Default<ClosenessLevel | "", "">;
+  closeness: ClosenessLevel | "" | Default<"">;
   /** How we met */
-  howWeMet: Default<string, "">;
+  howWeMet: string | Default<"">;
   /** Inner circle member */
-  innerCircle: Default<boolean, false>;
+  innerCircle: boolean | Default<false>;
 }
 
 // ===== Constants =====

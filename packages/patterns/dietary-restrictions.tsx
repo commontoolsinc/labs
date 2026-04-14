@@ -78,7 +78,7 @@ export interface RestrictionEntry {
 export type RestrictionInput = string | RestrictionEntry;
 
 export interface DietaryRestrictionsInput {
-  restrictions: Default<RestrictionInput[], []>;
+  restrictions: RestrictionInput[] | Default<[]>;
 }
 
 // ===== Restriction Categories =====

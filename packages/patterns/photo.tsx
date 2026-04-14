@@ -36,9 +36,9 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface PhotoModuleInput {
   /** The uploaded image data (null if no image) */
-  image: Default<ImageData | null, null>;
+  image: ImageData | null | Default<null>;
   /** User-defined label for the photo */
-  label: Default<string, "">;
+  label: string | Default<"">;
 }
 
 // Output interface with unknown for UI properties to prevent OOM (CT-1148)

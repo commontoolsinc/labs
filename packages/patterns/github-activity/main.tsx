@@ -32,7 +32,7 @@ function parseUrl(url: string): { owner: string; repo: string } {
 
 export default pattern<{
   repoUrl: Writable<
-    Default<string, "https://github.com/anthropics/claude-code">
+    string | Default<"https://github.com/anthropics/claude-code">
   >;
 }>((state) => {
   // Parse URL and create API endpoint

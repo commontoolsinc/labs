@@ -21,11 +21,13 @@ interface Repo {
 }
 
 interface InputSchema {
-  repos: Default<Repo[], [
-    { id: "1"; name: "react" },
-    { id: "2"; name: "vue" },
-    { id: "3"; name: "angular" },
-  ]>;
+  repos:
+    | Repo[]
+    | Default<[
+      { id: "1"; name: "react" },
+      { id: "2"; name: "vue" },
+      { id: "3"; name: "angular" },
+    ]>;
 }
 
 interface Input {

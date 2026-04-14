@@ -21,17 +21,17 @@ import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
  */
 
 interface LobbyInput {
-  chatName: Default<string, "Group Chat">;
-  messages: Writable<Default<Message[], []>>;
-  users: Writable<Default<User[], []>>;
-  sessionId: Writable<Default<string, "">>;
+  chatName: string | Default<"Group Chat">;
+  messages: Writable<Message[] | Default<[]>>;
+  users: Writable<User[] | Default<[]>>;
+  sessionId: Writable<string | Default<"">>;
 }
 
 interface LobbyOutput {
-  chatName: Default<string, "Group Chat">;
-  messages: Writable<Default<Message[], []>>;
-  users: Writable<Default<User[], []>>;
-  sessionId: Writable<Default<string, "">>;
+  chatName: string | Default<"Group Chat">;
+  messages: Writable<Message[] | Default<[]>>;
+  users: Writable<User[] | Default<[]>>;
+  sessionId: Writable<string | Default<"">>;
 }
 
 // Random color selection from a pool of distinct colors

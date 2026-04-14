@@ -55,11 +55,11 @@ interface TypePickerInput {
   trashedEntries: Writable<TrashedSubPieceEntry[]>;
   linkPatternJson?: string;
   // Internal state
-  dismissed?: Default<boolean, false>;
+  dismissed?: boolean | Default<false>;
 }
 
 interface TypePickerOutput {
-  dismissed?: Default<boolean, false>;
+  dismissed?: boolean | Default<false>;
 }
 
 // ===== Handlers =====

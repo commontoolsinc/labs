@@ -41,8 +41,8 @@ import {
 } from "commonfabric";
 
 interface Input {
-  runCount: Default<number, 0>;
-  logs: Default<string[], []>;
+  runCount: number | Default<0>;
+  logs: string[] | Default<[]>;
 }
 
 // Browser-triggered handler - explicitly marks source as BROWSER

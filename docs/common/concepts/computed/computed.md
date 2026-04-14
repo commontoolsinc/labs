@@ -5,12 +5,12 @@ import { computed, Default, NAME, pattern, UI } from "commonfabric";
 
 interface Item {
   title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Other">;
+  done: boolean | Default<false>;
+  category: string | Default<"Other">;
 }
 
 interface Input {
-  items: Default<Item[], []>;
+  items: Item[] | Default<[]>;
 }
 
 export default pattern<Input, Input>(({ items }) => {

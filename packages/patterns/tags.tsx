@@ -29,7 +29,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface TagsModuleInput {
   /** Tags or labels */
-  tags: Default<string[], []>;
+  tags: string[] | Default<[]>;
 }
 
 // ===== Handlers =====

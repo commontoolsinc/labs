@@ -23,7 +23,7 @@ interface Item {
 }
 
 interface Input {
-  items: Writable<Default<Item[], []>>;
+  items: Writable<Item[] | Default<[]>>;
 }
 
 interface Output {

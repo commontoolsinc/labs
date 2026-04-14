@@ -53,7 +53,7 @@ interface SeriesOverride {
 
 interface DayEntry {
   date: string; // ISO date string (YYYY-MM-DD)
-  notes: Default<Note[], []>;
+  notes: Note[] | Default<[]>;
 }
 
 interface TimeLabel {
@@ -62,18 +62,19 @@ interface TimeLabel {
 }
 
 interface Input {
-  entries: Default<DayEntry[], []>;
-  recurringSeries: Default<RecurringSeries[], []>;
-  seriesOverrides: Default<SeriesOverride[], []>;
-  name: Default<string, "calendar-v512">;
-  customTimeLabels: Default<
-    TimeLabel[],
-    [{ label: "Morning"; time: "09:00" }, { label: "Evening"; time: "18:00" }]
-  >;
-  startTime: Default<number, 7>; // Start hour in 24-hour format (7 = 7 AM)
-  endTime: Default<number, 19>; // End hour in 24-hour format (19 = 7 PM)
-  timeInterval: Default<30 | 60, 60>; // Time slot interval in minutes
-  showMonthView: Default<boolean, true>; // Show/hide month calendar view
+  entries: DayEntry[] | Default<[]>;
+  recurringSeries: RecurringSeries[] | Default<[]>;
+  seriesOverrides: SeriesOverride[] | Default<[]>;
+  name: string | Default<"calendar-v512">;
+  customTimeLabels:
+    | TimeLabel[]
+    | Default<
+      [{ label: "Morning"; time: "09:00" }, { label: "Evening"; time: "18:00" }]
+    >;
+  startTime: number | Default<7>; // Start hour in 24-hour format (7 = 7 AM)
+  endTime: number | Default<19>; // End hour in 24-hour format (19 = 7 PM)
+  timeInterval: 30 | 60 | Default<60>; // Time slot interval in minutes
+  showMonthView: boolean | Default<true>; // Show/hide month calendar view
 }
 
 interface Output {

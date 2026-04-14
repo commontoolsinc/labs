@@ -58,7 +58,7 @@ export const searchPattern = pattern<
 });
 
 const SuggestionHistory = pattern<Input, Output>(() => {
-  const { result: entries } = wish<Default<SuggestionHistoryEntry[], []>>({
+  const { result: entries } = wish<SuggestionHistoryEntry[] | Default<[]>>({
     query: "#suggestions",
   });
   const allEntries = computed(() => entries ?? []);

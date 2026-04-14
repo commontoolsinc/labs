@@ -72,9 +72,9 @@ interface AggregatorCharm {
 
 interface FolksonomyTagsInput {
   /** Namespace key (e.g., GitHub URL of the pattern using it) */
-  scope: Writable<Default<string, "">>;
+  scope: Writable<string | Default<"">>;
   /** User's tags for this scope - bidirectional binding */
-  tags: Writable<Default<string[], []>>;
+  tags: Writable<string[] | Default<[]>>;
   /** Optional: Direct reference to aggregator (bypasses wish() discovery) */
   aggregator?: AggregatorCharm;
 }
