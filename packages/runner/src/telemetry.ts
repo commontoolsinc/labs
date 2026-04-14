@@ -29,6 +29,7 @@ export interface SchedulerGraphNode {
   preview?: string; // First ~200 chars of function body for hover tooltips
   // Diagnostic info: what cells this action reads and writes
   reads?: string[]; // space/entity paths this action reads
+  shallowReads?: string[]; // non-recursive reads used for structural invalidation
   writes?: string[]; // space/entity paths this action writes (mightWrite)
   // Timing controls
   debounceMs?: number; // Current debounce delay in ms (if set)

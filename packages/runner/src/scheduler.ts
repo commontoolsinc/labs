@@ -2270,6 +2270,9 @@ export class Scheduler {
       const reads = deps?.reads.map((r) =>
         `${r.space}/${r.id}/${r.path.join("/")}`
       );
+      const shallowReads = deps?.shallowReads.map((r) =>
+        `${r.space}/${r.id}/${r.path.join("/")}`
+      );
       const writes = this.getSchedulingWrites(action)?.map((w) =>
         `${w.space}/${w.id}/${w.path.join("/")}`
       );
@@ -2296,6 +2299,7 @@ export class Scheduler {
           module?: { implementation?: { preview?: string } };
         }).module?.implementation?.preview,
         reads,
+        shallowReads,
         writes,
         debounceMs: debounceMs && debounceMs > 0 ? debounceMs : undefined,
         throttleMs: throttleMs && throttleMs > 0 ? throttleMs : undefined,

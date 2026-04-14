@@ -619,6 +619,7 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
     if (!rt) return null;
 
     const trace = await rt.getTriggerTrace();
+    const graph = rt.getGraphSnapshot ? await rt.getGraphSnapshot() : undefined;
     type TriggerSample = {
       writerActionId?: string;
       change: string;
@@ -628,6 +629,15 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
 
     const counts = new Map<string, number>();
     const samples = new Map<string, TriggerSample[]>();
+    const rootSinkChangeCounts = new Map<string, {
+      count: number;
+      actionIds: Set<string>;
+      decisions: Set<string>;
+      writerActionIds: Set<string>;
+    }>();
+
+    const isRootSink = (actionId: string) =>
+      actionId.startsWith("sink:") && /\/of:[^/]+\/$/.test(actionId);
 
     const pushSample = (actionId: string, sample: TriggerSample) => {
       counts.set(actionId, (counts.get(actionId) ?? 0) + 1);
@@ -636,6 +646,21 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
         existing.push(sample);
       }
       samples.set(actionId, existing);
+      if (isRootSink(actionId)) {
+        const changeRow = rootSinkChangeCounts.get(sample.change) ?? {
+          count: 0,
+          actionIds: new Set<string>(),
+          decisions: new Set<string>(),
+          writerActionIds: new Set<string>(),
+        };
+        changeRow.count += 1;
+        changeRow.actionIds.add(actionId);
+        changeRow.decisions.add(sample.decision);
+        if (sample.writerActionId) {
+          changeRow.writerActionIds.add(sample.writerActionId);
+        }
+        rootSinkChangeCounts.set(sample.change, changeRow);
+      }
     };
 
     for (const entry of trace) {
@@ -662,6 +687,48 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
 
     return {
       entryCount: trace.length,
+      rootSinkActions: [...counts.entries()]
+        .filter(([actionId]) => isRootSink(actionId))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20)
+        .map(([actionId, count]) => ({
+          actionId,
+          count,
+          samples: samples.get(actionId) ?? [],
+        })),
+      rootSinkChanges: [...rootSinkChangeCounts.entries()]
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 20)
+        .map(([change, row]) => ({
+          change,
+          count: row.count,
+          actionIds: [...row.actionIds].slice(0, 5),
+          decisions: [...row.decisions],
+          writerActionIds: [...row.writerActionIds].slice(0, 5),
+        })),
+      rootSinkGraphNodes: graph?.nodes
+        ?.filter((node: {
+          id: string;
+          type: string;
+        }) => node.type === "effect" && isRootSink(node.id))
+        .slice(0, 20)
+        .map((node: {
+          id: string;
+          parentId?: string;
+          reads?: string[];
+          shallowReads?: string[];
+          writes?: string[];
+          isDirty: boolean;
+          isPending: boolean;
+        }) => ({
+          id: node.id,
+          parentId: node.parentId,
+          reads: node.reads ?? [],
+          shallowReads: node.shallowReads ?? [],
+          writes: node.writes ?? [],
+          isDirty: node.isDirty,
+          isPending: node.isPending,
+        })),
       repeatedActions: [...counts.entries()]
         .filter(([, count]) => count > 1)
         .sort((a, b) => b[1] - a[1])
