@@ -120,7 +120,9 @@ class FetchLLMClient implements LLMClient {
     };
   }
 
-  private toOpenAIMessages(request: LLMRequest): Array<Record<string, unknown>> {
+  private toOpenAIMessages(
+    request: LLMRequest,
+  ): Array<Record<string, unknown>> {
     const messages: Array<Record<string, unknown>> = [];
 
     if (request.system) {
@@ -219,14 +221,14 @@ const SYSTEM_PROMPT =
   `You are Brighid, a shell assistant. You MUST use the exec tool to run commands — never just describe what you would do.
 
 You have two tools:
-- exec: Run a command in the Brighid sandbox shell. Built-in commands are available directly: cat, head, tail, wc, diff, grep, sed, sort, uniq, cut, tr, jq, base64, echo, printf, ls, pwd, cd, cp, mv, rm, mkdir, touch, tee, chmod, curl, date, test, true, false, sleep, read, which, xargs. Real sandboxed bash is also available through the bash command.
+- exec: Run a command in the Brighid sandbox shell. Ordinary shell-like commands run through the real sandboxed backend by default. Only current-shell state commands such as cd, export, unset, env, printenv, read, source, test, and [ remain supervisor-side.
 - task: Delegate work to a sub-agent that can see data you cannot. Your visibility policy filters out untrusted content (e.g., network-fetched HTML), but a sub-agent has a relaxed policy and can read it. For classification tasks (yes/no questions), provide ballots — short fixed strings the sub-agent can return. For open-ended tasks (summaries, explanations, discoveries), omit ballots entirely — the response will pass through if all data the sub-agent accessed was clean (no curl/network data).
 
 Rules:
 - ALWAYS call the exec tool when the user asks you to do something. Do not just explain — execute.
 - You can chain commands with pipes: echo "hello" | grep hello
 - You can redirect output: echo "data" > /tmp/file.txt
-- Prefer built-ins for simple structured operations. Use bash -c or bash <script> only when you need genuine shell syntax or multiple shell features.
+- Plain shell-like commands already use the real sandbox backend. Use bash -c or bash <script> when you need explicit shell composition or multi-command syntax.
 - If output is filtered, the content didn't meet the security policy — use the task tool to delegate to a sub-agent that can see it.
 - After executing, briefly explain what happened.`;
 
@@ -353,7 +355,11 @@ async function main(): Promise<void> {
   const model = Deno.env.get("MODEL") ?? "claude-sonnet-4-6";
   const llm = new FetchLLMClient();
   const vfs = new VFS();
-  const agent = new AgentSession({ policy: policies.main(), vfs });
+  const agent = new AgentSession({
+    policy: policies.main(),
+    vfs,
+    registryMode: "real-shell",
+  });
 
   const encoder = new TextEncoder();
   const write = (s: string) => Deno.stdout.write(encoder.encode(s));
@@ -406,7 +412,9 @@ async function readLine(
   try {
     return await rl.question(promptText);
   } catch (error) {
-    if (error instanceof Error && error.message.includes("readline was closed")) {
+    if (
+      error instanceof Error && error.message.includes("readline was closed")
+    ) {
       return null;
     }
     throw error;
@@ -414,10 +422,11 @@ async function readLine(
 }
 
 async function createReadline(): Promise<ReadLineInterface> {
-  const [{ default: readline }, { stdin: input, stdout: output }] = await Promise.all([
-    import("node:readline/promises"),
-    import("node:process"),
-  ]);
+  const [{ default: readline }, { stdin: input, stdout: output }] =
+    await Promise.all([
+      import("node:readline/promises"),
+      import("node:process"),
+    ]);
 
   return readline.createInterface({
     input,

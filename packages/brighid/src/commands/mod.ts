@@ -15,7 +15,7 @@ import { chmod, cp, mkdir, mv, rm, tee, touch } from "./write.ts";
 import { echo, printf } from "./output.ts";
 import { env, exportCmd, printenv, unset } from "./env.ts";
 import { curl } from "./network.ts";
-import { bash, evalCmd, source } from "./exec.ts";
+import { bash, evalCmd, shellPassthrough, source } from "./exec.ts";
 import {
   date,
   falseCmd,
@@ -99,6 +99,50 @@ export function createDefaultRegistry(): CommandRegistry {
 
   // Sandbox
   registry.register("!real", realCommand);
+
+  return registry;
+}
+
+export function createAgentRegistry(): CommandRegistry {
+  const registry = createDefaultRegistry();
+
+  const realShellCommands = [
+    "pwd",
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "diff",
+    "grep",
+    "sed",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "jq",
+    "base64",
+    "cp",
+    "mv",
+    "rm",
+    "mkdir",
+    "touch",
+    "tee",
+    "chmod",
+    "echo",
+    "printf",
+    "curl",
+    "date",
+    "true",
+    "false",
+    "sleep",
+    "which",
+    "xargs",
+  ] as const;
+
+  for (const command of realShellCommands) {
+    registry.register(command, shellPassthrough(command));
+  }
 
   return registry;
 }

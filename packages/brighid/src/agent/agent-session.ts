@@ -20,9 +20,9 @@
 
 import { type Label, labels } from "../labels.ts";
 import { createSession, ShellSession } from "../session.ts";
-import { execute, executeWithStdio } from "../interpreter.ts";
+import { executeWithStdio } from "../interpreter.ts";
 import { VFS } from "../vfs.ts";
-import { createDefaultRegistry } from "../commands/mod.ts";
+import { createAgentRegistry, createDefaultRegistry } from "../commands/mod.ts";
 import { createEnvironment, type Environment } from "../commands/context.ts";
 import { type AgentPolicy, filterOutput, policies } from "./policy.ts";
 import { AgentEvent, ToolCall, ToolResult } from "./protocol.ts";
@@ -44,6 +44,7 @@ export interface AgentSessionOptions {
   policy?: AgentPolicy;
   vfs?: VFS;
   env?: Environment;
+  registryMode?: "default" | "real-shell";
   /** Parent agent (for sub-agent hierarchy) */
   parent?: AgentSession;
   /** Label inherited from the parent's tool-call prompt. */
@@ -55,6 +56,7 @@ export class AgentSession {
   readonly policy: AgentPolicy;
   readonly shell: ShellSession;
   readonly parent: AgentSession | null;
+  readonly registryMode: "default" | "real-shell";
   /** Label inherited from the parent's tool-call prompt. */
   readonly initialLabel: Label;
   private children: AgentSession[] = [];
@@ -65,6 +67,8 @@ export class AgentSession {
     this.id = nextAgentId();
     this.policy = options.policy ?? policies.main();
     this.parent = options.parent ?? null;
+    this.registryMode = options.registryMode ?? options.parent?.registryMode ??
+      "default";
     this.initialLabel = options.initialLabel ?? labels.userInput();
 
     // Share VFS with parent if this is a sub-agent, otherwise create new
@@ -88,7 +92,9 @@ export class AgentSession {
     this.shell = createSession({
       vfs,
       env,
-      registry: createDefaultRegistry(),
+      registry: this.registryMode === "real-shell"
+        ? createAgentRegistry()
+        : createDefaultRegistry(),
       requestIntent: () => {
         // Sub-agents auto-approve intents; main agents deny by default
         return Promise.resolve(this.parent !== null);
@@ -179,6 +185,7 @@ export class AgentSession {
     const child = new AgentSession({
       policy: policy ?? policies.sub(),
       parent: this,
+      registryMode: this.registryMode,
       initialLabel: initialLabel ?? labels.userInput(),
     });
 

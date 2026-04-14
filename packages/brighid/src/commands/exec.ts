@@ -5,7 +5,7 @@
  * They check integrity before executing any code/scripts.
  */
 
-import type { CommandContext, CommandResult } from "./context.ts";
+import type { CommandContext, CommandFn, CommandResult } from "./context.ts";
 import { type Label, labels } from "../labels.ts";
 import {
   defaultConfig,
@@ -87,6 +87,10 @@ function shellSingleQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+function shellCommandString(command: string, args: string[]): string {
+  return [shellSingleQuote(command), ...args.map(shellSingleQuote)].join(" ");
+}
+
 function envFlag(...names: string[]): boolean | undefined {
   for (const name of names) {
     const value = Deno.env.get(name)?.trim().toLowerCase();
@@ -110,7 +114,10 @@ function bashSandboxConfig(): SandboxedExecConfig {
   });
 }
 
-function guestPathForVfsPath(vfsPath: string, guestWorkspacePath: string): string {
+function guestPathForVfsPath(
+  vfsPath: string,
+  guestWorkspacePath: string,
+): string {
   if (vfsPath === "/") {
     return guestWorkspacePath;
   }
@@ -156,6 +163,15 @@ async function runSandboxedBash(
   return {
     exitCode: result.exitCode,
     label: result.stdout.value ? result.stdout.label : result.stderr.label,
+  };
+}
+
+export function shellPassthrough(command: string): CommandFn {
+  return async (
+    args: string[],
+    ctx: CommandContext,
+  ): Promise<CommandResult> => {
+    return await runSandboxedBash(shellCommandString(command, args), ctx);
   };
 }
 
