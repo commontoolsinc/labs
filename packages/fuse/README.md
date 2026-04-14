@@ -7,8 +7,12 @@ and link pieces together with `ln -s`.
 
 ## Prerequisites
 
-Install [FUSE-T](https://www.fuse-t.org/) (preferred) or
-[macFUSE](https://osxfuse.github.io/) on macOS.
+Install [FUSE-T](https://www.fuse-t.org/) on macOS using the known-good cask
+install path for this project:
+
+```bash
+brew install --cask fuse-t
+```
 
 On Linux (Debian/Ubuntu), install FUSE plus the toolchain and runtime library
 expected by this package:
@@ -259,15 +263,9 @@ avoid FUSE-T crashes from `notify_inval_entry` during callbacks).
 Install a FUSE provider:
 
 ```bash
-# FUSE-T (recommended — no kernel extension required)
-brew install fuse-t
-
-# or macFUSE (requires allowing a kernel extension in System Settings)
-brew install --cask macfuse
+# FUSE-T (known-good path for this project)
+brew install --cask fuse-t
 ```
-
-After installing macFUSE, go to **System Settings > Privacy & Security** and
-allow the kernel extension. A reboot may be required.
 
 ### Mount point is not empty / stale mount
 

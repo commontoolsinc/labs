@@ -183,9 +183,8 @@ const darwinPlatform: FusePlatform = {
     }
 
     throw new Error(
-      `Could not open libfuse. Install FUSE-T (recommended) or macFUSE:\n` +
-        `  brew install fuse-t\n` +
-        `  brew install --cask macfuse\n` +
+      `Could not open libfuse. Install FUSE-T using the known-good path for this project:\n` +
+        `  brew install --cask fuse-t\n` +
         `Tried:\n${errors.join("\n")}`,
     );
   },

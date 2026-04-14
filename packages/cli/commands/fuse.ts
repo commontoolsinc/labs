@@ -54,7 +54,7 @@ FILESYSTEM LAYOUT:
   rm result/oldkey                       # delete key
   ln -s ../../other-piece/input/foo result/ref  # sigil link
 
-Requires FUSE-T (preferred) or macFUSE on macOS.`,
+Requires FUSE-T on macOS. Known-good install path: brew install --cask fuse-t.`,
 );
 
 export async function awaitForegroundMountExit(
