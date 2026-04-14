@@ -25,27 +25,16 @@ export function createHasherNoble(): IncrementalHasher {
  * function.
  */
 class NobleHasher implements IncrementalHasher {
-  #chunks: Uint8Array[] = [];
+  #hasher = sha256.create();
 
   update(data: Uint8Array) {
-    // Copy to avoid aliasing shared scratch buffers.
-    this.#chunks.push(new Uint8Array(data));
+    this.#hasher.update(data);
   }
 
   digest(): Uint8Array;
   digest(encoding: "base64url"): string;
   digest(encoding?: string): Uint8Array | string {
-    let totalLen = 0;
-    for (const c of this.#chunks) totalLen += c.length;
-    const buf = new Uint8Array(totalLen);
-
-    let offset = 0;
-    for (const c of this.#chunks) {
-      buf.set(c, offset);
-      offset += c.length;
-    }
-
-    const result = sha256(buf);
+    const result = this.#hasher.digest();
 
     switch (encoding) {
       case "base64url": {
