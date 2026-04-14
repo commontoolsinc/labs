@@ -9,18 +9,6 @@ import type { IncrementalHasher } from "./interface.ts";
 export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
 /**
- * Performs a hash on a single array.
- */
-export const sha256Noble = sha256;
-
-/**
- * Creates an incremental hasher.
- */
-export function createHasherNoble(): IncrementalHasher {
-  return new NobleHasher();
-}
-
-/**
  * Noble-specific incremental hasher. Noble notably only has a one-shot digest
  * function.
  */
@@ -48,4 +36,21 @@ class NobleHasher implements IncrementalHasher {
       }
     }
   }
+}
+
+/**
+ * Creates an incremental hasher.
+ */
+export function createHasherNoble(): IncrementalHasher {
+  return new NobleHasher();
+}
+
+/**
+ * Performs a hash on a single array.
+ */
+export function sha256Noble(payload: Uint8Array): Uint8Array {
+  // Note: This whole function isn't just a re-`export` of `sha256()` from
+  // Noble, because that `sha256()` has additional properties which we don't
+  // want to expose as part of this module's interface.
+  return sha256(payload);
 }
