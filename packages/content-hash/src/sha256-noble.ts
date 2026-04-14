@@ -2,7 +2,7 @@
  * Noble version of SHA256.
  */
 
-import { sha256 } from "merkle-reference";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { IncrementalHasher } from "./interface.ts";
 

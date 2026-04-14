@@ -132,6 +132,7 @@
     "@commonfabric/ports": "./ports.json",
     "@astral/astral": "./packages/vendor-astral/mod.ts",
     "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.8",
+    "@noble/hashes": "npm:@noble/hashes@^2.2.0",
     "@std/assert": "jsr:@std/assert@^1",
     "@std/async": "jsr:@std/async@^1",
     "@std/cli": "jsr:@std/cli@^1",

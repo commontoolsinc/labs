@@ -5,8 +5,8 @@
  *
  * Priority:
  * 1. `node:crypto` (Deno/server) -- hardware-accelerated via OpenSSL
- * 2. `hash-wasm` (browser) -- WASM, ~3x faster than pure JS
- * 3. `merkle-reference`'s `sha256` (fallback) -- pure JS via @noble/hashes
+ * 2. `hash-wasm` (browser) -- WASM, about twice the speed of the fallback
+ * 3. `@noble/hashes` (fallback) -- pure JS
  */
 
 import type { IncrementalHasher, Sha256Fn } from "./interface.ts";
