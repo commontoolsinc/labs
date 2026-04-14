@@ -17,7 +17,9 @@ const createFuncs = [
 ] as const;
 
 beforeAll(async () => {
-  await initWasm();
+  if (!await initWasm()) {
+    throw new Error("`sha256-wasm not available!");
+  }
 });
 
 describe("createHasher()", () => {
@@ -52,7 +54,7 @@ for (const createFunc of createFuncs) {
           expect(got).toEqual(hashBytes);
         });
 
-        it("byte-at-a-time use produces expected string hash", () => {
+        it("byte-at-a-time use produces expected byte-array hash", () => {
           const hasher = createFunc();
           for (let i = 0; i < bytes.length; i++) {
             hasher.update(bytes.subarray(i, i + 1));
@@ -61,7 +63,7 @@ for (const createFunc of createFuncs) {
           expect(got).toEqual(hashBytes);
         });
 
-        it("multi-byte variety use produces expected string hash", () => {
+        it("multi-byte variety use produces expected byte-array hash", () => {
           const hasher = createFunc();
           let i = 0;
           while (i < bytes.length) {
