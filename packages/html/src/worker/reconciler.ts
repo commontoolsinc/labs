@@ -522,10 +522,15 @@ export class WorkerReconciler {
     left: RenderPolicy,
     right: RenderPolicy,
   ): boolean {
-    return this.atomListsEqual(
-      left.maxConfidentiality ?? [],
-      right.maxConfidentiality ?? [],
-    ) &&
+    const maxConfidentialityEquals = left.maxConfidentiality === undefined ||
+        right.maxConfidentiality === undefined
+      ? left.maxConfidentiality === right.maxConfidentiality
+      : this.atomListsEqual(
+        left.maxConfidentiality,
+        right.maxConfidentiality,
+      );
+
+    return maxConfidentialityEquals &&
       this.atomListsEqual(
         left.declassifyConfidentiality,
         right.declassifyConfidentiality,

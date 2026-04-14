@@ -573,6 +573,56 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "blocks cell children when boundary tightens to unlabeled-only",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const rootCell = new MockCell(
+          {
+            type: "vnode",
+            name: "cf-cfc-render-boundary",
+            props: {},
+            children: [confidential as never],
+          } satisfies WorkerVNode,
+        );
+
+        const cancel = reconciler.mount(rootCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          let renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            true,
+          );
+          collector.clear();
+
+          rootCell.set(
+            {
+              type: "vnode",
+              name: "cf-cfc-render-boundary",
+              props: { maxConfidentiality: [] },
+              children: [confidential as never],
+            } satisfies WorkerVNode,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "reveals materialized children when reactive policy props update",
       async () => {
         const collector = createOpsCollector();
