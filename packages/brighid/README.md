@@ -535,12 +535,19 @@ The backend selection is:
 The sandbox runtime selection is stable across platforms:
 
 - `sandboxRuntime: "auto"` (default)
-  - macOS: prefer the `cfc-sandbox` wrapper
+  - macOS: prefer the `cfc-sandbox` wrapper; if that wrapper is unavailable and
+    Docker exposes the configured CFC runtime alias, fall back to `docker-cfc`
   - Linux: prefer Docker `runsc-cfc`, then fall back to direct `runsc`
 - `sandboxRuntime: "cfc-sandbox"` — force the wrapper-based path
 - `sandboxRuntime: "docker-cfc"` — force Docker with the configured CFC runtime
+  on either macOS or Linux
 - `sandboxRuntime: "runsc-direct"` — force OCI bundle generation + direct
   `runsc run --bundle ...`
+
+On macOS, `docker-cfc` is still a Linux-daemon-backed compatibility path, not a
+native `runsc` runtime. In practice that means Docker must be talking to a
+Linux VM or other Linux daemon that already exposes the configured runtime name
+(default `runsc-cfc`).
 
 Useful environment overrides:
 
@@ -587,7 +594,7 @@ The default wrapper image is:
 
 - `us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest`
 
-## Opt-in cfc-sandbox integration tests
+## Opt-in real-runtime integration tests
 
 Brighid now has a dedicated real-runtime integration suite under `integration/`.
 It is opt-in so the normal package test suite stays fast and offline-friendly.
@@ -618,11 +625,99 @@ BRIGHID_RUNSC_BIN=../../gvisor/bazel-bin/runsc/runsc_/runsc \
 deno task integration
 ```
 
-On Linux, the preferred real-runtime integration suite is gated by
+The Docker-backed real-runtime integration suite is gated by
 `TEST_BRIGHID_DOCKER_CFC=1`. It runs Brighid through Docker with the configured
-`runsc-cfc` runtime and the published kitchensink image. The lower-level
-`TEST_BRIGHID_RUNSC_DIRECT=1` suite remains for direct `runsc` fallback and
-exports a rootfs from a Docker image before running Brighid through `runsc`.
+`runsc-cfc` runtime and the published kitchensink image. The suite no longer
+assumes a Linux host OS; instead it checks that Docker exposes the configured
+runtime alias before running. On macOS this still requires a Linux-backed Docker
+daemon (for example Docker Desktop's Linux VM) with `runsc-cfc` configured.
+
+For the current Docker Desktop proof-of-concept, Brighid includes a reproducible
+setup helper that copies the Linux `runsc` build and CFC policy into a stable
+host path and points Docker Desktop at those files through `/host_mnt/...`.
+
+```bash
+cd packages/brighid
+deno task setup:docker-desktop
+```
+
+By default the setup task:
+
+- looks for a sibling `gvisor*` checkout with:
+  - `bazel-bin/runsc/runsc_/runsc`
+  - `demo/cfc-policy.json`
+- copies them to:
+  - `~/.local/share/runsc-cfc/runsc`
+  - `~/.local/share/runsc-cfc/cfc-policy.json`
+- updates `~/.docker/daemon.json`
+- restarts Docker Desktop
+- verifies that `docker run --runtime=runsc-cfc ...` works
+
+Useful overrides:
+
+- `BRIGHID_GVISOR_CHECKOUT`
+- `BRIGHID_DOCKER_DESKTOP_RUNSC_SRC`
+- `BRIGHID_DOCKER_DESKTOP_POLICY_SRC`
+- `BRIGHID_DOCKER_DESKTOP_LOCAL_DIR`
+- `BRIGHID_DOCKER_DESKTOP_DAEMON_CONFIG`
+- `BRIGHID_DOCKER_DESKTOP_OVERWRITE_RUNTIME=1`
+- `BRIGHID_DOCKER_DESKTOP_RESTART=0`
+
+The setup helper is intentionally conservative:
+
+- it rejects symlinked source files
+- it rejects group/world-writable runtime or policy files
+- it refuses to overwrite a conflicting existing Docker runtime alias unless you
+  set `BRIGHID_DOCKER_DESKTOP_OVERWRITE_RUNTIME=1`
+- it verifies the exact runtime path and args written to `~/.docker/daemon.json`
+
+Example:
+
+```bash
+cd packages/brighid
+TEST_BRIGHID_DOCKER_CFC=1 \
+BRIGHID_SANDBOX_RUNTIME=docker-cfc \
+BRIGHID_DOCKER_RUNTIME=runsc-cfc \
+BRIGHID_SANDBOX_IMAGE=us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest \
+deno task integration:docker
+```
+
+If you also want the `/fabric` integration assertion on the Docker path, provide
+an explicit host mount:
+
+```bash
+BRIGHID_FABRIC_HOST_PATH=/absolute/path/to/labs-fuse-mount
+```
+
+To run Brighid itself through Docker CFC rather than the integration suite:
+
+```bash
+cd packages/brighid
+BRIGHID_SANDBOX_RUNTIME=docker-cfc \
+BRIGHID_DOCKER_RUNTIME=runsc-cfc \
+deno task brighid
+```
+
+Important: the interactive Brighid agent still has many simulated built-in
+commands (`ls`, `cat`, `grep`, `mkdir`, etc.). The Docker-backed runtime is used
+when Brighid takes the real sandboxed bash path, for example:
+
+```text
+bash -c 'echo hello from docker-cfc'
+eval 'uname -a'
+bash /tmp/script.sh
+```
+
+So `BRIGHID_SANDBOX_RUNTIME=docker-cfc` does not force every ordinary built-in
+command through Docker; it selects the backend used by real sandboxed bash.
+
+Also note that Brighid's sandboxed `bash` path currently enables network access
+by default unless you disable it with `BRIGHID_BASH_SANDBOX_ALLOW_NETWORK=0`
+or `BRIGHID_SANDBOX_ALLOW_NETWORK=0`.
+
+The lower-level `TEST_BRIGHID_RUNSC_DIRECT=1` suite remains for direct `runsc`
+fallback and exports a rootfs from a Docker image before running Brighid
+through `runsc`.
 
 ## API Usage
 

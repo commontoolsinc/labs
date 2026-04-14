@@ -17,6 +17,11 @@ These paths are real and covered today:
 - macOS `cfc-sandbox` wrapper path: `integration/cfc-sandbox.test.ts`
 - sandbox bridge/export/import behavior: `test/sandbox.test.ts`
 
+In addition, the runtime selector now has unit coverage for macOS explicitly
+targeting `docker-cfc`, and for auto mode falling back to `docker-cfc` when the
+`cfc-sandbox` wrapper is unavailable. That is selector coverage, not a separate
+claim that native macOS `runsc` exists.
+
 The practical state is that Brighid can already run real sandboxed bash on the
 supported runtime paths. The remaining gaps are about fidelity, interaction
 model, and architectural shape.
@@ -204,7 +209,14 @@ For now, Brighid should keep using the validated real-runtime paths where they
 exist:
 
 - Linux: Docker + `runsc-cfc` first, then `runsc-direct` fallback
-- macOS: `cfc-sandbox`
+- macOS: prefer `cfc-sandbox`; explicit `docker-cfc` is supported, and auto
+  mode may fall back to `docker-cfc` when the wrapper is unavailable and Docker
+  exposes the configured runtime alias
+
+That macOS Docker path should still be treated as a Linux-daemon-backed
+compatibility path rather than a new native Apple runtime. `/fabric` also
+remains conservative there: the reliable contract is still an explicit
+host-backed path when one is needed.
 
 And it should continue to keep these responsibilities outside the sandbox:
 
