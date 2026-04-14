@@ -400,7 +400,7 @@ export class Scheduler {
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
   private dirty = new Set<Action>();
-  private pullMode = false;
+  private pullMode = true;
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
   private breakpoints = new Set<string>();
@@ -498,6 +498,8 @@ export class Scheduler {
   private actionRunTrace: ActionRunTraceEntry[] = [];
   private collectTriggerTrace = false;
   private triggerTrace: TriggerTraceEntry[] = [];
+  private changedWritesHistory: IMemorySpaceAddress[] = [];
+  private conditionallyScheduledEffects = new Map<Action, number>();
 
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
@@ -1041,12 +1043,20 @@ export class Scheduler {
     // Skip throttled computations - they'll trigger via storage changes when unthrottled.
     // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
     if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
-      const effectReads = log.reads ?? [];
+      const effectReads = reads;
+      const effectShallowReads = shallowReads;
       let shouldMarkDirty = false;
 
-      // If there are pending computations whose dependencies haven't been collected yet,
-      // we can't know what they write. Be conservative and assume they might affect this effect.
-      if (this.pendingDependencyCollection.size > 0) {
+      // If there are pending computations whose dependencies haven't been
+      // collected yet, only fall back to conservatism for unknown writes or
+      // known writes that overlap what this effect reads.
+      if (
+        this.pendingDependencyCollectionMightAffect(
+          action,
+          effectReads,
+          effectShallowReads,
+        )
+      ) {
         shouldMarkDirty = true;
       }
 
@@ -1082,6 +1092,7 @@ export class Scheduler {
       }
 
       if (shouldMarkDirty && !this.dirty.has(action)) {
+        this.markEffectConditionallyScheduled(action);
         this.dirty.add(action);
         this.pending.add(action);
         this.queueExecution();
@@ -1109,6 +1120,7 @@ export class Scheduler {
       this.actionChangeGroups.delete(action);
     }
     this.pending.delete(action);
+    this.conditionallyScheduledEffects.delete(action);
     const dependencies = this.reverseDependencies.get(action);
     if (dependencies) {
       for (const dependency of dependencies) {
@@ -1237,6 +1249,7 @@ export class Scheduler {
             );
           });
           const log = txToReactivityLog(tx);
+          this.recordChangedComputationWrites(action, tx, log);
 
           logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${actionId}`,
@@ -1648,6 +1661,7 @@ export class Scheduler {
                 if (this.pullMode) {
                   // Pull mode: only schedule effects, mark computations as dirty
                   if (this.effects.has(action)) {
+                    this.conditionallyScheduledEffects.delete(action);
                     this.scheduleWithDebounce(action);
                     decision = "schedule-effect";
                   } else {
@@ -2612,6 +2626,96 @@ export class Scheduler {
     }
   }
 
+  private pendingDependencyCollectionMightAffect(
+    action: Action,
+    reads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
+  ): boolean {
+    if (reads.length === 0 && shallowReads.length === 0) return false;
+
+    for (const pendingAction of this.pendingDependencyCollection) {
+      if (pendingAction === action) continue;
+      if (this.effects.has(pendingAction)) continue;
+      if (this.isThrottled(pendingAction)) continue;
+
+      const writes = this.getSchedulingWrites(pendingAction);
+      if (!writes || writes.length === 0) return true;
+      if (this.hasDependentPath(pendingAction, action)) return true;
+      if (this.readsOverlapWrites(reads, shallowReads, writes)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private hasDependentPath(
+    from: Action,
+    to: Action,
+    visited = new Set<Action>(),
+  ): boolean {
+    if (from === to) return true;
+    if (visited.has(from)) return false;
+    visited.add(from);
+
+    const dependents = this.dependents.get(from);
+    if (!dependents) return false;
+
+    for (const dependent of dependents) {
+      if (this.hasDependentPath(dependent, to, visited)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private markEffectConditionallyScheduled(effect: Action): void {
+    if (!this.conditionallyScheduledEffects.has(effect)) {
+      this.conditionallyScheduledEffects.set(
+        effect,
+        this.changedWritesHistory.length,
+      );
+    }
+  }
+
+  private recordChangedComputationWrites(
+    action: Action,
+    tx: IExtendedStorageTransaction,
+    log: ReactivityLog,
+  ): void {
+    if (!this.pullMode || !this.computations.has(action)) return;
+    if (log.writes.length === 0) return;
+
+    const spaces = new Set(log.writes.map((write) => write.space));
+    const changedWrites: IMemorySpaceAddress[] = [];
+
+    for (const space of spaces) {
+      for (const detail of getTransactionWriteDetails(tx, space)) {
+        if (!deepEqual(detail.previousValue, detail.value)) {
+          changedWrites.push(detail.address);
+        }
+      }
+    }
+
+    if (changedWrites.length > 0) {
+      this.changedWritesHistory.push(...sortAndCompactPaths(changedWrites));
+    }
+  }
+
+  private conditionalEffectHasChangedInputs(effect: Action): boolean {
+    const changedWritesStart = this.conditionallyScheduledEffects.get(effect);
+    if (changedWritesStart === undefined) return true;
+
+    const changedWrites = this.changedWritesHistory.slice(changedWritesStart);
+    if (changedWrites.length === 0) return false;
+
+    const log = this.dependencies.get(effect);
+    if (!log) return false;
+
+    return this.readsOverlapWrites(log.reads, log.shallowReads, changedWrites);
+  }
+
   private collectDirtyDependenciesForLog(
     log: ReactivityLog,
     workSet: Set<Action>,
@@ -2731,6 +2835,12 @@ export class Scheduler {
         const pendingBefore = this.pending.has(effect);
         const dirtyBefore = this.dirty.has(effect);
         const debounceMs = this.actionDebounce.get(effect);
+        if (
+          !pendingBefore && !dirtyBefore &&
+          !this.conditionallyScheduledEffects.has(effect)
+        ) {
+          this.markEffectConditionallyScheduled(effect);
+        }
         this.scheduleWithDebounce(effect);
         scheduledEffects.push({
           actionId: this.getActionId(effect),
@@ -3940,8 +4050,22 @@ export class Scheduler {
           continue;
         }
 
+        if (
+          this.pullMode &&
+          this.effects.has(fn) &&
+          this.conditionallyScheduledEffects.has(fn) &&
+          !this.conditionalEffectHasChangedInputs(fn)
+        ) {
+          this.conditionallyScheduledEffects.delete(fn);
+          this.pending.delete(fn);
+          this.clearDirty(fn);
+          this.filterStats.filtered++;
+          continue;
+        }
+
         // Clean up from pending/dirty before running
         this.pending.delete(fn);
+        this.conditionallyScheduledEffects.delete(fn);
         if (this.pullMode) {
           this.clearDirty(fn);
         }
@@ -4155,6 +4279,9 @@ export class Scheduler {
         };
 
         this.scheduledFirstTime.clear();
+        if (this.conditionallyScheduledEffects.size === 0) {
+          this.changedWritesHistory = [];
+        }
       }
     } else {
       // Keep scheduled = true since we're queuing another execution

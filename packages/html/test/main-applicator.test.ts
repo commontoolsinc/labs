@@ -5,20 +5,26 @@
  * covers the DOM surface the applicator needs in unit tests.
  */
 
-import { assertEquals, assertExists } from "@std/assert";
-import { $conn } from "@commonfabric/runtime-client";
+import {
+  assertEquals,
+  assertExists,
+  assertNotStrictEquals,
+  assertStrictEquals,
+} from "@std/assert";
 import { createDomApplicator } from "../src/main/applicator.ts";
 import type { DomEventMessage } from "../src/main/events.ts";
 import type { VDomBatch } from "../src/vdom-ops.ts";
+import { $conn, type CellRef } from "@commonfabric/runtime-client";
 
 // Mock RuntimeClient for testing
 const createMockRuntimeClient = () => {
+  const conn = {
+    request: () => Promise.resolve({}),
+    subscribe: () => Promise.resolve(),
+    unsubscribe: () => Promise.resolve(),
+  };
   return {
-    [$conn]: () => ({
-      request: () => Promise.resolve({}),
-      subscribe: () => Promise.resolve(),
-      unsubscribe: () => Promise.resolve(),
-    }),
+    [$conn]: () => conn,
     getConnection: () => ({
       subscribe: () => Promise.resolve(),
       unsubscribe: () => Promise.resolve(),
@@ -552,6 +558,70 @@ Deno.test("DomApplicator - event handling", async (t) => {
     // Should only have one event with the new handler ID
     assertEquals(events.length, 1);
     assertEquals(events[0].handlerId, 2);
+  });
+});
+
+Deno.test("DomApplicator - cell bindings", async (t) => {
+  const cellRef: CellRef = {
+    id: "of:test-cell" as CellRef["id"],
+    space: "did:key:test-space" as CellRef["space"],
+    path: ["value"],
+    type: "application/json" as CellRef["type"],
+    schema: { type: "string" },
+  };
+
+  await t.step("does not replace a binding for the same cell ref", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "cf-cell-link" },
+        { op: "set-binding", nodeId: 1, propName: "cell", cellRef },
+      ],
+    });
+
+    const node = applicator.getNode(1) as any;
+    const firstHandle = node.cell;
+    assertExists(firstHandle);
+
+    applicator.applyBatch({
+      batchId: 2,
+      ops: [{ op: "set-binding", nodeId: 1, propName: "cell", cellRef }],
+    });
+
+    assertStrictEquals(node.cell, firstHandle);
+
+    applicator.applyBatch({
+      batchId: 3,
+      ops: [{
+        op: "set-binding",
+        nodeId: 1,
+        propName: "cell",
+        cellRef: { ...cellRef, schema: { type: "number" } },
+      }],
+    });
+
+    assertNotStrictEquals(node.cell, firstHandle);
+
+    assertEquals(applicator.getLifecycleDiagnostics(), {
+      vdomOps: {
+        "create-element": 1,
+        "set-binding": 3,
+      },
+      cfCellLinkOps: {
+        "create-element": 1,
+        "set-binding": 3,
+      },
+      bindingSets: {
+        "cf-cell-link.cell": { set: 2, skipped: 1 },
+      },
+    });
   });
 });
 

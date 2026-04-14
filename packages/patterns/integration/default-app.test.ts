@@ -110,6 +110,14 @@ const CAPTURE_NOTE_CREATE_PROFILE_SERIES = (() => {
     return 0;
   }
 })();
+const CAPTURE_LIFECYCLE_DIAGNOSTICS_SERIES = (() => {
+  try {
+    const raw = Deno.env.get("CF_CAPTURE_LIFECYCLE_DIAGNOSTICS_SERIES");
+    return raw ? Number(raw) : 0;
+  } catch {
+    return 0;
+  }
+})();
 
 type NoteCreateTimingEntry = {
   noteIndex: number;
@@ -230,11 +238,13 @@ describe("default-app flow test", () => {
     const homeLoadSeries: unknown[] = [];
     const noteCreateTimings: NoteCreateTimingEntry[] = [];
     const noteCreateProfiles: NoteCreateProfileEntry[] = [];
+    const lifecycleDiagnosticsSeries: unknown[] = [];
     const noteIterations = Math.max(
       CAPTURE_ACTION_RUN_SERIES > 0 ? CAPTURE_ACTION_RUN_SERIES : 1,
       CAPTURE_HOME_LOAD_SERIES,
       NOTE_CREATE_TIMING_SERIES,
       CAPTURE_NOTE_CREATE_PROFILE_SERIES,
+      CAPTURE_LIFECYCLE_DIAGNOSTICS_SERIES,
     );
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
@@ -277,6 +287,13 @@ describe("default-app flow test", () => {
         console.log(`Enable action run trace for note ${noteIndex}...`);
         await waitFor(async () => {
           return await armActionRunTrace(page);
+        });
+      }
+
+      if (noteIndex <= CAPTURE_LIFECYCLE_DIAGNOSTICS_SERIES) {
+        console.log(`Reset lifecycle diagnostics (note ${noteIndex})...`);
+        await waitFor(async () => {
+          return await resetLifecycleDiagnostics(page);
         });
       }
 
@@ -451,6 +468,22 @@ describe("default-app flow test", () => {
         });
       }
 
+      if (noteIndex <= CAPTURE_LIFECYCLE_DIAGNOSTICS_SERIES) {
+        const lifecycleDiagnostics = await collectLifecycleDiagnostics(page);
+        assert(
+          lifecycleDiagnostics,
+          `Expected lifecycle diagnostics for note ${noteIndex}`,
+        );
+        lifecycleDiagnosticsSeries.push({
+          noteIndex,
+          ...(lifecycleDiagnostics as Record<string, unknown>),
+        });
+        console.log(
+          `Lifecycle diagnostics (note ${noteIndex}):`,
+          JSON.stringify(lifecycleDiagnostics, null, 2),
+        );
+      }
+
       if (noteIndex <= CAPTURE_HOME_LOAD_SERIES) {
         console.log(
           `Open fresh home page for load summary (${noteIndex} notes)...`,
@@ -509,6 +542,13 @@ describe("default-app flow test", () => {
       console.log(
         "Note creation profile summary:",
         JSON.stringify(compareNoteCreateProfiles(noteCreateProfiles), null, 2),
+      );
+    }
+
+    if (lifecycleDiagnosticsSeries.length > 0) {
+      console.log(
+        "Lifecycle diagnostics series:",
+        JSON.stringify(lifecycleDiagnosticsSeries, null, 2),
       );
     }
 
@@ -610,6 +650,66 @@ async function resetNoteCreateProfiling(page: Page): Promise<boolean> {
     await api.setSettleStatsEnabled(false);
     await api.setSettleStatsEnabled(true);
     return true;
+  });
+}
+
+async function resetLifecycleDiagnostics(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const api = globalThis.commonfabric as {
+      rt?: { resetSubscriptionDiagnostics?: () => void };
+      vdom?: { resetDiagnostics?: () => void };
+    } | undefined;
+    if (!api?.rt?.resetSubscriptionDiagnostics || !api.vdom?.resetDiagnostics) {
+      return false;
+    }
+    api.rt.resetSubscriptionDiagnostics();
+    api.vdom.resetDiagnostics();
+    return true;
+  });
+}
+
+async function collectLifecycleDiagnostics(page: Page): Promise<unknown> {
+  return await page.evaluate(() => {
+    const api = globalThis.commonfabric as {
+      rt?: {
+        getSubscriptionDiagnostics?: () => {
+          totals: Record<string, number>;
+          cells: Record<string, Record<string, unknown>>;
+        };
+      };
+      vdom?: {
+        diagnostics?: () => {
+          aggregate: unknown;
+          renders: unknown[];
+        };
+      };
+    } | undefined;
+    const vdom = api?.vdom?.diagnostics?.();
+    const subscriptions = api?.rt?.getSubscriptionDiagnostics?.();
+    if (!vdom || !subscriptions) return null;
+
+    const topSubscriptionCells = Object.values(subscriptions.cells)
+      .map((entry) => {
+        const localSubscribes = Number(entry.localSubscribes ?? 0);
+        const localUnsubscribes = Number(entry.localUnsubscribes ?? 0);
+        const backendSubscribes = Number(entry.backendSubscribes ?? 0);
+        const backendUnsubscribes = Number(entry.backendUnsubscribes ?? 0);
+        return {
+          ...entry,
+          totalEvents: localSubscribes + localUnsubscribes +
+            backendSubscribes + backendUnsubscribes,
+        };
+      })
+      .sort((a, b) => b.totalEvents - a.totalEvents)
+      .slice(0, 20);
+
+    return {
+      vdom: vdom.aggregate,
+      subscriptions: {
+        totals: subscriptions.totals,
+        topCells: topSubscriptionCells,
+      },
+    };
   });
 }
 

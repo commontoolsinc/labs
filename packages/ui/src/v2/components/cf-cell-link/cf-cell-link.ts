@@ -6,6 +6,7 @@ import "../cf-chip/cf-chip.ts";
 import {
   type CellHandle,
   CellRef,
+  cellRefToKey,
   NAME,
   parseLLMFriendlyLink,
   type RuntimeClient,
@@ -91,6 +92,8 @@ export class CFCellLink extends BaseElement {
   private accessor _handle: string | undefined = undefined;
 
   private _unsubscribe?: () => void;
+  private _resolvedCellKey: string | undefined = undefined;
+  private _subscribedCellKey: string | undefined = undefined;
 
   // Drag state
   private _isDragging = false;
@@ -113,6 +116,7 @@ export class CFCellLink extends BaseElement {
       this._unsubscribe();
       this._unsubscribe = undefined;
     }
+    this._subscribedCellKey = undefined;
   }
 
   private _endDrag() {
@@ -160,7 +164,7 @@ export class CFCellLink extends BaseElement {
 
   private async _resolveCell() {
     if (this.cell) {
-      this._resolvedCell = await this.cell.resolveAsCell();
+      this._setResolvedCell(await this.cell.resolveAsCell());
       return;
     }
 
@@ -174,32 +178,57 @@ export class CFCellLink extends BaseElement {
           throw new Error("Link missing space.");
         }
         const cell = this.runtime.getCellFromRef(parsedLink as CellRef);
-        this._resolvedCell = await cell.resolveAsCell();
+        this._setResolvedCell(await cell.resolveAsCell());
       } catch (e) {
         console.error("Failed to resolve link:", e);
-        this._resolvedCell = undefined;
+        this._setResolvedCell(undefined);
       }
     } else {
-      this._resolvedCell = undefined;
+      this._setResolvedCell(undefined);
     }
   }
 
   private _updateSubscription() {
+    const cell = this._resolvedCell;
+    const nextCellKey = this._cellKey(cell);
+    if (
+      this._unsubscribe && nextCellKey &&
+      nextCellKey === this._subscribedCellKey
+    ) {
+      return;
+    }
+
     this._cleanupSubscription();
 
-    if (this._resolvedCell) {
+    if (cell) {
       // Subscribe with a minimal schema that only resolves $NAME.
       // Without this, cells from $cell bindings arrive with schema: {}
       // (stripped from the VDOM prop's asCell wrapper), causing
       // handleCellSubscribe to walk the entire piece output graph.
-      const namedCell = this._resolvedCell.asSchema<{ [NAME]?: string }>({
+      const namedCell = cell.asSchema<{ [NAME]?: string }>({
         type: "object",
         properties: { [NAME]: { type: "string" } },
       });
+      this._subscribedCellKey = nextCellKey;
       this._unsubscribe = namedCell.subscribe((val) => {
         this._updateNameFromValue(val);
       });
     }
+  }
+
+  private _setResolvedCell(cell: CellHandle | undefined) {
+    const nextCellKey = this._cellKey(cell);
+    if (nextCellKey === this._resolvedCellKey) {
+      return;
+    }
+    this._resolvedCell = cell;
+    this._resolvedCellKey = nextCellKey;
+  }
+
+  private _cellKey(cell: CellHandle | undefined): string | undefined {
+    return cell
+      ? cellRefToKey({ ...cell.ref(), schema: undefined })
+      : undefined;
   }
 
   private _updateNameFromValue(val: unknown) {

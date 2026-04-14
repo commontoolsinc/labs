@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type Action, type EventHandler } from "../src/scheduler.ts";
+import {
+  type Action,
+  type EventHandler,
+  type TelemetryAnnotations,
+} from "../src/scheduler.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -193,6 +197,266 @@ describe("pull-based scheduling", () => {
     await runtime.scheduler.idle();
 
     expect(writerRuns).toBe(0);
+  });
+
+  it("should not re-run an effect for unrelated pending dependency collection", async () => {
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    const observed = runtime.getCell<number>(
+      space,
+      "pending-dep-unrelated-observed",
+      undefined,
+      tx,
+    );
+    observed.set(1);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pending-dep-unrelated-effect-result",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    const unrelatedSource = runtime.getCell<number>(
+      space,
+      "pending-dep-unrelated-source",
+      undefined,
+      tx,
+    );
+    unrelatedSource.set(1);
+    const unrelatedResult = runtime.getCell<number>(
+      space,
+      "pending-dep-unrelated-result",
+      undefined,
+      tx,
+    );
+    unrelatedResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let effectRuns = 0;
+    let unrelatedRuns = 0;
+
+    const unrelatedComputation = ((actionTx: IExtendedStorageTransaction) => {
+      unrelatedRuns++;
+      unrelatedResult.withTx(actionTx).send(
+        (unrelatedSource.withTx(actionTx).get() ?? 0) + 1,
+      );
+    }) as Action & Partial<TelemetryAnnotations>;
+    unrelatedComputation.writes = [unrelatedResult.getAsNormalizedFullLink()];
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      effectResult.withTx(actionTx).send(
+        observed.withTx(actionTx).get() ?? 0,
+      );
+
+      if (effectRuns === 1) {
+        runtime.scheduler.subscribe(
+          unrelatedComputation,
+          (depTx) => {
+            unrelatedSource.withTx(depTx).get();
+          },
+          {},
+        );
+      }
+    };
+
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [observed.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [effectResult.getAsNormalizedFullLink()],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(effectRuns).toBe(1);
+    expect(effectResult.get()).toBe(1);
+    expect(unrelatedRuns).toBe(0);
+  });
+
+  it("should re-run an effect for transitively related pending dependency collection", async () => {
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    const source = runtime.getCell<number>(
+      space,
+      "pending-dep-transitive-source",
+      undefined,
+      tx,
+    );
+    source.set(2);
+    const childResult = runtime.getCell<number>(
+      space,
+      "pending-dep-transitive-child-result",
+      undefined,
+      tx,
+    );
+    const parentResult = runtime.getCell<number>(
+      space,
+      "pending-dep-transitive-parent-result",
+      undefined,
+      tx,
+    );
+    parentResult.set(0);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pending-dep-transitive-effect-result",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+    let childRuns = 0;
+    let parentRuns = 0;
+    let effectRuns = 0;
+
+    const childComputation = ((actionTx: IExtendedStorageTransaction) => {
+      childRuns++;
+      childResult.withTx(actionTx).send(
+        (source.withTx(actionTx).get() ?? 0) * 10,
+      );
+    }) as Action & Partial<TelemetryAnnotations>;
+    childComputation.writes = [childResult.getAsNormalizedFullLink()];
+
+    const parentComputation = ((actionTx: IExtendedStorageTransaction) => {
+      parentRuns++;
+
+      if (!childSubscribed) {
+        childSubscribed = true;
+        runtime.scheduler.subscribe(
+          childComputation,
+          (depTx) => {
+            source.withTx(depTx).get();
+          },
+          {},
+        );
+      }
+
+      parentResult.withTx(actionTx).send(
+        (childResult.withTx(actionTx).get() ?? 0) + 1,
+      );
+    }) as Action & Partial<TelemetryAnnotations>;
+    parentComputation.writes = [parentResult.getAsNormalizedFullLink()];
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      effectResult.withTx(actionTx).send(
+        parentResult.withTx(actionTx).get() ?? 0,
+      );
+    };
+
+    runtime.scheduler.subscribe(
+      parentComputation,
+      (depTx) => {
+        childResult.withTx(depTx).get();
+      },
+      {},
+    );
+
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [parentResult.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [effectResult.getAsNormalizedFullLink()],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(childRuns).toBe(1);
+    expect(parentRuns).toBe(2);
+    expect(effectRuns).toBe(2);
+    expect(effectResult.get()).toBe(21);
+  });
+
+  it("should not re-run an effect when pulled dirty computations do not change its inputs", async () => {
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-effect-unchanged-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const derived = runtime.getCell<number>(
+      space,
+      "pull-effect-unchanged-derived",
+      undefined,
+      tx,
+    );
+    derived.set(1);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pull-effect-unchanged-effect-result",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    let effectRuns = 0;
+
+    const computation = ((actionTx: IExtendedStorageTransaction) => {
+      computationRuns++;
+      const value = source.withTx(actionTx).get() ?? 0;
+      derived.withTx(actionTx).send(value % 2);
+    }) as Action & Partial<TelemetryAnnotations>;
+    computation.writes = [derived.getAsNormalizedFullLink()];
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      effectResult.withTx(actionTx).send(
+        derived.withTx(actionTx).get() ?? 0,
+      );
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [derived.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [derived.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [effectResult.getAsNormalizedFullLink()],
+      },
+      { isEffect: true },
+    );
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(1);
+    expect(effectRuns).toBe(1);
+    expect(effectResult.get()).toBe(1);
+
+    source.withTx(tx).send(3);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(2);
+    expect(derived.get()).toBe(1);
+    expect(effectRuns).toBe(1);
+    expect(effectResult.get()).toBe(1);
   });
 
   it("should schedule effects when affected by dirty computations", async () => {
