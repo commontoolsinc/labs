@@ -292,7 +292,9 @@ export const trackGraph = (
       if (count > maxRootsPerDoc) maxRootsPerDoc = count;
     }
     console.error(
-      `[graph-query] ${elapsedMs}ms trackGraph space=${space} branch=${branch || "<default>"} roots=${query.roots.length} uniqueRootSelectors=${uniqueRootSelectors.size} uniqueRootDocs=${rootCounts.size} maxRootsPerDoc=${maxRootsPerDoc} reads=${manager.readCount} loaded=${loadedAddresses} trackerKeys=${schemaTracker.size} trackerVals=${schemaTracker.totalValues} entities=${result.state.entities.size}`,
+      `[graph-query] ${elapsedMs}ms trackGraph space=${space} branch=${
+        branch || "<default>"
+      } roots=${query.roots.length} uniqueRootSelectors=${uniqueRootSelectors.size} uniqueRootDocs=${rootCounts.size} maxRootsPerDoc=${maxRootsPerDoc} reads=${manager.readCount} loaded=${loadedAddresses} trackerKeys=${schemaTracker.size} trackerVals=${schemaTracker.totalValues} entities=${result.state.entities.size}`,
     );
   }
 

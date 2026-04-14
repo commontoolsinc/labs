@@ -51,7 +51,9 @@ export interface NotebookParentPiece {
   isNotebook?: boolean;
   isHidden?: boolean;
   createNote?: Stream<{ title: string; content: string; navigate?: boolean }>;
-  createNotes?: Stream<{ notesData: Array<{ title: string; content: string }> }>;
+  createNotes?: Stream<
+    { notesData: Array<{ title: string; content: string }> }
+  >;
   setTitle?: Stream<string>;
   createNotebook?: Stream<{
     title: string;

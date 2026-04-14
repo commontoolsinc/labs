@@ -102,7 +102,10 @@ interface NotebookOutput extends NotebookPiece {
 // Handler to remove a note from this notebook (but keep it in the space)
 const removeFromNotebook = handler<
   void,
-  { note: Writable<NotebookListItemPiece>; notes: Writable<NotebookListItemPiece[]> }
+  {
+    note: Writable<NotebookListItemPiece>;
+    notes: Writable<NotebookListItemPiece[]>;
+  }
 >((_, { note, notes }) => {
   const notebookNotes = notes.get();
   const index = notebookNotes.findIndex((n) => equals(n, note));

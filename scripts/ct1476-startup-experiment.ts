@@ -3,8 +3,8 @@
 import { fromFileUrl, resolve } from "@std/path";
 import {
   callPieceHandler,
-  newPiece,
   type EntryConfig,
+  newPiece,
   type PieceConfig,
   type SpaceConfig,
 } from "../packages/cli/lib/piece.ts";
@@ -38,7 +38,10 @@ const experimentPatterns: ExperimentPattern[] = [
     label: "contact-book",
     mainPath: resolve(patternsRoot, "contacts/contact-book.tsx"),
   },
-  { label: "calendar", mainPath: resolve(patternsRoot, "calendar/calendar.tsx") },
+  {
+    label: "calendar",
+    mainPath: resolve(patternsRoot, "calendar/calendar.tsx"),
+  },
   {
     label: "reading-list",
     mainPath: resolve(patternsRoot, "reading-list/reading-list.tsx"),
@@ -71,11 +74,21 @@ function parseArgs(args: string[]) {
   };
 }
 
-function makeSpaceName(prefix: string, label: string, kind: "fresh" | "seeded") {
-  return `${prefix}-${label}-${kind}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+function makeSpaceName(
+  prefix: string,
+  label: string,
+  kind: "fresh" | "seeded",
+) {
+  return `${prefix}-${label}-${kind}-${Date.now()}-${
+    crypto.randomUUID().slice(0, 8)
+  }`;
 }
 
-function makeConfig(apiUrl: string, identity: string, space: string): SpaceConfig {
+function makeConfig(
+  apiUrl: string,
+  identity: string,
+  space: string,
+): SpaceConfig {
   return { apiUrl, identity, space };
 }
 
@@ -222,14 +235,18 @@ async function main() {
     results.push(await runOnePattern(pattern, options));
   }
 
-  console.log(JSON.stringify({
-    apiUrl: options.apiUrl,
-    identity: options.identity,
-    seedNotes: options.seedNotes,
-    seedTodos: options.seedTodos,
-    noteBytes: options.noteBytes,
-    results,
-  }, null, 2));
+  console.log(JSON.stringify(
+    {
+      apiUrl: options.apiUrl,
+      identity: options.identity,
+      seedNotes: options.seedNotes,
+      seedTodos: options.seedTodos,
+      noteBytes: options.noteBytes,
+      results,
+    },
+    null,
+    2,
+  ));
 }
 
 if (import.meta.main) {
