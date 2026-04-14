@@ -124,6 +124,27 @@ describe("Schema: Default in unions", () => {
     expect(result.default).toEqual({ theme: "dark", retries: 3 });
   });
 
+  it("applies object defaults from typeof values with shorthand properties", async () => {
+    const code = `
+      interface Default<T, V extends T = T> {}
+      const theme = "dark" as const;
+      const retries = 3 as const;
+      const DEFAULT_CONFIG = { theme, retries } as const;
+      interface Config {
+        theme: string;
+        retries: number;
+      }
+      type T = Config | Default<typeof DEFAULT_CONFIG>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+    );
+
+    expect(result.$ref).toBe("#/$defs/Config");
+    expect(result.default).toEqual({ theme: "dark", retries: 3 });
+  });
+
   it("rejects object defaults that would widen an existing object member", async () => {
     const code = `
       interface Default<T, V extends T = T> {}

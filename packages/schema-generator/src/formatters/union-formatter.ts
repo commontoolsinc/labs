@@ -816,8 +816,8 @@ export class UnionFormatter implements TypeFormatter {
             );
           }
         } else if (ts.isShorthandPropertyAssignment(property)) {
-          obj[property.name.text] = this.extractValueFromExpression(
-            property.name,
+          obj[property.name.text] = this.extractValueFromShorthandProperty(
+            property,
             context,
           );
         }
@@ -832,6 +832,21 @@ export class UnionFormatter implements TypeFormatter {
     if (expr.kind === ts.SyntaxKind.NullKeyword) return null;
 
     return undefined;
+  }
+
+  private extractValueFromShorthandProperty(
+    property: ts.ShorthandPropertyAssignment,
+    context: GenerationContext,
+  ): unknown {
+    const checker = context.typeChecker as ts.TypeChecker & {
+      getShorthandAssignmentValueSymbol?: (
+        node: ts.ShorthandPropertyAssignment,
+      ) => ts.Symbol | undefined;
+    };
+    const symbol = checker.getShorthandAssignmentValueSymbol?.(property) ??
+      context.typeChecker.getSymbolAtLocation(property.name);
+
+    return symbol ? this.extractValueFromSymbol(symbol, context) : undefined;
   }
 
   private isUndefinedType(type: ts.Type): boolean {
