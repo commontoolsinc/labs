@@ -34,6 +34,10 @@ function rainbowBytes(count: number, seed: number): number[] {
     result[i] = value & 0xff;
     value = (value * 543) ^ (value << 5) ^ (value >> 2);
     value = Math.floor(Math.abs(value) * 1.2345) & 0xffffff;
+    if (value === 0) {
+      seed++;
+      value = seed;
+    }
   }
 
   return result;
