@@ -21,8 +21,9 @@ import {
   type MentionablePiece,
   type MinimalPiece,
   type NotebookInput,
+  type NotebookListItemPiece,
+  type NotebookParentPiece,
   type NotebookPiece,
-  type NotePiece,
 } from "./schemas.tsx";
 
 // ===== Shared Utility Functions =====
@@ -34,10 +35,8 @@ import {
 const removeFromAllNotebooks = (
   notebooks: Writable<NotebookPiece[]>,
   itemsToRemove: (
-    | NotePiece
-    | NotebookPiece
-    | Writable<NotePiece>
-    | Writable<NotebookPiece>
+    | NotebookListItemPiece
+    | Writable<NotebookListItemPiece>
   )[],
   skipIndex?: number,
 ): void => {
@@ -64,7 +63,7 @@ interface NotebookOutput extends NotebookPiece {
   [NAME]: string;
   [UI]: VNode;
   title: string;
-  notes: NotePiece[];
+  notes: NotebookListItemPiece[];
   noteCount: number;
   summary: string;
   isNotebook: boolean;
@@ -103,7 +102,7 @@ interface NotebookOutput extends NotebookPiece {
 // Handler to remove a note from this notebook (but keep it in the space)
 const removeFromNotebook = handler<
   void,
-  { note: Writable<NotePiece>; notes: Writable<NotePiece[]> }
+  { note: Writable<NotebookListItemPiece>; notes: Writable<NotebookListItemPiece[]> }
 >((_, { note, notes }) => {
   const notebookNotes = notes.get();
   const index = notebookNotes.findIndex((n) => equals(n, note));
@@ -120,9 +119,9 @@ const removeFromNotebook = handler<
 // This MOVES the dropped notebook - removes from all other notebooks, adds here
 // Supports multi-item drag: if dragged item is in selection, moves ALL selected items
 const handleDropOntoCurrentNotebook = handler<
-  { detail: { sourceCell: Writable<NotePiece | NotebookPiece> } },
+  { detail: { sourceCell: Writable<NotebookListItemPiece> } },
   {
-    notes: Writable<NotePiece[]>;
+    notes: Writable<NotebookListItemPiece[]>;
     notebooks: Writable<NotebookPiece[]>;
     selectedNoteIndices: Writable<number[]>;
   }
@@ -164,14 +163,14 @@ const handleDropOntoCurrentNotebook = handler<
 // Handler for dropping any item onto a notebook - moves from current notebook to target
 // Supports multi-item drag: if dragged item is in selection, moves ALL selected items
 const handleDropOntoNotebook = handler<
-  { detail: { sourceCell: Writable<NotePiece> } },
+  { detail: { sourceCell: Writable<NotebookListItemPiece> } },
   {
     targetNotebook: Writable<{
       title?: string;
-      notes?: NotePiece[];
+      notes?: NotebookListItemPiece[];
       isNotebook?: boolean;
     }>;
-    currentNotes: Writable<NotePiece[]>;
+    currentNotes: Writable<NotebookListItemPiece[]>;
     selectedNoteIndices: Writable<number[]>;
     notebooks: Writable<NotebookPiece[]>;
   }
@@ -250,7 +249,7 @@ const handleBacklinkClick = handler<
 // Must be module-scope handler because it's used in .map() with per-iteration child bindings
 const navigateToChild = handler<
   void,
-  { child: Writable<NotePiece | NotebookPiece>; self: NotebookPiece }
+  { child: Writable<NotebookListItemPiece>; self: NotebookParentPiece }
 >(
   (_, { child, self }) => {
     child.key("parentNotebook").set(self);
@@ -262,9 +261,9 @@ const navigateToChild = handler<
 const deleteSelectedNotes = handler<
   void,
   {
-    notes: Writable<NotePiece[]>;
+    notes: Writable<NotebookListItemPiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allPieces: Writable<Default<NotePiece[], []>>;
+    allPieces: Writable<Default<MinimalPiece[], []>>;
     notebooks: Writable<NotebookPiece[]>;
   }
 >((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {
@@ -296,7 +295,7 @@ const deleteSelectedNotes = handler<
 const addSelectedToNotebook = handler<
   { target?: { value: string }; detail?: { value: string } },
   {
-    notes: Writable<NotePiece[]>;
+    notes: Writable<NotebookListItemPiece[]>;
     selectedNoteIndices: Writable<number[]>;
     notebooks: Writable<NotebookPiece[]>;
     selectedAddNotebook: Writable<string>;
@@ -336,12 +335,12 @@ const addSelectedToNotebook = handler<
   const targetNotebookNotes = targetNotebookCell.key("notes");
 
   // Collect notes first, then batch push (reduces N reactive cycles to 1)
-  const notesToAdd: NotePiece[] = [];
+  const notesToAdd: NotebookListItemPiece[] = [];
   for (const idx of selected) {
     const note = notesList[idx];
     if (note) notesToAdd.push(note);
   }
-  (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(
+  (targetNotebookNotes as Writable<NotebookListItemPiece[] | undefined>).push(
     ...notesToAdd,
   );
 
@@ -353,7 +352,7 @@ const addSelectedToNotebook = handler<
 const moveSelectedToNotebook = handler<
   { target?: { value: string }; detail?: { value: string } },
   {
-    notes: Writable<NotePiece[]>;
+    notes: Writable<NotebookListItemPiece[]>;
     selectedNoteIndices: Writable<number[]>;
     notebooks: Writable<NotebookPiece[]>;
     selectedMoveNotebook: Writable<string>;
@@ -414,7 +413,7 @@ const createNotebookFromPrompt = handler<
     showNewNotebookPrompt: Writable<boolean>;
     pendingNotebookAction: Writable<"add" | "move" | "">;
     selectedNoteIndices: Writable<number[]>;
-    notes: Writable<NotePiece[]>;
+    notes: Writable<NotebookListItemPiece[]>;
     allPieces: Writable<MinimalPiece[]>;
     notebooks: Writable<NotebookPiece[]>;
   }
@@ -510,7 +509,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const notebooks = notebookWish.candidates;
 
     // Still need allPieces for write operations (push new notes/notebooks)
-    const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
+    const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>(
       { query: "#default", headless: true },
     ).result!;
 
@@ -655,7 +654,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           notesData: Array<{ title: string; content: string }>;
         },
       ) => {
-        const created: NotePiece[] = [];
+        const created: NotebookListItemPiece[] = [];
         for (const data of notesData) {
           created.push(Note({
             title: data.title,
@@ -684,7 +683,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           notesData?: Array<{ title: string; content: string }>;
         },
       ) => {
-        const notesToAdd: NotePiece[] = [];
+        const notesToAdd: NotebookListItemPiece[] = [];
         if (notesData && notesData.length > 0) {
           for (const data of notesData) {
             notesToAdd.push(Note({
@@ -821,7 +820,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         .map((n) => getPieceName(n))
         .filter((t) => t.length > 0);
 
-      const children: (NotePiece | NotebookPiece)[] = [];
+      const children: NotebookListItemPiece[] = [];
       for (let i = 0; i < nbCount; i++) {
         const nb = notebooks[i];
         const nbName = getPieceName(nb);

@@ -25,6 +25,9 @@ import * as Engine from "./engine.ts";
 
 export type QueryDocKey = `${string}/${string}/${string}`;
 
+const TRACE_GRAPH_QUERY = typeof Deno !== "undefined" &&
+  Deno.env.get("CF_TRACE_GRAPH_QUERY") === "1";
+
 export interface TrackedGraphState {
   branch: string;
   tracker: MapSetStringToPathSelectors;
@@ -222,6 +225,7 @@ export const trackGraph = (
   serverSeq: number;
   state: TrackedGraphState;
 } => {
+  const startedAt = TRACE_GRAPH_QUERY ? performance.now() : 0;
   const branch = query.branch ?? "";
   const managerKey = options.readSeq === undefined
     ? branch
@@ -258,7 +262,7 @@ export const trackGraph = (
     }
   }
 
-  return {
+  const result = {
     serverSeq: Engine.serverSeq(engine),
     state: {
       branch,
@@ -273,6 +277,26 @@ export const trackGraph = (
       manager,
     },
   };
+
+  if (TRACE_GRAPH_QUERY) {
+    const elapsedMs = Math.round(performance.now() - startedAt);
+    const loadedAddresses = manager.loadedAddresses().length;
+    const rootCounts = new Map<string, number>();
+    const uniqueRootSelectors = new Set<string>();
+    for (const root of query.roots) {
+      rootCounts.set(root.id, (rootCounts.get(root.id) ?? 0) + 1);
+      uniqueRootSelectors.add(JSON.stringify([root.id, root.selector]));
+    }
+    let maxRootsPerDoc = 0;
+    for (const count of rootCounts.values()) {
+      if (count > maxRootsPerDoc) maxRootsPerDoc = count;
+    }
+    console.error(
+      `[graph-query] ${elapsedMs}ms trackGraph space=${space} branch=${branch || "<default>"} roots=${query.roots.length} uniqueRootSelectors=${uniqueRootSelectors.size} uniqueRootDocs=${rootCounts.size} maxRootsPerDoc=${maxRootsPerDoc} reads=${manager.readCount} loaded=${loadedAddresses} trackerKeys=${schemaTracker.size} trackerVals=${schemaTracker.totalValues} entities=${result.state.entities.size}`,
+    );
+  }
+
+  return result;
 };
 
 export const extendTrackedGraph = (

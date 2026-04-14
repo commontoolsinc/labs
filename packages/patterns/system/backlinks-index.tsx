@@ -17,18 +17,30 @@ import {
  * Only patterns like notes and calendar events define them. The computeIndex
  * function safely handles pieces that lack these fields.
  */
-export type MentionablePiece = {
+export type MentionableRef = {
   [NAME]?: string;
   isHidden?: boolean;
   isMentionable?: boolean;
-  mentioned?: MentionablePiece[];
-  backlinks?: MentionablePiece[];
-  mentionable?: MentionablePiece[] | { get?: () => MentionablePiece[] };
+  summary?: string;
+  mentionable?: MentionableRef[] | { get?: () => MentionableRef[] };
 };
 
-export type WritableBacklinks = {
-  mentioned?: WritableBacklinks[];
-  backlinks?: Writable<WritableBacklinks[]>;
+export type MentionablePiece = MentionableRef & {
+  mentioned?: Array<
+    MentionableRef & {
+      backlinks?: MentionableRef[] | Writable<MentionableRef[]>;
+    }
+  >;
+  backlinks?: MentionableRef[] | Writable<MentionableRef[]>;
+};
+
+export type WritableBacklinks = MentionableRef & {
+  mentioned?: Array<
+    WritableBacklinks & {
+      backlinks?: Writable<MentionableRef[]>;
+    }
+  >;
+  backlinks?: Writable<MentionableRef[]>;
 };
 
 type Input = {

@@ -23,6 +23,7 @@ import NoteMd from "./note-md.tsx";
 import {
   type MentionablePiece,
   type MinimalPiece,
+  type NotebookParentPiece,
   type NotebookPiece,
   type NoteInput,
   type NotePiece,
@@ -50,7 +51,7 @@ interface NoteOutput extends NotePiece {
   appendLink: Stream<{ piece: Writable<MentionablePiece> }>;
   createNewNote: Stream<void>;
   /** Parent notebook reference, null if not in a notebook */
-  parentNotebook: NotebookPiece | null;
+  parentNotebook: NotebookParentPiece | null;
   /** Minimal UI for embedding in containers like Record. Use via cf-render variant="embedded". */
   embeddedUI: VNode;
   // Test-accessible state
@@ -235,7 +236,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     const createNewNote = action(() => {
       const notebook = parentNotebook.get();
 
-      if (notebook) {
+      if (notebook?.createNote) {
         notebook.createNote.send({
           title: "New Note",
           content: "",

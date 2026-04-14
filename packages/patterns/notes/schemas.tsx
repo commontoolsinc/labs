@@ -41,6 +41,42 @@ export interface MinimalPiece {
 }
 
 /**
+ * Minimal notebook reference used for navigation and note creation.
+ * Intentionally excludes `notes` and `backlinks` to avoid recursive expansion
+ * in container/list schemas.
+ */
+export interface NotebookParentPiece {
+  [NAME]?: string;
+  title?: string;
+  isNotebook?: boolean;
+  isHidden?: boolean;
+  createNote?: Stream<{ title: string; content: string; navigate?: boolean }>;
+  createNotes?: Stream<{ notesData: Array<{ title: string; content: string }> }>;
+  setTitle?: Stream<string>;
+  createNotebook?: Stream<{
+    title: string;
+    notesData?: Array<{ title: string; content: string }>;
+  }>;
+  parentNotebook?: NotebookParentPiece | null;
+}
+
+/**
+ * Lightweight item stored in notebook note arrays.
+ * Keeps the fields used by notebook list rendering and local actions, but
+ * excludes backlinks/mentioned recursion and full notebook contents.
+ */
+export interface NotebookListItemPiece {
+  [NAME]?: string;
+  title?: string;
+  content?: string;
+  summary?: string;
+  isHidden?: boolean;
+  isNotebook?: boolean;
+  parentNotebook?: NotebookParentPiece | null;
+  setTitle?: Stream<string>;
+}
+
+/**
  * A note's core data shape (without reactive wrappers).
  * Used for type-safe access to note properties.
  */
@@ -51,7 +87,7 @@ export interface NotePiece {
   summary?: string;
   isHidden?: boolean;
   backlinks?: MentionablePiece[];
-  parentNotebook?: NotebookPiece | null;
+  parentNotebook?: NotebookParentPiece | null;
   setTitle?: Stream<string>;
 }
 
@@ -61,7 +97,7 @@ export interface NotePiece {
 export interface NotebookPiece {
   [NAME]?: string;
   title?: string;
-  notes?: NotePiece[];
+  notes?: NotebookListItemPiece[];
   backlinks?: MentionablePiece[];
   isNotebook?: boolean;
   isHidden?: boolean;
@@ -82,7 +118,7 @@ export interface NotebookPiece {
 export interface NotebookCell {
   [NAME]?: string;
   title?: string;
-  notes: Writable<NotePiece[]>;
+  notes: Writable<NotebookListItemPiece[]>;
   isNotebook?: boolean;
   isHidden?: boolean;
 }
@@ -107,16 +143,16 @@ export interface NoteInput {
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
   linkPattern?: Writable<Default<string, "">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
-  parentNotebook?: Writable<Default<NotebookPiece | null, null>>;
+  parentNotebook?: Writable<Default<NotebookParentPiece | null, null>>;
 }
 
 export interface NotebookInput {
   title?: Writable<Default<string, "Notebook">>;
-  notes?: Writable<Default<NotePiece[], []>>;
+  notes?: Writable<Default<NotebookListItemPiece[], []>>;
   isNotebook?: Default<boolean, true>;
   isHidden?: Default<boolean, false>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
-  parentNotebook?: Writable<Default<NotebookPiece | null, null>>;
+  parentNotebook?: Writable<Default<NotebookParentPiece | null, null>>;
 }
 
 export interface NoteMdInput {
