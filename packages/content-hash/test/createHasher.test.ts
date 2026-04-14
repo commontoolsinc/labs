@@ -16,8 +16,8 @@ const createFuncs = [
   createHasherWasm,
 ] as const;
 
-beforeAll(() => {
-  initWasm();
+beforeAll(async () => {
+  await initWasm();
 });
 
 describe("createHasher()", () => {

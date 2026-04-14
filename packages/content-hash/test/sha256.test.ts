@@ -13,8 +13,8 @@ const sha256Funcs = [
   sha256Wasm,
 ] as const;
 
-beforeAll(() => {
-  initWasm();
+beforeAll(async () => {
+  await initWasm();
 });
 
 describe("sha256()", () => {
