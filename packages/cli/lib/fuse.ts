@@ -299,6 +299,7 @@ export function buildDenoArgs(opts: {
     "--allow-write",
     "--allow-env",
     "--allow-net",
+    "--allow-sys=uid,gid",
     opts.modPath,
     opts.mountpoint,
   ];

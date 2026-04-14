@@ -516,6 +516,7 @@ describe("buildDenoArgs", () => {
       "--allow-write",
       "--allow-env",
       "--allow-net",
+      "--allow-sys=uid,gid",
       "/path/to/mod.ts",
       "/mnt",
     ]);
