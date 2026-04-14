@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { setPatternEnvironment } from "../src/env.ts";
+import { streamData as rawStreamData } from "../src/builtins/stream-data.ts";
 import {
   ExtendedStorageTransaction,
   TransactionWrapper,
@@ -173,5 +174,61 @@ describe("stream-data outbox mechanism", () => {
       txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
       wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
     }
+  });
+
+  it("retries streamData start after a rejected post-commit transaction", async () => {
+    const setupTx = runtime.edit();
+    const parentCell = runtime.getCell(
+      space,
+      "stream-retry-parent",
+      undefined,
+      setupTx,
+    );
+    const inputsCell = runtime.getCell<{
+      url: string;
+      options?: {
+        body?: any;
+        method?: string;
+        headers?: Record<string, string>;
+      };
+      result?: any;
+    }>(
+      space,
+      "stream-retry-inputs",
+      undefined,
+      setupTx,
+    );
+    inputsCell.set({
+      url: "http://mock-test-server.local/stream-retry",
+    });
+    const setupResult = await setupTx.commit();
+    expect(setupResult.ok).toBeDefined();
+
+    const action = rawStreamData(
+      inputsCell,
+      () => {},
+      () => {},
+      [],
+      parentCell,
+      runtime,
+    );
+
+    const rejectedTx = runtime.edit();
+    rejectedTx.setCfcEnforcementMode("enforce-explicit");
+    rejectedTx.markCfcRelevant("streamData retry regression");
+    action(rejectedTx);
+    const rejectedResult = await rejectedTx.commit();
+    expect(rejectedResult.error).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchCalls).toEqual([]);
+
+    const retryTx = runtime.edit();
+    action(retryTx);
+    const retryResult = await retryTx.commit();
+    expect(retryResult.ok).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(fetchCalls.length).toBe(1);
+    expect(fetchCalls[0].url).toContain("/stream-retry");
   });
 });

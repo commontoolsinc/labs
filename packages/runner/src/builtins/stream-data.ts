@@ -36,6 +36,7 @@ export function streamData(
   };
 
   let previousCall = "";
+  let startAttempt = 0;
   let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<any | undefined>;
@@ -87,7 +88,18 @@ export function streamData(
     // Re-entrancy guard: Don't restart the stream if it's the same request.
     const currentCall = `${url}${JSON.stringify(options)}`;
     if (currentCall === previousCall) return;
+    const previousCallBeforeAttempt = previousCall;
+    const thisAttempt = ++startAttempt;
     previousCall = currentCall;
+    tx.addCommitCallback((_committedTx, commitResult) => {
+      if (
+        commitResult.error &&
+        startAttempt === thisAttempt &&
+        previousCall === currentCall
+      ) {
+        previousCall = previousCallBeforeAttempt;
+      }
+    });
 
     if (status.controller) {
       status.controller.abort();
