@@ -289,6 +289,7 @@ export class SandboxedExecutor {
   private async resolveSandboxRuntime(): Promise<
     "host" | "cfc-sandbox" | "docker-cfc" | "runsc-direct"
   > {
+    const hostOs = this.getHostOs();
     const runtimeOverride = envOverride(
       "BRIGHID_SANDBOX_RUNTIME",
       "CFC_SHELL_SANDBOX_RUNTIME",
@@ -313,30 +314,29 @@ export class SandboxedExecutor {
       return "runsc-direct";
     }
 
-    if (
-      Deno.build.os === "darwin" &&
-      await pathExists(this.resolveCfcSandboxBinary()) &&
-      await pathExists(this.resolveRunscBinary())
-    ) {
+    if (hostOs === "darwin" && await this.cfcSandboxAvailable()) {
       return "cfc-sandbox";
     }
 
-    if (
-      Deno.build.os === "linux" &&
-      await this.dockerRuntimeAvailable()
-    ) {
+    if ((hostOs === "darwin" || hostOs === "linux") &&
+      await this.dockerRuntimeAvailable()) {
       return "docker-cfc";
     }
 
-    if (
-      Deno.build.os === "linux" &&
-      await pathExists(this.resolveRunscBinary()) &&
-      await pathExists(this.resolveRunscRootfsPath())
-    ) {
+    if (hostOs === "linux" && await this.runscDirectAvailable()) {
       return "runsc-direct";
     }
 
     return "host";
+  }
+
+  protected getHostOs(): typeof Deno.build.os {
+    return Deno.build.os;
+  }
+
+  protected async cfcSandboxAvailable(): Promise<boolean> {
+    return await pathExists(this.resolveCfcSandboxBinary()) &&
+      await pathExists(this.resolveRunscBinary());
   }
 
   private resolveCfcSandboxBinary(): string {
@@ -360,7 +360,7 @@ export class SandboxedExecutor {
       "runsc-cfc";
   }
 
-  private async dockerRuntimeAvailable(): Promise<boolean> {
+  protected async dockerRuntimeAvailable(): Promise<boolean> {
     try {
       const output = await new Deno.Command(this.resolveDockerBinary(), {
         args: ["info", "--format", "{{json .Runtimes}}"],
@@ -380,6 +380,11 @@ export class SandboxedExecutor {
     } catch {
       return false;
     }
+  }
+
+  protected async runscDirectAvailable(): Promise<boolean> {
+    return await pathExists(this.resolveRunscBinary()) &&
+      await pathExists(this.resolveRunscRootfsPath());
   }
 
   private resolveRunscBinary(): string | undefined {

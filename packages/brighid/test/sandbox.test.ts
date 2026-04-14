@@ -101,6 +101,42 @@ function createMockContext(vfs?: VFS): CommandContext {
   };
 }
 
+class TestSandboxedExecutor extends SandboxedExecutor {
+  constructor(
+    config: SandboxedExecConfig,
+    private readonly probeState: {
+      hostOs: typeof Deno.build.os;
+      cfcSandboxAvailable?: boolean;
+      dockerRuntimeAvailable?: boolean;
+      runscDirectAvailable?: boolean;
+    },
+  ) {
+    super(config);
+  }
+
+  protected override getHostOs(): typeof Deno.build.os {
+    return this.probeState.hostOs;
+  }
+
+  protected override async cfcSandboxAvailable(): Promise<boolean> {
+    return this.probeState.cfcSandboxAvailable ?? false;
+  }
+
+  protected override async dockerRuntimeAvailable(): Promise<boolean> {
+    return this.probeState.dockerRuntimeAvailable ?? false;
+  }
+
+  protected override async runscDirectAvailable(): Promise<boolean> {
+    return this.probeState.runscDirectAvailable ?? false;
+  }
+
+  async testResolveSandboxRuntime(): Promise<string> {
+    return await (this as unknown as {
+      resolveSandboxRuntime: () => Promise<string>;
+    }).resolveSandboxRuntime();
+  }
+}
+
 // ============================================================================
 // Config Tests
 // ============================================================================
@@ -284,6 +320,64 @@ Deno.test("Executor with network adds network taint", async () => {
     ]),
     "Should have NetworkProvenance integrity when network is allowed",
   );
+});
+
+Deno.test("Executor auto mode prefers cfc-sandbox on Darwin when both runtimes exist", async () => {
+  const executor = new TestSandboxedExecutor(defaultConfig, {
+    hostOs: "darwin",
+    cfcSandboxAvailable: true,
+    dockerRuntimeAvailable: true,
+  });
+
+  const runtime = await executor.testResolveSandboxRuntime();
+
+  assertEquals(runtime, "cfc-sandbox");
+});
+
+Deno.test("Executor auto mode falls back to docker-cfc on Darwin when cfc-sandbox is unavailable", async () => {
+  const executor = new TestSandboxedExecutor(defaultConfig, {
+    hostOs: "darwin",
+    cfcSandboxAvailable: false,
+    dockerRuntimeAvailable: true,
+  });
+
+  const runtime = await executor.testResolveSandboxRuntime();
+
+  assertEquals(runtime, "docker-cfc");
+});
+
+Deno.test("Executor honors explicit docker-cfc override on Darwin", async () => {
+  const previous = Deno.env.get("BRIGHID_SANDBOX_RUNTIME");
+
+  try {
+    Deno.env.set("BRIGHID_SANDBOX_RUNTIME", "docker-cfc");
+    const executor = new TestSandboxedExecutor(defaultConfig, {
+      hostOs: "darwin",
+      cfcSandboxAvailable: true,
+      dockerRuntimeAvailable: false,
+    });
+
+    const runtime = await executor.testResolveSandboxRuntime();
+
+    assertEquals(runtime, "docker-cfc");
+  } finally {
+    if (previous == null) {
+      Deno.env.delete("BRIGHID_SANDBOX_RUNTIME");
+    } else {
+      Deno.env.set("BRIGHID_SANDBOX_RUNTIME", previous);
+    }
+  }
+});
+
+Deno.test("Executor auto mode keeps docker-cfc scoped to supported host runtimes", async () => {
+  const executor = new TestSandboxedExecutor(defaultConfig, {
+    hostOs: "windows",
+    dockerRuntimeAvailable: true,
+  });
+
+  const runtime = await executor.testResolveSandboxRuntime();
+
+  assertEquals(runtime, "host");
 });
 
 Deno.test("Executor can target cfc-sandbox backend", async () => {

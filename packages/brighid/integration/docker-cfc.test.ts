@@ -38,10 +38,6 @@ async function assertDockerRuntime(runtime: string): Promise<void> {
 }
 
 async function withDockerCfcEnv(fn: () => Promise<void>): Promise<void> {
-  if (Deno.build.os !== "linux") {
-    throw new Error("Brighid docker-cfc integration tests require Linux.");
-  }
-
   const runtime =
     envValue("BRIGHID_DOCKER_RUNTIME", "CFC_SHELL_DOCKER_RUNTIME") ??
       "runsc-cfc";
