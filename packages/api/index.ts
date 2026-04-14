@@ -1912,12 +1912,17 @@ export type CreateNodeFactoryFunction = <T = any, R = any>(
 // This is a compile-time-only brand; at runtime Default<> is just T.
 export declare const DEFAULT_MARKER: unique symbol;
 
+type DefaultMarker<T> = { readonly [DEFAULT_MARKER]: T };
+
 // Default type for specifying default values in type definitions.
 // The DEFAULT_MARKER brand enables RequireDefaults<T> to detect which fields
 // have runtime-provided defaults and make them non-optional in pattern bodies.
 // Detection uses conditional type inference (not keyof) for performance.
+// Nullish-only defaults need a standalone marker because `null & Brand` and
+// `undefined & Brand` collapse to `never`.
 export type Default<T, V extends T = T> =
-  | (T & { readonly [DEFAULT_MARKER]: T })
+  | ([T] extends [null | undefined] ? DefaultMarker<T>
+    : T & DefaultMarker<T>)
   | T;
 
 /** Detect if T is `any` (used to avoid false positives in brand detection). */
