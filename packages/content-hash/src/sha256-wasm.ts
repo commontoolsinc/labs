@@ -23,7 +23,7 @@ const CHUNK_SIZE_FIRST = 1024;
 const CHUNK_SIZE_USUAL = 65536;
 
 /**
- * Cache of usable hasher instances. This array is populated at module init
+ * Pool of usable hasher instances. This array is populated at module init
  * time, a tactic that is necessary since this module exposes a synchronous
  * interface for actual hashing (once loaded), whereas `hash-wasm` only allows
  * asynchronous hasher construction. Once constructed, though, hashers can be
@@ -275,7 +275,7 @@ export function createHasherWasm(): IncrementalHasher {
  * Creates a collecting incremental hasher. This is exported just for
  * testing. (We don't need to do this for the updating hasher, because it gets
  * sufficiently tested via `createHasherWasm()` and would fail the concurrency
- * test anyway because there aren't enough cached instances to satisfy the
+ * test anyway because there aren't enough pooled instances to satisfy the
  * concurrency required by the test.)
  */
 export function createHasherWasmCollecting(): IncrementalHasher {
