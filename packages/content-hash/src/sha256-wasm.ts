@@ -15,9 +15,11 @@ import type { IncrementalHasher } from "./interface.ts";
 let theHasher: IHasher | null = null;
 
 /**
- * Has `initIfNecessaryAndPossible()` been called at least once?
+ * Promised result of the call to `initIfNecessaryAndPossible()` or `null` if
+ * not yet called.
+ *
  */
-let initCalled = false;
+let initResult: Promise<boolean> | null = null;
 
 /**
  * Gets the hasher instance, or throws an error indicating that this module is
@@ -36,16 +38,19 @@ function getHasher(): IHasher {
  * `true` if initialization was successful, `false` if not.
  */
 export async function initWasm() {
-  if (!initCalled) {
-    initCalled = true;
-    try {
-      theHasher = await createSHA256();
-    } catch {
-      // `hash-wasm` not available.
-    }
+  if (!initResult) {
+    initResult = (async () => {
+      try {
+        theHasher = await createSHA256();
+      } catch {
+        // `hash-wasm` not available.
+      }
+
+      return theHasher !== null;
+    })();
   }
 
-  return theHasher !== null;
+  return initResult;
 }
 
 /**
