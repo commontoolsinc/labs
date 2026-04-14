@@ -6,6 +6,7 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   type Stream,
   UI,
   type VNode,
@@ -128,8 +129,9 @@ export default pattern<AgentInput, AgentOutput>(
         summary: string;
         learned?: string;
       }) => {
+        const nowIso = new Date(safeDateNow()).toISOString();
         status.set("idle");
-        lastRun.set(new Date().toISOString());
+        lastRun.set(nowIso);
         lastRunSummary.set(summary);
         if (learnedEntry) {
           const current = learned.get() || "";
@@ -147,8 +149,9 @@ export default pattern<AgentInput, AgentOutput>(
     );
 
     const markError = action(({ summary }: { summary: string }) => {
+      const nowIso = new Date(safeDateNow()).toISOString();
       status.set("error");
-      lastRun.set(new Date().toISOString());
+      lastRun.set(nowIso);
       lastRunSummary.set(`ERROR: ${summary}`);
       if (activityLog) {
         activityLog.logEvent.send({

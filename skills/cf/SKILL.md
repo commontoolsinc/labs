@@ -169,6 +169,32 @@ See `docs/common/workflows/handlers-cli-testing.md` for the full workflow and
 | JSON parse error             | Check nested quotes, no trailing commas                                      |
 | Local servers not responding | `./scripts/check-local-dev.sh` then `./scripts/restart-local-dev.sh --force` |
 
+### FUSE mount wrapper mismatch
+
+On some local setups, the installed `cf` wrapper (for example `dist/cf`) can lag
+behind the source CLI and reject newer `fuse mount` flags such as `-s/--space`,
+even when `deno task cf fuse mount --help` supports them.
+
+**Symptom:**
+
+```bash
+cf fuse mount /tmp/cf -s my-space
+# error: Unknown option "-s"
+```
+
+**Fix:** use the source CLI through the repo task wrapper instead:
+
+```bash
+cd ~/code/labs
+export CF_IDENTITY=./shared.key
+export CF_API_URL=http://localhost:8000
+
+deno task cf fuse mount /tmp/cf -s my-space
+```
+
+This matters because preconnecting the space is required for writable FUSE
+mounts; auto-discovered spaces may appear writable but silently drop writes.
+
 ## References
 
 - `packages/patterns/system/default-app.tsx` - System pieces (allCharms list
