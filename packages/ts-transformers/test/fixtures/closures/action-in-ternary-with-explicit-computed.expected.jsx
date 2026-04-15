@@ -48,7 +48,7 @@ export default pattern((__cf_pattern_input) => {
         isEditing.set(true);
     })({
         isEditing: isEditing
-    }).for("startEditing", true);
+    }).for({ stream: "startEditing" }, true);
     return {
         [UI]: (<cf-card>
         {__cfHelpers.ifElse({

@@ -173,7 +173,7 @@ const actionPattern = pattern((input: Writable<{
         required: ["input"]
     } as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get())({
         input: input
-    }).for("a", true);
+    }).for({ stream: "a" }, true);
     return a;
 }, {
     type: "object",
