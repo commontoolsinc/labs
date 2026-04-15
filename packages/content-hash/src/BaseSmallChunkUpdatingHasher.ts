@@ -9,6 +9,12 @@ const SMALLS_SIZE = 256;
  * Base implementation of an `IncrementalHasher` which ephemerally collects
  * small-size `update()`s to pass along to an underlying `update()` which also
  * gets called directly for larger-size chunks.
+ *
+ * Using this base class is a win if (a) multiple small-size updates are common,
+ * and (b) a small amount of extra byte copying wins over direct calls to the
+ * underlying hasher's `update()`. This implementation modestly penalizes use
+ * patterns where instances are used in a "one-shot" style (or a "couple-shots"
+ * style), but probably not enough to matter, especially for larger payloads..
  */
 export abstract class BaseSmallChunkUpdatingHasher
   extends BaseIncrementalHasher {
