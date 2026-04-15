@@ -36,3 +36,23 @@ export const createHarnessRunState = (
     toolOutputs: [],
   };
 };
+
+export const setHarnessRunStatus = (
+  state: HarnessRunState,
+  status: HarnessRunStatus,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  status,
+  updatedAt: now,
+});
+
+export const appendHarnessToolOutput = (
+  state: HarnessRunState,
+  output: ToolResultRef,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  updatedAt: now,
+  toolOutputs: [...state.toolOutputs, output],
+});

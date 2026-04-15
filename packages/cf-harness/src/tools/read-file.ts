@@ -1,9 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import {
-  createUnimplementedToolError,
-  type HarnessToolDefinition,
-} from "./types.ts";
+import type { HarnessToolDefinition } from "./types.ts";
 
 export interface ReadFileToolInput {
   path: string;
@@ -51,7 +48,29 @@ export const readFileTool: HarnessToolDefinition<
   ReadFileToolOutput
 > = {
   descriptor: readFileToolDescriptor,
-  async invoke() {
-    throw createUnimplementedToolError("read_file");
+  async invoke(context, input) {
+    const resolvedPath = context.sandbox.resolvePath(input.path);
+    const result = await context.sandbox.runShell({
+      command: [
+        "set -eu",
+        'if [ ! -f "$1" ]; then',
+        '  echo "file not found: $1" >&2',
+        "  exit 1",
+        "fi",
+        'if [ -n "$2" ]; then',
+        '  exec head -c "$2" "$1"',
+        "fi",
+        'exec cat "$1"',
+      ].join("\n"),
+      args: [
+        resolvedPath,
+        input.maxBytes !== undefined ? String(input.maxBytes) : "",
+      ],
+    });
+    return {
+      outputId: context.nextOutputId("read_file"),
+      path: resolvedPath,
+      content: result.stdout,
+    };
   },
 };

@@ -15,6 +15,12 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
   assertEquals(BUILTIN_TOOL_REGISTRY.size, 3);
 });
 
+Deno.test("builtin tool registry exposes invoke functions for all built-ins", () => {
+  for (const tool of BUILTIN_TOOLS) {
+    assertEquals(typeof tool.invoke, "function");
+  }
+});
+
 Deno.test("write_file descriptor includes append support", () => {
   const writeFileTool = getBuiltinTool("write_file");
   assert(writeFileTool);

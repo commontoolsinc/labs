@@ -2,6 +2,7 @@ import type {
   CfcEnforcementMode,
   TrustSnapshot,
 } from "@commonfabric/runner/cfc";
+import type { HarnessSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 
@@ -12,6 +13,7 @@ export interface HarnessConfig {
   skillsRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   trustSnapshot?: TrustSnapshot;
+  sandbox?: HarnessSandboxConfig;
 }
 
 export interface ResolveHarnessConfigOptions {
@@ -23,6 +25,7 @@ export interface ResolveHarnessConfigOptions {
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
   trustSnapshot?: TrustSnapshot;
+  sandbox?: HarnessSandboxConfig;
 }
 
 const CFC_ENFORCEMENT_MODES: readonly CfcEnforcementMode[] = [
@@ -77,5 +80,6 @@ export const resolveHarnessConfig = (
   ...(options.trustSnapshot !== undefined
     ? { trustSnapshot: options.trustSnapshot }
     : {}),
+  ...(options.sandbox !== undefined ? { sandbox: options.sandbox } : {}),
   cfcEnforcementMode: resolveCfcEnforcementMode(options),
 });

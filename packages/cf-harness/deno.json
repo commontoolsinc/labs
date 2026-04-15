@@ -1,17 +1,20 @@
 {
   "name": "@commonfabric/cf-harness",
   "tasks": {
-    "test": "ENV=test deno test"
+    "test": "ENV=test deno test test",
+    "test:integration": "CF_HARNESS_INTEGRATION=1 deno test -A integration"
   },
   "exports": {
     ".": "./mod.ts",
     "./config": "./src/config.ts",
+    "./engine": "./src/engine.ts",
     "./gateway/openai-client": "./src/gateway/openai-client.ts",
     "./contracts/prompt-slot": "./src/contracts/prompt-slot.ts",
     "./contracts/observation": "./src/contracts/observation.ts",
     "./contracts/tool-result": "./src/contracts/tool-result.ts",
     "./contracts/tool-descriptor": "./src/contracts/tool-descriptor.ts",
     "./contracts/audit": "./src/contracts/audit.ts",
+    "./sandbox": "./src/sandbox/docker-runsc.ts",
     "./tools": "./src/tools/registry.ts"
   }
 }

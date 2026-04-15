@@ -1,10 +1,12 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
+import type { SandboxRuntime } from "../sandbox/types.ts";
 
 export interface HarnessToolContext {
   runId: string;
   cfcEnforcementMode: CfcEnforcementMode;
+  sandbox: SandboxRuntime;
   nextOutputId(toolId: string): ToolOutputId;
 }
 

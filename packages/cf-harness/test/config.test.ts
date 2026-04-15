@@ -5,6 +5,7 @@ import {
   resolveCfcEnforcementMode,
   resolveHarnessConfig,
 } from "../src/config.ts";
+import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
 
 Deno.test("parseCfcEnforcementMode accepts runner-aligned values", () => {
   assertEquals(parseCfcEnforcementMode("observe"), "observe");
@@ -57,4 +58,14 @@ Deno.test("resolveHarnessConfig accepts an explicit mode override string", () =>
     cfcEnforcementModeOverride: "enforce-strict",
   });
   assertEquals(config.cfcEnforcementMode, "enforce-strict");
+});
+
+Deno.test("resolveHarnessConfig preserves explicit sandbox config", () => {
+  const sandbox = resolveDockerRunscSandboxConfig({
+    workspaceHostPath: "/host/workspace",
+  });
+  const config = resolveHarnessConfig({
+    sandbox,
+  });
+  assertEquals(config.sandbox, sandbox);
 });

@@ -1,9 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import {
-  createUnimplementedToolError,
-  type HarnessToolDefinition,
-} from "./types.ts";
+import type { HarnessToolDefinition } from "./types.ts";
 
 export type WriteFileMode = "replace" | "append";
 
@@ -60,7 +57,38 @@ export const writeFileTool: HarnessToolDefinition<
   WriteFileToolOutput
 > = {
   descriptor: writeFileToolDescriptor,
-  async invoke() {
-    throw createUnimplementedToolError("write_file");
+  async invoke(context, input) {
+    const resolvedPath = context.sandbox.resolvePath(input.path);
+    const mode = input.mode ?? "replace";
+    await context.sandbox.runShell({
+      command: [
+        "set -eu",
+        'path="$1"',
+        'mode="$2"',
+        'create_parents="$3"',
+        'if [ "$create_parents" = "true" ]; then',
+        '  mkdir -p "$(dirname "$path")"',
+        "fi",
+        'case "$mode" in',
+        "  replace)",
+        '    cat > "$path"',
+        "    ;;",
+        "  append)",
+        '    cat >> "$path"',
+        "    ;;",
+        "  *)",
+        '    echo "unsupported write mode: $mode" >&2',
+        "    exit 2",
+        "    ;;",
+        "esac",
+      ].join("\n"),
+      args: [resolvedPath, mode, String(input.createParents ?? false)],
+      stdinText: input.content,
+    });
+    return {
+      outputId: context.nextOutputId("write_file"),
+      path: resolvedPath,
+      mode,
+    };
   },
 };

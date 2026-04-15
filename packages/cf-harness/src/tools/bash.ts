@@ -1,9 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import {
-  createUnimplementedToolError,
-  type HarnessToolDefinition,
-} from "./types.ts";
+import type { HarnessToolDefinition } from "./types.ts";
 
 export interface BashToolInput {
   command: string;
@@ -50,7 +47,17 @@ export const bashToolDescriptor: HarnessToolDescriptor = {
 
 export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
   descriptor: bashToolDescriptor,
-  async invoke() {
-    throw createUnimplementedToolError("bash");
+  async invoke(context, input) {
+    const result = await context.sandbox.runShell({
+      command: input.command,
+      cwd: input.cwd,
+      timeoutMs: input.timeoutMs,
+    });
+    return {
+      outputId: context.nextOutputId("bash"),
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+    };
   },
 };
