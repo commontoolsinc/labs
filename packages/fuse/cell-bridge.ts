@@ -12,6 +12,7 @@ import {
   type CfcLabelView,
   CfcProjectionAnnotator,
   type CfcProjectionKind,
+  deriveCfcProjectionGeneration,
   joinLabels,
 } from "./annotations.ts";
 import { FsTree } from "./tree.ts";
@@ -288,7 +289,7 @@ export class CellBridge {
    */
   private fsProjectionEntries: Map<bigint, Set<string>> = new Map();
   private cfcAnnotationsEnabled = false;
-  private cfcProjectionGeneration = "unavailable";
+  private explicitCfcProjectionGeneration: string | undefined;
 
   private startedAt = new Date().toISOString();
   /** Inode of the .status file (created by initStatus). */
@@ -304,8 +305,7 @@ export class CellBridge {
     this.tree = tree;
     this.execCli = execCli;
     this.cfcAnnotationsEnabled = options.cfcAnnotations ?? false;
-    this.cfcProjectionGeneration = options.projectionGeneration ??
-      "unavailable";
+    this.explicitCfcProjectionGeneration = options.projectionGeneration;
   }
 
   init(config: {
@@ -358,14 +358,25 @@ export class CellBridge {
     rootKind?: "pieces" | "entities";
     cell?: "input" | "result";
     labelView?: CfcLabelView;
+    value?: unknown;
   }): CfcProjectionAnnotator | undefined {
     if (!this.cfcAnnotationsEnabled) return undefined;
+    const space = options.spaceDid ?? this.cfcSpaceDid(options.spaceName);
+    const generation = this.explicitCfcProjectionGeneration ??
+      deriveCfcProjectionGeneration({
+        space,
+        entity: options.pieceId,
+        rootKind: options.rootKind,
+        cell: options.cell,
+        value: options.value,
+        labelView: options.labelView,
+      });
     return new CfcProjectionAnnotator(this.tree, {
-      space: options.spaceDid ?? this.cfcSpaceDid(options.spaceName),
+      space,
       entity: options.pieceId,
       rootKind: options.rootKind,
       cell: options.cell,
-      generation: this.cfcProjectionGeneration,
+      generation,
       labelView: options.labelView,
     });
   }
@@ -1074,13 +1085,7 @@ export class CellBridge {
     const pendingPropName = `.${propName}.pending`;
     const pendingJsonName = `${pendingPropName}.json`;
     const rootInfo = this.pieceRoots.get(pieceIno);
-    const cfcAnnotator = this.makeCfcAnnotator({
-      spaceName,
-      pieceId,
-      rootKind: rootInfo?.rootKind ?? "pieces",
-      cell: propName,
-      labelView: this.cfcLabelViewForCell(cell),
-    });
+    const labelView = this.cfcLabelViewForCell(cell);
     const pendingIno = this.tree.lookup(pieceIno, pendingPropName);
     if (pendingIno !== undefined) {
       this.tree.clear(pendingIno);
@@ -1091,6 +1096,14 @@ export class CellBridge {
     }
 
     const treeValue = this.materializeTreeValue(cell, newValue);
+    const cfcAnnotator = this.makeCfcAnnotator({
+      spaceName,
+      pieceId,
+      rootKind: rootInfo?.rootKind ?? "pieces",
+      cell: propName,
+      value: treeValue,
+      labelView,
+    });
     let callables: Array<
       { key: string; callableKind: CallableKind; schema?: JSONSchema }
     > = [];
@@ -1597,12 +1610,11 @@ export class CellBridge {
       JSON.stringify(obj, null, 2),
       "object",
     );
-    const annotator = this.cfcAnnotationsEnabled
-      ? new CfcProjectionAnnotator(this.tree, {
-        space: "common-fabric:mount",
-        generation: this.cfcProjectionGeneration,
-      })
-      : undefined;
+    const annotator = this.makeCfcAnnotator({
+      spaceName: "common-fabric:mount",
+      spaceDid: "common-fabric:mount",
+      value: obj,
+    });
     this.annotateSyntheticNode(
       annotator,
       spacesIno,
@@ -1625,16 +1637,23 @@ export class CellBridge {
 
     // space.json: DID + name
     const spaceDid = manager.getSpace();
-    const spaceAnnotator = this.makeCfcAnnotator({ spaceName, spaceDid });
+    const spaceMeta = { did: spaceDid, name: spaceName };
+    const spaceAnnotator = this.makeCfcAnnotator({
+      spaceName,
+      spaceDid,
+      value: spaceMeta,
+    });
     const piecesAnnotator = this.makeCfcAnnotator({
       spaceName,
       spaceDid,
       rootKind: "pieces",
+      value: { rootKind: "pieces" },
     });
     const entitiesAnnotator = this.makeCfcAnnotator({
       spaceName,
       spaceDid,
       rootKind: "entities",
+      value: { rootKind: "entities" },
     });
     spaceAnnotator?.annotateJsonDirectory(spaceIno, [], {});
     piecesAnnotator?.annotateJsonDirectory(piecesIno, [], {});
@@ -1645,7 +1664,7 @@ export class CellBridge {
     const spaceJsonIno = this.tree.addFile(
       spaceIno,
       "space.json",
-      JSON.stringify({ did: spaceDid, name: spaceName }, null, 2),
+      JSON.stringify(spaceMeta, null, 2),
       "object",
     );
     this.annotateSyntheticNode(
@@ -1800,22 +1819,24 @@ export class CellBridge {
     // immediately. Full content is populated lazily by resolveEntity() on
     // first access, avoiding doubled subscriptions and startup cost.
     const entityStubIno = this.tree.addDir(state.entitiesIno, piece.id);
+    const entityMetaObject = {
+      id: piece.id,
+      entityId: piece.id,
+      name: piece.name() || "",
+    };
     const entityAnnotator = this.makeCfcAnnotator({
       spaceName,
       spaceDid: state.did,
       pieceId: piece.id,
       rootKind: "entities",
+      value: entityMetaObject,
     });
     entityAnnotator?.annotateJsonDirectory(entityStubIno, [], {});
     entityAnnotator?.annotateEntry(state.entitiesIno, piece.id, entityStubIno);
     const entityMetaIno = this.tree.addFile(
       entityStubIno,
       "meta.json",
-      JSON.stringify(
-        { id: piece.id, entityId: piece.id, name: piece.name() || "" },
-        null,
-        2,
-      ),
+      JSON.stringify(entityMetaObject, null, 2),
       "object",
     );
     this.annotateSyntheticNode(
@@ -2000,6 +2021,7 @@ export class CellBridge {
       spaceName: this.spaceNameForState(state) ?? state.did,
       spaceDid: state.did,
       rootKind: "pieces",
+      value: entries,
     });
     this.annotateSyntheticNode(
       annotator,
@@ -2030,6 +2052,7 @@ export class CellBridge {
       spaceName: this.spaceNameForState(state) ?? state.did,
       spaceDid: state.did,
       rootKind: "pieces",
+      value: indexObj,
     });
     this.annotateSyntheticNode(
       annotator,
@@ -2819,17 +2842,6 @@ export class CellBridge {
     rootKind: "pieces" | "entities" = "pieces",
   ): Promise<bigint> {
     const pieceIno = existingIno ?? this.tree.addDir(parentIno, name);
-    const pieceAnnotator = this.makeCfcAnnotator({
-      spaceName,
-      pieceId: piece.id,
-      rootKind,
-    });
-    pieceAnnotator?.annotateJsonDirectory(pieceIno, [], {});
-    pieceAnnotator?.annotateEntry(parentIno, name, pieceIno);
-
-    // Clear existing meta.json if reusing a stub dir (avoids orphaned inode)
-    const existingMetaIno = this.tree.lookup(pieceIno, "meta.json");
-    if (existingMetaIno !== undefined) this.tree.clear(existingMetaIno);
 
     // Create meta.json first so it's always present
     let patternName = "";
@@ -2840,19 +2852,29 @@ export class CellBridge {
       // Pattern meta not always available
     }
 
+    const metaObject = {
+      id: piece.id,
+      entityId: piece.id,
+      name: piece.name() || "",
+      patternName,
+    };
+    const pieceAnnotator = this.makeCfcAnnotator({
+      spaceName,
+      pieceId: piece.id,
+      rootKind,
+      value: metaObject,
+    });
+    pieceAnnotator?.annotateJsonDirectory(pieceIno, [], {});
+    pieceAnnotator?.annotateEntry(parentIno, name, pieceIno);
+
+    // Clear existing meta.json if reusing a stub dir (avoids orphaned inode)
+    const existingMetaIno = this.tree.lookup(pieceIno, "meta.json");
+    if (existingMetaIno !== undefined) this.tree.clear(existingMetaIno);
+
     const metaIno = this.tree.addFile(
       pieceIno,
       "meta.json",
-      JSON.stringify(
-        {
-          id: piece.id,
-          entityId: piece.id,
-          name: piece.name() || "",
-          patternName,
-        },
-        null,
-        2,
-      ),
+      JSON.stringify(metaObject, null, 2),
       "object",
     );
     this.annotateSyntheticNode(
@@ -2877,6 +2899,7 @@ export class CellBridge {
         pieceId: piece.id,
         rootKind,
         cell: "input",
+        value: {},
       }),
     );
     this.ensurePiecePropStub(
@@ -2887,6 +2910,7 @@ export class CellBridge {
         pieceId: piece.id,
         rootKind,
         cell: "result",
+        value: {},
       }),
     );
 
@@ -2927,6 +2951,7 @@ export class CellBridge {
       spaceDid: state.did,
       pieceId: piece.id,
       rootKind: "pieces",
+      value: { files },
     });
 
     // Create or reuse .src/ dir

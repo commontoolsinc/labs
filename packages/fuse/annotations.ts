@@ -1,4 +1,6 @@
 import { cfcAtom } from "@commonfabric/runner";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { encodeHex } from "@std/encoding/hex";
 import type { CallableKind } from "./callables.ts";
 
 export type CfcProjectionKind =
@@ -126,6 +128,16 @@ export type CfcProjectionBase = {
   labelView?: CfcLabelView;
 };
 
+export type CfcProjectionGenerationInput =
+  & Omit<
+    CfcProjectionBase,
+    "generation"
+  >
+  & {
+    value?: unknown;
+    profileVersion?: string;
+  };
+
 export type CfcJsonAnnotationContext = {
   annotator: CfcProjectionAnnotator;
   path: CfcPathSegment[];
@@ -150,6 +162,8 @@ export const CFC_TRUSTED_XATTR_PREFIX = "trusted.cfc.";
 export const CFC_COMPAT_XATTR_PREFIX = "user.commonfabric.cfc.";
 export const CFC_FAIL_CLOSED_ATOM_CLASS =
   "CommonFabricFuseProjectionMetadataIncomplete";
+export const CFC_FUSE_PROJECTION_PROFILE_VERSION =
+  "common-fabric-fuse-projection-v1";
 
 const encoder = new TextEncoder();
 
@@ -194,6 +208,9 @@ function pathPointer(path: readonly CfcPathSegment[]): string {
 }
 
 function stableStringify(value: unknown): string {
+  if (value === undefined) {
+    return "null";
+  }
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
   }
@@ -202,11 +219,126 @@ function stableStringify(value: unknown): string {
   }
 
   const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
+  const keys = Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort();
   return `{${
     keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
       .join(",")
   }}`;
+}
+
+function generationDigestValue(
+  value: unknown,
+  seen = new WeakMap<object, string>(),
+  path: string[] = [],
+): unknown {
+  if (value === null) return null;
+
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return value;
+    case "undefined":
+      return {
+        type: "common-fabric-projection-non-json-v1",
+        kind: "undefined",
+      };
+    case "bigint":
+      return {
+        type: "common-fabric-projection-non-json-v1",
+        kind: "bigint",
+        value: value.toString(),
+      };
+    case "symbol":
+      return {
+        type: "common-fabric-projection-non-json-v1",
+        kind: "symbol",
+        description: value.description ?? null,
+      };
+    case "function":
+      return {
+        type: "common-fabric-projection-non-json-v1",
+        kind: "function",
+      };
+    case "object":
+      break;
+  }
+
+  const object = value as object;
+  const existing = seen.get(object);
+  if (existing !== undefined) {
+    return {
+      type: "common-fabric-projection-cycle-v1",
+      path: existing,
+    };
+  }
+
+  seen.set(object, pathPointer(path));
+  try {
+    if (Array.isArray(value)) {
+      return value.map((entry, index) =>
+        generationDigestValue(entry, seen, [...path, String(index)])
+      );
+    }
+
+    const record = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      out[key] = generationDigestValue(record[key], seen, [...path, key]);
+    }
+    return out;
+  } finally {
+    seen.delete(object);
+  }
+}
+
+function canonicalLabelView(
+  labelView: CfcLabelView | undefined,
+): CfcLabelView | undefined {
+  if (!labelView) return undefined;
+  return {
+    version: 1,
+    entries: [...labelView.entries].map((entry) => ({
+      path: canonicalPath(entry.path),
+      label: canonicalLabelForGeneration(entry.label),
+    })).sort((left, right) =>
+      pathPointer(left.path).localeCompare(pathPointer(right.path))
+    ),
+  };
+}
+
+export function deriveCfcProjectionGeneration(
+  input: CfcProjectionGenerationInput,
+): string {
+  const digestInput = {
+    type: "common-fabric-fuse-projection-generation-v1",
+    profileVersion: input.profileVersion ??
+      CFC_FUSE_PROJECTION_PROFILE_VERSION,
+    annotationSchema: {
+      refType: "common-fabric-fuse-ref-v1",
+      nodeVersion: 1,
+    },
+    identity: {
+      space: input.space,
+      entity: input.entity,
+      rootKind: input.rootKind,
+      cell: input.cell,
+    },
+    value: generationDigestValue(input.value),
+    cfcMetadata: input.labelView === undefined
+      ? {
+        status: "missing",
+      }
+      : {
+        status: "present",
+        labelView: canonicalLabelView(input.labelView),
+      },
+  };
+  return `sha256:${
+    encodeHex(sha256(encoder.encode(stableStringify(digestInput))))
+  }`;
 }
 
 function cloneLabel(label: CfcLabel): CfcLabel {
@@ -218,6 +350,22 @@ function cloneLabel(label: CfcLabel): CfcLabel {
     }
   }
   return cloned;
+}
+
+function canonicalLabelForGeneration(label: CfcLabel): CfcLabel {
+  const canonical: CfcLabel = {};
+  for (const key of labelKeys()) {
+    const values = label[key];
+    if (!Array.isArray(values) || values.length === 0) continue;
+    const byCanonical = new Map<string, unknown>();
+    for (const value of values) {
+      byCanonical.set(stableStringify(value), value);
+    }
+    canonical[key] = [...byCanonical.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, value]) => value);
+  }
+  return canonical;
 }
 
 export function joinLabels(...labels: Array<CfcLabel | undefined>): CfcLabel {
@@ -342,7 +490,7 @@ export class CfcProjectionAnnotator {
     path: readonly CfcPathSegment[],
     overrides: Partial<CfcProjectionRef> = {},
   ): CfcProjectionRef {
-    return {
+    const ref: CfcProjectionRef = {
       type: "common-fabric-fuse-ref-v1",
       space: this.base.space,
       ...(this.base.entity === undefined ? {} : { entity: this.base.entity }),
@@ -353,8 +501,19 @@ export class CfcProjectionAnnotator {
       path: [...path],
       projection,
       generation: this.base.generation,
-      ...overrides,
     };
+    for (
+      const [key, value] of Object.entries(overrides) as Array<
+        [keyof CfcProjectionRef, CfcProjectionRef[keyof CfcProjectionRef]]
+      >
+    ) {
+      if (value === undefined) {
+        delete ref[key];
+      } else {
+        ref[key] = value as never;
+      }
+    }
+    return ref;
   }
 
   labelAt(path: readonly CfcPathSegment[]): CfcLabel {

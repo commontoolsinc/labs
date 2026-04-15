@@ -231,6 +231,22 @@ Environment variables `CF_API_URL` and `CF_IDENTITY` are also supported.
 Handlers remain writable through the mounted `.handler` file. Both mounted
 `.handler` and `.tool` files can be executed directly or via `cf exec`.
 
+### CFC Annotations
+
+`cf fuse mount --cfc-annotations` enables Common Fabric CFC projection
+annotations for trusted runtimes such as the CFC-aware gVisor profile. The FUSE
+daemon publishes logical projection metadata as xattr-like values and keeps
+CFC-enabled local writes, creates, renames, symlinks, truncates, and metadata
+mutations rejected until trusted write-label metadata is available.
+
+By default the local mount exposes the compatibility namespace
+`user.commonfabric.cfc.*`. Use `--cfc-xattr-namespace=trusted|compat|both` to
+select the returned spelling. `trusted.cfc.*` is the enforcement namespace;
+`user.commonfabric.cfc.*` is for local compatibility/debugging and must not be
+trusted as sandbox enforcement input. `trusted.cfc.generation` is returned as a
+raw UTF-8 string. Other CFC annotation values are canonical JSON with sorted
+object keys.
+
 ## Architecture
 
 Single Deno process using FFI to libfuse. FUSE callbacks are registered via

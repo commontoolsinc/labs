@@ -1,5 +1,5 @@
 // cell-bridge.test.ts — Integration tests for CellBridge using fake piece objects
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertNotEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
   CellBridge,
@@ -342,6 +342,107 @@ Deno.test("CellBridge CFC annotations attach to hydrated JSON projections and fa
       namespace: "compat",
     }).includes(`${CFC_COMPAT_XATTR_PREFIX}ref`),
     true,
+  );
+});
+
+Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    cfcAnnotations: true,
+  });
+  const state = buildTestSpace(bridge, "home", []);
+
+  const makeResultCell = (title: string): FakeCell => {
+    const searchToolCell = makeCell(
+      {
+        pattern: {
+          argumentSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+          },
+        },
+        extraParams: { title },
+      },
+      undefined,
+    );
+    return makeCell(
+      {
+        title,
+        search: searchToolCell.get(),
+      },
+      {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          search: { type: "object" },
+        },
+      },
+      { search: searchToolCell },
+    );
+  };
+
+  const initialResultCell = makeResultCell("one");
+  const piece = {
+    id: "of:entity-derived-generation",
+    name: () => "Derived Generation",
+    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(initialResultCell),
+      get: () => Promise.resolve(initialResultCell.get()),
+    },
+  };
+
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Derived Generation", "home");
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
+  const titleIno = tree.lookup(resultIno!, "title");
+  const resultJsonIno = tree.lookup(pieceIno, "result.json");
+  const callableIno = tree.lookup(resultIno!, "search.tool");
+  assertEquals(titleIno !== undefined, true);
+  assertEquals(resultJsonIno !== undefined, true);
+  assertEquals(callableIno !== undefined, true);
+
+  const titleAnnotation = tree.getCfcAnnotation(titleIno!);
+  const resultJsonAnnotation = tree.getCfcAnnotation(resultJsonIno!);
+  const callableAnnotation = tree.getCfcAnnotation(callableIno!);
+  assertEquals(titleAnnotation?.generation.startsWith("sha256:"), true);
+  assertNotEquals(titleAnnotation?.generation, "unavailable");
+  assertEquals(titleAnnotation?.ref.generation, titleAnnotation?.generation);
+  assertEquals(resultJsonAnnotation?.generation, titleAnnotation?.generation);
+  assertEquals(callableAnnotation?.generation, titleAnnotation?.generation);
+  assertEquals(
+    callableAnnotation?.callable?.descriptor.generation,
+    titleAnnotation?.generation,
+  );
+
+  const rebuiltResultCell = makeResultCell("two");
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: rebuiltResultCell,
+      newValue: rebuiltResultCell.get(),
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Derived Generation",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+
+  const rebuiltResultIno = tree.lookup(pieceIno, "result");
+  const rebuiltTitleIno = tree.lookup(rebuiltResultIno!, "title");
+  const rebuiltAnnotation = tree.getCfcAnnotation(rebuiltTitleIno!);
+  assertNotEquals(rebuiltAnnotation?.generation, titleAnnotation?.generation);
+  assertEquals(
+    rebuiltAnnotation?.ref.generation,
+    rebuiltAnnotation?.generation,
   );
 });
 
