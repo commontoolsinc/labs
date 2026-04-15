@@ -15,6 +15,11 @@ import {
   type WritePath,
 } from "./cell-bridge.ts";
 import {
+  type CfcXattrNamespace,
+  getCfcXattrValue,
+  listCfcXattrNames,
+} from "./annotations.ts";
+import {
   DIR_MODE,
   EACCES,
   EINVAL,
@@ -76,10 +81,27 @@ type HandleWriteTarget =
   | { kind: "value"; target: WritePath }
   | { kind: "source"; target: SourceWritePath };
 
+function parseCfcXattrNamespace(value: string): CfcXattrNamespace {
+  if (value === "trusted" || value === "compat" || value === "both") {
+    return value;
+  }
+  console.warn(
+    `[FUSE] Unknown --cfc-xattr-namespace=${value}; using compat namespace`,
+  );
+  return "compat";
+}
+
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
-    string: ["api-url", "space", "identity", "exec-cli", "log-file"],
-    boolean: ["debug"],
+    string: [
+      "api-url",
+      "space",
+      "identity",
+      "exec-cli",
+      "log-file",
+      "cfc-xattr-namespace",
+    ],
+    boolean: ["debug", "cfc-annotations"],
     collect: ["space"],
     default: {
       "api-url": Deno.env.get("CF_API_URL") ?? "",
@@ -87,7 +109,9 @@ export async function main(argv: string[] = Deno.args) {
       identity: Deno.env.get("CF_IDENTITY") ?? "",
       "exec-cli": "",
       "log-file": "",
+      "cfc-xattr-namespace": "compat",
       debug: false,
+      "cfc-annotations": false,
     },
   });
 
@@ -112,6 +136,10 @@ export async function main(argv: string[] = Deno.args) {
   }
 
   const debug = args.debug;
+  const cfcAnnotationsEnabled = Boolean(args["cfc-annotations"]);
+  const cfcXattrNamespace = parseCfcXattrNamespace(
+    String(args["cfc-xattr-namespace"] ?? "compat"),
+  );
 
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
@@ -158,7 +186,9 @@ export async function main(argv: string[] = Deno.args) {
   // Populate tree
   const apiUrl = args["api-url"];
   if (apiUrl) {
-    bridge = new CellBridge(tree, args["exec-cli"] || "");
+    bridge = new CellBridge(tree, args["exec-cli"] || "", {
+      cfcAnnotations: cfcAnnotationsEnabled,
+    });
     bridge.init({
       apiUrl,
       identity: args.identity || "",
@@ -388,6 +418,14 @@ export async function main(argv: string[] = Deno.args) {
 
       const { flags } = readFileInfo(fi);
       const isWriting = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
+
+      if (cfcAnnotationsEnabled && isWriting) {
+        // The first CFC slice publishes trusted annotations but does not yet
+        // receive write labels from gVisor. Reject local writes rather than
+        // exposing optimistic, under-labeled projection state.
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
       if (node.kind === "callable") {
         if (node.callableKind === "tool" && isWriting) {
@@ -1039,6 +1077,10 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
       }
+      if (cfcAnnotationsEnabled && toSet !== 0) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
       // Handle truncate / size change
       if (toSet & FUSE_SET_ATTR_SIZE) {
@@ -1143,6 +1185,12 @@ export async function main(argv: string[] = Deno.args) {
           attrValue = encoder.encode(jsonType);
         }
       }
+      if (!attrValue) {
+        attrValue = getCfcXattrValue(tree, ino, attrName, {
+          enabled: cfcAnnotationsEnabled,
+          namespace: cfcXattrNamespace,
+        });
+      }
 
       if (!attrValue) {
         fuse.symbols.fuse_reply_err(req, ENODATA);
@@ -1178,16 +1226,27 @@ export async function main(argv: string[] = Deno.args) {
       ino: number | bigint,
       size: number | bigint,
     ) => {
-      const node = tree.getNode(BigInt(ino));
+      const inode = BigInt(ino);
+      const node = tree.getNode(inode);
+      const xattrNames: string[] = [];
 
-      // Build null-separated list of xattr names
       const jsonType = node?.kind === "file"
         ? node.jsonType
         : node?.kind === "dir"
         ? node.jsonType
         : undefined;
+      if (jsonType) {
+        xattrNames.push("user.json.type");
+      }
 
-      if (!jsonType) {
+      xattrNames.push(
+        ...listCfcXattrNames(tree, inode, {
+          enabled: cfcAnnotationsEnabled,
+          namespace: cfcXattrNamespace,
+        }),
+      );
+
+      if (xattrNames.length === 0) {
         // No xattrs — empty list
         const sz = Number(size);
         if (sz === 0) {
@@ -1198,8 +1257,7 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
-      // "user.json.type\0"
-      const listBuf = encoder.encode("user.json.type\0");
+      const listBuf = encoder.encode(`${xattrNames.join("\0")}\0`);
       const sz = Number(size);
 
       if (sz === 0) {
@@ -1232,6 +1290,10 @@ export async function main(argv: string[] = Deno.args) {
     ) => {
       logOp("create", parentIno.toString());
       if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (cfcAnnotationsEnabled) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1319,6 +1381,10 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (cfcAnnotationsEnabled) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
@@ -1358,6 +1424,10 @@ export async function main(argv: string[] = Deno.args) {
     ) => {
       logOp("unlink", parentIno.toString());
       if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (cfcAnnotationsEnabled) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1446,6 +1516,10 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (cfcAnnotationsEnabled) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
@@ -1528,6 +1602,10 @@ export async function main(argv: string[] = Deno.args) {
     ) => {
       logOp("rename", parentIno.toString());
       if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (cfcAnnotationsEnabled) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1631,6 +1709,10 @@ export async function main(argv: string[] = Deno.args) {
       namePtr: Deno.PointerValue,
     ) => {
       if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (cfcAnnotationsEnabled) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }

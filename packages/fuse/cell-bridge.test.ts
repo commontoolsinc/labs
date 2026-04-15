@@ -7,6 +7,11 @@ import {
   type SpaceState,
   type WritePath,
 } from "./cell-bridge.ts";
+import {
+  CFC_COMPAT_XATTR_PREFIX,
+  CFC_FAIL_CLOSED_ATOM_CLASS,
+  listCfcXattrNames,
+} from "./annotations.ts";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -280,6 +285,64 @@ Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without ea
   );
   assertEquals(tree.getChildren(inputIno!).length, 0);
   assertEquals(tree.getChildren(resultIno!).length, 0);
+});
+
+Deno.test("CellBridge CFC annotations attach to hydrated JSON projections and fail closed without runner labels", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    cfcAnnotations: true,
+    projectionGeneration: "test-generation",
+  });
+  const state = buildTestSpace(bridge, "home", []);
+
+  const piece = {
+    id: "of:entity-cfc",
+    name: () => "Annotated Fixture",
+    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({ title: "secret" }, undefined)),
+      get: () => Promise.resolve({ title: "secret" }),
+    },
+  };
+
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Annotated Fixture", "home");
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
+  const titleIno = tree.lookup(resultIno!, "title");
+  assertEquals(titleIno !== undefined, true);
+
+  const annotation = tree.getCfcAnnotation(titleIno!);
+  assertEquals(annotation?.ref, {
+    type: "common-fabric-fuse-ref-v1",
+    space: state.did,
+    entity: "of:entity-cfc",
+    rootKind: "pieces",
+    cell: "result",
+    path: ["title"],
+    projection: "value",
+    generation: "test-generation",
+  });
+  assertEquals(
+    JSON.stringify(annotation?.contentLabel).includes(
+      CFC_FAIL_CLOSED_ATOM_CLASS,
+    ),
+    true,
+  );
+  assertEquals(
+    listCfcXattrNames(tree, titleIno!, {
+      enabled: true,
+      namespace: "compat",
+    }).includes(`${CFC_COMPAT_XATTR_PREFIX}ref`),
+    true,
+  );
 });
 
 Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", async () => {
