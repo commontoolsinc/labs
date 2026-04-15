@@ -3517,6 +3517,9 @@ interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "$open"?: CellLike<boolean> | boolean;
   "dismissable"?: boolean;
   "size"?: "sm" | "md" | "lg" | "full";
+  "presentation"?: "dialog" | "sheet";
+  "grabber"?: boolean;
+  "detent"?: "auto" | "half" | "full";
   "prevent-scroll"?: boolean;
   "label"?: string;
   "oncf-modal-open"?: EventHandler<void>;
