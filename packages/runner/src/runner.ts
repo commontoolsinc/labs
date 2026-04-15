@@ -1422,23 +1422,37 @@ export class Runner {
     inputs: FabricValue,
     processCell: Cell<any>,
     tx: IExtendedStorageTransaction,
+    name?: string,
   ): NormalizedFullLink | undefined {
     if (!isRecord(inputs) || !("$event" in inputs)) return undefined;
 
     let value: FabricValue = inputs.$event as FabricValue;
+    let resolvedStreamLink: NormalizedFullLink | undefined = undefined;
     while (isWriteRedirectLink(value)) {
-      const maybeStreamLink = resolveLink(
+      resolvedStreamLink = resolveLink(
         this.runtime,
         tx,
         parseLink(value, processCell),
         "writeRedirect",
       );
-      value = tx.readValueOrThrow(maybeStreamLink);
+      value = tx.readValueOrThrow(resolvedStreamLink);
     }
 
-    return isStreamValue(value)
-      ? parseLink(inputs.$event, processCell)
-      : undefined;
+    if (isStreamValue(value)) {
+      return parseLink(inputs.$event, processCell);
+    }
+
+    if (resolvedStreamLink) {
+      logger.warn(
+        "stream-marker-restored",
+        `Restored missing $stream marker for handler "${name ?? "<anonymous>"}"`,
+        { resolvedStreamLink, storedValue: value },
+      );
+      tx.writeValueOrThrow(resolvedStreamLink, { $stream: true });
+      return parseLink(inputs.$event, processCell);
+    }
+
+    return undefined;
   }
 
   private createPatternFrame(
@@ -2036,6 +2050,7 @@ export class Runner {
       io.inputs,
       processCell,
       tx,
+      name,
     );
     if (streamLink) {
       this.instantiateJavaScriptHandlerNode({ ...context, streamLink });
