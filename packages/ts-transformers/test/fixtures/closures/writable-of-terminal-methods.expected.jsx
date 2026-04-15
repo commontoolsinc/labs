@@ -55,7 +55,7 @@ export default pattern((__cf_pattern_input) => {
     })({
         counter: counter,
         label: label
-    }).for("reset", true);
+    }).for({ stream: "reset" }, true);
     return {
         [UI]: (<div>
         <span>{title} {label}: {counter}</span>

@@ -57,7 +57,7 @@ export default pattern((__cf_pattern_input) => {
         self: {
             title: self.key("title")
         }
-    }).for("showSelf", true);
+    }).for({ stream: "showSelf" }, true);
     // Action closing over both `self` and `count`
     const incrementWithSelf = __cfHelpers.handler({
         type: "object",
@@ -101,7 +101,7 @@ export default pattern((__cf_pattern_input) => {
     })({
         self: self,
         count: count
-    }).for("incrementWithSelf", true);
+    }).for({ stream: "incrementWithSelf" }, true);
     return {
         [NAME]: "Action SELF Test",
         [UI]: (<div>

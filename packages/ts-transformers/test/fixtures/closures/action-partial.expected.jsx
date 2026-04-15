@@ -35,7 +35,7 @@ export default pattern((__cf_pattern_input) => {
             }
         } as const satisfies __cfHelpers.JSONSchema, (_, { a }) => console.log(a))({
             a: a
-        }).for(["__patternResult", "readA"], true),
+        }).for({ stream: ["__patternResult", "readA"] }, true),
         readB: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
@@ -46,7 +46,7 @@ export default pattern((__cf_pattern_input) => {
             }
         } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => console.log(b))({
             b: b
-        }).for(["__patternResult", "readB"], true)
+        }).for({ stream: ["__patternResult", "readB"] }, true)
     };
 }, {
     type: "object",

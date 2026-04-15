@@ -67,7 +67,7 @@ export default pattern((__cf_pattern_input) => {
         path.push(name);
     })({
         path: path
-    }).for("pushPath", true);
+    }).for({ stream: "pushPath" }, true);
     return {
         [UI]: (<div>
         {(() => {
