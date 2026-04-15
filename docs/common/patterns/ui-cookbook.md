@@ -44,11 +44,9 @@ const theme = {
 <cf-theme theme={theme}>
   <cf-screen>
     <cf-heading slot="header" level={2}>Pattern</cf-heading>
-    <cf-vscroll flex showScrollbar fadeEdges>
-      <cf-vstack gap="4" padding="4">
-        {/* main content */}
-      </cf-vstack>
-    </cf-vscroll>
+    <cf-vstack gap="4" padding="4">
+      {/* main content — scrolls automatically */}
+    </cf-vstack>
   </cf-screen>
 </cf-theme>;
 ```
@@ -56,9 +54,9 @@ const theme = {
 Why this is the default:
 
 - one theme object establishes a visual system early
-- `cf-screen` gives a reliable full-surface container
-- `cf-vscroll` keeps full-height layouts usable when content grows
+- `cf-screen` gives a reliable full-surface container with auto-scrolling main area
 - `cf-vstack` keeps spacing and grouping readable
+- add `cf-vscroll` only when you need snap-to-bottom (chat), fade-edges, or styled scrollbar
 
 ## 2. Mobile App Vignette
 
@@ -115,8 +113,8 @@ Use this when you want:
 - a mobile-first hierarchy
 - a vignette that demonstrates the theme system clearly
 
-If you switch this vignette over to `cf-screen`, keep the scrollable body in
-`cf-vscroll` inside that frame.
+If you switch this vignette over to `cf-screen`, the body content scrolls
+automatically. Add `cf-vscroll` only if you need snap-to-bottom or fade-edges.
 
 ## 3. Editorial Detail Layout
 
@@ -126,27 +124,21 @@ Use when the pattern centers on one record, note, recipe, or project.
 <cf-theme theme={theme}>
   <cf-screen>
     <cf-heading slot="header" level={2}>Details</cf-heading>
-    <cf-vscroll style="flex: 1;">
-      <cf-vstack gap="4" padding="4">
-        <cf-card>
-          <cf-vstack slot="content" gap="3">
-            <cf-label>Overview</cf-label>
-            <cf-heading level={2}>Primary details</cf-heading>
-            <cf-label>
-              Use a calmer reading rhythm, stronger typography, and sectioned
-              content.
-            </cf-label>
-          </cf-vstack>
-        </cf-card>
-
-        <cf-card style="--cf-card-color-border: var(--cf-theme-color-accent);">
-          <cf-vstack slot="content" gap="2">
-            <cf-heading level={3}>Secondary section</cf-heading>
-            <cf-input placeholder="Notes" />
-          </cf-vstack>
-        </cf-card>
-      </cf-vstack>
-    </cf-vscroll>
+    <cf-vstack gap="4" padding="4">
+      <cf-card>
+        <cf-vstack slot="content" gap="3">
+          <cf-label>Overview</cf-label>
+          <cf-heading level={2}>Primary details</cf-heading>
+          {/* main fields */}
+        </cf-vstack>
+      </cf-card>
+      <cf-card>
+        <cf-vstack slot="content" gap="3">
+          <cf-heading level={3}>Secondary section</cf-heading>
+          <cf-input placeholder="Notes" />
+        </cf-vstack>
+      </cf-card>
+    </cf-vstack>
   </cf-screen>
 </cf-theme>
 ```

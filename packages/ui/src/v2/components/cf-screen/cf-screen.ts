@@ -36,6 +36,8 @@ export class CFScreen extends BaseElement {
       min-height: 0;
       display: flex;
       flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
     .footer {
