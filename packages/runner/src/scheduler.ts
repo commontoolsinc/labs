@@ -430,7 +430,12 @@ export class Scheduler {
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
+  // In pull mode, `dirty` means direct dirty. `stale` additionally includes
+  // actions with dirty upstream computations.
   private dirty = new Set<Action>();
+  private stale = new Set<Action>();
+  private upstreamStaleWriters = new WeakMap<Action, Set<Action>>();
+  private upstreamStaleCount = new WeakMap<Action, number>();
   private pullMode = true;
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
@@ -983,7 +988,7 @@ export class Scheduler {
 
     // Mark as dirty and pending for first-time execution
     // In pull mode this still doesn't mean execution: There needs to be an effect to trigger it.
-    this.dirty.add(action);
+    this.markDirectDirty(action);
     this.pending.add(action);
     this.scheduledFirstTime.add(action);
 
@@ -1074,7 +1079,7 @@ export class Scheduler {
     // pull those computations and see fresh data.
     // Skip throttled computations - they'll trigger via storage changes when unthrottled.
     // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
-    if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
+    if (this.pullMode && actionIsEffect && this.stale.size > 0) {
       const effectReads = reads;
       const effectShallowReads = shallowReads;
       let shouldMarkDirty = false;
@@ -1101,7 +1106,7 @@ export class Scheduler {
 
           for (const writer of writers) {
             if (writer === action) continue;
-            if (!this.dirty.has(writer)) continue;
+            if (!this.isStale(writer)) continue;
             if (this.effects.has(writer)) continue; // Only check computations
             if (this.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
 
@@ -1125,7 +1130,7 @@ export class Scheduler {
 
       if (shouldMarkDirty && !this.dirty.has(action)) {
         this.markEffectConditionallyScheduled(action);
-        this.dirty.add(action);
+        this.markDirectDirty(action);
         this.pending.add(action);
         this.queueExecution();
       }
@@ -1153,6 +1158,10 @@ export class Scheduler {
     }
     this.pending.delete(action);
     this.conditionallyScheduledEffects.delete(action);
+    // Clear direct/stale state before removing outgoing edges so downstream
+    // stale counts are decremented through normal propagation.
+    this.clearDirectDirty(action);
+    this.forceClearStale(action);
     const dependencies = this.reverseDependencies.get(action);
     if (dependencies) {
       for (const dependency of dependencies) {
@@ -1168,8 +1177,6 @@ export class Scheduler {
     // Clean up effect/computation tracking
     this.effects.delete(action);
     this.computations.delete(action);
-    // Clean up dirty tracking
-    this.dirty.delete(action);
     // Clean up writersByEntity index
     const writeEntities = this.actionWriteEntities.get(action);
     if (writeEntities) {
@@ -1263,7 +1270,7 @@ export class Scheduler {
                 // Use resubscribe to set up dependencies/triggers from the log,
                 // then mark as dirty/pending to ensure it runs again.
                 this.resubscribe(action, log);
-                this.dirty.add(action);
+                this.markDirectDirty(action);
                 this.pending.add(action);
                 this.queueExecution();
               }
@@ -1281,7 +1288,11 @@ export class Scheduler {
             );
           });
           const log = txToReactivityLog(tx);
-          this.recordChangedComputationWrites(action, tx, log);
+          const changedComputationWrites = this.recordChangedComputationWrites(
+            action,
+            tx,
+            log,
+          );
 
           logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${actionId}`,
@@ -1343,6 +1354,13 @@ export class Scheduler {
             this.resubscribe(action, log);
           } finally {
             logger.timeEnd("scheduler", "run", "resubscribe");
+          }
+          if (this.pullMode && this.computations.has(action)) {
+            this.clearDirectDirty(action);
+            this.markReadersDirtyForChangedWrites(
+              action,
+              changedComputationWrites,
+            );
           }
           resolve(result);
         }
@@ -2031,12 +2049,8 @@ export class Scheduler {
     const actionId = this.getActionId(action);
     const previousDependencies = this.reverseDependencies.get(action);
     if (previousDependencies) {
-      for (const dependency of previousDependencies) {
-        const dependents = this.dependents.get(dependency);
-        dependents?.delete(action);
-        if (dependents && dependents.size === 0) {
-          this.dependents.delete(dependency);
-        }
+      for (const dependency of [...previousDependencies]) {
+        this.unregisterDependentEdge(dependency, action);
       }
       this.reverseDependencies.delete(action);
     }
@@ -2093,12 +2107,7 @@ export class Scheduler {
           )
         ) {
           // otherAction writes → this action reads, so this action depends on otherAction
-          let deps = this.dependents.get(otherAction);
-          if (!deps) {
-            deps = new Set();
-            this.dependents.set(otherAction, deps);
-          }
-          deps.add(action);
+          this.registerDependentEdge(otherAction, action);
           newDependencies.add(otherAction);
         }
       }
@@ -2125,6 +2134,7 @@ export class Scheduler {
       dependents = new Set();
       this.dependents.set(writer, dependents);
     }
+    const alreadyDependent = dependents.has(dependent);
     dependents.add(dependent);
 
     let reverse = this.reverseDependencies.get(dependent);
@@ -2133,6 +2143,28 @@ export class Scheduler {
       this.reverseDependencies.set(dependent, reverse);
     }
     reverse.add(writer);
+
+    if (!alreadyDependent && this.isStale(writer)) {
+      this.addStaleUpstream(writer, dependent);
+    }
+  }
+
+  private unregisterDependentEdge(writer: Action, dependent: Action): void {
+    const dependents = this.dependents.get(writer);
+    const hadDependent = dependents?.delete(dependent) ?? false;
+    if (dependents && dependents.size === 0) {
+      this.dependents.delete(writer);
+    }
+
+    const reverse = this.reverseDependencies.get(dependent);
+    reverse?.delete(writer);
+    if (reverse && reverse.size === 0) {
+      this.reverseDependencies.delete(dependent);
+    }
+
+    if (hadDependent) {
+      this.removeStaleUpstream(writer, dependent);
+    }
   }
 
   private pathMatchesWrite(
@@ -2209,16 +2241,7 @@ export class Scheduler {
         continue;
       }
 
-      dependents.delete(dependent);
-      const reverse = this.reverseDependencies.get(dependent);
-      reverse?.delete(writer);
-      if (reverse && reverse.size === 0) {
-        this.reverseDependencies.delete(dependent);
-      }
-    }
-
-    if (dependents.size === 0) {
-      this.dependents.delete(writer);
+      this.unregisterDependentEdge(writer, dependent);
     }
   }
 
@@ -2514,6 +2537,9 @@ export class Scheduler {
    */
   enablePullMode(): void {
     this.pullMode = true;
+    this.stale.clear();
+    this.upstreamStaleWriters = new WeakMap();
+    this.upstreamStaleCount = new WeakMap();
 
     // Rebuild reverse dependency graph (dependents map) from current dependencies.
     // In push mode, processRun() doesn't update dependents, so the map may be stale.
@@ -2523,6 +2549,9 @@ export class Scheduler {
       if (log) {
         this.updateDependents(action, log);
       }
+    }
+    for (const action of this.dirty) {
+      this.setStaleFromInputs(action);
     }
 
     this.runtime.telemetry.submit({
@@ -2539,6 +2568,9 @@ export class Scheduler {
     this.pullMode = false;
     // Clear dirty set when switching back to push mode
     this.dirty.clear();
+    this.stale.clear();
+    this.upstreamStaleWriters = new WeakMap();
+    this.upstreamStaleCount = new WeakMap();
     this.runtime.telemetry.submit({
       type: "scheduler.mode.change",
       pullMode: false,
@@ -2561,9 +2593,85 @@ export class Scheduler {
    * on-demand by collectDirtyDependencies().
    */
   private markDirty(action: Action): void {
-    if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
+    this.markDirectDirty(action);
+  }
+
+  private markDirectDirty(action: Action): boolean {
+    if (this.dirty.has(action)) return false;
 
     this.dirty.add(action);
+    this.setStaleFromInputs(action);
+    return true;
+  }
+
+  private clearDirectDirty(action: Action): boolean {
+    if (!this.dirty.delete(action)) return false;
+    this.setStaleFromInputs(action);
+    return true;
+  }
+
+  private setStaleFromInputs(action: Action): void {
+    const shouldBeStale = this.dirty.has(action) ||
+      this.getUpstreamStaleCount(action) > 0;
+    const isCurrentlyStale = this.stale.has(action);
+    if (shouldBeStale === isCurrentlyStale) return;
+
+    if (shouldBeStale) {
+      this.stale.add(action);
+    } else {
+      this.stale.delete(action);
+    }
+    this.propagateStaleTransition(action, shouldBeStale);
+  }
+
+  private propagateStaleTransition(
+    action: Action,
+    becameStale: boolean,
+  ): void {
+    const dependents = this.dependents.get(action);
+    if (!dependents) return;
+
+    const delta = becameStale ? 1 : -1;
+    for (const dependent of dependents) {
+      if (delta > 0) {
+        this.addStaleUpstream(action, dependent);
+      } else {
+        this.removeStaleUpstream(action, dependent);
+      }
+    }
+  }
+
+  private addStaleUpstream(writer: Action, dependent: Action): void {
+    let writers = this.upstreamStaleWriters.get(dependent);
+    if (!writers) {
+      writers = new Set();
+      this.upstreamStaleWriters.set(dependent, writers);
+    }
+    if (writers.has(writer)) return;
+
+    writers.add(writer);
+    this.upstreamStaleCount.set(dependent, writers.size);
+    this.setStaleFromInputs(dependent);
+  }
+
+  private removeStaleUpstream(writer: Action, dependent: Action): void {
+    const writers = this.upstreamStaleWriters.get(dependent);
+    if (!writers?.delete(writer)) return;
+
+    if (writers.size === 0) {
+      this.upstreamStaleWriters.delete(dependent);
+      this.upstreamStaleCount.delete(dependent);
+    } else {
+      this.upstreamStaleCount.set(dependent, writers.size);
+    }
+    this.setStaleFromInputs(dependent);
+  }
+
+  private forceClearStale(action: Action): void {
+    this.upstreamStaleWriters.delete(action);
+    this.upstreamStaleCount.delete(action);
+    if (!this.stale.delete(action)) return;
+    this.propagateStaleTransition(action, false);
   }
 
   private getTraceActionSummary(
@@ -2643,11 +2751,19 @@ export class Scheduler {
     return this.dirty.has(action);
   }
 
+  private isStale(action: Action): boolean {
+    return this.stale.has(action);
+  }
+
+  private getUpstreamStaleCount(action: Action): number {
+    return this.upstreamStaleCount.get(action) ?? 0;
+  }
+
   /**
    * Clears the dirty flag for an action.
    */
   private clearDirty(action: Action): void {
-    this.dirty.delete(action);
+    this.clearDirectDirty(action);
   }
 
   /**
@@ -2685,16 +2801,21 @@ export class Scheduler {
           trace.memoHitCount++;
           this.getTraceActionSummary(trace, action).memoHitCount++;
         }
-        if (cached && this.computations.has(action)) {
+        if (cached && this.dirty.has(action) && this.computations.has(action)) {
           if (!workSet.has(action) && trace) trace.workSetAddCount++;
           workSet.add(action);
         }
         return cached;
       }
 
+      if (!this.isStale(action)) {
+        memo.set(action, false);
+        return false;
+      }
+
       if (this.collectStack.has(action)) {
         if (trace) trace.cycleHitCount++;
-        const cycleResult = this.dirty.has(action) || workSet.has(action);
+        const cycleResult = this.isStale(action) || workSet.has(action);
         memo.set(action, cycleResult);
         return cycleResult;
       }
@@ -2702,7 +2823,7 @@ export class Scheduler {
       this.collectStack.add(action);
       addedToStack = true;
 
-      let actionNeedsRun = this.dirty.has(action);
+      let actionNeedsRun = this.isStale(action);
       const directWriters = this.reverseDependencies.get(action);
       if (directWriters) {
         if (trace) {
@@ -2716,6 +2837,10 @@ export class Scheduler {
           );
         }
         for (const writer of directWriters) {
+          if (!this.isStale(writer)) {
+            memo.set(writer, false);
+            continue;
+          }
           if (trace) trace.depth++;
           let writerNeedsRun: boolean;
           try {
@@ -2729,10 +2854,6 @@ export class Scheduler {
           }
           if (writerNeedsRun) {
             actionNeedsRun = true;
-            if (this.computations.has(writer)) {
-              if (!workSet.has(writer) && trace) trace.workSetAddCount++;
-              workSet.add(writer);
-            }
           }
         }
       } else {
@@ -2745,7 +2866,7 @@ export class Scheduler {
         }
       }
 
-      if (actionNeedsRun && this.computations.has(action)) {
+      if (this.dirty.has(action) && this.computations.has(action)) {
         if (!workSet.has(action) && trace) trace.workSetAddCount++;
         workSet.add(action);
       }
@@ -2826,9 +2947,9 @@ export class Scheduler {
     action: Action,
     tx: IExtendedStorageTransaction,
     log: ReactivityLog,
-  ): void {
-    if (!this.pullMode || !this.computations.has(action)) return;
-    if (log.writes.length === 0) return;
+  ): IMemorySpaceAddress[] {
+    if (!this.pullMode || !this.computations.has(action)) return [];
+    if (log.writes.length === 0) return [];
 
     const spaces = new Set(log.writes.map((write) => write.space));
     const changedWrites: IMemorySpaceAddress[] = [];
@@ -2844,6 +2965,7 @@ export class Scheduler {
     if (changedWrites.length > 0) {
       this.changedWritesHistory.push(...sortAndCompactPaths(changedWrites));
     }
+    return changedWrites;
   }
 
   private conditionalEffectHasChangedInputs(effect: Action): boolean {
@@ -2857,6 +2979,32 @@ export class Scheduler {
     if (!log) return false;
 
     return this.readsOverlapWrites(log.reads, log.shallowReads, changedWrites);
+  }
+
+  private markReadersDirtyForChangedWrites(
+    sourceAction: Action,
+    changedWrites: IMemorySpaceAddress[],
+  ): void {
+    if (!this.pullMode || changedWrites.length === 0) return;
+
+    const readers = new Set<Action>();
+    for (const write of sortAndCompactPaths(changedWrites)) {
+      for (const reader of this.collectReadersForWrite(write)) {
+        if (reader !== sourceAction) {
+          readers.add(reader);
+        }
+      }
+    }
+
+    for (const reader of readers) {
+      if (this.effects.has(reader)) {
+        this.conditionallyScheduledEffects.delete(reader);
+        this.scheduleWithDebounce(reader);
+      } else if (this.computations.has(reader)) {
+        this.markDirectDirty(reader);
+        this.scheduleAffectedEffects(reader);
+      }
+    }
   }
 
   private collectDirtyDependenciesForLog(
@@ -2927,6 +3075,11 @@ export class Scheduler {
 
     let hasDirtyDependencies = false;
     for (const writer of directWriters) {
+      if (!this.isStale(writer)) {
+        memo.set(writer, false);
+        continue;
+      }
+
       if (trace) trace.depth++;
       let writerNeedsRun: boolean;
       try {
@@ -2940,7 +3093,7 @@ export class Scheduler {
       }
       if (writerNeedsRun) {
         hasDirtyDependencies = true;
-        if (this.computations.has(writer)) {
+        if (this.dirty.has(writer) && this.computations.has(writer)) {
           if (!workSet.has(writer) && trace) trace.workSetAddCount++;
           workSet.add(writer);
         }
@@ -4378,7 +4531,7 @@ export class Scheduler {
         // Clean up from pending/dirty before running
         this.pending.delete(fn);
         this.conditionallyScheduledEffects.delete(fn);
-        if (this.pullMode) {
+        if (this.pullMode && this.effects.has(fn)) {
           this.clearDirty(fn);
         }
 

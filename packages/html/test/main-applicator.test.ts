@@ -621,6 +621,13 @@ Deno.test("DomApplicator - cell bindings", async (t) => {
       bindingSets: {
         "cf-cell-link.cell": { set: 2, skipped: 1 },
       },
+      nodeCount: 1,
+      connectedNodeCount: 0,
+      detachedNodeCount: 1,
+      cfCellLinkNodeCount: 1,
+      detachedCfCellLinkNodeCount: 1,
+      duplicateCreateCount: 0,
+      duplicateCreates: {},
     });
   });
 });
