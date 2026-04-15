@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { asObjectSchema, getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
 
 describe("Schema: Default in unions", () => {
   it("applies primitive defaults from T | Default<V>", async () => {
@@ -40,6 +40,35 @@ describe("Schema: Default in unions", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const title = result.properties?.title as any;
+    expect(title.$ref).toBe("#/$defs/WithDefault");
+    expect((result as any).$defs?.WithDefault).toEqual({
+      type: "string",
+      default: "",
+    });
+  });
+
+  it("applies defaults through imported aliased union types", async () => {
+    const { type, checker } = await getTypeFromFiles(
+      {
+        "/types.ts": `
+        export interface Default<T, V extends T = T> {}
+        export type WithDefault = string | Default<"">;
+      `,
+        "/main.ts": `
+        import type { WithDefault } from "./types.ts";
+        export interface X {
+          title: WithDefault;
+        }
+      `,
+      },
+      "/main.ts",
+      "X",
+    );
     const result = asObjectSchema(
       createSchemaTransformerV2().generateSchema(type, checker),
     );

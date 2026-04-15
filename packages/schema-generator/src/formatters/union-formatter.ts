@@ -316,7 +316,10 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     const symbol = checker.getSymbolAtLocation(unwrapped.typeName);
-    const aliasDeclaration = symbol?.declarations?.find((
+    const resolvedSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
+      ? checker.getAliasedSymbol(symbol)
+      : symbol;
+    const aliasDeclaration = resolvedSymbol?.declarations?.find((
       declaration,
     ): declaration is ts.TypeAliasDeclaration =>
       ts.isTypeAliasDeclaration(declaration)
