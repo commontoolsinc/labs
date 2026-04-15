@@ -7,6 +7,8 @@
  * * `createHasher()` multi-byte variety -- many `update()` calls with
  *   pseudo-randomly varying chunk sizes (mirrors the unit test of the same
  *   name).
+ * * `createHasher()` byte-at-a-time -- one `update()` per byte. Skipped for
+ *   fixtures large enough that this would dominate the whole bench run.
  *
  * Benchmarks are grouped by implementation (`sha256Deno`, `sha256Noble`,
  * `sha256Wasm`).
@@ -19,6 +21,13 @@ import type { IncrementalHasher, Sha256Fn } from "../src/interface.ts";
 import { FIXTURES } from "../test/fixtures.ts";
 
 await initWasm();
+
+/**
+ * Maximum fixture size (in bytes) for the byte-at-a-time bench style. Larger
+ * fixtures would do millions of `update()` calls per iteration and dominate
+ * the suite's runtime.
+ */
+const BYTE_AT_A_TIME_MAX = 10000;
 
 type CreateHasherFn = () => IncrementalHasher;
 
@@ -87,5 +96,19 @@ for (const impl of IMPLS) {
         hashMultiVariety(impl.createHasher, bytes, 10);
       },
     });
+
+    if (bytes.length <= BYTE_AT_A_TIME_MAX) {
+      Deno.bench({
+        name: `${fixtureLabel} createHasher() byte-at-a-time`,
+        group: impl.name,
+        fn: () => {
+          const hasher = impl.createHasher();
+          for (let i = 0; i < bytes.length; i++) {
+            hasher.update(bytes.subarray(i, i + 1));
+          }
+          hasher.digest();
+        },
+      });
+    }
   }
 }
