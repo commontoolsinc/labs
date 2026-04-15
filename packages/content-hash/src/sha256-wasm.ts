@@ -3,7 +3,7 @@
  */
 
 import { createSHA256, type IHasher } from "hash-wasm";
-import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
+import { BaseCollectingHasher } from "./BaseCollectingHasher.ts";
 import {
   BaseSmallChunkUpdatingHasher,
 } from "./BaseSmallChunkUpdatingHasher.ts";
@@ -13,17 +13,6 @@ import type { IncrementalHasher } from "./interface.ts";
  * How many hashers to have available for concurrent use.
  */
 const HASHER_POOL_SIZE = 5;
-
-/**
- * When collecting chunks, size of the first chunk to collect into by default.
- */
-const CHUNK_SIZE_FIRST = 1024;
-
-/**
- * When collecting chunks, usual (and minimum) size of the chunks to collect
- * into after the initial chunk.
- */
-const CHUNK_SIZE_USUAL = 65536;
 
 /**
  * Pool of usable hasher instances. This array is populated at module init
@@ -137,79 +126,18 @@ export function initWasm() {
  * WASM-specific incremental hasher which collects chunks and performs a
  * one-shot digest at the end of processing.
  */
-class WasmCollectingHasher extends BaseIncrementalHasher {
-  /** Finalized chunks. */
-  #chunks: Uint8Array[] = [];
-
-  /** Chunk in progress, if any. */
-  #currentChunk: Uint8Array | null = null;
-
-  /** Offset into `currentChunk` for next write. */
-  #currentOffset = 0;
-
-  protected _rawUpdate(data: Uint8Array) {
-    const length = data.length;
-
-    this.#prepChunk(length);
-    this.#currentChunk!.set(data, this.#currentOffset);
-    this.#currentOffset += length;
-  }
-
-  protected _rawDigest(_encoding: string | undefined): Uint8Array {
+class WasmCollectingHasher extends BaseCollectingHasher {
+  protected _digestChunks(
+    _encoding: string | undefined,
+    chunks: Uint8Array[],
+  ): Uint8Array | string {
     const hasher = getOneShotHasher();
 
-    for (const chunk of this.#chunks) {
+    for (const chunk of chunks) {
       hasher.update(chunk);
     }
 
-    let lastChunk = this.#currentChunk;
-    if (lastChunk) {
-      // Deal with the final (was in-progress) chunk.
-      const lastLength = this.#currentOffset;
-      if (lastLength !== lastChunk.length) {
-        lastChunk = lastChunk.subarray(0, lastLength);
-      }
-      hasher.update(lastChunk);
-    }
-
     return hasher.digest("binary");
-  }
-
-  /**
-   * Arranges for there to be a `currentChunk` with enough room for the
-   * indicated amount of data.
-   */
-  #prepChunk(length: number) {
-    const current = this.#currentChunk;
-    const offset = this.#currentOffset;
-
-    if (current) {
-      if (offset === current.length) {
-        // Current chunk is exactly full. Add it to the list, and fall through
-        // to set up a new one.
-        this.#chunks.push(current);
-      } else {
-        const lengthLeft = current.length - offset;
-        if (lengthLeft >= length) {
-          // There's enough room in the current chunk for the new data.
-          return;
-        } else {
-          // There's not enough room in the current chunk. Chop off the unused
-          // part, add it to the list, and fall through to set up a new one.
-          this.#chunks.push(current.subarray(0, offset));
-        }
-      }
-    }
-
-    // Need to create a new chunk.
-    const baseLength = (this.#chunks.length === 0)
-      ? CHUNK_SIZE_FIRST
-      : CHUNK_SIZE_USUAL;
-    const newLength = (length < (baseLength / 2)) ? baseLength : length * 2;
-
-    const chunk = new Uint8Array(newLength);
-    this.#currentChunk = chunk;
-    this.#currentOffset = 0;
   }
 }
 
