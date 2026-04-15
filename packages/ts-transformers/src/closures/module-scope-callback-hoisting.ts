@@ -150,6 +150,10 @@ function callbackCanBeHoisted(
       node !== callback &&
       isFunctionLikeDeclaration(node)
     ) {
+      if (nestedFunctionCapturesEnclosingBindings(node, callback, checker)) {
+        capturesEnclosingBindings = true;
+        return true;
+      }
       return false;
     }
 
@@ -177,6 +181,35 @@ function callbackCanBeHoisted(
   }
 
   return usesModuleScopedReferences && !capturesEnclosingBindings;
+}
+
+function nestedFunctionCapturesEnclosingBindings(
+  nested: ts.FunctionLikeDeclaration,
+  callback: ts.FunctionLikeDeclaration,
+  checker: ts.TypeChecker,
+): boolean {
+  const visit = (node: ts.Node): boolean => {
+    if (node !== nested && isFunctionLikeDeclaration(node)) {
+      return false;
+    }
+
+    if (
+      ts.isIdentifier(node) &&
+      getReferenceScope(node, callback, checker) === "enclosing"
+    ) {
+      return true;
+    }
+
+    return ts.forEachChild(node, (child) => visit(child)) ?? false;
+  };
+
+  for (const parameter of nested.parameters) {
+    if (parameter.initializer && visit(parameter.initializer)) {
+      return true;
+    }
+  }
+
+  return nested.body ? visit(nested.body) : false;
 }
 
 type ReferenceScope = "local" | "module" | "enclosing" | "other";

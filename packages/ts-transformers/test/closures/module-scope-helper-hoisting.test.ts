@@ -79,3 +79,26 @@ Deno.test("Closure Transformer does not hoist nested handler callbacks that also
     /const makeHandler = .*handler\(.*\(event: \{ status\?: string; \} \| undefined\) => \{.*allowed\.includes\(status\)/,
   );
 });
+
+Deno.test("Closure Transformer does not hoist pattern callbacks whose nested actions capture enclosing callables", async () => {
+  const source = `    import { action, pattern } from "commonfabric";
+
+    export const makePattern = (helper: (value: string) => string) =>
+      pattern(() => {
+        const go = action(() => helper("x"));
+        return { go };
+      });
+`;
+
+  const output = await transformSource(source, options);
+  const normalized = output.replace(/\s+/g, " ");
+
+  assertNotMatch(
+    normalized,
+    /const \S+ = __cfHardenFn\(\(\) => \{ const go = __cfHelpers\.handler\(false as const satisfies __cfHelpers\.JSONSchema, \{ type: "object", properties: \{\} \} as const satisfies __cfHelpers\.JSONSchema, \(_, __cf_action_params\) => \{ return helper\("x"\); \}\)\(\{\}\)\.for\(\{ stream: "go" \}, true\); return \{ go \}; \}\);/,
+  );
+  assertMatch(
+    normalized,
+    /const makePattern = .*pattern\(\(\) => \{ .*helper\("x"\).*\}, false as const satisfies __cfHelpers\.JSONSchema,/,
+  );
+});
