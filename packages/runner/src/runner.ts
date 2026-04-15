@@ -34,7 +34,6 @@ import { type Action } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   findAllWriteRedirectCells,
-  findShallowWriteRedirectCells,
   unsafe_noteParentOnPatterns,
   unwrapOneLevelAndBindtoDoc,
 } from "./pattern-binding.ts";
@@ -1939,43 +1938,7 @@ export class Runner {
         ),
       );
 
-    const rawResult = tx.readValueOrThrow(
-      resultCell.getAsNormalizedFullLink(),
-      {
-        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-      },
-    );
-    const resultRoots = findShallowWriteRedirectCells(rawResult, processCell);
-
-    if (resultRoots.length === 0) {
-      addCancel(() => this.stop(resultCell));
-      return result;
-    }
-
-    const keepHandlerResultLive: Action = (tx) =>
-      resultRoots.forEach((link) => tx.readValueOrThrow(link));
-
-    if (name) {
-      setRunnableName(keepHandlerResultLive, `handlerResult:${name}`, {
-        setSrc: true,
-      });
-    }
-
-    const cancel = this.runtime.scheduler.subscribe(
-      keepHandlerResultLive,
-      keepHandlerResultLive,
-      { isEffect: true },
-    );
-    tx.addCommitCallback((_committedTx, result) => {
-      if (result.error) {
-        cancel();
-        this.stop(resultCell);
-      }
-    });
-    addCancel(() => {
-      cancel();
-      this.stop(resultCell);
-    });
+    addCancel(() => this.stop(resultCell));
 
     return result;
   }

@@ -2,14 +2,13 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   findAllWriteRedirectCells,
-  findShallowWriteRedirectCells,
   sendValueToBinding,
   unwrapOneLevelAndBindtoDoc,
 } from "../src/pattern-binding.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { areLinksSame, areNormalizedLinksSame } from "../src/link-utils.ts";
+import { areLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -270,59 +269,6 @@ describe("pattern-binding", () => {
       expect(links[0].path).toEqual(["foo"]);
       expect(links[0].id).toBeDefined();
       expect(links[0].space).toBe(space);
-    });
-  });
-
-  describe("findShallowWriteRedirectCells", () => {
-    it("should not follow write redirect target contents", () => {
-      const baseCell = runtime.getCell<Record<string, unknown>>(
-        space,
-        "shallow base",
-        undefined,
-        tx,
-      );
-      const outerCell = runtime.getCell<Record<string, unknown>>(
-        space,
-        "shallow outer",
-        undefined,
-        tx,
-      );
-      const innerCell = runtime.getCell<{ value: number }>(
-        space,
-        "shallow inner",
-        undefined,
-        tx,
-      );
-
-      innerCell.set({ value: 42 });
-      outerCell.setRaw({
-        nested: innerCell.key("value").getAsWriteRedirectLink({
-          base: outerCell,
-        }),
-      });
-
-      const binding = {
-        result: outerCell.getAsWriteRedirectLink({ base: baseCell }),
-      };
-
-      const shallowLinks = findShallowWriteRedirectCells(binding, baseCell);
-      expect(shallowLinks.length).toBe(1);
-      expect(
-        areNormalizedLinksSame(
-          shallowLinks[0],
-          outerCell.getAsNormalizedFullLink(),
-        ),
-      ).toBe(true);
-
-      const deepLinks = findAllWriteRedirectCells(binding, baseCell);
-      expect(
-        deepLinks.some((link) =>
-          areNormalizedLinksSame(
-            link,
-            innerCell.key("value").getAsNormalizedFullLink(),
-          )
-        ),
-      ).toBe(true);
     });
   });
 });

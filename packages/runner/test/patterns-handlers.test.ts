@@ -25,6 +25,7 @@ describe("Pattern Runner - Handlers", () => {
   let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
+  let Writable: ReturnType<typeof createBuilder>["commonfabric"]["Writable"];
   let TYPE: ReturnType<typeof createBuilder>["commonfabric"]["TYPE"];
 
   beforeEach(() => {
@@ -41,6 +42,7 @@ describe("Pattern Runner - Handlers", () => {
       lift,
       pattern,
       handler,
+      Writable,
       TYPE,
     } = commonfabric);
   });
@@ -207,18 +209,17 @@ describe("Pattern Runner - Handlers", () => {
 
     addEventHandlerSpy.restore();
   });
-
-  it("should execute patterns returned by handlers", async () => {
+  it("should demand handler-written pattern results when pulled", async () => {
     const counter = runtime.getCell<{ value: number }>(
       space,
-      "should execute patterns returned by handlers 1",
+      "should demand handler-written pattern results when pulled 1",
       undefined,
       tx,
     );
     counter.set({ value: 0 });
     const nested = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
-      "should execute patterns returned by handlers 2",
+      "should demand handler-written pattern results when pulled 2",
       undefined,
       tx,
     );
@@ -241,11 +242,19 @@ describe("Pattern Runner - Handlers", () => {
 
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number }; nested: { a: { b: { c: number } } } }
+      {
+        counter: { value: number };
+        nested: { a: { b: { c: number } } };
+        latest?: number[];
+      }
     >(
-      (event, { counter, nested }) => {
-        counter.value += event.amount;
-        return incLogger({ counter, amount: event.amount, nested: nested.a.b });
+      (event, state) => {
+        state.counter.value += event.amount;
+        state.latest = incLogger({
+          counter: state.counter,
+          amount: event.amount,
+          nested: state.nested.a.b,
+        });
       },
       { proxy: true },
     );
@@ -254,13 +263,17 @@ describe("Pattern Runner - Handlers", () => {
       counter: { value: number };
       nested: { a: { b: { c: number } } };
     }>(({ counter, nested }) => {
-      const stream = incHandler({ counter, nested });
-      return { stream };
+      const latest = Writable.of<number[] | undefined>(undefined);
+      const stream = incHandler({ counter, nested, latest });
+      return { stream, latest };
     });
 
-    const resultCell = runtime.getCell<{ stream: any }>(
+    const resultCell = runtime.getCell<{
+      stream: any;
+      latest?: number[];
+    }>(
       space,
-      "should execute patterns returned by handlers",
+      "should demand handler-written pattern results when pulled",
       undefined,
       tx,
     );
@@ -274,22 +287,24 @@ describe("Pattern Runner - Handlers", () => {
 
     result.key("stream").send({ amount: 1 });
     await runtime.idle();
+    expect(values).toEqual([]);
+    expect(await result.key("latest").pull()).toEqual([1, 1, 0]);
     expect(values).toEqual([[1, 1, 0]]);
 
     result.key("stream").send({ amount: 2 });
     await runtime.idle();
 
     expect(values).toContainEqual([1, 1, 0]);
-
-    // Next is the first logger called again when counter changes, since this
-    // is now a long running piecelet:
-    expect(values).toContainEqual([3, 1, 0]);
-
+    expect(await result.key("latest").pull()).toEqual([3, 2, 0]);
     expect(values).toContainEqual([3, 2, 0]);
+    expect(values.some((tuple) => tuple.join(",") === "3,1,0")).toBe(false);
 
     const graph = runtime.scheduler.getGraphSnapshot();
     expect(
       graph.nodes.some((node) => node.id.startsWith("readResult:")),
+    ).toBe(false);
+    expect(
+      graph.nodes.some((node) => node.id.startsWith("handlerResult:")),
     ).toBe(false);
   });
 
