@@ -101,7 +101,8 @@ function extendSourceRef(
 const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
-const ARRAY_IDENTITY_WRITER_METHODS = new Set(["push"]);
+const ARRAY_IDENTITY_WRITER_METHODS = new Set(["push", "unshift", "splice"]);
+const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 const READER_METHODS = new Set(["get"]);
 const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.QuestionQuestionToken,
@@ -482,7 +483,22 @@ function isArrayIdentityWriterArgumentUsage(
         isLiteralElement(target.argumentExpression)
     ? getLiteralElementText(target.argumentExpression)
     : undefined;
-  return !!methodName && ARRAY_IDENTITY_WRITER_METHODS.has(methodName);
+  return isArrayIdentityWriterValueArgument(methodName, parent, usage);
+}
+
+function isArrayIdentityWriterValueArgument(
+  methodName: string | undefined,
+  call: ts.CallExpression,
+  usage: ts.Expression,
+): boolean {
+  if (!methodName || !ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
+    return false;
+  }
+  const index = call.arguments.findIndex((argument) => argument === usage);
+  if (index < 0) {
+    return false;
+  }
+  return methodName === "splice" ? index >= 2 : true;
 }
 
 function isOptionalAliasInitializerMemberUsage(usage: ts.Expression): boolean {
@@ -571,6 +587,28 @@ function getIdentityArrayLocalNameForElementUsage(
   return undefined;
 }
 
+function getIdentityArrayLocalNameForWriterArgumentUsage(
+  usage: ts.Expression,
+): string | undefined {
+  const parent = usage.parent;
+  if (!parent || !ts.isCallExpression(parent)) {
+    return undefined;
+  }
+  const target = unwrapExpression(parent.expression);
+  const receiver = ts.isPropertyAccessExpression(target) ||
+      ts.isElementAccessExpression(target)
+    ? unwrapExpression(target.expression)
+    : undefined;
+  const methodName = getCallMethodNameFromExpression(parent.expression);
+  if (!receiver || !ts.isIdentifier(receiver)) {
+    return undefined;
+  }
+  if (!isArrayIdentityWriterValueArgument(methodName, parent, usage)) {
+    return undefined;
+  }
+  return receiver.text;
+}
+
 function collectArrayLocalsPassedToSet(
   body: ts.ConciseBody,
   checker?: ts.TypeChecker,
@@ -579,7 +617,7 @@ function collectArrayLocalsPassedToSet(
   const setArgumentLocals = new Set<string>();
   const structurallyAccessedArrayLocals = new Set<string>();
 
-  const expressionStartsWithArrayLiteral = (
+  const expressionIsIdentityArrayInitializer = (
     expression: ts.Expression,
   ): boolean => {
     const current = unwrapExpression(expression);
@@ -592,10 +630,24 @@ function collectArrayLocalsPassedToSet(
         ts.isPropertyAccessExpression(target) ||
         ts.isElementAccessExpression(target)
       ) {
-        return expressionStartsWithArrayLiteral(target.expression);
+        const methodName = getCallMethodNameFromExpression(current.expression);
+        return !!methodName &&
+          ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS.has(methodName) &&
+          expressionIsIdentityArrayInitializer(target.expression);
       }
     }
     return false;
+  };
+
+  const isCallReceiverForMethod = (
+    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    methods: ReadonlySet<string>,
+  ): boolean => {
+    const methodName = getCallMethodNameFromExpression(node);
+    return !!methodName &&
+      methods.has(methodName) &&
+      ts.isCallExpression(node.parent) &&
+      node.parent.expression === node;
   };
 
   const visit = (node: ts.Node): void => {
@@ -604,7 +656,7 @@ function collectArrayLocalsPassedToSet(
       ts.isIdentifier(node.name) &&
       node.initializer &&
       ts.isExpression(node.initializer) &&
-      expressionStartsWithArrayLiteral(node.initializer)
+      expressionIsIdentityArrayInitializer(node.initializer)
     ) {
       arrayInitializerLocals.add(node.name.text);
     }
@@ -630,7 +682,14 @@ function collectArrayLocalsPassedToSet(
       const isSetCallReceiver = node.name.text === "set" &&
         ts.isCallExpression(node.parent) &&
         node.parent.expression === node;
-      if (ts.isIdentifier(current) && !isSetCallReceiver) {
+      const isIdentityWriterReceiver = isCallReceiverForMethod(
+        node,
+        ARRAY_IDENTITY_WRITER_METHODS,
+      );
+      if (
+        ts.isIdentifier(current) && !isSetCallReceiver &&
+        !isIdentityWriterReceiver
+      ) {
         structurallyAccessedArrayLocals.add(current.text);
       }
     }
@@ -642,7 +701,14 @@ function collectArrayLocalsPassedToSet(
         getLiteralElementText(node.argumentExpression) === "set" &&
         ts.isCallExpression(node.parent) &&
         node.parent.expression === node;
-      if (ts.isIdentifier(current) && !isSetCallReceiver) {
+      const isIdentityWriterReceiver = isCallReceiverForMethod(
+        node,
+        ARRAY_IDENTITY_WRITER_METHODS,
+      );
+      if (
+        ts.isIdentifier(current) && !isSetCallReceiver &&
+        !isIdentityWriterReceiver
+      ) {
         structurallyAccessedArrayLocals.add(current.text);
       }
     }
@@ -1555,7 +1621,7 @@ export function analyzeFunctionCapabilities(
       }
     };
 
-    const recordLocalArrayPush = (
+    const recordLocalArrayIdentityWrite = (
       arrayName: string,
       args: readonly ts.Expression[],
     ): void => {
@@ -2031,9 +2097,17 @@ export function analyzeFunctionCapabilities(
                 getIdentityArrayLocalNameForElementUsage(usage);
               const identityOnlyArrayElementUse = !!identityArrayLocal &&
                 identityArrayLocals.has(identityArrayLocal);
+              const identityArrayWriterLocal =
+                getIdentityArrayLocalNameForWriterArgumentUsage(usage);
+              const identityOnlyArrayWriterArgumentUse =
+                !!identityArrayWriterLocal &&
+                identityArrayLocals.has(identityArrayWriterLocal);
               const arrayIdentityWriterArgumentUse =
                 isArrayIdentityWriterArgumentUsage(usage);
-              if (arrayIdentityWriterArgumentUse) {
+              if (
+                arrayIdentityWriterArgumentUse &&
+                !identityOnlyArrayWriterArgumentUse
+              ) {
                 if (
                   source.arrayElement &&
                   !resolvedSource.dynamic
@@ -2053,7 +2127,8 @@ export function analyzeFunctionCapabilities(
               } else if (
                 isCallOrNewArgumentUsage(usage) ||
                 isPassThroughIdentifierUsage(node) ||
-                identityOnlyArrayElementUse
+                identityOnlyArrayElementUse ||
+                identityOnlyArrayWriterArgumentUse
               ) {
                 if (
                   resolvedSource.path.length === 0 && !resolvedSource.dynamic
@@ -2076,11 +2151,13 @@ export function analyzeFunctionCapabilities(
                     cellLike: isCellLikeExpression(usage),
                   });
                 } else if (
-                  identityOnlyArrayElementUse &&
+                  (identityOnlyArrayElementUse ||
+                    identityOnlyArrayWriterArgumentUse) &&
                   !resolvedSource.dynamic
                 ) {
                   recordIdentityPath(resolvedSource.root, resolvedSource.path, {
-                    cellLike: isCellLikeExpression(usage),
+                    cellLike: isCellLikeExpression(usage) ||
+                      !isPrimitiveLikeExpression(usage),
                   });
                 } else {
                   trackReadRef(
@@ -2158,10 +2235,16 @@ export function analyzeFunctionCapabilities(
         const localMethodName = getCallMethodName(node.expression);
         if (
           localReceiverName &&
-          localMethodName === "push" &&
+          localMethodName &&
+          ARRAY_IDENTITY_WRITER_METHODS.has(localMethodName) &&
           node.arguments.length > 0
         ) {
-          recordLocalArrayPush(localReceiverName, node.arguments);
+          recordLocalArrayIdentityWrite(
+            localReceiverName,
+            localMethodName === "splice"
+              ? node.arguments.slice(2)
+              : node.arguments,
+          );
         } else if (localReceiverName && localMethodName === "set") {
           recordLocalMapSet(localReceiverName, node.arguments[1]);
         }
