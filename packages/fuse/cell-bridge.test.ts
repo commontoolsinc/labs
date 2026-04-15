@@ -709,6 +709,21 @@ Deno.test("CellBridge finalizes CFC annotations after namespace mutation writeba
     tree.getCfcAnnotation(updatedToIno)?.generation,
     toGeneration,
   );
+
+  const beforeSymlinkGeneration = tree.getCfcAnnotation(resultIno)?.generation;
+  await bridge.writeValue(
+    { ...rootPath, jsonPath: ["link"], isJsonFile: false },
+    { "/": { "link@1": { path: ["to", "new"] } } },
+  );
+  await bridge.finalizeWritePath(rootPath);
+  resultIno = tree.lookup(pieceIno, "result")!;
+  const linkIno = tree.lookup(resultIno, "link")!;
+  assertEquals(tree.getNode(linkIno)?.kind, "symlink");
+  assertEquals(tree.getCfcAnnotation(linkIno)?.ref.projection, "symlink");
+  assertNotEquals(
+    tree.getCfcAnnotation(resultIno)?.generation,
+    beforeSymlinkGeneration,
+  );
 });
 
 Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", async () => {

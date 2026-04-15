@@ -28,7 +28,8 @@ export type CfcWritebackOperation =
   | "unlink"
   | "rmdir"
   | "rename-source"
-  | "rename-destination";
+  | "rename-destination"
+  | "symlink";
 export type CfcCreateWritebackOperation = "create" | "mkdir";
 export type CfcExistingWritebackOperation = "write" | "truncate";
 export type CfcNamespaceMutationWritebackOperation =
@@ -36,6 +37,7 @@ export type CfcNamespaceMutationWritebackOperation =
   | "rmdir"
   | "rename-source"
   | "rename-destination";
+export type CfcSymlinkWritebackOperation = "symlink";
 
 export const CFC_WRITEBACK_PREPARE_XATTR = "trusted.cfc.writeback.prepare";
 export const CFC_WRITEBACK_FINALIZE_XATTR = "trusted.cfc.writeback.finalize";
@@ -45,6 +47,8 @@ export type CfcPreparedWritebackLabels = {
   nameLabel?: CfcLabel;
   existenceLabel?: CfcLabel;
   namespaceLabel?: CfcLabel;
+  linkTextLabel?: CfcLabel;
+  targetIdentityLabel?: CfcLabel;
   metadataLabels?: Partial<CfcMetadataLabels>;
 };
 
@@ -60,6 +64,8 @@ export type CfcPreparedWriteback = {
     name?: string;
     sourceName?: string;
     destinationName?: string;
+    targetText?: string;
+    targetIdentity?: unknown;
   };
   expectedGeneration: string;
   labels: CfcPreparedWritebackLabels;
@@ -137,6 +143,13 @@ export function shouldRequirePrepareForCreate(options: {
 }
 
 export function shouldRequirePrepareForNamespaceMutation(options: {
+  mode: CfcEnforcementMode;
+  parentAnnotation?: CfcNodeAnnotation;
+}): boolean {
+  return shouldRequirePrepareForAnnotatedParent(options);
+}
+
+export function shouldRequirePrepareForSymlink(options: {
   mode: CfcEnforcementMode;
   parentAnnotation?: CfcNodeAnnotation;
 }): boolean {
@@ -264,6 +277,71 @@ export function authorizeNamespaceMutationWriteback(options: {
     return { allowed: true, requiresPrepare: false };
   }
   if (!validPreparedForNamespaceMutation(options)) {
+    return {
+      allowed: false,
+      requiresPrepare: true,
+      reason: "missing or stale parent prepared CFC writeback metadata",
+    };
+  }
+  return {
+    allowed: true,
+    requiresPrepare: true,
+    prepared: options.prepared,
+  };
+}
+
+export function authorizeSymlinkWriteback(options: {
+  mode: CfcEnforcementMode;
+  parentAnnotation?: CfcNodeAnnotation;
+  prepared?: CfcPreparedWriteback;
+  name: string;
+  targetText: string;
+  targetIdentity?: unknown;
+  allowDeferredTargetIdentity?: boolean;
+  diagnostics?: string[];
+}): CfcWritebackAuthorization {
+  const requiresPrepare = shouldRequirePrepareForSymlink(options);
+  if (options.mode === "disabled") {
+    return { allowed: true, requiresPrepare: false };
+  }
+  if (options.mode === "observe") {
+    if (!options.prepared) {
+      options.diagnostics?.push(
+        `missing prepared CFC writeback metadata for symlink:${options.name}`,
+      );
+    } else if (!validPreparedForSymlink(options)) {
+      options.diagnostics?.push(
+        `malformed prepared CFC writeback metadata for symlink:${options.name}`,
+      );
+    }
+    return {
+      allowed: true,
+      requiresPrepare: false,
+      prepared: validPreparedForSymlink(options) ? options.prepared : undefined,
+    };
+  }
+  if (options.mode === "enforce-strict" && !options.parentAnnotation) {
+    return {
+      allowed: false,
+      requiresPrepare,
+      reason: "missing coherent parent CFC annotation",
+    };
+  }
+  if (
+    options.parentAnnotation &&
+    options.parentAnnotation.ref.generation !==
+      options.parentAnnotation.generation
+  ) {
+    return {
+      allowed: false,
+      requiresPrepare,
+      reason: "stale parent CFC ref generation",
+    };
+  }
+  if (!requiresPrepare) {
+    return { allowed: true, requiresPrepare: false };
+  }
+  if (!validPreparedForSymlink(options)) {
     return {
       allowed: false,
       requiresPrepare: true,
@@ -486,6 +564,40 @@ function renameNamesMatch(
   return false;
 }
 
+function validPreparedForSymlink(options: {
+  parentAnnotation?: CfcNodeAnnotation;
+  prepared?: CfcPreparedWriteback;
+  name: string;
+  targetText: string;
+  targetIdentity?: unknown;
+  allowDeferredTargetIdentity?: boolean;
+}): boolean {
+  const { parentAnnotation, prepared } = options;
+  if (!parentAnnotation || !prepared) return false;
+  if (prepared.version !== 1) return false;
+  const preparedParentRef = prepared.target.parentRef ?? prepared.target.ref;
+  if (
+    prepared.operation !== "symlink" ||
+    prepared.expectedGeneration !== parentAnnotation.generation ||
+    prepared.target.name !== options.name ||
+    preparedParentRef?.generation !== parentAnnotation.generation ||
+    canonicalCfcJsonStringify(preparedParentRef) !==
+      canonicalCfcJsonStringify(parentAnnotation.ref)
+  ) {
+    return false;
+  }
+
+  if (typeof prepared.target.targetText === "string") {
+    return prepared.target.targetText === options.targetText;
+  }
+  if (prepared.target.targetIdentity === undefined) return false;
+  if (options.targetIdentity === undefined) {
+    return options.allowDeferredTargetIdentity === true;
+  }
+  return canonicalCfcJsonStringify(prepared.target.targetIdentity) ===
+    canonicalCfcJsonStringify(options.targetIdentity);
+}
+
 function isRenameOperation(
   operation: CfcWritebackOperation,
 ): operation is "rename-source" | "rename-destination" {
@@ -598,7 +710,8 @@ function isOperation(value: unknown): value is CfcWritebackOperation {
   return value === "write" || value === "truncate" ||
     value === "create" || value === "mkdir" ||
     value === "unlink" || value === "rmdir" ||
-    value === "rename-source" || value === "rename-destination";
+    value === "rename-source" || value === "rename-destination" ||
+    value === "symlink";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -751,6 +864,61 @@ export function applyPreparedCreate(
       nameDigest: `pending:${name}`,
       childRef,
       kind,
+      nameLabel: labelOrFail(prepared.labels.nameLabel),
+      existenceLabel: labelOrFail(prepared.labels.existenceLabel),
+      metadataLabels: childAnnotation.metadataLabels,
+    } satisfies CfcDirectoryEntryAnnotation,
+  );
+  return childIno;
+}
+
+export function applyPreparedSymlink(
+  tree: FsTree,
+  parentIno: bigint,
+  name: string,
+  target: string,
+  prepared: CfcPreparedWriteback,
+): bigint {
+  applyPreparedParent(tree, parentIno, prepared);
+  const childIno = tree.addSymlink(parentIno, name, target);
+  const parent = tree.getCfcAnnotation(parentIno);
+  if (!parent) return childIno;
+
+  const generation = parent.generation;
+  const childRef: CfcProjectionRef = {
+    ...parent.ref,
+    path: [...parent.ref.path, name],
+    projection: "symlink",
+    generation,
+  };
+  const contentLabel = labelOrFail(prepared.labels.contentLabel);
+  const childAnnotation: CfcNodeAnnotation = {
+    version: 1,
+    ref: childRef,
+    generation,
+    contentLabel,
+    metadataLabels: metadataLabelsFor(prepared, contentLabel),
+    derivedSlots: emptyDerivedSlots(),
+    symlink: {
+      version: 1,
+      target,
+      linkTextLabel: labelOrFail(prepared.labels.linkTextLabel),
+      targetIdentityLabel: labelOrFail(prepared.labels.targetIdentityLabel),
+    },
+    incomplete: {
+      reason: "cfc writeback prepared but not finalized",
+      paths: ["/" + childRef.path.map(String).join("/")],
+    },
+  };
+  tree.setCfcAnnotation(childIno, childAnnotation);
+  tree.setCfcEntryAnnotation(
+    parentIno,
+    name,
+    {
+      name,
+      nameDigest: `pending:${name}`,
+      childRef,
+      kind: "symlink",
       nameLabel: labelOrFail(prepared.labels.nameLabel),
       existenceLabel: labelOrFail(prepared.labels.existenceLabel),
       metadataLabels: childAnnotation.metadataLabels,

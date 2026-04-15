@@ -23,9 +23,11 @@ import {
   applyPreparedCreate,
   applyPreparedExistingWrite,
   applyPreparedParent,
+  applyPreparedSymlink,
   authorizeCreateWriteback,
   authorizeExistingWriteback,
   authorizeNamespaceMutationWriteback,
+  authorizeSymlinkWriteback,
   CFC_WRITEBACK_FINALIZE_XATTR,
   CFC_WRITEBACK_PREPARE_XATTR,
   type CfcEnforcementMode,
@@ -435,6 +437,36 @@ export async function main(argv: string[] = Deno.args) {
       return { allowed: false };
     }
     return { allowed: true, source, destination };
+  }
+
+  function authorizeSymlinkCfcWrite(
+    parentIno: bigint,
+    name: string,
+    targetText: string,
+    options: {
+      targetIdentity?: unknown;
+      allowDeferredTargetIdentity?: boolean;
+    } = {},
+  ): ReturnType<typeof authorizeSymlinkWriteback> {
+    const parent = tree.getNode(parentIno);
+    const diagnostics: string[] = [];
+    const authorization = authorizeSymlinkWriteback({
+      mode: cfcMode,
+      parentAnnotation: parent?.cfc,
+      prepared: cfcWritebacks.getPrepared(parentIno, "symlink", name),
+      name,
+      targetText,
+      targetIdentity: options.targetIdentity,
+      allowDeferredTargetIdentity: options.allowDeferredTargetIdentity,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied symlink ${name}: ${authorization.reason}`,
+      );
+    }
+    return authorization;
   }
 
   function replyEntry(
@@ -2107,10 +2139,6 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
-      if (isCfcEnforcing(cfcMode)) {
-        fuse.symbols.fuse_reply_err(req, EACCES);
-        return;
-      }
 
       const target = readCString(targetPtr);
       const name = readCString(namePtr);
@@ -2122,11 +2150,37 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
+      let authorization = undefined as
+        | ReturnType<typeof authorizeSymlinkWriteback>
+        | undefined;
+      if (cfcMode !== "disabled") {
+        authorization = authorizeSymlinkCfcWrite(parent, name, target, {
+          allowDeferredTargetIdentity: true,
+        });
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
       // Parse target into sigil link components
       const sigil = bridge.parseSymlinkTarget(parent, target);
       if (!sigil) {
         fuse.symbols.fuse_reply_err(req, EINVAL);
         return;
+      }
+
+      const needsTargetIdentityValidation = authorization?.allowed &&
+        authorization.prepared?.target.targetText === undefined &&
+        authorization.prepared?.target.targetIdentity !== undefined;
+      if (needsTargetIdentityValidation) {
+        authorization = authorizeSymlinkCfcWrite(parent, name, target, {
+          targetIdentity: sigil,
+        });
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
       }
 
       // Construct sigil link value and write to cell
@@ -2138,13 +2192,25 @@ export async function main(argv: string[] = Deno.args) {
 
       // Optimistic: add to tree and reply immediately, then write to cell.
       // The subscription rebuild will eventually replace this node.
-      const ino = tree.addSymlink(parent, name, target);
+      const prepared = authorization?.allowed
+        ? authorization.prepared
+        : undefined;
+      const ino = prepared
+        ? applyPreparedSymlink(tree, parent, name, target, prepared)
+        : tree.addSymlink(parent, name, target);
       const node = tree.getNode(ino);
       replyEntry(req, ino, node);
 
       // Fire-and-forget write to cell
-      bridge.writeValue(writePath, sigilValue).then(() => {
-        bridge.invalidateWritePath(parentPath);
+      bridge.writeValue(writePath, sigilValue).then(async () => {
+        if (prepared) {
+          cfcWritebacks.deletePrepared(parent, "symlink", name);
+        }
+        if (cfcAnnotationsEnabled) {
+          await bridge.finalizeWritePath(parentPath);
+        } else {
+          bridge.invalidateWritePath(parentPath);
+        }
       }).catch((e) => {
         console.error(`[fuse] symlink write error: ${e}`);
       });

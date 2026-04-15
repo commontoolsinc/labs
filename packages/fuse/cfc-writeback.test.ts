@@ -7,9 +7,11 @@ import {
 import {
   applyPreparedCreate,
   applyPreparedExistingWrite,
+  applyPreparedSymlink,
   authorizeCreateWriteback,
   authorizeExistingWriteback,
   authorizeNamespaceMutationWriteback,
+  authorizeSymlinkWriteback,
   CFC_WRITEBACK_FINALIZE_XATTR,
   CFC_WRITEBACK_PREPARE_XATTR,
   CfcWritebackStore,
@@ -61,7 +63,8 @@ function prepareJson(
     | "unlink"
     | "rmdir"
     | "rename-source"
-    | "rename-destination",
+    | "rename-destination"
+    | "symlink",
   ref: CfcProjectionRef,
   extraTarget: Record<string, unknown> = {},
 ): string {
@@ -130,6 +133,7 @@ Deno.test("writeback prepare parsing accepts namespace operations only by exact 
       "rmdir",
       "rename-source",
       "rename-destination",
+      "symlink",
     ] as const
   ) {
     assertEquals(
@@ -154,6 +158,223 @@ Deno.test("writeback prepare parsing accepts namespace operations only by exact 
       ).replace('"unlink"', '"rename"'),
     ).ok,
     false,
+  );
+});
+
+Deno.test("symlink writeback authorization binds target name generation and identity", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const parentAnnotation = tree.getCfcAnnotation(parentIno);
+  assertExists(parentAnnotation);
+  const targetIdentity = { path: ["target"], space: "did:key:zSpace" };
+  const prepared = {
+    version: 1 as const,
+    operation: "symlink" as const,
+    target: {
+      parentRef: parentAnnotation.ref,
+      name: "link",
+      targetText: "../target",
+      targetIdentity,
+    },
+    expectedGeneration: parentAnnotation.generation,
+    labels: { contentLabel: SECRET_LABEL },
+  };
+
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-strict",
+      parentAnnotation,
+      prepared,
+      name: "link",
+      targetText: "../target",
+      targetIdentity: { space: "did:key:zSpace", path: ["target"] },
+    }).allowed,
+    true,
+  );
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-strict",
+      parentAnnotation,
+      prepared: { ...prepared, target: { ...prepared.target, name: "other" } },
+      name: "link",
+      targetText: "../target",
+      targetIdentity,
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-strict",
+      parentAnnotation,
+      prepared,
+      name: "link",
+      targetText: "../different",
+      targetIdentity,
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-strict",
+      parentAnnotation,
+      prepared: {
+        ...prepared,
+        expectedGeneration: "stale-generation",
+      },
+      name: "link",
+      targetText: "../target",
+      targetIdentity,
+    }).allowed,
+    false,
+  );
+});
+
+Deno.test("observe mode logs and allows missing symlink prepare", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const diagnostics: string[] = [];
+
+  const result = authorizeSymlinkWriteback({
+    mode: "observe",
+    parentAnnotation: tree.getCfcAnnotation(parentIno),
+    prepared: undefined,
+    name: "link",
+    targetText: "../target",
+    diagnostics,
+  });
+
+  assertEquals(result.allowed, true);
+  assertStringIncludes(
+    diagnostics.join("\n"),
+    "missing prepared CFC writeback metadata",
+  );
+});
+
+Deno.test("enforce-explicit requires symlink prepare only for annotated parents", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-explicit",
+      parentAnnotation: tree.getCfcAnnotation(parentIno),
+      prepared: undefined,
+      name: "link",
+      targetText: "../target",
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-explicit",
+      parentAnnotation: undefined,
+      prepared: undefined,
+      name: "link",
+      targetText: "../target",
+    }).allowed,
+    true,
+  );
+});
+
+Deno.test("enforce-strict rejects missing malformed and stale symlink prepare", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const parentAnnotation = tree.getCfcAnnotation(parentIno);
+  assertExists(parentAnnotation);
+
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-strict",
+      parentAnnotation,
+      prepared: undefined,
+      name: "link",
+      targetText: "../target",
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-strict",
+      parentAnnotation,
+      prepared: {
+        version: 1,
+        operation: "create",
+        target: {
+          parentRef: parentAnnotation.ref,
+          name: "link",
+          targetText: "../target",
+        },
+        expectedGeneration: parentAnnotation.generation,
+        labels: {},
+      },
+      name: "link",
+      targetText: "../target",
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeSymlinkWriteback({
+      mode: "enforce-strict",
+      parentAnnotation,
+      prepared: {
+        version: 1,
+        operation: "symlink",
+        target: {
+          parentRef: parentAnnotation.ref,
+          name: "link",
+          targetText: "../target",
+        },
+        expectedGeneration: "stale-generation",
+        labels: {},
+      },
+      name: "link",
+      targetText: "../target",
+    }).allowed,
+    false,
+  );
+});
+
+Deno.test("prepared symlink annotation is conservative and incomplete", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const parentAnnotation = tree.getCfcAnnotation(parentIno);
+  assertExists(parentAnnotation);
+  const prepared = {
+    version: 1 as const,
+    operation: "symlink" as const,
+    target: {
+      parentRef: parentAnnotation.ref,
+      name: "link",
+      targetText: "../target",
+    },
+    expectedGeneration: parentAnnotation.generation,
+    labels: {
+      contentLabel: SECRET_LABEL,
+      nameLabel: SECRET_LABEL,
+      existenceLabel: SECRET_LABEL,
+      linkTextLabel: SECRET_LABEL,
+      targetIdentityLabel: SECRET_LABEL,
+    },
+  };
+
+  const childIno = applyPreparedSymlink(
+    tree,
+    parentIno,
+    "link",
+    "../target",
+    prepared,
+  );
+  const child = tree.getNode(childIno);
+  assertEquals(child?.kind, "symlink");
+  const annotation = tree.getCfcAnnotation(childIno);
+  assertExists(annotation);
+  assertEquals(annotation.ref.projection, "symlink");
+  assertStringIncludes(annotation.generation, "prepared:sha256:");
+  assertEquals(annotation.contentLabel, SECRET_LABEL);
+  assertEquals(annotation.symlink?.target, "../target");
+  assertEquals(annotation.symlink?.linkTextLabel, SECRET_LABEL);
+  assertEquals(annotation.symlink?.targetIdentityLabel, SECRET_LABEL);
+  assertStringIncludes(annotation.incomplete?.reason ?? "", "prepared");
+  assertEquals(
+    tree.getCfcAnnotation(parentIno)?.entries?.entries.some((entry) =>
+      entry.name === "link" && entry.kind === "symlink"
+    ),
+    true,
   );
 });
 
