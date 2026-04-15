@@ -23,6 +23,7 @@ import {
 } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -201,6 +202,34 @@ describe("module", () => {
         $alias: {
           path: ["internal", "stream:click"],
           schema: true,
+        },
+      });
+    });
+
+    it("serializes array causes as stable internal path segments", () => {
+      const arrayCausePattern = pattern(() => {
+        const value = new CellImpl<number>(
+          runtime,
+          undefined,
+          { path: [], space },
+          false,
+        );
+        value.setInitialValue(1);
+        return {
+          value: value.for(["a", "b"], true),
+        };
+      });
+
+      expect(arrayCausePattern.result).toEqual({
+        value: {
+          $alias: {
+            path: ["internal", '["a","b"]'],
+          },
+        },
+      });
+      expect(arrayCausePattern.initial).toEqual({
+        internal: {
+          '["a","b"]': 1,
         },
       });
     });
