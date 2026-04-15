@@ -20,9 +20,22 @@ import type { FsTree } from "./tree.ts";
 
 export type CfcEnforcementMode = RunnerCfcEnforcementMode;
 
-export type CfcWritebackOperation = "write" | "truncate" | "create" | "mkdir";
+export type CfcWritebackOperation =
+  | "write"
+  | "truncate"
+  | "create"
+  | "mkdir"
+  | "unlink"
+  | "rmdir"
+  | "rename-source"
+  | "rename-destination";
 export type CfcCreateWritebackOperation = "create" | "mkdir";
 export type CfcExistingWritebackOperation = "write" | "truncate";
+export type CfcNamespaceMutationWritebackOperation =
+  | "unlink"
+  | "rmdir"
+  | "rename-source"
+  | "rename-destination";
 
 export const CFC_WRITEBACK_PREPARE_XATTR = "trusted.cfc.writeback.prepare";
 export const CFC_WRITEBACK_FINALIZE_XATTR = "trusted.cfc.writeback.finalize";
@@ -41,8 +54,12 @@ export type CfcPreparedWriteback = {
   target: {
     ref?: CfcProjectionRef;
     parentRef?: CfcProjectionRef;
+    sourceParentRef?: CfcProjectionRef;
+    destinationParentRef?: CfcProjectionRef;
     path?: CfcPathSegment[];
     name?: string;
+    sourceName?: string;
+    destinationName?: string;
   };
   expectedGeneration: string;
   labels: CfcPreparedWritebackLabels;
@@ -116,6 +133,20 @@ export function shouldRequirePrepareForCreate(options: {
   mode: CfcEnforcementMode;
   parentAnnotation?: CfcNodeAnnotation;
 }): boolean {
+  return shouldRequirePrepareForAnnotatedParent(options);
+}
+
+export function shouldRequirePrepareForNamespaceMutation(options: {
+  mode: CfcEnforcementMode;
+  parentAnnotation?: CfcNodeAnnotation;
+}): boolean {
+  return shouldRequirePrepareForAnnotatedParent(options);
+}
+
+function shouldRequirePrepareForAnnotatedParent(options: {
+  mode: CfcEnforcementMode;
+  parentAnnotation?: CfcNodeAnnotation;
+}): boolean {
   if (options.mode === "enforce-strict") return true;
   if (options.mode !== "enforce-explicit") return false;
   const annotation = options.parentAnnotation;
@@ -170,6 +201,73 @@ export function authorizeExistingWriteback(options: {
       allowed: false,
       requiresPrepare: true,
       reason: "missing or stale prepared CFC writeback metadata",
+    };
+  }
+  return {
+    allowed: true,
+    requiresPrepare: true,
+    prepared: options.prepared,
+  };
+}
+
+export function authorizeNamespaceMutationWriteback(options: {
+  mode: CfcEnforcementMode;
+  operation: CfcNamespaceMutationWritebackOperation;
+  parentAnnotation?: CfcNodeAnnotation;
+  prepared?: CfcPreparedWriteback;
+  name: string;
+  pairedName?: string;
+  allowPairedRenamePrepare?: boolean;
+  diagnostics?: string[];
+}): CfcWritebackAuthorization {
+  const requiresPrepare = shouldRequirePrepareForNamespaceMutation(options);
+  if (options.mode === "disabled") {
+    return { allowed: true, requiresPrepare: false };
+  }
+  if (options.mode === "observe") {
+    if (!options.prepared) {
+      options.diagnostics?.push(
+        `missing prepared CFC writeback metadata for ${options.operation}:${options.name}`,
+      );
+    } else if (!validPreparedForNamespaceMutation(options)) {
+      options.diagnostics?.push(
+        `malformed prepared CFC writeback metadata for ${options.operation}:${options.name}`,
+      );
+    }
+    return {
+      allowed: true,
+      requiresPrepare: false,
+      prepared: validPreparedForNamespaceMutation(options)
+        ? options.prepared
+        : undefined,
+    };
+  }
+  if (options.mode === "enforce-strict" && !options.parentAnnotation) {
+    return {
+      allowed: false,
+      requiresPrepare,
+      reason: "missing coherent parent CFC annotation",
+    };
+  }
+  if (
+    options.parentAnnotation &&
+    options.parentAnnotation.ref.generation !==
+      options.parentAnnotation.generation
+  ) {
+    return {
+      allowed: false,
+      requiresPrepare,
+      reason: "stale parent CFC ref generation",
+    };
+  }
+  if (!requiresPrepare) {
+    return { allowed: true, requiresPrepare: false };
+  }
+  if (!validPreparedForNamespaceMutation(options)) {
+    return {
+      allowed: false,
+      requiresPrepare: true,
+      reason: "missing or stale parent prepared CFC writeback metadata",
     };
   }
   return {
@@ -270,6 +368,128 @@ function validPreparedForCreate(options: {
     preparedParentRef?.generation === parentAnnotation.generation &&
     canonicalCfcJsonStringify(preparedParentRef) ===
       canonicalCfcJsonStringify(parentAnnotation.ref);
+}
+
+function validPreparedForNamespaceMutation(options: {
+  operation: CfcNamespaceMutationWritebackOperation;
+  parentAnnotation?: CfcNodeAnnotation;
+  prepared?: CfcPreparedWriteback;
+  name: string;
+  pairedName?: string;
+  allowPairedRenamePrepare?: boolean;
+}): boolean {
+  const { parentAnnotation, prepared } = options;
+  if (!parentAnnotation || !prepared) return false;
+  if (prepared.version !== 1) return false;
+  if (prepared.expectedGeneration !== parentAnnotation.generation) {
+    return false;
+  }
+
+  const preparedParentRef = parentRefForPrepared(prepared, options.operation);
+  if (
+    preparedParentRef?.generation !== parentAnnotation.generation ||
+    canonicalCfcJsonStringify(preparedParentRef) !==
+      canonicalCfcJsonStringify(parentAnnotation.ref)
+  ) {
+    return false;
+  }
+
+  if (prepared.operation === options.operation) {
+    return preparedNameMatches(prepared, options.operation, options.name) &&
+      pairedRenameNameMatches(prepared, options);
+  }
+
+  if (
+    !options.allowPairedRenamePrepare ||
+    !isRenameOperation(options.operation) ||
+    !isRenameOperation(prepared.operation)
+  ) {
+    return false;
+  }
+  return renameNamesMatch(prepared, options.operation, options.name) &&
+    pairedRenameNameMatches(prepared, options);
+}
+
+function parentRefForPrepared(
+  prepared: CfcPreparedWriteback,
+  operation: CfcNamespaceMutationWritebackOperation,
+): CfcProjectionRef | undefined {
+  if (operation === "rename-source") {
+    return prepared.target.sourceParentRef ??
+      (prepared.operation === "rename-destination"
+        ? prepared.target.destinationParentRef
+        : undefined) ??
+      prepared.target.parentRef ??
+      prepared.target.ref;
+  }
+  if (operation === "rename-destination") {
+    return prepared.target.destinationParentRef ??
+      (prepared.operation === "rename-source"
+        ? prepared.target.sourceParentRef
+        : undefined) ??
+      prepared.target.parentRef ??
+      prepared.target.ref;
+  }
+  return prepared.target.parentRef ?? prepared.target.ref;
+}
+
+function preparedNameMatches(
+  prepared: CfcPreparedWriteback,
+  operation: CfcNamespaceMutationWritebackOperation,
+  name: string,
+): boolean {
+  if (operation === "rename-source") {
+    return (prepared.target.sourceName ?? prepared.target.name) === name;
+  }
+  if (operation === "rename-destination") {
+    return (prepared.target.destinationName ?? prepared.target.name) === name;
+  }
+  return prepared.target.name === name;
+}
+
+function pairedRenameNameMatches(
+  prepared: CfcPreparedWriteback,
+  options: {
+    operation: CfcNamespaceMutationWritebackOperation;
+    pairedName?: string;
+  },
+): boolean {
+  if (
+    !isRenameOperation(options.operation) || options.pairedName === undefined
+  ) {
+    return true;
+  }
+  if (options.operation === "rename-source") {
+    return (prepared.target.destinationName ??
+      (prepared.operation === "rename-destination"
+        ? prepared.target.name
+        : undefined)) === options.pairedName;
+  }
+  return (prepared.target.sourceName ??
+    (prepared.operation === "rename-source"
+      ? prepared.target.name
+      : undefined)) ===
+    options.pairedName;
+}
+
+function renameNamesMatch(
+  prepared: CfcPreparedWriteback,
+  requestedOperation: CfcNamespaceMutationWritebackOperation,
+  requestedName: string,
+): boolean {
+  if (requestedOperation === "rename-source") {
+    return prepared.target.sourceName === requestedName;
+  }
+  if (requestedOperation === "rename-destination") {
+    return prepared.target.destinationName === requestedName;
+  }
+  return false;
+}
+
+function isRenameOperation(
+  operation: CfcWritebackOperation,
+): operation is "rename-source" | "rename-destination" {
+  return operation === "rename-source" || operation === "rename-destination";
 }
 
 export class CfcWritebackStore {
@@ -376,7 +596,9 @@ function parseFinalizedWriteback(value: string): CfcFinalizedWriteback | null {
 
 function isOperation(value: unknown): value is CfcWritebackOperation {
   return value === "write" || value === "truncate" ||
-    value === "create" || value === "mkdir";
+    value === "create" || value === "mkdir" ||
+    value === "unlink" || value === "rmdir" ||
+    value === "rename-source" || value === "rename-destination";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

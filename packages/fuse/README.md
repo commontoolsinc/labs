@@ -247,18 +247,19 @@ trusted as sandbox enforcement input. `trusted.cfc.generation` is returned as a
 raw UTF-8 string. Other CFC annotation values are canonical JSON with sorted
 object keys.
 
-Prepared writeback is scaffolded for existing-file writes and `create`/`mkdir`.
-In `observe`, missing prepare metadata is logged and writes continue. In
-`enforce-explicit`, annotated targets and annotated parent directories require
-trusted prepare metadata. In `enforce-strict`, projected writes fail closed when
-annotations or prepare metadata are missing, malformed, or stale. Direct
-pre-gVisor testing can enable the temporary xattr prepare/finalize path with
-`--cfc-writeback-xattrs`; this accepts only `trusted.cfc.writeback.prepare` and
+Prepared writeback is scaffolded for existing-file writes, `create`/`mkdir`,
+`unlink`/`rmdir`, and same-cell `rename`. In `observe`, missing prepare metadata
+is logged and writes continue. In `enforce-explicit`, annotated targets and
+annotated parent directories require trusted prepare metadata. In
+`enforce-strict`, projected writes fail closed when annotations or prepare
+metadata are missing, malformed, or stale. Direct pre-gVisor testing can enable
+the temporary xattr prepare/finalize path with `--cfc-writeback-xattrs`; this
+accepts only `trusted.cfc.writeback.prepare` and
 `trusted.cfc.writeback.finalize` and is not a sandbox trust boundary.
 
-Rename, unlink, rmdir, symlink creation, chmod/chown/timestamp mutation, and
-callable-send writeback are still out of scope for CFC enforcing modes and are
-rejected there. gVisor remains responsible for sandbox-visible enforcement.
+Symlink creation, chmod/chown/timestamp mutation, and callable-send writeback
+are still out of scope for CFC enforcing modes and are rejected there. gVisor
+remains responsible for sandbox-visible enforcement.
 
 ## Architecture
 

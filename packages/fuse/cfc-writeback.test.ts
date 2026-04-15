@@ -9,6 +9,7 @@ import {
   applyPreparedExistingWrite,
   authorizeCreateWriteback,
   authorizeExistingWriteback,
+  authorizeNamespaceMutationWriteback,
   CFC_WRITEBACK_FINALIZE_XATTR,
   CFC_WRITEBACK_PREPARE_XATTR,
   CfcWritebackStore,
@@ -52,7 +53,15 @@ function makeAnnotatedTree(): {
 }
 
 function prepareJson(
-  operation: "write" | "truncate" | "create" | "mkdir",
+  operation:
+    | "write"
+    | "truncate"
+    | "create"
+    | "mkdir"
+    | "unlink"
+    | "rmdir"
+    | "rename-source"
+    | "rename-destination",
   ref: CfcProjectionRef,
   extraTarget: Record<string, unknown> = {},
 ): string {
@@ -108,6 +117,43 @@ Deno.test("CFC mode parsing and annotation defaults match runner modes", () => {
       mode: "observe",
     }),
     true,
+  );
+});
+
+Deno.test("writeback prepare parsing accepts namespace operations only by exact name", () => {
+  const { parentIno, ref } = makeAnnotatedTree();
+  const store = new CfcWritebackStore();
+
+  for (
+    const operation of [
+      "unlink",
+      "rmdir",
+      "rename-source",
+      "rename-destination",
+    ] as const
+  ) {
+    assertEquals(
+      store.setPreparedXattr(
+        parentIno,
+        CFC_WRITEBACK_PREPARE_XATTR,
+        prepareJson(operation, ref, { name: `${operation}-name` }),
+      ).ok,
+      true,
+      operation,
+    );
+  }
+
+  assertEquals(
+    store.setPreparedXattr(
+      parentIno,
+      CFC_WRITEBACK_PREPARE_XATTR,
+      prepareJson(
+        "unlink",
+        ref,
+        { name: "bad", operation: "rename" },
+      ).replace('"unlink"', '"rename"'),
+    ).ok,
+    false,
   );
 });
 
@@ -295,6 +341,296 @@ Deno.test("parent-prepared create and mkdir gate occupancy-sensitive paths", () 
       parentAnnotation: tree.getCfcAnnotation(parentIno),
       prepared: store.getPrepared(parentIno, "mkdir", "dir"),
       name: "dir",
+    }).allowed,
+    true,
+  );
+});
+
+Deno.test("observe mode logs and allows missing namespace mutation prepare", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const diagnostics: string[] = [];
+
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "observe",
+      operation: "unlink",
+      parentAnnotation: tree.getCfcAnnotation(parentIno),
+      prepared: undefined,
+      name: "missing-child",
+      diagnostics,
+    }).allowed,
+    true,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "observe",
+      operation: "rename-source",
+      parentAnnotation: tree.getCfcAnnotation(parentIno),
+      prepared: undefined,
+      name: "old",
+      pairedName: "new",
+      diagnostics,
+    }).allowed,
+    true,
+  );
+  assertStringIncludes(
+    diagnostics.join("\n"),
+    "missing prepared CFC writeback metadata",
+  );
+});
+
+Deno.test("enforce-explicit requires namespace prepare only for annotated parents", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-explicit",
+      operation: "unlink",
+      parentAnnotation: tree.getCfcAnnotation(parentIno),
+      prepared: undefined,
+      name: "title",
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-explicit",
+      operation: "unlink",
+      parentAnnotation: undefined,
+      prepared: undefined,
+      name: "ordinary",
+    }).allowed,
+    true,
+  );
+});
+
+Deno.test("enforce-strict rejects missing malformed and stale namespace prepare", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const parentAnnotation = tree.getCfcAnnotation(parentIno);
+  assertExists(parentAnnotation);
+
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rmdir",
+      parentAnnotation,
+      prepared: undefined,
+      name: "dir",
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rmdir",
+      parentAnnotation,
+      prepared: {
+        version: 1,
+        operation: "unlink",
+        target: { parentRef: parentAnnotation.ref, name: "dir" },
+        expectedGeneration: parentAnnotation.generation,
+        labels: {},
+      },
+      name: "dir",
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rmdir",
+      parentAnnotation,
+      prepared: {
+        version: 1,
+        operation: "rmdir",
+        target: { parentRef: parentAnnotation.ref, name: "other" },
+        expectedGeneration: parentAnnotation.generation,
+        labels: {},
+      },
+      name: "dir",
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rmdir",
+      parentAnnotation,
+      prepared: {
+        version: 1,
+        operation: "rmdir",
+        target: { parentRef: parentAnnotation.ref, name: "dir" },
+        expectedGeneration: "stale-generation",
+        labels: {},
+      },
+      name: "dir",
+    }).allowed,
+    false,
+  );
+});
+
+Deno.test("namespace prepare gates before occupancy-sensitive lookup", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const parentAnnotation = tree.getCfcAnnotation(parentIno);
+  assertExists(parentAnnotation);
+
+  const result = authorizeNamespaceMutationWriteback({
+    mode: "enforce-strict",
+    operation: "unlink",
+    parentAnnotation,
+    prepared: undefined,
+    name: "does-not-exist",
+  });
+
+  assertEquals(result.allowed, false);
+  if (result.allowed) throw new Error("expected namespace writeback rejection");
+  assertStringIncludes(result.reason, "prepared CFC writeback metadata");
+});
+
+Deno.test("rename prepare validation binds source and destination parent generations and names", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const destinationParentIno = tree.addDir(tree.rootIno, "other", "object");
+  const parentAnnotation = tree.getCfcAnnotation(parentIno);
+  assertExists(parentAnnotation);
+  tree.setCfcAnnotation(destinationParentIno, {
+    ...parentAnnotation,
+    ref: {
+      ...parentAnnotation.ref,
+      path: ["other"],
+      generation: "generation-2",
+    },
+    generation: "generation-2",
+  });
+  const destinationAnnotation = tree.getCfcAnnotation(destinationParentIno);
+  assertExists(destinationAnnotation);
+
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rename-source",
+      parentAnnotation,
+      prepared: {
+        version: 1,
+        operation: "rename-source",
+        target: {
+          parentRef: parentAnnotation.ref,
+          name: "title",
+          sourceName: "title",
+          destinationName: "renamed",
+        },
+        expectedGeneration: parentAnnotation.generation,
+        labels: {},
+      },
+      name: "title",
+      pairedName: "renamed",
+    }).allowed,
+    true,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rename-destination",
+      parentAnnotation: destinationAnnotation,
+      prepared: {
+        version: 1,
+        operation: "rename-destination",
+        target: {
+          parentRef: destinationAnnotation.ref,
+          name: "renamed",
+          sourceName: "title",
+          destinationName: "renamed",
+        },
+        expectedGeneration: destinationAnnotation.generation,
+        labels: {},
+      },
+      name: "renamed",
+      pairedName: "title",
+    }).allowed,
+    true,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rename-destination",
+      parentAnnotation: destinationAnnotation,
+      prepared: {
+        version: 1,
+        operation: "rename-destination",
+        target: {
+          parentRef: parentAnnotation.ref,
+          name: "renamed",
+          sourceName: "title",
+          destinationName: "renamed",
+        },
+        expectedGeneration: parentAnnotation.generation,
+        labels: {},
+      },
+      name: "renamed",
+      pairedName: "title",
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rename-destination",
+      parentAnnotation: destinationAnnotation,
+      prepared: {
+        version: 1,
+        operation: "rename-destination",
+        target: {
+          parentRef: destinationAnnotation.ref,
+          name: "other",
+          sourceName: "title",
+          destinationName: "other",
+        },
+        expectedGeneration: destinationAnnotation.generation,
+        labels: {},
+      },
+      name: "renamed",
+      pairedName: "title",
+    }).allowed,
+    false,
+  );
+});
+
+Deno.test("same-parent rename can use one prepare record covering both names", () => {
+  const { tree, parentIno } = makeAnnotatedTree();
+  const parentAnnotation = tree.getCfcAnnotation(parentIno);
+  assertExists(parentAnnotation);
+  const prepared = {
+    version: 1 as const,
+    operation: "rename-source" as const,
+    target: {
+      sourceParentRef: parentAnnotation.ref,
+      name: "title",
+      destinationName: "renamed",
+    },
+    expectedGeneration: parentAnnotation.generation,
+    labels: {},
+  };
+
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rename-source",
+      parentAnnotation,
+      prepared,
+      name: "title",
+      pairedName: "renamed",
+      allowPairedRenamePrepare: true,
+    }).allowed,
+    true,
+  );
+  assertEquals(
+    authorizeNamespaceMutationWriteback({
+      mode: "enforce-strict",
+      operation: "rename-destination",
+      parentAnnotation,
+      prepared,
+      name: "renamed",
+      pairedName: "title",
+      allowPairedRenamePrepare: true,
     }).allowed,
     true,
   );
