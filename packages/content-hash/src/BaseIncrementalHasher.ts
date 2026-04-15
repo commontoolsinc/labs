@@ -7,7 +7,7 @@ import type { IncrementalHasher } from "./interface.ts";
 export abstract class BaseIncrementalHasher implements IncrementalHasher {
   digest(): Uint8Array;
   digest(encoding: "base64url"): string;
-  digest(encoding?: string): Uint8Array | string;
+  digest(encoding: string | undefined): Uint8Array | string;
   digest(encoding?: string | undefined): Uint8Array | string {
     const result = this._rawDigest();
 
