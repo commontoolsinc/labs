@@ -18,6 +18,9 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
   const open = Writable.of(false);
   const size = Writable.of<"sm" | "md" | "lg" | "full">("md");
   const dismissable = Writable.of(true);
+  const presentation = Writable.of<"dialog" | "sheet">("dialog");
+  const grabber = Writable.of(false);
+  const detent = Writable.of<"auto" | "half" | "full">("auto");
 
   const showModal = action(() => open.set(true));
   const closeModal = action(() => open.set(false));
@@ -30,7 +33,14 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
           Open Modal
         </cf-button>
 
-        <cf-modal $open={open} size={size} dismissable={dismissable}>
+        <cf-modal
+          $open={open}
+          size={size}
+          dismissable={dismissable}
+          presentation={presentation}
+          grabber={grabber}
+          detent={detent}
+        >
           <div slot="header">
             <cf-heading level={4}>Modal Title</cf-heading>
           </div>
@@ -57,8 +67,18 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
       <Controls>
         <>
           <SelectControl
+            label="presentation"
+            description="Layout mode: centered dialog or bottom sheet"
+            defaultValue="dialog"
+            value={presentation}
+            items={[
+              { label: "Dialog", value: "dialog" },
+              { label: "Sheet", value: "sheet" },
+            ]}
+          />
+          <SelectControl
             label="size"
-            description="Modal width preset"
+            description="Modal width preset (dialog mode only)"
             defaultValue="md"
             value={size}
             items={[
@@ -67,6 +87,23 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
               { label: "Large", value: "lg" },
               { label: "Full", value: "full" },
             ]}
+          />
+          <SelectControl
+            label="detent"
+            description="Sheet max height (sheet mode only)"
+            defaultValue="auto"
+            value={detent}
+            items={[
+              { label: "Auto", value: "auto" },
+              { label: "Half", value: "half" },
+              { label: "Full", value: "full" },
+            ]}
+          />
+          <SwitchControl
+            label="grabber"
+            description="Show drag-handle indicator (sheet mode only)"
+            defaultValue="false"
+            checked={grabber}
           />
           <SwitchControl
             label="dismissable"
