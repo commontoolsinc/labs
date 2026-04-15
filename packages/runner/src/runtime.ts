@@ -56,7 +56,11 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import type { CfcEnforcementMode, TrustSnapshot } from "./cfc/mod.ts";
+import {
+  type CfcEnforcementMode,
+  DEFAULT_CFC_ENFORCEMENT_MODE,
+  type TrustSnapshot,
+} from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -394,7 +398,8 @@ export class Runtime {
     this.patternManager = new PatternManager(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
-    this.cfcEnforcementMode = options.cfcEnforcementMode ?? "disabled";
+    this.cfcEnforcementMode = options.cfcEnforcementMode ??
+      DEFAULT_CFC_ENFORCEMENT_MODE;
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(

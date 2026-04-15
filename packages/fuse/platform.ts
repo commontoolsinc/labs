@@ -166,6 +166,17 @@ export interface FusePlatform {
     ) => void,
   ): AnyCallback;
 
+  createSetxattrCallback(
+    handler: (
+      req: Deno.PointerValue,
+      ino: bigint,
+      namePtr: Deno.PointerValue,
+      valuePtr: Deno.PointerValue,
+      size: bigint,
+      flags: number,
+    ) => void,
+  ): AnyCallback;
+
   createRenameCallback(
     handler: (
       req: Deno.PointerValue,

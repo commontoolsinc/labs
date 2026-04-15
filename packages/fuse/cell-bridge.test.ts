@@ -446,6 +446,112 @@ Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts"
   );
 });
 
+Deno.test("CellBridge finalizes CFC annotations after committed writeback", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    cfcAnnotations: true,
+  });
+  const state = buildTestSpace(bridge, "home", []);
+
+  let resultValue: Record<string, unknown> = { title: "one" };
+  const resultCell: FakeCell = {
+    schema: {
+      type: "object",
+      properties: { title: { type: "string" } },
+    },
+    get: () => resultValue,
+    getRaw: () => resultValue,
+    asSchemaFromLinks() {
+      return this;
+    },
+    key(segment: string) {
+      return makeCell(resultValue[segment], undefined);
+    },
+    sink: () => () => {},
+  };
+  const piece = {
+    id: "of:entity-finalize-generation",
+    name: () => "Finalize Generation",
+    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: () => Promise.resolve(resultValue),
+      set: (value: unknown, path?: (string | number)[]) => {
+        if (path?.length === 1 && typeof path[0] === "string") {
+          resultValue = { ...resultValue, [path[0]]: value };
+        } else if (
+          typeof value === "object" && value !== null && !Array.isArray(value)
+        ) {
+          resultValue = value as Record<string, unknown>;
+        }
+        return Promise.resolve();
+      },
+    },
+  };
+
+  state.pieceControllers.set(
+    "Finalize Generation",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Finalize Generation", "home");
+  state.pieceMap.set("Finalize Generation", piece.id);
+  state.pieceInos.set("Finalize Generation", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+  const initialResultIno = tree.lookup(pieceIno, "result")!;
+  const initialTitleIno = tree.lookup(initialResultIno, "title")!;
+  const initialGeneration = tree.getCfcAnnotation(initialTitleIno)?.generation;
+
+  const titleWritePath: WritePath = {
+    spaceName: "home",
+    pieceName: "Finalize Generation",
+    cell: "result",
+    jsonPath: ["title"],
+    isJsonFile: false,
+    piece: piece as unknown as WritePath["piece"],
+  };
+  await bridge.writeValue(titleWritePath, "two");
+  await bridge.finalizeWritePath(titleWritePath);
+
+  const updatedResultIno = tree.lookup(pieceIno, "result")!;
+  const updatedTitleIno = tree.lookup(updatedResultIno, "title")!;
+  assertEquals(getFileContent(tree, updatedResultIno, "title"), "two");
+  assertNotEquals(
+    tree.getCfcAnnotation(updatedTitleIno)?.generation,
+    initialGeneration,
+  );
+  assertEquals(
+    tree.getCfcAnnotation(updatedTitleIno)?.ref.generation,
+    tree.getCfcAnnotation(updatedTitleIno)?.generation,
+  );
+
+  const parentWritePath: WritePath = {
+    ...titleWritePath,
+    jsonPath: [],
+    isJsonFile: true,
+  };
+  await bridge.writeValue(
+    { ...parentWritePath, jsonPath: ["created"] },
+    "child",
+  );
+  await bridge.finalizeWritePath(parentWritePath);
+
+  const finalResultIno = tree.lookup(pieceIno, "result")!;
+  const childIno = tree.lookup(finalResultIno, "created");
+  assertEquals(childIno !== undefined, true);
+  assertEquals(
+    tree.getCfcAnnotation(childIno!)?.ref.projection,
+    "value",
+  );
+});
+
 Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");

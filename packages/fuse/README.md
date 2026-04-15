@@ -233,11 +233,11 @@ Handlers remain writable through the mounted `.handler` file. Both mounted
 
 ### CFC Annotations
 
-`cf fuse mount --cfc-annotations` enables Common Fabric CFC projection
-annotations for trusted runtimes such as the CFC-aware gVisor profile. The FUSE
-daemon publishes logical projection metadata as xattr-like values and keeps
-CFC-enabled local writes, creates, renames, symlinks, truncates, and metadata
-mutations rejected until trusted write-label metadata is available.
+`cf fuse mount --cfc-mode=<mode>` selects the FUSE-side CFC guardrail mode:
+`disabled`, `observe`, `enforce-explicit`, or `enforce-strict`. When no mode is
+provided, FUSE uses the runner default (`disabled` today). `observe` and both
+enforcing modes publish annotations automatically. `--cfc-annotations` still
+forces annotation output for local debugging even when the mode is `disabled`.
 
 By default the local mount exposes the compatibility namespace
 `user.commonfabric.cfc.*`. Use `--cfc-xattr-namespace=trusted|compat|both` to
@@ -246,6 +246,19 @@ select the returned spelling. `trusted.cfc.*` is the enforcement namespace;
 trusted as sandbox enforcement input. `trusted.cfc.generation` is returned as a
 raw UTF-8 string. Other CFC annotation values are canonical JSON with sorted
 object keys.
+
+Prepared writeback is scaffolded for existing-file writes and `create`/`mkdir`.
+In `observe`, missing prepare metadata is logged and writes continue. In
+`enforce-explicit`, annotated targets and annotated parent directories require
+trusted prepare metadata. In `enforce-strict`, projected writes fail closed when
+annotations or prepare metadata are missing, malformed, or stale. Direct
+pre-gVisor testing can enable the temporary xattr prepare/finalize path with
+`--cfc-writeback-xattrs`; this accepts only `trusted.cfc.writeback.prepare` and
+`trusted.cfc.writeback.finalize` and is not a sandbox trust boundary.
+
+Rename, unlink, rmdir, symlink creation, chmod/chown/timestamp mutation, and
+callable-send writeback are still out of scope for CFC enforcing modes and are
+rejected there. gVisor remains responsible for sandbox-visible enforcement.
 
 ## Architecture
 

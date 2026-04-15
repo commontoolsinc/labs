@@ -20,6 +20,22 @@ import {
   listCfcXattrNames,
 } from "./annotations.ts";
 import {
+  applyPreparedCreate,
+  applyPreparedExistingWrite,
+  applyPreparedParent,
+  authorizeCreateWriteback,
+  authorizeExistingWriteback,
+  CFC_WRITEBACK_FINALIZE_XATTR,
+  CFC_WRITEBACK_PREPARE_XATTR,
+  type CfcEnforcementMode,
+  type CfcExistingWritebackOperation,
+  CfcWritebackStore,
+  isCfcEnforcing,
+  parseCfcMode,
+  resolveCfcMode,
+  shouldEnableCfcAnnotations,
+} from "./cfc-writeback.ts";
+import {
   DIR_MODE,
   EACCES,
   EINVAL,
@@ -91,6 +107,14 @@ function parseCfcXattrNamespace(value: string): CfcXattrNamespace {
   return "compat";
 }
 
+function readBuffer(ptr: Deno.PointerValue, size: bigint): Uint8Array {
+  const length = Number(size);
+  const data = new Uint8Array(length);
+  if (!ptr || length === 0) return data;
+  new Deno.UnsafePointerView(ptr).copyInto(data);
+  return data;
+}
+
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
     string: [
@@ -100,8 +124,9 @@ export async function main(argv: string[] = Deno.args) {
       "exec-cli",
       "log-file",
       "cfc-xattr-namespace",
+      "cfc-mode",
     ],
-    boolean: ["debug", "cfc-annotations"],
+    boolean: ["debug", "cfc-annotations", "cfc-writeback-xattrs"],
     collect: ["space"],
     default: {
       "api-url": Deno.env.get("CF_API_URL") ?? "",
@@ -110,8 +135,10 @@ export async function main(argv: string[] = Deno.args) {
       "exec-cli": "",
       "log-file": "",
       "cfc-xattr-namespace": "compat",
+      "cfc-mode": "",
       debug: false,
       "cfc-annotations": false,
+      "cfc-writeback-xattrs": false,
     },
   });
 
@@ -136,10 +163,26 @@ export async function main(argv: string[] = Deno.args) {
   }
 
   const debug = args.debug;
-  const cfcAnnotationsEnabled = Boolean(args["cfc-annotations"]);
+  const requestedCfcMode = String(args["cfc-mode"] ?? "");
+  if (requestedCfcMode && !parseCfcMode(requestedCfcMode)) {
+    console.warn(
+      `[FUSE] Unknown --cfc-mode=${requestedCfcMode}; using runner default`,
+    );
+  }
+  const cfcMode: CfcEnforcementMode = resolveCfcMode({
+    cliMode: requestedCfcMode || undefined,
+    envMode: Deno.env.get("CF_CFC_MODE") ?? undefined,
+  });
+  const cfcAnnotationsEnabled = shouldEnableCfcAnnotations({
+    annotationsRequested: Boolean(args["cfc-annotations"]),
+    mode: cfcMode,
+  });
+  const cfcWritebackXattrs = Boolean(args["cfc-writeback-xattrs"]);
   const cfcXattrNamespace = parseCfcXattrNamespace(
     String(args["cfc-xattr-namespace"] ?? "compat"),
   );
+  const cfcWritebacks = new CfcWritebackStore();
+  const cfcDiagnostics: string[] = [];
 
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
@@ -229,6 +272,65 @@ export async function main(argv: string[] = Deno.args) {
       ),
       ownership: mountOwnership,
     });
+  }
+
+  function recordCfcDiagnostics(messages: string[]): void {
+    for (const message of messages) {
+      cfcDiagnostics.push(message);
+      console.warn(`[FUSE:CFC] ${message}`);
+    }
+  }
+
+  function authorizeExistingCfcWrite(
+    ino: bigint,
+    operation: CfcExistingWritebackOperation,
+  ): boolean {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedExistingWrite(tree, ino, authorization.prepared);
+    }
+    return true;
+  }
+
+  function authorizeCreateCfcWrite(
+    parentIno: bigint,
+    operation: "create" | "mkdir",
+    name: string,
+  ): boolean {
+    const parent = tree.getNode(parentIno);
+    const diagnostics: string[] = [];
+    const authorization = authorizeCreateWriteback({
+      mode: cfcMode,
+      operation,
+      parentAnnotation: parent?.cfc,
+      prepared: cfcWritebacks.getPrepared(parentIno, operation, name),
+      name,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied ${operation} ${name}: ${authorization.reason}`,
+      );
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedParent(tree, parentIno, authorization.prepared);
+    }
+    return true;
   }
 
   function replyEntry(
@@ -419,14 +521,6 @@ export async function main(argv: string[] = Deno.args) {
       const { flags } = readFileInfo(fi);
       const isWriting = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
 
-      if (cfcAnnotationsEnabled && isWriting) {
-        // The first CFC slice publishes trusted annotations but does not yet
-        // receive write labels from gVisor. Reject local writes rather than
-        // exposing optimistic, under-labeled projection state.
-        fuse.symbols.fuse_reply_err(req, EACCES);
-        return;
-      }
-
       if (node.kind === "callable") {
         if (node.callableKind === "tool" && isWriting) {
           fuse.symbols.fuse_reply_err(req, EACCES);
@@ -435,6 +529,10 @@ export async function main(argv: string[] = Deno.args) {
 
         let writeTarget: HandleWriteTarget | undefined;
         if (node.callableKind === "handler" && isWriting) {
+          if (isCfcEnforcing(cfcMode)) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
           const handlerTarget = bridge?.resolveHandlerTarget(inode);
           if (!handlerTarget) {
             fuse.symbols.fuse_reply_err(req, EACCES);
@@ -480,6 +578,15 @@ export async function main(argv: string[] = Deno.args) {
       // Get current content for the handle buffer
       const content = node.kind === "file" ? node.content : new Uint8Array(0);
       const truncate = (flags & O_TRUNC) !== 0;
+      if (isWriting) {
+        const operation: CfcExistingWritebackOperation = truncate
+          ? "truncate"
+          : "write";
+        if (!authorizeExistingCfcWrite(inode, operation)) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
       const fh = handles.open(
         inode,
         flags,
@@ -805,6 +912,7 @@ export async function main(argv: string[] = Deno.args) {
           if (errorLogIno !== undefined) {
             tree.updateFile(errorLogIno, "");
           }
+          await bridge.finalizeSourceWritePath(writeTarget.target);
           if (handle.version === flushVersion) {
             handle.dirty = false;
             handle.truncatePending = false;
@@ -840,7 +948,7 @@ export async function main(argv: string[] = Deno.args) {
       if (writePath.fsProjection) {
         const ok = await bridge.writeFsFile(writePath, text);
         if (!ok) return EINVAL;
-        bridge.invalidateWritePath(writePath);
+        await bridge.finalizeWritePath(writePath);
         if (handle.version === flushVersion) {
           handle.dirty = false;
           handle.truncatePending = false;
@@ -889,7 +997,7 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       await bridge.writeValue(writePath, value);
-      bridge.invalidateWritePath(writePath);
+      await bridge.finalizeWritePath(writePath);
       if (handle.version === flushVersion) {
         handle.dirty = false;
         handle.truncatePending = false;
@@ -1077,13 +1185,19 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
       }
-      if (cfcAnnotationsEnabled && toSet !== 0) {
+      const sizeChange = (toSet & FUSE_SET_ATTR_SIZE) !== 0;
+      const metadataOnlyChange = (toSet & ~FUSE_SET_ATTR_SIZE) !== 0;
+      if (isCfcEnforcing(cfcMode) && metadataOnlyChange) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (sizeChange && !authorizeExistingCfcWrite(inode, "truncate")) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
 
       // Handle truncate / size change
-      if (toSet & FUSE_SET_ATTR_SIZE) {
+      if (sizeChange) {
         // Read new size from attr struct
         const attrView = new Deno.UnsafePointerView(_attrPtr!);
         const newSize = Number(attrView.getBigInt64(STAT_ST_SIZE_OFFSET));
@@ -1275,6 +1389,69 @@ export async function main(argv: string[] = Deno.args) {
   );
   callbacks.push(listxattrCb);
 
+  const setxattrCb = platform.createSetxattrCallback(
+    (
+      req: Deno.PointerValue,
+      ino: bigint,
+      namePtr: Deno.PointerValue,
+      valuePtr: Deno.PointerValue,
+      size: bigint,
+      _flags: number,
+    ) => {
+      logOp("setxattr", ino.toString());
+      if (!cfcWritebackXattrs) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      const name = readCString(namePtr);
+      const value = new TextDecoder().decode(readBuffer(valuePtr, size));
+      let result:
+        | ReturnType<CfcWritebackStore["setPreparedXattr"]>
+        | ReturnType<CfcWritebackStore["setFinalizeXattr"]>;
+      if (name === CFC_WRITEBACK_PREPARE_XATTR) {
+        result = cfcWritebacks.setPreparedXattr(ino, name, value);
+      } else if (name === CFC_WRITEBACK_FINALIZE_XATTR) {
+        result = cfcWritebacks.setFinalizeXattr(ino, name, value);
+      } else {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (!result.ok) {
+        console.warn(`[FUSE:CFC] rejected ${name}: ${result.reason}`);
+        fuse.symbols.fuse_reply_err(req, EINVAL);
+        return;
+      }
+      fuse.symbols.fuse_reply_err(req, 0);
+    },
+  );
+  callbacks.push(setxattrCb);
+
+  const removexattrCb = new Deno.UnsafeCallback(
+    { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
+    (
+      req: Deno.PointerValue,
+      ino: number | bigint,
+      namePtr: Deno.PointerValue,
+    ) => {
+      logOp("removexattr", ino.toString());
+      if (!cfcWritebackXattrs) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      const name = readCString(namePtr);
+      if (
+        name !== CFC_WRITEBACK_PREPARE_XATTR &&
+        name !== CFC_WRITEBACK_FINALIZE_XATTR
+      ) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      cfcWritebacks.deleteAllForIno(BigInt(ino));
+      fuse.symbols.fuse_reply_err(req, 0);
+    },
+  );
+  callbacks.push(removexattrCb);
+
   // create(req, parent_ino, name_ptr, mode, fi_ptr)
   const createCb = new Deno.UnsafeCallback(
     {
@@ -1290,10 +1467,6 @@ export async function main(argv: string[] = Deno.args) {
     ) => {
       logOp("create", parentIno.toString());
       if (!bridge) {
-        fuse.symbols.fuse_reply_err(req, EACCES);
-        return;
-      }
-      if (cfcAnnotationsEnabled) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1313,9 +1486,15 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (!authorizeCreateCfcWrite(parent, "create", name)) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
-      // Optimistic: create file node and reply immediately, then write to cell.
-      const ino = tree.addFile(parent, name, "", "string");
+      const prepared = cfcWritebacks.getPrepared(parent, "create", name);
+      const ino = prepared
+        ? applyPreparedCreate(tree, parent, name, "file", prepared)
+        : tree.addFile(parent, name, "", "string");
       const fh = handles.open(
         ino,
         O_RDWR,
@@ -1355,8 +1534,9 @@ export async function main(argv: string[] = Deno.args) {
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         "",
-      ).then(() => {
-        bridge.invalidateWritePath(parentPath);
+      ).then(async () => {
+        cfcWritebacks.deletePrepared(parent, "create", name);
+        await bridge.finalizeWritePath(parentPath);
       }).catch((e) => {
         console.error(`[fuse] create write error: ${e}`);
       });
@@ -1381,10 +1561,6 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
-      if (cfcAnnotationsEnabled) {
-        fuse.symbols.fuse_reply_err(req, EACCES);
-        return;
-      }
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
@@ -1394,9 +1570,15 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (!authorizeCreateCfcWrite(parent, "mkdir", name)) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
-      // Optimistic: create dir and reply immediately, then write to cell.
-      const ino = tree.addDir(parent, name, "object");
+      const prepared = cfcWritebacks.getPrepared(parent, "mkdir", name);
+      const ino = prepared
+        ? applyPreparedCreate(tree, parent, name, "dir", prepared)
+        : tree.addDir(parent, name, "object");
       const node = tree.getNode(ino);
       replyEntry(req, ino, node);
 
@@ -1405,8 +1587,9 @@ export async function main(argv: string[] = Deno.args) {
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         {},
-      ).then(() => {
-        bridge.invalidateWritePath(parentPath);
+      ).then(async () => {
+        cfcWritebacks.deletePrepared(parent, "mkdir", name);
+        await bridge.finalizeWritePath(parentPath);
       }).catch((e) => {
         console.error(`[fuse] mkdir write error: ${e}`);
       });
@@ -1427,7 +1610,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
-      if (cfcAnnotationsEnabled) {
+      if (isCfcEnforcing(cfcMode)) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1516,7 +1699,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
-      if (cfcAnnotationsEnabled) {
+      if (isCfcEnforcing(cfcMode)) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1605,7 +1788,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
-      if (cfcAnnotationsEnabled) {
+      if (isCfcEnforcing(cfcMode)) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1712,7 +1895,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
-      if (cfcAnnotationsEnabled) {
+      if (isCfcEnforcing(cfcMode)) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1788,8 +1971,14 @@ export async function main(argv: string[] = Deno.args) {
   setOp(OPS_OFFSETS.opendir, opendirCb);
   setOp(OPS_OFFSETS.readdir, readdirCb);
   setOp(OPS_OFFSETS.releasedir, releasedirCb);
+  if (cfcWritebackXattrs) {
+    setOp(OPS_OFFSETS.setxattr, setxattrCb);
+  }
   setOp(OPS_OFFSETS.getxattr, getxattrCb);
   setOp(OPS_OFFSETS.listxattr, listxattrCb);
+  if (cfcWritebackXattrs) {
+    setOp(OPS_OFFSETS.removexattr, removexattrCb);
+  }
   setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---

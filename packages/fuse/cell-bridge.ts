@@ -1417,6 +1417,39 @@ export class CellBridge {
     this.invalidatePieceIdPropCache(writePath.piece.id, writePath.cell);
   }
 
+  async finalizeWritePath(writePath: WritePath): Promise<void> {
+    const state = this.spaces.get(writePath.spaceName);
+    const pieceIno = state?.pieceInos.get(writePath.pieceName);
+    if (pieceIno === undefined) {
+      this.invalidateWritePath(writePath);
+      return;
+    }
+    const cell = await writePath.piece[writePath.cell].getCell();
+    const newValue = await writePath.piece[writePath.cell].get();
+    await this.rebuildPieceProp({
+      cell,
+      newValue,
+      pieceId: writePath.piece.id,
+      pieceIno,
+      pieceName: writePath.pieceName,
+      propName: writePath.cell,
+      resolveLink: this.makeLinkResolver(writePath.spaceName),
+      spaceName: writePath.spaceName,
+    });
+  }
+
+  async finalizeSourceWritePath(writePath: SourceWritePath): Promise<void> {
+    const state = this.spaces.get(writePath.spaceName);
+    const pieceIno = state?.pieceInos.get(writePath.pieceName);
+    if (!state || pieceIno === undefined) return;
+    await this.buildSourceTree(
+      pieceIno,
+      writePath.piece,
+      state,
+      writePath.pieceName,
+    );
+  }
+
   invalidateHandlerTarget(target: HandlerTarget): void {
     this.invalidatePieceIdPropCache(target.piece.id, target.cellProp);
   }

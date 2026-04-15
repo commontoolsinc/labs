@@ -207,7 +207,7 @@ function pathPointer(path: readonly CfcPathSegment[]): string {
   return "/" + canonicalPath(path).join("/");
 }
 
-function stableStringify(value: unknown): string {
+export function canonicalCfcJsonStringify(value: unknown): string {
   if (value === undefined) {
     return "null";
   }
@@ -215,7 +215,9 @@ function stableStringify(value: unknown): string {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+    return `[${
+      value.map((entry) => canonicalCfcJsonStringify(entry)).join(",")
+    }]`;
   }
 
   const record = value as Record<string, unknown>;
@@ -223,9 +225,15 @@ function stableStringify(value: unknown): string {
     .filter((key) => record[key] !== undefined)
     .sort();
   return `{${
-    keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    keys.map((key) =>
+      `${JSON.stringify(key)}:${canonicalCfcJsonStringify(record[key])}`
+    )
       .join(",")
   }}`;
+}
+
+function stableStringify(value: unknown): string {
+  return canonicalCfcJsonStringify(value);
 }
 
 function generationDigestValue(
@@ -392,6 +400,10 @@ export function joinLabels(...labels: Array<CfcLabel | undefined>): CfcLabel {
 
 function failClosedLabel(): CfcLabel {
   return cloneLabel(CFC_FAIL_CLOSED_LABEL);
+}
+
+export function cfcFailClosedLabel(): CfcLabel {
+  return failClosedLabel();
 }
 
 function labelWithFailClosed(label: CfcLabel | undefined): CfcLabel {
