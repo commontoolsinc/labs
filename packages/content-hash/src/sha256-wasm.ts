@@ -4,6 +4,9 @@
 
 import { createSHA256, type IHasher } from "hash-wasm";
 import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
+import {
+  BaseSmallChunkUpdatingHasher,
+} from "./BaseSmallChunkUpdatingHasher.ts";
 import type { IncrementalHasher } from "./interface.ts";
 
 /**
@@ -21,11 +24,6 @@ const CHUNK_SIZE_FIRST = 1024;
  * into after the initial chunk.
  */
 const CHUNK_SIZE_USUAL = 65536;
-
-/**
- * Size of the small-data buffer used in `WasmUpdatingHasher`.
- */
-const SMALLS_SIZE = 256;
 
 /**
  * Pool of usable hasher instances. This array is populated at module init
@@ -219,55 +217,20 @@ class WasmCollectingHasher extends BaseIncrementalHasher {
  * WASM-specific incremental hasher which has a direct hasher instance and
  * can `update()` it.
  */
-class WasmUpdatingHasher extends BaseIncrementalHasher {
+class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
   #hasher: IHasher | null = acquireHasher(this);
-  #smalls = new Uint8Array(SMALLS_SIZE);
-  #smallsOffset: number = 0;
 
-  update(data: Uint8Array) {
-    const length = data.length;
-
-    if (length <= SMALLS_SIZE) {
-      const smallsOffset = this.#smallsOffset;
-
-      if (length <= (SMALLS_SIZE - smallsOffset)) {
-        this.#smalls.set(data, smallsOffset);
-        this.#smallsOffset += length;
-        return;
-      }
-    }
-
-    const hasher = this.#getHasher();
-    this.#updateFromSmalls(hasher);
-    hasher.update(data);
+  protected _rawUpdate(data: Uint8Array) {
+    this.#getHasher().update(data);
   }
 
   protected _rawDigest(): Uint8Array {
     const hasher = this.#getHasher();
-
-    this.#updateFromSmalls(hasher);
-
     const result: Uint8Array = hasher.digest("binary");
 
     releaseHasher(hasher);
     this.#hasher = null;
     return result;
-  }
-
-  #updateFromSmalls(hasher: IHasher) {
-    const smallsOffset = this.#smallsOffset;
-
-    if (smallsOffset === 0) {
-      return;
-    }
-
-    const smalls = this.#smalls;
-
-    const smallsFinal = (smallsOffset === smalls.length)
-      ? smalls
-      : smalls.subarray(0, smallsOffset);
-    hasher.update(smallsFinal);
-    this.#smallsOffset = 0;
   }
 
   #getHasher(): IHasher {
