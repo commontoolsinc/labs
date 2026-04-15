@@ -2458,8 +2458,8 @@ export function applyShrinkAndWrap(
   const retainedPathsCoveredByIdentityContainers = identityPaths.length > 0 &&
     retainedPaths.every((path) =>
       identityPaths.some((identityPath) =>
-        identityPath.length > path.length &&
-        path.every((segment, index) => segment === identityPath[index])
+        identityPath.length <= path.length &&
+        identityPath.every((segment, index) => segment === path[index])
       )
     );
   if (
