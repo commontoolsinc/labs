@@ -32,7 +32,8 @@ const addPiece = handler({
         allPieces: {
             type: "array",
             items: {
-                type: "unknown"
+                type: "unknown",
+                asCell: ["opaque"]
             },
             asCell: ["cell"]
         }
@@ -62,7 +63,8 @@ const trackRecent = handler({
         recentPieces: {
             type: "array",
             items: {
-                type: "unknown"
+                type: "unknown",
+                asCell: ["opaque"]
             },
             asCell: ["cell"]
         }

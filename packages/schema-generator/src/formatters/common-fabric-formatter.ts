@@ -9,7 +9,6 @@ import {
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
-  JSONSchema,
   JSONSchemaMutable,
   JSONSchemaObjMutable,
 } from "@commonfabric/api";
@@ -17,6 +16,7 @@ import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   detectWrapperViaNode,
+  getArrayElementInfo,
   getPropertyNameText,
   resolveWrapperNode,
   type TypeWithInternals,
@@ -273,7 +273,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
-        const itemsOverride: JSONSchema = { type: "unknown" };
+        const itemsOverride = this.createArrayItemsOverride(
+          innerType,
+          innerTypeNode,
+          context,
+        );
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -392,7 +396,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
-        const itemsOverride: JSONSchema = { type: "unknown" };
+        const itemsOverride = this.createArrayItemsOverride(
+          innerType,
+          shouldPassTypeNode ? innerTypeNode : undefined,
+          context,
+        );
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -426,6 +434,32 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     // Apply wrapper semantics (asCell/asOpaque) to the inner schema
     return this.applyWrapperSemantics(innerSchema, wrapperKind);
+  }
+
+  private createArrayItemsOverride(
+    arrayType: ts.Type,
+    arrayTypeNode: ts.TypeNode | undefined,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const base: JSONSchemaMutable = { type: "unknown" };
+    const elementInfo = getArrayElementInfo(
+      arrayType,
+      context.typeChecker,
+      arrayTypeNode,
+    );
+    if (!elementInfo) {
+      return base;
+    }
+
+    const resolvedElementWrapperKind = elementInfo.elementNode
+      ? resolveWrapperNode(elementInfo.elementNode, context.typeChecker)?.kind
+      : getCellWrapperInfo(elementInfo.elementType, context.typeChecker)?.kind;
+    const elementWrapperKind = resolvedElementWrapperKind === "Default"
+      ? undefined
+      : resolvedElementWrapperKind;
+    return elementWrapperKind
+      ? this.applyWrapperSemantics(base, elementWrapperKind)
+      : base;
   }
 
   private isUnusableInnerType(type: ts.Type): boolean {
