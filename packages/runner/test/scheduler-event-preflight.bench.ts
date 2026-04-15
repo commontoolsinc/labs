@@ -14,11 +14,23 @@ import {
   type SchedulerBenchEnv,
 } from "./scheduler-bench-helpers.ts";
 
-const BROAD_FANOUT = 48;
+/**
+ * Canonical pull-scheduler event preflight benchmarks.
+ *
+ * The older scheduler benchmarks cover generic push-mode/index operations, and
+ * push-pull-patterns.bench.ts covers real pattern map/filter/fanout behavior.
+ * This file owns the 30-note failure shape:
+ *
+ * - 30 note creations produced 210 preflights, exactly 7 per note.
+ * - Hot note handlers populated about 660 recursive reads and 330 shallow reads.
+ * - The hottest root writer fanout was just over 500 direct writers.
+ * - Even tiny menu handlers still paid for broad upstream graph traversal.
+ */
+const BROAD_FANOUT = 512;
 const QUEUED_EVENT_ROUNDS = 30;
 const EVENTS_PER_ROUND = 7;
-const DEEP_READ_COUNT = 220;
-const SHALLOW_READ_COUNT = 110;
+const DEEP_READ_COUNT = 660;
+const SHALLOW_READ_COUNT = 330;
 
 type BroadGraph = {
   env: SchedulerBenchEnv;
@@ -208,11 +220,11 @@ Deno.bench(
 );
 
 Deno.bench(
-  "Scheduler event preflight - 30 rounds of 7 queued events",
+  "Scheduler event preflight - note-shaped 30x7 clean events",
   benchOptions("scheduler-event-preflight"),
   async () => {
     await runWithSchedulerTiming(
-      "event preflight: 30 rounds of 7 queued events",
+      "event preflight: note-shaped 30x7 clean events",
       async (resetMeasuredTiming) => {
         const graph = await setupBroadGraph("preflight-queued");
         const resultCells: Cell<number>[] = [];
