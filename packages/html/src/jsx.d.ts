@@ -2934,6 +2934,8 @@ interface CFTabsElement extends CFHTMLElement {}
 interface CFTabElement extends CFHTMLElement {}
 interface CFTabListElement extends CFHTMLElement {}
 interface CFTabPanelElement extends CFHTMLElement {}
+interface CFTabBarElement extends CFHTMLElement {}
+interface CFTabBarItemElement extends CFHTMLElement {}
 
 // Accordion components
 interface CFAccordionElement extends CFHTMLElement {}
@@ -3895,6 +3897,21 @@ interface CFTabListAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFTabPanelAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: string; // Panel identifier (plain string, no cell binding needed)
+}
+
+// Tab bar component attributes
+interface CFTabBarAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<string> | string; // Bidirectional cell binding
+  "value"?: string; // Plain string value (use $value for cells)
+  "position"?: "bottom" | "top";
+  "variant"?: "default" | "inset";
+  "oncf-change"?: EventHandler<{ value: string; oldValue: string }>;
+}
+
+interface CFTabBarItemAttributes<T> extends CFHTMLAttributes<T> {
+  "value"?: string;
+  "label"?: string;
+  "disabled"?: boolean;
 }
 
 // Accordion component attributes
@@ -4937,6 +4954,14 @@ declare global {
       "cf-tab-panel": CFDOM.DetailedHTMLProps<
         CFTabPanelAttributes<CFTabPanelElement>,
         CFTabPanelElement
+      >;
+      "cf-tab-bar": CFDOM.DetailedHTMLProps<
+        CFTabBarAttributes<CFTabBarElement>,
+        CFTabBarElement
+      >;
+      "cf-tab-bar-item": CFDOM.DetailedHTMLProps<
+        CFTabBarItemAttributes<CFTabBarItemElement>,
+        CFTabBarItemElement
       >;
 
       // Accordion components

@@ -78,6 +78,7 @@ export * from "./components/cf-slider/index.ts";
 export * from "./components/cf-switch/index.ts";
 export * from "./components/cf-svg/index.ts";
 export * from "./components/cf-tab/index.ts";
+export * from "./components/cf-tab-bar/index.ts";
 export * from "./components/cf-tab-list/index.ts";
 export * from "./components/cf-tab-panel/index.ts";
 export * from "./components/cf-tabs/index.ts";
