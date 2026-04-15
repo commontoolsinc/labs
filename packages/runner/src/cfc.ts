@@ -1,13 +1,16 @@
-import { JSONSchemaObj } from "@commonfabric/api";
+import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { CellKind, JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
 import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
 import { decodeJsonPointer } from "./link-types.ts";
+export { CFC_ATOM_TYPE, CFC_RUNTIME_SUBJECT, cfcAtom } from "./cfc/atoms.ts";
 
 const logger = getLogger("cfc");
+type IFCAtom = ImmutableJSONValue;
 
 // Mapping from ref url to schema object
 // Any $ref links in these must be self contained or absolute
@@ -16,178 +19,48 @@ const embeddedSchemas: Record<string, JSONSchema> = {
   "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
 };
 
-// I use these strings in other code, so make them available as
-// constants. These are just strings, and real meaning would be
-// up to implementation.
-export const Classification = {
-  Unclassified: "unclassified",
-  Confidential: "confidential",
-  Secret: "secret",
-  TopSecret: "topsecret",
-} as const;
-
-// We'll often work with the transitive closure of this graph.
-// I currently require this to be a DAG, but I could support cycles
-// Technically, this is required to be a join-semilattice.
-const classificationLattice = new Map<string, string[]>([
-  [Classification.Unclassified, []],
-  [Classification.Confidential, [Classification.Unclassified]],
-  [Classification.Secret, [Classification.Confidential]],
-  [Classification.TopSecret, [Classification.Secret]],
-]);
-
-// This class lets me sort with strongly connected components.
-// These are not technically a partial order, since they violate antisymmetry.
-// This uses an implementation of Tarjan's algorithm, which is O(V+E).
-class _TarjanSCC {
-  private index: number = 0;
-  private vertexIndices: number[];
-  private vertexLowLink: number[];
-  private vertexOnStack: boolean[];
-  private stack: number[] = [];
-  private adjacency: number[][];
-  private sorted: number[][];
-  constructor(nodeCount: number, edges: [number, number][]) {
-    // Build an array with each item having the list of nodes that point to it.
-    this.adjacency = Array.from({ length: nodeCount }, () => []);
-    for (const [from, to] of edges) {
-      this.adjacency[from].push(to);
-    }
-    this.sorted = [];
-    this.vertexIndices = new Array(nodeCount);
-    this.vertexLowLink = new Array(nodeCount);
-    this.vertexOnStack = new Array(nodeCount);
-    for (let v = 0; v < nodeCount; v++) {
-      if (this.vertexIndices[v] === undefined) {
-        this.strongConnect(v);
-      }
-    }
-    this.sorted.reverse();
-  }
-
-  // Groups are ordered such that if we have an edge [0,1], we get [[0], [1]]
-  get result() {
-    return this.sorted;
-  }
-
-  private strongConnect(v: number) {
-    this.vertexIndices[v] = this.index;
-    this.vertexLowLink[v] = this.index;
-    this.index = this.index + 1;
-    this.stack.push(v);
-    this.vertexOnStack[v] = true;
-
-    for (const w of this.adjacency[v]) {
-      if (this.vertexIndices[w] === undefined) {
-        // vertex w not yet visited
-        this.strongConnect(w);
-        this.vertexLowLink[v] = this.vertexLowLink[v] < this.vertexLowLink[w]
-          ? this.vertexLowLink[v]
-          : this.vertexLowLink[w];
-      } else if (this.vertexOnStack[w]) {
-        // vertex w is on the stack, so it's in our SCC
-        this.vertexLowLink[v] = this.vertexLowLink[v] < this.vertexLowLink[w]
-          ? this.vertexLowLink[v]
-          : this.vertexLowLink[w];
-      }
-    }
-
-    if (this.vertexLowLink[v] === this.vertexIndices[v]) {
-      // this is a new SCC
-      let w;
-      const scc = [];
-      do {
-        w = this.stack.pop()!;
-        this.vertexOnStack[w] = false;
-        scc.push(w);
-      } while (w != v);
-      this.sorted.push(scc);
-    }
-  }
-}
-
-// Based on the edges, returns the indexes of the nodes in topological order.
-// The result is sorted so the node's children are after it in the list
-// This uses an implementation of Kahn's algorithm, which is O(V+E).
-// It assumes the graph is a DAG (Directed Acyclic Graph)
-// We implement topological sort in other places, but this is a simpler version
-class KahnTopologicalSort {
-  private sorted: number[];
-  constructor(nodeCount: number, edges: [number, number][]) {
-    // Build an array with each item having the list of nodes that poitnt to it.
-    const adjacency: number[][] = Array.from({ length: nodeCount }, () => []);
-    for (const [from, to] of edges) {
-      adjacency[from].push(to);
-    }
-
-    const indegree = Array(nodeCount).fill(0); // count of incoming edges
-    for (let i = 0; i < nodeCount; i++) {
-      for (const j of adjacency[i]) {
-        indegree[j]++;
-      }
-    }
-
-    const queue: number[] = [];
-    for (let i = 0; i < nodeCount; i++) {
-      if (indegree[i] === 0) queue.push(i);
-    }
-
-    const result = [];
-    while (queue.length > 0) {
-      const node = queue.shift()!;
-      result.push(node);
-
-      for (const neighbor of adjacency[node!]) {
-        indegree[neighbor]--;
-        if (indegree[neighbor] === 0) {
-          queue.push(neighbor);
-        }
-      }
-    }
-
-    if (result.length !== nodeCount) {
-      throw new Error("Graph is not a DAG (cycle detected)");
-    }
-
-    this.sorted = result;
-  }
-
-  // Items are ordered such that if we have an edge [0,1], we get [0, 1]
-  get result() {
-    return this.sorted;
-  }
-}
-
 // Class for handling cfc rules.
-// Right now, we just drop this constructor all over, but eventually
-// we'll get our lattice from the user, so we should be constructing
-// these objects where we have access to the user's preferences.
-// These preferences are likely per user/space combination.
+// The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
-  private reachable: Map<string, Set<string>>;
-  constructor(
-    private lattice: Map<string, string[]> = classificationLattice,
-  ) {
-    this.reachable = ContextualFlowControl.reachableNodes(lattice);
+  static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
+    const unique: IFCAtom[] = [];
+    for (const atom of atoms) {
+      if (!unique.some((existing) => deepEqual(existing, atom))) {
+        unique.push(atom as IFCAtom);
+      }
+    }
+    return unique;
+  }
+
+  static addIfcAtoms(
+    joined: Set<unknown>,
+    atoms: readonly IFCAtom[] | undefined,
+  ): void {
+    if (!Array.isArray(atoms)) {
+      return;
+    }
+    for (const atom of atoms) {
+      joined.add(atom);
+    }
   }
 
   /**
-   * Collect any required classification tags required by the schema.
+   * Collect any required confidentiality atoms required by the schema.
    * This could be made more conservative by combining the schema with the object
-   * If our object lacks any of the fields that would have a higher classification,
+   * If our object lacks any of the fields that would add confidentiality,
    * we don't need to consider them.
    *
-   * @param joined set to which we will add any classification tags
+   * @param joined set to which we will add any confidentiality atoms
    * @param schema the schema with tags
    * @param fullSchema the full schema with any $defs needed
    * @param cycleTracker used to avoid reference cycles
    */
   static joinSchema(
-    joined: Set<string>,
+    joined: Set<unknown>,
     schema: JSONSchema,
     fullSchema: JSONSchema = schema,
     cycleTracker: CycleTracker<string> = new CycleTracker<string>(true),
-  ): Set<string> {
+  ): Set<unknown> {
     if (typeof schema === "boolean") {
       return joined;
     }
@@ -200,11 +73,7 @@ export class ContextualFlowControl {
       return joined;
     }
     if (schema.ifc) {
-      if (schema.ifc?.classification) {
-        for (const classification of schema.ifc.classification) {
-          joined.add(classification);
-        }
-      }
+      ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
     if (schema.properties && typeof schema.properties === "object") {
       for (const value of Object.values(schema.properties)) {
@@ -254,37 +123,33 @@ export class ContextualFlowControl {
     return joined;
   }
 
-  // Get the least upper bound classification from the schema.
+  // Get the joined confidentiality atoms from the schema.
   public lubSchema(
     schema: JSONSchema,
-    extraClassifications?: Set<string>,
-  ): string | undefined {
-    const classifications = (extraClassifications !== undefined)
-      ? new Set<string>(extraClassifications)
-      : new Set<string>();
-    ContextualFlowControl.joinSchema(classifications, schema);
+    extraConfidentiality?: Set<unknown>,
+  ): IFCAtom[] | undefined {
+    const confidentiality = (extraConfidentiality !== undefined)
+      ? new Set<unknown>(extraConfidentiality)
+      : new Set<unknown>();
+    ContextualFlowControl.joinSchema(confidentiality, schema);
 
-    return (classifications.size === 0) ? undefined : this.lub(classifications);
+    return (confidentiality.size === 0) ? undefined : this.lub(confidentiality);
   }
 
-  public lub(joined: Set<string>): string {
-    return ContextualFlowControl.findLub(this.lattice, joined);
+  public lub(joined: Set<unknown>): IFCAtom[] {
+    return ContextualFlowControl.uniqueAtoms(joined);
   }
 
-  // Return a copy of the schema with the least upper bound classifcation.
+  // Return a copy of the schema with joined confidentiality atoms.
   public schemaWithLub(
     schema: JSONSchema,
-    classification: string,
+    confidentiality: readonly unknown[],
   ): JSONSchema {
-    const joined = new Set<string>([classification]);
+    const joined = new Set<unknown>(confidentiality);
     if (isRecord(schema) && schema.ifc !== undefined) {
-      if (schema.ifc.classification !== undefined) {
-        for (const item of schema.ifc.classification) {
-          joined.add(item);
-        }
-      }
+      ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
-    // If we have no classification, we can leave the schema
+    // If we have no confidentiality, we can leave the schema
     if (joined.size === 0) {
       return schema;
     }
@@ -293,7 +158,7 @@ export class ContextualFlowControl {
     const schemaObj = ContextualFlowControl.toSchemaObj(schema);
     const restrictedSchema = {
       ...schemaObj,
-      ifc: { classification: [this.lub(joined)] },
+      ifc: { ...schemaObj.ifc, confidentiality: this.lub(joined) },
     };
     return restrictedSchema;
   }
@@ -309,49 +174,6 @@ export class ContextualFlowControl {
       : schema === false
       ? { not: true }
       : schema;
-  }
-
-  // Compute the transitive closure, which is the set of all nodes reachable from each node.
-  // May want to consider Warshall algorithm for this.
-  static reachableNodes<T>(graph: Map<T, T[]>): Map<T, Set<T>> {
-    const sortedNodes = ContextualFlowControl.sortedGraphNodes(graph);
-    const reachable = new Map<T, Set<T>>();
-    for (const [from, tos] of sortedNodes.reverse()) {
-      const reachableFrom = new Set<T>();
-      for (const to of tos) {
-        // Add the elements in tos to reachableFrom
-        for (const tutu of reachable.get(to)!) {
-          reachableFrom.add(tutu);
-        }
-        reachableFrom.add(to);
-      }
-      reachableFrom.add(from);
-      reachable.set(from, reachableFrom);
-    }
-    return reachable;
-  }
-
-  // Return the Least Upper Bound for the set of classification values
-  // This could be almost certainly be more efficient.
-  static findLub<T>(graph: Map<T, T[]>, joined: Set<T>): T {
-    const sortedNodes = ContextualFlowControl.sortedGraphNodes(graph);
-    const reachable = new Map<T, Set<T>>();
-    for (const [from, tos] of sortedNodes.reverse()) {
-      const reachableFrom = new Set<T>();
-      for (const to of tos) {
-        // Add the elements in tos to reachableFrom
-        for (const tutu of reachable.get(to)!) {
-          reachableFrom.add(tutu);
-        }
-        reachableFrom.add(to);
-      }
-      reachableFrom.add(from);
-      if (reachableFrom.isSupersetOf(joined)) {
-        return from;
-      }
-      reachable.set(from, reachableFrom);
-    }
-    throw Error("Improper lattice");
   }
 
   /**
@@ -573,12 +395,12 @@ export class ContextualFlowControl {
   getSchemaAtPath(
     schema: JSONSchema | undefined,
     path: string[],
-    extraClassifications?: Set<string>,
+    extraConfidentiality?: Set<unknown>,
   ): JSONSchema | undefined {
     if (schema === undefined) {
       return undefined;
     }
-    const result = this.schemaAtPath(schema, path, extraClassifications);
+    const result = this.schemaAtPath(schema, path, extraConfidentiality);
     return result === false ? undefined : result === true ? {} : result;
   }
 
@@ -612,7 +434,7 @@ export class ContextualFlowControl {
   schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
-    extraClassifications?: Set<string>,
+    extraConfidentiality?: Set<unknown>,
     defaultEmptyProperties: JSONSchema = true,
     defaultMissingProperty: JSONSchema = true,
   ): JSONSchema {
@@ -622,7 +444,7 @@ export class ContextualFlowControl {
       schema,
       path,
       defs,
-      extraClassifications,
+      extraConfidentiality,
       defaultEmptyProperties,
       defaultMissingProperty,
     );
@@ -632,13 +454,13 @@ export class ContextualFlowControl {
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
-    extraClassifications: Set<string> | undefined,
+    extraConfidentiality: Set<unknown> | undefined,
     defaultEmptyProperties: JSONSchema,
     defaultMissingProperty: JSONSchema,
   ): JSONSchema {
-    const joined = (extraClassifications !== undefined)
-      ? new Set<string>(extraClassifications)
-      : new Set<string>();
+    const joined = (extraConfidentiality !== undefined)
+      ? new Set<unknown>(extraConfidentiality)
+      : new Set<unknown>();
     let cursor = schema;
     for (
       const [index, part] of path.map((value, index) =>
@@ -669,7 +491,7 @@ export class ContextualFlowControl {
             entry,
             path.slice(index),
             defs,
-            extraClassifications,
+            extraConfidentiality,
             defaultEmptyProperties,
             defaultMissingProperty,
           );
@@ -710,10 +532,11 @@ export class ContextualFlowControl {
         // wildcard schema -- equivalent to true, but we can add ifc tags
         break;
       } else if (cursor.type === "object") {
-        if (cursor.ifc !== undefined && cursor.ifc.classification) {
-          for (const classification of cursor.ifc.classification) {
-            joined.add(classification);
-          }
+        if (cursor.ifc !== undefined) {
+          ContextualFlowControl.addIfcAtoms(
+            joined,
+            cursor.ifc.confidentiality,
+          );
         }
         if (cursor.properties && part in cursor.properties) {
           const cursorObj = cursor.properties as Record<string, JSONSchema>;
@@ -721,13 +544,11 @@ export class ContextualFlowControl {
           if (typeof cursor === "boolean") {
             break;
           } else {
-            if (
-              cursor.ifc !== undefined &&
-              cursor.ifc.classification !== undefined
-            ) {
-              for (const classification of cursor.ifc.classification) {
-                joined.add(classification);
-              }
+            if (cursor.ifc !== undefined) {
+              ContextualFlowControl.addIfcAtoms(
+                joined,
+                cursor.ifc.confidentiality,
+              );
             }
           }
         } else if (cursor.additionalProperties !== undefined) {
@@ -764,14 +585,12 @@ export class ContextualFlowControl {
         // we can only descend into objects and arrays or unknown
         return false;
       }
-    }
-    if (
-      isRecord(cursor) && cursor.ifc !== undefined &&
-      cursor.ifc?.classification !== undefined
-    ) {
-      for (const classification of cursor.ifc.classification!) {
-        joined.add(classification);
+      if (isRecord(cursor) && cursor.$defs) {
+        defs = cursor.$defs;
       }
+    }
+    if (isRecord(cursor) && cursor.ifc !== undefined) {
+      ContextualFlowControl.addIfcAtoms(joined, cursor.ifc.confidentiality);
     }
     if (typeof cursor === "boolean") {
       if (!cursor) {
@@ -781,40 +600,13 @@ export class ContextualFlowControl {
       }
       cursor = {}; // change to use the empty object schema, so we can attach ifc.
     }
-    // If we've encountered any classification tags while walking down the schema, we need to add them to the returned object
+    // If we've encountered any confidentiality atoms while walking down the
+    // schema, we need to add them to the returned object.
     const ifc = (joined.size !== 0)
-      ? { ...cursor.ifc, classification: [this.lub(joined)] }
+      ? { ...cursor.ifc, confidentiality: this.lub(joined) }
       : cursor.ifc;
     // Merge any ifc and defs
     return { ...cursor, ...(ifc && { ifc }), ...(defs && { $defs: defs }) };
-  }
-
-  private static sortedGraphNodes<T>(graph: Map<T, T[]>) {
-    const [nodeCount, edges] = ContextualFlowControl.graphToEdges(graph);
-    const sortHelper = new KahnTopologicalSort(nodeCount, edges);
-    // We haven't changed the graph, so the index in the entries matches the nodeId used
-    const entries = Array.from(graph.entries());
-    return sortHelper.result.map((index) => entries[index]);
-  }
-
-  private static graphToEdges<T>(
-    graph: Map<T, T[]>,
-  ): [number, [number, number][]] {
-    const nodeIds: Map<T, number> = new Map();
-    let nodeCount = 0;
-    // First, assign each key an id
-    for (const [from, _tos] of graph.entries()) {
-      nodeIds.set(from, nodeCount++);
-    }
-    // Second pass to build the edges, now that we have ids
-    const edges: [number, number][] = [];
-    for (const [from, tos] of graph.entries()) {
-      const fromIndex = nodeIds.get(from);
-      for (const to of tos) {
-        edges.push([fromIndex!, nodeIds.get(to)!]);
-      }
-    }
-    return [nodeCount, edges];
   }
 
   // Check to see if the specified schema is one of the special values meaning

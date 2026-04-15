@@ -15,10 +15,12 @@ const staticCache = new StaticCacheFS();
 export const commonfabricTypes = await staticCache.getText(
   "types/commonfabric.d.ts",
 );
+export const cfcTypes = await staticCache.getText("types/cfc.ts");
 
 /**
  * Types in the format expected by test utilities.
  */
 export const COMMONFABRIC_TYPES: Record<string, string> = {
   "commonfabric.d.ts": commonfabricTypes,
+  "cfc.ts": cfcTypes,
 };

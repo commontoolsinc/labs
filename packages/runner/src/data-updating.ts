@@ -525,7 +525,7 @@ export function normalizeAndDiff(
         : undefined;
       // We have to cast these, since the type could be changed to another value
       const childSchema = (lub !== undefined)
-        ? { type: "number", ifc: { classification: [lub] } } as JSONSchema
+        ? { type: "number", ifc: { confidentiality: lub } } as JSONSchema
         : { type: "number" } as JSONSchema;
       changes.push({
         location: {
@@ -775,6 +775,8 @@ export function applyChangeSet(
     return;
   }
   for (const change of changes) {
+    // `diffAndUpdate()` establishes attempted-target coverage before we get
+    // here, so these direct writes preserve the phase-1 `potentialWrites` view.
     tx.writeValueOrThrow(change.location, change.value);
   }
 }

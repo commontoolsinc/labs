@@ -13,13 +13,15 @@ import {
 class MockEvent {
   type: string;
   target: unknown;
+  isTrusted: boolean;
 
   constructor(
     type: string,
-    init?: { target?: unknown },
+    init?: { target?: unknown; isTrusted?: boolean },
   ) {
     this.type = type;
     this.target = init?.target;
+    this.isTrusted = init?.isTrusted ?? false;
   }
 }
 
@@ -170,6 +172,52 @@ Deno.test("events - serializeEvent", async (t) => {
     const event = new MockEvent("click") as unknown as Event;
     const serialized = serializeEvent(event);
     assertEquals(serialized.type, "click");
+  });
+
+  await t.step("captures trusted provenance", () => {
+    const event = new MockEvent("click", {
+      isTrusted: true,
+    }) as unknown as Event;
+    const serialized = serializeEvent(event);
+    assertEquals(serialized.provenance, {
+      origin: "dom",
+      trusted: true,
+    });
+  });
+
+  await t.step("captures data-ui markers from composed event paths", () => {
+    const event = new MockEvent("click", {
+      isTrusted: true,
+      target: { dataset: { ordinaryHandlerData: "preserved" } },
+    }) as MockEvent & { composedPath: () => unknown[] };
+    event.composedPath = () => [
+      { dataset: { cfButton: "" } },
+      { dataset: { uiAction: "TrustedSaveTitle" } },
+      {
+        dataset: {
+          uiPattern: "TrustedSaveSurface",
+          uiEventIntegrity: "TrustedSaveSurface",
+        },
+      },
+      event.target,
+    ];
+
+    const serialized = serializeEvent(event as unknown as Event);
+
+    assertEquals(serialized.target?.dataset, {
+      ordinaryHandlerData: "preserved",
+    });
+    assertEquals(serialized.provenance, {
+      origin: "dom",
+      trusted: true,
+      ui: {
+        pattern: "TrustedSaveSurface",
+        eventIntegrity: ["TrustedSaveSurface"],
+        uiContractDataset: {
+          uiAction: "TrustedSaveTitle",
+        },
+      },
+    });
   });
 
   await t.step("serializes keyboard event properties", () => {

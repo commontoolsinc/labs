@@ -10,6 +10,8 @@ import {
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
@@ -57,12 +59,18 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
   processDefaultValue,
   resolveSchema,
+  schemaHasIfc,
   validateAndTransform,
 } from "./schema.ts";
+import {
+  readStoredCfcMetadata,
+  storedCfcMetadataAppliesToPath,
+} from "./cfc/metadata.ts";
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import {
@@ -93,6 +101,8 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
+import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 ensureNotRenderThread();
@@ -110,6 +120,77 @@ let flatMapFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
+
+const recordSchemaWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void => {
+  const resolvedSchema = resolveSchema(schema) ??
+    storedSchemaForWritePolicyInput(tx, link);
+  if (resolvedSchema === undefined) {
+    return;
+  }
+  const schemaAndHash = internSchema(
+    toDeepFrozenSchema(resolvedSchema, true),
+    true,
+  );
+  tx.recordCfcWritePolicyInput({
+    kind: "schema",
+    target: {
+      space: link.space,
+      id: link.id,
+      type: link.type,
+      path: [...link.path],
+    },
+    schemaHash: schemaAndHash.hashString,
+    schema: schemaAndHash.schema,
+  });
+};
+
+const storedSchemaForWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): JSONSchema | undefined => {
+  const metadata = readStoredCfcMetadata(tx, link);
+  if (metadata === undefined) {
+    return undefined;
+  }
+  const stored = tx.readOrThrow({
+    space: link.space,
+    id: `cid:${metadata.schemaHash}` as URI,
+    type: "application/json",
+    path: [],
+  }, {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  });
+  if (!isRecord(stored) || stored.value === undefined) {
+    return undefined;
+  }
+  return new ContextualFlowControl().getSchemaAtPath(
+    stored.value as JSONSchema,
+    [...link.path],
+  );
+};
+
+const recordRelevantSchemaWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void => {
+  const resolvedSchema = resolveSchema(schema);
+  const cfcRelevant = schemaHasIfc(resolvedSchema) ||
+    storedCfcMetadataAppliesToPath(tx, link);
+  if (!cfcRelevant) {
+    return;
+  }
+  tx.markCfcRelevant(`schema-ifc-write:${link.id}`);
+  recordSchemaWritePolicyInput(
+    tx,
+    link,
+    schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+  );
+};
 
 /**
  * Module augmentation for runtime-specific cell methods.
@@ -703,6 +784,12 @@ export class CellImpl<T extends FabricValue>
 
   set(
     newValue: AnyCellWrapping<T> | T,
+    /**
+     * Internal-only commit callback. This runs after this transaction's final
+     * commit result, including failure, so it must remain non-effectful. Use
+     * the post-commit outbox for external side effects that must happen only
+     * after success.
+     */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
@@ -715,6 +802,7 @@ export class CellImpl<T extends FabricValue>
     if (this.isStream(resolvedToValueLink)) {
       // Stream behavior
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
+      propagateRendererTrustedEvent(newValue, event);
 
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
@@ -744,8 +832,13 @@ export class CellImpl<T extends FabricValue>
 
       // Looks for arrays and makes sure each object gets its own doc.
       const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
+      recordRelevantSchemaWritePolicyInput(
+        this.tx,
+        resolvedToValueLink,
+        resolvedToValueLink.schema ?? this.schema,
+      );
 
-      // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
+      // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       diffAndUpdate(
         this.runtime,
         this.tx,
@@ -754,9 +847,15 @@ export class CellImpl<T extends FabricValue>
         this._frame?.cause,
       );
 
-      // Register commit callback if provided
+      // Register commit callback if provided.
       if (onCommit) {
-        this.tx.addCommitCallback(onCommit);
+        this.tx.addCommitCallback((committedTx) => {
+          try {
+            onCommit(committedTx);
+          } catch (error) {
+            console.error("Error in cell onCommit callback:", error);
+          }
+        });
       }
     }
 
@@ -766,10 +865,22 @@ export class CellImpl<T extends FabricValue>
   send(
     ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
+        /**
+         * Internal-only commit callback. This runs after the final commit
+         * result, including failure, so it must remain non-effectful. Use the
+         * post-commit outbox for external side effects that must happen only
+         * after success.
+         */
         (tx: IExtendedStorageTransaction) => void,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
+        /**
+         * Internal-only commit callback. This runs after the final commit
+         * result, including failure, so it must remain non-effectful. Use the
+         * post-commit outbox for external side effects that must happen only
+         * after success.
+         */
         (tx: IExtendedStorageTransaction) => void,
       ]
   ): void {
@@ -799,6 +910,11 @@ export class CellImpl<T extends FabricValue>
 
     // Get current value, following aliases and references
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
     // If there's no current value, initialize based on schema, even if there is
@@ -825,6 +941,8 @@ export class CellImpl<T extends FabricValue>
         );
       }
 
+      // This initialization write only occurs after the read above proved the
+      // value is absent, so no-op attempted-target coverage is not relevant.
       this.tx.writeValueOrThrow(resolvedLink, {});
     }
 
@@ -853,6 +971,11 @@ export class CellImpl<T extends FabricValue>
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
     const cause = this._frame?.cause;
 
@@ -1241,6 +1364,14 @@ export class CellImpl<T extends FabricValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
+    // Raw writes bypass diff-based attempted-target capture. Same-value direct
+    // writes through this internal path are therefore outside phase-1 CFC
+    // attempted-target coverage unless a caller establishes it separately.
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      this.link,
+      this.link.schema ?? this.schema,
+    );
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
@@ -1271,6 +1402,9 @@ export class CellImpl<T extends FabricValue>
     if (!this.synced) this.sync(); // No await, just kicking this off
     let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
       { ...this.link, path: ["source"] },
+      {
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+      },
     ) as string | undefined;
     if (!sourceCellId) return undefined;
     if (isRecord(sourceCellId)) {
@@ -1304,6 +1438,7 @@ export class CellImpl<T extends FabricValue>
     if (sourceLink.path.length > 0) {
       throw new Error("Source cell must have empty path for now");
     }
+    // System-owned provenance metadata, not user-surface value data.
     this.tx.writeOrThrow(
       { ...this.link, path: ["source"] },
       // TODO(@ubik2): Transition source links to sigil links?
@@ -1491,14 +1626,17 @@ export class CellImpl<T extends FabricValue>
         implementation: "map",
       });
     }
-
-    // Use the cell directly as an OpaqueRef (since cells are now also OpaqueRefs)
-    return mapFactory({
+    const result = mapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: pattern(
         ({ element, index, array }: Opaque<any>) => fn(element, index, array),
       ),
     });
+    const schema = flowPrecisionSchemaForBuiltin("map");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1518,11 +1656,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return mapFactory({
+    const result = mapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    const schema = flowPrecisionSchemaForBuiltin("map");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1594,12 +1737,17 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return filterFactory({
+    const result = filterFactory({
       list: this as unknown as OpaqueRef<T>,
       op: pattern(
         ({ element, index, array }: Opaque<any>) => fn(element, index, array),
       ),
     });
+    const schema = flowPrecisionSchemaForBuiltin("filter");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1618,11 +1766,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return filterFactory({
+    const result = filterFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    const schema = flowPrecisionSchemaForBuiltin("filter");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1644,12 +1797,17 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return flatMapFactory({
+    const result = flatMapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: pattern(
         ({ element, index, array }: Opaque<any>) => fn(element, index, array),
       ),
     });
+    const schema = flowPrecisionSchemaForBuiltin("flatMap");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   /**
@@ -1668,11 +1826,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    return flatMapFactory({
+    const result = flatMapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    const schema = flowPrecisionSchemaForBuiltin("flatMap");
+    if (schema !== undefined) {
+      result.setSchema(schema);
+    }
+    return result;
   }
 
   toJSON(): SigilLink | null {
@@ -1737,6 +1900,7 @@ function subscribeToReferencedDocs<T>(
     // no async await here, but that also means no retry. TODO(seefeld): Should
     // we add a retry? So far all sinks are read-only, so they get re-triggered
     // on changes already.
+    runtime.prepareTxForCommit(extraTx);
     extraTx.commit();
   };
   // Name the action for debugging
@@ -1757,6 +1921,7 @@ function subscribeToReferencedDocs<T>(
   // Technically unnecessary since we don't expect/allow callbacks to sink to
   // write to other cells, and we retry by design anyway below when read data
   // changed. But ideally we enforce read-only as well.
+  runtime.prepareTxForCommit(tx);
   tx.commit();
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)

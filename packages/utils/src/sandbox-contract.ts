@@ -39,6 +39,8 @@ export function isTrustedDataHelper(
 }
 
 export const FUNCTION_HARDENING_HELPER_NAME = "__cfHardenFn";
+export const BINDING_IDENTITY_HELPER_NAME = "__cfBindVerifiedBinding";
+export const VERIFIED_BINDING_METADATA_FIELD = "__cfVerifiedBindingIdentity";
 
 export const RESERVED_FACTORY_BINDINGS = [
   ...SHADOWED_FACTORY_BINDINGS,
@@ -61,6 +63,30 @@ export function createFunctionHardeningHelperSource(
     "    Object.freeze(prototype);",
     "  }",
     "  return fn;",
+    "}",
+  ].join("\n");
+}
+
+export function createBindingIdentityHelperSource(
+  helperName = BINDING_IDENTITY_HELPER_NAME,
+  metadataField = VERIFIED_BINDING_METADATA_FIELD,
+  options: { typedParameter?: boolean } = {},
+): string {
+  const parameter = options.typedParameter ? "value: any" : "value";
+  const metadataParameter = options.typedParameter
+    ? "metadata: any"
+    : "metadata";
+  return [
+    `function ${helperName}(${parameter}, ${metadataParameter}) {`,
+    '  if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {',
+    "    Object.defineProperty(value, " +
+    JSON.stringify(metadataField) +
+    ", {",
+    "      value: metadata,",
+    "      configurable: true,",
+    "    });",
+    "  }",
+    "  return value;",
     "}",
   ].join("\n");
 }

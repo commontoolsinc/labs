@@ -2,14 +2,51 @@ import {
   type HFunction,
   type JSXElement,
   type RenderNode,
+  type UiActionProps,
+  type UiDisclosureProps,
+  type UiPromptSlotProps,
   type VNode,
 } from "@commonfabric/api";
-import { isCell, isCellResult } from "@commonfabric/runner";
+import { getCellOrThrow, isCell, isCellResult } from "@commonfabric/runner";
 
 /**
  * Fragment element name used for JSX fragments.
  */
 const FRAGMENT_ELEMENT = "cf-fragment";
+
+type LinkableCell = {
+  getAsLink(options?: unknown): unknown;
+};
+
+const isDeferredLinkContextError = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.startsWith("Cannot create cell link - ");
+
+function bindingTargetLink(value: unknown): unknown {
+  if (isCell(value)) {
+    try {
+      return (value as unknown as LinkableCell).getAsLink({
+        includeSchema: true,
+        keepAsCell: true,
+      });
+    } catch (error) {
+      if (isDeferredLinkContextError(error)) return value;
+      throw error;
+    }
+  }
+  if (isCellResult(value)) {
+    try {
+      return (getCellOrThrow(value) as unknown as LinkableCell).getAsLink({
+        includeSchema: true,
+        keepAsCell: true,
+      });
+    } catch (error) {
+      if (isDeferredLinkContextError(error)) return value;
+      throw error;
+    }
+  }
+  return value;
+}
 
 /**
  * JSX factory function for creating virtual DOM nodes.
@@ -52,6 +89,7 @@ export const h: HFunction = Object.assign(
               "Use pattern parameter or create a cell using Writable.of()",
           );
         }
+        props![key] = bindingTargetLink(value);
       });
       return { type: "vnode", name, props, children: children.flat() };
     }
@@ -62,3 +100,64 @@ export const h: HFunction = Object.assign(
     },
   },
 ) as HFunction;
+
+function toChildArray(
+  children: RenderNode | RenderNode[] | undefined,
+): RenderNode[] {
+  if (children === undefined || children === null) {
+    return [];
+  }
+  return Array.isArray(children) ? children.flat() : [children];
+}
+
+function createUiHelper<
+  Props extends {
+    readonly as?: string;
+    readonly children?: RenderNode;
+  },
+>(
+  defaultTag: string,
+  dataAttrs: readonly [string, string][],
+  helperOnlyProps: readonly string[],
+) {
+  return (props: Props): JSXElement => {
+    const { as, children, ...rest } = props as Props & Record<string, unknown>;
+    const attrs: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(rest)) {
+      if (!helperOnlyProps.includes(key)) {
+        attrs[key] = value;
+      }
+    }
+
+    for (const [prop, attr] of dataAttrs) {
+      const value = (rest as Record<string, unknown>)[prop];
+      if (value !== undefined) {
+        attrs[attr] = value;
+      }
+    }
+
+    return h(as ?? defaultTag, attrs, ...toChildArray(children));
+  };
+}
+
+export const UiAction = createUiHelper(
+  "ct-button",
+  [["action", "data-ui-action"]],
+  ["as", "action"],
+) as (props: UiActionProps) => JSXElement;
+
+export const UiPromptSlot = createUiHelper(
+  "ct-textarea",
+  [
+    ["surface", "data-ui-surface"],
+    ["role", "data-ui-role"],
+  ],
+  ["as", "surface", "role"],
+) as (props: UiPromptSlotProps) => JSXElement;
+
+export const UiDisclosure = createUiHelper(
+  "ct-card",
+  [["kind", "data-ui-disclosure-kind"]],
+  ["as", "kind"],
+) as (props: UiDisclosureProps) => JSXElement;

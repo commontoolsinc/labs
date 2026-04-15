@@ -1,0 +1,243 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import {
+  authorshipStateForLabel,
+  CFCFCAuthorship,
+  integrityAtomMatchesAuthor,
+} from "./cf-cfc-authorship.ts";
+
+describe("CFCFCAuthorship", () => {
+  it("registers the custom element", () => {
+    expect(customElements.get("cf-cfc-authorship")).toBe(CFCFCAuthorship);
+  });
+
+  it("verifies object-shaped authored-by integrity atoms", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.author = "alice";
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+
+    await element.refreshLabel();
+
+    expect(element.authorshipState).toBe("verified");
+  });
+
+  it("fails closed when the claimed author does not match integrity", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.author = "bob";
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+
+    await element.refreshLabel();
+
+    expect(element.authorshipState).toBe("unverified");
+  });
+
+  it("does not verify missing label data", async () => {
+    const element = new CFCFCAuthorship();
+    element.author = "alice";
+    element.value = {
+      getCfcLabel: () => Promise.resolve(undefined),
+    };
+
+    await element.refreshLabel();
+
+    expect(element.authorshipState).toBe("unknown");
+  });
+
+  it("falls back to the resolved cell label for bound prop cells", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.author = "alice";
+    element.value = {
+      getCfcLabel: () => Promise.resolve(undefined),
+      resolveAsCell: () =>
+        Promise.resolve({
+          getCfcLabel: () => Promise.resolve(cfcLabel),
+        }),
+    };
+
+    await element.refreshLabel();
+
+    expect(element.authorshipState).toBe("verified");
+  });
+
+  it("verifies object-shaped bound author claims by id", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+    element.author = {
+      get: () => ({ id: "alice", name: "Alice Nguyen" }),
+      sync: () => Promise.resolve({ id: "alice", name: "Alice Nguyen" }),
+      subscribe: () => () => {},
+    };
+
+    await element.refreshLabel();
+    await element.refreshAuthorClaim();
+
+    expect(element.authorshipState).toBe("verified");
+  });
+
+  it("fails closed when a bound author claim cell changes away from the integrity subject", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      }],
+    };
+    let author = { id: "alice", name: "Alice Nguyen" };
+    let notify: ((value: unknown) => void) | undefined;
+    const element = new CFCFCAuthorship();
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+    element.author = {
+      get: () => author,
+      sync: () => Promise.resolve(author),
+      subscribe: (callback: (value: unknown) => void) => {
+        notify = callback;
+        callback(author);
+        return () => {};
+      },
+    };
+
+    await element.refreshLabel();
+    await element.refreshAuthorClaim();
+    expect(element.authorshipState).toBe("verified");
+
+    author = { id: "bob", name: "Bob Patel" };
+    notify?.(author);
+
+    expect(element.authorshipState).toBe("unverified");
+  });
+});
+
+describe("CFCFCAuthorship integrity matching", () => {
+  it("matches authored-by object atoms by subject", () => {
+    expect(integrityAtomMatchesAuthor(
+      {
+        kind: "authored-by",
+        subject: "alice",
+      },
+      "alice",
+      "authored-by",
+    )).toBe(true);
+    expect(integrityAtomMatchesAuthor(
+      {
+        kind: "authored-by",
+        subject: "alice",
+      },
+      "bob",
+      "authored-by",
+    )).toBe(false);
+  });
+
+  it("matches object author claims by id without trusting display names", () => {
+    expect(integrityAtomMatchesAuthor(
+      {
+        kind: "authored-by",
+        subject: "alice",
+      },
+      {
+        id: "alice",
+        name: "Mallory-provided display text",
+      },
+      "authored-by",
+    )).toBe(true);
+    expect(integrityAtomMatchesAuthor(
+      {
+        kind: "authored-by",
+        subject: "alice",
+      },
+      {
+        id: "bob",
+        name: "Alice Nguyen",
+      },
+      "authored-by",
+    )).toBe(false);
+  });
+
+  it("matches canonical string atoms without treating arbitrary author ids as proof", () => {
+    expect(integrityAtomMatchesAuthor(
+      "authored-by:alice",
+      "alice",
+      "authored-by",
+    )).toBe(true);
+    expect(integrityAtomMatchesAuthor(
+      "alice",
+      "alice",
+      "authored-by",
+    )).toBe(false);
+  });
+
+  it("derives state from the integrity label view", () => {
+    expect(authorshipStateForLabel(
+      {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            integrity: [{ kind: "authored-by", subject: "alice" }],
+          },
+        }],
+      },
+      "alice",
+      "authored-by",
+    )).toBe("verified");
+
+    expect(authorshipStateForLabel(
+      {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            integrity: [{ kind: "authored-by", subject: "alice" }],
+          },
+        }],
+      },
+      "bob",
+      "authored-by",
+    )).toBe("unverified");
+  });
+});

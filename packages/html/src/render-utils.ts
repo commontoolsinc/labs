@@ -5,6 +5,10 @@ import {
   UI,
   type VNode,
 } from "@commonfabric/runtime-client";
+import {
+  getEventProvenance,
+  getEventTargetDataset,
+} from "./event-provenance.ts";
 
 export type SetPropHandler = <T>(
   target: T,
@@ -236,6 +240,10 @@ const allowListedEventTargetProperties = [
  */
 export function sanitizeEvent(event: Event): object {
   const eventObject: Record<string, unknown> = {};
+  const provenance = getEventProvenance(event, event.target);
+  if (provenance) {
+    eventObject.provenance = provenance;
+  }
   for (const property of allowListedEventProperties) {
     eventObject[property] = event[property as keyof Event];
   }
@@ -255,16 +263,11 @@ export function sanitizeEvent(event: Event): object {
       );
   }
 
-  // Copy dataset as a plain object for serialization
-  if (isRecord(target) && "dataset" in target && isRecord(target.dataset)) {
-    const dataset: Record<string, string> = {};
-    for (const key in target.dataset) {
-      // String() to normalize, just in case
-      dataset[key] = String(target.dataset[key]);
-    }
-    if (Object.keys(dataset).length > 0) {
-      targetObject.dataset = dataset;
-    }
+  // Copy the event target's own dataset as handler-visible data. UI contract
+  // markers from the composed path are serialized separately in provenance.
+  const dataset = getEventTargetDataset(target);
+  if (dataset) {
+    targetObject.dataset = dataset;
   }
 
   if (Object.keys(targetObject).length > 0) eventObject.target = targetObject;

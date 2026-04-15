@@ -13,6 +13,10 @@ export {
   transformCfDirective,
   Transformer,
 } from "./core/mod.ts";
+export {
+  CFC_CANONICAL_ALIAS_NAMES,
+  type CfcCanonicalAliasName,
+} from "./cfc-authoring.ts";
 
 export {
   CastValidationTransformer,

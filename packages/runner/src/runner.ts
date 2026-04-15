@@ -10,6 +10,7 @@ import {
   isModule,
   isPattern,
   isStreamValue,
+  type JSONSchema,
   type Module,
   NAME,
   type NodeFactory,
@@ -57,6 +58,7 @@ import {
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
 } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
@@ -71,6 +73,14 @@ import {
   setRunnableName,
   validateAndCheckOpaqueRefs,
 } from "./runner-utils.ts";
+import {
+  resolveBuiltinImplementationIdentity,
+  resolvePolicyFacingImplementationIdentity,
+} from "./cfc/implementation-identity.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  type ImplementationIdentity,
+} from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 export {
   cellAwareDeepCopy,
@@ -97,6 +107,160 @@ type ProcessCellData<T> = {
   argument?: T;
   internal?: FabricValue;
   resultRef: SigilLink;
+};
+
+const processCellSetupSchema = (pattern: Pattern): JSONSchema => ({
+  type: "object",
+  properties: {
+    [TYPE]: { type: "string" },
+    argument: pattern.argumentSchema ?? true,
+    resultRef: { type: "unknown", asCell: ["cell"] as const },
+    ...(pattern.internalSchema !== undefined
+      ? { internal: pattern.internalSchema }
+      : {}),
+  },
+  required: [TYPE] as const,
+});
+
+const recordOutputSchemaPolicyInputs = (
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  processCell: Cell<any>,
+  outputBinding: unknown,
+  resultSchema: JSONSchema | undefined,
+  schemaPath: readonly string[] = [],
+): void => {
+  if (resultSchema === undefined) {
+    return;
+  }
+
+  if (isWriteRedirectLink(outputBinding)) {
+    const bindingLink = parseLink(outputBinding, processCell);
+    const link = resolveLink(
+      runtime,
+      tx,
+      bindingLink,
+      "writeRedirect",
+    );
+    const schema = schemaPath.length === 0
+      ? resultSchema
+      : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+    if (schema === undefined) {
+      return;
+    }
+    for (const targetLink of [bindingLink, link]) {
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          space: targetLink.space,
+          id: targetLink.id,
+          type: targetLink.type,
+          path: [...targetLink.path],
+        },
+        schema,
+      });
+    }
+    return;
+  }
+
+  if (Array.isArray(outputBinding)) {
+    outputBinding.forEach((child, index) =>
+      recordOutputSchemaPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        child,
+        resultSchema,
+        [...schemaPath, String(index)],
+      )
+    );
+    return;
+  }
+
+  if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
+    for (const [key, child] of Object.entries(outputBinding)) {
+      recordOutputSchemaPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        child,
+        resultSchema,
+        [...schemaPath, key],
+      );
+    }
+  }
+};
+
+const recordSetupProjectionPolicyInputs = (
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  processCell: Cell<any>,
+  resultCell: Cell<any>,
+  resultSchema: JSONSchema | undefined,
+  projection: unknown,
+  schemaPath: readonly string[] = [],
+): void => {
+  if (resultSchema === undefined) {
+    return;
+  }
+
+  const schema = schemaPath.length === 0
+    ? resultSchema
+    : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+  if (schema === undefined) {
+    return;
+  }
+
+  if (isWriteRedirectLink(projection)) {
+    const target = resultCell.getAsNormalizedFullLink();
+    const source = parseLink(projection, processCell);
+    tx.recordCfcWritePolicyInput({
+      kind: "structural-provenance",
+      target: {
+        space: target.space,
+        id: target.id,
+        type: target.type,
+        path: [...target.path, ...schemaPath],
+      },
+      claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+      sources: [{
+        space: source.space,
+        id: source.id,
+        type: source.type,
+        path: [...source.path],
+      }],
+    });
+    return;
+  }
+
+  if (Array.isArray(projection)) {
+    projection.forEach((child, index) =>
+      recordSetupProjectionPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        resultCell,
+        resultSchema,
+        child,
+        [...schemaPath, String(index)],
+      )
+    );
+    return;
+  }
+
+  if (isRecord(projection) && !isCellLink(projection)) {
+    for (const [key, child] of Object.entries(projection)) {
+      recordSetupProjectionPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        resultCell,
+        resultSchema,
+        child,
+        [...schemaPath, key],
+      );
+    }
+  }
 };
 
 type SetupResult<R> = {
@@ -220,6 +384,12 @@ export class Runner {
               ? error.reason
               : new Error(error.message);
           }
+          if (
+            error.name === "StorageTransactionAborted" &&
+            error.message.startsWith("CFC enforcement rejected commit")
+          ) {
+            throw new Error(error.message, { cause: error.reason });
+          }
         }
 
         return resultCell;
@@ -322,11 +492,14 @@ export class Runner {
     resultCell: Cell<R>,
     options: { preserveName: boolean },
   ): void {
+    const writableResultCell = pattern.resultSchema === undefined
+      ? resultCell.withTx(tx)
+      : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       pattern.result as R,
       processCell,
     );
-    const previousResult = resultCell.withTx(tx).getRaw({
+    const previousResult = writableResultCell.getRaw({
       meta: ignoreReadForScheduling,
     });
     if (
@@ -337,7 +510,15 @@ export class Runner {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
     if (!deepEqual(result, previousResult)) {
-      resultCell.withTx(tx).setRawUntyped(
+      recordSetupProjectionPolicyInputs(
+        tx,
+        this.runtime,
+        processCell,
+        resultCell,
+        pattern.resultSchema,
+        result,
+      );
+      writableResultCell.setRawUntyped(
         fabricFromNativeValue(result, false),
       );
     }
@@ -388,21 +569,22 @@ export class Runner {
       nextArgument = mergeObjects<T>(argument as any, defaults);
     }
 
-    processCell.withTx(tx).setRawUntyped(fabricFromNativeValue({
-      ...processCell.getRaw({ meta: ignoreReadForScheduling }),
-      [TYPE]: patternId,
-      resultRef: pattern.resultSchema !== undefined
-        ? resultCell.asSchema(pattern.resultSchema).getAsLink({
-          base: processCell,
-          includeSchema: true,
-          keepAsCell: true,
-        })
-        : resultCell.getAsLink({
-          base: processCell,
-        }),
-      internal,
-      spell: getSpellLink(patternId),
-    }, false));
+    processCell.withTx(tx).asSchema(processCellSetupSchema(pattern))
+      .setRawUntyped(fabricFromNativeValue({
+        ...processCell.getRaw({ meta: ignoreReadForScheduling }),
+        [TYPE]: patternId,
+        resultRef: pattern.resultSchema !== undefined
+          ? resultCell.asSchema(pattern.resultSchema).getAsLink({
+            base: processCell,
+            includeSchema: true,
+            keepAsCell: true,
+          })
+          : resultCell.getAsLink({
+            base: processCell,
+          }),
+        internal,
+        spell: getSpellLink(patternId),
+      }, false));
 
     if (nextArgument) {
       this.updateProcessArgument(tx, processCell, nextArgument);
@@ -610,7 +792,10 @@ export class Runner {
           );
         }
       } finally {
-        if (shouldCommit) actualTx.commit();
+        if (shouldCommit) {
+          this.runtime.prepareTxForCommit(actualTx);
+          actualTx.commit();
+        }
       }
     };
 
@@ -856,6 +1041,52 @@ export class Runner {
     });
   }
 
+  private startAfterSuccessfulCommit<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    givenPattern?: Pattern,
+    options: { doNotUpdateOnPatternChange?: boolean } = {},
+  ): void {
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        return;
+      }
+
+      const startTx = this.runtime.edit();
+      const committedResultCell = this.runtime.getCellFromLink<T>(
+        resultLink,
+        undefined,
+        startTx,
+      );
+      try {
+        this.startWithTx(startTx, committedResultCell, givenPattern, options);
+        this.runtime.prepareTxForCommit(startTx);
+        startTx.commit().then(({ error }) => {
+          if (error) {
+            this.stop(committedResultCell);
+            logger.error(
+              "tx-commit-error",
+              "Error committing deferred start transaction",
+              error,
+            );
+          }
+        }).catch((error) => {
+          this.stop(committedResultCell);
+          logger.error(
+            "tx-commit-error",
+            "Deferred start transaction commit rejected",
+            error,
+          );
+        });
+      } catch (error) {
+        startTx.abort(error);
+        logger.error("runner-start", "Deferred start failed", error);
+        throw error;
+      }
+    });
+  }
+
   /**
    * Run a pattern.
    *
@@ -919,10 +1150,21 @@ export class Runner {
     );
 
     if (needsStart) {
-      this.startWithTx(tx, resultCell, pattern, options);
+      if (
+        tx.tx.immediate === true &&
+        (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+            .deferRunnerStartUntilCommit === true
+      ) {
+        this.startAfterSuccessfulCommit(tx, resultCell, pattern, options);
+      } else {
+        this.startWithTx(tx, resultCell, pattern, options);
+      }
     }
 
-    if (!providedTx) tx.commit();
+    if (!providedTx) {
+      this.runtime.prepareTxForCommit(tx);
+      tx.commit();
+    }
 
     return resultCell;
   }
@@ -985,6 +1227,7 @@ export class Runner {
       if (!givenTx) {
         // Should be unnecessary as the start itself is read-only
         // TODO(seefeld): Enforce this by adding a read-only flag for tx
+        this.runtime.prepareTxForCommit(tx);
         await tx.commit().then(({ error }) => {
           if (error) {
             logger.error(
@@ -1049,6 +1292,9 @@ export class Runner {
       properties: {
         [TYPE]: { type: "string" },
         argument: pattern.argumentSchema ?? true,
+        ...(isPattern(pattern) && pattern.internalSchema !== undefined
+          ? { internal: pattern.internalSchema }
+          : {}),
       },
       required: [TYPE],
     };
@@ -1407,7 +1653,7 @@ export class Runner {
       name?: string;
       sourceLocationSample?: Record<string, unknown>;
     };
-    const name = namedFn.src || fn.name;
+    const name = namedFn.src || fn.name || module.implementationRef;
     if (name && namedFn.sourceLocationSample) {
       sourceLocationLogger.flag("sample", name, true, {
         name,
@@ -1448,6 +1694,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     inHandler: boolean,
     verifiedLoadId?: string,
+    implementationIdentity?: ImplementationIdentity,
   ): Frame {
     return pushFrameFromCause(cause, {
       unsafe_binding: {
@@ -1462,6 +1709,7 @@ export class Runner {
       space: processCell.space,
       tx,
       ...(verifiedLoadId ? { verifiedLoadId } : {}),
+      ...(implementationIdentity ? { implementationIdentity } : {}),
     });
   }
 
@@ -1550,21 +1798,32 @@ export class Runner {
     }
 
     const resultPattern = patternFromFrame(() => result);
-    const resultCell = this.run(
-      tx,
-      resultPattern,
-      undefined,
-      this.runtime.getCell(
-        processCell.space,
-        { resultFor: cause },
-        undefined,
+    const resultCell = this.handlerResultPatternMustStartAfterCommit(
+        resultPattern,
+      )
+      ? this.setupDeferredHandlerResultPattern(
         tx,
-      ),
-    );
+        resultPattern,
+        processCell,
+        cause,
+      )
+      : this.run(
+        tx,
+        resultPattern,
+        undefined,
+        this.runtime.getCell(
+          processCell.space,
+          { resultFor: cause },
+          undefined,
+          tx,
+        ),
+      );
 
     const rawResult = tx.readValueOrThrow(
       resultCell.getAsNormalizedFullLink(),
-      { meta: ignoreReadForScheduling },
+      {
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+      },
     );
     const resultRedirects = findAllWriteRedirectCells(rawResult, processCell);
     const readResultAction: Action = (tx) =>
@@ -1579,6 +1838,12 @@ export class Runner {
       readResultAction,
       { isEffect: true },
     );
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        cancel();
+        this.stop(resultCell);
+      }
+    });
     addCancel(() => {
       cancel();
       this.stop(resultCell);
@@ -1587,8 +1852,39 @@ export class Runner {
     return result;
   }
 
+  private handlerResultPatternMustStartAfterCommit(pattern: Pattern): boolean {
+    return pattern.nodes.some(({ module }) =>
+      module.type === "ref" && module.implementation === "navigateTo"
+    );
+  }
+
+  private setupDeferredHandlerResultPattern(
+    tx: IExtendedStorageTransaction,
+    resultPattern: Pattern,
+    processCell: Cell<any>,
+    cause: Record<string, any>,
+  ): Cell<any> {
+    const resultCell = this.runtime.getCell(
+      processCell.space,
+      { resultFor: cause },
+      undefined,
+      tx,
+    );
+    const resultSetup = this.setupInternal(
+      tx,
+      resultPattern,
+      undefined,
+      resultCell,
+    );
+    if (resultSetup.needsStart) {
+      this.startAfterSuccessfulCommit(tx, resultCell, resultSetup.pattern);
+    }
+    return resultCell;
+  }
+
   private writeJavaScriptActionResult(
     tx: IExtendedStorageTransaction,
+    resultSchema: JSONSchema | undefined,
     result: any,
     name: string | undefined,
     frame: Frame,
@@ -1603,6 +1899,13 @@ export class Runner {
       !validateAndCheckOpaqueRefs(result, name) &&
       frame.opaqueRefs.size === 0
     ) {
+      recordOutputSchemaPolicyInputs(
+        tx,
+        this.runtime,
+        processCell,
+        outputs,
+        resultSchema,
+      );
       sendValueToBinding(tx, processCell, outputs, result);
       return result;
     }
@@ -1650,6 +1953,15 @@ export class Runner {
     }
 
     previousResultCellRef.current ??= resultCell;
+    const effectiveResultSchema = resultSchema ?? resultPattern.resultSchema ??
+      resultCell.schema;
+    recordOutputSchemaPolicyInputs(
+      tx,
+      this.runtime,
+      processCell,
+      outputs,
+      effectiveResultSchema,
+    );
     sendValueToBinding(
       tx,
       processCell,
@@ -1685,6 +1997,14 @@ export class Runner {
         ...(inputs as Record<string, any>),
         $event: crypto.randomUUID(),
       };
+      const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
+        module,
+        {
+          verifiedLoadId,
+          harness: this.runtime.harness,
+          implementation: fn,
+        },
+      );
       const frame = this.createPatternFrame(
         cause,
         pattern,
@@ -1692,7 +2012,11 @@ export class Runner {
         tx,
         true,
         verifiedLoadId,
+        policyFacingIdentity,
       );
+      if (policyFacingIdentity) {
+        tx.setCfcImplementationIdentity(policyFacingIdentity);
+      }
 
       try {
         const inputsCell = this.runtime.getImmutableCell(
@@ -1775,7 +2099,7 @@ export class Runner {
     };
 
     if (name) {
-      setRunnableName(handler, `handler:${name}`);
+      setRunnableName(handler, `handler:${name}`, { setSrc: true });
     }
 
     const wrappedHandler = Object.assign(handler, {
@@ -1849,6 +2173,14 @@ export class Runner {
     } = (tx: IExtendedStorageTransaction) => {
       action.ignoredSchedulingWrites = [];
       const resultFor = { inputs, outputs, fn: fnSource };
+      const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
+        module,
+        {
+          verifiedLoadId,
+          harness: this.runtime.harness,
+          implementation: fn,
+        },
+      );
       const frame = this.createPatternFrame(
         resultFor,
         pattern,
@@ -1856,8 +2188,12 @@ export class Runner {
         tx,
         false,
         verifiedLoadId,
+        policyFacingIdentity,
       );
       (action as Action & { lastFrame?: Frame }).lastFrame = frame;
+      if (policyFacingIdentity) {
+        tx.setCfcImplementationIdentity(policyFacingIdentity);
+      }
 
       const handleErrorOutput = (error: unknown) => {
         if (
@@ -1936,6 +2272,7 @@ export class Runner {
           try {
             return this.writeJavaScriptActionResult(
               tx,
+              module.resultSchema,
               result,
               name,
               frame,
@@ -2119,6 +2456,11 @@ export class Runner {
       );
     }
 
+    const builtinIdentity = resolveBuiltinImplementationIdentity(module);
+    if (builtinIdentity) {
+      tx.setCfcImplementationIdentity(builtinIdentity);
+    }
+
     // CT-1230: Pass bindPatterns: false to prevent premature alias binding in pattern
     // arguments. When a subpattern is passed to map(), its aliases should not be
     // bound to the current doc yet - they need to remain unbound until the pattern
@@ -2156,21 +2498,34 @@ export class Runner {
       tx,
     );
 
-    const builtinResult: RawBuiltinReturnType = module.implementation(
-      inputsCell,
-      (tx: IExtendedStorageTransaction, result: any) => {
-        sendValueToBinding(
-          tx,
-          processCell,
-          mappedOutputBindings,
-          result,
-        );
-      },
-      addCancel,
-      { inputs: inputsCell, parents: processCell.entityId },
-      processCell,
-      this.runtime,
-    );
+    const builtinFrame = builtinIdentity
+      ? pushFrameFromCause(undefined, {
+        runtime: this.runtime,
+        tx,
+        space: processCell.space,
+        implementationIdentity: builtinIdentity,
+      })
+      : undefined;
+    let builtinResult: RawBuiltinReturnType;
+    try {
+      builtinResult = module.implementation(
+        inputsCell,
+        (tx: IExtendedStorageTransaction, result: any) => {
+          sendValueToBinding(
+            tx,
+            processCell,
+            mappedOutputBindings,
+            result,
+          );
+        },
+        addCancel,
+        { inputs: inputsCell, parents: processCell.entityId },
+        processCell,
+        this.runtime,
+      );
+    } finally {
+      popFrame(builtinFrame);
+    }
 
     // Handle both legacy (just Action) and new (RawBuiltinResult) return formats
     const action = isRawBuiltinResult(builtinResult)

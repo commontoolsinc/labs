@@ -219,8 +219,7 @@ export type IsThisArray =
  * attaches the internal methods..
  */
 // deno-lint-ignore no-empty-interface
-export interface IAnyCell<T> {
-}
+export interface IAnyCell<T> {}
 
 /**
  * Readable cells can retrieve their current value.
@@ -1182,6 +1181,7 @@ export type AnyCellWrapping<T> =
 export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
+  internalSchema?: JSONSchema;
 }
 export interface Module {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
@@ -1364,8 +1364,32 @@ export type JSONSchemaObj = {
   readonly asStream?: boolean;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
-    readonly classification?: readonly string[];
-    readonly integrity?: readonly string[];
+    readonly confidentiality?: readonly ImmutableJSONValue[];
+    readonly integrity?: readonly ImmutableJSONValue[];
+    readonly addIntegrity?: readonly ImmutableJSONValue[];
+    readonly requiredIntegrity?: readonly ImmutableJSONValue[];
+    readonly maxConfidentiality?: readonly ImmutableJSONValue[];
+    readonly writeAuthorizedBy?:
+      | readonly string[]
+      | {
+        readonly __ctWriterIdentityOf?: {
+          readonly bundleId?: string;
+          readonly file?: string;
+          readonly path?: readonly string[];
+        };
+      };
+    readonly exactCopyOf?: readonly string[];
+    readonly projection?: readonly string[];
+    readonly collection?: readonly string[];
+    readonly uiContract?: {
+      readonly helper?: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+      readonly action?: string;
+      readonly surface?: string;
+      readonly role?: string;
+      readonly kind?: string;
+      readonly trustedPattern?: string;
+      readonly requiredEventIntegrity?: readonly string[];
+    };
   };
 };
 
@@ -1390,6 +1414,9 @@ export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
  * value) and `false` (reject all values) as valid schemas.
  */
 export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
+
+export type * from "./cfc.ts";
+export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
 
 /**
  * Selects a sub-path within a document, optionally paired with a schema
@@ -2084,6 +2111,29 @@ export declare const byRef: ByRefFunction;
 export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
 export declare const nonPrivateRandom: NonPrivateRandomFunction;
 export declare const safeDateNow: SafeDateNowFunction;
+
+export interface UiActionProps {
+  readonly as?: string;
+  readonly action: string;
+  readonly children?: RenderNode;
+}
+
+export interface UiPromptSlotProps {
+  readonly as?: string;
+  readonly surface: string;
+  readonly role: string;
+  readonly children?: RenderNode;
+}
+
+export interface UiDisclosureProps {
+  readonly as?: string;
+  readonly kind: string;
+  readonly children?: RenderNode;
+}
+
+export declare function UiAction(props: UiActionProps): JSXElement;
+export declare function UiPromptSlot(props: UiPromptSlotProps): JSXElement;
+export declare function UiDisclosure(props: UiDisclosureProps): JSXElement;
 
 /**
  * Get the entity ID from a cell or value.

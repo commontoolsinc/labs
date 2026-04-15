@@ -143,8 +143,10 @@ describe("Runtime v2 read transaction fallback", () => {
       expect(() => readTx1.tx.write(cell.getAsNormalizedFullLink(), 4))
         .toThrow(/runtime\.edit\(\)/);
       expect(() => readTx1.abort()).toThrow(/runtime\.edit\(\)/);
-      await expect(readTx1.commit()).rejects.toThrow(/runtime\.edit\(\)/);
-      await expect(readTx1.tx.commit()).rejects.toThrow(/runtime\.edit\(\)/);
+      await expect(readTx1.commit()).resolves.toEqual({ ok: {} });
+
+      const readTx3 = runtime.readTx();
+      await expect(readTx3.tx.commit()).rejects.toThrow(/runtime\.edit\(\)/);
     } finally {
       await runtime.dispose();
     }

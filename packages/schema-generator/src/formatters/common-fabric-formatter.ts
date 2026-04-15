@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   type CellWrapperKind,
   getCellBrand,
@@ -20,8 +21,15 @@ import {
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
+import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api/cfc";
 
 type WrapperKind = CellWrapperKind;
+const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
+type ResolvedCfcAlias = {
+  readonly aliasName: string;
+  readonly aliasArgs: readonly ts.Type[];
+  readonly aliasArgNodes?: readonly ts.TypeNode[];
+};
 
 /**
  * Formatter for Common Fabric-specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
@@ -39,6 +47,15 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
+    const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
+    if (aliasName && CFC_ALIAS_NAMES.has(aliasName)) {
+      return true;
+    }
+
+    if (this.resolveCfcAliasInstantiation(type as TypeWithInternals, context)) {
+      return true;
+    }
+
     // Check via typeNode for Default (erased at type-level)
     const wrapperViaNode = detectWrapperViaNode(
       context.typeNode,
@@ -81,6 +98,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
   ): JSONSchemaMutable {
     const n = context.typeNode;
+    const aliasType = type as TypeWithInternals;
+    const resolvedCfcAlias = this.resolveCfcAliasInstantiation(
+      aliasType,
+      context,
+    );
+    if (resolvedCfcAlias) {
+      return this.formatResolvedCfcAlias(resolvedCfcAlias, context);
+    }
 
     // Handle wrapper unions first (before Opaque<T> union check)
     // This catches cases like OpaqueRef<T> | undefined and processes them
@@ -680,6 +705,706 @@ export class CommonFabricFormatter implements TypeFormatter {
     return valueSchema;
   }
 
+  private formatCfcAlias(
+    typeWithAlias: TypeWithInternals,
+    context: GenerationContext,
+    aliasName: string,
+  ): JSONSchemaMutable {
+    const aliasArgs = typeWithAlias.aliasTypeArguments ?? [];
+    const baseType = aliasArgs[0];
+    if (!baseType) {
+      throw new Error(`${aliasName}<T> requires type argument`);
+    }
+
+    const baseTypeNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
+    const baseSchema = this.schemaGenerator.formatChildType(
+      baseType,
+      context,
+      baseTypeNode,
+    );
+
+    const ifc = this.buildIfcMetadataForAlias(
+      aliasName,
+      aliasArgs,
+      context,
+    );
+    if (ifc === undefined) {
+      return baseSchema;
+    }
+
+    return this.mergeIfcMetadata(baseSchema, ifc);
+  }
+
+  private formatResolvedCfcAlias(
+    resolved: ResolvedCfcAlias,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const baseType = resolved.aliasArgs[0];
+    if (!baseType) {
+      throw new Error(`${resolved.aliasName}<T> requires type argument`);
+    }
+
+    const baseTypeNode = resolved.aliasArgNodes?.[0];
+    const baseSchema = baseTypeNode
+      ? this.formatCfcAliasTypeNode(baseTypeNode, context) ??
+        this.schemaGenerator.formatChildType(baseType, context, baseTypeNode)
+      : this.schemaGenerator.formatChildType(baseType, context, undefined);
+
+    const ifc = this.buildIfcMetadataForAlias(
+      resolved.aliasName,
+      resolved.aliasArgs,
+      context,
+      resolved.aliasArgNodes,
+    );
+    if (ifc === undefined) {
+      return baseSchema;
+    }
+
+    return this.mergeIfcMetadata(baseSchema, ifc);
+  }
+
+  private formatCfcAliasTypeNode(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): JSONSchemaMutable | undefined {
+    if (
+      ts.isParenthesizedTypeNode(typeNode) || ts.isTypeOperatorNode(typeNode)
+    ) {
+      return this.formatCfcAliasTypeNode(typeNode.type, context);
+    }
+    if (
+      !ts.isTypeReferenceNode(typeNode) || !ts.isIdentifier(typeNode.typeName)
+    ) {
+      return undefined;
+    }
+
+    const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+      context.typeChecker.getSymbolAtLocation(typeNode.typeName),
+      context,
+    );
+    if (!aliasDeclaration) {
+      return undefined;
+    }
+
+    const aliasArgNodes = typeNode.typeArguments
+      ? [...typeNode.typeArguments]
+      : undefined;
+    const aliasArgs = (aliasArgNodes ?? []).map((argNode) =>
+      this.resolveTypeNodeToType(argNode, context, new Map())
+    );
+    const resolved = this.resolveCfcAliasFromDeclaration(
+      aliasDeclaration,
+      aliasArgs,
+      aliasArgNodes,
+      { ...context, typeNode },
+      new Set([aliasDeclaration.name.text]),
+    );
+    return resolved
+      ? this.formatResolvedCfcAlias(resolved, context)
+      : undefined;
+  }
+
+  private resolveCfcAliasInstantiation(
+    typeWithAlias: TypeWithInternals,
+    context: GenerationContext,
+  ): ResolvedCfcAlias | undefined {
+    const aliasName = typeWithAlias.aliasSymbol?.name;
+    if (!aliasName) {
+      return undefined;
+    }
+    const aliasArgs = typeWithAlias.aliasTypeArguments ?? [];
+    if (CFC_ALIAS_NAMES.has(aliasName)) {
+      return { aliasName, aliasArgs };
+    }
+
+    const aliasSymbol = typeWithAlias.aliasSymbol;
+    const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+      aliasSymbol,
+      context,
+    );
+    if (!aliasDeclaration) {
+      return undefined;
+    }
+
+    return this.resolveCfcAliasFromDeclaration(
+      aliasDeclaration,
+      aliasArgs,
+      this.getAliasTypeArgumentNodes(context.typeNode),
+      context,
+      new Set([aliasName]),
+    );
+  }
+
+  private resolveCfcAliasFromDeclaration(
+    aliasDeclaration: ts.TypeAliasDeclaration,
+    aliasArgs: readonly ts.Type[],
+    aliasArgNodes: readonly ts.TypeNode[] | undefined,
+    context: GenerationContext,
+    visited: Set<string>,
+  ): ResolvedCfcAlias | undefined {
+    const aliasName = aliasDeclaration.name.text;
+    if (CFC_ALIAS_NAMES.has(aliasName)) {
+      return {
+        aliasName,
+        aliasArgs,
+        ...(aliasArgNodes ? { aliasArgNodes } : {}),
+      };
+    }
+
+    const aliased = aliasDeclaration.type;
+    if (
+      !ts.isTypeReferenceNode(aliased) || !ts.isIdentifier(aliased.typeName)
+    ) {
+      return undefined;
+    }
+
+    const targetName = aliased.typeName.text;
+    if (visited.has(targetName)) {
+      return undefined;
+    }
+
+    const targetDeclaration = this.getTypeAliasDeclarationForSymbol(
+      context.typeChecker.getSymbolAtLocation(aliased.typeName),
+      context,
+    );
+    if (!targetDeclaration) {
+      return undefined;
+    }
+
+    const paramMap = new Map<string, ts.Type>();
+    const paramNodeMap = new Map<string, ts.TypeNode>();
+    for (let i = 0; i < (aliasDeclaration.typeParameters?.length ?? 0); i++) {
+      const paramName = aliasDeclaration.typeParameters?.[i]?.name.text;
+      const actualArg = aliasArgs[i];
+      if (paramName && actualArg) {
+        paramMap.set(paramName, actualArg);
+      }
+      const actualArgNode = aliasArgNodes?.[i];
+      if (paramName && actualArgNode) {
+        paramNodeMap.set(paramName, actualArgNode);
+      }
+    }
+
+    const resolvedArgs: ts.Type[] = [];
+    const resolvedArgNodes: ts.TypeNode[] = [];
+    for (const argNode of aliased.typeArguments ?? []) {
+      const resolvedArgNode = this.substituteTypeNode(argNode, paramNodeMap);
+      resolvedArgs.push(
+        this.resolveTypeNodeToType(resolvedArgNode, context, new Map()),
+      );
+      resolvedArgNodes.push(resolvedArgNode);
+    }
+
+    visited.add(aliasName);
+    return this.resolveCfcAliasFromDeclaration(
+      targetDeclaration,
+      resolvedArgs,
+      resolvedArgNodes,
+      context,
+      visited,
+    );
+  }
+
+  private resolveTypeNodeToType(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+    paramMap: ReadonlyMap<string, ts.Type>,
+  ): ts.Type {
+    if (
+      ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+    ) {
+      const mapped = paramMap.get(typeNode.typeName.text);
+      if (mapped) {
+        return mapped;
+      }
+    }
+
+    const fromRegistry = context.typeRegistry?.get(typeNode);
+    if (fromRegistry) {
+      return fromRegistry;
+    }
+
+    try {
+      return context.typeChecker.getTypeFromTypeNode(typeNode);
+    } catch {
+      return context.typeChecker.getAnyType();
+    }
+  }
+
+  private getTypeAliasDeclarationForSymbol(
+    symbol: ts.Symbol | undefined,
+    context: GenerationContext,
+  ): ts.TypeAliasDeclaration | undefined {
+    let resolved = symbol;
+    if (resolved && (resolved.flags & ts.SymbolFlags.Alias) !== 0) {
+      try {
+        resolved = context.typeChecker.getAliasedSymbol(resolved);
+      } catch {
+        // Fall back to the original symbol; some synthetic test symbols do not
+        // round-trip cleanly through getAliasedSymbol.
+      }
+    }
+    return resolved?.declarations?.find(
+      (decl): decl is ts.TypeAliasDeclaration =>
+        ts.isTypeAliasDeclaration(decl),
+    );
+  }
+
+  private substituteTypeNode(
+    typeNode: ts.TypeNode,
+    paramMap: ReadonlyMap<string, ts.TypeNode>,
+  ): ts.TypeNode {
+    if (paramMap.size === 0) {
+      return typeNode;
+    }
+
+    if (
+      ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+    ) {
+      const mapped = paramMap.get(typeNode.typeName.text);
+      if (mapped && !typeNode.typeArguments?.length) {
+        return mapped;
+      }
+      if (typeNode.typeArguments?.length) {
+        return ts.factory.updateTypeReferenceNode(
+          typeNode,
+          typeNode.typeName,
+          ts.factory.createNodeArray(
+            typeNode.typeArguments.map((arg) =>
+              this.substituteTypeNode(arg, paramMap)
+            ),
+          ),
+        );
+      }
+      return typeNode;
+    }
+
+    if (ts.isTypeLiteralNode(typeNode)) {
+      return ts.factory.updateTypeLiteralNode(
+        typeNode,
+        ts.factory.createNodeArray(
+          typeNode.members.map((member) => {
+            if (ts.isPropertySignature(member) && member.type) {
+              return ts.factory.updatePropertySignature(
+                member,
+                member.modifiers,
+                member.name,
+                member.questionToken,
+                this.substituteTypeNode(member.type, paramMap),
+              );
+            }
+            return member;
+          }),
+        ),
+      );
+    }
+
+    if (ts.isTupleTypeNode(typeNode)) {
+      return ts.factory.updateTupleTypeNode(
+        typeNode,
+        typeNode.elements.map((element) =>
+          this.substituteTypeNode(element, paramMap) as ts.TypeNode
+        ),
+      );
+    }
+
+    if (ts.isArrayTypeNode(typeNode)) {
+      return ts.factory.updateArrayTypeNode(
+        typeNode,
+        this.substituteTypeNode(typeNode.elementType, paramMap),
+      );
+    }
+
+    if (ts.isTypeOperatorNode(typeNode)) {
+      return ts.factory.updateTypeOperatorNode(
+        typeNode,
+        this.substituteTypeNode(typeNode.type, paramMap),
+      );
+    }
+
+    if (ts.isParenthesizedTypeNode(typeNode)) {
+      return ts.factory.updateParenthesizedType(
+        typeNode,
+        this.substituteTypeNode(typeNode.type, paramMap),
+      );
+    }
+
+    return typeNode;
+  }
+
+  private buildIfcMetadataForAlias(
+    aliasName: string,
+    aliasArgs: readonly ts.Type[],
+    context: GenerationContext,
+    aliasArgNodes?: readonly ts.TypeNode[],
+  ): Record<string, unknown> | undefined {
+    const readValue = (index: number): unknown => {
+      return this.extractLiteralLikeValue(
+        aliasArgs[index],
+        aliasArgNodes?.[index] ??
+          this.getAliasTypeArgumentNode(context.typeNode, index),
+        context,
+      );
+    };
+
+    switch (aliasName) {
+      case "Cfc": {
+        const payload = readValue(1);
+        return isRecord(payload) ? { ...payload } : undefined;
+      }
+      case "Confidential":
+        return { confidentiality: readValue(1) };
+      case "Integrity":
+        return { integrity: readValue(1) };
+      case "AddIntegrity":
+        return { addIntegrity: readValue(1) };
+      case "RequiresIntegrity":
+        return { requiredIntegrity: readValue(1) };
+      case "MaxConfidentiality":
+        return { maxConfidentiality: readValue(1) };
+      case "ExactCopy":
+        return { exactCopyOf: readValue(1) };
+      case "OpaqueInput":
+        return {
+          opaque: aliasArgs.length > 1 ? readValue(1) : true,
+        };
+      case "WriteAuthorizedBy":
+        return this.buildWriteAuthorizedByMetadata(context, aliasArgNodes);
+      case "LengthPreservedFrom":
+        return {
+          collection: {
+            sourceCollection: readValue(1),
+            lengthPreserved: true,
+          },
+        };
+      case "FilteredFrom":
+        return {
+          collection: {
+            filteredFrom: readValue(1),
+          },
+        };
+      case "SubsetOf":
+        return {
+          collection: {
+            subsetOf: readValue(1),
+          },
+        };
+      case "PermutationOf":
+        return {
+          collection: {
+            permutationOf: readValue(1),
+          },
+        };
+      case "ProjectionPath":
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 2,
+          defaultFrom: undefined,
+        });
+      case "ProjectionOf":
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 1,
+          defaultFrom: "/",
+        });
+      case "Projection":
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 1,
+          defaultFrom: "/",
+        });
+      default:
+        return undefined;
+    }
+  }
+
+  private buildProjectionMetadata(
+    aliasArgs: readonly ts.Type[],
+    context: GenerationContext,
+    options: {
+      readonly fromIndex: number;
+      readonly pathIndex: number;
+      readonly defaultFrom: string | undefined;
+    },
+  ): Record<string, unknown> | undefined {
+    const readValue = (index: number): unknown => {
+      return this.extractLiteralLikeValue(
+        aliasArgs[index],
+        this.getAliasTypeArgumentNode(context.typeNode, index),
+        context,
+      );
+    };
+
+    const from = options.defaultFrom ?? readValue(options.fromIndex);
+    const directPath = this.encodeJsonPointerPath(readValue(options.pathIndex));
+    if (directPath !== undefined) {
+      return {
+        projection: {
+          from,
+          path: directPath,
+        },
+      };
+    }
+
+    const sourceRefType = aliasArgs[0] as TypeWithInternals | undefined;
+    const sourceRefNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
+    const nestedPathType = sourceRefType?.aliasTypeArguments?.[1];
+    const nestedPathNode =
+      sourceRefNode && ts.isTypeReferenceNode(sourceRefNode)
+        ? sourceRefNode.typeArguments?.[1]
+        : undefined;
+    const nestedPath = this.encodeJsonPointerPath(
+      this.extractLiteralLikeValue(nestedPathType, nestedPathNode, context),
+    );
+    if (nestedPath === undefined) {
+      return undefined;
+    }
+
+    return {
+      projection: {
+        from,
+        path: nestedPath,
+      },
+    };
+  }
+
+  private buildWriteAuthorizedByMetadata(
+    context: GenerationContext,
+    aliasArgNodes?: readonly ts.TypeNode[],
+  ): Record<string, unknown> | undefined {
+    const bindingNode = aliasArgNodes?.[1] ??
+      this.getAliasTypeArgumentNode(context.typeNode, 1);
+    if (!bindingNode || !ts.isTypeQueryNode(bindingNode)) {
+      return undefined;
+    }
+    if (!ts.isIdentifier(bindingNode.exprName)) {
+      return undefined;
+    }
+
+    return {
+      writeAuthorizedBy: {
+        __ctWriterIdentityOf: {
+          file: normalizeWriterIdentityFile(
+            context.sourceFileName ?? bindingNode.getSourceFile().fileName,
+          ),
+          path: [bindingNode.exprName.text],
+        },
+      },
+    };
+  }
+
+  private getAliasTypeArgumentNode(
+    typeNode: ts.TypeNode | undefined,
+    index: number,
+  ): ts.TypeNode | undefined {
+    if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+      return undefined;
+    }
+    return typeNode.typeArguments?.[index];
+  }
+
+  private getAliasTypeArgumentNodes(
+    typeNode: ts.TypeNode | undefined,
+  ): readonly ts.TypeNode[] | undefined {
+    if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+      return undefined;
+    }
+    return typeNode.typeArguments ? [...typeNode.typeArguments] : undefined;
+  }
+
+  private mergeIfcMetadata(
+    schema: JSONSchemaMutable,
+    ifc: Record<string, unknown>,
+  ): JSONSchemaMutable {
+    if (typeof schema === "boolean") {
+      return schema === false ? { not: true, ifc } : { ifc };
+    }
+
+    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+    return {
+      ...schema,
+      ifc: {
+        ...existingIfc,
+        ...ifc,
+      },
+    };
+  }
+
+  private encodeJsonPointerPath(value: unknown): string | undefined {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (
+      Array.isArray(value) &&
+      value.every((segment) => typeof segment === "string")
+    ) {
+      if (value.length === 0) {
+        return "/";
+      }
+      return `/${
+        value.map((segment) =>
+          segment.replaceAll("~", "~0").replaceAll("/", "~1")
+        ).join("/")
+      }`;
+    }
+    return undefined;
+  }
+
+  private extractLiteralLikeValue(
+    type: ts.Type | undefined,
+    typeNode: ts.TypeNode | undefined,
+    context: GenerationContext,
+  ): unknown {
+    if (!typeNode && !type) {
+      return undefined;
+    }
+
+    if (typeNode) {
+      if (ts.isParenthesizedTypeNode(typeNode)) {
+        return this.extractLiteralLikeValue(type, typeNode.type, context);
+      }
+      if (ts.isTypeOperatorNode(typeNode)) {
+        return this.extractLiteralLikeValue(type, typeNode.type, context);
+      }
+      if (ts.isTypeQueryNode(typeNode)) {
+        return this.extractValueFromTypeQuery(typeNode, context);
+      }
+      if (ts.isLiteralTypeNode(typeNode)) {
+        const literal = typeNode.literal;
+        if (ts.isStringLiteral(literal)) return literal.text;
+        if (ts.isNumericLiteral(literal)) return Number(literal.text);
+        if (literal.kind === ts.SyntaxKind.TrueKeyword) return true;
+        if (literal.kind === ts.SyntaxKind.FalseKeyword) return false;
+        if (literal.kind === ts.SyntaxKind.NullKeyword) return null;
+      }
+      if (ts.isTupleTypeNode(typeNode)) {
+        return typeNode.elements.map((element) =>
+          this.extractLiteralLikeValue(undefined, element, context)
+        );
+      }
+      if (
+        ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+      ) {
+        const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+          context.typeChecker.getSymbolAtLocation(typeNode.typeName),
+          context,
+        );
+        if (aliasDeclaration) {
+          const paramMap = new Map<string, ts.TypeNode>();
+          for (
+            let i = 0;
+            i < (aliasDeclaration.typeParameters?.length ?? 0);
+            i++
+          ) {
+            const paramName = aliasDeclaration.typeParameters?.[i]?.name.text;
+            const actualArgNode = typeNode.typeArguments?.[i];
+            if (paramName && actualArgNode) {
+              paramMap.set(paramName, actualArgNode);
+            }
+          }
+          return this.extractLiteralLikeValue(
+            undefined,
+            this.substituteTypeNode(aliasDeclaration.type, paramMap),
+            context,
+          );
+        }
+      }
+      if (ts.isTypeLiteralNode(typeNode)) {
+        const obj: Record<string, unknown> = {};
+        for (const member of typeNode.members) {
+          if (ts.isPropertySignature(member) && member.name && member.type) {
+            const propName = getPropertyNameText(member.name);
+            if (!propName) continue;
+            obj[propName] = this.extractLiteralLikeValue(
+              undefined,
+              member.type,
+              context,
+            );
+          }
+        }
+        return obj;
+      }
+      if (typeNode.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (typeNode.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (typeNode.kind === ts.SyntaxKind.NullKeyword) return null;
+      if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+    }
+
+    if (!type) {
+      return undefined;
+    }
+
+    if (type.flags & ts.TypeFlags.StringLiteral) {
+      return (type as ts.StringLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.NumberLiteral) {
+      return (type as ts.NumberLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.BooleanLiteral) {
+      return (type as { intrinsicName?: string }).intrinsicName === "true";
+    }
+    if (type.flags & ts.TypeFlags.Null) {
+      return null;
+    }
+    if (type.flags & ts.TypeFlags.Undefined) {
+      return undefined;
+    }
+
+    const typeText = context.typeChecker.typeToString(type);
+    if (
+      typeText.length >= 2 &&
+      ((typeText.startsWith('"') && typeText.endsWith('"')) ||
+        (typeText.startsWith("'") && typeText.endsWith("'")))
+    ) {
+      return typeText.slice(1, -1);
+    }
+
+    if (context.typeChecker.isTupleType(type)) {
+      const tupleType = type as ts.TypeReference;
+      const elements = context.typeChecker.getTypeArguments(tupleType);
+      if (elements.length > 0) {
+        return elements.map((element) =>
+          this.extractLiteralLikeValue(element, undefined, context)
+        );
+      }
+    }
+
+    const objectFlags =
+      (type as { objectFlags?: ts.ObjectFlags }).objectFlags ??
+        0;
+    if ((objectFlags & ts.ObjectFlags.Tuple) !== 0) {
+      const tupleType = type as ts.TypeReference;
+      const elements = context.typeChecker.getTypeArguments(tupleType);
+      if (elements.length > 0) {
+        return elements.map((element) =>
+          this.extractLiteralLikeValue(element, undefined, context)
+        );
+      }
+    }
+
+    if ((type.flags & ts.TypeFlags.Object) !== 0) {
+      const properties = context.typeChecker.getPropertiesOfType(type);
+      if (properties.length > 0) {
+        const obj: Record<string, unknown> = {};
+        for (const property of properties) {
+          const propType = context.typeChecker.getTypeOfSymbolAtLocation(
+            property,
+            property.valueDeclaration ?? property.declarations?.[0] ??
+              context.typeNode ?? ({} as ts.Node),
+          );
+          obj[property.getName()] = this.extractLiteralLikeValue(
+            propType,
+            undefined,
+            context,
+          );
+        }
+        return obj;
+      }
+    }
+
+    return undefined;
+  }
+
   private extractDefaultValueFromNode(
     typeNode: ts.TypeNode,
     context: GenerationContext,
@@ -792,9 +1517,17 @@ export class CommonFabricFormatter implements TypeFormatter {
     const exprName = typeQueryNode.exprName;
 
     // Get the symbol for the referenced entity
-    const symbol = context.typeChecker.getSymbolAtLocation(exprName);
+    let symbol = context.typeChecker.getSymbolAtLocation(exprName);
     if (!symbol) {
       return undefined;
+    }
+    if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+      try {
+        symbol = context.typeChecker.getAliasedSymbol(symbol);
+      } catch {
+        // Fall back to the import alias; local test programs can produce
+        // synthetic symbols that do not round-trip through getAliasedSymbol.
+      }
     }
 
     return this.extractValueFromSymbol(symbol, context);
@@ -831,6 +1564,13 @@ export class CommonFabricFormatter implements TypeFormatter {
     expr: ts.Expression,
     context: GenerationContext,
   ): unknown {
+    if (
+      ts.isAsExpression(expr) || ts.isTypeAssertionExpression(expr) ||
+      ts.isSatisfiesExpression(expr) || ts.isParenthesizedExpression(expr)
+    ) {
+      return this.extractValueFromExpression(expr.expression, context);
+    }
+
     // Handle array literals like [1, 2, 3] or [{ id: "a" }, { id: "b" }]
     if (ts.isArrayLiteralExpression(expr)) {
       return expr.elements.map((element) =>
@@ -1108,4 +1848,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     // This excludes mixed unions like `string | number | Cell | Stream | null`
     return hasWrapperMember && !hasNonWrapperMember;
   }
+}
+
+function normalizeWriterIdentityFile(fileName: string): string {
+  const normalized = fileName.replace(/\\/g, "/");
+  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
+  return strippedPrefixed ?? normalized;
 }

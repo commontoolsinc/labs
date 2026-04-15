@@ -1,5 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import * as assert from "./assert.ts";
+import { h } from "../src/h.ts";
+import { Identity } from "@commonfabric/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { createCell } from "../../runner/src/cell.ts";
 
 describe("jsx dom fragments support", () => {
   it("dom fragments should work", () => {
@@ -59,5 +64,48 @@ describe("jsx dom fragments support", () => {
         </cf-fragment>
       </div>,
     );
+  });
+});
+
+describe("jsx binding props", () => {
+  it("stores binding props as explicit cell links", async () => {
+    const signer = await Identity.fromPassphrase("jsx binding props");
+    const runtime = new Runtime({
+      storageManager: StorageManager.emulate({ as: signer }),
+      apiUrl: new URL("http://localhost"),
+    });
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(signer.did(), "jsx-binding", undefined, tx);
+      cell.set("hello");
+
+      const vnode = h("cf-cfc-authorship", { $value: cell }, []);
+      const link = (vnode as any).props.$value["/"]["link@1"];
+
+      assert.equal(link.id, cell.getAsNormalizedFullLink().id);
+      assert.equal(link.space, signer.did());
+      assert.equal(JSON.stringify(link.path), "[]");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("keeps binding props as cells when standalone evaluation has no link context", async () => {
+    const signer = await Identity.fromPassphrase(
+      "jsx standalone binding props",
+    );
+    const runtime = new Runtime({
+      storageManager: StorageManager.emulate({ as: signer }),
+      apiUrl: new URL("http://localhost"),
+    });
+    try {
+      const cell = createCell(runtime, { path: [] });
+
+      const vnode = h("cf-cfc-authorship", { $value: cell }, []);
+
+      assert.equal((vnode as any).props.$value, cell);
+    } finally {
+      await runtime.dispose();
+    }
   });
 });

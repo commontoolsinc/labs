@@ -30,6 +30,7 @@ import type {
   IfElseFunction,
   JSONSchema,
   JSONValue,
+  JSXElement,
   LiftFunction,
   LLMDialogFunction,
   LLMFunction,
@@ -45,12 +46,16 @@ import type {
   SELF as SELFSymbol,
   StreamDataFunction,
   StrFunction,
+  UiActionProps,
+  UiDisclosureProps,
+  UiPromptSlotProps,
   UnlessFunction,
   WhenFunction,
   WishFunction,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import { toSchema } from "@commonfabric/api";
+import type { ImplementationIdentity } from "../cfc/types.ts";
 import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 import {
   type IExtendedStorageTransaction,
@@ -134,6 +139,9 @@ export type {
   StripDefaultBrand,
   toJSON,
   ToSchemaFunction,
+  UiActionProps,
+  UiDisclosureProps,
+  UiPromptSlotProps,
   UnwrapCell,
   VNode,
 } from "@commonfabric/api";
@@ -202,6 +210,7 @@ declare module "@commonfabric/api" {
   interface Pattern {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
+    internalSchema?: JSONSchema;
     initial?: JSONValue;
     result: JSONValue;
     nodes: Node[];
@@ -244,6 +253,7 @@ export type Frame = {
   cause?: unknown;
   generatedIdCounter: number;
   verifiedLoadId?: string;
+  implementationIdentity?: ImplementationIdentity;
   runtime?: Runtime;
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;
@@ -324,6 +334,9 @@ export interface BuilderFunctionsAndConstants {
 
   // Render utils
   h: HFunction;
+  UiAction: (props: UiActionProps) => JSXElement;
+  UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
+  UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
   // Fabric value classes
   FabricInstance:

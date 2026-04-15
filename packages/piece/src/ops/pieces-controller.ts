@@ -151,6 +151,11 @@ export class PiecesController<T = unknown> {
         address: new URL("/api/storage/memory", apiUrl),
         spaceIdentity: session.spaceIdentity,
       }),
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: `principal:${session.as.did()}`,
+        actingPrincipal: session.as.did(),
+      }),
     });
 
     const manager = new PieceManager(session, runtime);

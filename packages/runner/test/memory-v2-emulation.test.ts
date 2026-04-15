@@ -75,14 +75,14 @@ describe("Memory v2 emulation", () => {
       uri,
       value: {
         value: { hello: "labels" },
-        labels: { classification: ["confidential"] },
+        labels: { confidentiality: ["confidential"] },
       },
     }]);
 
     expect(result).toEqual({ ok: {} });
     expect(provider.get(uri)).toEqual({
       value: { hello: "labels" },
-      labels: { classification: ["confidential"] },
+      labels: { confidentiality: ["confidential"] },
     });
   });
 

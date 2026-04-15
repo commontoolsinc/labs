@@ -217,4 +217,34 @@ describe("RuntimeInternals navigation", () => {
       await runtime.dispose();
     }
   });
+
+  it("creates worker runtime options with explicit CFC enforcement and principal trust", async () => {
+    const { createRuntimeClientOptions } = await import(
+      "../src/lib/runtime.ts"
+    );
+    const { createSession, Identity } = await import(
+      "@commonfabric/identity"
+    );
+
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "shell-cfc-runtime-options",
+    });
+
+    const options = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      buildHash: "build-hash",
+    });
+
+    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.trustSnapshot).toEqual({
+      id: `principal:${session.as.did()}`,
+      actingPrincipal: session.as.did(),
+    });
+    expect(options.spaceDid).toBe(session.space);
+    expect(options.spaceName).toBe(session.spaceName);
+    expect(options.buildHash).toBe("build-hash");
+  });
 });

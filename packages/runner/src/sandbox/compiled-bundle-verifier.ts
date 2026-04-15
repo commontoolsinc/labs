@@ -33,6 +33,8 @@ import {
   TOP_LEVEL_CALL_RESULT_ERROR,
 } from "./policy.ts";
 import {
+  BINDING_IDENTITY_HELPER_NAME,
+  createBindingIdentityHelperSource,
   createFactoryShadowGuardSource,
   createFunctionHardeningHelperSource,
   RESERVED_FACTORY_BINDINGS,
@@ -45,6 +47,7 @@ interface BindingInfo {
   trustedRuntimeName?: string;
   namespaceImport?: boolean;
   hardeningHelper?: boolean;
+  bindingIdentityHelper?: boolean;
   functionRange?: { start: number; end: number };
 }
 
@@ -52,6 +55,9 @@ const logger = getLogger("compiled-bundle-verifier");
 
 const CANONICAL_HARDENING_HELPER = stripJsTrivia(
   createFunctionHardeningHelperSource(),
+);
+const CANONICAL_BINDING_IDENTITY_HELPER = stripJsTrivia(
+  createBindingIdentityHelperSource(),
 );
 
 const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
@@ -311,7 +317,10 @@ function verifyAuthoredFactory(
 
         if (isCompiledExportStarStatementNormalized(normalized)) continue;
 
-        if (isAllowedFunctionHardeningStatementNormalized(normalized, env)) {
+        if (
+          isAllowedFunctionHardeningStatementNormalized(normalized, env) ||
+          isAllowedBindingIdentityStatementNormalized(normalized, env)
+        ) {
           continue;
         }
 
@@ -525,7 +534,19 @@ function provisionalBindingForExpression(
 
   const hardeningBinding = env.get(normalizedCallee);
   if (!hardeningBinding?.hardeningHelper || call.args.length !== 1) {
-    return undefined;
+    const bindingIdentityHelper = env.get(normalizedCallee);
+    if (
+      !bindingIdentityHelper?.bindingIdentityHelper || call.args.length !== 2
+    ) {
+      return undefined;
+    }
+    return classifyExpressionText(
+      source,
+      "<binding-identity>",
+      call.args[0].start,
+      call.args[0].end,
+      env,
+    );
   }
 
   const hardened = trimRange(source, call.args[0].start, call.args[0].end);
@@ -668,6 +689,34 @@ function classifyExpressionText(
           return cloneBindingInfo(argBinding);
         }
 
+        const bindingIdentityHelper = env.get(normalizedCallee);
+        if (bindingIdentityHelper?.bindingIdentityHelper) {
+          if (call.args.length !== 2) {
+            throw verificationErrorAt(
+              source,
+              filename,
+              call.start,
+              "Verified binding annotation helpers accept exactly two arguments",
+            );
+          }
+          const argBinding = classifyExpressionText(
+            source,
+            filename,
+            call.args[0].start,
+            call.args[0].end,
+            env,
+          );
+          if (argBinding.kind === "unknown") {
+            throw verificationErrorAt(
+              source,
+              filename,
+              call.args[0].start,
+              "Verified binding annotation must target trusted top-level bindings",
+            );
+          }
+          return cloneBindingInfo(argBinding);
+        }
+
         if (isLocalCallableExpression(normalizedCallee, env)) {
           throw verificationErrorAt(
             source,
@@ -681,7 +730,7 @@ function classifyExpressionText(
           source,
           filename,
           call.start,
-          "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+          "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
         );
       }
     }
@@ -706,7 +755,7 @@ function classifyExpressionText(
         source,
         filename,
         inner.start,
-        "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+        "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
       );
     }
 
@@ -777,6 +826,25 @@ function classifyExpressionText(
         return cloneBindingInfo(argBinding);
       }
 
+      const bindingIdentityHelper = env.get(normalizedCallee);
+      if (bindingIdentityHelper?.bindingIdentityHelper) {
+        if (call.args.length !== 2) {
+          throw verificationErrorAt(
+            source,
+            filename,
+            call.start,
+            "Verified binding annotation helpers accept exactly two arguments",
+          );
+        }
+        return classifyExpressionText(
+          source,
+          filename,
+          call.args[0].start,
+          call.args[0].end,
+          env,
+        );
+      }
+
       if (isLocalCallableExpression(normalizedCallee, env)) {
         throw verificationErrorAt(
           source,
@@ -790,7 +858,7 @@ function classifyExpressionText(
         source,
         filename,
         call.start,
-        "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+        "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
       );
     }
 
@@ -1304,8 +1372,30 @@ function isAllowedFunctionHardeningStatementNormalized(
   return callee?.hardeningHelper === true && target?.kind === "function";
 }
 
+function isAllowedBindingIdentityStatementNormalized(
+  normalized: string,
+  env: Map<string, BindingInfo>,
+): boolean {
+  const match = normalized.match(
+    /^([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{[\s\S]*\}\);?$/,
+  );
+  if (!match) return false;
+
+  const callee = env.get(match[1]);
+  const target = env.get(match[2]);
+  return (
+    (match[1] === BINDING_IDENTITY_HELPER_NAME ||
+      callee?.bindingIdentityHelper === true) &&
+    (target?.kind === "function" || target?.kind === "builder")
+  );
+}
+
 function isFunctionHardeningHelperDeclaration(source: string): boolean {
   return stripJsTrivia(source) === CANONICAL_HARDENING_HELPER;
+}
+
+function isBindingIdentityHelperDeclaration(source: string): boolean {
+  return stripJsTrivia(source) === CANONICAL_BINDING_IDENTITY_HELPER;
 }
 
 function registerFunctionStatement(
@@ -1323,6 +1413,7 @@ function registerFunctionStatement(
   env.set(name, {
     kind: "function",
     hardeningHelper: isFunctionHardeningHelperDeclaration(statementText),
+    bindingIdentityHelper: isBindingIdentityHelperDeclaration(statementText),
     functionRange: { start: statement.start, end: statement.end },
   });
 }

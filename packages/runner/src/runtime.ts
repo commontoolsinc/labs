@@ -56,6 +56,7 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import type { CfcEnforcementMode, TrustSnapshot } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -178,12 +179,34 @@ export interface RuntimeOptions {
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
+  /** Rollout mode for commit-boundary CFC enforcement. */
+  cfcEnforcementMode?: CfcEnforcementMode;
+  /** Deterministic provider for the trust snapshot attached to each new tx. */
+  trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Optional compilation cache for persistent caching of compiled JS.
    *  If absent, no persistent caching is performed (same as before). */
   cachedCompiler?: CachedCompiler;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
   hideInternalStackFrames?: boolean;
 }
+
+export interface CfcRuntimeStats {
+  cfcRelevantTx: number;
+  cfcPreparedTx: number;
+  cfcPrepareRejects: number;
+  cfcDigestInvalidations: number;
+  cfcOutboxFlushes: number;
+  sinkDedupHits: number;
+}
+
+const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
+  cfcRelevantTx: 0,
+  cfcPreparedTx: 0,
+  cfcPrepareRejects: 0,
+  cfcDigestInvalidations: 0,
+  cfcOutboxFlushes: 0,
+  sinkDedupHits: 0,
+});
 
 /**
  * For these schema, we use type object with empty properties, so that we
@@ -261,8 +284,10 @@ export class Runtime {
   readonly navigateCallback?: NavigateCallback;
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
+  readonly cfcEnforcementMode: CfcEnforcementMode;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
+  readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly memoryVersion: MemoryVersion;
   readonly telemetry: RuntimeTelemetry;
   readonly cachedCompiler?: CachedCompiler;
@@ -273,6 +298,7 @@ export class Runtime {
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
+  private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
 
   constructor(options: RuntimeOptions) {
     const defaultMemoryVersion = getDefaultMemoryVersion();
@@ -357,11 +383,18 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    const actingPrincipal = options.storageManager.as.did() as DID;
+    this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
+      id: `principal:${actingPrincipal}`,
+      actingPrincipal,
+      revision: this.id,
+    }));
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
+    this.cfcEnforcementMode = options.cfcEnforcementMode ?? "disabled";
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -535,7 +568,37 @@ export class Runtime {
     if (debugActionId) {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
-    return new ExtendedStorageTransaction(tx);
+    const wrapped = new ExtendedStorageTransaction(tx, {
+      onRelevantTx: () => {
+        this.cfcStats.cfcRelevantTx += 1;
+      },
+      onPreparedTx: () => {
+        this.cfcStats.cfcPreparedTx += 1;
+      },
+      onPrepareReject: () => {
+        this.cfcStats.cfcPrepareRejects += 1;
+      },
+      onDigestInvalidation: () => {
+        this.cfcStats.cfcDigestInvalidations += 1;
+      },
+      onOutboxFlush: () => {
+        this.cfcStats.cfcOutboxFlushes += 1;
+      },
+      onSinkDedupHit: () => {
+        this.cfcStats.sinkDedupHits += 1;
+      },
+    });
+    wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
+    wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
+    return wrapped;
+  }
+
+  getCfcStats(): Readonly<CfcRuntimeStats> {
+    return { ...this.cfcStats };
+  }
+
+  resetCfcStats(): void {
+    this.cfcStats = initialCfcRuntimeStats();
   }
 
   getWriteDebugContext(): string | undefined {
@@ -604,6 +667,8 @@ export class Runtime {
   > {
     const tx = this.edit();
     tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
     let result: T;
     try {
       result = fn(tx);
@@ -619,6 +684,7 @@ export class Runtime {
         },
       });
     }
+    this.prepareTxForCommit(tx);
     return tx.commit().then(({ error }) => {
       if (error) {
         if (maxRetries > 0) {
@@ -637,6 +703,16 @@ export class Runtime {
         },
       };
     });
+  }
+
+  prepareTxForCommit(tx: IExtendedStorageTransaction): void {
+    const state = tx.getCfcState();
+    if (!state.relevant || state.enforcementMode === "disabled") {
+      return;
+    }
+    if (state.prepare.status === "unprepared") {
+      tx.prepareCfc();
+    }
   }
 
   /**

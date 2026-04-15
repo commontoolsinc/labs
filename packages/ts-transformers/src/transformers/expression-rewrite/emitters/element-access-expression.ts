@@ -35,6 +35,7 @@ export const emitElementAccessExpression = ({
     dataFlows,
     context,
     {
+      allowDirectExpressionWrap: !isStaticIndex,
       preferDeriveWrapper: preferDeriveWrappers,
     },
   );

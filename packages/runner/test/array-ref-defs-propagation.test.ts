@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager as V2StorageManager } from "../src/storage/v2.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
@@ -106,5 +107,52 @@ describe("$defs propagation in array item schema extraction", () => {
       // Should not throw "Failed to resolve $ref: #/$defs/Item"
       await expect(Promise.all(promises)).resolves.toBeDefined();
     }
+  });
+
+  it("v2 collectLinkedCellSyncs carries parent $defs into array item schemas", () => {
+    const cellLink = {
+      "/": {
+        "link@1": {
+          id: "bafytest1234:test",
+          path: [],
+          space: signer.did(),
+        },
+      },
+    };
+    const base: NormalizedLink = {
+      space: signer.did(),
+      id: "of:test-doc" as any,
+      path: [],
+      type: "application/json",
+    };
+    const capturedSchemas: unknown[] = [];
+    const collectLinkedCellSyncs =
+      (V2StorageManager.prototype as any).collectLinkedCellSyncs;
+    const fakeStorage = {
+      collectLinkedCellSyncs,
+      open: () => ({
+        sync: (_id: string, selector: { schema: unknown }) => {
+          capturedSchemas.push(selector.schema);
+          return Promise.resolve();
+        },
+      }),
+    };
+
+    collectLinkedCellSyncs.call(
+      fakeStorage,
+      [cellLink],
+      base,
+      arraySchema,
+      new ContextualFlowControl(),
+      [],
+      new Set(),
+    );
+
+    expect(capturedSchemas).toEqual([
+      {
+        $ref: "#/$defs/Item",
+        $defs: { Item: itemDef },
+      },
+    ]);
   });
 });

@@ -5,6 +5,8 @@ import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import {
   computeInputHashFromValue,
   internalSchema,
@@ -63,7 +65,7 @@ function snapshotFetchDataInputs(
         : body,
     }
     : undefined;
-  return { url: snapshot.url, mode, options };
+  return createFrozenRequestSnapshot({ url: snapshot.url, mode, options });
 }
 
 /**
@@ -112,6 +114,7 @@ export function fetchData(
 
       // Since we're aborting, don't retry. If the above fails, it's because the
       // requestId was already changing under us.
+      runtime.prepareTxForCommit(tx);
       tx.commit();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
@@ -233,70 +236,80 @@ export function fetchData(
 
     // Start a new fetch if we don't have a result/error and aren't already fetching
     if (!hasValidResult && !hasError && !alreadyFetching) {
-      const newRequestId = crypto.randomUUID();
-      // Try to claim mutex - returns immediately if another tab is processing
-      tryClaimMutex(
-        runtime,
-        inputsCell,
-        pending,
-        result,
-        error,
-        internal,
-        newRequestId,
-        // Materialize inputs via the schema system and preprocess body.
-        // asSchema().get() returns a frozen plain snapshot with nested
-        // properties (like options.headers) fully resolved, safe to use
-        // after commit.
-        snapshotFetchDataInputs,
-      ).then(
-        ({ claimed, inputs, inputHash }) => {
-          if (!claimed) {
-            // Another tab is handling this, we're done
-            return;
-          }
-
-          const { url, mode, options } = inputs;
-
-          // Clear any previous result/error when starting a new fetch
-          // This ensures observers see a clean pending state
-          runtime.editWithRetry((tx) => {
-            result.withTx(tx).set(undefined);
-            error.withTx(tx).set(undefined);
-          });
-
-          // Check if URL became empty while waiting for mutex
-          if (!url) {
-            // Release the lock and clear state
-            myRequestId = undefined;
-            runtime.editWithRetry((tx) => {
-              pending.withTx(tx).set(false);
-              result.withTx(tx).set(undefined);
-              error.withTx(tx).set(undefined);
-              internal.withTx(tx).set({
-                requestId: "",
-                lastActivity: 0,
-                inputHash: "",
-              });
-            });
-            return;
-          }
-
-          abortController = new AbortController();
-
-          // We claimed the mutex, start the fetch
-          myRequestId = newRequestId;
-          startFetch(
+      const newRequestId = inputHash;
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchData",
+        `fetchData:${newRequestId}`,
+        inputsSnapshot,
+        "fetchData-start",
+        () => {
+          // Try to claim mutex - returns immediately if another tab is processing
+          void tryClaimMutex(
             runtime,
             inputsCell,
-            url,
-            mode,
-            options,
-            inputHash,
             pending,
             result,
             error,
             internal,
-            abortController.signal,
+            newRequestId,
+            // Materialize inputs via the schema system and preprocess body.
+            // asSchema().get() returns a frozen plain snapshot with nested
+            // properties (like options.headers) fully resolved, safe to use
+            // after commit.
+            snapshotFetchDataInputs,
+            inputHash,
+          ).then(
+            ({ claimed }) => {
+              if (!claimed) {
+                // Another tab is handling this, we're done
+                return;
+              }
+
+              const { url, mode, options } = inputsSnapshot;
+
+              // Clear any previous result/error when starting a new fetch
+              // This ensures observers see a clean pending state
+              runtime.editWithRetry((tx) => {
+                result.withTx(tx).set(undefined);
+                error.withTx(tx).set(undefined);
+              });
+
+              // Check if URL became empty while waiting for mutex
+              if (!url) {
+                // Release the lock and clear state
+                myRequestId = undefined;
+                runtime.editWithRetry((tx) => {
+                  pending.withTx(tx).set(false);
+                  result.withTx(tx).set(undefined);
+                  error.withTx(tx).set(undefined);
+                  internal.withTx(tx).set({
+                    requestId: "",
+                    lastActivity: 0,
+                    inputHash: "",
+                  });
+                });
+                return;
+              }
+
+              abortController = new AbortController();
+
+              // We claimed the mutex, start the fetch
+              myRequestId = newRequestId;
+              startFetch(
+                runtime,
+                inputsCell,
+                url,
+                mode,
+                options,
+                newRequestId,
+                pending,
+                result,
+                error,
+                internal,
+                abortController.signal,
+              );
+            },
           );
         },
       );

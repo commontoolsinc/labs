@@ -87,6 +87,45 @@ describe("Pattern Runner - Handlers", () => {
     expect(value).toMatchObject({ counter: { value: 3 } });
   });
 
+  it("defers handler registration for retryable setup transactions until commit", async () => {
+    const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
+
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incPattern = pattern<{ counter: { value: number } }>(
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const result = await runtime.editWithRetry((retryTx) => {
+      const resultCell = runtime.getCell<
+        { counter: { value: number }; stream: any }
+      >(space, "defer retryable handler start", undefined, retryTx);
+      const cell = runtime.run(retryTx, incPattern, {
+        counter: { value: 0 },
+      }, resultCell);
+
+      expect(addEventHandlerSpy.calls.length).toBe(0);
+      return cell;
+    });
+    if (result.error) throw new Error(result.error.message);
+
+    await result.ok.pull();
+
+    expect(addEventHandlerSpy.calls.length).toBe(1);
+
+    addEventHandlerSpy.restore();
+  });
+
   it("should propagate handler source location to scheduler via .name", async () => {
     // Spy on addEventHandler to capture the handler passed to it
     const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
@@ -126,6 +165,45 @@ describe("Pattern Runner - Handlers", () => {
     expect(registeredHandler.name).toMatch(
       /^handler:.*patterns-handlers\.test\.ts:\d+:\d+$/,
     );
+
+    addEventHandlerSpy.restore();
+  });
+
+  it("should annotate event handlers with write targets", async () => {
+    const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
+
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incPattern = pattern<{ counter: { value: number } }>(
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const resultCell = runtime.getCell<
+      { counter: { value: number }; stream: any }
+    >(space, "handler write target annotation test", undefined, tx);
+    const result = runtime.run(tx, incPattern, {
+      counter: { value: 0 },
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    expect(addEventHandlerSpy.calls.length).toBeGreaterThan(0);
+    const registeredHandler = addEventHandlerSpy.calls[0].args[0] as {
+      writes?: unknown[];
+    };
+    expect(registeredHandler.writes).toBeDefined();
 
     addEventHandlerSpy.restore();
   });

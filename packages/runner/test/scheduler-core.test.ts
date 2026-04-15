@@ -1394,6 +1394,58 @@ describe("event handling", () => {
     expect(events).toEqual([1, 2, 3]);
   });
 
+  it("does not commit or flush outbox effects when event handler throws", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "does not commit or flush outbox effects when event handler throws 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    const resultCell = runtime.getCell<number>(
+      space,
+      "does not commit or flush outbox effects when event handler throws 2",
+      undefined,
+      tx,
+    );
+    resultCell.set(0);
+    await tx.commit();
+
+    let attempts = 0;
+    let errors = 0;
+    let flushed = 0;
+    runtime.scheduler.onError(() => {
+      errors++;
+    });
+
+    const eventHandler: EventHandler = (handlerTx) => {
+      attempts++;
+      resultCell.withTx(handlerTx).send(1);
+      handlerTx.enqueuePostCommitEffect({
+        id: "event-handler-throw-outbox",
+        kind: "test",
+        flush() {
+          flushed++;
+        },
+      });
+      throw new Error("boom");
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+    await runtime.idle();
+    await runtime.idle();
+
+    expect(attempts).toBe(1);
+    expect(errors).toBe(1);
+    expect(flushed).toBe(0);
+    expect(resultCell.get()).toBe(0);
+  });
+
   it("should trigger recomputation of dependent cells", async () => {
     const eventCell = runtime.getCell<number>(
       space,

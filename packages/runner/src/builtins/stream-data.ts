@@ -2,6 +2,10 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -32,6 +36,7 @@ export function streamData(
   };
 
   let previousCall = "";
+  let startAttempt = 0;
   let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<any | undefined>;
@@ -78,12 +83,23 @@ export function streamData(
     const resultWithLog = result.withTx(tx);
     const errorWithLog = error.withTx(tx);
 
-    const { url, options } = inputsCell.getAsQueryResult([], tx) || {};
+    const { url, options } = snapshotStreamDataInputs(inputsCell.withTx(tx));
 
     // Re-entrancy guard: Don't restart the stream if it's the same request.
     const currentCall = `${url}${JSON.stringify(options)}`;
     if (currentCall === previousCall) return;
+    const previousCallBeforeAttempt = previousCall;
+    const thisAttempt = ++startAttempt;
     previousCall = currentCall;
+    tx.addCommitCallback((_committedTx, commitResult) => {
+      if (
+        commitResult.error &&
+        startAttempt === thisAttempt &&
+        previousCall === currentCall
+      ) {
+        previousCall = previousCallBeforeAttempt;
+      }
+    });
 
     if (status.controller) {
       status.controller.abort();
@@ -102,89 +118,149 @@ export function streamData(
     resultWithLog.set(undefined);
     errorWithLog.set(undefined);
 
-    const controller = new AbortController();
-    const signal = controller.signal;
-    status.controller = controller;
     const thisRun = ++status.run;
+    const requestSnapshot = snapshotStreamDataInputs(inputsCell.withTx(tx));
+    const requestId = hashOf(requestSnapshot).toString();
 
-    fetch(url, { ...options, signal })
-      .then(async (response) => {
-        const reader = response.body?.getReader();
-        const utf8 = new TextDecoder();
-
-        if (!reader) {
-          throw new Error("Response body is not readable");
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "streamData",
+      `streamData:${requestId}`,
+      requestSnapshot,
+      "streamData-start",
+      () => {
+        if (thisRun !== status.run) {
+          return;
         }
 
-        let buffer = "";
-        let id: string | undefined = undefined;
-        let event: string | undefined = undefined;
-        let data: string | undefined = undefined;
+        const controller = new AbortController();
+        const signal = controller.signal;
+        status.controller = controller;
 
-        while (true) {
-          if (thisRun !== status.run) {
-            controller.abort();
-            return;
-          }
+        fetch(url, { ...options, signal })
+          .then(async (response) => {
+            const reader = response.body?.getReader();
+            const utf8 = new TextDecoder();
 
-          const { done, value } = await reader.read();
-
-          buffer += utf8.decode(value);
-          while (buffer.includes("\n")) {
-            const line = buffer.split("\n")[0];
-            buffer = buffer.slice(line.length + 1);
-
-            if (line.startsWith("id:")) {
-              id = line.slice("id:".length);
-            } else if (line.startsWith("event:")) {
-              event = line.slice("event:".length);
-            } else if (line.startsWith("data:")) {
-              data = line.slice("data:".length);
+            if (!reader) {
+              throw new Error("Response body is not readable");
             }
-          }
 
-          if (id && event && data) {
-            const parsedData = {
-              id,
-              event,
-              data: JSON.parse(data),
-            };
+            let buffer = "";
+            let id: string | undefined = undefined;
+            let event: string | undefined = undefined;
+            let data: string | undefined = undefined;
+
+            while (true) {
+              if (thisRun !== status.run) {
+                controller.abort();
+                return;
+              }
+
+              const { done, value } = await reader.read();
+
+              buffer += utf8.decode(value);
+              while (buffer.includes("\n")) {
+                const line = buffer.split("\n")[0];
+                buffer = buffer.slice(line.length + 1);
+
+                if (line.startsWith("id:")) {
+                  id = line.slice("id:".length);
+                } else if (line.startsWith("event:")) {
+                  event = line.slice("event:".length);
+                } else if (line.startsWith("data:")) {
+                  data = line.slice("data:".length);
+                }
+              }
+
+              if (id && event && data) {
+                const parsedData = {
+                  id,
+                  event,
+                  data: JSON.parse(data),
+                };
+
+                await runtime.idle();
+
+                await runtime.editWithRetry((tx) => {
+                  result.withTx(tx).set(parsedData);
+                });
+
+                id = undefined;
+                event = undefined;
+                data = undefined;
+              }
+
+              if (done) {
+                break;
+              }
+            }
+          })
+          .catch(async (e) => {
+            if (e instanceof DOMException && e.name === "AbortError") {
+              return;
+            }
+            // FIXME(ja): I don't think this is the right logic... if the stream
+            // disconnects, we should probably not erase the result.
+            // FIXME(ja): also pending should probably be more like "live"?
+            console.error(e);
 
             await runtime.idle();
 
             await runtime.editWithRetry((tx) => {
-              result.withTx(tx).set(parsedData);
+              pending.withTx(tx).set(false);
+              result.withTx(tx).set(undefined);
+              error.withTx(tx).set(e);
             });
 
-            id = undefined;
-            event = undefined;
-            data = undefined;
-          }
-
-          if (done) {
-            break;
-          }
-        }
-      })
-      .catch(async (e) => {
-        if (e instanceof DOMException && e.name === "AbortError") {
-          return;
-        }
-        // FIXME(ja): I don't think this is the right logic... if the stream
-        // disconnects, we should probably not erase the result.
-        // FIXME(ja): also pending should probably be more like "live"?
-        console.error(e);
-
-        await runtime.idle();
-
-        await runtime.editWithRetry((tx) => {
-          pending.withTx(tx).set(false);
-          result.withTx(tx).set(undefined);
-          error.withTx(tx).set(e);
-        });
-
-        // Allow retrying the same request.
-        previousCall = "";
-      });
+            // Allow retrying the same request.
+            previousCall = "";
+          });
+      },
+    );
   };
+}
+
+type StreamDataInputs = {
+  url?: string;
+  options?: { body?: any; method?: string; headers?: Record<string, string> };
+};
+
+const streamDataInputSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      url: { type: "string" },
+      options: {
+        type: "object",
+        properties: {
+          body: {},
+          method: { type: "string" },
+          headers: {
+            type: "object",
+            additionalProperties: { type: "string" },
+          },
+        },
+      },
+    },
+  },
+  true,
+);
+
+function snapshotStreamDataInputs(
+  cell: Cell<StreamDataInputs>,
+): StreamDataInputs {
+  const snapshot = cell.asSchema(streamDataInputSchema).get() ??
+    ({} as StreamDataInputs);
+  const body = snapshot.options?.body;
+  if (!snapshot.options) {
+    return createFrozenRequestSnapshot({ url: snapshot.url });
+  }
+  const options = {
+    ...snapshot.options,
+    body: body !== undefined && typeof body !== "string"
+      ? JSON.stringify(body)
+      : body,
+  };
+  return createFrozenRequestSnapshot({ url: snapshot.url, options });
 }

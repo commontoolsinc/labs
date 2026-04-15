@@ -1,6 +1,7 @@
 export const assets: Readonly<string[]> = [
   "prompts/system.md",
   "scripts/iframe-bootstrap.js",
+  "types/cfc.ts",
   "types/commonfabric.d.ts",
   "types/commonfabric-schema.d.ts",
   "types/dom.d.ts",

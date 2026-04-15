@@ -15,14 +15,14 @@ import {
   UI,
 } from "commonfabric";
 
-const Classification = {
+const Confidentiality = {
   Unclassified: "unclassified",
   Confidential: "confidential",
   Secret: "secret",
   TopSecret: "topsecret",
 } as const;
 
-const ClassificationSecret = "secret";
+const ConfidentialitySecret = "secret";
 
 // Plaid Auth Schema for storing multiple bank connections
 export const PlaidAuthSchema = {
@@ -35,7 +35,7 @@ export const PlaidAuthSchema = {
         properties: {
           accessToken: {
             type: "string",
-            ifc: { classification: [ClassificationSecret] },
+            ifc: { confidentiality: [ConfidentialitySecret] },
           },
           itemId: { type: "string" },
           institutionId: { type: "string" },
@@ -151,7 +151,7 @@ const AccountSchema = {
   type: "object",
   properties: AccountProperties,
   required: Object.keys(AccountProperties),
-  ifc: { classification: [Classification.Confidential] },
+  ifc: { confidentiality: [Confidentiality.Confidential] },
 } as const satisfies JSONSchema;
 type Account = Mutable<Schema<typeof AccountSchema>>;
 
@@ -229,7 +229,7 @@ const TransactionSchema = {
   type: "object",
   properties: TransactionProperties,
   required: Object.keys(TransactionProperties),
-  ifc: { classification: [Classification.Confidential] },
+  ifc: { confidentiality: [Confidentiality.Confidential] },
 } as const satisfies JSONSchema;
 type Transaction = Mutable<Schema<typeof TransactionSchema>>;
 

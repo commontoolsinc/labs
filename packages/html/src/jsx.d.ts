@@ -2836,6 +2836,10 @@ type CFThemeInput = Partial<CFThemeDef> & Record<string, unknown>;
 
 type CFEvent<T> = {
   detail: T;
+  provenance?: {
+    origin: "dom";
+    trusted: boolean;
+  };
 };
 
 type EventHandler<T> =
@@ -2891,6 +2895,9 @@ interface CFKbdElement extends CFHTMLElement {}
 interface CFKeybindElement extends CFHTMLElement {}
 interface CFRenderElement extends CFHTMLElement {}
 interface CFCellContextElement extends CFHTMLElement {}
+interface CFCFCAuthorshipElement extends CFHTMLElement {}
+interface CFCFCLabelElement extends CFHTMLElement {}
+interface CFCFCRenderBoundaryElement extends CFHTMLElement {}
 interface CFDragSourceElement extends CFHTMLElement {}
 interface CFDropZoneElement extends CFHTMLElement {}
 interface CFChatMessageElement extends CFHTMLElement {}
@@ -3464,6 +3471,32 @@ interface CFCellContextAttributes<T> extends CFHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "label"?: string;
   "inline"?: boolean;
+}
+
+interface CFCFCLabelAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<unknown>;
+  "value"?: unknown;
+  "atom"?: string;
+  "kind"?: string;
+}
+
+interface CFCFCAuthorshipAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<unknown>;
+  "$author"?: CellLike<unknown>;
+  "value"?: unknown;
+  "author"?: unknown;
+  "authorName"?: unknown;
+  "avatar"?: unknown;
+  "kind"?: string;
+}
+
+interface CFCFCRenderBoundaryAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<unknown>;
+  "value"?: unknown;
+  "maxConfidentiality"?: unknown | readonly unknown[];
+  "data-cfc-max-confidentiality"?: unknown | readonly unknown[];
+  "declassifyConfidentiality"?: unknown | readonly unknown[];
+  "data-cfc-declassify-confidentiality"?: unknown | readonly unknown[];
 }
 
 interface CFDragSourceAttributes<T> extends CFHTMLAttributes<T> {
@@ -4804,6 +4837,18 @@ declare global {
       "cf-cell-context": CFDOM.DetailedHTMLProps<
         CFCellContextAttributes<CFCellContextElement>,
         CFCellContextElement
+      >;
+      "cf-cfc-authorship": CFDOM.DetailedHTMLProps<
+        CFCFCAuthorshipAttributes<CFCFCAuthorshipElement>,
+        CFCFCAuthorshipElement
+      >;
+      "cf-cfc-label": CFDOM.DetailedHTMLProps<
+        CFCFCLabelAttributes<CFCFCLabelElement>,
+        CFCFCLabelElement
+      >;
+      "cf-cfc-render-boundary": CFDOM.DetailedHTMLProps<
+        CFCFCRenderBoundaryAttributes<CFCFCRenderBoundaryElement>,
+        CFCFCRenderBoundaryElement
       >;
       "cf-drag-source": CFDOM.DetailedHTMLProps<
         CFDragSourceAttributes<CFDragSourceElement>,

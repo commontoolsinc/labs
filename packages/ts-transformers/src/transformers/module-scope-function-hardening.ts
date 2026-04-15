@@ -1,5 +1,9 @@
 import ts from "typescript";
-import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
+import {
+  BINDING_IDENTITY_HELPER_NAME,
+  FUNCTION_HARDENING_HELPER_NAME,
+  VERIFIED_BINDING_METADATA_FIELD,
+} from "@commonfabric/utils/sandbox-contract";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
@@ -7,32 +11,59 @@ export class ModuleScopeFunctionHardeningTransformer extends Transformer {
   override transform(context: TransformationContext): ts.SourceFile {
     const { factory, sourceFile } = context;
     const helperName = factory.createUniqueName(FUNCTION_HARDENING_HELPER_NAME);
+    const bindingHelperName = factory.createUniqueName(
+      BINDING_IDENTITY_HELPER_NAME,
+    );
     let helperNeeded = false;
+    let bindingHelperNeeded = false;
+    const trustedBindingNames = collectWriteAuthorizedByBindingNames(
+      sourceFile,
+    );
+    const sourceFileName = normalizeWriterIdentityFile(sourceFile.fileName);
 
     const statements = sourceFile.statements.flatMap((statement) =>
       transformTopLevelStatement(statement, context, {
         helperName: helperName.text,
+        bindingHelperName: bindingHelperName.text,
+        trustedBindingNames,
+        sourceFileName,
         useHelper: () => {
           helperNeeded = true;
+        },
+        useBindingHelper: () => {
+          bindingHelperNeeded = true;
         },
       })
     );
 
     return factory.updateSourceFile(
       sourceFile,
-      helperNeeded
-        ? [
-          createFunctionHardeningHelper(helperName.text),
-          ...statements,
-        ]
-        : statements,
+      [
+        ...(bindingHelperNeeded
+          ? [
+            createBindingIdentityHelper(
+              bindingHelperName.text,
+            ),
+          ]
+          : []),
+        ...(helperNeeded
+          ? [
+            createFunctionHardeningHelper(helperName.text),
+          ]
+          : []),
+        ...statements,
+      ],
     );
   }
 }
 
 interface HardeningState {
   readonly helperName: string;
+  readonly bindingHelperName: string;
+  readonly trustedBindingNames: ReadonlySet<string>;
+  readonly sourceFileName: string;
   readonly useHelper: () => void;
+  readonly useBindingHelper: () => void;
 }
 
 function transformTopLevelStatement(
@@ -47,7 +78,7 @@ function transformTopLevelStatement(
   }
 
   if (ts.isVariableStatement(statement)) {
-    return [transformVariableStatement(statement, sourceFile, factory, state)];
+    return transformVariableStatement(statement, sourceFile, factory, state);
   }
 
   if (
@@ -83,8 +114,23 @@ function transformFunctionDeclaration(
 
   if (statement.name) {
     state.useHelper();
+    const postStatements: ts.Statement[] = [];
+    if (state.trustedBindingNames.has(statement.name.text)) {
+      state.useBindingHelper();
+      postStatements.push(
+        factory.createExpressionStatement(
+          annotateBindingIdentifier(
+            factory.createIdentifier(statement.name.text),
+            statement.name.text,
+            factory,
+            state,
+          ),
+        ),
+      );
+    }
     return [
       statement,
+      ...postStatements,
       factory.createExpressionStatement(
         wrapWithFunctionHardener(
           factory.createIdentifier(statement.name.text),
@@ -139,45 +185,93 @@ function transformVariableStatement(
   _sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   state: HardeningState,
-): ts.VariableStatement {
+): ts.Statement[] {
   let changed = false;
+  const postStatements: ts.Statement[] = [];
   const declarations = statement.declarationList.declarations.map(
     (declaration) => {
       if (
-        !declaration.initializer ||
-        !isDirectFunctionExpression(declaration.initializer)
+        !ts.isIdentifier(declaration.name) ||
+        !declaration.initializer
       ) {
+        return declaration;
+      }
+      const initializer = unwrapExpression(declaration.initializer);
+      const isTrustedBinding = state.trustedBindingNames.has(
+        declaration.name.text,
+      );
+      const isDirectFunction = isDirectFunctionExpression(initializer);
+      const isTrustedCallable = isTrustedBinding &&
+        (ts.isCallExpression(initializer) || isDirectFunction);
+
+      if (!isTrustedCallable && !isDirectFunction) {
         return declaration;
       }
 
       changed = true;
-      state.useHelper();
+      if (isTrustedCallable) {
+        state.useBindingHelper();
+        postStatements.push(
+          factory.createExpressionStatement(
+            annotateBindingIdentifier(
+              factory.createIdentifier(declaration.name.text),
+              declaration.name.text,
+              factory,
+              state,
+            ),
+          ),
+        );
+      }
+
+      if (isDirectFunction && isTrustedBinding) {
+        state.useHelper();
+        postStatements.push(
+          factory.createExpressionStatement(
+            wrapWithFunctionHardener(
+              factory.createIdentifier(declaration.name.text),
+              factory,
+              state.helperName,
+            ),
+          ),
+        );
+        return declaration;
+      }
+
+      let rewritten = declaration.initializer;
+      if (isDirectFunction) {
+        state.useHelper();
+        rewritten = wrapWithFunctionHardener(
+          declaration.initializer,
+          factory,
+          state.helperName,
+        );
+      }
+
       return factory.updateVariableDeclaration(
         declaration,
         declaration.name,
         declaration.exclamationToken,
         declaration.type,
-        wrapWithFunctionHardener(
-          declaration.initializer,
-          factory,
-          state.helperName,
-        ),
+        rewritten,
       );
     },
   );
 
   if (!changed) {
-    return statement;
+    return [statement];
   }
 
-  return factory.updateVariableStatement(
-    statement,
-    statement.modifiers,
-    factory.updateVariableDeclarationList(
-      statement.declarationList,
-      declarations,
+  return [
+    factory.updateVariableStatement(
+      statement,
+      statement.modifiers,
+      factory.updateVariableDeclarationList(
+        statement.declarationList,
+        declarations,
+      ),
     ),
-  );
+    ...postStatements,
+  ];
 }
 
 function wrapWithFunctionHardener(
@@ -190,6 +284,41 @@ function wrapWithFunctionHardener(
     undefined,
     [expression],
   );
+}
+
+function annotateBindingIdentifier(
+  identifier: ts.Identifier,
+  bindingName: string,
+  factory: ts.NodeFactory,
+  state: HardeningState,
+): ts.CallExpression {
+  return factory.createCallExpression(
+    factory.createIdentifier(state.bindingHelperName),
+    undefined,
+    [
+      identifier,
+      createBindingIdentityMetadata(bindingName, factory, state),
+    ],
+  );
+}
+
+function createBindingIdentityMetadata(
+  bindingName: string,
+  factory: ts.NodeFactory,
+  state: HardeningState,
+): ts.ObjectLiteralExpression {
+  return factory.createObjectLiteralExpression([
+    factory.createPropertyAssignment(
+      factory.createIdentifier("sourceFile"),
+      factory.createStringLiteral(state.sourceFileName),
+    ),
+    factory.createPropertyAssignment(
+      factory.createIdentifier("bindingPath"),
+      factory.createArrayLiteralExpression([
+        factory.createStringLiteral(bindingName),
+      ]),
+    ),
+  ], true);
 }
 
 function createFunctionHardeningHelper(
@@ -267,6 +396,131 @@ function createFunctionHardeningHelper(
       factory.createReturnStatement(factory.createIdentifier("fn")),
     ], true),
   );
+}
+
+function createBindingIdentityHelper(
+  helperName: string,
+): ts.FunctionDeclaration {
+  const factory = ts.factory;
+  return factory.createFunctionDeclaration(
+    undefined,
+    undefined,
+    factory.createIdentifier(helperName),
+    undefined,
+    [
+      factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        factory.createIdentifier("value"),
+        undefined,
+        factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
+      ),
+      factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        factory.createIdentifier("metadata"),
+        undefined,
+        factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
+      ),
+    ],
+    undefined,
+    factory.createBlock([
+      factory.createIfStatement(
+        factory.createBinaryExpression(
+          factory.createParenthesizedExpression(
+            factory.createBinaryExpression(
+              factory.createIdentifier("value"),
+              factory.createToken(ts.SyntaxKind.AmpersandAmpersandToken),
+              factory.createParenthesizedExpression(
+                factory.createBinaryExpression(
+                  factory.createBinaryExpression(
+                    factory.createTypeOfExpression(
+                      factory.createIdentifier("value"),
+                    ),
+                    factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
+                    factory.createStringLiteral("object"),
+                  ),
+                  factory.createToken(ts.SyntaxKind.BarBarToken),
+                  factory.createBinaryExpression(
+                    factory.createTypeOfExpression(
+                      factory.createIdentifier("value"),
+                    ),
+                    factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
+                    factory.createStringLiteral("function"),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          factory.createToken(ts.SyntaxKind.AmpersandAmpersandToken),
+          factory.createCallExpression(
+            factory.createPropertyAccessExpression(
+              factory.createIdentifier("Object"),
+              "isExtensible",
+            ),
+            undefined,
+            [factory.createIdentifier("value")],
+          ),
+        ),
+        factory.createBlock([
+          factory.createExpressionStatement(
+            factory.createCallExpression(
+              factory.createPropertyAccessExpression(
+                factory.createIdentifier("Object"),
+                "defineProperty",
+              ),
+              undefined,
+              [
+                factory.createIdentifier("value"),
+                factory.createStringLiteral(VERIFIED_BINDING_METADATA_FIELD),
+                factory.createObjectLiteralExpression([
+                  factory.createPropertyAssignment(
+                    factory.createIdentifier("value"),
+                    factory.createIdentifier("metadata"),
+                  ),
+                  factory.createPropertyAssignment(
+                    factory.createIdentifier("configurable"),
+                    factory.createTrue(),
+                  ),
+                ], true),
+              ],
+            ),
+          ),
+        ], true),
+      ),
+      factory.createReturnStatement(factory.createIdentifier("value")),
+    ], true),
+  );
+}
+
+function collectWriteAuthorizedByBindingNames(
+  sourceFile: ts.SourceFile,
+): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isTypeReferenceNode(node) &&
+      ts.isIdentifier(node.typeName) &&
+      node.typeName.text === "WriteAuthorizedBy"
+    ) {
+      const bindingNode = node.typeArguments?.[1];
+      if (
+        bindingNode && ts.isTypeQueryNode(bindingNode) &&
+        ts.isIdentifier(bindingNode.exprName)
+      ) {
+        names.add(bindingNode.exprName.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return names;
+}
+
+function normalizeWriterIdentityFile(fileName: string): string {
+  const normalized = fileName.replace(/\\/g, "/");
+  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
+  return strippedPrefixed ?? normalized;
 }
 
 function isDirectFunctionExpression(expression: ts.Expression): boolean {

@@ -187,6 +187,13 @@ export async function batchTypeCheckFixtures(
             isExternalLibraryImport: false,
           };
         }
+        if (name === "./cfc.ts" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
+            isExternalLibraryImport: false,
+          };
+        }
         return undefined;
       });
     },
@@ -408,6 +415,13 @@ export async function transformFiles(
           return {
             resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "./cfc.ts" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
         }
@@ -733,6 +747,13 @@ export async function validateFiles(
           return {
             resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "./cfc.ts" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
         }
