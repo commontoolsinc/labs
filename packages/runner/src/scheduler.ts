@@ -4481,7 +4481,7 @@ export class Scheduler {
 
         // Every iteration needs to consider newly created pending effects.
         // Without this, nested/recursive patterns can stall after creating
-        // new `readResult`/`$TYPE` effects in an earlier iteration.
+        // new handler-result/`$TYPE` effects in an earlier iteration.
         this.collectPullIterationSeeds(iterationSeeds);
 
         // On first iteration, add special-case seeds discovered before settle

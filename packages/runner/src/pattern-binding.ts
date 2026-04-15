@@ -239,3 +239,42 @@ export function findAllWriteRedirectCells<T>(
   find(binding, baseCell);
   return seen;
 }
+
+/**
+ * Traverses a binding and returns write redirects that appear in that binding,
+ * without following those redirects into their target cell values.
+ *
+ * This is useful when a serialized boundary should be kept live as a demand
+ * root, but the target's internal graph should still be demand-driven.
+ *
+ * @param binding - The binding to traverse.
+ * @param baseCell - The base cell to use for resolving links.
+ * @returns All write redirect links found directly in the binding.
+ */
+export function findShallowWriteRedirectCells<T>(
+  binding: unknown,
+  baseCell: AnyCell<T>,
+): NormalizedFullLink[] {
+  const seen: NormalizedFullLink[] = [];
+  function find(binding: unknown): void {
+    if (isLegacyAlias(binding) && typeof binding.$alias.cell === "number") {
+      // Numbered docs are yet to be unwrapped nested patterns. Ignore them.
+      return;
+    } else if (isWriteRedirectLink(binding)) {
+      const link = parseLink(binding, baseCell);
+      if (!seen.find((s) => areNormalizedLinksSame(s, link))) {
+        seen.push(link);
+      }
+      return;
+    } else if (isCellLink(binding)) {
+      // Links that are not write redirects: Ignore them.
+      return;
+    } else if (Array.isArray(binding)) {
+      for (const value of binding) find(value);
+    } else if (isRecord(binding) && !isCellLink(binding)) {
+      for (const value of Object.values(binding)) find(value);
+    }
+  }
+  find(binding);
+  return seen;
+}

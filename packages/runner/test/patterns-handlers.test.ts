@@ -286,6 +286,11 @@ describe("Pattern Runner - Handlers", () => {
     expect(values).toContainEqual([3, 1, 0]);
 
     expect(values).toContainEqual([3, 2, 0]);
+
+    const graph = runtime.scheduler.getGraphSnapshot();
+    expect(
+      graph.nodes.some((node) => node.id.startsWith("readResult:")),
+    ).toBe(false);
   });
 
   it("should execute handlers with schemas", async () => {
