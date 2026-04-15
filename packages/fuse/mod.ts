@@ -22,20 +22,24 @@ import {
 import {
   applyPreparedCreate,
   applyPreparedExistingWrite,
+  applyPreparedMetadataMutation,
   applyPreparedParent,
   applyPreparedSymlink,
   authorizeCreateWriteback,
   authorizeExistingWriteback,
+  authorizeMetadataWriteback,
   authorizeNamespaceMutationWriteback,
   authorizeSymlinkWriteback,
   CFC_WRITEBACK_FINALIZE_XATTR,
   CFC_WRITEBACK_PREPARE_XATTR,
   type CfcEnforcementMode,
   type CfcExistingWritebackOperation,
+  type CfcMetadataLabelKey,
   type CfcNamespaceMutationWritebackOperation,
   type CfcPreparedWriteback,
   CfcWritebackStore,
   isCfcEnforcing,
+  metadataFieldsForSetattrFlags,
   parseCfcMode,
   resolveCfcMode,
   shouldEnableCfcAnnotations,
@@ -308,6 +312,72 @@ export async function main(argv: string[] = Deno.args) {
       applyPreparedExistingWrite(tree, ino, authorization.prepared);
     }
     return true;
+  }
+
+  function getExistingCfcWriteAuthorization(
+    ino: bigint,
+    operation: CfcExistingWritebackOperation,
+  ): ReturnType<typeof authorizeExistingWriteback> {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+    }
+    return authorization;
+  }
+
+  function authorizeMetadataCfcWrite(
+    ino: bigint,
+    requestedFields: CfcMetadataLabelKey[],
+  ): ReturnType<typeof authorizeMetadataWriteback> {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeMetadataWriteback({
+      mode: cfcMode,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, "setattr-metadata"),
+      requestedFields,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied setattr-metadata: ${authorization.reason}`,
+      );
+    }
+    return authorization;
+  }
+
+  function finalizeMetadataCfcMutation(
+    ino: bigint,
+    prepared: CfcPreparedWriteback | undefined,
+  ): void {
+    if (!prepared || !bridge) return;
+    const writePath = bridge.resolveWritePath(ino);
+    if (writePath) {
+      bridge.finalizeWritePath(writePath).then(() => {
+        cfcWritebacks.deletePrepared(ino, "setattr-metadata");
+      }).catch((e) => {
+        console.error(`[fuse] metadata finalize error: ${e}`);
+      });
+      return;
+    }
+    const sourceWritePath = bridge.resolveSourceWritePath(ino);
+    if (sourceWritePath) {
+      bridge.finalizeSourceWritePath(sourceWritePath).then(() => {
+        cfcWritebacks.deletePrepared(ino, "setattr-metadata");
+      }).catch((e) => {
+        console.error(`[fuse] metadata source finalize error: ${e}`);
+      });
+    }
   }
 
   function authorizeCreateCfcWrite(
@@ -1322,14 +1392,50 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
       const sizeChange = (toSet & FUSE_SET_ATTR_SIZE) !== 0;
-      const metadataOnlyChange = (toSet & ~FUSE_SET_ATTR_SIZE) !== 0;
-      if (isCfcEnforcing(cfcMode) && metadataOnlyChange) {
-        fuse.symbols.fuse_reply_err(req, EACCES);
-        return;
+      const metadataFlags = toSet & ~FUSE_SET_ATTR_SIZE;
+      const metadataChange = metadataFlags !== 0;
+      const metadataFields = metadataChange
+        ? metadataFieldsForSetattrFlags(metadataFlags)
+        : [];
+
+      let truncateAuthorization = undefined as
+        | ReturnType<typeof authorizeExistingWriteback>
+        | undefined;
+      let metadataAuthorization = undefined as
+        | ReturnType<typeof authorizeMetadataWriteback>
+        | undefined;
+
+      if (sizeChange) {
+        truncateAuthorization = getExistingCfcWriteAuthorization(
+          inode,
+          "truncate",
+        );
+        if (!truncateAuthorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
       }
-      if (sizeChange && !authorizeExistingCfcWrite(inode, "truncate")) {
-        fuse.symbols.fuse_reply_err(req, EACCES);
-        return;
+      if (metadataChange) {
+        metadataAuthorization = authorizeMetadataCfcWrite(
+          inode,
+          metadataFields,
+        );
+        if (!metadataAuthorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
+      if (truncateAuthorization?.allowed && truncateAuthorization.prepared) {
+        applyPreparedExistingWrite(tree, inode, truncateAuthorization.prepared);
+      }
+      if (metadataAuthorization?.allowed && metadataAuthorization.prepared) {
+        applyPreparedMetadataMutation(
+          tree,
+          inode,
+          metadataAuthorization.prepared,
+          metadataFields,
+        );
       }
 
       // Handle truncate / size change
@@ -1362,6 +1468,13 @@ export async function main(argv: string[] = Deno.args) {
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
         1.0,
       );
+      if (
+        metadataAuthorization?.allowed &&
+        metadataAuthorization.prepared &&
+        !sizeChange
+      ) {
+        finalizeMetadataCfcMutation(inode, metadataAuthorization.prepared);
+      }
     },
   );
   callbacks.push(setattrCb);

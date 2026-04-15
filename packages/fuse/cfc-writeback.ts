@@ -16,6 +16,29 @@ import {
   type CfcProjectionKind,
   type CfcProjectionRef,
 } from "./annotations.ts";
+import {
+  FUSE_SET_ATTR_ATIME,
+  FUSE_SET_ATTR_ATIME_NOW,
+  FUSE_SET_ATTR_BKUPTIME,
+  FUSE_SET_ATTR_CHGTIME,
+  FUSE_SET_ATTR_CRTIME,
+  FUSE_SET_ATTR_CTIME,
+  FUSE_SET_ATTR_FILE,
+  FUSE_SET_ATTR_FLAGS,
+  FUSE_SET_ATTR_FORCE,
+  FUSE_SET_ATTR_GID,
+  FUSE_SET_ATTR_KILL_PRIV,
+  FUSE_SET_ATTR_KILL_SGID,
+  FUSE_SET_ATTR_KILL_SUID,
+  FUSE_SET_ATTR_METADATA_KNOWN_MASK,
+  FUSE_SET_ATTR_MODE,
+  FUSE_SET_ATTR_MTIME,
+  FUSE_SET_ATTR_MTIME_NOW,
+  FUSE_SET_ATTR_OPEN,
+  FUSE_SET_ATTR_TIMES_SET,
+  FUSE_SET_ATTR_TOUCH,
+  FUSE_SET_ATTR_UID,
+} from "./platform.ts";
 import type { FsTree } from "./tree.ts";
 
 export type CfcEnforcementMode = RunnerCfcEnforcementMode;
@@ -29,7 +52,8 @@ export type CfcWritebackOperation =
   | "rmdir"
   | "rename-source"
   | "rename-destination"
-  | "symlink";
+  | "symlink"
+  | "setattr-metadata";
 export type CfcCreateWritebackOperation = "create" | "mkdir";
 export type CfcExistingWritebackOperation = "write" | "truncate";
 export type CfcNamespaceMutationWritebackOperation =
@@ -38,6 +62,8 @@ export type CfcNamespaceMutationWritebackOperation =
   | "rename-source"
   | "rename-destination";
 export type CfcSymlinkWritebackOperation = "symlink";
+export type CfcMetadataWritebackOperation = "setattr-metadata";
+export type CfcMetadataLabelKey = keyof CfcMetadataLabels;
 
 export const CFC_WRITEBACK_PREPARE_XATTR = "trusted.cfc.writeback.prepare";
 export const CFC_WRITEBACK_FINALIZE_XATTR = "trusted.cfc.writeback.finalize";
@@ -66,6 +92,7 @@ export type CfcPreparedWriteback = {
     destinationName?: string;
     targetText?: string;
     targetIdentity?: unknown;
+    metadataFields?: CfcMetadataLabelKey[];
   };
   expectedGeneration: string;
   labels: CfcPreparedWritebackLabels;
@@ -126,6 +153,59 @@ export function isCfcEnforcing(mode: CfcEnforcementMode): boolean {
   return mode === "enforce-explicit" || mode === "enforce-strict";
 }
 
+export function metadataFieldsForSetattrFlags(
+  flags: number,
+): CfcMetadataLabelKey[] {
+  const fields = new Set<CfcMetadataLabelKey>();
+  const unsignedFlags = flags >>> 0;
+  const has = (flag: number) => (unsignedFlags & (flag >>> 0)) !== 0;
+
+  if (
+    has(FUSE_SET_ATTR_MODE) ||
+    has(FUSE_SET_ATTR_KILL_SUID) ||
+    has(FUSE_SET_ATTR_KILL_SGID) ||
+    has(FUSE_SET_ATTR_KILL_PRIV) ||
+    has(FUSE_SET_ATTR_FLAGS)
+  ) {
+    fields.add("mode");
+  }
+  if (has(FUSE_SET_ATTR_UID)) fields.add("uid");
+  if (has(FUSE_SET_ATTR_GID)) fields.add("gid");
+  if (
+    has(FUSE_SET_ATTR_ATIME) ||
+    has(FUSE_SET_ATTR_MTIME) ||
+    has(FUSE_SET_ATTR_ATIME_NOW) ||
+    has(FUSE_SET_ATTR_MTIME_NOW) ||
+    has(FUSE_SET_ATTR_TIMES_SET) ||
+    has(FUSE_SET_ATTR_TOUCH)
+  ) {
+    fields.add("mtime");
+  }
+  if (
+    has(FUSE_SET_ATTR_CTIME) ||
+    has(FUSE_SET_ATTR_CRTIME) ||
+    has(FUSE_SET_ATTR_CHGTIME) ||
+    has(FUSE_SET_ATTR_BKUPTIME)
+  ) {
+    fields.add("ctime");
+  }
+  if (
+    has(FUSE_SET_ATTR_FORCE) ||
+    has(FUSE_SET_ATTR_FILE) ||
+    has(FUSE_SET_ATTR_OPEN)
+  ) {
+    fields.add("generation");
+  }
+
+  const unknownFlags = unsignedFlags &
+    ~(FUSE_SET_ATTR_METADATA_KNOWN_MASK >>> 0);
+  if (unknownFlags !== 0) {
+    for (const key of allMetadataLabelKeys) fields.add(key);
+  }
+
+  return [...fields].sort();
+}
+
 export function shouldRequirePrepareForExisting(options: {
   mode: CfcEnforcementMode;
   annotation?: CfcNodeAnnotation;
@@ -133,6 +213,13 @@ export function shouldRequirePrepareForExisting(options: {
   if (options.mode === "enforce-strict") return true;
   return options.mode === "enforce-explicit" &&
     options.annotation !== undefined;
+}
+
+export function shouldRequirePrepareForMetadata(options: {
+  mode: CfcEnforcementMode;
+  annotation?: CfcNodeAnnotation;
+}): boolean {
+  return shouldRequirePrepareForExisting(options);
 }
 
 export function shouldRequirePrepareForCreate(options: {
@@ -214,6 +301,67 @@ export function authorizeExistingWriteback(options: {
       allowed: false,
       requiresPrepare: true,
       reason: "missing or stale prepared CFC writeback metadata",
+    };
+  }
+  return {
+    allowed: true,
+    requiresPrepare: true,
+    prepared: options.prepared,
+  };
+}
+
+export function authorizeMetadataWriteback(options: {
+  mode: CfcEnforcementMode;
+  annotation?: CfcNodeAnnotation;
+  prepared?: CfcPreparedWriteback;
+  requestedFields: CfcMetadataLabelKey[];
+  diagnostics?: string[];
+}): CfcWritebackAuthorization {
+  const requiresPrepare = shouldRequirePrepareForMetadata(options);
+  if (options.mode === "disabled") {
+    return { allowed: true, requiresPrepare: false };
+  }
+  if (options.mode === "observe") {
+    if (!options.prepared) {
+      options.diagnostics?.push(
+        "missing prepared CFC writeback metadata for setattr-metadata",
+      );
+    } else if (!validPreparedForMetadata(options)) {
+      options.diagnostics?.push(
+        "malformed prepared CFC writeback metadata for setattr-metadata",
+      );
+    }
+    return {
+      allowed: true,
+      requiresPrepare: false,
+      prepared: validPreparedForMetadata(options)
+        ? options.prepared
+        : undefined,
+    };
+  }
+
+  if (!requiresPrepare) {
+    return { allowed: true, requiresPrepare: false };
+  }
+  if (!options.annotation) {
+    return {
+      allowed: false,
+      requiresPrepare,
+      reason: "missing coherent CFC annotation",
+    };
+  }
+  if (options.annotation.ref.generation !== options.annotation.generation) {
+    return {
+      allowed: false,
+      requiresPrepare,
+      reason: "stale CFC ref generation",
+    };
+  }
+  if (!validPreparedForMetadata(options)) {
+    return {
+      allowed: false,
+      requiresPrepare: true,
+      reason: "missing or stale prepared CFC metadata writeback",
     };
   }
   return {
@@ -428,6 +576,32 @@ function validPreparedForExisting(options: {
     prepared.target.ref?.projection === annotation.ref.projection &&
     canonicalCfcJsonStringify(prepared.target.ref) ===
       canonicalCfcJsonStringify(annotation.ref);
+}
+
+function validPreparedForMetadata(options: {
+  annotation?: CfcNodeAnnotation;
+  prepared?: CfcPreparedWriteback;
+  requestedFields: CfcMetadataLabelKey[];
+}): boolean {
+  const { annotation, prepared } = options;
+  if (!annotation || !prepared) return false;
+  if (
+    prepared.version !== 1 ||
+    prepared.operation !== "setattr-metadata" ||
+    prepared.expectedGeneration !== annotation.generation ||
+    prepared.target.ref?.generation !== annotation.generation ||
+    canonicalCfcJsonStringify(prepared.target.ref) !==
+      canonicalCfcJsonStringify(annotation.ref)
+  ) {
+    return false;
+  }
+
+  const labels = prepared.labels.metadataLabels;
+  if (!labels) return false;
+  for (const field of options.requestedFields) {
+    if (labels[field] === undefined) return false;
+  }
+  return true;
 }
 
 function validPreparedForCreate(options: {
@@ -711,7 +885,7 @@ function isOperation(value: unknown): value is CfcWritebackOperation {
     value === "create" || value === "mkdir" ||
     value === "unlink" || value === "rmdir" ||
     value === "rename-source" || value === "rename-destination" ||
-    value === "symlink";
+    value === "symlink" || value === "setattr-metadata";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -750,6 +924,35 @@ function metadataLabelsFor(
   };
 }
 
+const allMetadataLabelKeys: CfcMetadataLabelKey[] = [
+  "type",
+  "mode",
+  "size",
+  "mtime",
+  "ctime",
+  "generation",
+  "uid",
+  "gid",
+  "nlink",
+  "inode",
+];
+
+function preparedMetadataLabelsForRequested(
+  prepared: CfcPreparedWriteback,
+  requestedFields: readonly CfcMetadataLabelKey[],
+): CfcMetadataLabels {
+  const preparedMetadata = prepared.labels.metadataLabels ?? {};
+  const requested = new Set(requestedFields);
+  const failClosed = cfcFailClosedLabel();
+  const labels = {} as CfcMetadataLabels;
+  for (const key of allMetadataLabelKeys) {
+    labels[key] = requested.has(key)
+      ? labelOrFail(preparedMetadata[key])
+      : failClosed;
+  }
+  return labels;
+}
+
 const emptyDerivedSlots = (): CfcDerivedSlotsAnnotation => ({
   version: 1 as const,
   slots: [],
@@ -778,6 +981,36 @@ export function applyPreparedExistingWrite(
     generation,
     contentLabel,
     metadataLabels: metadataLabelsFor(prepared, contentLabel),
+    namespaceLabel: existing.namespaceLabel,
+    entries: existing.entries,
+    derivedSlots: emptyDerivedSlots(),
+    callable: existing.callable,
+    symlink: existing.symlink,
+    incomplete: {
+      reason: "cfc writeback prepared but not finalized",
+      paths: ["/" + existing.ref.path.map(String).join("/")],
+    },
+  });
+}
+
+export function applyPreparedMetadataMutation(
+  tree: FsTree,
+  ino: bigint,
+  prepared: CfcPreparedWriteback,
+  requestedFields: readonly CfcMetadataLabelKey[],
+): void {
+  const existing = tree.getCfcAnnotation(ino);
+  if (!existing) return;
+  const generation = preparedGeneration(prepared);
+  tree.setCfcAnnotation(ino, {
+    version: 1,
+    ref: preparedRef(existing.ref, generation),
+    generation,
+    contentLabel: existing.contentLabel,
+    metadataLabels: preparedMetadataLabelsForRequested(
+      prepared,
+      requestedFields,
+    ),
     namespaceLabel: existing.namespaceLabel,
     entries: existing.entries,
     derivedSlots: emptyDerivedSlots(),

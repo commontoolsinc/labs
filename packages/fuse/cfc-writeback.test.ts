@@ -7,18 +7,31 @@ import {
 import {
   applyPreparedCreate,
   applyPreparedExistingWrite,
+  applyPreparedMetadataMutation,
   applyPreparedSymlink,
   authorizeCreateWriteback,
   authorizeExistingWriteback,
+  authorizeMetadataWriteback,
   authorizeNamespaceMutationWriteback,
   authorizeSymlinkWriteback,
   CFC_WRITEBACK_FINALIZE_XATTR,
   CFC_WRITEBACK_PREPARE_XATTR,
   CfcWritebackStore,
+  metadataFieldsForSetattrFlags,
   parseCfcMode,
   resolveCfcMode,
   shouldEnableCfcAnnotations,
 } from "./cfc-writeback.ts";
+import {
+  FUSE_SET_ATTR_ATIME,
+  FUSE_SET_ATTR_CTIME,
+  FUSE_SET_ATTR_FILE,
+  FUSE_SET_ATTR_GID,
+  FUSE_SET_ATTR_MODE,
+  FUSE_SET_ATTR_MTIME,
+  FUSE_SET_ATTR_SIZE,
+  FUSE_SET_ATTR_UID,
+} from "./platform.ts";
 
 const SECRET_LABEL = {
   confidentiality: [{ type: "test-label", value: "secret" }],
@@ -64,7 +77,8 @@ function prepareJson(
     | "rmdir"
     | "rename-source"
     | "rename-destination"
-    | "symlink",
+    | "symlink"
+    | "setattr-metadata",
   ref: CfcProjectionRef,
   extraTarget: Record<string, unknown> = {},
 ): string {
@@ -123,6 +137,42 @@ Deno.test("CFC mode parsing and annotation defaults match runner modes", () => {
   );
 });
 
+Deno.test("FUSE setattr flag constants and metadata field mapping match low-level ABI", () => {
+  assertEquals(FUSE_SET_ATTR_MODE, 1 << 0);
+  assertEquals(FUSE_SET_ATTR_UID, 1 << 1);
+  assertEquals(FUSE_SET_ATTR_GID, 1 << 2);
+  assertEquals(FUSE_SET_ATTR_SIZE, 1 << 3);
+  assertEquals(FUSE_SET_ATTR_ATIME, 1 << 4);
+  assertEquals(FUSE_SET_ATTR_MTIME, 1 << 5);
+  assertEquals(FUSE_SET_ATTR_CTIME, 1 << 10);
+  assertEquals(FUSE_SET_ATTR_FILE, 1 << 13);
+  assertEquals(
+    metadataFieldsForSetattrFlags(
+      FUSE_SET_ATTR_MODE |
+        FUSE_SET_ATTR_UID |
+        FUSE_SET_ATTR_GID |
+        FUSE_SET_ATTR_MTIME |
+        FUSE_SET_ATTR_FILE,
+    ),
+    ["generation", "gid", "mode", "mtime", "uid"],
+  );
+  assertEquals(
+    metadataFieldsForSetattrFlags(1 << 24),
+    [
+      "ctime",
+      "generation",
+      "gid",
+      "inode",
+      "mode",
+      "mtime",
+      "nlink",
+      "size",
+      "type",
+      "uid",
+    ],
+  );
+});
+
 Deno.test("writeback prepare parsing accepts namespace operations only by exact name", () => {
   const { parentIno, ref } = makeAnnotatedTree();
   const store = new CfcWritebackStore();
@@ -158,6 +208,244 @@ Deno.test("writeback prepare parsing accepts namespace operations only by exact 
       ).replace('"unlink"', '"rename"'),
     ).ok,
     false,
+  );
+});
+
+Deno.test("writeback prepare parsing accepts metadata operation only by exact name", () => {
+  const { fileIno, ref } = makeAnnotatedTree();
+  const store = new CfcWritebackStore();
+
+  assertEquals(
+    store.setPreparedXattr(
+      fileIno,
+      CFC_WRITEBACK_PREPARE_XATTR,
+      prepareJson("setattr-metadata", ref, {
+        metadataFields: ["mode", "uid", "mtime"],
+      }),
+    ).ok,
+    true,
+  );
+  assertEquals(
+    store.setPreparedXattr(
+      fileIno,
+      CFC_WRITEBACK_PREPARE_XATTR,
+      prepareJson("setattr-metadata", ref, {
+        metadataFields: ["mode"],
+      }).replace('"setattr-metadata"', '"setattr"'),
+    ).ok,
+    false,
+  );
+});
+
+Deno.test("observe mode logs and allows missing metadata prepare", () => {
+  const { tree, fileIno } = makeAnnotatedTree();
+  const diagnostics: string[] = [];
+
+  const result = authorizeMetadataWriteback({
+    mode: "observe",
+    annotation: tree.getCfcAnnotation(fileIno),
+    prepared: undefined,
+    requestedFields: ["mode", "uid"],
+    diagnostics,
+  });
+
+  assertEquals(result.allowed, true);
+  assertStringIncludes(
+    diagnostics.join("\n"),
+    "missing prepared CFC writeback metadata",
+  );
+});
+
+Deno.test("enforce-explicit requires metadata prepare for annotated nodes only", () => {
+  const { tree, fileIno } = makeAnnotatedTree();
+
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-explicit",
+      annotation: tree.getCfcAnnotation(fileIno),
+      prepared: undefined,
+      requestedFields: ["mode"],
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-explicit",
+      annotation: undefined,
+      prepared: undefined,
+      requestedFields: ["mode"],
+    }).allowed,
+    true,
+  );
+});
+
+Deno.test("enforce-strict rejects missing annotation stale annotation missing prepare and stale metadata prepare", () => {
+  const { tree, fileIno, ref } = makeAnnotatedTree();
+  const annotation = tree.getCfcAnnotation(fileIno);
+  assertExists(annotation);
+
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-strict",
+      annotation: undefined,
+      prepared: undefined,
+      requestedFields: ["mode"],
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-strict",
+      annotation: {
+        ...annotation,
+        ref: { ...annotation.ref, generation: "stale-ref" },
+      },
+      prepared: undefined,
+      requestedFields: ["mode"],
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-strict",
+      annotation,
+      prepared: undefined,
+      requestedFields: ["mode"],
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-strict",
+      annotation,
+      prepared: {
+        version: 1,
+        operation: "setattr-metadata",
+        target: { ref },
+        expectedGeneration: "stale-generation",
+        labels: { metadataLabels: { mode: SECRET_LABEL } },
+      },
+      requestedFields: ["mode"],
+    }).allowed,
+    false,
+  );
+});
+
+Deno.test("metadata prepare must cover requested metadata fields", () => {
+  const { tree, fileIno, ref } = makeAnnotatedTree();
+  const annotation = tree.getCfcAnnotation(fileIno);
+  assertExists(annotation);
+
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-strict",
+      annotation,
+      prepared: {
+        version: 1,
+        operation: "setattr-metadata",
+        target: { ref },
+        expectedGeneration: ref.generation,
+        labels: { metadataLabels: { mode: SECRET_LABEL } },
+      },
+      requestedFields: ["mode"],
+    }).allowed,
+    true,
+  );
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-strict",
+      annotation,
+      prepared: {
+        version: 1,
+        operation: "setattr-metadata",
+        target: { ref },
+        expectedGeneration: ref.generation,
+        labels: { metadataLabels: { mode: SECRET_LABEL } },
+      },
+      requestedFields: ["mode", "uid"],
+    }).allowed,
+    false,
+  );
+});
+
+Deno.test("prepared metadata mutation preserves node data annotations and fail-closes unspecified metadata labels", () => {
+  const { tree, fileIno, ref } = makeAnnotatedTree();
+  const before = tree.getCfcAnnotation(fileIno);
+  assertExists(before);
+
+  applyPreparedMetadataMutation(
+    tree,
+    fileIno,
+    {
+      version: 1,
+      operation: "setattr-metadata",
+      target: { ref },
+      expectedGeneration: ref.generation,
+      labels: { metadataLabels: { mode: SECRET_LABEL, uid: SECRET_LABEL } },
+    },
+    ["mode", "uid"],
+  );
+
+  const annotation = tree.getCfcAnnotation(fileIno);
+  assertExists(annotation);
+  assertStringIncludes(annotation.generation, "prepared:sha256:");
+  assertEquals(annotation.contentLabel, before.contentLabel);
+  assertEquals(annotation.symlink, before.symlink);
+  assertEquals(annotation.callable, before.callable);
+  assertEquals(annotation.metadataLabels.mode, SECRET_LABEL);
+  assertEquals(annotation.metadataLabels.uid, SECRET_LABEL);
+  assertStringIncludes(
+    JSON.stringify(annotation.metadataLabels.gid),
+    "CommonFabricFuseProjectionMetadataIncomplete",
+  );
+  assertStringIncludes(annotation.incomplete?.reason ?? "", "prepared");
+});
+
+Deno.test("mixed size and metadata setattr requires truncate and metadata prepare", () => {
+  const { tree, fileIno, ref } = makeAnnotatedTree();
+  const annotation = tree.getCfcAnnotation(fileIno);
+  assertExists(annotation);
+  const truncatePrepare = {
+    version: 1 as const,
+    operation: "truncate" as const,
+    target: { ref },
+    expectedGeneration: ref.generation,
+    labels: { contentLabel: SECRET_LABEL },
+  };
+  const metadataPrepare = {
+    version: 1 as const,
+    operation: "setattr-metadata" as const,
+    target: { ref },
+    expectedGeneration: ref.generation,
+    labels: { metadataLabels: { mode: SECRET_LABEL } },
+  };
+
+  assertEquals(
+    authorizeExistingWriteback({
+      mode: "enforce-strict",
+      operation: "truncate",
+      annotation,
+      prepared: truncatePrepare,
+    }).allowed,
+    true,
+  );
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-strict",
+      annotation,
+      prepared: undefined,
+      requestedFields: ["mode"],
+    }).allowed,
+    false,
+  );
+  assertEquals(
+    authorizeMetadataWriteback({
+      mode: "enforce-strict",
+      annotation,
+      prepared: metadataPrepare,
+      requestedFields: ["mode"],
+    }).allowed,
+    true,
   );
 });
 
