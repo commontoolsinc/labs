@@ -1,6 +1,10 @@
-import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
+import { ifElse, NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
-import { Controls, SelectControl } from "../ui/controls/index.ts";
+import {
+  Controls,
+  SelectControl,
+  SwitchControl,
+} from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface TabBarStoryInput {}
@@ -14,6 +18,7 @@ export default pattern<TabBarStoryInput, TabBarStoryOutput>(() => {
   const activeTab = Writable.of("home");
   const position = Writable.of<"bottom" | "top">("bottom");
   const variant = Writable.of<"default" | "inset">("default");
+  const showAction = Writable.of(false);
 
   return {
     [NAME]: "cf-tab-bar Story",
@@ -56,6 +61,17 @@ export default pattern<TabBarStoryInput, TabBarStoryOutput>(() => {
           <cf-tab-bar-item value="profile" label="Profile">
             <span slot="icon">&#128100;</span>
           </cf-tab-bar-item>
+          {ifElse(
+            showAction,
+            <cf-button
+              slot="action"
+              variant="primary"
+              style="border-radius: 9999px; width: 3.5rem; height: 3.5rem; padding: 0; flex-shrink: 0;"
+            >
+              &#65291;
+            </cf-button>,
+            null,
+          )}
         </cf-tab-bar>
       </div>
     ),
@@ -81,6 +97,12 @@ export default pattern<TabBarStoryInput, TabBarStoryOutput>(() => {
               { label: "Default", value: "default" },
               { label: "Inset", value: "inset" },
             ]}
+          />
+          <SwitchControl
+            label="showAction"
+            description="Show a primary action button (FAB) in the action slot beside the nav pill"
+            defaultValue="false"
+            checked={showAction}
           />
         </>
       </Controls>
