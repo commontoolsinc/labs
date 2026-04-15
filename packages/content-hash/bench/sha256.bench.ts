@@ -11,12 +11,19 @@
  *   fixtures large enough that this would dominate the whole bench run.
  *
  * Benchmarks are grouped by implementation (`sha256Deno`, `sha256Noble`,
- * `sha256Wasm`).
+ * `sha256Wasm`, `sha256WasmCollecting`). The last of these is the fallback
+ * path used when the WASM hasher pool is exhausted; the `sha256()` column is
+ * a duplicate of `sha256Wasm`'s (same underlying one-shot path).
  */
 
 import { createHasherDeno, sha256Deno } from "../src/sha256-deno.ts";
 import { createHasherNoble, sha256Noble } from "../src/sha256-noble.ts";
-import { createHasherWasm, initWasm, sha256Wasm } from "../src/sha256-wasm.ts";
+import {
+  createHasherWasm,
+  createHasherWasmCollecting,
+  initWasm,
+  sha256Wasm,
+} from "../src/sha256-wasm.ts";
 import type { IncrementalHasher, Sha256Fn } from "../src/interface.ts";
 import { FIXTURES } from "../test/fixtures.ts";
 
@@ -41,6 +48,11 @@ const IMPLS: readonly Impl[] = [
   { name: "sha256Deno", sha256: sha256Deno, createHasher: createHasherDeno },
   { name: "sha256Noble", sha256: sha256Noble, createHasher: createHasherNoble },
   { name: "sha256Wasm", sha256: sha256Wasm, createHasher: createHasherWasm },
+  {
+    name: "sha256WasmCollecting",
+    sha256: sha256Wasm,
+    createHasher: createHasherWasmCollecting,
+  },
 ];
 
 /**
