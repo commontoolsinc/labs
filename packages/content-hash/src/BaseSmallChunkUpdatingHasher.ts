@@ -36,13 +36,17 @@ export abstract class BaseSmallChunkUpdatingHasher
       const smallsOffset = this.#smallsOffset;
 
       if (length <= (SMALLS_SIZE - smallsOffset)) {
-        // Note: We accept that in the case where the instance is done, a call
-        // that ends up here won't throw the "already done" error.
+        // The given `data` fits in the space available in `#smalls`. Note:
+        // We accept that in the case where the instance is done, a call that
+        // ends up here won't throw the "already done" error.
         this.#smalls.set(data, smallsOffset);
         this.#smallsOffset += length;
         return;
       }
     }
+
+    // `data` is too big to fit in the available `#smalls` space (even if it
+    // would have fit if `#smalls` were emptier).
 
     this.#updateFromSmalls();
     super.update(data);
