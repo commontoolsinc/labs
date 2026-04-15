@@ -18,8 +18,13 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
   digest(encoding?: string | undefined): Uint8Array | string {
     this.#throwIfDone();
 
-    const result = this._rawDigest();
+    const result = this._rawDigest(encoding);
     this.#done = true;
+
+    if (typeof result === "string") {
+      // `_rawDigest()` handles encoding.
+      return result;
+    }
 
     switch (encoding) {
       case "base64url": {
@@ -55,5 +60,7 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
    * This is called by the base class to perform a digest operation on the
    * underlying hash implementation.
    */
-  protected abstract _rawDigest(): Uint8Array;
+  protected abstract _rawDigest(
+    encoding: string | undefined,
+  ): Uint8Array | string;
 }

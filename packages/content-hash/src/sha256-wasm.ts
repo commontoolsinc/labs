@@ -155,7 +155,7 @@ class WasmCollectingHasher extends BaseIncrementalHasher {
     this.#currentOffset += length;
   }
 
-  protected _rawDigest(): Uint8Array {
+  protected _rawDigest(_encoding: string | undefined): Uint8Array {
     const hasher = getOneShotHasher();
 
     for (const chunk of this.#chunks) {
@@ -224,7 +224,7 @@ class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
     this.#hasher.update(data);
   }
 
-  protected _rawDigest(): Uint8Array {
+  protected _rawDigest(_encoding: string | undefined): Uint8Array {
     const hasher = this.#hasher;
     const result: Uint8Array = hasher.digest("binary");
 

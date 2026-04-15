@@ -19,7 +19,7 @@ class NobleHasher extends BaseSmallChunkUpdatingHasher {
     this.#hasher.update(data);
   }
 
-  protected _rawDigest(): Uint8Array {
+  protected _rawDigest(_encoding: string | undefined): Uint8Array {
     return this.#hasher.digest();
   }
 }
