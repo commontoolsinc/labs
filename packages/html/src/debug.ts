@@ -13,7 +13,18 @@ import { type ActiveRender, getActiveRenders } from "./render.ts";
 import type { DomApplicatorLifecycleDiagnostics } from "./main/applicator.ts";
 
 function emptyLifecycleDiagnostics(): DomApplicatorLifecycleDiagnostics {
-  return { vdomOps: {}, cfCellLinkOps: {}, bindingSets: {} };
+  return {
+    vdomOps: {},
+    cfCellLinkOps: {},
+    bindingSets: {},
+    nodeCount: 0,
+    connectedNodeCount: 0,
+    detachedNodeCount: 0,
+    cfCellLinkNodeCount: 0,
+    detachedCfCellLinkNodeCount: 0,
+    duplicateCreateCount: 0,
+    duplicateCreates: {},
+  };
 }
 
 function addCounts(
@@ -291,6 +302,14 @@ export function createVDomDebugHelpers() {
           addCounts(aggregate.vdomOps, diagnostics.vdomOps);
           addCounts(aggregate.cfCellLinkOps, diagnostics.cfCellLinkOps);
           addBindingCounts(aggregate.bindingSets, diagnostics.bindingSets);
+          aggregate.nodeCount += diagnostics.nodeCount;
+          aggregate.connectedNodeCount += diagnostics.connectedNodeCount;
+          aggregate.detachedNodeCount += diagnostics.detachedNodeCount;
+          aggregate.cfCellLinkNodeCount += diagnostics.cfCellLinkNodeCount;
+          aggregate.detachedCfCellLinkNodeCount +=
+            diagnostics.detachedCfCellLinkNodeCount;
+          aggregate.duplicateCreateCount += diagnostics.duplicateCreateCount;
+          addCounts(aggregate.duplicateCreates, diagnostics.duplicateCreates);
         }
         renders.push({
           index: i,

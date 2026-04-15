@@ -118,6 +118,24 @@ const CAPTURE_LIFECYCLE_DIAGNOSTICS_SERIES = (() => {
     return 0;
   }
 })();
+const CAPTURE_EVENT_INVOCATION_SERIES = (() => {
+  try {
+    const raw = Deno.env.get("CF_CAPTURE_EVENT_INVOCATION_SERIES");
+    return raw ? Number(raw) : 0;
+  } catch {
+    return 0;
+  }
+})();
+const SCHEDULER_PULL_MODE = (() => {
+  try {
+    const raw = Deno.env.get("CF_SCHEDULER_PULL_MODE");
+    if (raw === "1" || raw === "true" || raw === "pull") return true;
+    if (raw === "0" || raw === "false" || raw === "push") return false;
+  } catch {
+    // Ignore unavailable env in browser-like runners.
+  }
+  return undefined;
+})();
 
 type NoteCreateTimingEntry = {
   noteIndex: number;
@@ -185,6 +203,15 @@ describe("default-app flow test", () => {
       identity,
     });
 
+    if (SCHEDULER_PULL_MODE !== undefined) {
+      console.log(
+        `Set scheduler mode: ${SCHEDULER_PULL_MODE ? "pull" : "push"}...`,
+      );
+      await waitFor(async () => {
+        return await setSchedulerPullMode(page, SCHEDULER_PULL_MODE);
+      });
+    }
+
     if (CAPTURE_TRIGGER_TRACE) {
       console.log("Enable trigger trace...");
       await waitFor(async () => {
@@ -239,12 +266,14 @@ describe("default-app flow test", () => {
     const noteCreateTimings: NoteCreateTimingEntry[] = [];
     const noteCreateProfiles: NoteCreateProfileEntry[] = [];
     const lifecycleDiagnosticsSeries: unknown[] = [];
+    const eventInvocationSeries: unknown[] = [];
     const noteIterations = Math.max(
       CAPTURE_ACTION_RUN_SERIES > 0 ? CAPTURE_ACTION_RUN_SERIES : 1,
       CAPTURE_HOME_LOAD_SERIES,
       NOTE_CREATE_TIMING_SERIES,
       CAPTURE_NOTE_CREATE_PROFILE_SERIES,
       CAPTURE_LIFECYCLE_DIAGNOSTICS_SERIES,
+      CAPTURE_EVENT_INVOCATION_SERIES,
     );
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
@@ -294,6 +323,13 @@ describe("default-app flow test", () => {
         console.log(`Reset lifecycle diagnostics (note ${noteIndex})...`);
         await waitFor(async () => {
           return await resetLifecycleDiagnostics(page);
+        });
+      }
+
+      if (noteIndex <= CAPTURE_EVENT_INVOCATION_SERIES) {
+        console.log(`Reset event invocation trace (note ${noteIndex})...`);
+        await waitFor(async () => {
+          return await resetEventInvocationTrace(page);
         });
       }
 
@@ -484,6 +520,24 @@ describe("default-app flow test", () => {
         );
       }
 
+      if (noteIndex <= CAPTURE_EVENT_INVOCATION_SERIES) {
+        const eventInvocationSummary = await collectEventInvocationSummary(
+          page,
+        );
+        assert(
+          eventInvocationSummary,
+          `Expected event invocation summary for note ${noteIndex}`,
+        );
+        eventInvocationSeries.push({
+          noteIndex,
+          ...(eventInvocationSummary as Record<string, unknown>),
+        });
+        console.log(
+          `Event invocation summary (note ${noteIndex}):`,
+          JSON.stringify(eventInvocationSummary, null, 2),
+        );
+      }
+
       if (noteIndex <= CAPTURE_HOME_LOAD_SERIES) {
         console.log(
           `Open fresh home page for load summary (${noteIndex} notes)...`,
@@ -552,6 +606,13 @@ describe("default-app flow test", () => {
       );
     }
 
+    if (eventInvocationSeries.length > 0) {
+      console.log(
+        "Event invocation series:",
+        JSON.stringify(eventInvocationSeries, null, 2),
+      );
+    }
+
     if (CAPTURE_TRIGGER_TRACE) {
       const triggerSummary = await collectTriggerTraceSummary(page);
       assert(triggerSummary, "Expected trigger trace summary to be available");
@@ -571,6 +632,22 @@ async function armTriggerTrace(page: Page): Promise<boolean> {
     await rt.setTriggerTraceEnabled(true);
     return true;
   });
+}
+
+async function setSchedulerPullMode(
+  page: Page,
+  pullMode: boolean,
+): Promise<boolean> {
+  return await page.evaluate<Promise<boolean>, [boolean]>(
+    async (pullMode) => {
+      const rt = globalThis.commonfabric?.rt;
+      if (!rt?.setPullMode || !rt?.idle) return false;
+      await rt.setPullMode(pullMode);
+      await rt.idle();
+      return true;
+    },
+    { args: [pullMode] },
+  );
 }
 
 async function armWriteTrace(page: Page): Promise<boolean> {
@@ -668,6 +745,108 @@ async function resetLifecycleDiagnostics(page: Page): Promise<boolean> {
   });
 }
 
+async function resetEventInvocationTrace(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric as {
+      rt?: {
+        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
+        on?: (event: string, handler: (marker: unknown) => void) => void;
+        off?: (event: string, handler: (marker: unknown) => void) => void;
+        idle?: () => Promise<void>;
+      };
+      __eventInvocationTrace?: unknown[];
+      __eventInvocationTraceHandler?: (marker: unknown) => void;
+    } | undefined;
+    const rt = api?.rt;
+    if (!api || !rt?.setTelemetryEnabled || !rt.on || !rt.off) return false;
+
+    if (api.__eventInvocationTraceHandler) {
+      rt.off("telemetry", api.__eventInvocationTraceHandler);
+    }
+
+    api.__eventInvocationTrace = [];
+    api.__eventInvocationTraceHandler = (marker: unknown) => {
+      if (
+        marker && typeof marker === "object" &&
+        (marker as { type?: unknown }).type === "scheduler.invocation"
+      ) {
+        api.__eventInvocationTrace?.push(marker);
+      }
+    };
+    rt.on("telemetry", api.__eventInvocationTraceHandler);
+    await rt.setTelemetryEnabled(true);
+    await rt.idle?.();
+    return true;
+  });
+}
+
+async function collectEventInvocationSummary(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric as {
+      rt?: {
+        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
+        off?: (event: string, handler: (marker: unknown) => void) => void;
+        idle?: () => Promise<void>;
+      };
+      __eventInvocationTrace?: unknown[];
+      __eventInvocationTraceHandler?: (marker: unknown) => void;
+    } | undefined;
+    const rt = api?.rt;
+    if (!api || !rt?.setTelemetryEnabled) return null;
+
+    await rt.idle?.();
+    await rt.setTelemetryEnabled(false);
+    if (api.__eventInvocationTraceHandler && rt.off) {
+      rt.off("telemetry", api.__eventInvocationTraceHandler);
+    }
+
+    type Marker = {
+      type: string;
+      handlerId?: string;
+      handlerInfo?: {
+        patternName?: string;
+        moduleName?: string;
+        reads?: string[];
+        writes?: string[];
+      };
+    };
+    const markers = (api.__eventInvocationTrace ?? []) as Marker[];
+    const rows = new Map<string, {
+      handlerId: string;
+      count: number;
+      patternName?: string;
+      moduleName?: string;
+      reads?: string[];
+      writes?: string[];
+    }>();
+
+    for (const marker of markers) {
+      if (marker.type !== "scheduler.invocation") continue;
+      const handlerId = marker.handlerId ?? "unknown";
+      const row = rows.get(handlerId) ?? {
+        handlerId,
+        count: 0,
+        patternName: marker.handlerInfo?.patternName,
+        moduleName: marker.handlerInfo?.moduleName,
+        reads: marker.handlerInfo?.reads,
+        writes: marker.handlerInfo?.writes,
+      };
+      row.count++;
+      rows.set(handlerId, row);
+    }
+
+    const handlers = [...rows.values()].sort((a, b) =>
+      b.count - a.count || a.handlerId.localeCompare(b.handlerId)
+    );
+    const total = handlers.reduce((sum, row) => sum + row.count, 0);
+    return {
+      total,
+      uniqueHandlers: handlers.length,
+      handlers,
+    };
+  });
+}
+
 async function collectLifecycleDiagnostics(page: Page): Promise<unknown> {
   return await page.evaluate(() => {
     const api = globalThis.commonfabric as {
@@ -702,12 +881,20 @@ async function collectLifecycleDiagnostics(page: Page): Promise<unknown> {
       })
       .sort((a, b) => b.totalEvents - a.totalEvents)
       .slice(0, 20);
+    const topActiveSubscriptionCells = Object.values(subscriptions.cells)
+      .map((entry) => ({
+        ...entry,
+        activeInstances: Number(entry.activeInstances ?? 0),
+      }))
+      .sort((a, b) => b.activeInstances - a.activeInstances)
+      .slice(0, 20);
 
     return {
       vdom: vdom.aggregate,
       subscriptions: {
         totals: subscriptions.totals,
         topCells: topSubscriptionCells,
+        topActiveCells: topActiveSubscriptionCells,
       },
     };
   });
@@ -1567,14 +1754,35 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
     const focusKeys = [
       ["scheduler", "scheduler/execute"],
       ["scheduler", "scheduler/execute/settle"],
+      ["scheduler", "scheduler/execute/depCollect"],
       ["scheduler", "scheduler/execute/event"],
+      ["scheduler", "scheduler/execute/event/pullPopulateDependencies"],
+      ["scheduler", "scheduler/execute/event/pullTxToReactivityLog"],
+      ["scheduler", "scheduler/execute/event/pullDepCommitStart"],
+      ["scheduler", "scheduler/execute/event/pullCollectDirtyDependencies"],
+      ["scheduler", "scheduler/execute/event/pullScheduleDirtyDependencies"],
+      ["scheduler", "scheduler/execute/event/handlerAction"],
+      ["scheduler", "scheduler/execute/buildPullWorkSet"],
+      ["scheduler", "scheduler/execute/collectDirtyDependencies"],
+      ["scheduler", "scheduler/execute/collectDirtyDependencies/writerLookup"],
+      ["scheduler", "scheduler/execute/topologicalSort"],
+      ["scheduler", "scheduler/scheduleAffectedEffects"],
       ["scheduler", "scheduler/run"],
       ["scheduler", "scheduler/run/action"],
       ["scheduler", "scheduler/run/commit"],
       ["traverse", "traverse"],
+      ["runner", "stream/readInputs"],
+      ["runner", "stream/invokeJavaScriptImplementation"],
+      ["runner", "stream/postRun"],
       ["runner", "action/readInputs"],
+      ["runner", "action/invokeJavaScriptImplementation"],
       ["runner", "action/postRun"],
       ["runner", "action/populateDependencies"],
+      ["runner", "raw/run/wish"],
+      ["runner", "raw/run/map"],
+      ["runner", "raw/run/ifElse"],
+      ["runner", "raw/run/when"],
+      ["runner", "raw/populateDependencies"],
     ] as const;
 
     const focusTiming = focusKeys
@@ -1602,6 +1810,9 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
           "storage.cache",
           "worker-reconciler",
           "runner",
+          "stream",
+          "raw",
+          "runner.wish-flow",
         ].includes(loggerName)
       )
       .flatMap(([loggerName, rows]) =>

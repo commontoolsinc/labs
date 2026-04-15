@@ -62,6 +62,13 @@ export interface DomApplicatorLifecycleDiagnostics {
   vdomOps: Record<string, number>;
   cfCellLinkOps: Record<string, number>;
   bindingSets: Record<string, { set: number; skipped: number }>;
+  nodeCount: number;
+  connectedNodeCount: number;
+  detachedNodeCount: number;
+  cfCellLinkNodeCount: number;
+  detachedCfCellLinkNodeCount: number;
+  duplicateCreateCount: number;
+  duplicateCreates: Record<string, number>;
 }
 
 /**
@@ -88,6 +95,8 @@ export class DomApplicator {
     string,
     { set: number; skipped: number }
   >();
+  private readonly duplicateCreateCounts = new Map<string, number>();
+  private duplicateCreateCount = 0;
 
   private rootNodeId: number | null = null;
 
@@ -295,10 +304,14 @@ export class DomApplicator {
   }
 
   getLifecycleDiagnostics(): DomApplicatorLifecycleDiagnostics {
+    const nodeState = this.getNodeStateDiagnostics();
     return {
       vdomOps: Object.fromEntries(this.vdomOpCounts),
       cfCellLinkOps: Object.fromEntries(this.cfCellLinkOpCounts),
       bindingSets: Object.fromEntries(this.bindingSetCounts),
+      ...nodeState,
+      duplicateCreateCount: this.duplicateCreateCount,
+      duplicateCreates: Object.fromEntries(this.duplicateCreateCounts),
     };
   }
 
@@ -306,16 +319,20 @@ export class DomApplicator {
     this.vdomOpCounts.clear();
     this.cfCellLinkOpCounts.clear();
     this.bindingSetCounts.clear();
+    this.duplicateCreateCounts.clear();
+    this.duplicateCreateCount = 0;
   }
 
   // ============== Operation Implementations ==============
 
   private createElement(nodeId: number, tagName: string): void {
+    this.recordDuplicateCreate(nodeId, tagName.toLowerCase());
     const element = this.document.createElement(tagName);
     this.nodes.set(nodeId, element);
   }
 
   private createText(nodeId: number, text: string): void {
+    this.recordDuplicateCreate(nodeId, "#text");
     const textNode = this.document.createTextNode(text);
     this.nodes.set(nodeId, textNode);
   }
@@ -619,6 +636,57 @@ export class DomApplicator {
 
   private diagnosticTagName(node: HTMLElement): string {
     return node.tagName.toLowerCase();
+  }
+
+  private getNodeStateDiagnostics(): Pick<
+    DomApplicatorLifecycleDiagnostics,
+    | "nodeCount"
+    | "connectedNodeCount"
+    | "detachedNodeCount"
+    | "cfCellLinkNodeCount"
+    | "detachedCfCellLinkNodeCount"
+  > {
+    const container = this.nodes.get(CONTAINER_NODE_ID);
+    let connectedNodeCount = 0;
+    let detachedNodeCount = 0;
+    let cfCellLinkNodeCount = 0;
+    let detachedCfCellLinkNodeCount = 0;
+
+    for (const [nodeId, node] of this.nodes) {
+      const isContainer = nodeId === CONTAINER_NODE_ID;
+      const isConnected = isContainer ||
+        (container ? container.contains(node) : node.isConnected);
+      const isCfCellLink = isElementNode(node) &&
+        this.diagnosticTagName(node) === "cf-cell-link";
+
+      if (isConnected) {
+        connectedNodeCount++;
+      } else {
+        detachedNodeCount++;
+      }
+
+      if (isCfCellLink) {
+        cfCellLinkNodeCount++;
+        if (!isConnected) {
+          detachedCfCellLinkNodeCount++;
+        }
+      }
+    }
+
+    return {
+      nodeCount: this.nodes.size,
+      connectedNodeCount,
+      detachedNodeCount,
+      cfCellLinkNodeCount,
+      detachedCfCellLinkNodeCount,
+    };
+  }
+
+  private recordDuplicateCreate(nodeId: number, tagName: string): void {
+    if (!this.nodes.has(nodeId)) return;
+
+    this.duplicateCreateCount++;
+    this.incrementCount(this.duplicateCreateCounts, tagName);
   }
 
   private recordBindingSet(

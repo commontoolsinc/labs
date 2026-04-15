@@ -2144,15 +2144,22 @@ export class Runner {
           undefined,
           tx,
         );
-        const { argument, isValidArgument } = this.readJavaScriptArgument(
-          module,
-          inputsCell,
-          tx,
-          {
-            writableProxy:
-              (module as { writableProxy?: boolean }).writableProxy,
-          },
-        );
+        logger.timeStart("stream", "readInputs");
+        const { argument, isValidArgument } = (() => {
+          try {
+            return this.readJavaScriptArgument(
+              module,
+              inputsCell,
+              tx,
+              {
+                writableProxy:
+                  (module as { writableProxy?: boolean }).writableProxy,
+              },
+            );
+          } finally {
+            logger.timeEnd("stream", "readInputs");
+          }
+        })();
 
         this.updateInvalidInputFlag(
           name,
@@ -2181,14 +2188,28 @@ export class Runner {
           );
         }
 
-        const result = isValidArgument
-          ? this.invokeJavaScriptImplementation(
-            module,
-            fn,
-            argument,
-            verifiedLoadId,
-          )
-          : undefined;
+        let result: any = undefined;
+        if (isValidArgument) {
+          logger.timeStart("stream", "invokeJavaScriptImplementation");
+          try {
+            result = this.invokeJavaScriptImplementation(
+              module,
+              fn,
+              argument,
+              verifiedLoadId,
+            );
+            if (result instanceof Promise) {
+              result = result.finally(() =>
+                logger.timeEnd("stream", "invokeJavaScriptImplementation")
+              );
+            } else {
+              logger.timeEnd("stream", "invokeJavaScriptImplementation");
+            }
+          } catch (error) {
+            logger.timeEnd("stream", "invokeJavaScriptImplementation");
+            throw error;
+          }
+        }
         const postRun = (result: any) => {
           logger.timeStart("stream", "postRun");
           try {
@@ -2378,14 +2399,28 @@ export class Runner {
           previouslyInvalidArgument = !isValidArgument;
         }
 
-        const result = isValidArgument
-          ? this.invokeJavaScriptImplementation(
-            module,
-            fn,
-            argument,
-            verifiedLoadId,
-          )
-          : undefined;
+        let result: any = undefined;
+        if (isValidArgument) {
+          logger.timeStart("action", "invokeJavaScriptImplementation");
+          try {
+            result = this.invokeJavaScriptImplementation(
+              module,
+              fn,
+              argument,
+              verifiedLoadId,
+            );
+            if (result instanceof Promise) {
+              result = result.finally(() =>
+                logger.timeEnd("action", "invokeJavaScriptImplementation")
+              );
+            } else {
+              logger.timeEnd("action", "invokeJavaScriptImplementation");
+            }
+          } catch (error) {
+            logger.timeEnd("action", "invokeJavaScriptImplementation");
+            throw error;
+          }
+        }
         const postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
@@ -2667,7 +2702,7 @@ export class Runner {
     }
 
     // Handle both legacy (just Action) and new (RawBuiltinResult) return formats
-    const action = isRawBuiltinResult(builtinResult)
+    const builtinAction = isRawBuiltinResult(builtinResult)
       ? builtinResult.action
       : builtinResult;
     const builtinIsEffect = isRawBuiltinResult(builtinResult)
@@ -2692,11 +2727,28 @@ export class Runner {
       sanitizeDebugLabel(impl.name) ??
       "anonymous";
     const rawName = `raw:${rawTargetName}`;
+
+    const action: Action = (tx: IExtendedStorageTransaction) => {
+      logger.timeStart("raw", "run", rawTargetName);
+      try {
+        const result = builtinAction(tx);
+        if (result instanceof Promise) {
+          return result.finally(() =>
+            logger.timeEnd("raw", "run", rawTargetName)
+          );
+        }
+        logger.timeEnd("raw", "run", rawTargetName);
+        return result;
+      } catch (error) {
+        logger.timeEnd("raw", "run", rawTargetName);
+        throw error;
+      }
+    };
     setRunnableName(action, rawName, { setSrc: true });
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
-    Object.assign(action, {
+    Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: outputCells,
       module,

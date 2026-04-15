@@ -94,6 +94,7 @@ export class CFCellLink extends BaseElement {
   private _unsubscribe?: () => void;
   private _resolvedCellKey: string | undefined = undefined;
   private _subscribedCellKey: string | undefined = undefined;
+  private _resolveCellGeneration = 0;
 
   // Drag state
   private _isDragging = false;
@@ -104,6 +105,11 @@ export class CFCellLink extends BaseElement {
   private _preview?: HTMLElement;
   private _boundPointerMove = this._onPointerMove.bind(this);
   private _boundPointerUp = this._onPointerUp.bind(this);
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this._updateSubscription();
+  }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
@@ -163,32 +169,59 @@ export class CFCellLink extends BaseElement {
   }
 
   private async _resolveCell() {
-    if (this.cell) {
-      this._setResolvedCell(await this.cell.resolveAsCell());
+    const generation = ++this._resolveCellGeneration;
+    const cell = this.cell;
+    const link = this.link;
+    const runtime = this.runtime;
+    const space = this.space;
+
+    if (cell) {
+      this._prepareSubscriptionTarget(this._cellKey(cell));
+      try {
+        const resolvedCell = await cell.resolveAsCell();
+        if (generation !== this._resolveCellGeneration) return;
+        this._setResolvedCell(resolvedCell);
+      } catch (e) {
+        if (generation !== this._resolveCellGeneration) return;
+        console.error("Failed to resolve cell:", e);
+        this._prepareSubscriptionTarget(undefined);
+        this._setResolvedCell(undefined);
+      }
       return;
     }
 
-    if (this.link && this.runtime) {
+    if (link && runtime) {
       try {
         // TODO(runtime-worker-refactor): Making some changes here, but
         // `this.space` will be Shell's active space, not necessarily the
         // space for `this.link`.
-        const parsedLink = parseLLMFriendlyLink(this.link, this.space);
+        const parsedLink = parseLLMFriendlyLink(link, space);
         if (!parsedLink.space) {
           throw new Error("Link missing space.");
         }
-        const cell = this.runtime.getCellFromRef(parsedLink as CellRef);
-        this._setResolvedCell(await cell.resolveAsCell());
+        const linkedCell = runtime.getCellFromRef(parsedLink as CellRef);
+        this._prepareSubscriptionTarget(this._cellKey(linkedCell));
+        const resolvedCell = await linkedCell.resolveAsCell();
+        if (generation !== this._resolveCellGeneration) return;
+        this._setResolvedCell(resolvedCell);
       } catch (e) {
+        if (generation !== this._resolveCellGeneration) return;
         console.error("Failed to resolve link:", e);
+        this._prepareSubscriptionTarget(undefined);
         this._setResolvedCell(undefined);
       }
     } else {
+      this._prepareSubscriptionTarget(undefined);
       this._setResolvedCell(undefined);
     }
   }
 
   private _updateSubscription() {
+    if (!this.isConnected) {
+      this._cleanupSubscription();
+      return;
+    }
+
     const cell = this._resolvedCell;
     const nextCellKey = this._cellKey(cell);
     if (
@@ -229,6 +262,12 @@ export class CFCellLink extends BaseElement {
     return cell
       ? cellRefToKey({ ...cell.ref(), schema: undefined })
       : undefined;
+  }
+
+  private _prepareSubscriptionTarget(nextCellKey: string | undefined) {
+    if (this._unsubscribe && nextCellKey !== this._subscribedCellKey) {
+      this._cleanupSubscription();
+    }
   }
 
   private _updateNameFromValue(val: unknown) {

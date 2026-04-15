@@ -3673,39 +3673,110 @@ export class Scheduler {
           // Get the handler's dependencies (read-only, just capturing what will be read)
           const depTx = this.runtime.edit();
           depTx.setReadOnly?.("scheduler.populateDependencies()");
-          handler.populateDependencies(depTx, eventValue);
+          logger.timeStart(
+            "scheduler",
+            "execute",
+            "event",
+            "pullPopulateDependencies",
+          );
+          try {
+            handler.populateDependencies(depTx, eventValue);
+          } finally {
+            logger.timeEnd(
+              "scheduler",
+              "execute",
+              "event",
+              "pullPopulateDependencies",
+            );
+          }
+          logger.timeStart(
+            "scheduler",
+            "execute",
+            "event",
+            "pullTxToReactivityLog",
+          );
           const deps = txToReactivityLog(depTx);
+          logger.timeEnd(
+            "scheduler",
+            "execute",
+            "event",
+            "pullTxToReactivityLog",
+          );
+          // Commit even though we only read - the tx has no writes so this is safe
+          logger.timeStart(
+            "scheduler",
+            "execute",
+            "event",
+            "pullDepCommitStart",
+          );
           // Commit the read-only inspection tx as a no-op so dependency discovery
           // does not participate in CFC prepare or commit gating.
           depTx.commit();
+          logger.timeEnd(
+            "scheduler",
+            "execute",
+            "event",
+            "pullDepCommitStart",
+          );
 
           const dirtyDeps = new Set<Action>();
           const dirtyDepMemo = new Map<Action, boolean>();
-          const hasDirtyDependencies = this.collectDirtyDependenciesForLog(
-            deps,
-            dirtyDeps,
-            dirtyDepMemo,
+          logger.timeStart(
+            "scheduler",
+            "execute",
+            "event",
+            "pullCollectDirtyDependencies",
           );
+          let hasDirtyDependencies = false;
+          try {
+            hasDirtyDependencies = this.collectDirtyDependenciesForLog(
+              deps,
+              dirtyDeps,
+              dirtyDepMemo,
+            );
+          } finally {
+            logger.timeEnd(
+              "scheduler",
+              "execute",
+              "event",
+              "pullCollectDirtyDependencies",
+            );
+          }
 
           if (hasDirtyDependencies) {
             let nextEligibleAt: number | undefined;
             let hasRunnableDirtyDependency = false;
 
-            for (const dep of dirtyDeps) {
-              const depNextEligibleAt = this.getNextEligibleRunTime(dep);
-              if (
-                depNextEligibleAt !== undefined &&
-                depNextEligibleAt > performance.now()
-              ) {
-                nextEligibleAt = nextEligibleAt === undefined
-                  ? depNextEligibleAt
-                  : Math.min(nextEligibleAt, depNextEligibleAt);
-                continue;
-              }
+            logger.timeStart(
+              "scheduler",
+              "execute",
+              "event",
+              "pullScheduleDirtyDependencies",
+            );
+            try {
+              for (const dep of dirtyDeps) {
+                const depNextEligibleAt = this.getNextEligibleRunTime(dep);
+                if (
+                  depNextEligibleAt !== undefined &&
+                  depNextEligibleAt > performance.now()
+                ) {
+                  nextEligibleAt = nextEligibleAt === undefined
+                    ? depNextEligibleAt
+                    : Math.min(nextEligibleAt, depNextEligibleAt);
+                  continue;
+                }
 
-              hasRunnableDirtyDependency = true;
-              this.pending.add(dep);
-              eventBlockingDeps.add(dep);
+                hasRunnableDirtyDependency = true;
+                this.pending.add(dep);
+                eventBlockingDeps.add(dep);
+              }
+            } finally {
+              logger.timeEnd(
+                "scheduler",
+                "execute",
+                "event",
+                "pullScheduleDirtyDependencies",
+              );
             }
 
             if (hasRunnableDirtyDependency) {
@@ -3797,30 +3868,45 @@ export class Scheduler {
               recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
             }
             const actionStartTime = performance.now();
-            this.runningPromise = Promise.resolve(
-              this.runtime.harness.invoke(() => action(tx)),
-            ).then(() => {
-              const trustedEventCandidates =
-                trustedEventWriteCandidatesFromTransaction(tx, handler, [
-                  queuedEvent.eventLink.space,
-                ]);
-              recordTrustedEventPolicyInputs(
-                tx,
-                trustedEventCandidates,
-                eventValue,
+            logger.timeStart(
+              "scheduler",
+              "execute",
+              "event",
+              "handlerAction",
+            );
+            try {
+              this.runningPromise = Promise.resolve(
+                this.runtime.harness.invoke(() => action(tx)),
+              ).then(() => {
+                const trustedEventCandidates =
+                  trustedEventWriteCandidatesFromTransaction(tx, handler, [
+                    queuedEvent.eventLink.space,
+                  ]);
+                recordTrustedEventPolicyInputs(
+                  tx,
+                  trustedEventCandidates,
+                  eventValue,
+                );
+                const duration = (performance.now() - actionStartTime) / 1000;
+                if (duration > 10) {
+                  console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+                }
+                logger.debug("action-timing", () => {
+                  return [
+                    `Action ${actionId} completed in ${duration.toFixed(3)}s`,
+                  ];
+                });
+                finalize();
+              }).catch((error) => finalize(error));
+              await this.runningPromise;
+            } finally {
+              logger.timeEnd(
+                "scheduler",
+                "execute",
+                "event",
+                "handlerAction",
               );
-              const duration = (performance.now() - actionStartTime) / 1000;
-              if (duration > 10) {
-                console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
-              }
-              logger.debug("action-timing", () => {
-                return [
-                  `Action ${actionId} completed in ${duration.toFixed(3)}s`,
-                ];
-              });
-              finalize();
-            }).catch((error) => finalize(error));
-            await this.runningPromise;
+            }
           } catch (error) {
             finalize(error);
           }
@@ -3920,6 +4006,7 @@ export class Scheduler {
       let workSet: Set<Action>;
 
       if (this.pullMode) {
+        const buildPullWorkSetStart = performance.now();
         workSet = new Set<Action>();
         const iterationSeeds = new Set<Action>();
 
@@ -3952,6 +4039,12 @@ export class Scheduler {
             }`,
           ]);
         }
+        logger.time(
+          buildPullWorkSetStart,
+          "scheduler",
+          "execute",
+          "buildPullWorkSet",
+        );
       } else {
         // Push mode: work set is just the pending actions
         workSet = this.pending;
@@ -3976,12 +4069,19 @@ export class Scheduler {
       // which gets mutated during execution)
       const iterWorkSetSize = workSet.size;
 
+      const topologicalSortStart = performance.now();
       const order = topologicalSort(
         workSet,
         this.dependencies,
         this.getSchedulingWritesMap(),
         this.actionParent,
         this.pullMode ? this.dependents : undefined,
+      );
+      logger.time(
+        topologicalSortStart,
+        "scheduler",
+        "execute",
+        "topologicalSort",
       );
 
       logger.debug("schedule-execute", () => [
