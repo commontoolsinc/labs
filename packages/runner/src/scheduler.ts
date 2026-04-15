@@ -61,6 +61,8 @@ import type {
   NonIdempotentReport,
   SchedulerActionInfo,
   SchedulerDiagnosisResult,
+  SchedulerEventPreflightActionSummary,
+  SchedulerEventPreflightStats,
   SchedulerGraphEdge,
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
@@ -214,6 +216,35 @@ export type ReactivityLog = {
   /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
   potentialWrites?: IMemorySpaceAddress[];
 };
+
+type DirtyDependencyTraceContext = SchedulerEventPreflightStats & {
+  depth: number;
+  actionSummaries: Map<Action, SchedulerEventPreflightActionSummary>;
+  rootDirectWriterActions: Set<Action>;
+};
+
+function createDirtyDependencyTraceContext(): DirtyDependencyTraceContext {
+  return {
+    visitCount: 0,
+    memoHitCount: 0,
+    cycleHitCount: 0,
+    dirtyInputCount: 0,
+    resultTrueCount: 0,
+    workSetAddCount: 0,
+    reverseDependencyActionCount: 0,
+    reverseDependencyEdgeCount: 0,
+    logFallbackCount: 0,
+    logReadCount: 0,
+    logShallowReadCount: 0,
+    writerCandidateCount: 0,
+    writerOverlapCount: 0,
+    directWriterCount: 0,
+    maxDepth: 0,
+    depth: 0,
+    actionSummaries: new Map(),
+    rootDirectWriterActions: new Set(),
+  };
+}
 
 function addressMatchesLinkPrefix(
   address: IMemorySpaceAddress,
@@ -412,6 +443,7 @@ export class Scheduler {
   private anonymousActionCounter = 0;
   // Cycle detection during dependency collection
   private collectStack = new Set<Action>();
+  private dirtyDependencyTraceContext?: DirtyDependencyTraceContext;
 
   // Cycle-aware debounce: track runs per action within current execute() call
   private runsThisExecute = new Map<Action, number>();
@@ -2534,6 +2566,76 @@ export class Scheduler {
     this.dirty.add(action);
   }
 
+  private getTraceActionSummary(
+    trace: DirtyDependencyTraceContext,
+    action: Action,
+  ): SchedulerEventPreflightActionSummary {
+    let summary = trace.actionSummaries.get(action);
+    if (!summary) {
+      const log = this.dependencies.get(action);
+      const writes = this.getSchedulingWrites(action) ?? [];
+      summary = {
+        actionId: this.getActionId(action),
+        actionType: this.effects.has(action)
+          ? "effect"
+          : this.computations.has(action)
+          ? "computation"
+          : "unknown",
+        visitCount: 0,
+        memoHitCount: 0,
+        dirtyInputCount: 0,
+        resultTrueCount: 0,
+        reverseDependencyEdgeCount: 0,
+        maxDirectWriterCount: 0,
+        dirty: this.dirty.has(action),
+        pending: this.pending.has(action),
+        readCount: log?.reads.length ?? 0,
+        shallowReadCount: log?.shallowReads.length ?? 0,
+        writeCount: writes.length,
+      };
+      trace.actionSummaries.set(action, summary);
+    } else {
+      summary.dirty ||= this.dirty.has(action);
+      summary.pending ||= this.pending.has(action);
+    }
+    return summary;
+  }
+
+  private snapshotDirtyDependencyTraceContext(
+    context: DirtyDependencyTraceContext,
+  ): SchedulerEventPreflightStats {
+    const {
+      depth: _depth,
+      actionSummaries,
+      rootDirectWriterActions,
+      ...stats
+    } = context;
+    const actionRows = [...actionSummaries.values()];
+    const topBy = (
+      rows: SchedulerEventPreflightActionSummary[],
+      key: "visitCount" | "reverseDependencyEdgeCount",
+    ) =>
+      rows
+        .filter((row) => row[key] > 0)
+        .sort((a, b) =>
+          b[key] - a[key] ||
+          b.visitCount - a.visitCount ||
+          a.actionId.localeCompare(b.actionId)
+        )
+        .slice(0, 12);
+
+    const rootDirectWriterRows = [...rootDirectWriterActions].map((action) =>
+      this.getTraceActionSummary(context, action)
+    );
+
+    return {
+      ...stats,
+      hotActions: topBy(actionRows, "visitCount"),
+      hotFanoutActions: topBy(actionRows, "reverseDependencyEdgeCount"),
+      rootDirectWriters: topBy(rootDirectWriterRows, "visitCount"),
+    };
+  }
+
   /**
    * Returns whether an action is marked as dirty.
    */
@@ -2563,17 +2665,35 @@ export class Scheduler {
   ): boolean {
     const collectStart = performance.now();
     let addedToStack = false;
+    const trace = this.dirtyDependencyTraceContext;
 
     try {
+      if (trace) {
+        trace.visitCount++;
+        trace.maxDepth = Math.max(trace.maxDepth, trace.depth);
+        const actionSummary = this.getTraceActionSummary(trace, action);
+        actionSummary.visitCount++;
+        if (this.dirty.has(action)) {
+          trace.dirtyInputCount++;
+          actionSummary.dirtyInputCount++;
+        }
+      }
+
       const cached = memo.get(action);
       if (cached !== undefined) {
+        if (trace) {
+          trace.memoHitCount++;
+          this.getTraceActionSummary(trace, action).memoHitCount++;
+        }
         if (cached && this.computations.has(action)) {
+          if (!workSet.has(action) && trace) trace.workSetAddCount++;
           workSet.add(action);
         }
         return cached;
       }
 
       if (this.collectStack.has(action)) {
+        if (trace) trace.cycleHitCount++;
         const cycleResult = this.dirty.has(action) || workSet.has(action);
         memo.set(action, cycleResult);
         return cycleResult;
@@ -2585,20 +2705,38 @@ export class Scheduler {
       let actionNeedsRun = this.dirty.has(action);
       const directWriters = this.reverseDependencies.get(action);
       if (directWriters) {
-        for (const writer of directWriters) {
-          const writerNeedsRun = this.collectDirtyDependencies(
-            writer,
-            workSet,
-            memo,
+        if (trace) {
+          trace.reverseDependencyActionCount++;
+          trace.reverseDependencyEdgeCount += directWriters.size;
+          const actionSummary = this.getTraceActionSummary(trace, action);
+          actionSummary.reverseDependencyEdgeCount += directWriters.size;
+          actionSummary.maxDirectWriterCount = Math.max(
+            actionSummary.maxDirectWriterCount,
+            directWriters.size,
           );
+        }
+        for (const writer of directWriters) {
+          if (trace) trace.depth++;
+          let writerNeedsRun: boolean;
+          try {
+            writerNeedsRun = this.collectDirtyDependencies(
+              writer,
+              workSet,
+              memo,
+            );
+          } finally {
+            if (trace) trace.depth--;
+          }
           if (writerNeedsRun) {
             actionNeedsRun = true;
             if (this.computations.has(writer)) {
+              if (!workSet.has(writer) && trace) trace.workSetAddCount++;
               workSet.add(writer);
             }
           }
         }
       } else {
+        if (trace) trace.logFallbackCount++;
         const log = this.dependencies.get(action);
         if (log) {
           if (this.collectDirtyDependenciesForLog(log, workSet, memo)) {
@@ -2608,9 +2746,14 @@ export class Scheduler {
       }
 
       if (actionNeedsRun && this.computations.has(action)) {
+        if (!workSet.has(action) && trace) trace.workSetAddCount++;
         workSet.add(action);
       }
 
+      if (actionNeedsRun && trace) {
+        trace.resultTrueCount++;
+        this.getTraceActionSummary(trace, action).resultTrueCount++;
+      }
       memo.set(action, actionNeedsRun);
       return actionNeedsRun;
     } finally {
@@ -2723,6 +2866,11 @@ export class Scheduler {
   ): boolean {
     const lookupStart = performance.now();
     const directWriters = new Set<Action>();
+    const trace = this.dirtyDependencyTraceContext;
+    if (trace) {
+      trace.logReadCount += log.reads.length;
+      trace.logShallowReadCount += log.shallowReads.length;
+    }
     try {
       for (const read of log.reads) {
         const entity = `${read.space}/${read.id}` as SpaceAndURI;
@@ -2731,8 +2879,12 @@ export class Scheduler {
 
         for (const writer of writers) {
           if (this.effects.has(writer)) continue;
+          if (trace) trace.writerCandidateCount++;
           const writes = this.getSchedulingWrites(writer) ?? [];
           if (this.readsOverlapWrites([read], [], writes)) {
+            if (trace && !directWriters.has(writer)) {
+              trace.writerOverlapCount++;
+            }
             directWriters.add(writer);
           }
         }
@@ -2745,8 +2897,12 @@ export class Scheduler {
 
         for (const writer of writers) {
           if (this.effects.has(writer)) continue;
+          if (trace) trace.writerCandidateCount++;
           const writes = this.getSchedulingWrites(writer) ?? [];
           if (this.readsOverlapWrites([], [read], writes)) {
+            if (trace && !directWriters.has(writer)) {
+              trace.writerOverlapCount++;
+            }
             directWriters.add(writer);
           }
         }
@@ -2761,16 +2917,31 @@ export class Scheduler {
       );
     }
 
+    if (trace) trace.directWriterCount += directWriters.size;
+    if (trace && trace.depth === 0) {
+      for (const writer of directWriters) {
+        trace.rootDirectWriterActions.add(writer);
+        this.getTraceActionSummary(trace, writer);
+      }
+    }
+
     let hasDirtyDependencies = false;
     for (const writer of directWriters) {
-      const writerNeedsRun = this.collectDirtyDependencies(
-        writer,
-        workSet,
-        memo,
-      );
+      if (trace) trace.depth++;
+      let writerNeedsRun: boolean;
+      try {
+        writerNeedsRun = this.collectDirtyDependencies(
+          writer,
+          workSet,
+          memo,
+        );
+      } finally {
+        if (trace) trace.depth--;
+      }
       if (writerNeedsRun) {
         hasDirtyDependencies = true;
         if (this.computations.has(writer)) {
+          if (!workSet.has(writer) && trace) trace.workSetAddCount++;
           workSet.add(writer);
         }
       }
@@ -3670,9 +3841,20 @@ export class Scheduler {
         // In pull mode, ensure handler dependencies are computed before running.
         let shouldSkipEvent = false;
         if (this.pullMode && handler.populateDependencies) {
+          const preflightStats = createDirtyDependencyTraceContext();
+          const dirtySizeBefore = this.dirty.size;
+          const pendingSizeBefore = this.pending.size;
+          let populateMs = 0;
+          let txToLogMs = 0;
+          let depCommitMs = 0;
+          let collectMs = 0;
+          let scheduleMs = 0;
           // Get the handler's dependencies (read-only, just capturing what will be read)
           const depTx = this.runtime.edit();
           depTx.setReadOnly?.("scheduler.populateDependencies()");
+          let stepStart = performance.now();
+          depTx.setReadOnly?.("scheduler.populateDependencies()");
+          let stepStart = performance.now();
           logger.timeStart(
             "scheduler",
             "execute",
@@ -3689,6 +3871,8 @@ export class Scheduler {
               "pullPopulateDependencies",
             );
           }
+          populateMs = performance.now() - stepStart;
+          stepStart = performance.now();
           logger.timeStart(
             "scheduler",
             "execute",
@@ -3702,7 +3886,9 @@ export class Scheduler {
             "event",
             "pullTxToReactivityLog",
           );
+          txToLogMs = performance.now() - stepStart;
           // Commit even though we only read - the tx has no writes so this is safe
+          stepStart = performance.now();
           logger.timeStart(
             "scheduler",
             "execute",
@@ -3718,9 +3904,11 @@ export class Scheduler {
             "event",
             "pullDepCommitStart",
           );
+          depCommitMs = performance.now() - stepStart;
 
           const dirtyDeps = new Set<Action>();
           const dirtyDepMemo = new Map<Action, boolean>();
+          stepStart = performance.now();
           logger.timeStart(
             "scheduler",
             "execute",
@@ -3728,6 +3916,7 @@ export class Scheduler {
             "pullCollectDirtyDependencies",
           );
           let hasDirtyDependencies = false;
+          this.dirtyDependencyTraceContext = preflightStats;
           try {
             hasDirtyDependencies = this.collectDirtyDependenciesForLog(
               deps,
@@ -3735,6 +3924,7 @@ export class Scheduler {
               dirtyDepMemo,
             );
           } finally {
+            this.dirtyDependencyTraceContext = undefined;
             logger.timeEnd(
               "scheduler",
               "execute",
@@ -3742,11 +3932,13 @@ export class Scheduler {
               "pullCollectDirtyDependencies",
             );
           }
+          collectMs = performance.now() - stepStart;
 
           if (hasDirtyDependencies) {
             let nextEligibleAt: number | undefined;
             let hasRunnableDirtyDependency = false;
 
+            stepStart = performance.now();
             logger.timeStart(
               "scheduler",
               "execute",
@@ -3778,6 +3970,7 @@ export class Scheduler {
                 "pullScheduleDirtyDependencies",
               );
             }
+            scheduleMs = performance.now() - stepStart;
 
             if (hasRunnableDirtyDependency) {
               shouldSkipEvent = true;
@@ -3787,6 +3980,25 @@ export class Scheduler {
               shouldSkipEvent = true;
             }
           }
+
+          this.runtime.telemetry.submit({
+            type: "scheduler.event.preflight",
+            handlerId,
+            handlerInfo: this.getActionTelemetryInfo(handler),
+            readCount: deps.reads.length,
+            shallowReadCount: deps.shallowReads.length,
+            dirtySizeBefore,
+            pendingSizeBefore,
+            dirtyDependencyCount: dirtyDeps.size,
+            hasDirtyDependencies,
+            skipped: shouldSkipEvent,
+            populateMs,
+            txToLogMs,
+            depCommitMs,
+            collectMs,
+            scheduleMs,
+            stats: this.snapshotDirtyDependencyTraceContext(preflightStats),
+          });
         }
 
         if (!shouldSkipEvent) {

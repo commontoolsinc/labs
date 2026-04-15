@@ -766,9 +766,12 @@ async function resetEventInvocationTrace(page: Page): Promise<boolean> {
 
     api.__eventInvocationTrace = [];
     api.__eventInvocationTraceHandler = (marker: unknown) => {
+      const type = marker && typeof marker === "object"
+        ? (marker as { type?: unknown }).type
+        : undefined;
       if (
-        marker && typeof marker === "object" &&
-        (marker as { type?: unknown }).type === "scheduler.invocation"
+        type === "scheduler.invocation" ||
+        type === "scheduler.event.preflight"
       ) {
         api.__eventInvocationTrace?.push(marker);
       }
@@ -810,6 +813,55 @@ async function collectEventInvocationSummary(page: Page): Promise<unknown> {
         writes?: string[];
       };
     };
+    type PreflightMarker = Marker & {
+      readCount?: number;
+      shallowReadCount?: number;
+      dirtySizeBefore?: number;
+      pendingSizeBefore?: number;
+      dirtyDependencyCount?: number;
+      hasDirtyDependencies?: boolean;
+      skipped?: boolean;
+      populateMs?: number;
+      txToLogMs?: number;
+      depCommitMs?: number;
+      collectMs?: number;
+      scheduleMs?: number;
+      stats?: {
+        hotActions?: PreflightActionSummary[];
+        hotFanoutActions?: PreflightActionSummary[];
+        rootDirectWriters?: PreflightActionSummary[];
+        visitCount?: number;
+        memoHitCount?: number;
+        cycleHitCount?: number;
+        dirtyInputCount?: number;
+        resultTrueCount?: number;
+        workSetAddCount?: number;
+        reverseDependencyActionCount?: number;
+        reverseDependencyEdgeCount?: number;
+        logFallbackCount?: number;
+        logReadCount?: number;
+        logShallowReadCount?: number;
+        writerCandidateCount?: number;
+        writerOverlapCount?: number;
+        directWriterCount?: number;
+        maxDepth?: number;
+      };
+    };
+    type PreflightActionSummary = {
+      actionId: string;
+      actionType?: string;
+      visitCount?: number;
+      memoHitCount?: number;
+      dirtyInputCount?: number;
+      resultTrueCount?: number;
+      reverseDependencyEdgeCount?: number;
+      maxDirectWriterCount?: number;
+      dirty?: boolean;
+      pending?: boolean;
+      readCount?: number;
+      shallowReadCount?: number;
+      writeCount?: number;
+    };
     const markers = (api.__eventInvocationTrace ?? []) as Marker[];
     const rows = new Map<string, {
       handlerId: string;
@@ -835,14 +887,252 @@ async function collectEventInvocationSummary(page: Page): Promise<unknown> {
       rows.set(handlerId, row);
     }
 
+    const preflightRows = new Map<string, {
+      handlerId: string;
+      count: number;
+      skipped: number;
+      withDirtyDependencies: number;
+      readCountMax: number;
+      shallowReadCountMax: number;
+      dirtyDependencyCountMax: number;
+      dirtySizeBeforeMax: number;
+      pendingSizeBeforeMax: number;
+      totalPopulateMs: number;
+      totalCollectMs: number;
+      totalScheduleMs: number;
+      totalVisitCount: number;
+      totalMemoHitCount: number;
+      totalDirtyInputCount: number;
+      totalResultTrueCount: number;
+      totalWorkSetAddCount: number;
+      totalReverseDependencyEdges: number;
+      totalWriterCandidates: number;
+      totalWriterOverlaps: number;
+      totalDirectWriters: number;
+      maxVisitCount: number;
+      maxDepth: number;
+      patternName?: string;
+      moduleName?: string;
+      reads?: string[];
+      writes?: string[];
+    }>();
+    const hotActionsByHandler = new Map<
+      string,
+      Map<string, PreflightActionSummary>
+    >();
+    const hotFanoutActionsByHandler = new Map<
+      string,
+      Map<string, PreflightActionSummary>
+    >();
+    const rootDirectWritersByHandler = new Map<
+      string,
+      Map<string, PreflightActionSummary>
+    >();
+
+    const mergeActionSummaries = (
+      store: Map<string, Map<string, PreflightActionSummary>>,
+      handlerId: string,
+      actions: PreflightActionSummary[] | undefined,
+    ) => {
+      if (!actions?.length) return;
+      let byAction = store.get(handlerId);
+      if (!byAction) {
+        byAction = new Map();
+        store.set(handlerId, byAction);
+      }
+      for (const action of actions) {
+        const existing = byAction.get(action.actionId) ?? {
+          actionId: action.actionId,
+          actionType: action.actionType,
+          visitCount: 0,
+          memoHitCount: 0,
+          dirtyInputCount: 0,
+          resultTrueCount: 0,
+          reverseDependencyEdgeCount: 0,
+          maxDirectWriterCount: 0,
+          dirty: false,
+          pending: false,
+          readCount: 0,
+          shallowReadCount: 0,
+          writeCount: 0,
+        };
+        existing.visitCount = (existing.visitCount ?? 0) +
+          (action.visitCount ?? 0);
+        existing.memoHitCount = (existing.memoHitCount ?? 0) +
+          (action.memoHitCount ?? 0);
+        existing.dirtyInputCount = (existing.dirtyInputCount ?? 0) +
+          (action.dirtyInputCount ?? 0);
+        existing.resultTrueCount = (existing.resultTrueCount ?? 0) +
+          (action.resultTrueCount ?? 0);
+        existing.reverseDependencyEdgeCount =
+          (existing.reverseDependencyEdgeCount ?? 0) +
+          (action.reverseDependencyEdgeCount ?? 0);
+        existing.maxDirectWriterCount = Math.max(
+          existing.maxDirectWriterCount ?? 0,
+          action.maxDirectWriterCount ?? 0,
+        );
+        existing.dirty = Boolean(existing.dirty || action.dirty);
+        existing.pending = Boolean(existing.pending || action.pending);
+        existing.readCount = Math.max(
+          existing.readCount ?? 0,
+          action.readCount ?? 0,
+        );
+        existing.shallowReadCount = Math.max(
+          existing.shallowReadCount ?? 0,
+          action.shallowReadCount ?? 0,
+        );
+        existing.writeCount = Math.max(
+          existing.writeCount ?? 0,
+          action.writeCount ?? 0,
+        );
+        byAction.set(action.actionId, existing);
+      }
+    };
+
+    for (const marker of markers as PreflightMarker[]) {
+      if (marker.type !== "scheduler.event.preflight") continue;
+      const handlerId = marker.handlerId ?? "unknown";
+      const row = preflightRows.get(handlerId) ?? {
+        handlerId,
+        count: 0,
+        skipped: 0,
+        withDirtyDependencies: 0,
+        readCountMax: 0,
+        shallowReadCountMax: 0,
+        dirtyDependencyCountMax: 0,
+        dirtySizeBeforeMax: 0,
+        pendingSizeBeforeMax: 0,
+        totalPopulateMs: 0,
+        totalCollectMs: 0,
+        totalScheduleMs: 0,
+        totalVisitCount: 0,
+        totalMemoHitCount: 0,
+        totalDirtyInputCount: 0,
+        totalResultTrueCount: 0,
+        totalWorkSetAddCount: 0,
+        totalReverseDependencyEdges: 0,
+        totalWriterCandidates: 0,
+        totalWriterOverlaps: 0,
+        totalDirectWriters: 0,
+        maxVisitCount: 0,
+        maxDepth: 0,
+        patternName: marker.handlerInfo?.patternName,
+        moduleName: marker.handlerInfo?.moduleName,
+        reads: marker.handlerInfo?.reads,
+        writes: marker.handlerInfo?.writes,
+      };
+      row.count++;
+      if (marker.skipped) row.skipped++;
+      if (marker.hasDirtyDependencies) row.withDirtyDependencies++;
+      row.readCountMax = Math.max(row.readCountMax, marker.readCount ?? 0);
+      row.shallowReadCountMax = Math.max(
+        row.shallowReadCountMax,
+        marker.shallowReadCount ?? 0,
+      );
+      row.dirtyDependencyCountMax = Math.max(
+        row.dirtyDependencyCountMax,
+        marker.dirtyDependencyCount ?? 0,
+      );
+      row.dirtySizeBeforeMax = Math.max(
+        row.dirtySizeBeforeMax,
+        marker.dirtySizeBefore ?? 0,
+      );
+      row.pendingSizeBeforeMax = Math.max(
+        row.pendingSizeBeforeMax,
+        marker.pendingSizeBefore ?? 0,
+      );
+      row.totalPopulateMs += marker.populateMs ?? 0;
+      row.totalCollectMs += marker.collectMs ?? 0;
+      row.totalScheduleMs += marker.scheduleMs ?? 0;
+      row.totalVisitCount += marker.stats?.visitCount ?? 0;
+      row.totalMemoHitCount += marker.stats?.memoHitCount ?? 0;
+      row.totalDirtyInputCount += marker.stats?.dirtyInputCount ?? 0;
+      row.totalResultTrueCount += marker.stats?.resultTrueCount ?? 0;
+      row.totalWorkSetAddCount += marker.stats?.workSetAddCount ?? 0;
+      row.totalReverseDependencyEdges +=
+        marker.stats?.reverseDependencyEdgeCount ?? 0;
+      row.totalWriterCandidates += marker.stats?.writerCandidateCount ?? 0;
+      row.totalWriterOverlaps += marker.stats?.writerOverlapCount ?? 0;
+      row.totalDirectWriters += marker.stats?.directWriterCount ?? 0;
+      row.maxVisitCount = Math.max(
+        row.maxVisitCount,
+        marker.stats?.visitCount ?? 0,
+      );
+      row.maxDepth = Math.max(row.maxDepth, marker.stats?.maxDepth ?? 0);
+      preflightRows.set(handlerId, row);
+      mergeActionSummaries(
+        hotActionsByHandler,
+        handlerId,
+        marker.stats?.hotActions,
+      );
+      mergeActionSummaries(
+        hotFanoutActionsByHandler,
+        handlerId,
+        marker.stats?.hotFanoutActions,
+      );
+      mergeActionSummaries(
+        rootDirectWritersByHandler,
+        handlerId,
+        marker.stats?.rootDirectWriters,
+      );
+    }
+
     const handlers = [...rows.values()].sort((a, b) =>
       b.count - a.count || a.handlerId.localeCompare(b.handlerId)
     );
     const total = handlers.reduce((sum, row) => sum + row.count, 0);
+    const topActionSummaries = (
+      store: Map<string, Map<string, PreflightActionSummary>>,
+      handlerId: string,
+      key: "visitCount" | "reverseDependencyEdgeCount",
+    ) =>
+      [...(store.get(handlerId)?.values() ?? [])]
+        .sort((a, b) =>
+          (b[key] ?? 0) - (a[key] ?? 0) ||
+          (b.visitCount ?? 0) - (a.visitCount ?? 0) ||
+          a.actionId.localeCompare(b.actionId)
+        )
+        .slice(0, 8);
+    const preflightHandlers = [...preflightRows.values()]
+      .map((row) => ({
+        ...row,
+        totalPopulateMs: Number(row.totalPopulateMs.toFixed(3)),
+        totalCollectMs: Number(row.totalCollectMs.toFixed(3)),
+        totalScheduleMs: Number(row.totalScheduleMs.toFixed(3)),
+        hotActions: topActionSummaries(
+          hotActionsByHandler,
+          row.handlerId,
+          "visitCount",
+        ),
+        hotFanoutActions: topActionSummaries(
+          hotFanoutActionsByHandler,
+          row.handlerId,
+          "reverseDependencyEdgeCount",
+        ),
+        rootDirectWriters: topActionSummaries(
+          rootDirectWritersByHandler,
+          row.handlerId,
+          "visitCount",
+        ),
+      }))
+      .sort((a, b) =>
+        b.totalCollectMs - a.totalCollectMs ||
+        b.totalVisitCount - a.totalVisitCount ||
+        a.handlerId.localeCompare(b.handlerId)
+      );
     return {
       total,
       uniqueHandlers: handlers.length,
       handlers,
+      preflights: {
+        total: preflightHandlers.reduce((sum, row) => sum + row.count, 0),
+        skipped: preflightHandlers.reduce((sum, row) => sum + row.skipped, 0),
+        withDirtyDependencies: preflightHandlers.reduce(
+          (sum, row) => sum + row.withDirtyDependencies,
+          0,
+        ),
+        handlers: preflightHandlers,
+      },
     };
   });
 }

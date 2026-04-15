@@ -59,6 +59,43 @@ export interface SchedulerActionInfo {
   writes?: string[];
 }
 
+export interface SchedulerEventPreflightStats {
+  visitCount: number;
+  memoHitCount: number;
+  cycleHitCount: number;
+  dirtyInputCount: number;
+  resultTrueCount: number;
+  workSetAddCount: number;
+  reverseDependencyActionCount: number;
+  reverseDependencyEdgeCount: number;
+  logFallbackCount: number;
+  logReadCount: number;
+  logShallowReadCount: number;
+  writerCandidateCount: number;
+  writerOverlapCount: number;
+  directWriterCount: number;
+  maxDepth: number;
+  hotActions?: SchedulerEventPreflightActionSummary[];
+  hotFanoutActions?: SchedulerEventPreflightActionSummary[];
+  rootDirectWriters?: SchedulerEventPreflightActionSummary[];
+}
+
+export interface SchedulerEventPreflightActionSummary {
+  actionId: string;
+  actionType: "effect" | "computation" | "unknown";
+  visitCount: number;
+  memoHitCount: number;
+  dirtyInputCount: number;
+  resultTrueCount: number;
+  reverseDependencyEdgeCount: number;
+  maxDirectWriterCount: number;
+  dirty: boolean;
+  pending: boolean;
+  readCount: number;
+  shallowReadCount: number;
+  writeCount: number;
+}
+
 // ============================================================
 // Diagnosis types for non-settling / non-idempotent detection
 // ============================================================
@@ -111,6 +148,24 @@ export type RuntimeTelemetryMarker = {
   type: "scheduler.invocation";
   handlerId: string;
   handlerInfo?: SchedulerActionInfo;
+  error?: string;
+} | {
+  type: "scheduler.event.preflight";
+  handlerId: string;
+  handlerInfo?: SchedulerActionInfo;
+  readCount: number;
+  shallowReadCount: number;
+  dirtySizeBefore: number;
+  pendingSizeBefore: number;
+  dirtyDependencyCount: number;
+  hasDirtyDependencies: boolean;
+  skipped: boolean;
+  populateMs: number;
+  txToLogMs: number;
+  depCommitMs: number;
+  collectMs: number;
+  scheduleMs: number;
+  stats: SchedulerEventPreflightStats;
   error?: string;
 } | {
   type: "storage.push.start";
