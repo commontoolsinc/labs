@@ -504,6 +504,10 @@ export class Scheduler {
   private eventQueueWakeTimer: ReturnType<typeof setTimeout> | null = null;
   private eventQueueWakeAt: number | null = null;
   private actionDebounce = new WeakMap<Action, number>();
+  private actionHasRun = new WeakSet<Action>();
+  private computationDebounceReady = new WeakSet<Action>();
+  private computationDebounceReadyAt = new WeakMap<Action, number>();
+  private computationDebounceFlushSeeds = new Set<Action>();
   // Actions that opt out of auto-debounce (inverted: true means NO auto-debounce)
   private noDebounce = new WeakMap<Action, boolean>();
 
@@ -1196,6 +1200,7 @@ export class Scheduler {
     // garbage collected (WeakMap).
     // Cancel any pending debounce timer
     this.cancelDebounceTimer(action);
+    this.clearComputationDebounceState(action, { cancelTimer: false });
     // Clean up dependency collection tracking
     this.populateDependenciesCallbacks.delete(action);
     this.pendingDependencyCollection.delete(action);
@@ -1230,6 +1235,7 @@ export class Scheduler {
         // Record action execution time for cycle-aware scheduling
         const elapsed = performance.now() - actionStartTime;
         this.recordActionTime(action, elapsed);
+        this.actionHasRun.add(action);
 
         try {
           if (error) {
@@ -2594,6 +2600,7 @@ export class Scheduler {
    */
   private markDirty(action: Action): void {
     this.markDirectDirty(action);
+    this.scheduleComputationDebounce(action);
   }
 
   private markDirectDirty(action: Action): boolean {
@@ -2606,6 +2613,9 @@ export class Scheduler {
 
   private clearDirectDirty(action: Action): boolean {
     if (!this.dirty.delete(action)) return false;
+    if (this.computations.has(action)) {
+      this.clearComputationDebounceState(action);
+    }
     this.setStaleFromInputs(action);
     return true;
   }
@@ -3001,7 +3011,7 @@ export class Scheduler {
         this.conditionallyScheduledEffects.delete(reader);
         this.scheduleWithDebounce(reader);
       } else if (this.computations.has(reader)) {
-        this.markDirectDirty(reader);
+        this.markDirty(reader);
         this.scheduleAffectedEffects(reader);
       }
     }
@@ -3236,6 +3246,7 @@ export class Scheduler {
   setDebounce(action: Action, ms: number): void {
     if (ms <= 0) {
       this.actionDebounce.delete(action);
+      this.clearComputationDebounceState(action);
     } else {
       this.actionDebounce.set(action, ms);
     }
@@ -3254,6 +3265,19 @@ export class Scheduler {
   clearDebounce(action: Action): void {
     this.actionDebounce.delete(action);
     this.cancelDebounceTimer(action);
+    this.clearComputationDebounceState(action, { cancelTimer: false });
+  }
+
+  private clearComputationDebounceState(
+    action: Action,
+    options: { cancelTimer?: boolean } = {},
+  ): void {
+    this.computationDebounceReady.delete(action);
+    this.computationDebounceReadyAt.delete(action);
+    this.computationDebounceFlushSeeds.delete(action);
+    if (options.cancelTimer ?? true) {
+      this.cancelDebounceTimer(action);
+    }
   }
 
   /**
@@ -3279,6 +3303,71 @@ export class Scheduler {
       this.debounceTimers.delete(action);
       this.activeDebounceTimers.delete(timer);
     }
+  }
+
+  private shouldDebouncePullComputation(action: Action): boolean {
+    const debounceMs = this.actionDebounce.get(action);
+    return this.pullMode &&
+      this.computations.has(action) &&
+      !this.effects.has(action) &&
+      this.actionHasRun.has(action) &&
+      debounceMs !== undefined &&
+      debounceMs > 0;
+  }
+
+  private getNextDebounceRunTime(action: Action): number | undefined {
+    if (!this.shouldDebouncePullComputation(action)) return undefined;
+    if (!this.dirty.has(action)) return undefined;
+    if (this.computationDebounceReady.has(action)) return undefined;
+    return this.computationDebounceReadyAt.get(action);
+  }
+
+  private isDebouncedComputationWaiting(action: Action): boolean {
+    if (
+      this.shouldDebouncePullComputation(action) &&
+      this.dirty.has(action) &&
+      !this.computationDebounceReady.has(action) &&
+      this.computationDebounceReadyAt.get(action) === undefined
+    ) {
+      this.scheduleComputationDebounce(action);
+    }
+    const readyAt = this.getNextDebounceRunTime(action);
+    return readyAt !== undefined && readyAt > performance.now();
+  }
+
+  private scheduleComputationDebounce(action: Action): void {
+    if (!this.shouldDebouncePullComputation(action)) return;
+    const debounceMs = this.actionDebounce.get(action);
+    if (!debounceMs || debounceMs <= 0) return;
+
+    this.computationDebounceReady.delete(action);
+    this.cancelDebounceTimer(action);
+
+    const readyAt = performance.now() + debounceMs;
+    this.computationDebounceReadyAt.set(action, readyAt);
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(action);
+      this.activeDebounceTimers.delete(timer);
+      this.computationDebounceReadyAt.delete(action);
+
+      if (!this.computations.has(action) || !this.dirty.has(action)) {
+        return;
+      }
+
+      this.computationDebounceReady.add(action);
+      this.computationDebounceFlushSeeds.add(action);
+      this.pending.add(action);
+      this.queueExecution();
+    }, debounceMs);
+
+    this.debounceTimers.set(action, timer);
+    this.activeDebounceTimers.add(timer);
+
+    logger.debug("schedule-debounce", () => [
+      `[DEBOUNCE] Computation ${
+        this.getActionId(action)
+      } trailing flush scheduled for ${debounceMs}ms`,
+    ]);
   }
 
   /**
@@ -4100,6 +4189,16 @@ export class Scheduler {
             );
             try {
               for (const dep of dirtyDeps) {
+                if (this.isDebouncedComputationWaiting(dep)) {
+                  const depNextDebounceAt = this.getNextDebounceRunTime(dep);
+                  if (depNextDebounceAt !== undefined) {
+                    nextEligibleAt = nextEligibleAt === undefined
+                      ? depNextDebounceAt
+                      : Math.min(nextEligibleAt, depNextDebounceAt);
+                    continue;
+                  }
+                }
+
                 const depNextEligibleAt = this.getNextEligibleRunTime(dep);
                 if (
                   depNextEligibleAt !== undefined &&
@@ -4329,6 +4428,11 @@ export class Scheduler {
       for (const action of eventBlockingDeps) {
         initialSeeds.add(action);
       }
+      // Add computations whose trailing debounce timer fired. These are pull
+      // computations, so they need an explicit demand seed to flush.
+      for (const action of this.computationDebounceFlushSeeds) {
+        initialSeeds.add(action);
+      }
     }
 
     // Settle loop: runs until no more dirty work is found.
@@ -4501,6 +4605,17 @@ export class Scheduler {
           if (!isInPending) continue;
         }
 
+        if (this.isDebouncedComputationWaiting(fn)) {
+          logger.debug("schedule-debounce", () => [
+            `[DEBOUNCE] Skipping debounced computation: ${
+              this.getActionId(fn)
+            }`,
+          ]);
+          this.filterStats.filtered++;
+          this.pending.delete(fn);
+          continue;
+        }
+
         // Check throttle: skip recently-run actions but keep them dirty
         // They'll be pulled next time an effect needs them (if throttle expired)
         if (this.isThrottled(fn)) {
@@ -4531,6 +4646,9 @@ export class Scheduler {
         // Clean up from pending/dirty before running
         this.pending.delete(fn);
         this.conditionallyScheduledEffects.delete(fn);
+        if (this.computations.has(fn)) {
+          this.clearComputationDebounceState(fn);
+        }
         if (this.pullMode && this.effects.has(fn)) {
           this.clearDirty(fn);
         }

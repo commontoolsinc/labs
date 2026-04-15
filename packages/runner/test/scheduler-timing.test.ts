@@ -183,6 +183,73 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(1);
   });
 
+  it("should debounce dirty pull computations with immediate first run and trailing flush", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "debounce-pull-computation-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const result = runtime.getCell<number>(
+      space,
+      "debounce-pull-computation-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const computation: Action = (actionTx) => {
+      runCount++;
+      const value = source.withTx(actionTx).get();
+      result.withTx(actionTx).send(value * 10);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [result.getAsNormalizedFullLink()],
+      },
+      { debounce: 50 },
+    );
+
+    await result.pull();
+    expect(runCount).toBe(1);
+    expect(result.get()).toBe(10);
+
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(runCount).toBe(1);
+    expect(result.get()).toBe(10);
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    source.withTx(tx).send(3);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await result.pull();
+    expect(runCount).toBe(1);
+    expect(result.get()).toBe(10);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await runtime.idle();
+    await result.pull();
+
+    expect(runCount).toBe(2);
+    expect(result.get()).toBe(30);
+  });
+
   it("should cancel debounce timer on unsubscribe", async () => {
     const cell = runtime.getCell<number>(
       space,

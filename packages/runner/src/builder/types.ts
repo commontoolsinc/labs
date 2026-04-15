@@ -184,6 +184,12 @@ declare module "@commonfabric/api" {
     propagateInputIfc?: boolean;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
+    /** Optional scheduler debounce delay in milliseconds */
+    debounce?: number;
+    /** Opt out of scheduler auto-debounce */
+    noDebounce?: boolean;
+    /** Optional scheduler throttle period in milliseconds */
+    throttle?: number;
   }
 }
 

@@ -30,7 +30,11 @@ const wishFlowLogger = getLogger("runner.wish-flow", {
 const mentionableListSchema = internSchema(
   {
     type: "array",
-    items: { asCell: true },
+    items: {
+      type: "object",
+      properties: { [NAME]: { type: "string" } },
+      asCell: ["cell"],
+    },
   },
 );
 
@@ -80,6 +84,52 @@ function bucketDuration(ms: number): string {
   if (ms < 20) return "5to20ms";
   if (ms < 100) return "20to100ms";
   return "gte100ms";
+}
+
+function recordWishPhaseTiming(
+  startedAt: number,
+  phase: string,
+  queryKey?: string,
+  sourceBucket?: string,
+): number {
+  const endedAt = performance.now();
+  wishFlowLogger.time(startedAt, endedAt, "wish", "phase", phase);
+  if (queryKey) {
+    wishFlowLogger.time(
+      startedAt,
+      endedAt,
+      "wish",
+      "phase-query",
+      phase,
+      queryKey,
+    );
+  }
+  if (queryKey && sourceBucket) {
+    wishFlowLogger.time(
+      startedAt,
+      endedAt,
+      "wish",
+      "phase-source",
+      phase,
+      queryKey,
+      sourceBucket,
+    );
+  }
+  return endedAt - startedAt;
+}
+
+function measureWishPhase<T>(
+  phase: string,
+  queryKey: string | undefined,
+  fn: () => T,
+  sourceBucket?: string,
+): T {
+  const startedAt = performance.now();
+  try {
+    return fn();
+  } finally {
+    recordWishPhaseTiming(startedAt, phase, queryKey, sourceBucket);
+  }
 }
 
 function getResolutionKind(parsed: ParsedWishTarget): string {
@@ -208,27 +258,52 @@ function searchFavoritesForHashtag(
   searchTermWithoutHash: string,
   pathPrefix: string[],
 ): BaseResolution[] {
+  const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
+  const sourceBucket = sanitizeSourceKey(getTxDebugActionId(ctx.tx) ?? "none");
   const userDID = ctx.runtime.userIdentityDID;
   if (!userDID) return [];
 
-  const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-  const favoritesCell = homeSpaceCell
-    .key("defaultPattern")
-    .key("favorites")
-    .asSchema(favoriteListSchema);
-  const favorites = favoritesCell.get() || [];
+  const favoritesCell = measureWishPhase(
+    "favorites-cell",
+    queryKey,
+    () => {
+      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+      return homeSpaceCell
+        .key("defaultPattern")
+        .key("favorites")
+        .asSchema(favoriteListSchema);
+    },
+    sourceBucket,
+  );
+  const favorites = measureWishPhase(
+    "favorites-get",
+    queryKey,
+    () => favoritesCell.get() || [],
+    sourceBucket,
+  );
 
-  const matches = favorites.filter((entry) => {
-    // Check userTags first (stored without # prefix)
-    const userTags = entry.userTags ?? [];
-    for (const t of userTags) {
-      if (t.toLowerCase() === searchTermWithoutHash) return true;
-    }
-    // Search schema tag for hashtags
-    return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
-  });
+  const matches = measureWishPhase(
+    "favorites-filter",
+    queryKey,
+    () =>
+      favorites.filter((entry) => {
+        // Check userTags first (stored without # prefix)
+        const userTags = entry.userTags ?? [];
+        for (const t of userTags) {
+          if (t.toLowerCase() === searchTermWithoutHash) return true;
+        }
+        // Search schema tag for hashtags
+        return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
+      }),
+    sourceBucket,
+  );
 
-  return matches.map((match) => ({ cell: match.cell, pathPrefix }));
+  return measureWishPhase(
+    "favorites-result-map",
+    queryKey,
+    () => matches.map((match) => ({ cell: match.cell, pathPrefix })),
+    sourceBucket,
+  );
 }
 
 type MentionableSearchResult = {
@@ -248,45 +323,93 @@ function searchMentionablesForHashtag(
   pathPrefix: string[],
   spaceCell?: Cell<unknown>,
 ): MentionableSearchResult {
-  const mentionableCell = (spaceCell ?? getSpaceCell(ctx))
-    .key("defaultPattern")
-    .key("backlinksIndex")
-    .key("mentionable")
-    .resolveAsCell()
-    .asSchema(mentionableListSchema);
-  const raw = mentionableCell.get();
+  const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
+  const sourceKey = getTxDebugActionId(ctx.tx) ?? "none";
+  const sourceBucket = sanitizeSourceKey(sourceKey);
+  const mentionableCell = measureWishPhase(
+    "mentionable-cell",
+    queryKey,
+    () =>
+      (spaceCell ?? getSpaceCell(ctx))
+        .key("defaultPattern")
+        .key("backlinksIndex")
+        .key("mentionable")
+        .resolveAsCell()
+        .asSchema(mentionableListSchema),
+    sourceBucket,
+  );
+  const raw = measureWishPhase(
+    "mentionable-get",
+    queryKey,
+    () => mentionableCell.get(),
+    sourceBucket,
+  );
   if (raw === undefined || raw === null) {
     // Data not loaded yet — reactive system will re-trigger when it arrives
     return { matches: [], loaded: false };
   }
   const mentionables = (raw || []) as Cell<any>[];
 
-  const matches = mentionables.filter((pieceCell: Cell<any>) => {
-    if (!pieceCell) return false;
+  const matches = measureWishPhase(
+    "mentionable-filter",
+    queryKey,
+    () =>
+      mentionables.filter((pieceCell: Cell<any>) => {
+        if (!pieceCell) return false;
 
-    const piece = pieceCell.get();
-    if (!piece) return false;
+        const piece = measureWishPhase(
+          "mentionable-piece-get",
+          queryKey,
+          () => pieceCell.get(),
+          sourceBucket,
+        );
+        if (!piece) return false;
 
-    // Check [NAME] field for exact match
-    const name = piece[NAME]?.toLowerCase() ?? "";
-    if (name === searchTermWithoutHash) return true;
+        // Check [NAME] field for exact match
+        const nameMatches = measureWishPhase(
+          "mentionable-name-check",
+          queryKey,
+          () => {
+            const name = piece[NAME]?.toLowerCase() ?? "";
+            return name === searchTermWithoutHash;
+          },
+          sourceBucket,
+        );
+        if (nameMatches) return true;
 
-    // Compute schema tag lazily from the cell
-    let tag: string | undefined;
-    try {
-      const schema = (pieceCell as any)?.resolveAsCell()?.asSchema(undefined)
-        .asSchemaFromLinks?.()?.schema;
-      if (typeof schema === "object") {
-        tag = JSON.stringify(schema);
-      }
-    } catch {
-      // Schema not available yet
-    }
+        // Compute schema tag lazily from the cell
+        let tag: string | undefined;
+        try {
+          const schema = measureWishPhase(
+            "mentionable-schema",
+            queryKey,
+            () =>
+              pieceCell.resolveAsCell()?.asSchema(undefined)
+                .asSchemaFromLinks?.()?.schema,
+            sourceBucket,
+          );
+          if (typeof schema === "object") {
+            tag = measureWishPhase(
+              "mentionable-schema-stringify",
+              queryKey,
+              () => JSON.stringify(schema),
+              sourceBucket,
+            );
+          }
+        } catch {
+          // Schema not available yet
+        }
 
-    return tagMatchesHashtag(tag, searchTermWithoutHash);
-  });
+        return measureWishPhase(
+          "mentionable-tag-match",
+          queryKey,
+          () => tagMatchesHashtag(tag, searchTermWithoutHash),
+          sourceBucket,
+        );
+      }),
+    sourceBucket,
+  );
 
-  const sourceKey = getTxDebugActionId(ctx.tx) ?? "none";
   const query = `#${searchTermWithoutHash}`;
   wishFlowLogger.debug(`wish/search-hashtag/${sanitizeQueryKey(query)}`, () =>
     [
@@ -304,7 +427,12 @@ function searchMentionablesForHashtag(
     ].filter(Boolean));
 
   return {
-    matches: matches.map((match) => ({ cell: match, pathPrefix })),
+    matches: measureWishPhase(
+      "mentionable-result-map",
+      queryKey,
+      () => matches.map((match) => ({ cell: match, pathPrefix })),
+      sourceBucket,
+    ),
     loaded: true,
   };
 }
@@ -757,255 +885,387 @@ export function wish(
   // returns undefined if data isn't loaded yet. The reactive system re-triggers
   // wish when the data arrives.
   return (tx: IExtendedStorageTransaction) => {
-    const inputsWithTx = inputsCell.withTx(tx);
-    const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
+    const actionStartedAt = performance.now();
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     const sourceBucket = sanitizeSourceKey(sourceKey);
+    let actionQueryKey: string | undefined;
 
-    if (typeof targetValue === "object") {
-      const { query, path, schema, context, scope, headless } =
-        targetValue as WishParams;
-      const queryKey = sanitizeQueryKey(String(query ?? ""));
+    try {
+      const targetValue = measureWishPhase(
+        "input-get",
+        undefined,
+        () => {
+          const inputsWithTx = inputsCell.withTx(tx);
+          return inputsWithTx.asSchema(TARGET_SCHEMA).get();
+        },
+        sourceBucket,
+      );
 
-      if (query === undefined || query === null || query === "") {
-        const errorMsg = `Wish target "${
-          toCompactDebugString(targetValue)
-        }" has no query.`;
-        wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
-          `[WISH ERROR] source=${sourceKey}`,
-          `query=${String(query ?? "")}`,
-          `error=${errorMsg}`,
-        ]);
-        sendResult(
-          tx,
-          {
-            result: undefined,
-            candidates: [],
-            error: errorMsg,
-            [UI]: errorUI(errorMsg),
-          } satisfies WishState<any>,
-        );
+      if (typeof targetValue === "object") {
+        const { query, path, schema, context, scope, headless } =
+          targetValue as WishParams;
+        const queryKey = sanitizeQueryKey(String(query ?? ""));
+        actionQueryKey = queryKey;
+
+        if (query === undefined || query === null || query === "") {
+          const errorMsg = `Wish target "${
+            toCompactDebugString(targetValue)
+          }" has no query.`;
+          wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
+            `[WISH ERROR] source=${sourceKey}`,
+            `query=${String(query ?? "")}`,
+            `error=${errorMsg}`,
+          ]);
+          measureWishPhase(
+            "send-error",
+            queryKey,
+            () =>
+              sendResult(
+                tx,
+                {
+                  result: undefined,
+                  candidates: [],
+                  error: errorMsg,
+                  [UI]: errorUI(errorMsg),
+                } satisfies WishState<any>,
+              ),
+            sourceBucket,
+          );
+          return;
+        }
+
+        // If the query is a path or a hash tag, resolve it directly
+        if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
+          wishFlowLogger.debug(`wish/start/${queryKey}`, () => [
+            `[WISH START] source=${sourceKey}`,
+            `query=${query}`,
+            `scope=${formatScope(scope)}`,
+            `headless=${Boolean(headless)}`,
+            `path=${toCompactDebugString(path ?? [])}`,
+            `parent=${describeCell(parentCell)}`,
+          ]);
+          wishFlowLogger.debug(
+            `wish/start-source/${queryKey}/${sourceBucket}`,
+            () => [`source=${sourceKey}`],
+          );
+          try {
+            const resolveStartedAt = performance.now();
+            const parsed = measureWishPhase(
+              "parse-target",
+              queryKey,
+              () => {
+                const parsed = parseWishTarget(query);
+                parsed.path = [...parsed.path, ...(path ?? [])];
+                return parsed;
+              },
+              sourceBucket,
+            );
+            const ctx: WishContext = {
+              runtime,
+              tx,
+              parentCell,
+              scope,
+              nowCell,
+            };
+            const baseResolutions = measureWishPhase(
+              "resolve-base",
+              queryKey,
+              () => resolveBase(parsed, ctx),
+              sourceBucket,
+            );
+            // Persist #now cell across re-runs to avoid non-idempotent loops
+            if (ctx.nowCell) nowCell = ctx.nowCell;
+
+            if (baseResolutions.length === 0) {
+              // No matches yet — data may still be loading. Send a pending
+              // result; the reactive system will re-trigger when cells update
+              // (dependencies were registered by the cell.get() calls in the
+              // search functions).
+              measureWishPhase(
+                "send-pending",
+                queryKey,
+                () =>
+                  sendResult(
+                    tx,
+                    {
+                      result: undefined,
+                      candidates: [],
+                      [UI]: undefined,
+                    } satisfies WishState<any>,
+                  ),
+                sourceBucket,
+              );
+              return;
+            }
+
+            const resultCells = measureWishPhase(
+              "resolve-paths",
+              queryKey,
+              () =>
+                baseResolutions.map((baseResolution) => {
+                  const combinedPath = baseResolution.pathPrefix
+                    ? [...baseResolution.pathPrefix, ...parsed.path]
+                    : parsed.path;
+                  const resolvedCell = resolvePath(
+                    baseResolution.cell,
+                    combinedPath,
+                  );
+                  return schema ? resolvedCell.asSchema(schema) : resolvedCell;
+                }),
+              sourceBucket,
+            );
+
+            // Deduplicate result cells using Cell.equals()
+            const uniqueResultCells = measureWishPhase(
+              "dedupe-results",
+              queryKey,
+              () =>
+                resultCells.filter(
+                  (cell, index) =>
+                    resultCells.findIndex((c) => c.equals(cell)) === index,
+                ),
+              sourceBucket,
+            );
+            const resolveMs = Number(
+              (performance.now() - resolveStartedAt).toFixed(3),
+            );
+
+            wishFlowLogger.debug(`wish/resolve/${queryKey}`, () =>
+              [
+                `[WISH RESOLVE] source=${sourceKey}`,
+                `query=${query}`,
+                `kind=${getResolutionKind(parsed)}`,
+                `baseResolutions=${baseResolutions.length}`,
+                `uniqueResults=${uniqueResultCells.length}`,
+                `resolveMs=${resolveMs}`,
+                uniqueResultCells.length > 0
+                  ? `results=${
+                    uniqueResultCells.slice(0, 5).map((cell) =>
+                      describeCell(cell)
+                    ).join(", ")
+                  }`
+                  : undefined,
+              ].filter(Boolean));
+            wishFlowLogger.debug(
+              `wish/resolve-source/${queryKey}/${sourceBucket}`,
+              () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
+            );
+            wishFlowLogger.debug(
+              `wish/resolve-ms/${queryKey}/${bucketDuration(resolveMs)}`,
+              () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
+            );
+            wishFlowLogger.time(
+              resolveStartedAt,
+              "wish",
+              "resolve",
+              queryKey,
+            );
+            wishFlowLogger.time(
+              resolveStartedAt,
+              "wish",
+              "resolve-source",
+              queryKey,
+              sourceBucket,
+            );
+
+            // Unified shape: always return { result, candidates, [UI] }
+            // For single result, use fast path (no picker needed)
+            // For multiple results, launch suggestion pattern for picker
+            const candidatesCell = measureWishPhase(
+              "candidates-cell",
+              queryKey,
+              () =>
+                runtime.getImmutableCell(
+                  parentCell.space,
+                  uniqueResultCells,
+                  undefined,
+                  tx,
+                ),
+              sourceBucket,
+            );
+
+            if (uniqueResultCells.length === 1 || headless) {
+              // Single result or headless mode - fast path with unified shape
+              // Prefer the result cell's own [UI]; fall back to cf-cell-link
+              const resultUI = measureWishPhase(
+                "result-ui-get",
+                queryKey,
+                () => uniqueResultCells[0].key(UI).get(),
+                sourceBucket,
+              );
+              wishFlowLogger.debug(`wish/send-fast/${queryKey}`, () => [
+                `[WISH FAST PATH] source=${sourceKey}`,
+                `query=${query}`,
+                `mode=${headless ? "headless" : "single-result"}`,
+                `result=${describeCell(uniqueResultCells[0])}`,
+              ]);
+              wishFlowLogger.debug(
+                `wish/send-fast-source/${queryKey}/${sourceBucket}`,
+                () => [`source=${sourceKey}`],
+              );
+              measureWishPhase(
+                "send-fast",
+                queryKey,
+                () =>
+                  sendResult(tx, {
+                    result: uniqueResultCells[0],
+                    candidates: candidatesCell,
+                    [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+                  }),
+                sourceBucket,
+              );
+            } else {
+              // Multiple results — if suggestion pattern is already loaded,
+              // launch it and send its result cell so the picker's output
+              // flows through. Otherwise fall back to first result and kick
+              // off the fetch for next time.
+              if (suggestionPattern) {
+                measureWishPhase(
+                  "send-suggestion",
+                  queryKey,
+                  () =>
+                    sendResult(
+                      tx,
+                      launchSuggestionPattern(
+                        {
+                          situation: query,
+                          context: context ?? {},
+                          initialResults: candidatesCell,
+                        },
+                        tx,
+                      ),
+                    ),
+                  sourceBucket,
+                );
+              } else {
+                // Pattern not loaded yet — send first result, start fetch
+                const resultUI = measureWishPhase(
+                  "result-ui-get",
+                  queryKey,
+                  () => uniqueResultCells[0].key(UI).get(),
+                  sourceBucket,
+                );
+                measureWishPhase(
+                  "send-fast-before-suggestion",
+                  queryKey,
+                  () =>
+                    sendResult(tx, {
+                      result: uniqueResultCells[0],
+                      candidates: candidatesCell,
+                      [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+                    }),
+                  sourceBucket,
+                );
+                measureWishPhase(
+                  "launch-suggestion",
+                  queryKey,
+                  () =>
+                    launchSuggestionPattern(
+                      {
+                        situation: query,
+                        context: context ?? {},
+                        initialResults: candidatesCell,
+                      },
+                      tx,
+                    ),
+                  sourceBucket,
+                );
+              }
+            }
+          } catch (e) {
+            const errorMsg = e instanceof WishError ? e.message : String(e);
+            wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
+              `[WISH ERROR] source=${sourceKey}`,
+              `query=${query}`,
+              `error=${errorMsg}`,
+            ]);
+            measureWishPhase(
+              "send-error",
+              queryKey,
+              () =>
+                sendResult(
+                  tx,
+                  {
+                    result: undefined,
+                    candidates: [],
+                    error: errorMsg,
+                    [UI]: errorUI(errorMsg),
+                  } satisfies WishState<any>,
+                ),
+              sourceBucket,
+            );
+          }
+        } else if (headless) {
+          // Headless mode with freeform query — no suggestion pattern
+          wishFlowLogger.debug(`wish/freeform/${queryKey}`, () => [
+            `[WISH FREEFORM] source=${sourceKey}`,
+            `query=${query}`,
+            `mode=headless`,
+          ]);
+          measureWishPhase(
+            "send-freeform",
+            queryKey,
+            () =>
+              sendResult(
+                tx,
+                {
+                  result: undefined,
+                  candidates: [],
+                  [UI]: undefined,
+                } satisfies WishState<any>,
+              ),
+            sourceBucket,
+          );
+        } else {
+          // Otherwise it's a generic query, instantiate suggestion.tsx
+          wishFlowLogger.debug(`wish/launch-suggestion/${queryKey}`, () => [
+            `[WISH LAUNCH SUGGESTION] source=${sourceKey}`,
+            `query=${query}`,
+            `mode=freeform`,
+          ]);
+          measureWishPhase(
+            "send-suggestion",
+            queryKey,
+            () =>
+              sendResult(
+                tx,
+                launchSuggestionPattern(
+                  { situation: query, context: context ?? {} },
+                  tx,
+                ),
+              ),
+            sourceBucket,
+          );
+        }
         return;
-      }
-
-      // If the query is a path or a hash tag, resolve it directly
-      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
-        wishFlowLogger.debug(`wish/start/${queryKey}`, () => [
-          `[WISH START] source=${sourceKey}`,
-          `query=${query}`,
-          `scope=${formatScope(scope)}`,
-          `headless=${Boolean(headless)}`,
-          `path=${toCompactDebugString(path ?? [])}`,
-          `parent=${describeCell(parentCell)}`,
-        ]);
-        wishFlowLogger.debug(
-          `wish/start-source/${queryKey}/${sourceBucket}`,
-          () => [`source=${sourceKey}`],
-        );
-        try {
-          const resolveStartedAt = performance.now();
-          const parsed = parseWishTarget(query);
-          parsed.path = [...parsed.path, ...(path ?? [])];
-          const ctx: WishContext = { runtime, tx, parentCell, scope, nowCell };
-          const baseResolutions = resolveBase(parsed, ctx);
-          // Persist #now cell across re-runs to avoid non-idempotent loops
-          if (ctx.nowCell) nowCell = ctx.nowCell;
-
-          if (baseResolutions.length === 0) {
-            // No matches yet — data may still be loading. Send a pending
-            // result; the reactive system will re-trigger when cells update
-            // (dependencies were registered by the cell.get() calls in the
-            // search functions).
+      } else {
+        const errorMsg = `Wish target is not recognized: ${
+          toCompactDebugString(targetValue)
+        }`;
+        measureWishPhase(
+          "send-error",
+          undefined,
+          () =>
             sendResult(
               tx,
               {
                 result: undefined,
                 candidates: [],
-                [UI]: undefined,
+                error: errorMsg,
+                [UI]: errorUI(errorMsg),
               } satisfies WishState<any>,
-            );
-            return;
-          }
-
-          const resultCells = baseResolutions.map((baseResolution) => {
-            const combinedPath = baseResolution.pathPrefix
-              ? [...baseResolution.pathPrefix, ...parsed.path]
-              : parsed.path;
-            const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
-            return schema ? resolvedCell.asSchema(schema) : resolvedCell;
-          });
-
-          // Deduplicate result cells using Cell.equals()
-          const uniqueResultCells = resultCells.filter(
-            (cell, index) =>
-              resultCells.findIndex((c) => c.equals(cell)) === index,
-          );
-          const resolveMs = Number(
-            (performance.now() - resolveStartedAt).toFixed(3),
-          );
-
-          wishFlowLogger.debug(`wish/resolve/${queryKey}`, () =>
-            [
-              `[WISH RESOLVE] source=${sourceKey}`,
-              `query=${query}`,
-              `kind=${getResolutionKind(parsed)}`,
-              `baseResolutions=${baseResolutions.length}`,
-              `uniqueResults=${uniqueResultCells.length}`,
-              `resolveMs=${resolveMs}`,
-              uniqueResultCells.length > 0
-                ? `results=${
-                  uniqueResultCells.slice(0, 5).map((cell) =>
-                    describeCell(cell)
-                  ).join(", ")
-                }`
-                : undefined,
-            ].filter(Boolean));
-          wishFlowLogger.debug(
-            `wish/resolve-source/${queryKey}/${sourceBucket}`,
-            () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
-          );
-          wishFlowLogger.debug(
-            `wish/resolve-ms/${queryKey}/${bucketDuration(resolveMs)}`,
-            () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
-          );
-          wishFlowLogger.time(
-            resolveStartedAt,
-            "wish",
-            "resolve",
-            queryKey,
-          );
-          wishFlowLogger.time(
-            resolveStartedAt,
-            "wish",
-            "resolve-source",
-            queryKey,
-            sourceBucket,
-          );
-
-          // Unified shape: always return { result, candidates, [UI] }
-          // For single result, use fast path (no picker needed)
-          // For multiple results, launch suggestion pattern for picker
-          const candidatesCell = runtime.getImmutableCell(
-            parentCell.space,
-            uniqueResultCells,
-            undefined,
-            tx,
-          );
-
-          if (uniqueResultCells.length === 1 || headless) {
-            // Single result or headless mode - fast path with unified shape
-            // Prefer the result cell's own [UI]; fall back to cf-cell-link
-            const resultUI = uniqueResultCells[0].key(UI).get();
-            wishFlowLogger.debug(`wish/send-fast/${queryKey}`, () => [
-              `[WISH FAST PATH] source=${sourceKey}`,
-              `query=${query}`,
-              `mode=${headless ? "headless" : "single-result"}`,
-              `result=${describeCell(uniqueResultCells[0])}`,
-            ]);
-            wishFlowLogger.debug(
-              `wish/send-fast-source/${queryKey}/${sourceBucket}`,
-              () => [`source=${sourceKey}`],
-            );
-            sendResult(tx, {
-              result: uniqueResultCells[0],
-              candidates: candidatesCell,
-              [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
-            });
-          } else {
-            // Multiple results — if suggestion pattern is already loaded,
-            // launch it and send its result cell so the picker's output
-            // flows through. Otherwise fall back to first result and kick
-            // off the fetch for next time.
-            if (suggestionPattern) {
-              sendResult(
-                tx,
-                launchSuggestionPattern(
-                  {
-                    situation: query,
-                    context: context ?? {},
-                    initialResults: candidatesCell,
-                  },
-                  tx,
-                ),
-              );
-            } else {
-              // Pattern not loaded yet — send first result, start fetch
-              const resultUI = uniqueResultCells[0].key(UI).get();
-              sendResult(tx, {
-                result: uniqueResultCells[0],
-                candidates: candidatesCell,
-                [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
-              });
-              launchSuggestionPattern(
-                {
-                  situation: query,
-                  context: context ?? {},
-                  initialResults: candidatesCell,
-                },
-                tx,
-              );
-            }
-          }
-        } catch (e) {
-          const errorMsg = e instanceof WishError ? e.message : String(e);
-          wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
-            `[WISH ERROR] source=${sourceKey}`,
-            `query=${query}`,
-            `error=${errorMsg}`,
-          ]);
-          sendResult(
-            tx,
-            {
-              result: undefined,
-              candidates: [],
-              error: errorMsg,
-              [UI]: errorUI(errorMsg),
-            } satisfies WishState<any>,
-          );
-        }
-      } else if (headless) {
-        // Headless mode with freeform query — no suggestion pattern
-        wishFlowLogger.debug(`wish/freeform/${queryKey}`, () => [
-          `[WISH FREEFORM] source=${sourceKey}`,
-          `query=${query}`,
-          `mode=headless`,
-        ]);
-        sendResult(
-          tx,
-          {
-            result: undefined,
-            candidates: [],
-            [UI]: undefined,
-          } satisfies WishState<any>,
+            ),
+          sourceBucket,
         );
-      } else {
-        // Otherwise it's a generic query, instantiate suggestion.tsx
-        wishFlowLogger.debug(`wish/launch-suggestion/${queryKey}`, () => [
-          `[WISH LAUNCH SUGGESTION] source=${sourceKey}`,
-          `query=${query}`,
-          `mode=freeform`,
-        ]);
-        sendResult(
-          tx,
-          launchSuggestionPattern(
-            { situation: query, context: context ?? {} },
-            tx,
-          ),
-        );
+        return;
       }
-      return;
-    } else {
-      const errorMsg = `Wish target is not recognized: ${targetValue}`;
-      sendResult(
-        tx,
-        {
-          result: undefined,
-          candidates: [],
-          error: errorMsg,
-          [UI]: errorUI(errorMsg),
-        } satisfies WishState<any>,
+    } finally {
+      recordWishPhaseTiming(
+        actionStartedAt,
+        "action-total",
+        actionQueryKey,
+        sourceBucket,
       );
-      return;
     }
   };
 }

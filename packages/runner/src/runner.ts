@@ -2711,6 +2711,15 @@ export class Runner {
     const builtinPopulateDependencies = isRawBuiltinResult(builtinResult)
       ? builtinResult.populateDependencies
       : undefined;
+    const builtinDebounce = isRawBuiltinResult(builtinResult)
+      ? builtinResult.debounce
+      : undefined;
+    const builtinNoDebounce = isRawBuiltinResult(builtinResult)
+      ? builtinResult.noDebounce
+      : undefined;
+    const builtinThrottle = isRawBuiltinResult(builtinResult)
+      ? builtinResult.throttle
+      : undefined;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -2792,10 +2801,16 @@ export class Runner {
 
     // isEffect can come from module options or from the builtin result
     const isEffect = module.isEffect ?? builtinIsEffect;
+    const debounce = module.debounce ?? builtinDebounce;
+    const noDebounce = module.noDebounce ?? builtinNoDebounce;
+    const throttle = module.throttle ?? builtinThrottle;
 
     addCancel(
       this.runtime.scheduler.subscribe(action, populateDependencies, {
         isEffect,
+        debounce,
+        noDebounce,
+        throttle,
       }),
     );
   }
