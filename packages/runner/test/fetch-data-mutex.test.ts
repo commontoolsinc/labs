@@ -6,7 +6,17 @@ import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
 import { setPatternEnvironment } from "../src/env.ts";
+import {
+  computeInputHashFromValue,
+  internalSchema,
+  tryClaimMutex,
+} from "../src/builtins/fetch-utils.ts";
+import type { Schema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-data mutex");
 const space = signer.did();
@@ -111,6 +121,149 @@ describe("fetch-data mutex mechanism", () => {
     // Should have made the fetch call
     expect(fetchCalls.length).toBeGreaterThan(0);
     expect(fetchCalls[0].url).toContain("/api/test");
+  });
+
+  it("should enqueue fetchData work behind the post-commit outbox", async () => {
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxCommit = txPrototype.commit;
+    const originalWrapperCommit = wrapperPrototype.commit;
+    let committed = false;
+
+    txPrototype.commit = function (...args) {
+      committed = true;
+      return originalTxCommit.apply(this, args as never);
+    };
+    wrapperPrototype.commit = function (...args) {
+      committed = true;
+      return originalWrapperCommit.apply(this, args as never);
+    };
+
+    const resultCell = runtime.getCell(space, "pre-commit-test", undefined, tx);
+    const result = runtime.run(tx, testPattern, {
+      url: "http://mock-test-server.local/api/pre-commit",
+    }, resultCell);
+
+    try {
+      tx.commit();
+      await result.pull();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(committed).toBe(true);
+      expect(fetchCalls.length).toBeGreaterThan(0);
+      expect(fetchCalls[0].url).toContain("/api/pre-commit");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } finally {
+      txPrototype.commit = originalTxCommit;
+      wrapperPrototype.commit = originalWrapperCommit;
+    }
+  });
+
+  it("uses a stable fetchData idempotency key for identical inputs", async () => {
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxEnqueue = txPrototype.enqueuePostCommitEffect;
+    const originalWrapperEnqueue = wrapperPrototype.enqueuePostCommitEffect;
+    const outboxIds: string[] = [];
+
+    txPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalTxEnqueue.apply(this, args as never);
+    };
+    wrapperPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalWrapperEnqueue.apply(this, args as never);
+    };
+
+    try {
+      const resultCell = runtime.getCell(
+        space,
+        "fetch-idempotency-test",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {
+        url: "http://mock-test-server.local/api/idempotency",
+      }, resultCell);
+      tx.commit();
+      await result.pull();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const expectedHash = computeInputHashFromValue({
+        url: "http://mock-test-server.local/api/idempotency",
+        mode: "json",
+      });
+
+      expect(outboxIds.length).toBeGreaterThan(0);
+      expect(outboxIds[0]).toBe(`fetchData:${expectedHash}`);
+    } finally {
+      txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
+      wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
+    }
+  });
+
+  it("does not claim a post-commit fetch mutex when live inputs differ from the approved snapshot", async () => {
+    const inputs = runtime.getCell<{
+      url?: string;
+      mode?: "json" | "text";
+    }>(space, "fetch-mutex-approved-inputs", undefined, tx);
+    const pending = runtime.getCell<boolean>(
+      space,
+      "fetch-mutex-approved-pending",
+      undefined,
+      tx,
+    );
+    const result = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-approved-result",
+      undefined,
+      tx,
+    );
+    const error = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-approved-error",
+      undefined,
+      tx,
+    );
+    const internal = runtime.getCell<Schema<typeof internalSchema>>(
+      space,
+      "fetch-mutex-approved-internal",
+      undefined,
+      tx,
+    );
+    inputs.set({ url: "/api/mutated", mode: "json" });
+    pending.set(false);
+    internal.set({ requestId: "", lastActivity: 0, inputHash: "" });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const approvedSnapshot = { url: "/api/approved", mode: "json" as const };
+    const approvedHash = computeInputHashFromValue(approvedSnapshot);
+    const claim = await tryClaimMutex(
+      runtime,
+      inputs,
+      pending,
+      result,
+      error,
+      internal,
+      approvedHash,
+      (cell) => cell.get() ?? {},
+      approvedHash,
+    );
+
+    expect(claim.claimed).toBe(false);
+    expect(claim.inputHash).not.toBe(approvedHash);
+    expect(pending.get()).toBe(false);
   });
 
   it("should handle concurrent requests with same inputs (mutex test)", async () => {

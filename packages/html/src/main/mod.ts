@@ -19,6 +19,7 @@ export {
 } from "./events.ts";
 export type {
   DomEventMessage,
+  EventProvenance,
   SerializedEvent,
   SerializedEventTarget,
 } from "./events.ts";

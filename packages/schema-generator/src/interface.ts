@@ -34,12 +34,28 @@ export interface GenerationContext {
   // Optional context
   /** Type node for additional context */
   typeNode?: ts.TypeNode;
+  /** Source file name for authoring metadata that needs stable file identity */
+  sourceFileName?: string;
   /** Optional type registry for synthetic nodes */
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
-  schemaHints?: WeakMap<ts.Node, { items?: unknown }>;
+  schemaHints?: WeakMap<
+    ts.Node,
+    {
+      items?: unknown;
+      cfcUiContract?: {
+        helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+        action?: string;
+        surface?: string;
+        role?: string;
+        kind?: string;
+        trustedPattern?: string;
+        requiredEventIntegrity?: string[];
+      };
+    }
+  >;
   /** Override for array items schema, propagated from wrapper types */
   arrayItemsOverride?: JSONSchema;
 }
@@ -74,7 +90,21 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
+        };
+      }
+    >,
   ): SchemaDefinition;
 
   /**
@@ -90,6 +120,20 @@ export interface SchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
+        };
+      }
+    >,
   ): SchemaDefinition;
 }

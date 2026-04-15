@@ -587,11 +587,33 @@ export class StorageManager implements IStorageManager {
       return this.syncDataURICell(cell, space, id, schema);
     }
 
-    await this.open(space).sync(id, {
+    const provider = this.open(space);
+    await provider.sync(id, {
       path: cell.path.map((segment) => segment.toString()),
       schema: schema ?? false,
     });
+    await this.syncCfcSchemaDocument(
+      space,
+      (provider as { get?: (uri: URI) => EntityDocument | undefined }).get?.(
+        id,
+      ),
+    );
     return cell;
+  }
+
+  private async syncCfcSchemaDocument(
+    space: MemorySpace,
+    document: EntityDocument | undefined,
+  ): Promise<void> {
+    const cfc = isRecord(document?.cfc) ? document.cfc : undefined;
+    const schemaHash = cfc?.schemaHash;
+    if (typeof schemaHash !== "string" || schemaHash.length === 0) {
+      return;
+    }
+    await this.open(space).sync(`cid:${schemaHash}` as URI, {
+      path: [],
+      schema: false,
+    });
   }
 
   private resolveCrossSpace(resolve: () => void): Promise<void> {
@@ -701,13 +723,11 @@ export class StorageManager implements IStorageManager {
     }
 
     if (Array.isArray(value)) {
-      const schemaObj = isRecord(schema)
-        ? schema as { items?: JSONSchema }
-        : undefined;
-      const itemSchema = schemaObj?.items
-        ? schemaObj.items as JSONSchema
-        : undefined;
-      for (const item of value) {
+      for (let i = 0; i < value.length; i++) {
+        const item = value[i];
+        const itemSchema = schema
+          ? cfc.getSchemaAtPath(schema, [String(i)])
+          : undefined;
         this.collectLinkedCellSyncs(
           item,
           base,

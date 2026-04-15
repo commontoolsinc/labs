@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { Emitter } from "../types.ts";
+import type { Emitter, EmitterContext } from "../types.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "../fallback-array-method-rewrite.ts";
 import {
@@ -9,12 +9,74 @@ import {
 } from "./compute-wrap-invariants.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
 import {
+  classifyArrayMethodCall,
   isReactiveValueExpression,
   isSimpleReactiveAccessExpression,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
 import { shouldLowerLogicalExpression } from "../../../policy/mod.ts";
+
+function getTransparentReceiverWrappedExpression(
+  node: ts.Node,
+): ts.Expression | undefined {
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isPartiallyEmittedExpression(node)
+  ) {
+    return node.expression;
+  }
+  return undefined;
+}
+
+function isArrayMethodReceiverExpression(node: ts.Node): boolean {
+  let current: ts.Node = node;
+  let parent = current.parent;
+  while (parent) {
+    const wrapped = getTransparentReceiverWrappedExpression(parent);
+    if (!wrapped) break;
+    if (wrapped !== current) return false;
+    current = parent;
+    parent = parent.parent;
+  }
+
+  if (
+    !parent ||
+    (
+      !ts.isPropertyAccessExpression(parent) &&
+      !ts.isElementAccessExpression(parent)
+    ) ||
+    parent.expression !== current
+  ) {
+    return false;
+  }
+
+  const call = parent.parent;
+  return !!call && ts.isCallExpression(call) && call.expression === parent &&
+    !!classifyArrayMethodCall(call);
+}
+
+function isAllowedSyntheticArrayReceiverWrap(
+  node: ts.Expression,
+  context: Parameters<Emitter>[0]["context"],
+): boolean {
+  return context.getReactiveContext(node).kind === "compute" &&
+    context.isSyntheticComputeOwnedNode(node) &&
+    isArrayMethodReceiverExpression(node);
+}
+
+function preferLocalIdentifierDataFlows(
+  dataFlows: EmitterContext["dataFlows"],
+): EmitterContext["dataFlows"] {
+  const identifiers = dataFlows.filter((dataFlow) =>
+    ts.isIdentifier(dataFlow.expression)
+  );
+  return identifiers.length > 0 ? identifiers : dataFlows;
+}
 
 export const emitBinaryExpression: Emitter = ({
   expression,
@@ -173,16 +235,25 @@ export const emitBinaryExpression: Emitter = ({
   );
   if (!pendingWrap) return undefined;
 
-  assertValidComputeWrapCandidate(
+  const allowedSyntheticArrayReceiverWrap = isAllowedSyntheticArrayReceiverWrap(
     pendingWrap,
-    expression,
-    "binary expression",
     context,
   );
 
+  if (!allowedSyntheticArrayReceiverWrap) {
+    assertValidComputeWrapCandidate(
+      pendingWrap,
+      expression,
+      "binary expression",
+      context,
+    );
+  }
+
   return createReactiveWrapperForExpression(
     expression,
-    dataFlows,
+    allowedSyntheticArrayReceiverWrap
+      ? preferLocalIdentifierDataFlows(dataFlows)
+      : dataFlows,
     context,
     {
       preferDeriveWrapper: preferDeriveWrappers,

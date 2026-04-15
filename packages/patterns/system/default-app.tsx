@@ -121,7 +121,9 @@ const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
 const addPiece = handler<
   { piece: MentionablePiece },
   { allPieces: Writable<MentionablePiece[]> }
->(({ piece }, { allPieces }) => {
+>((event, { allPieces }) => {
+  const piece = event?.piece;
+  if (!piece) return;
   const current = allPieces.get();
   if (!current.some((c) => equals(c, piece))) {
     allPieces.push(piece);

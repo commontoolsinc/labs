@@ -1,0 +1,562 @@
+import { css, html } from "lit";
+import { BaseElement } from "../../core/base-element.ts";
+import type { CfcLabelView } from "@commonfabric/runtime-client";
+
+export type CfcAuthorshipState = "verified" | "unverified" | "unknown";
+
+type CfcLabelQueryableValue = {
+  getCfcLabel(): Promise<CfcLabelView | undefined>;
+};
+
+type CfcLabelResolvableValue = {
+  resolveAsCell(): Promise<CfcLabelQueryableValue>;
+};
+
+type CfcLabelSubscribableValue = {
+  subscribe(callback: (value: unknown) => void): () => void;
+};
+
+type CfcReadableClaimValue = {
+  get?(): unknown;
+  sync?(): Promise<unknown>;
+};
+
+const DEFAULT_AUTHORSHIP_KIND = "authored-by";
+const AUTHOR_FIELDS = [
+  "subject",
+  "author",
+  "authorId",
+  "sender",
+  "senderId",
+  "user",
+  "userId",
+  "id",
+] as const;
+const AUTHOR_DISPLAY_FIELDS = [
+  "name",
+  "displayName",
+  "fullName",
+  "label",
+  "username",
+] as const;
+
+const hasLabelQuery = (value: unknown): value is CfcLabelQueryableValue =>
+  typeof value === "object" && value !== null &&
+  "getCfcLabel" in value &&
+  typeof (value as { getCfcLabel?: unknown }).getCfcLabel === "function";
+
+const hasLabelSubscription = (
+  value: unknown,
+): value is CfcLabelSubscribableValue =>
+  typeof value === "object" && value !== null &&
+  "subscribe" in value &&
+  typeof (value as { subscribe?: unknown }).subscribe === "function";
+
+const hasLabelResolution = (
+  value: unknown,
+): value is CfcLabelResolvableValue =>
+  typeof value === "object" && value !== null &&
+  "resolveAsCell" in value &&
+  typeof (value as { resolveAsCell?: unknown }).resolveAsCell === "function";
+
+const hasReadableClaim = (
+  value: unknown,
+): value is CfcReadableClaimValue =>
+  typeof value === "object" && value !== null &&
+  (typeof (value as { get?: unknown }).get === "function" ||
+    typeof (value as { sync?: unknown }).sync === "function");
+
+const primitiveToString = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return undefined;
+};
+
+const objectField = (
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined => primitiveToString(value[field]);
+
+const objectStringFields = (
+  value: unknown,
+  fields: readonly string[],
+): string[] => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  return fields.flatMap((field) => {
+    const fieldValue = objectField(record, field);
+    return fieldValue === undefined ? [] : [fieldValue];
+  });
+};
+
+const uniqueStrings = (values: readonly string[]): string[] => [
+  ...new Set(values),
+];
+
+const authorIdsForClaim = (author: unknown): string[] => {
+  const primitive = primitiveToString(author);
+  if (primitive !== undefined) {
+    return [primitive];
+  }
+  return uniqueStrings(objectStringFields(author, AUTHOR_FIELDS));
+};
+
+const primaryAuthorId = (author: unknown): string | undefined =>
+  authorIdsForClaim(author)[0];
+
+const authorDisplayName = (author: unknown): string | undefined =>
+  objectStringFields(author, AUTHOR_DISPLAY_FIELDS)[0];
+
+export const integrityAtomMatchesAuthor = (
+  atom: unknown,
+  author: unknown,
+  kind: string = DEFAULT_AUTHORSHIP_KIND,
+): boolean => {
+  const authorIds = authorIdsForClaim(author);
+  if (authorIds.length === 0) {
+    return false;
+  }
+
+  if (typeof atom === "string") {
+    return authorIds.some((authorId) => atom === `${kind}:${authorId}`);
+  }
+
+  if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+    return false;
+  }
+
+  const atomRecord = atom as Record<string, unknown>;
+  if (objectField(atomRecord, "kind") !== kind) {
+    return false;
+  }
+
+  return AUTHOR_FIELDS.some((field) => {
+    const atomAuthor = objectField(atomRecord, field);
+    return atomAuthor !== undefined && authorIds.includes(atomAuthor);
+  });
+};
+
+const hasAnyIntegrity = (view: CfcLabelView): boolean =>
+  view.entries.some((entry) =>
+    Array.isArray(entry.label.integrity) && entry.label.integrity.length > 0
+  );
+
+export const authorshipStateForLabel = (
+  view: CfcLabelView | undefined,
+  author: unknown,
+  kind: string = DEFAULT_AUTHORSHIP_KIND,
+): CfcAuthorshipState => {
+  if (!view || authorIdsForClaim(author).length === 0) {
+    return "unknown";
+  }
+
+  for (const entry of view.entries) {
+    const integrity = entry.label.integrity;
+    if (!Array.isArray(integrity)) {
+      continue;
+    }
+    if (
+      integrity.some((atom) => integrityAtomMatchesAuthor(atom, author, kind))
+    ) {
+      return "verified";
+    }
+  }
+
+  return hasAnyIntegrity(view) ? "unverified" : "unknown";
+};
+
+const initialsForName = (name: string | undefined): string => {
+  if (!name) {
+    return "?";
+  }
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("")
+    .slice(0, 2);
+  return initials || "?";
+};
+
+/**
+ * Shows trusted authorship state for a bound CFC-labeled content cell.
+ *
+ * The component certifies a bound `value` against the bound author claim. It
+ * cannot inspect arbitrary slotted DOM: callers should slot the UI block that
+ * renders the same bound value and author claim so the badge and rendered
+ * content remain adjacent.
+ *
+ * @element cf-cfc-authorship
+ *
+ * @prop {unknown} value - Usually supplied via `$value`; queried for CFC label IPC.
+ * @prop {unknown} author - Claimed author id/object, or a `$author`-bound claim cell.
+ * @prop {unknown} authorName - Optional untrusted display fallback.
+ * @prop {unknown} avatar - Optional avatar image URL shown only when verified.
+ * @attr {string} kind - Integrity object kind; defaults to `authored-by`.
+ */
+export class CFCFCAuthorship extends BaseElement {
+  static override styles = [
+    BaseElement.baseStyles,
+    css`
+      :host {
+        display: block;
+        color: var(--cf-theme-color-text, hsl(220, 14%, 12%));
+        font-size: 0.875rem;
+      }
+
+      .authorship {
+        display: grid;
+        grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+        gap: 0.75rem;
+        align-items: start;
+      }
+
+      .badge {
+        display: inline-grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 0.5rem;
+        align-items: center;
+        min-width: 10rem;
+        padding: 0.5rem 0.625rem;
+        border-radius: 999px;
+        border: 1px solid var(--cf-theme-color-border, hsl(220, 14%, 86%));
+        background: var(--cf-theme-color-surface, hsl(220, 20%, 98%));
+      }
+
+      .authorship.verified .badge {
+        border-color: var(--cf-authorship-verified-border, hsl(155, 48%, 58%));
+        background: var(--cf-authorship-verified-bg, hsl(151, 58%, 95%));
+      }
+
+      .authorship.unverified .badge {
+        border-color: var(--cf-authorship-unverified-border, hsl(24, 82%, 64%));
+        background: var(--cf-authorship-unverified-bg, hsl(34, 100%, 96%));
+      }
+
+      .authorship.unknown .badge {
+        border-color: var(--cf-theme-color-border, hsl(220, 14%, 86%));
+        background: var(--cf-theme-color-muted, hsl(220, 18%, 96%));
+      }
+
+      .avatar,
+      .status-dot {
+        display: inline-grid;
+        place-items: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .avatar {
+        color: var(--cf-authorship-avatar-text, hsl(155, 65%, 16%));
+        background: var(--cf-authorship-avatar-bg, hsl(155, 55%, 84%));
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .status-dot {
+        border: 1px dashed var(--cf-theme-color-border, hsl(220, 14%, 72%));
+        color: var(--cf-theme-color-text-muted, hsl(220, 10%, 44%));
+        font-weight: 700;
+      }
+
+      .label {
+        display: grid;
+        min-width: 0;
+        line-height: 1.25;
+      }
+
+      .state {
+        font-weight: 700;
+      }
+
+      .author {
+        color: var(--cf-theme-color-text-muted, hsl(220, 10%, 44%));
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .content {
+        min-width: 0;
+      }
+    `,
+  ];
+
+  static override properties = {
+    value: { attribute: false },
+    cfcLabel: { attribute: false },
+    author: { attribute: false },
+    authorName: { attribute: false },
+    avatar: { attribute: false },
+    kind: { type: String },
+  };
+
+  declare cfcLabel: CfcLabelView | undefined;
+  declare authorName: unknown;
+  declare avatar: unknown;
+  declare kind: string | undefined;
+
+  private _labelRequestId = 0;
+  private _authorRequestId = 0;
+  private _value: unknown = undefined;
+  private _author: unknown = undefined;
+  private _authorClaim: unknown = undefined;
+  private _observedValue: unknown = undefined;
+  private _observedAuthor: unknown = undefined;
+  private _unsubscribeValue: (() => void) | undefined;
+  private _unsubscribeAuthor: (() => void) | undefined;
+
+  constructor() {
+    super();
+    this.cfcLabel = undefined;
+    this.authorName = undefined;
+    this.avatar = undefined;
+    this.kind = DEFAULT_AUTHORSHIP_KIND;
+  }
+
+  get value(): unknown {
+    return this._value;
+  }
+
+  set value(next: unknown) {
+    const previous = this._value;
+    this._value = next;
+    this.requestUpdate("value", previous);
+    this.refreshForCurrentValue();
+  }
+
+  get author(): unknown {
+    return this._author;
+  }
+
+  set author(next: unknown) {
+    const previous = this._author;
+    this._author = next;
+    this.requestUpdate("author", previous);
+    this.refreshForCurrentAuthor();
+  }
+
+  get authorshipState(): CfcAuthorshipState {
+    return authorshipStateForLabel(
+      this.cfcLabel,
+      this.authorClaim,
+      this.kind ?? DEFAULT_AUTHORSHIP_KIND,
+    );
+  }
+
+  get authorClaim(): unknown {
+    return hasReadableClaim(this.author) ? this._authorClaim : this.author;
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.refreshForCurrentValue();
+    this.refreshForCurrentAuthor();
+  }
+
+  override disconnectedCallback() {
+    this.clearValueSubscription();
+    this.clearAuthorSubscription();
+    super.disconnectedCallback();
+  }
+
+  protected override firstUpdated(
+    changedProperties: Map<PropertyKey, unknown>,
+  ) {
+    super.firstUpdated(changedProperties);
+    this.refreshForCurrentValue();
+    this.refreshForCurrentAuthor();
+  }
+
+  private refreshForCurrentValue(): void {
+    const hasSubscription = this.observeValue(this.value);
+    if (!hasSubscription) {
+      void this.refreshLabel();
+    }
+  }
+
+  private refreshForCurrentAuthor(): void {
+    this.observeAuthor(this.author);
+    void this.refreshAuthorClaim();
+  }
+
+  private observeValue(value: unknown): boolean {
+    if (Object.is(value, this._observedValue)) {
+      return this._unsubscribeValue !== undefined;
+    }
+
+    this.clearValueSubscription();
+    this._observedValue = value;
+
+    if (!hasLabelSubscription(value)) {
+      return false;
+    }
+
+    this._unsubscribeValue = value.subscribe(() => {
+      void this.refreshLabel();
+    });
+    return true;
+  }
+
+  private clearValueSubscription(): void {
+    this._unsubscribeValue?.();
+    this._unsubscribeValue = undefined;
+    this._observedValue = undefined;
+  }
+
+  private observeAuthor(author: unknown): boolean {
+    if (Object.is(author, this._observedAuthor)) {
+      return this._unsubscribeAuthor !== undefined;
+    }
+
+    this.clearAuthorSubscription();
+    this._observedAuthor = author;
+
+    if (!hasLabelSubscription(author)) {
+      return false;
+    }
+
+    this._unsubscribeAuthor = author.subscribe((claim) => {
+      const previous = this._authorClaim;
+      this._authorClaim = claim;
+      this.requestUpdate("author", previous);
+    });
+    return true;
+  }
+
+  private clearAuthorSubscription(): void {
+    this._unsubscribeAuthor?.();
+    this._unsubscribeAuthor = undefined;
+    this._observedAuthor = undefined;
+  }
+
+  async refreshLabel(): Promise<void> {
+    const requestId = ++this._labelRequestId;
+    if (!hasLabelQuery(this.value)) {
+      const previous = this.cfcLabel;
+      this.cfcLabel = undefined;
+      this.requestUpdate("cfcLabel", previous);
+      return;
+    }
+
+    let cfcLabel = await this.value.getCfcLabel();
+    if (!cfcLabel && hasLabelResolution(this.value)) {
+      const resolved = await this.value.resolveAsCell();
+      cfcLabel = await resolved.getCfcLabel();
+    }
+    if (requestId === this._labelRequestId) {
+      const previous = this.cfcLabel;
+      this.cfcLabel = cfcLabel;
+      this.requestUpdate("cfcLabel", previous);
+    }
+  }
+
+  async refreshAuthorClaim(): Promise<void> {
+    const requestId = ++this._authorRequestId;
+    if (!hasReadableClaim(this.author)) {
+      const previous = this._authorClaim;
+      this._authorClaim = undefined;
+      this.requestUpdate("author", previous);
+      return;
+    }
+
+    let authorClaim: unknown;
+    try {
+      authorClaim = typeof this.author.sync === "function"
+        ? await this.author.sync()
+        : this.author.get?.();
+    } catch {
+      authorClaim = undefined;
+    }
+
+    if (requestId === this._authorRequestId) {
+      const previous = this._authorClaim;
+      this._authorClaim = authorClaim;
+      this.requestUpdate("author", previous);
+    }
+  }
+
+  private renderAvatar(state: CfcAuthorshipState) {
+    if (state !== "verified") {
+      return html`
+        <span class="status-dot" part="status-dot" aria-hidden="true">!</span>
+      `;
+    }
+
+    const authorName = authorDisplayName(this.authorClaim) ??
+      primaryAuthorId(this.authorClaim);
+    const avatar = primitiveToString(this.avatar);
+    return html`
+      <span
+        class="avatar"
+        part="avatar"
+        data-cfc-authorship-avatar
+        aria-hidden="true"
+      >
+        ${avatar
+          ? html`
+            <img src="${avatar}" alt="" />
+          `
+          : initialsForName(authorName)}
+      </span>
+    `;
+  }
+
+  override render() {
+    const state = this.authorshipState;
+    const claimLabel = authorDisplayName(this.authorClaim) ??
+      primaryAuthorId(this.authorClaim);
+    const authorLabel = state === "verified"
+      ? claimLabel ?? "unknown author"
+      : claimLabel ?? primitiveToString(this.authorName) ?? "unknown author";
+    const stateLabel = state === "verified"
+      ? "Verified author"
+      : state === "unverified"
+      ? "Unverified author"
+      : "Unknown author";
+
+    return html`
+      <section
+        class="authorship ${state}"
+        part="root"
+        data-cfc-authorship-state="${state}"
+      >
+        <div class="badge" part="badge">
+          ${this.renderAvatar(state)}
+          <span class="label" part="label">
+            <span class="state" part="state">${stateLabel}</span>
+            <span class="author" part="author">${authorLabel}</span>
+          </span>
+        </div>
+        <div class="content" part="content">
+          <slot></slot>
+        </div>
+      </section>
+    `;
+  }
+}
+
+if (!globalThis.customElements.get("cf-cfc-authorship")) {
+  globalThis.customElements.define("cf-cfc-authorship", CFCFCAuthorship);
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "cf-cfc-authorship": CFCFCAuthorship;
+  }
+}

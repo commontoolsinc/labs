@@ -14,7 +14,13 @@ export function navigateTo(
 ): RawBuiltinResult {
   let isInitialized = false;
   let navigated = false;
+  let navigationAttempt = 0;
   let resultCell: Cell<boolean>;
+  const targetCellSchema = {
+    type: "object",
+    properties: {},
+    asCell: ["cell"],
+  } as const;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
     // The main reason we might be called again after navigating is that the
@@ -44,18 +50,13 @@ export function navigateTo(
     if (resultCell.withTx(tx).get()) return;
 
     // Read with a schema that won't subscribe to the whole piece
-    const inputsWithLog = inputsCell.asSchema({
-      type: "object",
-      properties: {},
-      asCell: ["cell"],
-    })
-      .withTx(tx);
+    const inputsWithLog = inputsCell.asSchema(targetCellSchema).withTx(tx);
     const target = inputsWithLog.get();
 
-    // If we have a target and the value isn't `undefined`, navigate to it.
-    const targetValue = target?.asSchema({ type: "object", properties: {} })
-      .get();
-    if (target && targetValue) {
+    // Pattern creation can yield a navigable cell before every reactive
+    // dependency has materialized its value. The cell identity is enough for
+    // navigation; requiring a current value can block valid piece targets.
+    if (target) {
       if (!runtime.navigateCallback) {
         throw new Error("navigateCallback is not set");
       }
@@ -63,19 +64,35 @@ export function navigateTo(
       // Resolve to root piece - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
 
-      void Promise.resolve(runtime.navigateCallback(resolvedTarget)).catch(
-        (error) => {
-          console.error("[navigateTo] navigate callback failed:", error);
-        },
-      );
-
+      const previousNavigated = navigated;
+      const thisAttempt = ++navigationAttempt;
       navigated = true;
-      resultCell.set(true);
+      tx.addCommitCallback((_committedTx, commitResult) => {
+        if (commitResult.error && navigationAttempt === thisAttempt) {
+          navigated = previousNavigated;
+        }
+      });
+      // TODO(seefeld): This post-commit handoff regresses the previous
+      // speculative-navigation latency. Model navigation as an event instead.
+      tx.enqueuePostCommitEffect({
+        id: `navigate-to:${JSON.stringify(resolvedTarget.getAsLink())}`,
+        kind: "navigate-to",
+        idempotencyKey: `navigate-to:${
+          JSON.stringify(resolvedTarget.getAsLink())
+        }`,
+        async flush() {
+          await runtime.navigateCallback!(resolvedTarget);
+        },
+      });
+      resultCell.withTx(tx).set(true);
     }
   };
 
   return {
     action,
     isEffect: true,
+    populateDependencies: (depTx) => {
+      inputsCell.asSchema(targetCellSchema).withTx(depTx).get();
+    },
   };
 }

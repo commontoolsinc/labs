@@ -67,7 +67,7 @@ export default pattern((__cf_pattern_input) => {
         path.push(name);
     })({
         path: path
-    }).for("pushPath", true);
+    }).for({ stream: "pushPath" }, true);
     return {
         [UI]: (<div>
         {(() => {
@@ -104,20 +104,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()).for(["p", 3], true), []).for("p", true);
                 if (p.length === 0)
                     return null;
-                return <div>{__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        p: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["p"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: ["string", "undefined"]
-                } as const satisfies __cfHelpers.JSONSchema, { p: p }, ({ p }) => p[p.length - 1])}</div>;
+                return <div>{p[p.length - 1]}</div>;
             })()}
         {(() => {
                 const p = __cfHelpers.unless({

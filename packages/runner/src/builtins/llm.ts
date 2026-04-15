@@ -16,6 +16,8 @@ import {
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
@@ -124,7 +126,9 @@ function createUpdatePartialCallback(
 async function executeWithToolsLoop(params: {
   initialMessages: readonly BuiltInLLMMessage[];
   llmParams: LLMRequest;
-  toolCatalog: ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>;
+  toolCatalog?:
+    | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
+    | undefined;
   updatePartial: (text: string) => void;
   runtime: Runtime;
   space: any;
@@ -151,8 +155,10 @@ async function executeWithToolsLoop(params: {
     const requestParams: LLMRequest = {
       ...llmParams,
       messages: currentMessages,
-      tools: toolCatalog?.llmTools,
     };
+    if (toolCatalog && requestParams.tools === undefined) {
+      requestParams.tools = toolCatalog.llmTools;
+    }
 
     const llmResult = await client.sendRequest(requestParams, updatePartial);
 
@@ -278,6 +284,41 @@ function buildContextDocumentation(
   );
 }
 
+function enqueuePostCommitLLMWork(
+  tx: IExtendedStorageTransaction,
+  sink: string,
+  id: string,
+  kind: string,
+  request: any,
+  start: () => void,
+): void {
+  enqueueSinkRequestPostCommitEffect(
+    tx,
+    sink,
+    id,
+    request,
+    kind,
+    () => {
+      start();
+    },
+  );
+}
+
+function markRequestHashPendingCommit(
+  tx: IExtendedStorageTransaction,
+  hash: string,
+  getPreviousCallHash: () => string | undefined,
+  setPreviousCallHash: (hash: string | undefined) => void,
+): void {
+  const previousCallHash = getPreviousCallHash();
+  setPreviousCallHash(hash);
+  tx.addCommitCallback((_committedTx, commitResult) => {
+    if (commitResult.error && getPreviousCallHash() === hash) {
+      setPreviousCallHash(previousCallHash);
+    }
+  });
+}
+
 /**
  * Generate data via an LLM.
  *
@@ -360,7 +401,17 @@ export function llm(
       // tools will be added below if present
     };
 
-    const hash = hashOf(llmParams).toString();
+    const toolsCell = inputs.key("tools").asSchema({
+      type: "object",
+      additionalProperties: LLMToolSchema,
+    });
+    const toolCatalog = toolsCell
+      ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+      : undefined;
+    const requestSnapshot = createFrozenRequestSnapshot(
+      toolCatalog ? { ...llmParams, tools: toolCatalog.llmTools } : llmParams,
+    );
+    const hash = hashOf(requestSnapshot).toString();
     const queueName = inputs.key("queue").withTx(tx).get() as unknown as
       | string
       | undefined;
@@ -369,7 +420,6 @@ export function llm(
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
     if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
-    previousCallHash = hash;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       resultWithLog.set(undefined);
@@ -378,6 +428,15 @@ export function llm(
       pendingWithLog.set(false);
       return;
     }
+
+    markRequestHashPendingCommit(
+      tx,
+      hash,
+      () => previousCallHash,
+      (next) => {
+        previousCallHash = next;
+      },
+    );
 
     resultWithLog.set(undefined);
     errorWithLog.set(undefined);
@@ -395,74 +454,77 @@ export function llm(
         thisRun,
       );
 
-    // Build tool catalog if tools are present, then start execution
-    const resultPromise = (async () => {
-      try {
-        const toolsCell = inputs.key("tools").asSchema({
-          type: "object",
-          additionalProperties: LLMToolSchema,
-        });
-        const toolCatalog = toolsCell
-          ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-          : undefined;
+    // Build tool catalog if tools are present, then start execution after the
+    // transaction commits.
+    enqueuePostCommitLLMWork(
+      tx,
+      "llm",
+      `llm:${hash}`,
+      "llm-start",
+      requestSnapshot,
+      () => {
+        const resultPromise = (async () => {
+          try {
+            const doWork = () =>
+              executeWithToolsLoop({
+                initialMessages:
+                  (messages as unknown as readonly BuiltInLLMMessage[]) ??
+                    [],
+                llmParams: requestSnapshot,
+                toolCatalog,
+                updatePartial,
+                runtime,
+                space: parentCell.space,
+                getCurrentRun: getRunForCancellation,
+                thisRun,
+                onComplete: async (llmResult) => {
+                  // Skip if a newer request has already superseded this one.
+                  if (hash !== previousCallHash) return;
 
-        const doWork = () =>
-          executeWithToolsLoop({
-            initialMessages:
-              (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
-            llmParams,
-            toolCatalog: toolCatalog!,
-            updatePartial,
-            runtime,
-            space: parentCell.space,
-            getCurrentRun: getRunForCancellation,
-            thisRun,
-            onComplete: async (llmResult) => {
-              // Skip if a newer request has already superseded this one.
-              if (hash !== previousCallHash) return;
+                  await runtime.idle();
 
-              await runtime.idle();
-
-              await runtime.editWithRetry((tx) => {
-                resultCell.key("pending").withTx(tx).set(false);
-                resultCell.key("result").withTx(tx).set(llmResult.content);
-                resultCell.key("error").withTx(tx).set(undefined);
-                resultCell.key("partial").withTx(tx).set(
-                  extractTextFromLLMResponse(llmResult),
-                );
-                resultCell.key("requestHash").withTx(tx).set(hash);
+                  await runtime.editWithRetry((tx) => {
+                    resultCell.key("pending").withTx(tx).set(false);
+                    resultCell.key("result").withTx(tx).set(llmResult.content);
+                    resultCell.key("error").withTx(tx).set(undefined);
+                    resultCell.key("partial").withTx(tx).set(
+                      extractTextFromLLMResponse(llmResult),
+                    );
+                    resultCell.key("requestHash").withTx(tx).set(hash);
+                  });
+                },
               });
+
+            if (queueName) {
+              await runtime.getOrCreateQueue(queueName).enqueue(doWork);
+            } else {
+              await doWork();
+            }
+          } finally {
+            cleanupPartial();
+          }
+        })();
+
+        resultPromise.catch((e) =>
+          handleLLMError(
+            e,
+            runtime,
+            resultCell.key("pending"),
+            resultCell.key("result"),
+            resultCell.key("error"),
+            resultCell.key("partial"),
+            resultCell.key("requestHash"),
+            hash,
+            getRunForCancellation,
+            thisRun,
+            () => {
+              // Only clear if this is still the current request; a newer request
+              // may have already set previousCallHash to its own hash.
+              if (hash === previousCallHash) previousCallHash = undefined;
             },
-          });
-
-        if (queueName) {
-          await runtime.getOrCreateQueue(queueName).enqueue(doWork);
-        } else {
-          await doWork();
-        }
-      } finally {
-        cleanupPartial();
-      }
-    })();
-
-    resultPromise.catch((e) =>
-      handleLLMError(
-        e,
-        runtime,
-        resultCell.key("pending"),
-        resultCell.key("result"),
-        resultCell.key("error"),
-        resultCell.key("partial"),
-        resultCell.key("requestHash"),
-        hash,
-        getRunForCancellation,
-        thisRun,
-        () => {
-          // Only clear if this is still the current request; a newer request
-          // may have already set previousCallHash to its own hash.
-          if (hash === previousCallHash) previousCallHash = undefined;
-        },
-      )
+          )
+        );
+      },
     );
   };
 }
@@ -560,7 +622,17 @@ export function generateText(
       // tools will be added below if present
     };
 
-    const hash = hashOf(llmParams).toString();
+    const toolsCell = inputs.key("tools").asSchema({
+      type: "object",
+      additionalProperties: LLMToolSchema,
+    });
+    const toolCatalog = toolsCell
+      ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+      : undefined;
+    const requestSnapshot = createFrozenRequestSnapshot(
+      toolCatalog ? { ...llmParams, tools: toolCatalog.llmTools } : llmParams,
+    );
+    const hash = hashOf(requestSnapshot).toString();
     const queueName = inputs.key("queue").withTx(tx).get() as unknown as
       | string
       | undefined;
@@ -582,7 +654,14 @@ export function generateText(
       return;
     }
 
-    previousCallHash = hash;
+    markRequestHashPendingCommit(
+      tx,
+      hash,
+      () => previousCallHash,
+      (next) => {
+        previousCallHash = next;
+      },
+    );
 
     // Only increment currentRun if this is a NEW request (different hash)
     // This prevents abandoning in-flight requests when the same params are re-evaluated
@@ -609,70 +688,70 @@ export function generateText(
         thisRun,
       );
 
-    // Build tool catalog if tools are present, then start execution
-    const resultPromise = (async () => {
-      try {
-        const toolsCell = inputs.key("tools").asSchema({
-          type: "object",
-          additionalProperties: LLMToolSchema,
-        });
-        const toolCatalog = toolsCell
-          ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-          : undefined;
+    enqueuePostCommitLLMWork(
+      tx,
+      "generateText",
+      `generateText:${hash}`,
+      "generateText-start",
+      requestSnapshot,
+      () => {
+        const resultPromise = (async () => {
+          try {
+            const doWork = () =>
+              executeWithToolsLoop({
+                initialMessages: requestMessages,
+                llmParams: requestSnapshot,
+                toolCatalog,
+                updatePartial,
+                runtime,
+                space: parentCell.space,
+                getCurrentRun: getRunForCancellation,
+                thisRun,
+                onComplete: async (llmResult) => {
+                  await runtime.idle();
 
-        const doWork = () =>
-          executeWithToolsLoop({
-            initialMessages: requestMessages,
-            llmParams,
-            toolCatalog: toolCatalog!,
-            updatePartial,
-            runtime,
-            space: parentCell.space,
-            getCurrentRun: getRunForCancellation,
-            thisRun,
-            onComplete: async (llmResult) => {
-              await runtime.idle();
+                  const textResult = extractTextFromLLMResponse(llmResult);
 
-              const textResult = extractTextFromLLMResponse(llmResult);
-
-              await runtime.editWithRetry((tx) => {
-                resultCell.key("pending").withTx(tx).set(false);
-                resultCell.key("result").withTx(tx).set(textResult);
-                resultCell.key("error").withTx(tx).set(undefined);
-                resultCell.key("partial").withTx(tx).set(textResult);
-                resultCell.key("requestHash").withTx(tx).set(hash);
+                  await runtime.editWithRetry((tx) => {
+                    resultCell.key("pending").withTx(tx).set(false);
+                    resultCell.key("result").withTx(tx).set(textResult);
+                    resultCell.key("error").withTx(tx).set(undefined);
+                    resultCell.key("partial").withTx(tx).set(textResult);
+                    resultCell.key("requestHash").withTx(tx).set(hash);
+                  });
+                },
               });
+
+            if (queueName) {
+              await runtime.getOrCreateQueue(queueName).enqueue(doWork);
+            } else {
+              await doWork();
+            }
+          } finally {
+            cleanupPartial();
+          }
+        })();
+
+        resultPromise.catch((e) =>
+          handleLLMError(
+            e,
+            runtime,
+            resultCell.key("pending"),
+            resultCell.key("result"),
+            resultCell.key("error"),
+            resultCell.key("partial"),
+            resultCell.key("requestHash"),
+            hash,
+            getRunForCancellation,
+            thisRun,
+            () => {
+              // Only clear if this is still the current request; a newer request
+              // may have already set previousCallHash to its own hash.
+              if (hash === previousCallHash) previousCallHash = undefined;
             },
-          });
-
-        if (queueName) {
-          await runtime.getOrCreateQueue(queueName).enqueue(doWork);
-        } else {
-          await doWork();
-        }
-      } finally {
-        cleanupPartial();
-      }
-    })();
-
-    resultPromise.catch((e) =>
-      handleLLMError(
-        e,
-        runtime,
-        resultCell.key("pending"),
-        resultCell.key("result"),
-        resultCell.key("error"),
-        resultCell.key("partial"),
-        resultCell.key("requestHash"),
-        hash,
-        getRunForCancellation,
-        thisRun,
-        () => {
-          // Only clear if this is still the current request; a newer request
-          // may have already set previousCallHash to its own hash.
-          if (hash === previousCallHash) previousCallHash = undefined;
-        },
-      )
+          )
+        );
+      },
     );
   };
 }
@@ -785,7 +864,38 @@ export function generateObject<T extends Record<string, unknown>>(
         cache: cache ?? true,
       };
 
-      const hash = hashOf({ ...llmParams, schema }).toString();
+      const toolsCell = inputs.key("tools").asSchema({
+        type: "object",
+        additionalProperties: LLMToolSchema,
+      });
+      const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
+        toolsCell,
+      );
+
+      // Add presentResult builtin tool.
+      const toolCatalog = {
+        ...baseCatalog,
+        llmTools: {
+          ...baseCatalog.llmTools,
+          [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
+            description:
+              "Call this tool with the final structured result matching the required schema. This should be your last action.",
+            // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
+            // cloneSchemaMutable() before turning on modern data-model.
+            inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
+              JSON.parse(JSON.stringify(schema)),
+            ),
+          },
+        },
+      };
+      const llmParamsWithTools: LLMRequest = {
+        ...llmParams,
+        tools: toolCatalog.llmTools,
+      };
+      const requestSnapshot = createFrozenRequestSnapshot(
+        JSON.parse(JSON.stringify({ ...llmParamsWithTools, schema })),
+      );
+      const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -806,7 +916,14 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
-      previousCallHash = hash;
+      markRequestHashPendingCommit(
+        tx,
+        hash,
+        () => previousCallHash,
+        (next) => {
+          previousCallHash = next;
+        },
+      );
 
       if (hash !== currentRequestHash) {
         currentRun++;
@@ -831,162 +948,139 @@ export function generateObject<T extends Record<string, unknown>>(
         ? () => false
         : () => thisRun !== currentRun;
 
-      // Build tool catalog with presentResult tool
-      const resultPromise = (async () => {
-        try {
-          const toolsCell = inputs.key("tools").asSchema({
-            type: "object",
-            additionalProperties: LLMToolSchema,
-          });
-          const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
-            toolsCell,
-          );
+      enqueuePostCommitLLMWork(
+        tx,
+        "generateObject",
+        `generateObject:${hash}`,
+        "generateObject-start",
+        requestSnapshot,
+        () => {
+          const resultPromise = (async () => {
+            try {
+              // Execute with tools - capture presentResult when called
+              let finalResult: T | undefined;
 
-          // Add presentResult builtin tool
-          const toolCatalog = {
-            ...baseCatalog,
-            llmTools: {
-              ...baseCatalog.llmTools,
-              [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
-                description:
-                  "Call this tool with the final structured result matching the required schema. This should be your last action.",
-                // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-                // cloneSchemaMutable() before turning on modern data-model.
-                inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
-                  JSON.parse(JSON.stringify(schema)),
-                ),
+              // Custom execution loop for generateObject with presentResult extraction
+              const executeRecursive = async (
+                currentMessages: readonly BuiltInLLMMessage[],
+              ): Promise<void> => {
+                if (isRunCancelled()) return;
+
+                const requestParams: LLMRequest = {
+                  ...llmParamsWithTools,
+                  messages: currentMessages,
+                };
+
+                const llmResult = await client.sendRequest(
+                  requestParams,
+                  updatePartial,
+                );
+
+                if (isRunCancelled()) return;
+
+                const toolCallParts = llmToolExecutionHelpers
+                  .extractToolCallParts(llmResult.content);
+                const hasToolCalls = toolCallParts.length > 0;
+
+                if (hasToolCalls) {
+                  const assistantMessage = llmToolExecutionHelpers
+                    .buildAssistantMessage(
+                      llmResult.content,
+                      toolCallParts,
+                    );
+
+                  const toolResults = await llmToolExecutionHelpers
+                    .executeToolCalls(
+                      runtime,
+                      parentCell.space,
+                      toolCatalog,
+                      toolCallParts,
+                    );
+
+                  // Check if presentResult was called. Cellify from the raw
+                  // tool call input to get live Cell references (the tool result
+                  // itself is serialized with @link for the conversation).
+                  const presentResultPart = toolCallParts.find(
+                    (p) =>
+                      p.toolName ===
+                        llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
+                  );
+                  if (presentResultPart) {
+                    finalResult = llmToolExecutionHelpers.traverseAndCellify(
+                      runtime,
+                      parentCell.space,
+                      presentResultPart.input,
+                    ) as T;
+                  }
+
+                  const toolResultMessages = llmToolExecutionHelpers
+                    .createToolResultMessages(toolResults);
+
+                  const updatedMessages = [
+                    ...currentMessages,
+                    assistantMessage,
+                    ...toolResultMessages,
+                  ];
+
+                  // Continue if presentResult wasn't called yet
+                  if (!presentResultPart) {
+                    await executeRecursive(updatedMessages);
+                  }
+                } else {
+                  throw new Error(
+                    "LLM did not call presentResult tool with structured data",
+                  );
+                }
+              };
+
+              const doWork = async () => {
+                await executeRecursive(requestMessages);
+
+                if (finalResult === undefined) {
+                  throw new Error("presentResult was never called");
+                }
+
+                return finalResult;
+              };
+
+              const objectResult = queueName
+                ? await runtime.getOrCreateQueue(queueName).enqueue(doWork)
+                : await doWork();
+
+              if (isRunCancelled()) return;
+
+              await runtime.idle();
+
+              await runtime.editWithRetry((tx) => {
+                resultCell.key("pending").withTx(tx).set(false);
+                resultCell.key("result").withTx(tx).set(objectResult);
+                resultCell.key("error").withTx(tx).set(undefined);
+                resultCell.key("requestHash").withTx(tx).set(hash);
+              });
+            } finally {
+              cleanupPartial();
+            }
+          })();
+
+          resultPromise.catch((e) =>
+            handleLLMError(
+              e,
+              runtime,
+              resultCell.key("pending"),
+              resultCell.key("result"),
+              resultCell.key("error"),
+              resultCell.key("partial"),
+              resultCell.key("requestHash"),
+              hash,
+              queueName ? () => thisRun : () => currentRun,
+              thisRun,
+              () => {
+                previousCallHash = undefined;
               },
-            },
-          };
-
-          // Execute with tools - capture presentResult when called
-          let finalResult: T | undefined;
-
-          // Custom execution loop for generateObject with presentResult extraction
-          const executeRecursive = async (
-            currentMessages: readonly BuiltInLLMMessage[],
-          ): Promise<void> => {
-            if (isRunCancelled()) return;
-
-            const requestParams: LLMRequest = {
-              ...llmParams,
-              messages: currentMessages,
-              tools: toolCatalog.llmTools,
-            };
-
-            const llmResult = await client.sendRequest(
-              requestParams,
-              updatePartial,
-            );
-
-            if (isRunCancelled()) return;
-
-            const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(
-              llmResult.content,
-            );
-            const hasToolCalls = toolCallParts.length > 0;
-
-            if (hasToolCalls) {
-              const assistantMessage = llmToolExecutionHelpers
-                .buildAssistantMessage(
-                  llmResult.content,
-                  toolCallParts,
-                );
-
-              const toolResults = await llmToolExecutionHelpers
-                .executeToolCalls(
-                  runtime,
-                  parentCell.space,
-                  toolCatalog,
-                  toolCallParts,
-                );
-
-              // Check if presentResult was called. Cellify from the raw
-              // tool call input to get live Cell references (the tool result
-              // itself is serialized with @link for the conversation).
-              const presentResultPart = toolCallParts.find(
-                (p) =>
-                  p.toolName ===
-                    llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
-              );
-              if (presentResultPart) {
-                finalResult = llmToolExecutionHelpers.traverseAndCellify(
-                  runtime,
-                  parentCell.space,
-                  presentResultPart.input,
-                ) as T;
-              }
-
-              const toolResultMessages = llmToolExecutionHelpers
-                .createToolResultMessages(toolResults);
-
-              const updatedMessages = [
-                ...currentMessages,
-                assistantMessage,
-                ...toolResultMessages,
-              ];
-
-              // Continue if presentResult wasn't called yet
-              if (!presentResultPart) {
-                await executeRecursive(updatedMessages);
-              }
-            } else {
-              throw new Error(
-                "LLM did not call presentResult tool with structured data",
-              );
-            }
-          };
-
-          const doWork = async () => {
-            await executeRecursive(requestMessages);
-
-            if (finalResult === undefined) {
-              throw new Error("presentResult was never called");
-            }
-
-            return finalResult;
-          };
-
-          if (queueName) {
-            return await runtime.getOrCreateQueue(queueName).enqueue(doWork);
-          } else {
-            return await doWork();
-          }
-        } finally {
-          cleanupPartial();
-        }
-      })();
-
-      resultPromise
-        .then(async (objectResult) => {
-          if (isRunCancelled()) return;
-
-          await runtime.idle();
-
-          await runtime.editWithRetry((tx) => {
-            resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(objectResult);
-            resultCell.key("error").withTx(tx).set(undefined);
-            resultCell.key("requestHash").withTx(tx).set(hash);
-          });
-        })
-        .catch((e) =>
-          handleLLMError(
-            e,
-            runtime,
-            resultCell.key("pending"),
-            resultCell.key("result"),
-            resultCell.key("error"),
-            resultCell.key("partial"),
-            resultCell.key("requestHash"),
-            hash,
-            queueName ? () => thisRun : () => currentRun,
-            thisRun,
-            () => {
-              previousCallHash = undefined;
-            },
-          )
-        );
+            )
+          );
+        },
+      );
     } else {
       // Use direct generateObject path (no tools)
       const generateObjectParams: LLMGenerateObjectRequest = {
@@ -1009,7 +1103,8 @@ export function generateObject<T extends Record<string, unknown>>(
       generateObjectParams.system = ((system ?? "") + contextDocs).trim() ||
         "You are a helpful assistant.";
 
-      const hash = hashOf(generateObjectParams).toString();
+      const requestSnapshot = createFrozenRequestSnapshot(generateObjectParams);
+      const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -1031,7 +1126,14 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
-      previousCallHash = hash;
+      markRequestHashPendingCommit(
+        tx,
+        hash,
+        () => previousCallHash,
+        (next) => {
+          previousCallHash = next;
+        },
+      );
 
       // Only increment currentRun if this is a NEW request (different hash)
       // This prevents abandoning in-flight requests when the same params are re-evaluated
@@ -1045,51 +1147,60 @@ export function generateObject<T extends Record<string, unknown>>(
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
 
-      const doWork = () =>
-        client.generateObject(
-          generateObjectParams,
-        ) as Promise<{
-          object: T;
-        }>;
-
-      const resultPromise = queueName
-        ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
-        : doWork();
-
       const isRunCancelled = queueName
         ? () => false
         : () => thisRun !== currentRun;
 
-      resultPromise
-        .then(async (response) => {
-          if (isRunCancelled()) return;
+      enqueuePostCommitLLMWork(
+        tx,
+        "generateObject",
+        `generateObject:${hash}`,
+        "generateObject-start",
+        requestSnapshot,
+        () => {
+          const doWork = () =>
+            client.generateObject(
+              generateObjectParams,
+            ) as Promise<{
+              object: T;
+            }>;
 
-          await runtime.idle();
+          const resultPromise = queueName
+            ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
+            : doWork();
 
-          await runtime.editWithRetry((tx) => {
-            resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(response.object);
-            resultCell.key("error").withTx(tx).set(undefined);
-            resultCell.key("requestHash").withTx(tx).set(hash);
-          });
-        })
-        .catch((e) =>
-          handleLLMError(
-            e,
-            runtime,
-            resultCell.key("pending"),
-            resultCell.key("result"),
-            resultCell.key("error"),
-            resultCell.key("partial"),
-            resultCell.key("requestHash"),
-            hash,
-            queueName ? () => thisRun : () => currentRun,
-            thisRun,
-            () => {
-              previousCallHash = undefined;
-            },
-          )
-        );
+          resultPromise
+            .then(async (response) => {
+              if (isRunCancelled()) return;
+
+              await runtime.idle();
+
+              await runtime.editWithRetry((tx) => {
+                resultCell.key("pending").withTx(tx).set(false);
+                resultCell.key("result").withTx(tx).set(response.object);
+                resultCell.key("error").withTx(tx).set(undefined);
+                resultCell.key("requestHash").withTx(tx).set(hash);
+              });
+            })
+            .catch((e) =>
+              handleLLMError(
+                e,
+                runtime,
+                resultCell.key("pending"),
+                resultCell.key("result"),
+                resultCell.key("error"),
+                resultCell.key("partial"),
+                resultCell.key("requestHash"),
+                hash,
+                queueName ? () => thisRun : () => currentRun,
+                thisRun,
+                () => {
+                  previousCallHash = undefined;
+                },
+              )
+            );
+        },
+      );
     }
   };
 }

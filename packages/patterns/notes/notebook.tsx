@@ -284,7 +284,7 @@ const deleteSelectedNotes = handler<
 
   // Remove from allPieces (permanent delete)
   allPieces.set(
-    allPieces.get().filter(
+    (allPieces.get() ?? []).filter(
       (piece) => !itemsToDelete.some((item) => equals(piece, item)),
     ),
   );
@@ -587,7 +587,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // TODO(seefeld,mathpirate): We need some better way to find the "All Notes" notebook.
     const goToAllNotesAction = action(() => {
-      const pieces = allPieces.get();
+      const pieces = allPieces.get() ?? [];
       const existing = pieces.find((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
@@ -918,7 +918,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // All Notes button display - search allPieces by name (matches default-app approach)
     const allNotesButtonDisplay = computed(() => {
-      const pieces = allPieces.get();
+      const pieces = allPieces.get() ?? [];
       const exists = pieces.some((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");

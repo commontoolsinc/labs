@@ -21,6 +21,38 @@ export function parseCaptureExpression(
     return { root: expr.text, path: [], expression: expr };
   }
 
+  if (ts.isCallExpression(expr)) {
+    const callee = expr.expression;
+    if (
+      ts.isPropertyAccessExpression(callee) &&
+      callee.name.text === "key"
+    ) {
+      const receiver = parseCaptureExpression(callee.expression);
+      if (!receiver) {
+        return undefined;
+      }
+
+      const keySegments: string[] = [];
+      for (const arg of expr.arguments) {
+        if (
+          ts.isStringLiteralLike(arg) ||
+          ts.isNumericLiteral(arg) ||
+          ts.isNoSubstitutionTemplateLiteral(arg)
+        ) {
+          keySegments.push(arg.text);
+          continue;
+        }
+        return undefined;
+      }
+
+      return {
+        root: receiver.root,
+        path: [...receiver.path, ...keySegments],
+        expression: expr,
+      };
+    }
+  }
+
   if (ts.isPropertyAccessExpression(expr)) {
     const segments: string[] = [];
     let current: ts.Expression = expr;
@@ -125,6 +157,14 @@ export function createCaptureAccessExpression(
   template?: ts.Expression,
 ): ts.Expression {
   if (template) {
+    if (
+      ts.isCallExpression(template) &&
+      ts.isPropertyAccessExpression(template.expression) &&
+      template.expression.name.text === "key"
+    ) {
+      return template;
+    }
+
     const rebuild = (expr: ts.Expression): ts.Expression | undefined => {
       if (ts.isIdentifier(expr)) {
         return factory.createIdentifier(rootName);

@@ -458,9 +458,7 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                             cursor: "pointer",
                           }}
                         >
-                          {ann?.[NAME] ??
-                            ann?.content?.slice(0, 40) ??
-                            "(unnamed)"}
+                          {ann?.[NAME] ?? ann?.content ?? "(unnamed)"}
                         </button>
                       ),
                   )}

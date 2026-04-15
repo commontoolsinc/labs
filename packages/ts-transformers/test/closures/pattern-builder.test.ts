@@ -1,9 +1,12 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStringIncludes } from "@std/assert";
 import ts from "typescript";
 
 import { TransformationContext } from "../../src/core/mod.ts";
 import type { CaptureTreeNode } from "../../src/utils/capture-tree.ts";
-import { buildCallbackWithTopLevelCaptures } from "../../src/closures/utils/pattern-builder.ts";
+import {
+  buildCallbackWithTopLevelCaptures,
+  PatternBuilder,
+} from "../../src/closures/utils/pattern-builder.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -107,4 +110,33 @@ Deno.test("buildCallbackWithTopLevelCaptures keeps rest bindings last", () => {
     ),
     ["item", "extra", "...rest"],
   );
+});
+
+Deno.test("PatternBuilder avoids capture collisions with nested explicit bindings", () => {
+  const { sourceFile, context } = createProgramAndContext(`
+    const callback = ({ isExpanded }) => !isExpanded;
+  `);
+  const originalCallback = findFirstNode(sourceFile, ts.isArrowFunction);
+  const originalParam = originalCallback.parameters[0];
+  if (!originalParam) {
+    throw new Error("Expected callback parameter");
+  }
+
+  const captureTree = new Map<string, CaptureTreeNode>([
+    ["isExpanded", { properties: new Map(), path: [] }],
+  ]);
+
+  const rebuilt = new PatternBuilder(context)
+    .addParameter("input", originalParam.name, "input")
+    .setCaptureTree(captureTree)
+    .buildCallback(originalCallback, originalCallback.body, null, null);
+
+  const printer = ts.createPrinter();
+  const printed = printer.printNode(
+    ts.EmitHint.Unspecified,
+    rebuilt,
+    sourceFile,
+  );
+
+  assertStringIncludes(printed, "isExpanded_1");
 });

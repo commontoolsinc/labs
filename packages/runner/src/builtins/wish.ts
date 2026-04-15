@@ -745,7 +745,10 @@ export function wish(
       }
     }
 
-    if (!providedTx) tx.commit();
+    if (!providedTx) {
+      runtime.prepareTxForCommit(tx);
+      tx.commit();
+    }
 
     return suggestionPatternResultCell;
   }

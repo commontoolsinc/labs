@@ -6,14 +6,28 @@ import {
   classifyArrayMethodResultSinkReceiverChainCall,
   detectCallKind,
 } from "../../../ast/mod.ts";
+import { getCellKind } from "../../opaque-ref/opaque-ref.ts";
+import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
+import { createDeriveCall } from "../../builtins/derive.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
 
 function isZeroArgInlineIifeCall(
   expression: ts.CallExpression,
-): boolean {
+): expression is ts.CallExpression & {
+  expression:
+    | ts.ParenthesizedExpression
+    | ts.ArrowFunction
+    | ts.FunctionExpression;
+} {
+  return getZeroArgInlineIifeCallee(expression) !== undefined;
+}
+
+function getZeroArgInlineIifeCallee(
+  expression: ts.CallExpression,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
   if (expression.arguments.length !== 0) {
-    return false;
+    return undefined;
   }
 
   let callee: ts.Expression = expression.expression;
@@ -21,7 +35,121 @@ function isZeroArgInlineIifeCall(
     callee = callee.expression;
   }
 
-  return ts.isArrowFunction(callee) || ts.isFunctionExpression(callee);
+  return ts.isArrowFunction(callee) || ts.isFunctionExpression(callee)
+    ? callee
+    : undefined;
+}
+
+function isZeroArgGetCall(expression: ts.CallExpression): boolean {
+  if (expression.arguments.length !== 0) {
+    return false;
+  }
+
+  if (classifyOpaquePathTerminalCall(expression) === "get") {
+    return true;
+  }
+
+  const callee = expression.expression;
+  return (
+    ts.isPropertyAccessExpression(callee) ||
+    ts.isElementAccessExpression(callee)
+  ) &&
+    (
+      ts.isPropertyAccessExpression(callee)
+        ? callee.name.text === "get"
+        : ts.isStringLiteralLike(callee.argumentExpression) &&
+          callee.argumentExpression.text === "get"
+    );
+}
+
+function getZeroArgGetReceiver(
+  expression: ts.CallExpression,
+): ts.Expression | undefined {
+  if (!isZeroArgGetCall(expression)) {
+    return undefined;
+  }
+
+  const callee = expression.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return undefined;
+  }
+
+  return callee.expression;
+}
+
+function isDeclaredInside(
+  expression: ts.Expression,
+  container: ts.Node,
+  context: Parameters<Emitter>[0]["context"],
+): boolean {
+  if (!ts.isIdentifier(expression)) {
+    return false;
+  }
+
+  const symbol = context.checker.getSymbolAtLocation(expression);
+  const declarations = symbol?.getDeclarations() ?? [];
+  return declarations.some((declaration) => {
+    let current: ts.Node | undefined = declaration;
+    while (current) {
+      if (current === container) {
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
+  });
+}
+
+function collectUnsafeIifeGetReceivers(
+  expression: ts.CallExpression,
+  context: Parameters<Emitter>[0]["context"],
+): ts.Expression[] {
+  const iifeCallee = getZeroArgInlineIifeCallee(expression);
+  if (!iifeCallee) {
+    return [];
+  }
+
+  const receivers: ts.Expression[] = [];
+
+  const visit = (node: ts.Node, syntheticComputeDepth: number): void => {
+    const isFunctionLike = ts.isArrowFunction(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isFunctionDeclaration(node);
+    if (isFunctionLike) {
+      const isRootIife = node === iifeCallee;
+      const isSyntheticCompute = context.isSyntheticComputeCallback(node);
+      if (!isRootIife && !isSyntheticCompute) {
+        return;
+      }
+      const nextDepth = syntheticComputeDepth + (isSyntheticCompute ? 1 : 0);
+      ts.forEachChild(node, (child) => visit(child, nextDepth));
+      return;
+    }
+
+    if (
+      syntheticComputeDepth === 0 &&
+      ts.isCallExpression(node) &&
+      isZeroArgGetCall(node)
+    ) {
+      const receiver = getZeroArgGetReceiver(node);
+      if (
+        receiver &&
+        !isDeclaredInside(receiver, iifeCallee, context) &&
+        !receivers.includes(receiver)
+      ) {
+        receivers.push(receiver);
+      }
+      return;
+    }
+
+    ts.forEachChild(node, (child) => visit(child, syntheticComputeDepth));
+  };
+
+  visit(iifeCallee.body, 0);
+  return receivers;
 }
 
 function getConditionalHelperArgLabel(
@@ -99,6 +227,31 @@ function shouldFilterNestedLocalsForCallWrapper(
 
   const receiverAnalysis = analyze(callee.expression);
   return receiverAnalysis.containsOpaqueRef;
+}
+
+function isCellGetTerminalCall(
+  expression: ts.CallExpression,
+  context: Parameters<Emitter>[0]["context"],
+): boolean {
+  if (classifyOpaquePathTerminalCall(expression) !== "get") {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return false;
+  }
+
+  try {
+    const receiverType = context.checker.getTypeAtLocation(callee.expression);
+    const cellKind = getCellKind(receiverType, context.checker);
+    return cellKind !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 export const emitCallExpression: Emitter = ({
@@ -198,15 +351,37 @@ export const emitCallExpression: Emitter = ({
     return undefined;
   }
 
-  // Preserve authored zero-arg IIFEs in the derive-preferring post-closure
-  // path so the existing inner expression-site machinery can decompose their
-  // local aliases instead of forcing a blanket wrapper around the whole call.
+  // Preserve authored zero-arg IIFEs so the existing inner expression-site
+  // machinery can decompose their local aliases instead of forcing a blanket
+  // wrapper around the whole call. If they still contain direct cell reads,
+  // wrap the IIFE so those reads happen under a reactive cause context.
   if (
-    preferDeriveWrappers &&
     isAuthoredCall &&
     isZeroArgInlineIifeCall(expression)
   ) {
     const rewritten = rewriteChildren(expression);
+    const unsafeGetReceivers = collectUnsafeIifeGetReceivers(
+      rewritten as ts.CallExpression,
+      context,
+    );
+    if (
+      unsafeGetReceivers.length > 0
+    ) {
+      return createReactiveWrapperForExpression(
+        rewritten,
+        dataFlows,
+        context,
+        {
+          filterNestedFunctionLocalCaptures: true,
+          preferDeriveWrapper: preferDeriveWrappers,
+        },
+      ) ?? createDeriveCall(rewritten, unsafeGetReceivers, {
+        factory: context.factory,
+        tsContext: context.tsContext,
+        cfHelpers: context.cfHelpers,
+        context,
+      });
+    }
     return rewritten !== expression ? rewritten : undefined;
   }
 
@@ -222,6 +397,7 @@ export const emitCallExpression: Emitter = ({
         context,
         analyze,
       ),
+      allowDirectExpressionWrap: isCellGetTerminalCall(expression, context),
       preferDeriveWrapper: preferDeriveWrappers,
     },
   );

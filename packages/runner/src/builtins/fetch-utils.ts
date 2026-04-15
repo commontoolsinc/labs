@@ -64,6 +64,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
   snapshotInputs: (cell: Cell<T>) => T,
+  expectedInputHash?: string,
   timeout: number = REQUEST_TIMEOUT,
 ): Promise<{
   claimed: boolean;
@@ -92,6 +93,10 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     // Hash the snapshot (plain object) to avoid proxy/undefined issues
     // from partially-initialized reactive inputs.
     inputHash = computeInputHashFromValue(inputs);
+    if (expectedInputHash !== undefined && inputHash !== expectedInputHash) {
+      claimed = false;
+      return;
+    }
     // Can claim if:
     // 1. Nothing is pending, OR
     // 2. Previous request timed out

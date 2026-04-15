@@ -1,5 +1,5 @@
-// Cell success callback tests: verifying that onCommit callbacks fire
-// correctly after cell writes are committed.
+// Cell commit callback tests: verifying that onCommit callbacks fire correctly
+// after cell writes reach a final commit result.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -18,7 +18,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Cell success callbacks", () => {
+describe("Cell commit callbacks", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -143,6 +143,39 @@ describe("Cell success callbacks", () => {
     expect(callbackCalled).toBe(false);
   });
 
+  it("should call callback when commit returns an error", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    tx = runtime.edit();
+
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-commit-error-test",
+      { type: "number", ifc: { confidentiality: ["secret"] } } as JSONSchema,
+      tx,
+    );
+
+    const statuses: string[] = [];
+    cell.set(42, (committedTx) => {
+      statuses.push(committedTx.status().status);
+    });
+
+    const result = await tx.commit();
+    expect(result.error).toBeDefined();
+    expect(statuses).toEqual(["error"]);
+  });
+
   it("should handle errors in callback gracefully", async () => {
     const cell = runtime.getCell<number>(
       space,
@@ -184,7 +217,7 @@ describe("Cell success callbacks", () => {
     expect(cell.get()).toBe(42);
   });
 
-  it("should call onCommit callback even when transaction commit fails", async () => {
+  it("should call onCommit callback when transaction commit fails", async () => {
     const cell = runtime.getCell<number>(
       space,
       "callback-commit-fail-test",
@@ -204,13 +237,21 @@ describe("Cell success callbacks", () => {
     tx.abort("intentional abort for test");
     await tx.commit();
 
-    // Even though aborted, callback should still be called after commit
     expect(callbackCalled).toBe(true);
     expect(receivedTx).toBe(tx);
+    expect(receivedTx?.status().status).toBe("error");
+  });
 
-    // Verify the transaction actually failed
-    const status = tx.status();
-    expect(status.status).toBe("error");
+  it("should still run generic commit callbacks for diagnostics on failure", async () => {
+    const callbackStatuses: string[] = [];
+    tx.addCommitCallback((_committedTx, result) => {
+      callbackStatuses.push(result.error ? "error" : "ok");
+    });
+
+    tx.abort("diagnostic failure");
+    await tx.commit();
+
+    expect(callbackStatuses).toEqual(["error"]);
   });
 
   describe("set operations with arrays", () => {

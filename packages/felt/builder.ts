@@ -169,7 +169,7 @@ export async function build(
   config: Parameters<typeof esbuild.build>[0],
 ): Promise<ReturnType<typeof esbuild.build>> {
   const fullConfig = Object.assign({}, config, {
-    plugins: [textLoaderPlugin(), denoPlugin()],
+    plugins: [textLoaderPlugin(), denoPlugin({ noTranspile: true })],
     platform: "browser",
     bundle: true,
     format: "esm",

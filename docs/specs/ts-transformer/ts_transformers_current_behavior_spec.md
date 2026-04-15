@@ -2,13 +2,17 @@
 
 **Status:** Implemented (current behavior)\
 **Package:** `@commonfabric/ts-transformers`\
-**Effective date:** March 17, 2026\
+**Effective date:** April 6, 2026\
 **Scope:** Compile-time behavior implemented in `packages/ts-transformers/src`
 and exercised by current tests/fixtures. **Related:**
 
 - `docs/specs/ts-transformer/ts_transformers_target_pattern_language_spec.md`
 - `docs/specs/ts-transformer/ts_transformers_lowering_contract.md`
 - `docs/specs/ts-transformer/ts_transformers_goals.md`
+- `docs/specs/ts-transformer/cfc_authoring_contract.md` (draft, not current
+  implemented behavior)
+- `docs/specs/ts-transformer/cfc_ui_helper_contract.md` (draft, not current
+  implemented behavior)
 
 ## 1. Scope And Source Of Truth
 
@@ -726,6 +730,10 @@ Special path:
   rather than collapsing them away
 - `OpaqueRef<T>` does not emit `asOpaque`; only cell/stream wrappers add wrapper
   markers such as `asCell` / `asStream`
+- CFC-specific wrapper lowering such as `WriteAuthorizedBy`, projection aliases,
+  and trusted-UI helper schema metadata is not part of current implemented
+  behavior on `main`; those contracts are described separately in the draft CFC
+  docs listed above
 
 ## 12. Diagnostics Message Transformation (Optional Consumer Layer)
 
@@ -757,6 +765,9 @@ pipeline. Current built-in behavior:
    declaration is analyzable in-proc (arrow/function
    expression/declaration/method); external/unresolved calls remain
    conservative.
+6. The CFC authoring and trusted-UI helper contracts now documented under
+   `docs/specs/ts-transformer/cfc_*.md` are draft contracts only; the current
+   implemented pipeline on `main` does not yet lower those forms.
 
 ## 14. Test Coverage Snapshot
 

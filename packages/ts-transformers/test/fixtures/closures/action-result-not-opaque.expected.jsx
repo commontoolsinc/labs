@@ -41,7 +41,7 @@ export default pattern((__cf_pattern_input) => {
         count.set(count.get() + 1);
     })({
         count: count
-    }).for("increment", true);
+    }).for({ stream: "increment" }, true);
     const decrement = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -55,7 +55,7 @@ export default pattern((__cf_pattern_input) => {
         count.set(count.get() - 1);
     })({
         count: count
-    }).for("decrement", true);
+    }).for({ stream: "decrement" }, true);
     return {
         [UI]: (<div>
         <span>{label}: {count}</span>

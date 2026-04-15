@@ -1,4 +1,5 @@
 import type { Immutable } from "@commonfabric/utils/types";
+import type { ImmutableJSONValue } from "@commonfabric/api";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
@@ -29,6 +30,15 @@ import {
 } from "@commonfabric/memory/interface";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
+import type {
+  CfcEnforcementMode,
+  CfcTxState,
+  ImplementationIdentity,
+  PostCommitSideEffect,
+  PreparedDigestInput,
+  TrustSnapshot,
+  WritePolicyInput,
+} from "../cfc/mod.ts";
 
 export type {
   Assertion,
@@ -92,9 +102,9 @@ export interface IReadOptions {
 }
 
 // This type is used to tag a document with any important metadata.
-// Currently, the only supported type is the classification.
+// Currently, the only supported type is confidentiality.
 export type Labels = {
-  classification?: string[];
+  confidentiality?: ImmutableJSONValue[];
 };
 
 /** Immutable storage value container. */
@@ -608,10 +618,27 @@ export interface IStorageTransaction {
 export interface IExtendedStorageTransaction extends IStorageTransaction {
   tx: IStorageTransaction;
 
+  getCfcState(): Readonly<CfcTxState>;
+  setCfcEnforcementMode(mode: CfcEnforcementMode): void;
+  markCfcRelevant(reason?: string): void;
+  invalidateCfc(reason: string): void;
+  prepareCfc(input?: PreparedDigestInput): string;
+  setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void;
+  setCfcImplementationIdentity(
+    identity: ImplementationIdentity | undefined,
+  ): void;
+  recordCfcWritePolicyInput(input: WritePolicyInput): void;
+  enqueuePostCommitEffect(effect: PostCommitSideEffect): void;
+
   /**
    * Add a callback to be called when the transaction commit completes.
    * The callback receives the transaction as a parameter and is called
    * regardless of whether the commit succeeded or failed.
+   *
+   * Internal-only hook. Callbacks may run after failed commits and therefore
+   * must not perform external side effects or release external requests. Use
+   * the CFC post-commit outbox for effectful work that should happen only after
+   * a successful commit.
    *
    * Note: Callbacks are called synchronously after commit completes.
    * If a callback throws, the error is logged but doesn't affect other callbacks.
@@ -656,6 +683,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Writes a value into a storage at a given address, including creating parent
    * entries in the document if a path is provided or throws an error.
    *
+   * Internal runner API. Phase-1 CFC no-op attempted-target coverage is not
+   * derived from blind direct `write*()` calls. Callers that need attempted
+   * target coverage before same-value short-circuiting must first establish it
+   * through a higher-level diff path such as `markReadAsPotentialWrite`.
+   * Runner-owned system metadata writes may also use this directly when they
+   * are intentionally out of phase-1 value-surface CFC scope.
+   *
    * @param address - Memory address to write to.
    * @param value - Value to write.
    */
@@ -670,6 +704,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * Thin convenience wrapper over `writeOrThrow()` that prepends `"value"` to
    * the supplied path.
+   *
+   * Internal runner API with the same phase-1 CFC caveat as `writeOrThrow()`:
+   * blind same-value direct writes do not by themselves establish attempted
+   * target coverage. Use higher-level diff paths when no-op attempted writes
+   * need to appear in `potentialWrites`.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
