@@ -113,7 +113,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     prefix: prefix
-                }, ({ entries, prefix }) => visibleEntries(entries, prefix)), []);
+                }, ({ entries, prefix }) => visibleEntries(entries, prefix)).for(["visible", 3], true), []).for("visible", true);
                 return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
@@ -172,7 +172,7 @@ export default pattern((__cf_pattern_input) => {
                     labelPrefix: labelPrefix
                 });
             })()}
-    </div>),
+    </div>)
     });
 }, {
     type: "object",

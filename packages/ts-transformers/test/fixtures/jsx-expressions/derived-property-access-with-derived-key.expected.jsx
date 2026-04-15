@@ -88,7 +88,7 @@ export default pattern((__cf_pattern_input) => {
     } as const satisfies __cfHelpers.JSONSchema, { items }, ({ items }) => items.map((item, idx) => ({
         aisle: `Aisle ${(idx % 3) + 1}`,
         item: item,
-    })));
+    }))).for("itemsWithAisles", true);
     // Group by aisle - returns Record<string, Assignment[]>
     const groupedByAisle = derive({
         type: "object",
@@ -170,7 +170,7 @@ export default pattern((__cf_pattern_input) => {
             groups[assignment.aisle]!.push(assignment);
         }
         return groups;
-    });
+    }).for("groupedByAisle", true);
     // Derive sorted aisle names from grouped object
     const aisleNames = derive({
         type: "object",
@@ -219,7 +219,7 @@ export default pattern((__cf_pattern_input) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { groupedByAisle }, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort());
+    } as const satisfies __cfHelpers.JSONSchema, { groupedByAisle }, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort()).for("aisleNames", true);
     // The pattern from CT-1036:
     // - Map over derived keys (aisleNames)
     // - Access derived object with derived key (groupedByAisle[aisleName])

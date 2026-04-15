@@ -1,11 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import {
   assert,
+  assertMatch,
   assertNotMatch,
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
 import { transformFiles } from "./utils.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 const fixture = `
 import { toSchema } from "commonfabric";
@@ -22,6 +24,402 @@ export { configSchema };
 `;
 
 describe("CommonFabricTransformerPipeline", () => {
+  it("adds stable variable causes to fresh reactive initializers", async () => {
+    const source = `
+import { cell, computed, Writable } from "commonfabric";
+
+export function make() {
+  const foo = Writable.of(1);
+  const bar = computed(() => foo.get() + 1);
+  const baz = cell(["a"]).map((value) => value.toUpperCase());
+  const already = Writable.of(2).for("manual");
+  return { already, bar, baz, foo };
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(
+      main,
+      'const foo = Writable.of(1, {\n        type: "number"\n    } as const satisfies __cfHelpers.JSONSchema).for("foo", true);',
+    );
+    assertStringIncludes(main, '.for("bar", true);');
+    assertStringIncludes(main, '.for("baz", true);');
+    assert(!main.includes('.for("already", true)'));
+  });
+
+  it("adds stable property causes to pattern-owned lowered derives", async () => {
+    const source = `
+import { pattern } from "commonfabric";
+
+export default pattern<{ count: number }, { doubled: number }>((state) => ({
+  doubled: state.count * 2,
+}));
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, "doubled: __cfHelpers.derive(");
+    assertStringIncludes(main, '.for(["__patternResult", "doubled"], true)');
+    assertNotMatch(main, /state\.key\("count"\)\.for/);
+  });
+
+  it("adds stable nested causes to pattern result cells", async () => {
+    const source = `
+import { pattern, Writable } from "commonfabric";
+
+export default pattern<{ count: number }>((state) => ({
+  foo: state.count * 2,
+  nested: {
+    bar: Writable.of("bar"),
+  },
+  tuple: [Writable.of("tuple")],
+}));
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, '.for(["__patternResult", "foo"], true)');
+    assertStringIncludes(
+      main,
+      '.for(["__patternResult", "nested", "bar"], true)',
+    );
+    assertStringIncludes(
+      main,
+      '.for(["__patternResult", "tuple", 0], true)',
+    );
+    assertNotMatch(main, /state\.key\("count"\)\.for/);
+  });
+
+  it("uses stream-scoped causes for handler result streams", async () => {
+    const source = `
+import { handler, pattern } from "commonfabric";
+
+const saveHandler = handler(false, false, () => {});
+
+export default pattern(() => {
+  const save = saveHandler({});
+  return {
+    nested: {
+      cancel: saveHandler({}),
+    },
+    save,
+  };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertMatch(main, /\.for\(\{\s*stream: "save"\s*\}, true\)/s);
+    assertMatch(
+      main,
+      /\.for\(\{\s*stream: \[\s*"__patternResult",\s*"nested",\s*"cancel"\s*\]\s*\}, true\)/s,
+    );
+    assertNotMatch(main, /\.for\("save", true\)/);
+    assertNotMatch(
+      main,
+      /\.for\(\["__patternResult", "nested", "cancel"\], true\)/,
+    );
+  });
+
+  it("re-roots reactive identifier members in pattern results", async () => {
+    const source = `
+import { pattern, Writable } from "commonfabric";
+
+export default pattern(() => {
+  const foo = Writable.of(1);
+  return {
+    foo,
+    explicit: foo,
+  };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, '.for("foo", true);');
+    assertStringIncludes(
+      main,
+      'foo: foo.for(["__patternResult", "foo"], true)',
+    );
+    assertStringIncludes(
+      main,
+      'explicit: foo.for(["__patternResult", "explicit"], true)',
+    );
+  });
+
+  it("adds stable nested causes to constructed variable values", async () => {
+    const source = `
+import { computed, Writable } from "commonfabric";
+
+declare function f(input: unknown): unknown;
+
+export function make() {
+  const foo = f({
+    param: Writable.of(1),
+    nested: {
+      result: computed(() => 2),
+    },
+    tuple: [Writable.of("tuple")],
+    already: Writable.of(3).for("manual"),
+  });
+  return foo;
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(main, '.for(["foo", "param"], true)');
+    assertStringIncludes(main, '.for(["foo", "nested", "result"], true)');
+    assertStringIncludes(main, '.for(["foo", "tuple", 0], true)');
+    assert(!main.includes('.for(["foo", "already"], true)'));
+  });
+
+  it("does not add positional cause segments for wrapped single object arguments", async () => {
+    const source = `
+import { Writable } from "commonfabric";
+
+declare function f<T>(arg: T): T;
+
+export function make() {
+  const param = Writable.of(1);
+  const foo = f(({ param }) as const);
+  return foo;
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(main, '.for(["foo", "param"], true)');
+    assert(!main.includes('.for(["foo", 0, "param"], true)'));
+  });
+
+  it("does not duplicate stable causes on asserted reactive initializers", async () => {
+    const source = `
+import { Default, pattern } from "commonfabric";
+
+interface Entry {
+  id: string;
+}
+
+export default pattern<{ entries: Default<Entry[], []> }>(({ entries }) => {
+  const tree = (entries || []) as Entry[];
+  return { tree };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    const treeCauseCount = main.match(/\.for\("tree", true\)/g)?.length ?? 0;
+    assert(
+      treeCauseCount === 1,
+      `expected one tree cause, found ${treeCauseCount}`,
+    );
+  });
+
+  it("does not add causes to plain array methods in lift callbacks", async () => {
+    const source = `
+import { lift } from "commonfabric";
+
+interface Summary {
+  label: string;
+  count: number;
+}
+
+export const summarize = lift((summaries: Summary[]) => {
+  const labels = summaries.map((summary) => summary.label);
+  const active = summaries.filter((summary) => summary.count > 0);
+  return {
+    labels: summaries.map((summary) => summary.label),
+    active,
+    label: labels.join(", "),
+  };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assert(!main.includes('.for("labels", true)'));
+    assert(!main.includes('.for("active", true)'));
+    assert(!main.includes('.for(["labels"], true)'));
+  });
+
+  it("does not add causes to plain array methods in lowered handler callbacks", async () => {
+    const source = `
+import { action, pattern, Stream } from "commonfabric";
+
+const Child = pattern<{}, { deleteHandlers: Stream<void>[] }>(() => {
+  return { deleteHandlers: [] as Stream<void>[] };
+});
+
+export default pattern(() => {
+  const subject = Child({});
+  const remove = action(() => {
+    const handlers = subject.deleteHandlers.filter(() => true);
+    handlers[0]?.send();
+  });
+  return { remove };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assert(!main.includes('.filter(() => true).for("handlers", true)'));
+  });
+
+  it("does not add causes to receiver calls in property access chains", async () => {
+    const source = `
+import { Default, pattern, wish, Writable } from "commonfabric";
+
+type MentionablePiece = { name: string };
+declare function make(input: unknown): { result: unknown };
+
+export default pattern(() => {
+  const mentionable =
+    wish<Default<MentionablePiece[], []>>({ query: "#mentionable" }).result;
+  const picked = make({ param: Writable.of(1) }).result;
+  return { mentionable, picked };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assert(!main.includes('.for("mentionable", true).result'));
+    assertStringIncludes(main, '.for(["picked", "param"], true)');
+  });
+
+  it("does not add root causes to pattern factory outputs", async () => {
+    const source = `
+import { pattern, Writable } from "commonfabric";
+
+const Child = pattern<{ value: number }>(() => {
+  return { value: Writable.of(1) };
+});
+
+export default pattern(() => {
+  const child = Child({ value: Writable.of(2) });
+  return { child };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assert(!main.includes('.for("child", true)'));
+    assertStringIncludes(main, '.for(["child", "value"], true)');
+  });
+
+  it("does not re-root pattern factory identifiers in tool descriptors", async () => {
+    const source = `
+import { BuiltInLLMTool, pattern, patternTool } from "commonfabric";
+
+export const searchWeb = pattern<{ query: string }, { results: string[] }>(
+  ({ query }) => ({ results: [query] }),
+);
+
+export default pattern(() => {
+  const tools: Record<string, BuiltInLLMTool> = {
+    searchWeb: {
+      pattern: searchWeb,
+    },
+    wrappedSearch: patternTool(searchWeb),
+  };
+  return { tools };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, "pattern: searchWeb");
+    assertStringIncludes(main, "wrappedSearch: patternTool(searchWeb)");
+    assert(!main.includes("searchWeb.for("));
+  });
+
+  it("does not add shared property causes inside dynamic array callbacks", async () => {
+    const source = `
+import { lift, Writable } from "commonfabric";
+
+export const build = lift((values: number[]) =>
+  values.map((_value, index) => ({
+    token: Writable.of(index),
+  }))
+);
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assert(!main.includes('.for("token", true)'));
+  });
+
   it("transforms by default and supports cf-disable-transform opt-out", async () => {
     const source = `
 import { computed } from "commonfabric";
@@ -35,7 +433,7 @@ export { value };
     });
     assertStringIncludes(
       enabledByDefault["/main.ts"]!,
-      "const value = __cfHelpers.derive(",
+      "__cfHelpers.derive(",
     );
 
     const disabled = await transformFiles({

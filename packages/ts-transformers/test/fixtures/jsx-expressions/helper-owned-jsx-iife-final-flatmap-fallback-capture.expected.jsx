@@ -113,7 +113,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     prefix: prefix
-                }, ({ entries, prefix }) => visibleEntries(entries, prefix)), []);
+                }, ({ entries, prefix }) => visibleEntries(entries, prefix)).for(["visible", 3], true), []).for("visible", true);
                 const labels = visible.flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
@@ -178,7 +178,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } as const satisfies __cfHelpers.JSONSchema), {
                     labelPrefix: labelPrefix
-                });
+                }).for("labels", true);
                 return labels.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const label = __cf_pattern_input.key("element");
                     return <button type="button">{label}</button>;
@@ -212,7 +212,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } as const satisfies __cfHelpers.JSONSchema), {});
             })()}
-    </div>),
+    </div>)
     });
 }, {
     type: "object",

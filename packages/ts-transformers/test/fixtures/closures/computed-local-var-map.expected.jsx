@@ -66,7 +66,7 @@ export default pattern((__cf_pattern_input) => {
                 required: ["name", "price"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.filter((i) => i.price > 100));
+    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.filter((i) => i.price > 100)).for("filtered", true);
     return {
         [UI]: (<div>
         {__cfHelpers.derive({

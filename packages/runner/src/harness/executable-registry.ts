@@ -1,5 +1,6 @@
 import { isPattern, unsafe_verifiedLoadId } from "../builder/types.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
+import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-contract";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import type { HarnessedFunction } from "./types.ts";
 
@@ -17,8 +18,14 @@ export class ExecutableRegistry {
     string,
     Map<string, HarnessedFunction>
   >();
+  private readonly verifiedLoadSources = new Map<string, Set<string>>();
+  private readonly verifiedLoadBundleIds = new Map<string, string>();
   private readonly verifiedFunctionIndex = new Map<string, HarnessedFunction>();
   private readonly verifiedFunctionLoadIds = new Map<string, string>();
+  private readonly verifiedBindingMetadata = new Map<
+    string,
+    { sourceFile?: string; bindingPath?: string[] }
+  >();
   private readonly verifiedPatternFunctions = new Map<
     string,
     Map<string, HarnessedFunction>
@@ -33,8 +40,11 @@ export class ExecutableRegistry {
 
   clear(): void {
     this.verifiedFunctions.clear();
+    this.verifiedLoadSources.clear();
+    this.verifiedLoadBundleIds.clear();
     this.verifiedFunctionIndex.clear();
     this.verifiedFunctionLoadIds.clear();
+    this.verifiedBindingMetadata.clear();
     this.verifiedPatternFunctions.clear();
     this.verifiedPatternLoadIds.clear();
     this.trustedHostFunctionIndex.clear();
@@ -66,6 +76,18 @@ export class ExecutableRegistry {
       }
     }
     this.verifiedFunctions.set(loadId, new Map());
+    this.verifiedLoadSources.set(loadId, new Set());
+  }
+
+  setVerifiedLoadSources(
+    loadId: string,
+    sources: Iterable<string>,
+  ): void {
+    this.verifiedLoadSources.set(loadId, new Set(sources));
+  }
+
+  setVerifiedLoadBundleId(loadId: string, bundleId: string): void {
+    this.verifiedLoadBundleIds.set(loadId, bundleId);
   }
 
   registerVerifiedFunction(
@@ -114,6 +136,20 @@ export class ExecutableRegistry {
     implementationRef: string,
   ): HarnessedFunction | undefined {
     return this.verifiedFunctions.get(loadId)?.get(implementationRef);
+  }
+
+  isVerifiedSourceInLoad(loadId: string, source: string): boolean {
+    return this.verifiedLoadSources.get(loadId)?.has(source) ?? false;
+  }
+
+  getVerifiedBundleId(loadId: string): string | undefined {
+    return this.verifiedLoadBundleIds.get(loadId);
+  }
+
+  getVerifiedBindingMetadata(
+    implementationRef: string,
+  ): { sourceFile?: string; bindingPath?: string[] } | undefined {
+    return this.verifiedBindingMetadata.get(implementationRef);
   }
 
   getVerifiedLoadId(
@@ -184,6 +220,7 @@ export class ExecutableRegistry {
     registry.set(implementationRef, implementation);
     this.verifiedFunctionIndex.set(implementationRef, implementation);
     this.verifiedFunctionLoadIds.set(implementationRef, loadId);
+    this.recordVerifiedBindingMetadata(implementationRef, implementation);
   }
 
   private recordVerifiedFunctions(
@@ -213,6 +250,7 @@ export class ExecutableRegistry {
       const implementation = (value as Record<string, unknown>)
         .implementation as HarnessedFunction;
       this.storeVerifiedFunction(loadId, implementationRef, implementation);
+      this.recordVerifiedBindingMetadata(implementationRef, value);
     }
 
     if (
@@ -228,6 +266,7 @@ export class ExecutableRegistry {
           implementationRef,
           value as HarnessedFunction,
         );
+        this.recordVerifiedBindingMetadata(implementationRef, value);
       }
     }
 
@@ -238,6 +277,17 @@ export class ExecutableRegistry {
       }
       this.recordVerifiedFunctions(loadId, descriptor.value, seen);
     }
+  }
+
+  private recordVerifiedBindingMetadata(
+    implementationRef: string,
+    value: unknown,
+  ): void {
+    const metadata = readVerifiedBindingMetadata(value);
+    if (!metadata) {
+      return;
+    }
+    this.verifiedBindingMetadata.set(implementationRef, metadata);
   }
 
   private annotateVerifiedPatterns(
@@ -410,4 +460,33 @@ export class ExecutableRegistry {
     hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
     return implementationRef;
   }
+}
+
+function readVerifiedBindingMetadata(
+  value: unknown,
+): { sourceFile?: string; bindingPath?: string[] } | undefined {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) {
+    return undefined;
+  }
+  const metadata =
+    (value as Record<string, unknown>)[VERIFIED_BINDING_METADATA_FIELD];
+  if (!metadata || typeof metadata !== "object") {
+    return undefined;
+  }
+  const sourceFile = typeof (metadata as Record<string, unknown>).sourceFile ===
+      "string"
+    ? (metadata as Record<string, unknown>).sourceFile as string
+    : undefined;
+  const bindingPath = Array.isArray(
+      (metadata as Record<string, unknown>).bindingPath,
+    ) &&
+      ((metadata as Record<string, unknown>).bindingPath as unknown[]).every((
+        entry,
+      ) => typeof entry === "string")
+    ? [...((metadata as Record<string, unknown>).bindingPath as string[])]
+    : undefined;
+  if (!sourceFile && !bindingPath) {
+    return undefined;
+  }
+  return { sourceFile, bindingPath };
 }

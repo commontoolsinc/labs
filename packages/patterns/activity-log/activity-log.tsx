@@ -4,7 +4,9 @@ import {
   type Default,
   handler,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   type VNode,
   Writable,
@@ -53,11 +55,10 @@ const logEventHandler = handler<
   Omit<ActivityEvent, "id" | "timestamp">,
   { events: Writable<ActivityEvent[]>; mentioned: Writable<MentionablePiece[]> }
 >((args, { events, mentioned }) => {
+  const now = safeDateNow();
   events.push({
-    id: `${new Date().getTime().toString(36)}-${
-      Math.random().toString(36).slice(2, 11)
-    }`,
-    timestamp: new Date().toISOString(),
+    id: `${now.toString(36)}-${nonPrivateRandom().toString(36).slice(2, 11)}`,
+    timestamp: new Date(now).toISOString(),
     ...args,
   });
   if (args.pieceRef) mentioned.push(args.pieceRef);

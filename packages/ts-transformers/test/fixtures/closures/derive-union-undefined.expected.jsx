@@ -22,7 +22,7 @@ interface Config {
 export default pattern((config: Config) => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -47,12 +47,12 @@ export default pattern((config: Config) => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         config: {
             required: config.key("required"),
             unionUndefined: config.key("unionUndefined")
         }
-    }, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0));
+    }, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0)).for("result", true);
     return result;
 }, {
     type: "object",

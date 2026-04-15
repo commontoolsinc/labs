@@ -73,7 +73,7 @@ export default pattern((state) => {
                         editingPersonName: state.key("editingPersonName")
                     },
                     personName: personName
-                }, ({ state, personName }) => state.editingPersonName === personName);
+                }, ({ state, personName }) => state.editingPersonName === personName).for("isEditing", true);
                 const isRemoveConfirm = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -102,7 +102,7 @@ export default pattern((state) => {
                         removePersonConfirmTarget: state.key("removePersonConfirmTarget")
                     },
                     personName: personName
-                }, ({ state, personName }) => state.removePersonConfirmTarget === personName);
+                }, ({ state, personName }) => state.removePersonConfirmTarget === personName).for("isRemoveConfirm", true);
                 const activeSpotOpts = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -153,7 +153,7 @@ export default pattern((state) => {
                     .map((s) => ({
                     label: "#" + s.spotNumber + (s.label ? " - " + s.label : ""),
                     value: s.spotNumber,
-                })));
+                }))).for("activeSpotOpts", true);
                 return (<section>
               <span>{personName}</span>
               <span>{email}</span>
@@ -442,7 +442,7 @@ export default pattern((state) => {
                     spots: state.key("spots")
                 }
             })}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

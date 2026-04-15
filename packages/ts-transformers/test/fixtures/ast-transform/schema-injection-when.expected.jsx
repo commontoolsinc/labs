@@ -30,7 +30,7 @@ export default pattern((__cf_pattern_input) => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: ["boolean", "string"]
-    } as const satisfies __cfHelpers.JSONSchema, enabled, message);
+    } as const satisfies __cfHelpers.JSONSchema, enabled, message).for("result", true);
     return {
         [NAME]: "when schema test",
         [UI]: <div>{result}</div>,

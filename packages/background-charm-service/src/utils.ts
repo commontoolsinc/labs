@@ -148,7 +148,7 @@ export async function getBGCharms(
   // INSIST THAT YOU HAVE THIS CELL ON THE SERVER!
   const privilegedSchema = {
     ...schema,
-    ifc: { classification: ["secret"] },
+    ifc: { confidentiality: ["secret"] },
   } as const satisfies JSONSchema;
   await charmsCell.asSchema(privilegedSchema).sync();
   await runtime.storageManager.synced();

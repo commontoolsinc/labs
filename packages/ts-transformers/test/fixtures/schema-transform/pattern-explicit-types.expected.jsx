@@ -47,7 +47,7 @@ export default pattern((input) => {
             }
         },
         required: ["bar", "foo"]
-    } as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input: input_1 }) => ({ ...input, bar: 123 }));
+    } as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input: input_1 }) => ({ ...input, bar: 123 })).for("__patternResult", true);
 }, {
     type: "object",
     properties: {

@@ -22,6 +22,7 @@
     "./traverse": "./src/traverse.ts",
     "./storage/cache": "./src/storage/cache.ts",
     "./storage/cache.deno": "./src/storage/cache.deno.ts",
+    "./cfc": "./src/cfc/mod.ts",
     "./compilation-cache": "./src/compilation-cache/mod.ts"
   }
 }

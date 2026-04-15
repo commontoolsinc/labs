@@ -46,6 +46,7 @@ import {
   markReadAsPotentialWrite,
   reactivityLogFromActivities,
 } from "./storage/reactivity-log.ts";
+import { recordTrustedEventPolicyInputs } from "./cfc/ui-contract.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
@@ -101,6 +102,87 @@ export type EventHandler =
     ) => void;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
+
+function hasAnnotatedWrites(
+  handler: EventHandler,
+): handler is AnnotatedEventHandler {
+  return "writes" in handler && Array.isArray(handler.writes);
+}
+
+function trustedEventWriteCandidatesFromTransaction(
+  tx: IExtendedStorageTransaction,
+  handler: EventHandler,
+  fallbackSpaces: Iterable<MemorySpace> = [],
+): NormalizedFullLink[] {
+  const candidates: NormalizedFullLink[] = [];
+  const seen = new Map<string, number>();
+  const detailSpaces = new Set<MemorySpace>(fallbackSpaces);
+
+  const addCandidate = (write: NormalizedFullLink | IMemorySpaceAddress) => {
+    const path = write.path[0] === "value" ? write.path.slice(1) : write.path;
+    const candidate: NormalizedFullLink = {
+      space: write.space,
+      id: write.id,
+      type: write.type ?? "application/json",
+      path: [...path],
+      ...("schema" in write && write.schema !== undefined
+        ? { schema: write.schema }
+        : {}),
+    };
+    const key = `${candidate.space}/${candidate.id}/${candidate.type}/${
+      candidate.path.join("/")
+    }`;
+    const existingIndex = seen.get(key);
+    if (existingIndex !== undefined) {
+      if (
+        candidates[existingIndex].schema === undefined &&
+        candidate.schema !== undefined
+      ) {
+        candidates[existingIndex] = {
+          ...candidates[existingIndex],
+          schema: candidate.schema,
+        };
+      }
+      return;
+    }
+    seen.set(key, candidates.length);
+    candidates.push(candidate);
+  };
+
+  if (hasAnnotatedWrites(handler)) {
+    for (const write of handler.writes) {
+      addCandidate(write);
+      detailSpaces.add(write.space);
+    }
+  }
+
+  const log = txToReactivityLog(tx);
+  for (const write of [...log.writes, ...(log.potentialWrites ?? [])]) {
+    addCandidate(write);
+    detailSpaces.add(write.space);
+  }
+
+  for (const input of tx.getCfcState().writePolicyInputs) {
+    if (input.kind === "schema") {
+      addCandidate({
+        space: input.target.space,
+        id: input.target.id as URI,
+        type: input.target.type as MediaType,
+        path: input.target.path,
+        ...(input.schema !== undefined ? { schema: input.schema } : {}),
+      });
+      detailSpaces.add(input.target.space);
+    }
+  }
+
+  for (const space of detailSpaces) {
+    for (const detail of getTransactionWriteDetails(tx, space)) {
+      addCandidate(detail.address);
+    }
+  }
+
+  return candidates;
+}
 
 /**
  * Callback to populate a transaction with an action's read dependencies.
@@ -280,6 +362,7 @@ function toActionRunTraceAddress(
 }
 
 type QueuedEvent = {
+  eventLink: NormalizedFullLink;
   action: Action;
   handler: EventHandler;
   event: any;
@@ -1128,6 +1211,7 @@ export class Scheduler {
           // retry logic below will have re-scheduled this action, so
           // topological sorting should move it before the dependencies.
           logger.timeStart("scheduler", "run", "commit");
+          this.runtime.prepareTxForCommit(tx);
           const commitPromise = tx.commit();
           logger.timeEnd("scheduler", "run", "commit");
           commitPromise.then(({ error }) => {
@@ -1303,6 +1387,9 @@ export class Scheduler {
     eventLink: NormalizedFullLink,
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
+    // Internal-only commit callback. This runs after the final commit result,
+    // including exhausted failure, so it must not perform external side
+    // effects. Use the post-commit outbox for success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
@@ -1313,6 +1400,7 @@ export class Scheduler {
         handlerFound = true;
         this.queueExecution();
         this.eventQueue.push({
+          eventLink,
           action: (tx: IExtendedStorageTransaction) => handler(tx, event),
           handler,
           event,
@@ -3499,9 +3587,11 @@ export class Scheduler {
         if (this.pullMode && handler.populateDependencies) {
           // Get the handler's dependencies (read-only, just capturing what will be read)
           const depTx = this.runtime.edit();
+          depTx.setReadOnly?.("scheduler.populateDependencies()");
           handler.populateDependencies(depTx, eventValue);
           const deps = txToReactivityLog(depTx);
-          // Commit even though we only read - the tx has no writes so this is safe
+          // Commit the read-only inspection tx as a no-op so dependency discovery
+          // does not participate in CFC prepare or commit gating.
           depTx.commit();
 
           const dirtyDeps = new Set<Action>();
@@ -3551,73 +3641,89 @@ export class Scheduler {
           });
           this.eventQueue.shift();
 
-          const finalize = (error?: unknown) => {
-            try {
-              if (error) this.handleError(error as Error, action);
-            } finally {
-              tx.commit().then(({ error }) => {
-                // If the transaction failed, and we have retries left, queue the
-                // event again at the beginning of the queue. This isn't guaranteed
-                // to be the same order as the original event, but it's close
-                // enough, especially for a series of event that act on the same
-                // conflicting data.
-                if (error && retriesLeft > 0) {
-                  logger.warn(
-                    "scheduler",
-                    `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
-                    { error, handlerId },
-                  );
-                  this.eventQueue.unshift({
-                    action,
-                    handler,
-                    event: eventValue,
-                    retriesLeft: retriesLeft - 1,
-                    onCommit,
-                  });
-                  // Ensure the re-queued event gets processed even if the scheduler
-                  // finished this cycle before the commit completed.
-                  this.queueExecution();
-                } else {
-                  if (error) {
-                    logger.error(
-                      "schedule-error",
-                      "Event handler transaction failed after exhausting all retries",
-                      { error, handlerId },
-                    );
-                  }
-                  if (onCommit) {
-                    // Call commit callback when:
-                    // - Commit succeeds (!error), OR
-                    // - Commit fails but we're out of retries (retriesLeft === 0)
-                    try {
-                      onCommit(tx);
-                    } catch (callbackError) {
-                      logger.error(
-                        "schedule-error",
-                        "Error in event commit callback:",
-                        callbackError,
-                      );
-                    }
-                  }
-                }
-              }).catch((error) => {
-                logger.error(
-                  "schedule-error",
-                  "Event handler commit promise rejected:",
-                  error,
-                );
-              });
-            }
-          };
           const tx = this.runtime.edit();
           tx.tx.immediate = true;
           const actionId = this.getActionId(action);
+          const runFinalCommitCallback = () => {
+            if (!onCommit) {
+              return;
+            }
+            try {
+              onCommit(tx);
+            } catch (callbackError) {
+              logger.error(
+                "schedule-error",
+                "Error in event commit callback:",
+                callbackError,
+              );
+            }
+          };
+
+          const finalize = (error?: unknown) => {
+            if (error) {
+              try {
+                this.handleError(error as Error, action);
+              } finally {
+                if (tx.status().status === "ready") {
+                  tx.abort(error);
+                }
+              }
+              return;
+            }
+
+            this.runtime.prepareTxForCommit(tx);
+            tx.commit().then((result) => {
+              if (result.error && retriesLeft > 0) {
+                logger.warn(
+                  "scheduler",
+                  `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
+                  { error: result.error, handlerId },
+                );
+                this.eventQueue.unshift({
+                  action,
+                  eventLink: queuedEvent.eventLink,
+                  handler,
+                  event: eventValue,
+                  retriesLeft: retriesLeft - 1,
+                  onCommit,
+                });
+                this.queueExecution();
+                return;
+              }
+              runFinalCommitCallback();
+              if (result.error) {
+                logger.error(
+                  "schedule-error",
+                  "Event handler transaction failed after exhausting all retries",
+                  { error: result.error, handlerId },
+                );
+              }
+            }).catch((error) => {
+              logger.error(
+                "schedule-error",
+                "Event handler commit promise rejected:",
+                error,
+              );
+            });
+          };
 
           try {
+            if (hasAnnotatedWrites(handler)) {
+              recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
+            }
             const actionStartTime = performance.now();
             this.runningPromise = Promise.resolve(
               this.runtime.harness.invoke(() => action(tx)),
             ).then(() => {
+              const trustedEventCandidates =
+                trustedEventWriteCandidatesFromTransaction(tx, handler, [
+                  queuedEvent.eventLink.space,
+                ]);
+              recordTrustedEventPolicyInputs(
+                tx,
+                trustedEventCandidates,
+                eventValue,
+              );
               const duration = (performance.now() - actionStartTime) / 1000;
               if (duration > 10) {
                 console.warn(`Slow action: ${duration.toFixed(3)}s`, action);

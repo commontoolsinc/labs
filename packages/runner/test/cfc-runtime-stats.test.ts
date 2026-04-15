@@ -1,0 +1,168 @@
+import { afterEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "../src/runtime.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+
+const signer = await Identity.fromPassphrase("runner-cfc-runtime-stats");
+const space = signer.did();
+
+describe("CFC runtime stats", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+  let runtime: Runtime | undefined;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+    runtime = undefined;
+    storageManager = undefined;
+  });
+
+  it("tracks relevant, prepared, reject, invalidation, outbox, and sink dedupe counters", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    expect(runtime.getCfcStats()).toEqual({
+      cfcRelevantTx: 0,
+      cfcPreparedTx: 0,
+      cfcPrepareRejects: 0,
+      cfcDigestInvalidations: 0,
+      cfcOutboxFlushes: 0,
+      sinkDedupHits: 0,
+    });
+
+    const preparedTx = runtime.edit();
+    preparedTx.setCfcEnforcementMode("enforce-explicit");
+    preparedTx.markCfcRelevant("stats-prepared");
+    const preparedCell = runtime.getCell(
+      space,
+      "cfc-runtime-stats-prepared",
+      {
+        type: "object",
+        properties: {
+          secret: {
+            type: "string",
+            ifc: { confidentiality: ["secret"] },
+          },
+        },
+        required: ["secret"],
+      },
+      preparedTx,
+    );
+    preparedCell.set({ secret: "value" });
+    let preparedFlushCount = 0;
+    enqueueSinkRequestPostCommitEffect(
+      preparedTx,
+      "fetchData",
+      "fetchData:cfc-runtime-stats-prepared",
+      createFrozenRequestSnapshot({
+        url: "https://example.com/cfc-runtime-stats-prepared",
+      }),
+      "fetchData-start",
+      () => {
+        preparedFlushCount++;
+      },
+    );
+    preparedTx.prepareCfc();
+    expect((await preparedTx.commit()).ok).toBeDefined();
+    expect(preparedFlushCount).toBe(1);
+
+    const rejectTx = runtime.edit();
+    rejectTx.setCfcEnforcementMode("enforce-explicit");
+    rejectTx.markCfcRelevant("stats-reject");
+    const rejectCell = runtime.getCell(
+      space,
+      "cfc-runtime-stats-reject",
+      {
+        type: "object",
+        properties: {
+          value: {
+            type: "string",
+            ifc: { collection: ["unsupported"] },
+          },
+        },
+        required: ["value"],
+      },
+      rejectTx,
+    );
+    rejectCell.set({ value: "blocked" });
+    expect(rejectTx.prepareCfc()).toBe("");
+    expect((await rejectTx.commit()).error?.message).toContain(
+      "unsupported trust-sensitive claim collection",
+    );
+
+    const invalidationTx = runtime.edit();
+    invalidationTx.setCfcEnforcementMode("enforce-explicit");
+    invalidationTx.markCfcRelevant("stats-invalidation");
+    const invalidationCell = runtime.getCell(
+      space,
+      "cfc-runtime-stats-invalidation",
+      {
+        type: "object",
+        properties: {
+          secret: {
+            type: "string",
+            ifc: { confidentiality: ["secret"] },
+          },
+        },
+        required: ["secret"],
+      },
+      invalidationTx,
+    );
+    invalidationCell.set({ secret: "initial" });
+    invalidationTx.prepareCfc();
+    invalidationCell.set({ secret: "mutated" });
+    expect((await invalidationTx.commit()).error?.message).toContain(
+      "read-after-prepare",
+    );
+
+    const sinkTx = runtime.edit();
+    sinkTx.setCfcEnforcementMode("disabled");
+    sinkTx.markCfcRelevant("stats-sink");
+    const request = createFrozenRequestSnapshot({
+      url: "https://example.com/cfc-runtime-stats",
+    });
+    let flushCount = 0;
+    enqueueSinkRequestPostCommitEffect(
+      sinkTx,
+      "fetchData",
+      "fetchData:cfc-runtime-stats",
+      request,
+      "fetchData-start",
+      () => {
+        flushCount++;
+      },
+    );
+    enqueueSinkRequestPostCommitEffect(
+      sinkTx,
+      "fetchData",
+      "fetchData:cfc-runtime-stats",
+      request,
+      "fetchData-start",
+      () => {
+        flushCount++;
+      },
+    );
+    expect((await sinkTx.commit()).ok).toBeDefined();
+    expect(flushCount).toBe(1);
+
+    expect(runtime.getCfcStats()).toEqual({
+      cfcRelevantTx: 4,
+      cfcPreparedTx: 2,
+      cfcPrepareRejects: 1,
+      cfcDigestInvalidations: 1,
+      cfcOutboxFlushes: 2,
+      sinkDedupHits: 1,
+    });
+  });
+});

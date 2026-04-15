@@ -94,7 +94,7 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
-        } }, ({ state }) => state.items);
+        } }, ({ state }) => state.items).for("inner", true);
     const fromComputed = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -128,7 +128,7 @@ export default pattern((state) => {
             items: {
                 type: "string"
             }
-        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
+        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner).for("foo", true);
         return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return item + "!";
@@ -143,7 +143,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema), {});
-    });
+    }).for("fromComputed", true);
     const fromLift = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -161,7 +161,7 @@ export default pattern((state) => {
             type: "string"
         }
     } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
-        const foo = passthrough(inner);
+        const foo = passthrough(inner).for("foo", true);
         return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return item + "!";
@@ -176,7 +176,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema), {});
-    });
+    }).for("fromLift", true);
     const fromWish = __cfHelpers.derive({
         type: "object",
         properties: {}
@@ -185,7 +185,7 @@ export default pattern((state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1);
+    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1).for("fromWish", true);
     const fromFiltered = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -219,7 +219,7 @@ export default pattern((state) => {
             items: {
                 type: "string"
             }
-        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
+        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner).for("foo", true);
         const filtered = foo.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return item.key("length") > 1;
@@ -233,7 +233,7 @@ export default pattern((state) => {
             required: ["element"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema), {});
+        } as const satisfies __cfHelpers.JSONSchema), {}).for("filtered", true);
         return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return item + "!";
@@ -248,7 +248,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema), {});
-    });
+    }).for("fromFiltered", true);
     const fromFilteredReceiverMethod = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -282,7 +282,7 @@ export default pattern((state) => {
             items: {
                 type: "string"
             }
-        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
+        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner).for("foo", true);
         const filtered = foo.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return item.key("length") > 1;
@@ -296,7 +296,7 @@ export default pattern((state) => {
             required: ["element"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema), {});
+        } as const satisfies __cfHelpers.JSONSchema), {}).for("filtered", true);
         return filtered.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
             type: "object",
             properties: {
@@ -308,7 +308,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema), {});
-    });
+    }).for("fromFilteredReceiverMethod", true);
     return {
         fromComputed,
         fromLift,

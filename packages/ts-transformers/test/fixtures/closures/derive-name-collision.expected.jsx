@@ -18,7 +18,7 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Input name collides with capture name
     // multiplier is both the input AND a captured variable (used via .get())
     const result = __cfHelpers.derive({
@@ -37,9 +37,9 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        multiplier,
+        multiplier: multiplier.for(["result", 2, "multiplier"], true),
         multiplier_1: multiplier
-    }, ({ multiplier: m, multiplier_1 }) => m.get() * 3 + multiplier_1.get());
+    }, ({ multiplier: m, multiplier_1 }) => m.get() * 3 + multiplier_1.get()).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

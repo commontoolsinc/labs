@@ -22,19 +22,19 @@ export default function TestLiteralWidenArrayElements() {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_arr1", true);
     const _arr2 = cell(["a", "b", "c"], {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_arr2", true);
     const _arr3 = cell([true, false], {
         type: "array",
         items: {
             type: "boolean"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_arr3", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenArrayElements);

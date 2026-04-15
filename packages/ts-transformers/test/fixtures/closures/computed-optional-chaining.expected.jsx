@@ -29,10 +29,10 @@ export default pattern(() => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("config", true);
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -60,7 +60,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         value: value,
         config: config
-    }, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1));
+    }, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1)).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

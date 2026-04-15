@@ -37,7 +37,7 @@ export default function TestCollectionsArrayOfObjects() {
             },
             required: ["id", "name", "score"]
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_arrayOfObjects", true);
     return _arrayOfObjects;
 }
 __cfHardenFn(TestCollectionsArrayOfObjects);

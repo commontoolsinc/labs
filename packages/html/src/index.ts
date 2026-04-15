@@ -1,1 +1,1 @@
-export { h } from "./h.ts";
+export { h, UiAction, UiDisclosure, UiPromptSlot } from "./h.ts";

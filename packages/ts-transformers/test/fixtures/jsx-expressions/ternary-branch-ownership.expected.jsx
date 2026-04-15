@@ -38,7 +38,7 @@ type State = {
 export default pattern((state) => {
     const showList = Writable.of(true, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
     const sorted = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -91,7 +91,7 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
-        } }, ({ state }) => [...state.items].sort((a, b) => a.value - b.value));
+        } }, ({ state }) => [...state.items].sort((a, b) => a.value - b.value)).for("sorted", true);
     const count = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -118,7 +118,7 @@ export default pattern((state) => {
             items: {
                 length: state.key("items", "length")
             }
-        } }, ({ state }) => state.items.length);
+        } }, ({ state }) => state.items.length).for("count", true);
     return {
         [UI]: (<div>
         <p>{__cfHelpers.ifElse({
@@ -224,64 +224,13 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, showList, __cfHelpers.derive({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number"
-                },
-                sorted: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Item"
-                    }
-                }
-            },
-            required: ["count", "sorted"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["name", "value"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            count: count,
-            sorted: sorted
-        }, ({ count, sorted }) => (() => {
+        } as const satisfies __cfHelpers.JSONSchema, showList, (() => {
             const itemCount = count + " items";
             return (<div>
                 <span>{itemCount}</span>
                 {sorted.map((item: Item) => (<span>{item.name}</span>))}
               </div>);
-        })()), <span>Hidden</span>)}
+        })(), <span>Hidden</span>)}
       </div>),
     };
 }, {

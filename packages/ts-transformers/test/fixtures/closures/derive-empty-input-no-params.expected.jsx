@@ -18,10 +18,10 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const a = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("a", true);
     const b = Writable.of(20, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("b", true);
     // Zero-parameter callback that closes over a and b
     const result = __cfHelpers.derive({
         type: "object",
@@ -41,7 +41,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         a: a,
         b: b
-    }, ({ a, b }) => a.get() + b.get());
+    }, ({ a, b }) => a.get() + b.get()).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

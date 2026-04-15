@@ -46,7 +46,7 @@ export default pattern((__cf_pattern_input) => {
                     required: ["kind"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { kind: kind }, ({ kind }) => describeKind(kind));
+                } as const satisfies __cfHelpers.JSONSchema, { kind: kind }, ({ kind }) => describeKind(kind)).for("label", true);
                 return <span>{label}</span>;
             }, {
                 type: "object",
@@ -91,7 +91,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

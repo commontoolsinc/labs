@@ -6,6 +6,7 @@ import {
   rewriteExpressionSite,
   rewriteOwnedPreClosureJsxExpressionSite,
 } from "./expression-site-lowering.ts";
+import { rewriteUiHelperElement } from "./ui-helper-lowering.ts";
 
 export class JsxExpressionSiteRouterTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -17,6 +18,16 @@ function transform(context: TransformationContext): ts.SourceFile {
   const analyze = context.getDataFlowAnalyzer();
 
   const visit: ts.Visitor = (node) => {
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const rewritten = rewriteUiHelperElement(node, context, visit);
+      if (rewritten) {
+        if (rewritten.hint && context.options.schemaHints) {
+          context.options.schemaHints.set(rewritten.node, rewritten.hint);
+        }
+        return rewritten.node;
+      }
+    }
+
     if (ts.isJsxExpression(node)) {
       // Skip empty JSX expressions (like JSX comments {/* ... */})
       if (!node.expression) {

@@ -38,7 +38,7 @@ export default pattern((__cf_pattern_input) => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __cfHelpers.JSONSchema, value, defaultValue);
+    } as const satisfies __cfHelpers.JSONSchema, value, defaultValue).for("result", true);
     return {
         [NAME]: "unless schema test",
         [UI]: <div>{result}</div>,

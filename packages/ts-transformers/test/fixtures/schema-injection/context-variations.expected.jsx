@@ -12,14 +12,14 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // 1. Top-level
-const _topLevel = cell(10, {
+const _topLevel = __cfHelpers.__cf_data(cell(10, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema).for("_topLevel", true));
 // 2. Inside function
 function regularFunction() {
     const _inFunction = cell(20, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_inFunction", true);
     return _inFunction;
 }
 __cfHardenFn(regularFunction);
@@ -27,7 +27,7 @@ __cfHardenFn(regularFunction);
 const arrowFunction = __cfHardenFn(() => {
     const _inArrow = cell(30, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_inArrow", true);
     return _inArrow;
 });
 // 4. Inside class method
@@ -35,7 +35,7 @@ class TestClass {
     method() {
         const _inMethod = cell(40, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema);
+        } as const satisfies __cfHelpers.JSONSchema).for("_inMethod", true);
         return _inMethod;
     }
 }
@@ -43,7 +43,7 @@ class TestClass {
 const testPattern = pattern(() => {
     const _inPattern = cell(50, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_inPattern", true);
     return _inPattern;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number",
@@ -53,7 +53,7 @@ const testPattern = pattern(() => {
 const testHandler = handler(false as const satisfies __cfHelpers.JSONSchema, false as const satisfies __cfHelpers.JSONSchema, () => {
     const _inHandler = cell(60, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_inHandler", true);
     return _inHandler;
 });
 // FIXTURE: context-variations

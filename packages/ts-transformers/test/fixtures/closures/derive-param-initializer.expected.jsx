@@ -19,7 +19,7 @@ export default pattern(() => {
     const value = 5;
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Test parameter with default value
     const result = __cfHelpers.derive({
         type: "object",
@@ -38,7 +38,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         value,
         multiplier: multiplier
-    }, ({ value: v = 10, multiplier }) => v * multiplier.get());
+    }, ({ value: v = 10, multiplier }) => v * multiplier.get()).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

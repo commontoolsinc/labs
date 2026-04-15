@@ -65,7 +65,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         pending: pending,
         result: result
-    }, ({ pending, result }) => pending || !result), undefined, { result });
+    }, ({ pending, result }) => pending || !result).for(["output1", 4], true), undefined, { result }).for("output1", true);
     // Pattern 2: undefined as ifFalse (error state returns nothing)
     const output2 = ifElse({
         type: "boolean"
@@ -101,7 +101,7 @@ export default pattern(() => {
         required: ["result"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { result: result }, ({ result }) => !!result), { data: result }, undefined);
+    } as const satisfies __cfHelpers.JSONSchema, { result: result }, ({ result }) => !!result).for(["output2", 4], true), { data: result.for(["output2", 5, "data"], true) }, undefined).for("output2", true);
     return {
         [UI]: (<div>
         <span>{output1}</span>

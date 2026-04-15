@@ -4,7 +4,7 @@ import { render, renderImpl } from "../src/render.ts";
 import { sanitizeEvent } from "../src/render-utils.ts";
 import * as assert from "./assert.ts";
 import { MockDoc } from "../src/mock-doc.ts";
-import { h } from "../src/h.ts";
+import { h, UiAction } from "../src/h.ts";
 
 let mock: MockDoc;
 
@@ -45,6 +45,21 @@ describe("render", () => {
       parent.getElementsByTagName("p")[0]!.innerHTML,
       "Hello world!",
     );
+  });
+
+  it("renders UI helper output with the same runtime node shape", () => {
+    const { renderOptions, document } = mock;
+    const renderable = UiAction({
+      action: "SubmitDirectCommand",
+      children: "Go",
+    });
+
+    const parent = document.getElementById("root")!;
+    render(parent, renderable as unknown as VNode, renderOptions);
+
+    const button = parent.getElementsByTagName("ct-button")[0]!;
+    assert.equal(button.getAttribute("data-ui-action"), "SubmitDirectCommand");
+    assert.equal(button.innerHTML, "Go");
   });
 });
 
@@ -165,9 +180,12 @@ describe("sanitizeEvent", () => {
   }
 
   it("serializes a basic Event", () => {
-    const event = new Event("test");
+    const event = { type: "test", isTrusted: true } as Event;
     const result = sanitizeEvent(event);
-    assert.matchObject(result, { type: "test" });
+    assert.matchObject(result, {
+      type: "test",
+      provenance: { origin: "dom", trusted: true },
+    });
     assert.equal(
       isPlainSerializableObject(result),
       true,
@@ -424,6 +442,47 @@ describe("sanitizeEvent", () => {
       isPlainSerializableObject(result),
       true,
       "Result should be a plain serializable object",
+    );
+  });
+
+  it("keeps composed-path UI markers separate from target.dataset", () => {
+    const target = {
+      dataset: {
+        ordinaryHandlerData: "preserved",
+      },
+    };
+    const event = {
+      type: "click",
+      isTrusted: true,
+      target,
+      composedPath: () => [
+        { dataset: { uiAction: "TrustedSaveTitle" } },
+        {
+          dataset: {
+            uiPattern: "TrustedSaveSurface",
+            uiEventIntegrity: "TrustedSaveSurface",
+          },
+        },
+        target,
+      ],
+    } as unknown as Event;
+
+    const result = sanitizeEvent(event) as {
+      provenance?: {
+        ui?: {
+          uiContractDataset?: Record<string, string>;
+        };
+      };
+      target?: {
+        dataset?: Record<string, string>;
+      };
+    };
+
+    assert.equal(result.target?.dataset?.ordinaryHandlerData, "preserved");
+    assert.equal(result.target?.dataset?.uiAction, undefined);
+    assert.equal(
+      result.provenance?.ui?.uiContractDataset?.uiAction,
+      "TrustedSaveTitle",
     );
   });
 });

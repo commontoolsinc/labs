@@ -31,10 +31,10 @@ export default pattern(() => {
             }
         },
         required: ["x", "y"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("point", true);
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Destructuring requires .get() first since derive doesn't unwrap Cell
     const result = __cfHelpers.derive({
         type: "object",
@@ -66,12 +66,12 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        point,
+        point: point.for(["result", 2, "point"], true),
         multiplier: multiplier
     }, ({ point: p, multiplier }) => {
         const { x, y } = p.get();
         return (x + y) * multiplier.get();
-    });
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

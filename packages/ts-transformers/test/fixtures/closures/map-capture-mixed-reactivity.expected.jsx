@@ -27,7 +27,7 @@ export default pattern((state) => {
     const label = "Result";
     const limit = cell(100, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("limit", true);
     const derived = state.key("threshold");
     return {
         [UI]: (<div>

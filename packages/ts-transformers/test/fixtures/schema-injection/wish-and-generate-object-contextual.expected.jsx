@@ -26,7 +26,7 @@ const existingLabelSchema = __cfHelpers.__cf_data({
 export default function TestWishAndGenerateObjectContextual() {
     const explicitWish = wish<string>({ query: "#greeting" }, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("explicitWish", true);
     const contextualWish: WishState<{
         title: string;
     }> = wish({
@@ -65,7 +65,7 @@ export default function TestWishAndGenerateObjectContextual() {
             }
         },
         required: ["result", "candidates"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("contextualWish", true);
     const explicitObject = generateObject<{
         title: string;
     }>({
@@ -80,14 +80,14 @@ export default function TestWishAndGenerateObjectContextual() {
             },
             required: ["title"]
         } as const satisfies __cfHelpers.JSONSchema
-    });
+    }).for("explicitObject", true);
     const preSchemaObject = generateObject<{
         label: string;
     }>({
         model: "gpt-4o-mini",
         prompt: "Return a label",
         schema: existingLabelSchema,
-    });
+    }).for("preSchemaObject", true);
     return {
         explicitWish,
         contextualWish,

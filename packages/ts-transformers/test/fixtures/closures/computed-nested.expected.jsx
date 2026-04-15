@@ -20,10 +20,10 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const a = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("a", true);
     const b = Writable.of(20, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("b", true);
     const sum = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -42,7 +42,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         a: a,
         b: b
-    }, ({ a, b }) => a.get() + b.get());
+    }, ({ a, b }) => a.get() + b.get()).for("sum", true);
     const doubled = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -53,7 +53,7 @@ export default pattern(() => {
         required: ["sum"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum * 2);
+    } as const satisfies __cfHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum * 2).for("doubled", true);
     return doubled;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

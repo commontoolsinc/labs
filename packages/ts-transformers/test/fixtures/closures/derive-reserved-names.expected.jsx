@@ -17,7 +17,7 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // Reserved JavaScript keyword as variable name (valid in TS with quotes)
     const __cf_reserved = Writable.of(2, {
         type: "number"
@@ -38,9 +38,9 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         __cf_reserved: __cf_reserved
-    }, ({ value: v, __cf_reserved }) => v.get() * __cf_reserved.get());
+    }, ({ value: v, __cf_reserved }) => v.get() * __cf_reserved.get()).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

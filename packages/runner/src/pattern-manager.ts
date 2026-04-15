@@ -343,6 +343,7 @@ export class PatternManager {
     patternMetaCell.set(patternMeta);
 
     if (!providedTx) {
+      this.runtime.prepareTxForCommit(tx);
       tx.commit().then((result) => {
         if (result.error) {
           logger.warn("pattern", "Pattern already existed", patternId);

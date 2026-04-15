@@ -21,13 +21,13 @@ export default function TestLiteralWidenMixedValues() {
     const variable = 42;
     const _c1 = cell(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c1", true);
     const _c2 = cell(variable, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c2", true);
     const _c3 = cell(10 + 20, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c3", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenMixedValues);

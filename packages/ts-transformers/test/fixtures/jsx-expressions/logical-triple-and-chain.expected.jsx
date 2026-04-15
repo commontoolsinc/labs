@@ -35,7 +35,7 @@ export default pattern((_state) => {
             }
         },
         required: ["active", "verified", "name"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("user", true);
     return {
         [UI]: (<div>
         {/* Triple && chain with complex conditions */}

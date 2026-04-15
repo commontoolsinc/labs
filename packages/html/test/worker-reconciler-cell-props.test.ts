@@ -6,6 +6,8 @@ import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "@commonfabric/runner";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -30,6 +32,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
   const runtime = new Runtime({
     storageManager,
     apiUrl: new URL("http://localhost"),
+    cfcEnforcementMode: "observe",
   });
 
   try {
@@ -78,6 +81,12 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
      */
     class MockPropsCell extends MockCell {
       private propCells = new Map<string, MockPropCell>();
+      private rawValue: any;
+
+      constructor(value: any, rawValue: any = value) {
+        super(value);
+        this.rawValue = rawValue;
+      }
 
       key(propName: string) {
         if (!this.propCells.has(propName)) {
@@ -89,8 +98,13 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         return this.propCells.get(propName)!;
       }
 
+      getRawUntyped() {
+        return this.rawValue;
+      }
+
       override set(newValue: any) {
         super.set(newValue);
+        this.rawValue = newValue;
         // Propagate updates to existing child prop cells
         for (const [k, propCell] of this.propCells) {
           propCell.set(newValue?.[k]);
@@ -133,6 +147,12 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       getAsNormalizedFullLink() {
         return { space: "test-space", id: "test-id", path: [] };
       }
+
+      getRawUntyped() {
+        return this.parentCell
+          ? this.parentCell.value?.[this.propKey!]
+          : this.value;
+      }
     }
 
     /**
@@ -149,9 +169,16 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         return true;
       }
 
+      withTx(tx?: unknown) {
+        this.usedTx = tx;
+        return this;
+      }
+
       send(event: unknown) {
         this.sent.push(event);
       }
+
+      public usedTx: unknown;
     }
 
     const mountReconciler = (
@@ -407,6 +434,47 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       }
     });
 
+    await t.step(
+      "Cell<Props> stream event dispatch avoids render transaction reuse",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const mockStream = new MockStream();
+        const propsCell = new MockPropsCell({
+          onclick: mockStream,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: propsCell,
+          children: ["Click"],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setEventOps = collector.getOpsOfType("set-event");
+          const eventOp = setEventOps[0] as Extract<
+            VDomOp,
+            { op: "set-event" }
+          >;
+          reconciler.dispatchEvent(
+            eventOp.handlerId,
+            { type: "click" },
+          );
+
+          assertEquals(mockStream.usedTx, undefined);
+          assertEquals(mockStream.sent, [{ type: "click" }]);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
     await t.step("Cell<Props> binding prop", async () => {
       const collector = createOpsCollector();
       const reconciler = new WorkerReconciler({
@@ -446,6 +514,404 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         cancel();
       }
     });
+
+    await t.step(
+      "Cell<Props> binding prop preserves linked cell identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "linked-binding-test-cell",
+          undefined,
+          dummyTx,
+        );
+        bindingCell.set("linked content");
+
+        const propsCell = new MockPropsCell({
+          $value: "linked content",
+        }, {
+          $value: bindingCell.getAsLink({ keepAsCell: true }),
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-cfc-label",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> binding prop preserves CellResult proxy identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "cell-result-binding-test-cell",
+          undefined,
+          dummyTx,
+        );
+        bindingCell.set({
+          senderId: "alice",
+          body: "linked content",
+        });
+
+        const cellResult = bindingCell.getAsQueryResult();
+        const propsCell = new MockPropsCell({
+          $value: cellResult,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves linked binding prop identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const bindingSchema = {
+          type: "string",
+          ifc: {
+            integrity: [{
+              kind: "authored-by",
+              subject: "alice",
+            }],
+          },
+        } as const;
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-target",
+          bindingSchema,
+          tx,
+        );
+        bindingCell.set("renderer schema linked content");
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            $value: bindingCell.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+            author: "alice",
+          },
+          children: [],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+          assertEquals(
+            cfcLabelViewForCell(runtime.getCellFromLink(bindingOp.cellRef)),
+            {
+              version: 1,
+              entries: [{
+                path: [],
+                label: {
+                  integrity: [{
+                    kind: "authored-by",
+                    subject: "alice",
+                  }],
+                },
+              }],
+            },
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves linked child render nodes",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-card",
+          props: { id: "linked-child-card" },
+          children: ["Linked child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-vstack",
+          props: {},
+          children: [linkedChild.getAsLink({ keepAsCell: true })],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves legacy alias child render nodes",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-card",
+          props: { id: "legacy-alias-child-card" },
+          children: ["Legacy alias child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-vstack",
+          props: {},
+          children: [{
+            $alias: {
+              cell: {
+                "/": linkedChild.getAsNormalizedFullLink().id.replace(
+                  /^of:/,
+                  "",
+                ),
+              },
+              path: [],
+            },
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves nested render node children",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: { author: "alice" },
+          children: ["Nested linked child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-screen",
+          props: { title: "Nested children" },
+          children: [{
+            type: "vnode",
+            name: "cf-vstack",
+            props: {},
+            children: [
+              {
+                type: "vnode",
+                name: "cf-card",
+                props: { id: "nested-inline-card" },
+                children: ["Nested inline child"],
+              },
+              {
+                $alias: {
+                  cell: {
+                    "/": linkedChild.getAsNormalizedFullLink().id.replace(
+                      /^of:/,
+                      "",
+                    ),
+                  },
+                  path: [],
+                },
+              },
+            ],
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-screen"), true);
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+          assertEquals(createdTags.includes("cf-cfc-authorship"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
 
     await t.step(
       "Cell<Props> same cell on update → no re-bind",
@@ -680,3 +1146,82 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     await runtime.dispose();
   }
 });
+
+Deno.test(
+  "worker reconciler - static Cell event prop sends to resolved stream target",
+  async () => {
+    const signer = await Identity.fromPassphrase("test static cell event prop");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL("http://localhost"),
+      cfcEnforcementMode: "observe",
+    });
+    let tx = runtime.edit();
+
+    try {
+      const streamCell = runtime.getCell<unknown>(
+        signer.did(),
+        "static-event-stream",
+        undefined,
+        tx,
+      );
+      streamCell.setRaw({ $stream: true });
+
+      const eventTargetCell = runtime.getCell<unknown>(
+        signer.did(),
+        "static-event-target",
+        undefined,
+        tx,
+      );
+      eventTargetCell.set(streamCell as never);
+
+      await tx.commit();
+      tx = runtime.edit();
+
+      let eventSeen: unknown;
+      runtime.scheduler.addEventHandler(
+        (_handlerTx, event) => {
+          eventSeen = event;
+        },
+        streamCell.getAsNormalizedFullLink(),
+      );
+
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+      const vnode: WorkerVNode = {
+        type: "vnode",
+        name: "button",
+        props: {
+          onClick: eventTargetCell,
+        },
+        children: ["Send"],
+      };
+
+      const cancel = reconciler.mount(vnode);
+      try {
+        await runtime.idle();
+
+        const setEventOp = collector.getOpsOfType("set-event")[0] as
+          | { handlerId: number }
+          | undefined;
+        assertEquals(setEventOp !== undefined, true);
+
+        reconciler.dispatchEvent(
+          setEventOp!.handlerId,
+          { type: "click" },
+        );
+
+        await runtime.idle();
+        assertEquals(eventSeen, { type: "click" });
+      } finally {
+        cancel();
+      }
+    } finally {
+      tx.abort("test cleanup");
+      await runtime.dispose();
+    }
+  },
+);

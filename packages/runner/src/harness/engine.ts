@@ -64,16 +64,26 @@ export class EngineProgramResolver extends InMemoryProgram {
   override async resolveSource(
     identifier: string,
   ): Promise<Source | undefined> {
+    if (!this.runtimeModuleTypes) {
+      this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
+        this.cache,
+      );
+    }
+    if (
+      !isRuntimeModuleIdentifier(identifier) &&
+      identifier in this.runtimeModuleTypes &&
+      this.runtimeModuleTypes[identifier]
+    ) {
+      return {
+        name: identifier,
+        contents: this.runtimeModuleTypes[identifier],
+      };
+    }
     if (identifier.endsWith(".d.ts")) {
       const origSource = identifier.substring(0, identifier.length - 5);
       if (
         isRuntimeModuleIdentifier(origSource)
       ) {
-        if (!this.runtimeModuleTypes) {
-          this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
-            this.cache,
-          );
-        }
         if (
           origSource in this.runtimeModuleTypes &&
           this.runtimeModuleTypes[origSource]
@@ -216,6 +226,14 @@ export class Engine extends EventTarget implements Harness {
         .getInternals();
       const loadId = this.getLoadId(id, jsScript);
       this.executableRegistry.beginVerifiedLoad(loadId);
+      this.executableRegistry.setVerifiedLoadBundleId(
+        loadId,
+        hashOf(jsScript.js).toString(),
+      );
+      this.executableRegistry.setVerifiedLoadSources(
+        loadId,
+        collectVerifiedLoadSources(id, jsScript, files),
+      );
       const isolate = runtime.getIsolate(loadId);
       const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
@@ -322,6 +340,22 @@ export class Engine extends EventTarget implements Harness {
   ): HarnessedFunction | undefined {
     return this.executableRegistry.getVerifiedFunctionInLoad(
       loadId,
+      implementationRef,
+    );
+  }
+
+  isVerifiedSourceInLoad(loadId: string, source: string): boolean {
+    return this.executableRegistry.isVerifiedSourceInLoad(loadId, source);
+  }
+
+  getVerifiedBundleId(loadId: string): string | undefined {
+    return this.executableRegistry.getVerifiedBundleId(loadId);
+  }
+
+  getVerifiedBindingMetadata(
+    implementationRef: string,
+  ): { sourceFile?: string; bindingPath?: string[] } | undefined {
+    return this.executableRegistry.getVerifiedBindingMetadata(
       implementationRef,
     );
   }
@@ -457,6 +491,39 @@ export class Engine extends EventTarget implements Harness {
       }),
     });
   }
+}
+
+function collectVerifiedLoadSources(
+  id: string,
+  jsScript: JsScript,
+  files: Source[],
+): string[] {
+  const sources = new Set<string>();
+  const addSource = (value: string | undefined) => {
+    if (typeof value !== "string" || value.length === 0) {
+      return;
+    }
+    sources.add(normalizeVerifiedSource(value));
+    const prefixed = `/${id}/`;
+    if (value.startsWith(prefixed)) {
+      sources.add(normalizeVerifiedSource(value.slice(id.length + 1)));
+    }
+  };
+
+  for (const file of files) {
+    addSource(file.name);
+  }
+  for (const source of jsScript.sourceMap?.sources ?? []) {
+    addSource(source);
+  }
+
+  return [...sources];
+}
+
+function normalizeVerifiedSource(source: string): string {
+  const withoutFilePrefix = source.replace(/^file:\/\//, "");
+  const normalized = withoutFilePrefix.replace(/\\/g, "/");
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
 function computeId(program: Program): string {

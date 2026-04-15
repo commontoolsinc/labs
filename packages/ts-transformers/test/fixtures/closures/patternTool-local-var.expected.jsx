@@ -26,7 +26,7 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
             required: ["language"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`),
+        } as const satisfies __cfHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`).for(["genResult", "system"], true),
         prompt: __cfHelpers.derive({
             type: "object",
             properties: {
@@ -37,8 +37,8 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
             required: ["content"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content),
-    });
+        } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content).for(["genResult", "prompt"], true)
+    }).for("genResult", true);
     return __cfHelpers.derive({
         type: "object",
         properties: {
@@ -69,7 +69,7 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
 });
 const content = __cfHelpers.__cf_data(Writable.of("Hello world", {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema));
+} as const satisfies __cfHelpers.JSONSchema).for("content", true));
 type Output = {
     tool: PatternToolResult<{
         content: string;
@@ -86,7 +86,7 @@ type Output = {
 //   must not be hoisted into extraParams. Only module-scoped reactive bindings
 //   (here, `content` from Writable.of) should be captured.
 export default pattern(() => {
-    const tool = patternTool(__cfModuleCallback_1, { content });
+    const tool = patternTool(__cfModuleCallback_1, { content: content.for(["tool", 1, "content"], true) });
     return { tool };
 }, {
     type: "object",
@@ -120,7 +120,8 @@ export default pattern(() => {
             type: "object",
             properties: {
                 argumentSchema: true,
-                resultSchema: true
+                resultSchema: true,
+                internalSchema: true
             },
             required: ["argumentSchema", "resultSchema"]
         }

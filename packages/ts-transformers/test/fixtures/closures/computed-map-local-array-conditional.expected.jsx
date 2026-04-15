@@ -69,7 +69,7 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
-        } }, ({ state }) => state.items);
+        } }, ({ state }) => state.items).for("rows", true);
     return {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
@@ -82,7 +82,7 @@ export default pattern((state) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["Done", "Pending"]
-                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending")];
+                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for(["view", 0], true)];
                 return <span>{__cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -137,7 +137,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

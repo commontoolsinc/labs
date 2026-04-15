@@ -22,15 +22,12 @@ import {
   setPatternEnvironment,
   type SigilLink,
 } from "@commonfabric/runner";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import {
   CachedCompiler,
   IDBCompilationCache,
 } from "@commonfabric/runner/compilation-cache";
-import {
-  NameSchema,
-  nameSchema,
-  rendererVDOMSchema,
-} from "@commonfabric/runner/schemas";
+import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type NormalizedFullLink,
@@ -39,6 +36,7 @@ import {
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
+  type CellGetCfcLabelRequest,
   type CellGetRequest,
   type CellResolveAsCellRequest,
   CellResponse,
@@ -46,6 +44,7 @@ import {
   type CellSetRequest,
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
+  type CfcLabelViewResponse,
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
@@ -107,9 +106,31 @@ import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import { WorkerReconciler } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
-import { URI } from "../../runner/src/sigil-types.ts";
+import type { RuntimeOptions, URI } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
+
+export function runtimeOptionsFromInitializationData(
+  data: InitializationData,
+  storageManager: RuntimeOptions["storageManager"],
+  telemetry: RuntimeTelemetry,
+  cachedCompiler: CachedCompiler | undefined,
+): RuntimeOptions {
+  const apiUrlObj = new URL(data.apiUrl);
+  return {
+    apiUrl: apiUrlObj,
+    storageManager,
+    patternEnvironment: { apiUrl: apiUrlObj },
+    telemetry,
+    memoryVersion: data.memoryVersion,
+    experimental: data.experimental,
+    cfcEnforcementMode: data.cfcEnforcementMode,
+    trustSnapshotProvider: data.trustSnapshot
+      ? () => data.trustSnapshot
+      : undefined,
+    cachedCompiler,
+  };
+}
 
 /**
  * Formats a cell link for display in console output.
@@ -311,13 +332,12 @@ export class RuntimeProcessor {
 
     let pieceManager: PieceManager | undefined = undefined;
     const runtime = new Runtime({
-      apiUrl: apiUrlObj,
-      storageManager,
-      patternEnvironment: { apiUrl: apiUrlObj },
-      telemetry,
-      memoryVersion: data.memoryVersion,
-      experimental: data.experimental,
-      cachedCompiler,
+      ...runtimeOptionsFromInitializationData(
+        data,
+        storageManager,
+        telemetry,
+        cachedCompiler,
+      ),
       consoleHandler: ({ metadata, method, args }) => {
         // Deep-walk args to convert uncloneable objects (Cells, Proxies,
         // functions) into cloneable representations for postMessage.
@@ -441,6 +461,9 @@ export class RuntimeProcessor {
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
     cell.withTx(tx).set(value);
+    this.runtime.prepareTxForCommit(tx);
+    // Local visibility is established by commit(); the promise tracks remote
+    // confirmation/rollback and must not block cell IPC.
     tx.commit();
   }
 
@@ -448,6 +471,9 @@ export class RuntimeProcessor {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
+    this.runtime.prepareTxForCommit(tx);
+    // Local visibility is established by commit(); the promise tracks remote
+    // confirmation/rollback and must not block cell IPC.
     tx.commit();
   }
 
@@ -514,6 +540,15 @@ export class RuntimeProcessor {
     const resolved = cell.resolveAsCell();
     return {
       cell: createCellRef(resolved),
+    };
+  }
+
+  handleCellGetCfcLabel(
+    request: CellGetCfcLabelRequest,
+  ): CfcLabelViewResponse {
+    const cell = getCell(this.runtime, request.cell);
+    return {
+      cfcLabel: cfcLabelViewForCell(cell),
     };
   }
 
@@ -624,17 +659,13 @@ export class RuntimeProcessor {
 
   // TODO(runtime-worker-refactor): Can this fail? What if the cell
   // is not a page cell?
-  handlePageGet(
+  async handlePageGet(
     request: PageGetRequest,
-  ): PageResponse {
-    let cell = this.runtime.getCellFromEntityId(this.space, {
-      "/": request.pageId,
-    });
-    cell = cell.asSchema(nameSchema);
-
-    if (request.runIt) {
-      this.runtime.start(cell).catch(console.error);
-    }
+  ): Promise<PageResponse> {
+    const cell = await this.cc.manager().get(
+      request.pageId,
+      request.runIt ?? false,
+    );
 
     return {
       page: createPageRef(cell),
@@ -889,6 +920,8 @@ export class RuntimeProcessor {
         return this.handleCellUnsubscribe(request);
       case RequestType.CellResolveAsCell:
         return this.handleCellResolveAsCell(request);
+      case RequestType.CellGetCfcLabel:
+        return this.handleCellGetCfcLabel(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:
@@ -910,7 +943,7 @@ export class RuntimeProcessor {
           request,
         );
       case RequestType.PageGet:
-        return this.handlePageGet(request);
+        return await this.handlePageGet(request);
       case RequestType.PageRemove:
         return await this.handlePageRemove(request);
       case RequestType.PageStart:
@@ -983,8 +1016,10 @@ export class RuntimeProcessor {
       return;
     }
 
-    // Dispatch the event to the reconciler
-    mount.reconciler.dispatchEvent(request.handlerId, request.event);
+    mount.reconciler.dispatchEvent(
+      request.handlerId,
+      request.event,
+    );
   }
 
   /**

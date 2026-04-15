@@ -37,7 +37,7 @@ export default pattern((state) => ({
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             count: state.key("count")
-        } }, ({ state }) => double(state.count + 1)),
+        } }, ({ state }) => double(state.count + 1)).for(["__patternResult", "doubled"], true)
 }), {
     type: "object",
     properties: {

@@ -21,19 +21,19 @@ export default function TestCellLikeClasses() {
     // Standalone cell() function
     const _standalone = cell(100, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_standalone", true);
     // ComparableCell.of()
     const _comparable = ComparableCell.of(200, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_comparable", true);
     // ReadonlyCell.of()
     const _readonly = ReadonlyCell.of(300, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_readonly", true);
     // WriteonlyCell.of()
     const _writeonly = WriteonlyCell.of(400, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_writeonly", true);
     return {
         standalone: _standalone,
         comparable: _comparable,

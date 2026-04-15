@@ -27,10 +27,10 @@ export default pattern((_state) => {
             },
             required: ["name"]
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("items", true);
     const showList = cell(true, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
     return {
         [UI]: (<div>
         {__cfHelpers.when({

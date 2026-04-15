@@ -1,6 +1,6 @@
 import {
   type Cell,
-  Classification,
+  cfcAtom,
   EntityId,
   getEntityId,
   getPatternIdFromSourceCell,
@@ -33,7 +33,7 @@ ensureNotRenderThread();
 
 const PRIVILEGED_PIECE_LIST_SCHEMA = toDeepFrozenSchema({
   ...pieceListSchema,
-  ifc: { classification: [Classification.Secret] },
+  ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
 });
 
 /**
@@ -263,7 +263,7 @@ export class PieceManager {
   syncPieces(cell: Cell<Cell<unknown>[]>) {
     // TODO(@ubik2) We use elevated permissions here temporarily.
     // Our request for the piece list will walk the schema tree, and that will
-    // take us into classified data of pieces. If that happens, we still want
+    // take us into confidential data of pieces. If that happens, we still want
     // this bit to work, so we elevate this request.
     return cell.asSchema(PRIVILEGED_PIECE_LIST_SCHEMA).pull();
   }

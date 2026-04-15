@@ -37,11 +37,11 @@ const myHandler = handler(false as const satisfies __cfHelpers.JSONSchema, {
 export default pattern((state) => {
     return {
         // Test case 1: Object literal with all properties from state
-        onClick1: myHandler({ value: state.key("value"), name: state.key("name") }),
+        onClick1: myHandler({ value: state.key("value"), name: state.key("name") }).for({ stream: ["__patternResult", "onClick1"] }, true),
         // Test case 2: Object literal with all properties (explicitly listed)
-        onClick2: myHandler({ value: state.key("value"), name: state.key("name") }),
+        onClick2: myHandler({ value: state.key("value"), name: state.key("name") }).for({ stream: ["__patternResult", "onClick2"] }, true),
         // Test case 3: Direct state passing (what we want to transform to)
-        onClick3: myHandler(state),
+        onClick3: myHandler(state).for({ stream: ["__patternResult", "onClick3"] }, true)
     };
 }, {
     type: "object",

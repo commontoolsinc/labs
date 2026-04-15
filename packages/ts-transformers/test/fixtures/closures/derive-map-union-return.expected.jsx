@@ -98,7 +98,7 @@ export default pattern((state) => {
             }
         }
         return null;
-    });
+    }).for("latestMessage", true);
     return {
         [UI]: (<div>
         <div>Latest: {latestMessage}</div>

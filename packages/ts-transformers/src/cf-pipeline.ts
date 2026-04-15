@@ -10,8 +10,10 @@ import {
   PatternCallbackLoweringTransformer,
   PatternContextValidationTransformer,
   PatternOwnedExpressionSiteLoweringTransformer,
+  ReactiveVariableForTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
+  WriteAuthorizedByValidationTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
 import { ComputedTransformer } from "./computed/transformer.ts";
@@ -21,6 +23,88 @@ import {
   TransformationOptions,
   Transformer,
 } from "./core/mod.ts";
+
+type TransformerStageSpec = {
+  readonly name: string;
+  readonly create: (options: TransformationOptions) => Transformer;
+};
+
+const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
+  {
+    name: "CastValidationTransformer",
+    create: (options) => new CastValidationTransformer(options),
+  },
+  {
+    name: "EmptyArrayOfValidationTransformer",
+    create: (options) => new EmptyArrayOfValidationTransformer(options),
+  },
+  {
+    name: "OpaqueGetValidationTransformer",
+    create: (options) => new OpaqueGetValidationTransformer(options),
+  },
+  {
+    name: "PatternContextValidationTransformer",
+    create: (options) => new PatternContextValidationTransformer(options),
+  },
+  {
+    name: "JsxExpressionSiteRouterTransformer",
+    create: (options) => new JsxExpressionSiteRouterTransformer(options),
+  },
+  {
+    name: "ComputedTransformer",
+    create: (options) => new ComputedTransformer(options),
+  },
+  {
+    name: "ClosureTransformer",
+    create: (options) => new ClosureTransformer(options),
+  },
+  {
+    name: "PatternOwnedExpressionSiteLoweringTransformer",
+    create: (options) =>
+      new PatternOwnedExpressionSiteLoweringTransformer(options),
+  },
+  {
+    name: "HelperOwnedExpressionSiteLoweringTransformer",
+    create: (options) =>
+      new HelperOwnedExpressionSiteLoweringTransformer(options),
+  },
+  {
+    name: "WriteAuthorizedByValidationTransformer",
+    create: (options) => new WriteAuthorizedByValidationTransformer(options),
+  },
+  {
+    name: "PatternCallbackLoweringTransformer",
+    create: (options) => new PatternCallbackLoweringTransformer(options),
+  },
+  {
+    name: "SchemaInjectionTransformer",
+    create: (options) => new SchemaInjectionTransformer(options),
+  },
+  {
+    name: "SchemaGeneratorTransformer",
+    create: (options) => new SchemaGeneratorTransformer(options),
+  },
+  {
+    name: "ReactiveVariableForTransformer",
+    create: (options) => new ReactiveVariableForTransformer(options),
+  },
+  {
+    name: "ModuleScopeShadowingTransformer",
+    create: (options) => new ModuleScopeShadowingTransformer(options),
+  },
+  {
+    name: "ModuleScopeCfDataTransformer",
+    create: (options) => new ModuleScopeCfDataTransformer(options),
+  },
+  {
+    name: "ModuleScopeFunctionHardeningTransformer",
+    create: (options) => new ModuleScopeFunctionHardeningTransformer(options),
+  },
+] as const;
+
+export const CFC_TRANSFORMER_STAGE_NAMES = CFC_TRANSFORMER_STAGE_SPECS.map(
+  (spec) => spec.name,
+) as readonly string[];
 
 export class CommonFabricTransformerPipeline extends Pipeline {
   private readonly diagnosticsCollector: TransformationDiagnostic[] = [];
@@ -41,35 +125,8 @@ export class CommonFabricTransformerPipeline extends Pipeline {
       ...ops,
       diagnosticsCollector: [],
     };
-
-    const transformers: Transformer[] = [
-      // Validation transformers run first to catch errors early.
-      // PatternContextValidation still enforces placement/standalone/get-call
-      // rules while skipping the old computation/optional heuristics that were
-      // tied to the removed legacy path.
-      new CastValidationTransformer(sharedOps),
-      new EmptyArrayOfValidationTransformer(sharedOps),
-      new OpaqueGetValidationTransformer(sharedOps),
-      new PatternContextValidationTransformer(sharedOps),
-    ];
-
-    transformers.push(
-      // Then the regular transformation pipeline
-      new JsxExpressionSiteRouterTransformer(sharedOps),
-      new ComputedTransformer(sharedOps),
-      new ClosureTransformer(sharedOps),
-      new PatternOwnedExpressionSiteLoweringTransformer(sharedOps),
-      new HelperOwnedExpressionSiteLoweringTransformer(sharedOps),
-    );
-
-    transformers.push(new PatternCallbackLoweringTransformer(sharedOps));
-
-    transformers.push(
-      new SchemaInjectionTransformer(sharedOps),
-      new SchemaGeneratorTransformer(sharedOps),
-      new ModuleScopeShadowingTransformer(sharedOps),
-      new ModuleScopeCfDataTransformer(sharedOps),
-      new ModuleScopeFunctionHardeningTransformer(sharedOps),
+    const transformers: Transformer[] = CFC_TRANSFORMER_STAGE_SPECS.map(
+      (stage) => stage.create(sharedOps),
     );
 
     super(transformers);

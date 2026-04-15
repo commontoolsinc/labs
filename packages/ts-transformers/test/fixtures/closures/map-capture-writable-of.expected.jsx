@@ -27,7 +27,7 @@ export default pattern((state) => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("selected", true);
     return {
         [UI]: (<div>
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

@@ -19,16 +19,16 @@ const __cfAmdHooks = undefined;
 export default function TestLiteralWidenString() {
     const _s1 = cell("hello", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_s1", true);
     const _s2 = cell("", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_s2", true);
     const _s3 = cell("hello\nworld", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_s3", true);
     const _s4 = cell("with spaces", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_s4", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenString);

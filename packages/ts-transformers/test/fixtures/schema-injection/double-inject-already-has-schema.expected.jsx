@@ -19,9 +19,9 @@ const existingSchema = __cfHelpers.__cf_data({ type: "number" } as const);
 // Context: negative test -- transformer must skip calls that already have two arguments
 export default function TestDoubleInjectAlreadyHasSchema() {
     // Should NOT transform - already has 2 arguments
-    const _c1 = cell(10, existingSchema);
-    const _c2 = cell("hello", { type: "string" });
-    const _c3 = cell(true, { type: "boolean" } as const);
+    const _c1 = cell(10, existingSchema).for("_c1", true);
+    const _c2 = cell("hello", { type: "string" }).for("_c2", true);
+    const _c3 = cell(true, { type: "boolean" } as const).for("_c3", true);
     return null;
 }
 __cfHardenFn(TestDoubleInjectAlreadyHasSchema);

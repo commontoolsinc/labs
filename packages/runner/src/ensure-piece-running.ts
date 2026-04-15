@@ -48,17 +48,20 @@ export async function ensurePieceRunning(
         undefined,
         tx,
       );
+      await currentCell.sync();
 
       // Traverse up the source cell chain
       // This follows links from derived cells back to the process cell
       let sourceCell = currentCell.getSourceCell(processLinkSchema);
       while (sourceCell) {
+        await sourceCell.sync();
         logger.debug("ensure-piece", () => [
           `Following source cell from ${currentCell?.getAsNormalizedFullLink().id} to ${sourceCell?.getAsNormalizedFullLink().id}`,
         ]);
         currentCell = sourceCell;
         sourceCell = currentCell.getSourceCell(processLinkSchema);
       }
+      await currentCell.sync();
 
       // currentCell is now the process cell (or the original cell if no sources)
       // Check if it has the process metadata needed to resolve the pattern.
@@ -103,6 +106,7 @@ export async function ensurePieceRunning(
       const resultCell = runtime.getCellFromLink(resultLink, undefined, tx);
 
       // Commit the read transaction before starting the piece
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       // Load the pattern from the persisted spell reference.
@@ -122,8 +126,9 @@ export async function ensurePieceRunning(
         `Starting piece with pattern ${patternId} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
       ]);
 
-      // Start the piece - this will register event handlers
-      await runtime.runSynced(resultCell, pattern);
+      // Start the existing piece - this registers event handlers without
+      // re-running setup and potentially allocating a different process cell.
+      await runtime.start(resultCell);
 
       logger.debug("ensure-piece", () => [
         `Piece started successfully`,
@@ -133,6 +138,7 @@ export async function ensurePieceRunning(
     } catch (error) {
       // Make sure to commit/rollback the transaction on error
       try {
+        runtime.prepareTxForCommit(tx);
         await tx.commit();
       } catch {
         // Ignore commit errors on cleanup

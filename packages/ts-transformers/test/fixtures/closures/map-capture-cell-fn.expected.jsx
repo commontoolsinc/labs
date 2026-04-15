@@ -23,7 +23,7 @@ interface State {
 export default pattern((state) => {
     const count = cell(0, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("count", true);
     return {
         [UI]: (<div>
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

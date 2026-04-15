@@ -19,13 +19,13 @@ const __cfAmdHooks = undefined;
 export default function TestLiteralWidenExplicitTypeArgs() {
     const _c1 = Cell.of<number>(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c1", true);
     const _c2 = Cell.of<string>("hello", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c2", true);
     const _c3 = Cell.of<boolean>(true, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_c3", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenExplicitTypeArgs);

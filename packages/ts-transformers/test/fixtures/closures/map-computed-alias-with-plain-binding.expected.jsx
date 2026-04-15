@@ -26,7 +26,7 @@ const __cfModuleCallback_1 = __cfHardenFn(({ element, params: {} }) => {
     } as const satisfies __cfHelpers.JSONSchema, {
         element: element,
         __cf_val_key: __cf_val_key
-    }, ({ element, __cf_val_key }) => element[__cf_val_key]);
+    }, ({ element, __cf_val_key }) => element[__cf_val_key]).for("val", true);
     return (<span>{__cfHelpers.derive({
         type: "object",
         properties: {

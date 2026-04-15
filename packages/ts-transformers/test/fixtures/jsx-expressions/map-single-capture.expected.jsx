@@ -33,7 +33,7 @@ export default pattern((_state) => {
             },
             required: ["id", "name"]
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("people", true);
     return {
         [UI]: (<div>
         {__cfHelpers.when({

@@ -41,10 +41,10 @@ export default pattern((__cf_pattern_input) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("path", true);
     const labelPrefix = Writable.of("prefix:", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("labelPrefix", true);
     return {
         [UI]: (<div>
         {(() => {
@@ -78,7 +78,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()).for(["p", 3], true), []).for("p", true);
                 const visible = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -127,7 +127,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     p: p
-                }, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
+                }, ({ entries, p }) => visibleEntries(entries, p[0] || "")).for("visible", true);
                 return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
@@ -187,7 +187,7 @@ export default pattern((__cf_pattern_input) => {
                     labelPrefix: labelPrefix
                 });
             })()}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

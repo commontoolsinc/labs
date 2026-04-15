@@ -30,7 +30,7 @@ export default pattern((__cf_pattern_input) => {
     const people = __cf_pattern_input.key("people");
     const showAdmin = Writable.of(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("showAdmin", true);
     const adminData = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -76,7 +76,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => [...people.get()]
         .sort((a, b) => a.rank - b.rank)
-        .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 })));
+        .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 }))).for("adminData", true);
     const count = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -105,7 +105,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length);
+    } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length).for("count", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({
@@ -125,56 +125,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, showAdmin, __cfHelpers.derive({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number"
-                },
-                adminData: {
-                    type: "array",
-                    items: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            rank: {
-                                type: "number"
-                            },
-                            isFirst: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "rank", "isFirst"]
-                    }
-                }
-            },
-            required: ["count", "adminData"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            count: count,
-            adminData: adminData
-        }, ({ count, adminData }) => (() => {
+        } as const satisfies __cfHelpers.JSONSchema, showAdmin, (() => {
             const peopleCount = count + " people";
             return (<div>
                 <span>{peopleCount}</span>
@@ -185,7 +136,7 @@ export default pattern((__cf_pattern_input) => {
                     </li>))}
                 </ul>
               </div>);
-        })()), null)}
+        })(), null)}
       </div>),
     };
 }, {

@@ -66,7 +66,7 @@ export default pattern((__cf_pattern_input) => {
     const messages = __cf_pattern_input.key("messages");
     const selectedId = Writable.of("", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("selectedId", true);
     return {
         [UI]: (<div>
           {entries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
@@ -84,7 +84,7 @@ export default pattern((__cf_pattern_input) => {
                     anyOf: [{
                             type: "null"
                         }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, moduleHasSettings({ piece: entry.key("piece") }), <span>settings</span>, null);
+                } as const satisfies __cfHelpers.JSONSchema, moduleHasSettings({ piece: entry.key("piece") }), <span>settings</span>, null).for("__patternResult", true);
             }, {
                 type: "object",
                 properties: {
@@ -164,7 +164,7 @@ export default pattern((__cf_pattern_input) => {
                         type: msg.key("type")
                     } }, ({ msg }) => msg.type === "system"), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
                 open
-              </button>);
+              </button>).for("__patternResult", true);
             }, {
                 type: "object",
                 properties: {
@@ -217,7 +217,7 @@ export default pattern((__cf_pattern_input) => {
             } as const satisfies __cfHelpers.JSONSchema), {
                 selectedId: selectedId
             })}
-        </div>),
+        </div>)
     };
 }, {
     type: "object",

@@ -36,7 +36,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["a"]
         } as const satisfies __cfHelpers.JSONSchema, (_, { a }) => a.set("hello"))({
             a: a
-        }),
+        }).for({ stream: ["__patternResult", "setA"] }, true),
         setB: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
@@ -48,7 +48,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["b"]
         } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => b.set(42))({
             b: b
-        }),
+        }).for({ stream: ["__patternResult", "setB"] }, true)
     };
 }, {
     type: "object",

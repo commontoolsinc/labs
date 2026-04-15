@@ -42,7 +42,7 @@ export default pattern((state) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     element: element,
                     __cf_amount_key: __cf_amount_key
-                }, ({ element, __cf_amount_key }) => element[__cf_amount_key]);
+                }, ({ element, __cf_amount_key }) => element[__cf_amount_key]).for("amount", true);
                 return (<span>{amount}</span>);
             }, {
                 type: "object",
@@ -77,7 +77,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

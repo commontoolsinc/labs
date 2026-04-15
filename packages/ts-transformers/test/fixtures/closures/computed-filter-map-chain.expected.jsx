@@ -58,7 +58,7 @@ export default pattern((state) => {
         return state.preferences
             .filter((p) => p.preference === "liked")
             .map((p) => p.ingredient);
-    });
+    }).for("liked", true);
     return { liked };
 }, {
     type: "object",

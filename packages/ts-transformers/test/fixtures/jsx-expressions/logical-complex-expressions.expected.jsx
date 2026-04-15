@@ -21,13 +21,13 @@ export default pattern((_state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("items", true);
     const isEnabled = cell(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("isEnabled", true);
     const count = cell(0, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("count", true);
     return {
         [UI]: (<div>
         {/* Nested && - both conditions reference opaque refs */}

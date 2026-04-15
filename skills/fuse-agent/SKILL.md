@@ -110,6 +110,48 @@ fail silently with a dead transport — the handler appears to execute but no
 state changes. If agents report "learned" entries that don't show up in
 `input/learned`, check the transport first.
 
+### Secure-mode time/random pitfalls in handlers
+
+Pattern handlers and actions may run under SES secure mode. Avoid raw zero-arg
+`new Date()` and `Math.random()` inside authored patterns — both can throw under
+secure mode.
+
+Use Common Fabric safe builtins instead:
+
+```ts
+import { nonPrivateRandom, safeDateNow } from "commonfabric";
+
+const now = safeDateNow();
+const iso = new Date(now).toISOString();
+const id = `${now.toString(36)}-${
+  nonPrivateRandom().toString(36).slice(2, 11)
+}`;
+```
+
+This specifically matters for:
+
+- `activity-log.tsx` event creation / timestamps
+- `agent.tsx` lifecycle handlers (`markIdle`, `markError`)
+- any handler-generated IDs or timestamps in experiment support patterns
+
+For event IDs in authored patterns, avoid `Math.random()` too. A safe pattern
+is:
+
+```ts
+const now = safeDateNow();
+const id = `${now.toString(36)}-${
+  nonPrivateRandom().toString(36).slice(2, 11)
+}`;
+const timestamp = new Date(now).toISOString();
+```
+
+If a handler fails with messages like:
+
+- `secure mode Calling new %SharedDate%() with no arguments throws`
+- `secure mode %SharedMath%.random() throws`
+
+check the pattern source before assuming the agent invoked it incorrectly.
+
 ---
 
 ## Activity Log Pattern
@@ -129,8 +171,12 @@ LOG_NAME=$(cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
 "MOUNT/SPACE/pieces/$LOG_NAME/result/logEvent.handler" \
   --agent "deployer" \
   --action "deployed" \
-  --pieceName "Contact Book" \
+  --piece-name "Contact Book" \
   --note "Contacts mentioned in standup notes with no structured tracking"
+
+# Note: handler CLIs expose object fields as kebab-case flags (`piece-name`),
+# not camelCase (`pieceName`). `--help` on the handler shows the exact flags.
+# When in doubt, prefer `--json` / `--json-file` to avoid flag-name mismatches.
 
 # Re-read pieces.json after — name changes on every event
 ```

@@ -87,7 +87,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0);
+    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0).for("hasItems", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({
@@ -170,25 +170,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, showInactive, __cfHelpers.derive({
-                        type: "object",
-                        properties: {
-                            tag: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        },
-                        required: ["tag"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, { tag: {
-                            name: tag.key("name")
-                        } }, ({ tag }) => `(${tag.name})`), ""))}
+                    } as const satisfies __cfHelpers.JSONSchema, showInactive, `(${tag.key("name")})`, ""))}
                   </li>);
                 }, {
                     type: "object",

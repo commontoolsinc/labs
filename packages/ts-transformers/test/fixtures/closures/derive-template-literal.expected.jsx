@@ -17,10 +17,10 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const prefix = Writable.of("Value: ", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("prefix", true);
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -37,9 +37,9 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         prefix: prefix
-    }, ({ value: v, prefix }) => `${prefix.get()}${v}`);
+    }, ({ value: v, prefix }) => `${prefix.get()}${v}`).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "string"

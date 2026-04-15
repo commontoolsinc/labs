@@ -14,6 +14,7 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
       vdomRenderNode: {
         anyOf: [
           { $ref: "#/$defs/vdomNode" },
+          { $ref: "#/$defs/vdomRenderableObject" },
           { type: "string" },
           { type: "number" },
           { type: "boolean" },
@@ -34,6 +35,7 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
             type: "object",
             properties: {
               style: { anyOf: [{ type: "object" }, { type: "string" }] },
+              $value: { asCell: ["cell"], type: "unknown" },
             },
             additionalProperties: {
               anyOf: [{
@@ -66,9 +68,17 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
           },
           [UI]: { $ref: "#/$defs/vdomNode" },
         },
+        required: ["type", "name"],
+      },
+      vdomRenderableObject: {
+        type: "object",
+        properties: {
+          [UI]: { $ref: "#/$defs/vdomNode" },
+        },
+        required: [UI],
       },
     },
-    $ref: "#/$defs/vdomNode",
+    $ref: "#/$defs/vdomRenderNode",
   },
   true,
 );

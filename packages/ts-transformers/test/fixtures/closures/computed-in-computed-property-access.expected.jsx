@@ -23,7 +23,7 @@ const __cfModuleCallback_1 = __cfHardenFn(() => {
             }
         },
         required: ["bar"]
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 }));
+    } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 })).for("foo", true);
     return foo.bar;
 });
 // FIXTURE: computed-in-computed-property-access
@@ -39,7 +39,7 @@ export default pattern(() => {
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1);
+    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1).for("outer", true);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

@@ -19,7 +19,7 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // All literal types that should be widened
     const numLiteral = 42;
     const strLiteral = "hello";
@@ -49,7 +49,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         numLiteral: numLiteral,
         floatLiteral: floatLiteral,
         boolLiteral: boolLiteral,
@@ -58,7 +58,7 @@ export default pattern(() => {
         // Use all captured literals to ensure they're all widened
         const combined = v.get() + numLiteral + floatLiteral;
         return boolLiteral ? strLiteral + combined : "";
-    });
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "string"

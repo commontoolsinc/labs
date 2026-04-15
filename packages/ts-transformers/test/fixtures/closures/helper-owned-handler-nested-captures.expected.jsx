@@ -60,7 +60,7 @@ export default pattern((__cf_pattern_input) => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("timer", true);
     const trigger = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -115,8 +115,8 @@ export default pattern((__cf_pattern_input) => {
         content: content,
         savedContent: savedContent,
         onSaveFile: onSaveFile
-    });
-    return { trigger };
+    }).for({ stream: "trigger" }, true);
+    return { trigger: trigger.for({ stream: ["__patternResult", "trigger"] }, true) };
 }, {
     type: "object",
     properties: {

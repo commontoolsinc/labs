@@ -39,7 +39,7 @@ export default pattern((input: MyInput) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, { input: {
                 value: input.key("value")
-            } }, ({ input: input_1 }) => input.value * 2),
+            } }, ({ input: input_1 }) => input.value * 2).for(["__patternResult", "result"], true)
     };
 }, {
     type: "object",

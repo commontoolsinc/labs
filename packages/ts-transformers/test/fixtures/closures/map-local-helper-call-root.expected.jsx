@@ -41,7 +41,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["element"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    } as const satisfies __cfHelpers.JSONSchema), {}).for("__patternResult", true);
 }, {
     type: "object",
     properties: {

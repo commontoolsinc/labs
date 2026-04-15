@@ -112,16 +112,16 @@ export default pattern((__cf_pattern_input) => {
     const trashedSubPieces = __cf_pattern_input.key("trashedSubPieces");
     const editingNoteIndex = Writable.of<number | undefined>(undefined, {
         type: ["number", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("editingNoteIndex", true);
     const editingNoteText = Writable.of("", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("editingNoteText", true);
     const expandedIndex = Writable.of<number | undefined>(undefined, {
         type: ["number", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("expandedIndex", true);
     const settingsModuleIndex = Writable.of<number | undefined>(undefined, {
         type: ["number", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("settingsModuleIndex", true);
     const allEntries = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -202,7 +202,7 @@ export default pattern((__cf_pattern_input) => {
         isExpanded: index === 0,
         isPinned: entry.pinned || false,
         allowMultiple: entry.allowMultiple,
-    })));
+    }))).for("allEntries", true);
     return {
         [UI]: (<div>
         {allEntries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
@@ -391,7 +391,7 @@ export default pattern((__cf_pattern_input) => {
                     })}>
                   trash
                 </button>)}
-            </div>, null);
+            </div>, null).for("__patternResult", true);
             }, {
                 type: "object",
                 properties: {
@@ -499,7 +499,7 @@ export default pattern((__cf_pattern_input) => {
                 expandedIndex: expandedIndex,
                 trashedSubPieces: trashedSubPieces
             })}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

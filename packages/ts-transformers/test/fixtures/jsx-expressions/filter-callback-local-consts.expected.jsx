@@ -29,98 +29,98 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
         {files.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const file = __cf_pattern_input.key("element");
-            const isFolder = __cfHelpers.derive({
+                const file = __cf_pattern_input.key("element");
+                const isFolder = __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        file: {
+                            type: "object",
+                            properties: {
+                                type: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["type"]
+                        }
+                    },
+                    required: ["file"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, { file: {
+                        type: file.key("type")
+                    } }, ({ file }) => file.type === "folder").for("isFolder", true);
+                return isFolder;
+            }, {
                 type: "object",
                 properties: {
-                    file: {
-                        type: "object",
-                        properties: {
-                            type: {
-                                type: "string"
-                            }
-                        },
-                        required: ["type"]
+                    element: {
+                        $ref: "#/$defs/FileEntry"
                     }
                 },
-                required: ["file"]
+                required: ["element"],
+                $defs: {
+                    FileEntry: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            type: {
+                                "enum": ["file", "folder"]
+                            }
+                        },
+                        required: ["name", "type"]
+                    }
+                }
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, { file: {
-                    type: file.key("type")
-                } }, ({ file }) => file.type === "folder");
-            return isFolder;
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/FileEntry"
-                }
-            },
-            required: ["element"],
-            $defs: {
-                FileEntry: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
+            } as const satisfies __cfHelpers.JSONSchema), {}).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const file = __cf_pattern_input.key("element");
+                return <span>{file.key("name")}</span>;
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/FileEntry"
+                    }
+                },
+                required: ["element"],
+                $defs: {
+                    FileEntry: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            type: {
+                                "enum": ["file", "folder"]
+                            }
                         },
-                        type: {
-                            "enum": ["file", "folder"]
-                        }
-                    },
-                    required: ["name", "type"]
+                        required: ["name", "type"]
+                    }
                 }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema), {}).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const file = __cf_pattern_input.key("element");
-            return <span>{file.key("name")}</span>;
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/FileEntry"
-                }
-            },
-            required: ["element"],
-            $defs: {
-                FileEntry: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
                         },
-                        type: {
-                            "enum": ["file", "folder"]
-                        }
-                    },
-                    required: ["name", "type"]
+                        required: ["$UI"]
+                    }
                 }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+            } as const satisfies __cfHelpers.JSONSchema), {})}
+      </div>)
     };
 }, {
     type: "object",

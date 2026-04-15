@@ -22,10 +22,10 @@ export default pattern(() => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("numbers", true);
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Nested callback - inner array map should not capture outer multiplier
     const result = __cfHelpers.derive({
         type: "object",
@@ -49,7 +49,7 @@ export default pattern(() => {
             type: "number"
         }
     } as const satisfies __cfHelpers.JSONSchema, {
-        numbers,
+        numbers: numbers.for(["result", 2, "numbers"], true),
         multiplier: multiplier
     }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const n = __cf_pattern_input.key("element");
@@ -77,7 +77,7 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema), {
         multiplier: multiplier
-    }));
+    })).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",

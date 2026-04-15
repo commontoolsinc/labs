@@ -48,7 +48,7 @@ export default pattern((state) => {
             user: {
                 name: state.key("user", "name")
             }
-        } }, ({ state }) => identity(state.user.name));
+        } }, ({ state }) => identity(state.user.name)).for("label", true);
     const maybeLabel = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -72,7 +72,7 @@ export default pattern((state) => {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             maybeUser: state.key("maybeUser")
-        } }, ({ state }) => identity(state.maybeUser?.name));
+        } }, ({ state }) => identity(state.maybeUser?.name)).for("maybeLabel", true);
     return {
         label,
         maybeLabel,
@@ -98,7 +98,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, { state: {
                 a: state.key("a"),
                 b: state.key("b")
-            } }, ({ state }) => Math.max(state.a, state.b)),
+            } }, ({ state }) => Math.max(state.a, state.b)).for(["__patternResult", "maxValue"], true),
         parsedValue: __cfHelpers.derive({
             type: "object",
             properties: {
@@ -117,7 +117,7 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, { state: {
                 float: state.key("float")
-            } }, ({ state }) => parseInt(state.float)),
+            } }, ({ state }) => parseInt(state.float)).for(["__patternResult", "parsedValue"], true),
         fallbackLabel: __cfHelpers.derive({
             type: "object",
             properties: {
@@ -135,8 +135,8 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, { state: {
                 label: state.key("label")
-            } }, ({ state }) => state.label ?? "Pending"),
-        firstItem: state.key("items", "0"),
+            } }, ({ state }) => state.label ?? "Pending").for(["__patternResult", "fallbackLabel"], true),
+        firstItem: state.key("items", "0")
     };
 }, {
     type: "object",

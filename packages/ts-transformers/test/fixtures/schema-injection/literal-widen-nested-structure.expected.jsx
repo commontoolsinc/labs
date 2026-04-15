@@ -47,7 +47,7 @@ export default function TestLiteralWidenNestedStructure() {
             }
         },
         required: ["users", "count"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_nested", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenNestedStructure);

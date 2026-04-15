@@ -53,7 +53,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, { meta: {
                         kind: meta.kind
-                    } }, ({ meta }) => meta.kind === "folder");
+                    } }, ({ meta }) => meta.kind === "folder").for("isFolder", true);
                 return <span>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -106,7 +106,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

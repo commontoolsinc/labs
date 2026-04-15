@@ -89,7 +89,7 @@ export default pattern((__cf_pattern_input) => {
                     todayDate: todayDate
                 }, ({ logs, habit, todayDate }) => logs.get().some((log) => log.habitName === habit.name &&
                     log.date === todayDate &&
-                    log.completed));
+                    log.completed)).for("doneToday", true);
                 return <span>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -172,7 +172,7 @@ export default pattern((__cf_pattern_input) => {
             } as const satisfies __cfHelpers.JSONSchema), {
                 logs: logs,
                 todayDate: todayDate
-            })}</div>,
+            })}</div>
     };
 }, {
     type: "object",

@@ -17,7 +17,7 @@ declare const flag: boolean;
 //   derive(flag, fn) → derive({ type: "boolean" }, { enum: ["hello", 42] }, flag, fn)
 // Context: Callback has two return statements (string and number); output schema is an enum union
 // Function with multiple return statements - should infer string | number
-export const multiReturn = derive({
+export const multiReturn = __cfHelpers.__cf_data(derive({
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["hello", 42]
@@ -26,7 +26,7 @@ export const multiReturn = derive({
         return "hello";
     }
     return 42;
-});
+}).for("multiReturn", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

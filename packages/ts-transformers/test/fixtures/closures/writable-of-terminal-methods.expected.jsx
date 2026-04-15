@@ -32,10 +32,10 @@ export default pattern((__cf_pattern_input) => {
     const title = __cf_pattern_input.key("title");
     const counter = Writable.of(0, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("counter", true);
     const label = Writable.of("Count", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("label", true);
     const reset = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -55,14 +55,14 @@ export default pattern((__cf_pattern_input) => {
     })({
         counter: counter,
         label: label
-    });
+    }).for({ stream: "reset" }, true);
     return {
         [UI]: (<div>
         <span>{title} {label}: {counter}</span>
         <cf-button onClick={reset}>Reset</cf-button>
       </div>),
-        counter,
-        label,
+        counter: counter.for(["__patternResult", "counter"], true),
+        label: label.for(["__patternResult", "label"], true)
     };
 }, {
     type: "object",

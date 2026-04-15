@@ -119,7 +119,7 @@ const createSimplePattern = handler({
     // Create isInitialized cell for this charm addition
     const isInitialized = cell(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("isInitialized", true);
     // Create the charm
     const charm = SimplePattern({});
     // Store the charm in the array and navigate
@@ -191,29 +191,9 @@ export default pattern(() => {
                 const index = __cf_pattern_input.key("index");
                 return (<li>
                 <cf-button onClick={goToCharm({ charm })}>
-                  Go to Charm {__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        }
-                    },
-                    required: ["index"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
+                  Go to Charm {index + 1}
                 </cf-button>
-                <span>Charm {__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        }
-                    },
-                    required: ["index"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
+                <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
@@ -221,7 +201,7 @@ export default pattern(() => {
                         charm: true
                     },
                     required: ["charm"]
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
+                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[__cfHelpers.NAME]), "Unnamed")}</span>
               </li>);
             }, {
                 type: "object",

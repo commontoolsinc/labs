@@ -37,7 +37,7 @@ export default pattern((cell) => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, cell.key("value"), (v: number) => v * 2);
+    } as const satisfies __cfHelpers.JSONSchema, cell.key("value"), (v: number) => v * 2).for("doubled", true);
     return {
         [UI]: (<div>
         <p>Value: {cell.key("value")}</p>

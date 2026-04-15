@@ -37,10 +37,10 @@ export default pattern((__cf_pattern_input) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("path", true);
     const labelPrefix = Writable.of("a", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("labelPrefix", true);
     return {
         [UI]: (<div>
         {(() => {
@@ -74,7 +74,7 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()).for(["p", 3], true), []).for("p", true);
                 const visible = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -123,7 +123,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     p: p
-                }, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
+                }, ({ entries, p }) => visibleEntries(entries, p[0] || "")).for("visible", true);
                 const filtered = visible.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
@@ -172,7 +172,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema), {
                     labelPrefix: labelPrefix
-                });
+                }).for("filtered", true);
                 return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     return <button type="button">{entry.key("name")}</button>;
@@ -217,7 +217,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } as const satisfies __cfHelpers.JSONSchema), {});
             })()}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

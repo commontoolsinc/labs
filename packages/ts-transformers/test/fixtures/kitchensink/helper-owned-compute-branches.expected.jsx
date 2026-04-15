@@ -41,7 +41,7 @@ export default pattern((state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("fallbackMembers", true);
     // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
     const visibleProjects = __cfHelpers.derive({
         type: "object",
@@ -120,7 +120,7 @@ export default pattern((state) => {
             projects: state.key("projects")
         } }, ({ state }) => state.showArchived
         ? state.projects
-        : state.projects.filter((project) => !project.archived));
+        : state.projects.filter((project) => !project.archived)).for("visibleProjects", true);
     // [TRANSFORM] computed() → derive(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
     const rows = __cfHelpers.derive({
         type: "object",
@@ -341,7 +341,7 @@ export default pattern((state) => {
                     : member}
             </span>))}
         </div>);
-    }));
+    })).for("rows", true);
     return {
         [UI]: <div>{rows}</div>,
     };

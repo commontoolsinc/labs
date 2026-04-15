@@ -37,7 +37,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count * 2)
+        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count * 2).for(["__patternResult", "doubled"], true)
     };
 }, {
     type: "object",

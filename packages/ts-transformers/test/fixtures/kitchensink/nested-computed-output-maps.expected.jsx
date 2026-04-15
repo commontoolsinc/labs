@@ -83,8 +83,8 @@ export default pattern((state) => {
     // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const selectedCommentId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema);
-    const laneLabels = passthroughLabels(["lane", "detail", "summary"]);
+    } as const satisfies __cfHelpers.JSONSchema).for("selectedCommentId", true);
+    const laneLabels = passthroughLabels(["lane", "detail", "summary"]).for("laneLabels", true);
     // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged
     const visibleThreads = __cfHelpers.derive({
         type: "object",
@@ -225,7 +225,7 @@ export default pattern((state) => {
         visibleComments: state.showFlagged
             ? thread.comments.filter((comment) => comment.flagged)
             : thread.comments,
-    })));
+    }))).for("visibleThreads", true);
     // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
     const threadRows = __cfHelpers.derive({
         type: "object",
@@ -333,7 +333,7 @@ export default pattern((state) => {
     visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
         // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
         const plainSeparators = ["top", "bottom"].map((edge) => `${thread.title}-${edge}`);
-        const liftedSeparators = passthroughLabels(plainSeparators);
+        const liftedSeparators = passthroughLabels(plainSeparators).for("liftedSeparators", true);
         // [TRANSFORM] computed() → derive() (nested): captures visibleComments from outer derive scope
         const reboundComments = __cfHelpers.derive({
             type: "object",
@@ -397,7 +397,7 @@ export default pattern((state) => {
                     required: ["id", "text", "flagged", "reactions"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, { visibleComments: visibleComments }, ({ visibleComments }) => visibleComments);
+        } as const satisfies __cfHelpers.JSONSchema, { visibleComments: visibleComments }, ({ visibleComments }) => visibleComments).for("reboundComments", true);
         return (<article>
           <h2>{thread.title}</h2>
           {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured derive input */}
@@ -679,7 +679,7 @@ export default pattern((state) => {
           {/* [TRANSFORM] .map() stays plain: plainSeparators is a local literal array */}
           {plainSeparators.map((edge) => <small>{edge}</small>)}
         </article>);
-    }));
+    })).for("threadRows", true);
     return {
         [UI]: (<div>
         {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}

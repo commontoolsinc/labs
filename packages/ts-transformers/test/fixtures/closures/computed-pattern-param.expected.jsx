@@ -22,7 +22,7 @@ export default pattern((config: {
 }) => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -48,7 +48,7 @@ export default pattern((config: {
         config: {
             multiplier: config.key("multiplier")
         }
-    }, ({ value, config }) => value.get() * config.multiplier);
+    }, ({ value, config }) => value.get() * config.multiplier).for("result", true);
     return result;
 }, {
     type: "object",

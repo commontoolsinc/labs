@@ -35,9 +35,10 @@ describe("Compile all patterns", () => {
 
       try {
         const sourcePath = join(import.meta.dirname!, "..", name);
+        const rootPath = join(import.meta.dirname!, "..");
         const program = await cc.manager().runtime.harness
           .resolve(
-            new FileSystemProgramResolver(sourcePath),
+            new FileSystemProgramResolver(sourcePath, rootPath),
           );
         const piece = await cc!.create(program, { start: false });
         assert(piece.id, `Received piece ID ${piece.id} for ${name}.`);

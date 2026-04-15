@@ -20,8 +20,8 @@ export default pattern((state) => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
-    return { typedValues };
+    } as const satisfies __cfHelpers.JSONSchema).for("typedValues", true);
+    return { typedValues: typedValues.for(["__patternResult", "typedValues"], true) };
 }, {
     type: "object",
     properties: {

@@ -77,7 +77,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } as const satisfies __cfHelpers.JSONSchema, { msg: {
                         reactions: msg.key("reactions")
-                    } }, ({ msg }) => (msg.reactions ?? []) as Reaction[]);
+                    } }, ({ msg }) => (msg.reactions ?? []) as Reaction[]).for("messageReactions", true);
                 return (<div>
               {messageReactions.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                         const reaction = __cf_pattern_input.key("element");
@@ -200,7 +200,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

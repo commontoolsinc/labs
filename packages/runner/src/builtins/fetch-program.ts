@@ -5,7 +5,9 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
-import { computeInputHash } from "./fetch-utils.ts";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { computeInputHashFromValue } from "./fetch-utils.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
 
@@ -25,6 +27,24 @@ type FetchState =
 interface FetchCacheEntry {
   inputHash: string;
   state: FetchState;
+}
+
+const fetchProgramInputSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      url: { type: "string" },
+    },
+  },
+  true,
+);
+
+function snapshotFetchProgramInputs(
+  cell: Cell<{ url?: string; result?: ProgramResult }>,
+): { url?: string } {
+  const snapshot = cell.asSchema(fetchProgramInputSchema).get() ??
+    ({} as { url?: string });
+  return createFrozenRequestSnapshot({ url: snapshot.url });
 }
 
 // Full schema for cache structure to ensure proper validation when reading back
@@ -144,6 +164,7 @@ export function fetchProgram(
         cache.withTx(tx).update(updates);
       }
 
+      runtime.prepareTxForCommit(tx);
       tx.commit();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
@@ -199,8 +220,9 @@ export function fetchProgram(
       cellsInitialized = true;
     }
 
-    const { url } = inputsCell.getAsQueryResult([], tx);
-    const inputHash = computeInputHash(tx, inputsCell);
+    const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
+    const { url } = requestSnapshot;
+    const inputHash = computeInputHashFromValue(requestSnapshot);
 
     if (!url) {
       // When URL is empty, clear outputs
@@ -219,7 +241,7 @@ export function fetchProgram(
     // State machine transitions
     if (state.type === "idle") {
       // Try to transition to fetching
-      const requestId = crypto.randomUUID();
+      const requestId = inputHash;
       cache.withTx(tx).update({
         [inputHash]: {
           inputHash,
@@ -227,16 +249,25 @@ export function fetchProgram(
         },
       });
 
-      // Start fetch asynchronously
-      myRequestId = requestId;
-      abortController = new AbortController();
-      startFetch(
-        runtime,
-        cache,
-        inputHash,
-        url,
-        requestId,
-        abortController.signal,
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchProgram",
+        `fetchProgram:${requestId}`,
+        requestSnapshot,
+        "fetchProgram-start",
+        () => {
+          // Start fetch asynchronously only after the transaction commits.
+          myRequestId = requestId;
+          abortController = new AbortController();
+          startFetch(
+            runtime,
+            cache,
+            inputHash,
+            url,
+            requestId,
+            abortController.signal,
+          );
+        },
       );
     } else if (state.type === "fetching") {
       // Check for timeout

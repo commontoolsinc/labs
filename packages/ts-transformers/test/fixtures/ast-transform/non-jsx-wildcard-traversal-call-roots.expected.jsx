@@ -56,7 +56,7 @@ export default pattern((state) => ({
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => JSON.stringify(state.wishes[1])),
+        } }, ({ state }) => JSON.stringify(state.wishes[1])).for(["__patternResult", "serialized"], true),
     keys: __cfHelpers.derive({
         type: "object",
         properties: {
@@ -90,7 +90,7 @@ export default pattern((state) => ({
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.keys(state.wishes[1])),
+        } }, ({ state }) => Object.keys(state.wishes[1])).for(["__patternResult", "keys"], true),
     values: __cfHelpers.derive({
         type: "object",
         properties: {
@@ -124,7 +124,7 @@ export default pattern((state) => ({
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.values(state.wishes[1])),
+        } }, ({ state }) => Object.values(state.wishes[1])).for(["__patternResult", "values"], true),
     entries: __cfHelpers.derive({
         type: "object",
         properties: {
@@ -161,7 +161,7 @@ export default pattern((state) => ({
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.entries(state.wishes[1])),
+        } }, ({ state }) => Object.entries(state.wishes[1])).for(["__patternResult", "entries"], true)
 }), {
     type: "object",
     properties: {

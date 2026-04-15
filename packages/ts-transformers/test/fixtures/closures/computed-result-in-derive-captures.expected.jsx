@@ -69,7 +69,7 @@ export default pattern((state) => {
         } }, ({ state }) => ({
         count: state.items.filter((i) => i.done).length,
         total: state.items.length,
-    }));
+    })).for("stats", true);
     return {
         [UI]: (<div>
         {__cfHelpers.derive({

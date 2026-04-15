@@ -20,10 +20,10 @@ const __cfAmdHooks = undefined;
 export default function TestCellStaticFactories() {
     const explicitString = Cell.of<string>("hello", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("explicitString", true);
     const inferredNumber = Cell.of(123, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("inferredNumber", true);
     const explicitCause = Cell.for<string>("cause").asSchema({
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -32,10 +32,10 @@ export default function TestCellStaticFactories() {
     } as const satisfies __cfHelpers.JSONSchema);
     const opaque = OpaqueCell.of<boolean>(true, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("opaque", true);
     const stream = Stream.of<number>(1, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("stream", true);
     return {
         explicitString,
         inferredNumber,

@@ -18,7 +18,7 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const factors = [2, 3, 4];
     const result = __cfHelpers.derive({
         type: "object",
@@ -38,9 +38,9 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
-        value,
+        value: value.for(["result", 2, "value"], true),
         factors: factors
-    }, ({ value: v, factors }) => v.get() * factors[1]!);
+    }, ({ value: v, factors }) => v.get() * factors[1]!).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

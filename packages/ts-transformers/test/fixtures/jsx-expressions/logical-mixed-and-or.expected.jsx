@@ -33,10 +33,10 @@ export default pattern((_state) => {
             }
         },
         required: ["name", "age"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("user", true);
     const defaultMessage = cell("Guest", {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("defaultMessage", true);
     return {
         [UI]: (<div>
         {/* (condition && value) || fallback pattern */}

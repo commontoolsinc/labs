@@ -35,7 +35,7 @@ export default pattern((state) => ({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             done: state.key("done")
-        } }, ({ state }) => !state.done),
+        } }, ({ state }) => !state.done).for(["__patternResult", "hidden"], true)
 }), {
     type: "object",
     properties: {

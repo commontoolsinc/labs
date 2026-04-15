@@ -40,13 +40,13 @@ export default pattern((_state) => {
             }
         },
         required: ["timeout", "retries"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("config", true);
     const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("items", true);
     return {
         [UI]: (<div>
         {/* ?? followed by || - different semantics */}

@@ -11,12 +11,15 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 export type { JSONSchema, JSONValue, Program };
 
 import type { MemoryVersion } from "@commonfabric/memory/interface";
+
+export type { CfcLabelView };
 
 export type MessageId = number;
 
@@ -38,6 +41,7 @@ export enum RequestType {
   CellSubscribe = "cell:subscribe",
   CellUnsubscribe = "cell:unsubscribe",
   CellResolveAsCell = "cell:resolveAsCell",
+  CellGetCfcLabel = "cell:getCfcLabel",
 
   // Runtime operations
   GetCell = "runtime:getCell",
@@ -129,6 +133,18 @@ export interface InitializationData {
     modernDataModel?: boolean;
     unifiedJsonEncoding?: boolean;
   };
+  // Commit-boundary CFC mode for the worker runtime.
+  cfcEnforcementMode?:
+    | "disabled"
+    | "observe"
+    | "enforce-explicit"
+    | "enforce-strict";
+  // Static trust snapshot applied to worker-owned transactions.
+  trustSnapshot?: {
+    id: string;
+    actingPrincipal?: string;
+    revision?: string;
+  };
   // Content hash of the worker bundle, used for compilation cache
   // invalidation. If absent, the compilation cache is disabled.
   // See docs/specs/compilation-cache.md Phase 3.
@@ -173,6 +189,11 @@ export interface CellUnsubscribeRequest extends BaseRequest {
 
 export interface CellResolveAsCellRequest extends BaseRequest {
   type: RequestType.CellResolveAsCell;
+  cell: CellRef;
+}
+
+export interface CellGetCfcLabelRequest extends BaseRequest {
+  type: RequestType.CellGetCfcLabel;
   cell: CellRef;
 }
 
@@ -452,6 +473,15 @@ export interface VDomEventRequest extends BaseRequest {
  */
 export interface SerializedDomEvent {
   type: string;
+  provenance?: {
+    origin?: string;
+    trusted?: boolean;
+    ui?: {
+      pattern?: string;
+      eventIntegrity?: string[];
+      uiContractDataset?: Record<string, string>;
+    };
+  };
   key?: string;
   code?: string;
   repeat?: boolean;
@@ -518,6 +548,7 @@ export type IPCClientRequest =
   | CellSubscribeRequest
   | CellUnsubscribeRequest
   | CellResolveAsCellRequest
+  | CellGetCfcLabelRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -568,6 +599,10 @@ export interface JSONValueResponse {
 
 export interface CellResponse {
   cell: CellRef;
+}
+
+export interface CfcLabelViewResponse {
+  cfcLabel: CfcLabelView | undefined;
 }
 
 export interface PageResponse {
@@ -666,6 +701,7 @@ export type RemoteResponse =
   | BooleanResponse
   | JSONValueResponse
   | CellResponse
+  | CfcLabelViewResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
   | SettleStatsResponse
@@ -799,6 +835,10 @@ export type Commands = {
   [RequestType.CellResolveAsCell]: {
     request: CellResolveAsCellRequest;
     response: CellResponse;
+  };
+  [RequestType.CellGetCfcLabel]: {
+    request: CellGetCfcLabelRequest;
+    response: CfcLabelViewResponse;
   };
   // Page requests
   [RequestType.PageCreate]: {

@@ -34,7 +34,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["name"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim()));
+    } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim())).for("upper", true);
     return {
         value: ifElse({
             type: "boolean"
@@ -54,7 +54,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + 1), 0),
+        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + 1), 0).for(["__patternResult", "value"], true),
         cellValue: ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -74,7 +74,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { cell: cell }, ({ cell }) => cell.get()), 0),
+        } as const satisfies __cfHelpers.JSONSchema, { cell: cell }, ({ cell }) => cell.get()), 0).for(["__patternResult", "cellValue"], true),
         trimmed: ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -93,7 +93,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["name"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()), "fallback"),
+        } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()), "fallback").for(["__patternResult", "trimmed"], true),
         upper,
         upperDirect: __cfHelpers.derive({
             type: "object",
@@ -105,7 +105,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["name"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()),
+        } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()).for(["__patternResult", "upperDirect"], true)
     };
 }, {
     type: "object",
