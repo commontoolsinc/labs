@@ -34,6 +34,7 @@ import LoaderStory from "../stories/cf-loader-story.tsx";
 import SkeletonStory from "../stories/cf-skeleton-story.tsx";
 import CollapsibleStory from "../stories/cf-collapsible-story.tsx";
 import TabListStory from "../stories/cf-tab-list-story.tsx";
+import TabBarStory from "../stories/cf-tab-bar-story.tsx";
 import TabsStory from "../stories/cf-tabs-story.tsx";
 import ChartStory from "../stories/cf-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
@@ -138,6 +139,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return CollapsibleStory({});
         case "tab-list":
           return TabListStory({});
+        case "tab-bar":
+          return TabBarStory({});
         case "tabs":
           return TabsStory({});
         case "chart":

@@ -55,6 +55,7 @@ interface CatalogInput {
       items: [
         { id: "card"; label: "Card" },
         { id: "modal"; label: "Modal" },
+        { id: "tab-bar"; label: "Tab Bar" },
         { id: "toolbar"; label: "Toolbar" },
         { id: "vstack"; label: "VStack" },
         { id: "hstack"; label: "HStack" },
