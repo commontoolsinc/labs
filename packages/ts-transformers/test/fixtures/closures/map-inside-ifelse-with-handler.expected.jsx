@@ -24,8 +24,7 @@ const removeItem = handler({
         items: {
             type: "array",
             items: {
-                type: "unknown",
-                asCell: ["opaque"]
+                type: "unknown"
             },
             asCell: ["cell"]
         },
