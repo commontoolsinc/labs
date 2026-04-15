@@ -79,6 +79,7 @@ has been explicitly verified as problematic.
 | `value={title}` | `$value={title}` |
 | `$checked={item}` | `$checked={item.done}` |
 | wrong event name | Use `oncf-send`, `oncf-input`, or `oncf-change` |
+| cell-bound control (for example `$value={status}`) with `oncf-change` writing `status.set(...)` | Let the binding own the control value; use the handler only for dependent state or side effects |
 
 ### 6. Custom Component Props and Styling Affordances
 
