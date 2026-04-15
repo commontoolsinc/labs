@@ -22,6 +22,8 @@ import { CaptureCollector } from "../capture-collector.ts";
 import { buildCaptureParamsObject } from "../utils/capture-scaffold.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import { filterDirectCallableCaptures } from "../utils/callable-capture-filter.ts";
+import { markCallbackAndAncestorsNonHoistable } from "../utils/non-hoistable-callbacks.ts";
 import {
   analyzeElementBinding,
   rewriteCallbackBody,
@@ -107,6 +109,7 @@ function createPatternCallWithParams(
   indexParam: ts.ParameterDeclaration | undefined,
   arrayParam: ts.ParameterDeclaration | undefined,
   captureTree: Map<string, CaptureTreeNode>,
+  containsLexicalCallableCaptures: boolean,
   context: TransformationContext,
   visitor: ts.Visitor,
   options: ArrayMethodCallbackTransformOptions,
@@ -189,6 +192,9 @@ function createPatternCallWithParams(
 
   const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
   context.markAsArrayMethodCallback(newCallback);
+  if (containsLexicalCallableCaptures) {
+    context.markAsNonHoistableCallback(newCallback);
+  }
 
   const schemaFactory = new SchemaFactory(context);
   const callbackParamTypeNode = schemaFactory.createArrayMethodCallbackSchema(
@@ -322,6 +328,12 @@ export function transformArrayMethodCallback(
 
   const collector = new CaptureCollector(checker);
   const { captureTree } = collector.analyzeCurrentAndOriginal(callback);
+  const explicitCaptureTree = filterDirectCallableCaptures(captureTree, checker);
+  const containsLexicalCallableCaptures =
+    explicitCaptureTree.size !== captureTree.size;
+  if (containsLexicalCallableCaptures) {
+    markCallbackAndAncestorsNonHoistable(callback, context);
+  }
 
   const originalParams = callback.parameters;
   const elemParam = originalParams[0];
@@ -340,7 +352,8 @@ export function transformArrayMethodCallback(
     elemParam,
     indexParam,
     arrayParam,
-    captureTree,
+    explicitCaptureTree,
+    containsLexicalCallableCaptures,
     context,
     visitor,
     options,

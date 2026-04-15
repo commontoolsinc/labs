@@ -6,6 +6,8 @@ import { CaptureCollector } from "../capture-collector.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
+import { filterDirectCallableCaptures } from "../utils/callable-capture-filter.ts";
+import { markCallbackAndAncestorsNonHoistable } from "../utils/non-hoistable-callbacks.ts";
 
 export class HandlerStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -57,13 +59,20 @@ export function transformHandlerJsxAttribute(
 
   const collector = new CaptureCollector(context.checker);
   const { captureTree } = collector.analyze(callback);
+  const explicitCaptureTree = filterDirectCallableCaptures(
+    captureTree,
+    context.checker,
+  );
+  if (explicitCaptureTree.size !== captureTree.size) {
+    markCallbackAndAncestorsNonHoistable(callback, context);
+  }
   const { factory } = context;
 
   // Build type information for handler params using SchemaFactory
   const schemaFactory = new SchemaFactory(context);
   const eventTypeNode = schemaFactory.createHandlerEventSchema(callback);
   const stateTypeNode = schemaFactory.createHandlerStateSchema(
-    captureTree,
+    explicitCaptureTree,
     callback.parameters[1] as ts.ParameterDeclaration | undefined,
   );
 
@@ -71,7 +80,7 @@ export function transformHandlerJsxAttribute(
     expression,
     callback,
     transformedBody,
-    captureTree,
+    explicitCaptureTree,
     eventTypeNode,
     stateTypeNode,
     context,

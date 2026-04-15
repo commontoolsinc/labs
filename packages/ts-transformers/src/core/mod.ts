@@ -21,6 +21,13 @@
  *   Readers: context.isArrayMethodCallback() (called by pattern-callback lowering,
  *            reactive-context classifier)
  *
+ * nonHoistableCallbackRegistry (WeakSet<ts.Node>)
+ *   Marks callbacks that must stay lexical because a closure strategy left
+ *   callable captures in surrounding JS scope instead of routing them through
+ *   explicit closure params/state.
+ *   Writers: closure strategies that filter direct callable captures
+ *   Readers: module-scope callback hoisting
+ *
  * syntheticComputeCallbackRegistry (WeakSet<ts.Node>)
  *   Marks callbacks introduced by synthetic compute wrappers (e.g. JSX branch
  *   wrapping) so later phases can treat reused authored nodes as compute-owned.

@@ -113,6 +113,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
     const ops: TransformationOptions = {
       typeRegistry: new WeakMap(),
       mapCallbackRegistry: new WeakSet(),
+      nonHoistableCallbackRegistry: new WeakSet(),
       syntheticComputeCallbackRegistry: new WeakSet(),
       syntheticComputeOwnedNodeRegistry: new WeakSet(),
       syntheticReactiveCollectionRegistry: new WeakSet(),

@@ -17,6 +17,8 @@ import {
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import { filterDirectCallableCaptures } from "../utils/callable-capture-filter.ts";
+import { markCallbackAndAncestorsNonHoistable } from "../utils/non-hoistable-callbacks.ts";
 
 /**
  * Pre-register unwrapped types for captured identifiers in a callback body.
@@ -325,7 +327,11 @@ export function transformDeriveCall(
   const { captures: captureExpressions, captureTree } = collector.analyze(
     callback,
   );
-  if (captureExpressions.size === 0) {
+  const explicitCaptureTree = filterDirectCallableCaptures(captureTree, checker);
+  if (explicitCaptureTree.size !== captureTree.size) {
+    markCallbackAndAncestorsNonHoistable(callback, context);
+  }
+  if (explicitCaptureTree.size === 0) {
     // No captures - no transformation needed
     return undefined;
   }
@@ -361,14 +367,14 @@ export function transformDeriveCall(
   // Resolve capture name collisions with the original input parameter name
   const captureNameMap = resolveDeriveCaptureNameCollisions(
     hadZeroParameters ? "" : originalInputParamName,
-    captureTree,
+    explicitCaptureTree,
   );
 
   // Build merged input object
   const mergedInput = buildDeriveInputObject(
     originalInput,
     originalInputParamName,
-    captureTree,
+    explicitCaptureTree,
     captureNameMap,
     factory,
     hadZeroParameters,
@@ -387,7 +393,7 @@ export function transformDeriveCall(
 
   // Initialize PatternBuilder
   const builder = new PatternBuilder(context);
-  builder.setCaptureTree(captureTree);
+  builder.setCaptureTree(explicitCaptureTree);
   builder.setCaptureRenames(captureNameMap);
 
   // Register used names (original input param name)
@@ -459,7 +465,7 @@ export function transformDeriveCall(
   const inputTypeNode = schemaFactory.createDeriveInputSchema(
     originalInputParamName,
     originalInput,
-    captureTree,
+    explicitCaptureTree,
     captureNameMap,
     hadZeroParameters,
   );

@@ -71,6 +71,7 @@ export interface TransformationOptions {
   readonly logger?: (message: string) => void;
   readonly typeRegistry?: TypeRegistry;
   readonly mapCallbackRegistry?: WeakSet<ts.Node>;
+  readonly nonHoistableCallbackRegistry?: WeakSet<ts.Node>;
   readonly syntheticComputeCallbackRegistry?: WeakSet<ts.Node>;
   readonly syntheticComputeOwnedNodeRegistry?: WeakSet<ts.Node>;
   readonly syntheticReactiveCollectionRegistry?:

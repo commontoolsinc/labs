@@ -6,7 +6,8 @@ import { CaptureCollector } from "../capture-collector.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
-import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
+import { filterDirectCallableCaptures } from "../utils/callable-capture-filter.ts";
+import { markCallbackAndAncestorsNonHoistable } from "../utils/non-hoistable-callbacks.ts";
 
 /**
  * ActionStrategy transforms action() calls to handler() calls with explicit closures.
@@ -115,10 +116,13 @@ function transformActionCall(
   // Collect captures
   const collector = new CaptureCollector(checker);
   const { captureTree } = collector.analyze(callback);
-  const explicitCaptureTree = filterDirectCallableActionCaptures(
+  const explicitCaptureTree = filterDirectCallableCaptures(
     captureTree,
     checker,
   );
+  if (explicitCaptureTree.size !== captureTree.size) {
+    markCallbackAndAncestorsNonHoistable(callback, context);
+  }
 
   // Determine event parameter name:
   // - If callback has an event param, preserve its name
@@ -181,32 +185,4 @@ function transformActionCall(
   }
 
   return finalCall;
-}
-
-function filterDirectCallableActionCaptures(
-  captureTree: Map<string, CaptureTreeNode>,
-  checker: ts.TypeChecker,
-): Map<string, CaptureTreeNode> {
-  const filtered = new Map<string, CaptureTreeNode>();
-
-  for (const [name, node] of captureTree) {
-    if (isDirectCallableActionCapture(node, checker)) {
-      continue;
-    }
-    filtered.set(name, node);
-  }
-
-  return filtered;
-}
-
-function isDirectCallableActionCapture(
-  node: CaptureTreeNode,
-  checker: ts.TypeChecker,
-): boolean {
-  if (!node.expression || node.path.length !== 0 || node.properties.size !== 0) {
-    return false;
-  }
-
-  const type = checker.getTypeAtLocation(node.expression);
-  return type.getCallSignatures().length > 0;
 }

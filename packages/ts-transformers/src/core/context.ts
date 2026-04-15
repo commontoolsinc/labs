@@ -152,6 +152,24 @@ export class TransformationContext {
     );
   }
 
+  markAsNonHoistableCallback(node: ts.Node): void {
+    if (this.options.nonHoistableCallbackRegistry) {
+      this.options.nonHoistableCallbackRegistry.add(node);
+    }
+  }
+
+  isNonHoistableCallback(node: ts.Node): boolean {
+    if (this.options.nonHoistableCallbackRegistry?.has(node)) {
+      return true;
+    }
+    const original = ts.getOriginalNode(node);
+    return !!(
+      original &&
+      original !== node &&
+      this.options.nonHoistableCallbackRegistry?.has(original)
+    );
+  }
+
   /**
    * Mark a synthetic callback introduced by a compute wrapper so later phases
    * can classify its contents as compute-owned even when they originate from
