@@ -1189,6 +1189,84 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 5 });
   });
 
+  it("restores a missing stream marker when restarting a handler", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { value: { type: "number" } },
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          eventCount: { type: "number" },
+        },
+      },
+      initial: {
+        internal: {
+          myHandler: { $stream: true },
+          eventCount: 0,
+        },
+      },
+      result: {
+        eventCount: { $alias: { path: ["internal", "eventCount"] } },
+        myHandler: { $alias: { path: ["internal", "myHandler"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            wrapper: "handler",
+            implementation: (
+              _event: unknown,
+              ctx: { eventCount: number },
+            ) => {
+              ctx.eventCount = (ctx.eventCount || 0) + 1;
+            },
+          },
+          inputs: {
+            $event: { $alias: { path: ["internal", "myHandler"] } },
+            $ctx: {
+              eventCount: { $alias: { path: ["internal", "eventCount"] } },
+            },
+          },
+          outputs: {
+            eventCount: { $alias: { path: ["internal", "eventCount"] } },
+          },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "restart handler stream marker");
+
+    setupTrusted(runtime, undefined, pattern, { value: 1 }, resultCell);
+    await runtime.start(resultCell);
+    await resultCell.pull();
+    runtime.runner.stop(resultCell);
+
+    const processCell = resultCell.getSourceCell()!;
+    const tx = runtime.edit();
+    const raw = processCell.withTx(tx).getRawUntyped({
+      frozen: false,
+    }) as Record<string, unknown>;
+    processCell.withTx(tx).setRawUntyped({
+      ...raw,
+      internal: {
+        ...(raw.internal as Record<string, unknown>),
+        myHandler: null,
+      },
+    });
+    tx.commit();
+
+    await runtime.start(resultCell);
+    const result = await resultCell.pull();
+    expect(result).toBeDefined();
+
+    const restored = processCell.getRawUntyped() as Record<string, unknown>;
+    expect(restored.internal).toMatchObject({
+      myHandler: { $stream: true },
+    });
+  });
+
   it("setup with Module wraps to pattern and runs on start", async () => {
     const mod = {
       type: "javascript" as const,
