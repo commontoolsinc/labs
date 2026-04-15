@@ -9,7 +9,6 @@ import {
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
-  JSONSchema,
   JSONSchemaMutable,
   JSONSchemaObjMutable,
 } from "@commonfabric/api";
@@ -17,6 +16,7 @@ import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   detectWrapperViaNode,
+  getArrayElementInfo,
   getPropertyNameText,
   resolveWrapperNode,
   type TypeWithInternals,
@@ -270,15 +270,14 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     // Keep schema-hint propagation behavior aligned with type-based wrapper formatting.
     let childContext = context;
-    let isArrayPropertyOnlyAccess = false;
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
-        isArrayPropertyOnlyAccess = true;
-        const propertyValue = wrapperKindToBrand(wrapperKind);
-        const itemsOverride: JSONSchema = propertyValue
-          ? { type: "object", properties: {}, asCell: [propertyValue] }
-          : { type: "object", properties: {} };
+        const itemsOverride = this.createArrayItemsOverride(
+          innerType,
+          innerTypeNode,
+          context,
+        );
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -288,10 +287,6 @@ export class CommonFabricFormatter implements TypeFormatter {
       childContext,
       innerTypeNode,
     );
-
-    if (isArrayPropertyOnlyAccess) {
-      return innerSchema;
-    }
 
     if (wrapperKind === "Stream") {
       if (typeof innerSchema === "boolean") {
@@ -394,19 +389,18 @@ export class CommonFabricFormatter implements TypeFormatter {
     const shouldPassTypeNode = innerTypeNode && !innerTypeIsGeneric &&
       (!isSyntheticNode || syntheticNodeNeedsHelp);
 
-    // Check for schema hints on the current typeNode and propagate to child context
-    // This allows array-property-only access patterns (e.g., .length) to generate items: { not: true, asCell/asOpaque: true }
+    // Check for schema hints on the current typeNode and propagate to child context.
+    // This allows identity-only/property-only array access patterns to avoid
+    // materializing full item schemas while preserving the wrapper on the array.
     let childContext = context;
-    let isArrayPropertyOnlyAccess = false;
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
-        isArrayPropertyOnlyAccess = true;
-        // Build items override with object stub and the appropriate wrapper semantic
-        const propertyValue = wrapperKindToBrand(wrapperKind);
-        const itemsOverride: JSONSchema = propertyValue
-          ? { type: "unknown", asCell: [propertyValue] }
-          : { type: "unknown" };
+        const itemsOverride = this.createArrayItemsOverride(
+          innerType,
+          shouldPassTypeNode ? innerTypeNode : undefined,
+          context,
+        );
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -416,12 +410,6 @@ export class CommonFabricFormatter implements TypeFormatter {
       childContext,
       shouldPassTypeNode ? innerTypeNode : undefined,
     );
-
-    // For array-property-only access (e.g., .length), don't wrap the result -
-    // we need the array unwrapped so .length is accessible
-    if (isArrayPropertyOnlyAccess) {
-      return innerSchema;
-    }
 
     // Stream<T>: can also reflect inner Cell-ness
     if (wrapperKind === "Stream") {
@@ -446,6 +434,32 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     // Apply wrapper semantics (asCell/asOpaque) to the inner schema
     return this.applyWrapperSemantics(innerSchema, wrapperKind);
+  }
+
+  private createArrayItemsOverride(
+    arrayType: ts.Type,
+    arrayTypeNode: ts.TypeNode | undefined,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const base: JSONSchemaMutable = { type: "unknown" };
+    const elementInfo = getArrayElementInfo(
+      arrayType,
+      context.typeChecker,
+      arrayTypeNode,
+    );
+    if (!elementInfo) {
+      return base;
+    }
+
+    const resolvedElementWrapperKind = elementInfo.elementNode
+      ? resolveWrapperNode(elementInfo.elementNode, context.typeChecker)?.kind
+      : getCellWrapperInfo(elementInfo.elementType, context.typeChecker)?.kind;
+    const elementWrapperKind = resolvedElementWrapperKind === "Default"
+      ? undefined
+      : resolvedElementWrapperKind;
+    return elementWrapperKind
+      ? this.applyWrapperSemantics(base, elementWrapperKind)
+      : base;
   }
 
   private isUnusableInnerType(type: ts.Type): boolean {

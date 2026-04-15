@@ -1,7 +1,44 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import ts from "typescript";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { asObjectSchema, getTypeFromCode } from "../utils.ts";
+import {
+  asObjectSchema,
+  createTestProgram,
+  getTypeFromCode,
+} from "../utils.ts";
+
+function findInterfaceMemberTypeNode(
+  sourceFile: ts.SourceFile,
+  interfaceName: string,
+  memberName: string,
+): ts.TypeNode {
+  let found: ts.TypeNode | undefined;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isInterfaceDeclaration(node) &&
+      node.name.text === interfaceName
+    ) {
+      for (const member of node.members) {
+        if (
+          ts.isPropertySignature(member) &&
+          member.type &&
+          ts.isIdentifier(member.name) &&
+          member.name.text === memberName
+        ) {
+          found = member.type;
+          return;
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  if (!found) {
+    throw new Error(`Member ${interfaceName}.${memberName} not found`);
+  }
+  return found;
+}
 
 describe("Schema: Capability wrapper types", () => {
   it("handles ReadonlyCell, WriteonlyCell, and OpaqueCell", async () => {
@@ -106,5 +143,75 @@ describe("Schema: Capability wrapper types", () => {
     const items = result.properties?.items as Record<string, any>;
     expect(items.type).toBe("array");
     expect(items.items).toEqual({ type: "unknown", asCell: ["cell"] });
+  });
+
+  it("array item hints preserve the outer cell wrapper without marking plain items as cells", async () => {
+    const code = `
+      interface X {
+        items: Writable<{ name: string }[]>;
+      }
+    `;
+    const { checker, sourceFile } = await createTestProgram(code);
+    const symbol = checker.getSymbolsInScope(
+      sourceFile,
+      ts.SymbolFlags.Interface,
+    ).find((candidate) => candidate.name === "X");
+    if (!symbol) throw new Error("Interface X not found");
+
+    const type = checker.getDeclaredTypeOfSymbol(symbol);
+    const itemsTypeNode = findInterfaceMemberTypeNode(
+      sourceFile,
+      "X",
+      "items",
+    );
+    const schemaHints = new WeakMap<ts.Node, { items?: unknown }>();
+    schemaHints.set(itemsTypeNode, { items: false });
+
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(
+      gen.generateSchema(type, checker, undefined, undefined, schemaHints),
+    );
+    const items = result.properties?.items as Record<string, any>;
+
+    expect(items).toEqual({
+      type: "array",
+      items: { type: "unknown" },
+      asCell: ["cell"],
+    });
+  });
+
+  it("array item hints preserve item-level cell wrappers when the element is a cell", async () => {
+    const code = `
+      interface X {
+        items: Writable<Array<Cell<{ name: string }>>>;
+      }
+    `;
+    const { checker, sourceFile } = await createTestProgram(code);
+    const symbol = checker.getSymbolsInScope(
+      sourceFile,
+      ts.SymbolFlags.Interface,
+    ).find((candidate) => candidate.name === "X");
+    if (!symbol) throw new Error("Interface X not found");
+
+    const type = checker.getDeclaredTypeOfSymbol(symbol);
+    const itemsTypeNode = findInterfaceMemberTypeNode(
+      sourceFile,
+      "X",
+      "items",
+    );
+    const schemaHints = new WeakMap<ts.Node, { items?: unknown }>();
+    schemaHints.set(itemsTypeNode, { items: false });
+
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(
+      gen.generateSchema(type, checker, undefined, undefined, schemaHints),
+    );
+    const items = result.properties?.items as Record<string, any>;
+
+    expect(items).toEqual({
+      type: "array",
+      items: { type: "unknown", asCell: ["cell"] },
+      asCell: ["cell"],
+    });
   });
 });

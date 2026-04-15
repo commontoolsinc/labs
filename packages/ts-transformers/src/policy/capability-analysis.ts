@@ -101,6 +101,8 @@ function extendSourceRef(
 const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
+const ARRAY_IDENTITY_WRITER_METHODS = new Set(["push", "unshift", "splice"]);
+const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 const READER_METHODS = new Set(["get"]);
 const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.QuestionQuestionToken,
@@ -464,6 +466,294 @@ function isCallOrNewArgumentUsage(
   return false;
 }
 
+function isArrayIdentityWriterArgumentUsage(
+  usage: ts.Expression,
+): boolean {
+  const parent = usage.parent;
+  if (!parent || !ts.isCallExpression(parent)) {
+    return false;
+  }
+  if (!parent.arguments.includes(usage)) {
+    return false;
+  }
+  const target = unwrapExpression(parent.expression);
+  const methodName = ts.isPropertyAccessExpression(target)
+    ? target.name.text
+    : ts.isElementAccessExpression(target) && target.argumentExpression &&
+        isLiteralElement(target.argumentExpression)
+    ? getLiteralElementText(target.argumentExpression)
+    : undefined;
+  return isArrayIdentityWriterValueArgument(methodName, parent, usage);
+}
+
+function isArrayIdentityWriterValueArgument(
+  methodName: string | undefined,
+  call: ts.CallExpression,
+  usage: ts.Expression,
+): boolean {
+  if (!methodName || !ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
+    return false;
+  }
+  const index = call.arguments.findIndex((argument) => argument === usage);
+  if (index < 0) {
+    return false;
+  }
+  return methodName === "splice" ? index >= 2 : true;
+}
+
+function isOptionalAliasInitializerMemberUsage(usage: ts.Expression): boolean {
+  let current: ts.Expression = usage;
+  let sawOptionalMemberAccess = (ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)) && !!current.questionDotToken;
+  while (current.parent) {
+    const parent = current.parent;
+    if (
+      (ts.isPropertyAccessExpression(parent) ||
+        ts.isElementAccessExpression(parent)) &&
+      parent.expression === current
+    ) {
+      sawOptionalMemberAccess ||= !!parent.questionDotToken;
+      current = parent;
+      continue;
+    }
+    if (
+      (ts.isParenthesizedExpression(parent) ||
+        ts.isAsExpression(parent) ||
+        ts.isTypeAssertionExpression(parent) ||
+        ts.isSatisfiesExpression(parent) ||
+        ts.isNonNullExpression(parent)) &&
+      parent.expression === current
+    ) {
+      current = parent;
+      continue;
+    }
+    return sawOptionalMemberAccess && ts.isVariableDeclaration(parent) &&
+      parent.initializer === current;
+  }
+  return false;
+}
+
+function getIdentityArrayLocalNameForElementUsage(
+  usage: ts.Node,
+): string | undefined {
+  const parent = usage.parent;
+  if (!parent || !ts.isArrayLiteralExpression(parent)) {
+    return undefined;
+  }
+
+  let current: ts.Expression = parent;
+  while (current.parent) {
+    const parentNode = current.parent;
+    if (
+      (ts.isParenthesizedExpression(parentNode) ||
+        ts.isAsExpression(parentNode) ||
+        ts.isTypeAssertionExpression(parentNode) ||
+        ts.isSatisfiesExpression(parentNode) ||
+        ts.isNonNullExpression(parentNode)) &&
+      parentNode.expression === current
+    ) {
+      current = parentNode;
+      continue;
+    }
+
+    if (
+      (ts.isPropertyAccessExpression(parentNode) ||
+        ts.isElementAccessExpression(parentNode)) &&
+      parentNode.expression === current
+    ) {
+      current = parentNode;
+      continue;
+    }
+
+    if (
+      ts.isCallExpression(parentNode) &&
+      parentNode.expression === current
+    ) {
+      current = parentNode;
+      continue;
+    }
+
+    if (
+      ts.isVariableDeclaration(parentNode) &&
+      parentNode.initializer === current &&
+      ts.isIdentifier(parentNode.name)
+    ) {
+      return parentNode.name.text;
+    }
+
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function getIdentityArrayLocalNameForWriterArgumentUsage(
+  usage: ts.Expression,
+): string | undefined {
+  const parent = usage.parent;
+  if (!parent || !ts.isCallExpression(parent)) {
+    return undefined;
+  }
+  const target = unwrapExpression(parent.expression);
+  const receiver = ts.isPropertyAccessExpression(target) ||
+      ts.isElementAccessExpression(target)
+    ? unwrapExpression(target.expression)
+    : undefined;
+  const methodName = getCallMethodNameFromExpression(parent.expression);
+  if (!receiver || !ts.isIdentifier(receiver)) {
+    return undefined;
+  }
+  if (!isArrayIdentityWriterValueArgument(methodName, parent, usage)) {
+    return undefined;
+  }
+  return receiver.text;
+}
+
+function collectArrayLocalsPassedToSet(
+  body: ts.ConciseBody,
+  checker?: ts.TypeChecker,
+): ReadonlySet<string> {
+  const arrayInitializerLocals = new Set<string>();
+  const setArgumentLocals = new Set<string>();
+  const structurallyAccessedArrayLocals = new Set<string>();
+
+  const expressionIsIdentityArrayInitializer = (
+    expression: ts.Expression,
+  ): boolean => {
+    const current = unwrapExpression(expression);
+    if (ts.isArrayLiteralExpression(current)) {
+      return true;
+    }
+    if (ts.isCallExpression(current)) {
+      const target = unwrapExpression(current.expression);
+      if (
+        ts.isPropertyAccessExpression(target) ||
+        ts.isElementAccessExpression(target)
+      ) {
+        const methodName = getCallMethodNameFromExpression(current.expression);
+        return !!methodName &&
+          ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS.has(methodName) &&
+          expressionIsIdentityArrayInitializer(target.expression);
+      }
+    }
+    return false;
+  };
+
+  const isCallReceiverForMethod = (
+    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    methods: ReadonlySet<string>,
+  ): boolean => {
+    const methodName = getCallMethodNameFromExpression(node);
+    return !!methodName &&
+      methods.has(methodName) &&
+      ts.isCallExpression(node.parent) &&
+      node.parent.expression === node;
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isExpression(node.initializer) &&
+      expressionIsIdentityArrayInitializer(node.initializer)
+    ) {
+      arrayInitializerLocals.add(node.name.text);
+    }
+
+    if (ts.isCallExpression(node)) {
+      const methodName = getCallMethodNameFromExpression(node.expression);
+      const receiver = getCallReceiverFromExpression(node.expression);
+      const receiverIsCellLike = !checker ||
+        (receiver &&
+          isCellLikeType(checker.getTypeAtLocation(receiver), checker));
+      if (methodName === "set" && receiverIsCellLike) {
+        for (const argument of node.arguments) {
+          const current = unwrapExpression(argument);
+          if (ts.isIdentifier(current)) {
+            setArgumentLocals.add(current.text);
+          }
+        }
+      }
+    }
+
+    if (ts.isPropertyAccessExpression(node)) {
+      const current = unwrapExpression(node.expression);
+      const isSetCallReceiver = node.name.text === "set" &&
+        ts.isCallExpression(node.parent) &&
+        node.parent.expression === node;
+      const isIdentityWriterReceiver = isCallReceiverForMethod(
+        node,
+        ARRAY_IDENTITY_WRITER_METHODS,
+      );
+      if (
+        ts.isIdentifier(current) && !isSetCallReceiver &&
+        !isIdentityWriterReceiver
+      ) {
+        structurallyAccessedArrayLocals.add(current.text);
+      }
+    }
+
+    if (ts.isElementAccessExpression(node)) {
+      const current = unwrapExpression(node.expression);
+      const isSetCallReceiver = node.argumentExpression &&
+        isLiteralElement(node.argumentExpression) &&
+        getLiteralElementText(node.argumentExpression) === "set" &&
+        ts.isCallExpression(node.parent) &&
+        node.parent.expression === node;
+      const isIdentityWriterReceiver = isCallReceiverForMethod(
+        node,
+        ARRAY_IDENTITY_WRITER_METHODS,
+      );
+      if (
+        ts.isIdentifier(current) && !isSetCallReceiver &&
+        !isIdentityWriterReceiver
+      ) {
+        structurallyAccessedArrayLocals.add(current.text);
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(body);
+  return new Set(
+    [...arrayInitializerLocals].filter((name) =>
+      setArgumentLocals.has(name) && !structurallyAccessedArrayLocals.has(name)
+    ),
+  );
+}
+
+function getCallReceiverFromExpression(
+  expression: ts.Expression,
+): ts.Expression | undefined {
+  const current = unwrapExpression(expression);
+  if (ts.isPropertyAccessExpression(current)) {
+    return current.expression;
+  }
+  if (ts.isElementAccessExpression(current)) {
+    return current.expression;
+  }
+  return undefined;
+}
+
+function getCallMethodNameFromExpression(
+  expression: ts.Expression,
+): string | undefined {
+  const current = unwrapExpression(expression);
+  if (ts.isPropertyAccessExpression(current)) {
+    return current.name.text;
+  }
+  if (
+    ts.isElementAccessExpression(current) &&
+    current.argumentExpression &&
+    isLiteralElement(current.argumentExpression)
+  ) {
+    return getLiteralElementText(current.argumentExpression);
+  }
+  return undefined;
+}
+
 function isKnownIdentityEqualsCallee(
   expr: ts.Expression,
   checker?: ts.TypeChecker,
@@ -506,6 +796,29 @@ function isKnownIdentityEqualsCall(
   checker?: ts.TypeChecker,
 ): boolean {
   return isKnownIdentityEqualsCallee(call.expression, checker);
+}
+
+function isKnownIdentityNavigationCallee(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): boolean {
+  const current = unwrapExpression(expr);
+  if (!ts.isIdentifier(current) || current.text !== "navigateTo") {
+    return false;
+  }
+  if (!checker) {
+    return true;
+  }
+  const symbol = checker.getSymbolAtLocation(current);
+  return resolvesToCommonFabricSymbol(symbol, checker, "navigateTo");
+}
+
+function isKnownIdentityArgumentCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): boolean {
+  return isKnownIdentityEqualsCall(call, checker) ||
+    isKnownIdentityNavigationCallee(call.expression, checker);
 }
 
 function isAliasShape(binding: AliasBinding): binding is AliasShape {
@@ -737,6 +1050,7 @@ export function analyzeFunctionCapabilities(
     const states = new Map<string, MutableCapabilityState>();
     const aliases = new Map<string, SourceRef>();
     const aliasShapes = new Map<string, AliasShape>();
+    const optionalPresenceAliases = new Set<string>();
     const localArrayElementBindings = new Map<string, AliasBinding>();
     const localMapValueBindings = new Map<string, AliasBinding>();
     const parameterStateKeys: string[] = [];
@@ -824,11 +1138,43 @@ export function analyzeFunctionCapabilities(
       state.hasIdentityUse = true;
     };
 
+    const hasRecordedIdentityPath = (
+      name: string,
+      path: readonly string[],
+    ): boolean => {
+      return ensureState(name).rawIdentityPaths.has(encodePath(path));
+    };
+
+    const hasRecordedIdentityUseRef = (ref: SourceRef): boolean => {
+      const materialized = materializeSourceRef(ref);
+      if (materialized.dynamic) {
+        return false;
+      }
+      return hasRecordedIdentityPath(materialized.root, materialized.path);
+    };
+
     const isCellLikeExpression = (expr: ts.Expression): boolean => {
       if (!checker) {
         return false;
       }
       return isCellLikeType(checker.getTypeAtLocation(expr), checker);
+    };
+
+    const isPrimitiveLikeExpression = (expr: ts.Expression): boolean => {
+      if (!checker) {
+        return false;
+      }
+      const type = checker.getTypeAtLocation(expr);
+      const flags = type.flags;
+      return !!(
+        flags &
+        (ts.TypeFlags.BooleanLike |
+          ts.TypeFlags.NumberLike |
+          ts.TypeFlags.StringLike |
+          ts.TypeFlags.BigIntLike |
+          ts.TypeFlags.ESSymbolLike |
+          ts.TypeFlags.EnumLike)
+      );
     };
 
     for (let index = 0; index < fn.parameters.length; index++) {
@@ -878,6 +1224,7 @@ export function analyzeFunctionCapabilities(
     // encounters a synthetic identifier with no parent pointer, it can skip
     // the blanket read if the alias already has a more specific path.
     const aliasesWithSpecificPaths = new Set<string>();
+    const identityArrayLocals = collectArrayLocalsPassedToSet(fn.body, checker);
 
     const getIdentifierName = (
       expression: ts.Expression,
@@ -1274,7 +1621,7 @@ export function analyzeFunctionCapabilities(
       }
     };
 
-    const recordLocalArrayPush = (
+    const recordLocalArrayIdentityWrite = (
       arrayName: string,
       args: readonly ts.Expression[],
     ): void => {
@@ -1451,7 +1798,9 @@ export function analyzeFunctionCapabilities(
       ref: SourceRef,
       expr?: ts.Expression,
     ): void => {
-      const cellLike = expr ? isCellLikeExpression(expr) : false;
+      const cellLike = expr
+        ? isCellLikeExpression(expr) || !isPrimitiveLikeExpression(expr)
+        : false;
       if (ref.dynamic) {
         markWildcard(ref.root);
       } else if (ref.path.length === 0) {
@@ -1460,6 +1809,15 @@ export function analyzeFunctionCapabilities(
       } else {
         recordIdentityPath(ref.root, ref.path, { cellLike });
       }
+    };
+
+    const markArrayItemIdentityUseRef = (ref: SourceRef): void => {
+      const materialized = materializeSourceRef(ref);
+      if (materialized.dynamic) {
+        markWildcard(materialized.root);
+        return;
+      }
+      recordIdentityPath(materialized.root, [...materialized.path, "0"]);
     };
 
     const resolveInterproceduralSummary = (
@@ -1487,6 +1845,7 @@ export function analyzeFunctionCapabilities(
     ): void => {
       const savedAliases = new Map(aliases);
       const savedAliasShapes = new Map(aliasShapes);
+      const savedOptionalPresenceAliases = new Set(optionalPresenceAliases);
       const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
       const savedLocalArrayElementBindings = new Map(
         localArrayElementBindings,
@@ -1528,6 +1887,10 @@ export function analyzeFunctionCapabilities(
         aliasShapes.clear();
         for (const [name, shape] of savedAliasShapes) {
           aliasShapes.set(name, shape);
+        }
+        optionalPresenceAliases.clear();
+        for (const name of savedOptionalPresenceAliases) {
+          optionalPresenceAliases.add(name);
         }
         aliasesWithSpecificPaths.clear();
         for (const name of savedSpecificPaths) {
@@ -1695,6 +2058,15 @@ export function analyzeFunctionCapabilities(
               // Truthiness checks on array-element aliases (e.g. find() results)
               // don't require loading the element payload.
             } else if (
+              source.path.length > 0 &&
+              !source.dynamic &&
+              (optionalPresenceAliases.has(node.text) ||
+                !isPrimitiveLikeExpression(usage)) &&
+              isBooleanConditionUsage(usage)
+            ) {
+              // Truthiness checks on local aliases of source properties only
+              // require presence, not the aliased payload shape.
+            } else if (
               !(
                 parent &&
                 ts.isPropertyAccessExpression(parent) &&
@@ -1719,11 +2091,44 @@ export function analyzeFunctionCapabilities(
                 parent &&
                 ts.isCallExpression(parent) &&
                 parent.arguments.includes(usage) &&
-                isKnownIdentityEqualsCall(parent, checker)
+                isKnownIdentityArgumentCall(parent, checker)
               );
+              const identityArrayLocal =
+                getIdentityArrayLocalNameForElementUsage(usage);
+              const identityOnlyArrayElementUse = !!identityArrayLocal &&
+                identityArrayLocals.has(identityArrayLocal);
+              const identityArrayWriterLocal =
+                getIdentityArrayLocalNameForWriterArgumentUsage(usage);
+              const identityOnlyArrayWriterArgumentUse =
+                !!identityArrayWriterLocal &&
+                identityArrayLocals.has(identityArrayWriterLocal);
+              const arrayIdentityWriterArgumentUse =
+                isArrayIdentityWriterArgumentUsage(usage);
               if (
+                arrayIdentityWriterArgumentUse &&
+                !identityOnlyArrayWriterArgumentUse
+              ) {
+                if (
+                  source.arrayElement &&
+                  !resolvedSource.dynamic
+                ) {
+                  trackReadRef(resolvedSource);
+                }
+                if (
+                  hasRecordedIdentityUseRef(source) &&
+                  !resolvedSource.dynamic
+                ) {
+                  recordIdentityPath(resolvedSource.root, resolvedSource.path, {
+                    cellLike: isCellLikeExpression(usage),
+                  });
+                } else {
+                  trackReadRef(resolvedSource);
+                }
+              } else if (
                 isCallOrNewArgumentUsage(usage) ||
-                isPassThroughIdentifierUsage(node)
+                isPassThroughIdentifierUsage(node) ||
+                identityOnlyArrayElementUse ||
+                identityOnlyArrayWriterArgumentUse
               ) {
                 if (
                   resolvedSource.path.length === 0 && !resolvedSource.dynamic
@@ -1744,6 +2149,15 @@ export function analyzeFunctionCapabilities(
                 ) {
                   recordIdentityPath(resolvedSource.root, resolvedSource.path, {
                     cellLike: isCellLikeExpression(usage),
+                  });
+                } else if (
+                  (identityOnlyArrayElementUse ||
+                    identityOnlyArrayWriterArgumentUse) &&
+                  !resolvedSource.dynamic
+                ) {
+                  recordIdentityPath(resolvedSource.root, resolvedSource.path, {
+                    cellLike: isCellLikeExpression(usage) ||
+                      !isPrimitiveLikeExpression(usage),
                   });
                 } else {
                   trackReadRef(
@@ -1769,7 +2183,8 @@ export function analyzeFunctionCapabilities(
           const parent = node.parent;
           if (
             !(parent && ts.isCallExpression(parent) &&
-              parent.expression === node)
+              parent.expression === node) &&
+            !isOptionalAliasInitializerMemberUsage(node)
           ) {
             const ref = resolveSourceRef(node);
             if (ref) {
@@ -1820,15 +2235,22 @@ export function analyzeFunctionCapabilities(
         const localMethodName = getCallMethodName(node.expression);
         if (
           localReceiverName &&
-          localMethodName === "push" &&
+          localMethodName &&
+          ARRAY_IDENTITY_WRITER_METHODS.has(localMethodName) &&
           node.arguments.length > 0
         ) {
-          recordLocalArrayPush(localReceiverName, node.arguments);
+          recordLocalArrayIdentityWrite(
+            localReceiverName,
+            localMethodName === "splice"
+              ? node.arguments.slice(2)
+              : node.arguments,
+          );
         } else if (localReceiverName && localMethodName === "set") {
           recordLocalMapSet(localReceiverName, node.arguments[1]);
         }
 
         const identityEqualsCall = isKnownIdentityEqualsCall(node, checker);
+        const identityArgumentCall = isKnownIdentityArgumentCall(node, checker);
         const interproceduralHandledArgs = new Set<number>();
         const calleeSummary = resolveInterproceduralSummary(node);
         if (calleeSummary) {
@@ -1942,6 +2364,26 @@ export function analyzeFunctionCapabilities(
               markIdentityUseRef(receiver, node.expression.expression);
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
+            } else if (ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
+              trackWriteRef(receiver);
+              let hasIdentityArgument = false;
+              for (const argument of node.arguments) {
+                const argumentRef = resolveSourceRef(argument);
+                const rawArgument = unwrapExpression(argument);
+                const rawAlias = ts.isIdentifier(rawArgument)
+                  ? aliases.get(rawArgument.text)
+                  : undefined;
+                if (rawAlias?.arrayElement || argumentRef?.arrayElement) {
+                  trackReadRef(materializeSourceRef(rawAlias ?? argumentRef!));
+                }
+                if (argumentRef && hasRecordedIdentityUseRef(argumentRef)) {
+                  hasIdentityArgument = true;
+                  markIdentityUseRef(argumentRef, argument);
+                }
+              }
+              if (hasIdentityArgument) {
+                markArrayItemIdentityUseRef(receiver);
+              }
             } else if (READER_METHODS.has(methodName)) {
               // If the .get() result was already resolved with a more specific
               // path by the member-access handler (e.g. notes.get().length →
@@ -1962,7 +2404,7 @@ export function analyzeFunctionCapabilities(
 
         // Passing a tracked root object into an opaque helper can conceal
         // indirect traversal/mutation; conservatively disable shrinking.
-        if (!identityEqualsCall) {
+        if (!identityArgumentCall) {
           for (let index = 0; index < node.arguments.length; index++) {
             if (interproceduralHandledArgs.has(index)) {
               continue;
@@ -1977,7 +2419,7 @@ export function analyzeFunctionCapabilities(
             markWildcard(source.root);
           }
         }
-        if (identityEqualsCall) {
+        if (identityArgumentCall) {
           for (const argument of node.arguments) {
             const source = resolveSourceRef(argument);
             if (source) {
@@ -2002,6 +2444,17 @@ export function analyzeFunctionCapabilities(
         const initRef = node.initializer && ts.isExpression(node.initializer)
           ? buildAliasBindingFromExpression(node.initializer)
           : undefined;
+        if (ts.isIdentifier(node.name)) {
+          if (
+            node.initializer &&
+            ts.isExpression(node.initializer) &&
+            isOptionalAliasInitializerMemberUsage(node.initializer)
+          ) {
+            optionalPresenceAliases.add(node.name.text);
+          } else {
+            optionalPresenceAliases.delete(node.name.text);
+          }
+        }
         assignBindingAlias(node.name, initRef);
       }
 
@@ -2017,10 +2470,27 @@ export function analyzeFunctionCapabilities(
         }
       }
 
-      if (
-        ts.isSpreadElement(node) ||
-        ts.isSpreadAssignment(node)
-      ) {
+      if (ts.isSpreadElement(node)) {
+        const spreadExpr = node.expression;
+        if (spreadExpr) {
+          const ref = resolveSourceRef(spreadExpr);
+          if (ref) {
+            trackReadRef(ref);
+            const identityArrayLocal = getIdentityArrayLocalNameForElementUsage(
+              node,
+            );
+            if (
+              identityArrayLocal && identityArrayLocals.has(identityArrayLocal)
+            ) {
+              markArrayItemIdentityUseRef(ref);
+            }
+          } else {
+            markWildcardFromExpression(spreadExpr);
+          }
+        }
+      }
+
+      if (ts.isSpreadAssignment(node)) {
         const spreadExpr = node.expression;
         if (spreadExpr) {
           markWildcardFromExpression(spreadExpr);
@@ -2057,6 +2527,7 @@ export function analyzeFunctionCapabilities(
 
         const savedAliases = new Map(aliases);
         const savedAliasShapes = new Map(aliasShapes);
+        const savedOptionalPresenceAliases = new Set(optionalPresenceAliases);
         const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
         const savedLocalArrayElementBindings = new Map(
           localArrayElementBindings,
@@ -2087,6 +2558,10 @@ export function analyzeFunctionCapabilities(
           aliasShapes.clear();
           for (const [name, shape] of savedAliasShapes) {
             aliasShapes.set(name, shape);
+          }
+          optionalPresenceAliases.clear();
+          for (const name of savedOptionalPresenceAliases) {
+            optionalPresenceAliases.add(name);
           }
           aliasesWithSpecificPaths.clear();
           for (const name of savedSpecificPaths) {

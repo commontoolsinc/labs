@@ -38,14 +38,11 @@ export default pattern(() => {
             floatLiteral: {
                 type: "number"
             },
-            boolLiteral: {
-                type: "boolean"
-            },
             strLiteral: {
                 type: "string"
             }
         },
-        required: ["value", "numLiteral", "floatLiteral", "boolLiteral", "strLiteral"]
+        required: ["value", "numLiteral", "floatLiteral", "strLiteral"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
