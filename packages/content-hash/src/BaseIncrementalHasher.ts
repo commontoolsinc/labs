@@ -5,11 +5,16 @@ import type { IncrementalHasher } from "./interface.ts";
  * Base implementation for the `IncrementalHasher` interface.
  */
 export abstract class BaseIncrementalHasher implements IncrementalHasher {
+  #done: boolean = false;
+
   digest(): Uint8Array;
   digest(encoding: "base64url"): string;
   digest(encoding: string | undefined): Uint8Array | string;
   digest(encoding?: string | undefined): Uint8Array | string {
+    this.#throwIfDone();
+
     const result = this._rawDigest();
+    this.#done = true;
 
     switch (encoding) {
       case "base64url": {
@@ -24,6 +29,17 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
     }
   }
 
-  abstract update(data: Uint8Array): void;
+  update(data: Uint8Array) {
+    this.#throwIfDone();
+    this._rawUpdate(data);
+  }
+
+  #throwIfDone() {
+    if (this.#done) {
+      throw new Error("Cannot use instance: `digest()` already done.");
+    }
+  }
+
+  protected abstract _rawUpdate(data: Uint8Array): void;
   protected abstract _rawDigest(): Uint8Array;
 }

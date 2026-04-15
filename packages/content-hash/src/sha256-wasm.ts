@@ -147,7 +147,7 @@ class WasmCollectingHasher extends BaseIncrementalHasher {
   /** Offset into `currentChunk` for next write. */
   #currentOffset = 0;
 
-  update(data: Uint8Array) {
+  protected _rawUpdate(data: Uint8Array) {
     const length = data.length;
 
     this.#prepChunk(length);
@@ -218,30 +218,20 @@ class WasmCollectingHasher extends BaseIncrementalHasher {
  * can `update()` it.
  */
 class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
-  #hasher: IHasher | null = acquireHasher(this);
+  #hasher: IHasher = acquireHasher(this);
 
   protected _rawUpdate(data: Uint8Array) {
-    this.#getHasher().update(data);
+    this.#hasher.update(data);
   }
 
   protected _rawDigest(): Uint8Array {
-    const hasher = this.#getHasher();
+    const hasher = this.#hasher;
     const result: Uint8Array = hasher.digest("binary");
 
     releaseHasher(hasher);
-    this.#hasher = null;
     return result;
   }
 
-  #getHasher(): IHasher {
-    const hasher = this.#hasher;
-
-    if (!hasher) {
-      throw new Error("Already digested.");
-    }
-
-    return hasher;
-  }
 }
 
 /**

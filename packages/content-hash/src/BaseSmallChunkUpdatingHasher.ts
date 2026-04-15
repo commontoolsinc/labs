@@ -29,13 +29,15 @@ export abstract class BaseSmallChunkUpdatingHasher
     return super.digest(encoding);
   }
 
-  update(data: Uint8Array) {
+  override update(data: Uint8Array) {
     const length = data.length;
 
     if (length <= SMALLS_SIZE) {
       const smallsOffset = this.#smallsOffset;
 
       if (length <= (SMALLS_SIZE - smallsOffset)) {
+        // Note: We accept that in the case where the instance is done, a call
+        // that ends up here won't throw the "already done" error.
         this.#smalls.set(data, smallsOffset);
         this.#smallsOffset += length;
         return;
@@ -43,7 +45,7 @@ export abstract class BaseSmallChunkUpdatingHasher
     }
 
     this.#updateFromSmalls();
-    this._rawUpdate(data);
+    super.update(data);
   }
 
   #updateFromSmalls() {
@@ -61,6 +63,4 @@ export abstract class BaseSmallChunkUpdatingHasher
     this._rawUpdate(smallsFinal);
     this.#smallsOffset = 0;
   }
-
-  protected abstract _rawUpdate(data: Uint8Array): void;
 }

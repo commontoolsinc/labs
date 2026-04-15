@@ -13,7 +13,7 @@ import type { IncrementalHasher } from "./interface.ts";
 class NobleHasher extends BaseIncrementalHasher {
   #hasher = sha256.create();
 
-  update(data: Uint8Array) {
+  protected _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
