@@ -21,10 +21,10 @@ import {
 
 interface Input {
   // Counter value that increments each time the stream is invoked
-  counter: Default<number, 0>;
+  counter: number | Default<0>;
 
   // Log of invocation timestamps
-  invocationLog: Default<string[], []>;
+  invocationLog: string[] | Default<[]>;
 }
 
 /** A #cross-piece-test-server that exposes a stream for testing cross-piece invocation. */

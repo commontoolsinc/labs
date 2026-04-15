@@ -46,12 +46,12 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface SimpleListItem {
   text: string;
-  indented: Default<boolean, false>;
-  done: Default<boolean, false>;
+  indented: boolean | Default<false>;
+  done: boolean | Default<false>;
 }
 
 export interface SimpleListInput {
-  items?: Writable<Default<SimpleListItem[], []>>;
+  items?: Writable<SimpleListItem[] | Default<[]>>;
 }
 
 interface SimpleListOutput {

@@ -99,8 +99,8 @@ const unmarkAsPaid = handler<
 
 interface PatternInput {
   overrideAuth?: Auth;
-  manuallyPaid?: Writable<Default<string[], []>>;
-  demoMode?: Writable<Default<boolean, true>>;
+  manuallyPaid?: Writable<string[] | Default<[]>>;
+  demoMode?: Writable<boolean | Default<true>>;
 }
 
 export default pattern<PatternInput>(

@@ -9,7 +9,7 @@ import {
 } from "commonfabric";
 
 interface PatternState {
-  value: Default<number, 0>;
+  value: number | Default<0>;
 }
 
 // In this case we do not have to type our event parameter because it is not used in the body.

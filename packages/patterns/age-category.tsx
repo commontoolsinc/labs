@@ -91,7 +91,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 
 // ===== Interface =====
 export interface AgeCategoryModuleInput {
-  ageCategory: Default<AgeCategory, "adult">;
+  ageCategory: AgeCategory | Default<"adult">;
 }
 
 // ===== Constants =====

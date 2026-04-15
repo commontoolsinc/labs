@@ -207,7 +207,7 @@ Manual test verified all 16 acceptance criteria except DEFAULT_SPOTS:
 Orchestrator invoked pattern-maker to fix both issues:
 
 1. **DEFAULT_SPOTS fix**: Inlined the three default spot values directly as
-   type-level literal in Default<ParkingSpot[], [{spotNumber: "1", label: "Near
+   type-level literal in ParkingSpot[] | Default<[{spotNumber: "1", label: "Near
    entrance", ...}, {spotNumber: "5", ...}, {spotNumber: "12", label: "Compact
    only", ...}]>. (Default<> second parameter must be a type literal, so const
    reference cannot be used.)

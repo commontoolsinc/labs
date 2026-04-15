@@ -16,11 +16,11 @@ import {
 /** A #todo item */
 export interface TodoItem {
   title: string;
-  done: Default<boolean, false>;
+  done: boolean | Default<false>;
 }
 
 interface TodoListInput {
-  items?: Writable<Default<TodoItem[], []>>;
+  items?: Writable<TodoItem[] | Default<[]>>;
 }
 
 interface TodoListOutput {

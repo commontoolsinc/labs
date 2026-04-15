@@ -22,13 +22,13 @@ type AnnotationKind = "note" | "todo" | "wish";
 type AnnotationStatus = "open" | "in-progress" | "resolved" | "dismissed";
 
 interface AnnotationInput {
-  content: Writable<Default<string, "">>;
-  kind: Writable<Default<AnnotationKind, "note">>;
-  status: Writable<Default<AnnotationStatus, "open">>;
-  targetPiece: Writable<Default<MentionablePiece | null, null>>;
-  blockedBy: Writable<Default<AnnotationPiece[], []>>;
-  isAnnotation: Default<boolean, true>;
-  isHidden: Default<boolean, false>;
+  content: Writable<string | Default<"">>;
+  kind: Writable<AnnotationKind | Default<"note">>;
+  status: Writable<AnnotationStatus | Default<"open">>;
+  targetPiece: Writable<MentionablePiece | null | Default<null>>;
+  blockedBy: Writable<AnnotationPiece[] | Default<[]>>;
+  isAnnotation: boolean | Default<true>;
+  isHidden: boolean | Default<false>;
 }
 ```
 
@@ -84,14 +84,14 @@ worker, bot, automation
 type AgentStatus = "idle" | "running" | "error";
 
 interface AgentInput {
-  agentName?: Writable<Default<string, "Unnamed Agent">>;
-  directive?: Writable<Default<string, "">>;
-  enabled?: Writable<Default<boolean, true>>;
-  learned?: Writable<Default<string, "">>;
-  status?: Writable<Default<AgentStatus, "idle">>;
-  lastRun?: Writable<Default<string, "">>;
-  lastRunSummary?: Writable<Default<string, "">>;
-  isAgent?: Default<boolean, true>;
+  agentName?: Writable<string | Default<"Unnamed Agent">>;
+  directive?: Writable<string | Default<"">>;
+  enabled?: Writable<boolean | Default<true>>;
+  learned?: Writable<string | Default<"">>;
+  status?: Writable<AgentStatus | Default<"idle">>;
+  lastRun?: Writable<string | Default<"">>;
+  lastRunSummary?: Writable<string | Default<"">>;
+  isAgent?: boolean | Default<true>;
 }
 ```
 
@@ -148,7 +148,7 @@ A simple counter demo.
 
 ```ts
 interface CounterInput {
-  value?: Writable<Default<number, 0>>;
+  value?: Writable<number | Default<0>>;
 }
 ```
 
@@ -174,13 +174,13 @@ LLM-friendly title-based handlers.
 ```ts
 interface DoItem {
   title: string;
-  done: Default<boolean, false>;
-  indent: Default<number, 0>;
-  aiEnabled: Default<boolean, false>;
+  done: boolean | Default<false>;
+  indent: number | Default<0>;
+  aiEnabled: boolean | Default<false>;
 }
 
 interface DoListInput {
-  items?: Writable<Default<DoItem[], []>>;
+  items?: Writable<DoItem[] | Default<[]>>;
 }
 ```
 
@@ -215,11 +215,11 @@ A todo list with AI suggestions.
 ```ts
 interface TodoItem {
   title: string;
-  done: Default<boolean, false>;
+  done: boolean | Default<false>;
 }
 
 interface TodoListInput {
-  items?: Writable<Default<TodoItem[], []>>;
+  items?: Writable<TodoItem[] | Default<[]>>;
 }
 ```
 
@@ -246,12 +246,12 @@ containers.
 ```ts
 interface SimpleListItem {
   text: string;
-  indented: Default<boolean, false>;
-  done: Default<boolean, false>;
+  indented: boolean | Default<false>;
+  done: boolean | Default<false>;
 }
 
 interface SimpleListInput {
-  items?: Writable<Default<SimpleListItem[], []>>;
+  items?: Writable<SimpleListItem[] | Default<[]>>;
 }
 ```
 
@@ -278,14 +278,14 @@ store-specific layouts.
 ```ts
 interface ShoppingItem {
   title: string;
-  done: Default<boolean, false>;
-  aisleSeed: Default<number, 0>;
-  aisleOverride: Default<string, "">;
+  done: boolean | Default<false>;
+  aisleSeed: number | Default<0>;
+  aisleOverride: string | Default<"">;
 }
 
 interface Input {
-  items: Writable<Default<ShoppingItem[], []>>;
-  storeLayout: Writable<Default<string, "">>;
+  items: Writable<ShoppingItem[] | Default<[]>>;
+  storeLayout: Writable<string | Default<"">>;
 }
 ```
 
@@ -314,10 +314,10 @@ A note with wiki-links, backlinks, and embedding support. Managed by
 
 ```ts
 type Input = {
-  title?: Writable<Default<string, "Untitled Note">>;
-  content?: Writable<Default<string, "">>;
-  isHidden?: Default<boolean, false>;
-  noteId?: Default<string, "">;
+  title?: Writable<string | Default<"Untitled Note">>;
+  content?: Writable<string | Default<"">>;
+  isHidden?: boolean | Default<false>;
+  noteId?: string | Default<"">;
   parentNotebook?: any;
 };
 ```
@@ -347,10 +347,10 @@ Notebook pattern managing notes and nested notebooks. Creates and organizes
 
 ```ts
 interface Input {
-  title?: Default<string, "Notebook">;
-  notes?: Writable<Default<NotePiece[], []>>;
-  isNotebook?: Default<boolean, true>;
-  isHidden?: Default<boolean, false>;
+  title?: string | Default<"Notebook">;
+  notes?: Writable<NotePiece[] | Default<[]>>;
+  isNotebook?: boolean | Default<true>;
+  isHidden?: boolean | Default<false>;
   parentNotebook?: any;
 }
 ```
@@ -386,7 +386,7 @@ microphone button to record, release to transcribe.
 
 ```ts
 type Input = {
-  title?: Writable<Default<string, "Voice Note">>;
+  title?: Writable<string | Default<"Voice Note">>;
 };
 ```
 
@@ -403,8 +403,8 @@ interface TranscriptionData {
 }
 
 type Output = {
-  transcription: Default<TranscriptionData | null, null>;
-  notes: Default<TranscriptionData[], []>;
+  transcription: TranscriptionData | null | Default<null>;
+  notes: TranscriptionData[] | Default<[]>;
 };
 ```
 
@@ -419,7 +419,7 @@ today highlighted.
 
 ```ts
 interface CalendarInput {
-  events?: Writable<Default<EventPiece[], []>>;
+  events?: Writable<EventPiece[] | Default<[]>>;
 }
 ```
 
@@ -446,10 +446,10 @@ Weekly calendar with drag-and-drop event creation and resizing. Manages
 
 ```ts
 interface Input {
-  title?: Default<string, "Weekly Calendar">;
-  events: Writable<Default<EventPiece[], []>>;
-  isCalendar?: Default<boolean, true>;
-  isHidden?: Default<boolean, false>;
+  title?: string | Default<"Weekly Calendar">;
+  events: Writable<EventPiece[] | Default<[]>>;
+  isCalendar?: boolean | Default<true>;
+  isHidden?: boolean | Default<false>;
 }
 ```
 
@@ -485,23 +485,23 @@ can be linked together with labels (friend, spouse, colleague, etc.).
 ```ts
 interface Contact {
   name: string;
-  email: Default<string, "">;
-  phone: Default<string, "">;
-  company: Default<string, "">;
-  tags: Default<string[], []>;
-  notes: Default<string, "">;
+  email: string | Default<"">;
+  phone: string | Default<"">;
+  company: string | Default<"">;
+  tags: string[] | Default<[]>;
+  notes: string | Default<"">;
   createdAt: number;
 }
 
 interface Relationship {
   fromName: string;
   toName: string;
-  label: Default<string, "">;
+  label: string | Default<"">;
 }
 
 interface ContactBookInput {
-  contacts: Writable<Default<Contact[], []>>;
-  relationships: Writable<Default<Relationship[], []>>;
+  contacts: Writable<Contact[] | Default<[]>>;
+  relationships: Writable<Relationship[] | Default<[]>>;
 }
 ```
 
@@ -527,8 +527,8 @@ habits complete for today and see your progress over time.
 ```ts
 interface Habit {
   name: string;
-  icon: Default<string, "✓">;
-  color: Default<string, "#3b82f6">;
+  icon: string | Default<"✓">;
+  color: string | Default<"#3b82f6">;
 }
 
 interface HabitLog {
@@ -538,8 +538,8 @@ interface HabitLog {
 }
 
 interface HabitTrackerInput {
-  habits: Writable<Default<Habit[], []>>;
-  logs: Writable<Default<HabitLog[], []>>;
+  habits: Writable<Habit[] | Default<[]>>;
+  logs: Writable<HabitLog[] | Default<[]>>;
 }
 ```
 
@@ -570,7 +570,7 @@ type ItemType = "book" | "article" | "paper" | "video";
 type ItemStatus = "want" | "reading" | "finished" | "abandoned";
 
 interface ReadingListInput {
-  items?: Writable<Default<ReadingItemPiece[], []>>;
+  items?: Writable<ReadingItemPiece[] | Default<[]>>;
 }
 ```
 
@@ -608,7 +608,7 @@ Multi-file pattern using sub-patterns for the form and data views.
 interface Expense {
   description: string;
   amount: number;
-  category: Default<string, "Other">;
+  category: string | Default<"Other">;
   date: string; // YYYY-MM-DD
 }
 
@@ -618,8 +618,8 @@ interface CategoryBudget {
 }
 
 interface Input {
-  expenses: Writable<Default<Expense[], []>>;
-  budgets: Writable<Default<CategoryBudget[], []>>;
+  expenses: Writable<Expense[] | Default<[]>>;
+  budgets: Writable<CategoryBudget[] | Default<[]>>;
 }
 ```
 
@@ -643,7 +643,7 @@ mentionables. Deploy this to have a conversational AI interface.
 
 ```ts
 type ChatInput = {
-  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+  messages?: Writable<Array<BuiltInLLMMessage> | Default<[]>>;
   tools?: any;
   theme?: any;
   system?: string;
@@ -693,10 +693,10 @@ interface User {
 }
 
 interface LobbyInput {
-  chatName: Default<string, "Group Chat">;
-  messages: Writable<Default<Message[], []>>;
-  users: Writable<Default<User[], []>>;
-  sessionId: Writable<Default<string, "">>;
+  chatName: string | Default<"Group Chat">;
+  messages: Writable<Message[] | Default<[]>>;
+  users: Writable<User[] | Default<[]>>;
+  sessionId: Writable<string | Default<"">>;
 }
 ```
 
@@ -724,14 +724,14 @@ positioning, and item location corrections. Generates layout data used by
 ```ts
 interface Aisle {
   name: string;
-  description: Default<string, "">;
+  description: string | Default<"">;
 }
 
 interface Department {
   name: string;
   icon: string;
-  location: Default<WallPosition, "unassigned">;
-  description: Default<string, "">;
+  location: WallPosition | Default<"unassigned">;
+  description: string | Default<"">;
 }
 
 interface Entrance {
@@ -741,16 +741,16 @@ interface Entrance {
 interface ItemLocation {
   itemName: string;
   correctAisle: string;
-  incorrectAisle: Default<string, "">;
+  incorrectAisle: string | Default<"">;
   timestamp: number;
 }
 
 interface Input {
-  storeName: Writable<Default<string, "My Store">>;
-  aisles: Writable<Default<Aisle[], []>>;
-  departments: Writable<Default<Department[], []>>;
-  entrances: Writable<Default<Entrance[], []>>;
-  itemLocations: Writable<Default<ItemLocation[], []>>;
+  storeName: Writable<string | Default<"My Store">>;
+  aisles: Writable<Aisle[] | Default<[]>>;
+  departments: Writable<Department[] | Default<[]>>;
+  entrances: Writable<Entrance[] | Default<[]>>;
+  itemLocations: Writable<ItemLocation[] | Default<[]>>;
 }
 ```
 
@@ -778,8 +778,8 @@ rendering images when an LLM has a URL to display.
 
 ```ts
 interface ImageInput {
-  url?: Default<string, "">;
-  caption?: Default<string, "">;
+  url?: string | Default<"">;
+  caption?: string | Default<"">;
 }
 ```
 
@@ -809,9 +809,9 @@ result with summary, confidence, and sources. Supports follow-up refinement.
 ```ts
 type Input = {
   /** The research question to investigate */
-  situation: Default<string, "What are the latest developments in AI agents?">;
+  situation: string | Default<"What are the latest developments in AI agents?">;
   /** Message history (managed by llmDialog) */
-  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+  messages?: Writable<Array<BuiltInLLMMessage> | Default<[]>>;
   /** Optional context cells to provide to the agent */
   context?: { [id: string]: any };
 };
@@ -871,7 +871,7 @@ for personalized text generation.
 
 ```ts
 type Input = {
-  title?: Default<string, "Profile-Aware Writer">;
+  title?: string | Default<"Profile-Aware Writer">;
 };
 ```
 
@@ -901,10 +901,10 @@ Detail/edit view for a single calendar event.
 
 ```ts
 interface EventDetailInput {
-  title?: Writable<Default<string, "">>;
-  date?: Writable<Default<string, "">>;
-  time?: Writable<Default<string, "">>;
-  notes?: Writable<Default<string, "">>;
+  title?: Writable<string | Default<"">>;
+  date?: Writable<string | Default<"">>;
+  time?: Writable<string | Default<"">>;
+  notes?: Writable<string | Default<"">>;
 }
 ```
 
@@ -935,11 +935,11 @@ or as a standalone contact editor.
 ```ts
 interface Contact {
   name: string;
-  email: Default<string, "">;
-  phone: Default<string, "">;
-  company: Default<string, "">;
-  tags: Default<string[], []>;
-  notes: Default<string, "">;
+  email: string | Default<"">;
+  phone: string | Default<"">;
+  company: string | Default<"">;
+  tags: string[] | Default<[]>;
+  notes: string | Default<"">;
   createdAt: number;
 }
 
@@ -970,15 +970,15 @@ type ItemType = "book" | "article" | "paper" | "video";
 type ItemStatus = "want" | "reading" | "finished" | "abandoned";
 
 interface ReadingItemDetailInput {
-  title?: Writable<Default<string, "">>;
-  author?: Writable<Default<string, "">>;
-  url?: Writable<Default<string, "">>;
-  type?: Writable<Default<ItemType, "article">>;
-  status?: Writable<Default<ItemStatus, "want">>;
-  rating?: Writable<Default<number | null, null>>;
-  notes?: Writable<Default<string, "">>;
-  addedAt?: Default<number, 0>;
-  finishedAt?: Default<number | null, null>;
+  title?: Writable<string | Default<"">>;
+  author?: Writable<string | Default<"">>;
+  url?: Writable<string | Default<"">>;
+  type?: Writable<ItemType | Default<"article">>;
+  status?: Writable<ItemStatus | Default<"want">>;
+  rating?: Writable<number | null | Default<null>>;
+  notes?: Writable<string | Default<"">>;
+  addedAt?: number | Default<0>;
+  finishedAt?: number | null | Default<null>;
 }
 ```
 
@@ -1019,8 +1019,8 @@ Generates a concise summary of provided context using an LLM.
 
 ```ts
 type SummaryInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 ```
 
@@ -1044,8 +1044,8 @@ Generates a checklist of actionable steps from a topic and context.
 
 ```ts
 type ChecklistInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 ```
 
@@ -1054,7 +1054,7 @@ type ChecklistInput = {
 ```ts
 type ChecklistItem = {
   label: string;
-  done: Default<boolean, false>;
+  done: boolean | Default<false>;
 };
 
 type ChecklistOutput = {
@@ -1074,8 +1074,8 @@ Generates a clarifying question with optional multiple-choice options.
 
 ```ts
 type QuestionInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 ```
 
@@ -1102,8 +1102,8 @@ Rendered in a `<pre>` tag with monospace styling.
 
 ```ts
 type DiagramInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 ```
 
@@ -1128,8 +1128,8 @@ Rendered via `<cf-svg>` web component for scalable vector output.
 
 ```ts
 type SvgDiagramInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 ```
 
@@ -1154,9 +1154,9 @@ suggests spending categories that sum to the given budget ceiling.
 
 ```ts
 type BudgetInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
-  maxAmount?: Default<number, 1000>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
+  maxAmount?: number | Default<1000>;
 };
 ```
 
@@ -1165,7 +1165,7 @@ type BudgetInput = {
 ```ts
 type BudgetItem = {
   name: string;
-  amount: Default<number, 0>;
+  amount: number | Default<0>;
 };
 
 type BudgetOutput = {
@@ -1195,7 +1195,7 @@ type PersonListInput = Record<string, never>;
 type Person = {
   contact: {
     name: string;
-    email: Default<string, "">;
+    email: string | Default<"">;
   };
 };
 
@@ -1289,7 +1289,7 @@ re-summarizes.
 ```ts
 type Input = {
   repoUrl: Writable<
-    Default<string, "https://github.com/anthropics/claude-code">
+    string | Default<"https://github.com/anthropics/claude-code">
   >;
 };
 ```
@@ -1316,12 +1316,12 @@ cf-link-preview, cf-grid
 ```ts
 interface Bookmark {
   url: string;
-  title: Default<string, "">;
-  description: Default<string, "">;
+  title: string | Default<"">;
+  description: string | Default<"">;
 }
 
 interface BookmarksInput {
-  bookmarks?: Writable<Default<Bookmark[], []>>;
+  bookmarks?: Writable<Bookmark[] | Default<[]>>;
 }
 ```
 
@@ -1346,7 +1346,7 @@ metadata and screenshot.
 
 ```ts
 interface LinkPreviewInput {
-  url: Default<string, "https://github.com">;
+  url: string | Default<"https://github.com">;
 }
 ```
 

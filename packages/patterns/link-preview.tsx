@@ -1,7 +1,7 @@
 import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 
 interface LinkPreviewInput {
-  url: Default<string, "https://github.com">;
+  url: string | Default<"https://github.com">;
 }
 
 export const LinkPreview = pattern<LinkPreviewInput, LinkPreviewInput>(

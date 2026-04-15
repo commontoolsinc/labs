@@ -5,7 +5,7 @@ type Input = {
 };
 
 type Result = {
-  tags: Default<string[], []>;
+  tags: string[] | Default<[]>;
 };
 
 const updateTags = handler<

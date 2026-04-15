@@ -13,7 +13,7 @@ import {
 } from "commonfabric";
 
 type Input = {
-  title?: Default<string, "Profile-Aware Writer">;
+  title?: string | Default<"Profile-Aware Writer">;
 };
 
 const handleSend = handler<

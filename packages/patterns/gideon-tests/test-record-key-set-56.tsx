@@ -17,13 +17,12 @@ interface Item {
 
 interface Input {
   // Empty record to test creating new keys
-  emptyRecord: Default<Record<string, Item>, Record<PropertyKey, never>>;
+  emptyRecord: Record<string, Item> | Default<Record<PropertyKey, never>>;
   // Pre-populated record to test updating existing keys
-  populatedRecord: Default<
-    Record<string, Item>,
-    { existing: { value: "preset"; count: 0 } }
-  >;
-  logs: Default<string[], []>;
+  populatedRecord:
+    | Record<string, Item>
+    | Default<{ existing: { value: "preset"; count: 0 } }>;
+  logs: string[] | Default<[]>;
 }
 
 // ============================================================

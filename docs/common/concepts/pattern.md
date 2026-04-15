@@ -21,8 +21,8 @@ The type declares what data it expects and _how_ it is accessed.
 
 ```typescript
 interface TodoInput {
-  items?: Writable<Default<Todo[], []>>;
-  title?: Writable<Default<string, "untitled">>;
+  items?: Writable<Todo[] | Default<[]>>;
+  title?: Writable<string | Default<"untitled">>;
 }
 
 interface TodoOutput {
@@ -52,7 +52,7 @@ interface MyInput {
 **Guideline:**
 
 - Use `Writable<>` when you want to call .set(), .push(), .update(), etc on it. Use plain types otherwise. It's explicitly ok to pass a plain type to a pattern that requests Writable<>, the framework will handle write intent transparently.
-- Add `Default<Type, Value>` with a reasonable initial state for most inputs, unless it really makes no sense to use the pattern without that value being passed in.
+- Add `Type | Default<Value>` with a reasonable initial state for most inputs, unless it really makes no sense to use the pattern without that value being passed in.
 
 ### Output Types
 

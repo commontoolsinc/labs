@@ -89,8 +89,8 @@ export interface Membership {
 
 export interface Bank {
   name: string;
-  hasCheckingAccount: Default<boolean, false>;
-  hasCreditCard: Default<boolean, false>;
+  hasCheckingAccount: boolean | Default<false>;
+  hasCreditCard: boolean | Default<false>;
   notes: string;
 }
 
@@ -188,18 +188,18 @@ const EMPTY_EMPLOYMENT: Employment = {
 // ============================================================================
 
 interface ProfileInput {
-  self?: Writable<Default<Person, typeof EMPTY_PERSON>>;
-  partner?: Writable<Default<Person, typeof EMPTY_PERSON>>;
-  children?: Writable<Default<Person[], []>>;
-  parents?: Writable<Default<Person[], []>>;
-  inlaws?: Writable<Default<Person[], []>>;
-  addresses?: Writable<Default<Address[], []>>;
-  vehicles?: Writable<Default<Vehicle[], []>>;
-  memberships?: Writable<Default<Membership[], []>>;
-  banks?: Writable<Default<Bank[], []>>;
-  employment?: Writable<Default<Employment, typeof EMPTY_EMPLOYMENT>>;
-  notes?: Writable<Default<string, "">>;
-  learned?: Writable<Default<LearnedSection, typeof EMPTY_LEARNED>>;
+  self?: Writable<Person | Default<typeof EMPTY_PERSON>>;
+  partner?: Writable<Person | Default<typeof EMPTY_PERSON>>;
+  children?: Writable<Person[] | Default<[]>>;
+  parents?: Writable<Person[] | Default<[]>>;
+  inlaws?: Writable<Person[] | Default<[]>>;
+  addresses?: Writable<Address[] | Default<[]>>;
+  vehicles?: Writable<Vehicle[] | Default<[]>>;
+  memberships?: Writable<Membership[] | Default<[]>>;
+  banks?: Writable<Bank[] | Default<[]>>;
+  employment?: Writable<Employment | Default<typeof EMPTY_EMPLOYMENT>>;
+  notes?: Writable<string | Default<"">>;
+  learned?: Writable<LearnedSection | Default<typeof EMPTY_LEARNED>>;
 }
 
 /** Profile blackboard for personal data coordination. #profile */

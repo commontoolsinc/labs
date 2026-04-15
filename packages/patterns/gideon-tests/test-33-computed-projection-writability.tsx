@@ -34,10 +34,12 @@ interface Source {
 
 // Schema definition for default value
 interface InputSchema {
-  source: Default<Source, {
-    auth: { token: "initial-token"; expiresAt: 0; refreshCount: 0 };
-    name: "Test Source";
-  }>;
+  source:
+    | Source
+    | Default<{
+      auth: { token: "initial-token"; expiresAt: 0; refreshCount: 0 };
+      name: "Test Source";
+    }>;
 }
 
 // Pattern output type - describes the inner value, not the cell wrapper

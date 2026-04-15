@@ -115,13 +115,13 @@ export interface GmailExtractorInput {
   };
 
   /** Display title for the extractor (shown in UI) */
-  title?: Default<string, "Email Items">;
+  title?: string | Default<"Email Items">;
 
   /** Whether to resolve inline images (cid: references) to base64 */
-  resolveInlineImages?: Default<boolean, false>;
+  resolveInlineImages?: boolean | Default<false>;
 
   /** Maximum number of emails to fetch */
-  limit?: Default<number, 100>;
+  limit?: number | Default<100>;
 
   // Note: model parameter removed - hardcoded to fix HTTP 400 errors
   // when passing variables through building block input.

@@ -12,7 +12,7 @@ import {
 
 export default pattern<{
   items: Writable<
-    Default<string[], ["alpha", "bravo", "charlie", "delta", "echo"]>
+    string[] | Default<["alpha", "bravo", "charlie", "delta", "echo"]>
   >;
 }>(({ items }) => {
   // Anti-pattern: nonPrivateRandom() inside computed() produces different output each run

@@ -26,17 +26,19 @@ import {
 
 interface Item {
   title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Uncategorized">;
+  done: boolean | Default<false>;
+  category: string | Default<"Uncategorized">;
 }
 
 interface Input {
-  items: Default<Item[], [
-    { title: "Milk"; done: false; category: "Dairy" },
-    { title: "Bread"; done: false; category: "Bakery" },
-    { title: "Cheese"; done: true; category: "Dairy" },
-  ]>;
-  log: Default<string[], []>;
+  items:
+    | Item[]
+    | Default<[
+      { title: "Milk"; done: false; category: "Dairy" },
+      { title: "Bread"; done: false; category: "Bakery" },
+      { title: "Cheese"; done: true; category: "Dairy" },
+    ]>;
+  log: string[] | Default<[]>;
 }
 
 // Handler to run the exact repro sequence (moved to module scope)

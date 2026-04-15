@@ -81,9 +81,9 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Module Input Type =====
 export interface LocationTrackModuleInput {
   /** Array of captured location points */
-  locations: Default<LocationPoint[], []>;
+  locations: LocationPoint[] | Default<[]>;
   /** Optional label for this track (e.g., "Morning run", "Commute") */
-  label: Default<string, "">;
+  label: string | Default<"">;
 }
 
 // ===== Handlers =====

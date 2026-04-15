@@ -84,11 +84,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 
 export interface CustomFieldModuleInput {
   /** Field name (e.g., "Employee ID", "SKU") */
-  name: Default<string, "">;
+  name: string | Default<"">;
   /** Field value (stored as string, parsed by UI) */
-  value: Default<string, "">;
+  value: string | Default<"">;
   /** Value type determines input UI */
-  valueType: Default<CustomFieldValueType, "text">;
+  valueType: CustomFieldValueType | Default<"text">;
 }
 
 // Output interface with unknown for UI properties to prevent OOM (CT-1148)

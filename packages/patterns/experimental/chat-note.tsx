@@ -40,16 +40,16 @@ const MODELS = [
 ] as const;
 
 type Input = {
-  title?: Writable<Default<string, "Chat Note">>;
-  content?: Writable<Default<string, "">>;
-  isHidden?: Default<boolean, false>;
-  noteId?: Default<string, "">;
+  title?: Writable<string | Default<"Chat Note">>;
+  content?: Writable<string | Default<"">>;
+  isHidden?: boolean | Default<false>;
+  noteId?: string | Default<"">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new ChatNotes. */
-  linkPattern?: Writable<Default<string, "">>;
+  linkPattern?: Writable<string | Default<"">>;
   /** Parent notebook reference (passed via SELF from notebook.tsx) */
   parentNotebook?: any;
   /** Selected model for generation. Defaults to Sonnet 4.5 */
-  model?: Writable<Default<string, "anthropic:claude-sonnet-4-5">>;
+  model?: Writable<string | Default<"anthropic:claude-sonnet-4-5">>;
 };
 
 type LLMMessage = {
@@ -61,12 +61,12 @@ type LLMMessage = {
 type Output = {
   [NAME]?: string;
   [UI]: VNode;
-  mentioned: Default<Array<MentionablePiece>, []>;
+  mentioned: Array<MentionablePiece> | Default<[]>;
   backlinks: MentionablePiece[];
   parentNotebook: any;
-  content: Default<string, "">;
-  isHidden: Default<boolean, false>;
-  noteId: Default<string, "">;
+  content: string | Default<"">;
+  isHidden: boolean | Default<false>;
+  noteId: string | Default<"">;
   isGenerating: boolean;
   editContent: Stream<{ detail: { value: string } }>;
 };
@@ -348,8 +348,8 @@ const ChatNote = pattern<Input, Output>(
     [SELF]: self,
   }) => {
     const { allPieces } =
-      wish<{ allPieces: Default<MinimalPiece[], []> }>({ query: "/" }).result;
-    const { result: mentionable } = wish<Default<MentionablePiece[], []>>({
+      wish<{ allPieces: MinimalPiece[] | Default<[]> }>({ query: "/" }).result;
+    const { result: mentionable } = wish<MentionablePiece[] | Default<[]>>({
       query: "#mentionable",
     });
     const mentioned = Writable.of<MentionablePiece[]>([]);

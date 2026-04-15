@@ -61,7 +61,7 @@ export const searchPattern = pattern<
 });
 
 const SummaryIndex = pattern<Input, Output>(() => {
-  const mentionable = wish<Default<Writable<SummarizablePiece>[], []>>({
+  const mentionable = wish<Writable<SummarizablePiece>[] | Default<[]>>({
     query: "#mentionable",
   }).result;
 

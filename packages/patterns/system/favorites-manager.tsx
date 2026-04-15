@@ -21,7 +21,10 @@ type Favorite = {
 
 const onRemoveFavorite = handler<
   Record<string, never>,
-  { favorites: Writable<Default<Array<Favorite>, []>>; item: Writable<unknown> }
+  {
+    favorites: Writable<Array<Favorite> | Default<[]>>;
+    item: Writable<unknown>;
+  }
 >((_, { favorites, item }) => {
   const favorite = favorites.get().find((f: Favorite) => f.cell.equals(item));
   if (favorite) favorites.remove(favorite);
@@ -36,7 +39,7 @@ const onUpdateUserTags = handler<
 
 export default pattern<Record<string, never>>((_) => {
   // Use wish() to access favorites from home.tsx via defaultPattern
-  const { result: favorites } = wish<Default<Array<Favorite>, []>>({
+  const { result: favorites } = wish<Array<Favorite> | Default<[]>>({
     query: "#favorites",
   });
 

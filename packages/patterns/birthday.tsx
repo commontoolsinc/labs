@@ -75,11 +75,11 @@ const getMonthName = (month: string): string => {
 // ===== Types =====
 export interface BirthdayModuleInput {
   /** Birth month (1-12 as string) */
-  birthMonth: Default<string, "">;
+  birthMonth: string | Default<"">;
   /** Birth day (1-31 as string) */
-  birthDay: Default<string, "">;
+  birthDay: string | Default<"">;
   /** Birth year (e.g., "1990") */
-  birthYear: Default<string, "">;
+  birthYear: string | Default<"">;
 }
 
 // ===== The Pattern =====

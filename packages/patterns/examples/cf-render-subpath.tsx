@@ -13,7 +13,7 @@
 import { computed, Default, NAME, pattern, UI } from "commonfabric";
 
 interface State {
-  title: Default<string, "Test Pattern">;
+  title: string | Default<"Test Pattern">;
 }
 
 export default pattern<State>((state) => {

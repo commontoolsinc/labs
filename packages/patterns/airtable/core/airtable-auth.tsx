@@ -161,49 +161,53 @@ export function createPreviewUI(
  * Use direct property access: `airtableAuthPiece.auth`
  */
 export type AirtableAuth = {
-  accessToken: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  accessToken: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 // Selected scopes configuration
 export type SelectedScopes = {
-  "data.records:read": Default<boolean, true>;
-  "data.records:write": Default<boolean, false>;
-  "data.recordComments:read": Default<boolean, false>;
-  "data.recordComments:write": Default<boolean, false>;
-  "schema.bases:read": Default<boolean, true>;
-  "schema.bases:write": Default<boolean, false>;
-  "webhook:manage": Default<boolean, false>;
+  "data.records:read": boolean | Default<true>;
+  "data.records:write": boolean | Default<false>;
+  "data.recordComments:read": boolean | Default<false>;
+  "data.recordComments:write": boolean | Default<false>;
+  "schema.bases:read": boolean | Default<true>;
+  "schema.bases:write": boolean | Default<false>;
+  "webhook:manage": boolean | Default<false>;
 };
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
-    "data.records:read": true;
-    "data.records:write": false;
-    "data.recordComments:read": false;
-    "data.recordComments:write": false;
-    "schema.bases:read": true;
-    "schema.bases:write": false;
-    "webhook:manage": false;
-  }>;
-  auth: Default<AirtableAuth, {
-    accessToken: "";
-    tokenType: "";
-    scope: [];
-    expiresIn: 0;
-    expiresAt: 0;
-    refreshToken: "";
-    user: { email: ""; name: ""; picture: "" };
-  }>;
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
+      "data.records:read": true;
+      "data.records:write": false;
+      "data.recordComments:read": false;
+      "data.recordComments:write": false;
+      "schema.bases:read": true;
+      "schema.bases:write": false;
+      "webhook:manage": false;
+    }>;
+  auth:
+    | AirtableAuth
+    | Default<{
+      accessToken: "";
+      tokenType: "";
+      scope: [];
+      expiresIn: 0;
+      expiresAt: 0;
+      refreshToken: "";
+      user: { email: ""; name: ""; picture: "" };
+    }>;
 }
 
 /** Airtable OAuth authentication for Airtable APIs. #airtableAuth */

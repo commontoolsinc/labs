@@ -14,8 +14,8 @@ import {
 // ===== Types =====
 
 type QuestionInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 
 type QuestionOutput = {

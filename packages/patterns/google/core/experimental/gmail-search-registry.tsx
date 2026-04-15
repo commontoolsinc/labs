@@ -60,7 +60,7 @@ export interface AgentTypeRegistry {
 
 export interface GmailSearchRegistryInput {
   // Flat array of all queries (workaround for CLI display bug CT-1104)
-  queries?: Default<SharedQuery[], []>;
+  queries?: SharedQuery[] | Default<[]>;
 }
 
 /** Community registry for shared Gmail search queries. #gmailSearchRegistry */

@@ -7,7 +7,7 @@ import { Default, NAME, pattern, UI, Writable, equals } from "commonfabric";
 
 interface Item {
   title: string;
-  done: Default<boolean, false>;
+  done: boolean | Default<false>;
 }
 
 interface Input {

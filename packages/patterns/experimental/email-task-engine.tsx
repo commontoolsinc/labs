@@ -271,7 +271,7 @@ const executeCreateNote = handler<
     taskCurrentLabelId: Writable<string>;
     hiddenTasks: Writable<string[]>;
     processingTasks: Writable<string[]>;
-    allPieces: Writable<Default<NotePiece[], []>>;
+    allPieces: Writable<NotePiece[] | Default<[]>>;
   }
 >(
   (

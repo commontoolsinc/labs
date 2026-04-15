@@ -81,7 +81,7 @@ const goToPiece = handler<unknown, { piece: Piece }>(
 
 // Pattern input/output type
 type PatternInOutput = {
-  cellRef: Default<Piece[], []>;
+  cellRef: Piece[] | Default<[]>;
 };
 
 // Main pattern that manages an array of piece references

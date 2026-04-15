@@ -30,29 +30,29 @@ interface LatLng {
 interface TripStop {
   position: LatLng;
   title: string;
-  description: Default<string, "">;
-  icon: Default<string, "pin">;
-  draggable: Default<boolean, false>;
+  description: string | Default<"">;
+  icon: string | Default<"pin">;
+  draggable: boolean | Default<false>;
 }
 
 interface AreaOfInterest {
   center: LatLng;
   radius: number; // meters
   title: string;
-  description: Default<string, "">;
-  color: Default<string, "#3b82f6">;
+  description: string | Default<"">;
+  color: string | Default<"#3b82f6">;
 }
 
 interface Input {
-  tripName: Default<string, "My Bay Area Trip">;
-  stops: Cell<Default<TripStop[], []>>;
-  areasOfInterest: Cell<Default<AreaOfInterest[], []>>;
-  showRoute: Cell<Default<boolean, true>>;
-  center: Cell<Default<LatLng | null, null>>;
-  zoom: Cell<Default<number, 9>>;
-  selectedStopIndex: Cell<Default<number | null, null>>;
-  fitBoundsTrigger: Cell<Default<number, 0>>;
-  initialized: Cell<Default<boolean, false>>;
+  tripName: string | Default<"My Bay Area Trip">;
+  stops: Cell<TripStop[] | Default<[]>>;
+  areasOfInterest: Cell<AreaOfInterest[] | Default<[]>>;
+  showRoute: Cell<boolean | Default<true>>;
+  center: Cell<LatLng | null | Default<null>>;
+  zoom: Cell<number | Default<9>>;
+  selectedStopIndex: Cell<number | null | Default<null>>;
+  fitBoundsTrigger: Cell<number | Default<0>>;
+  initialized: Cell<boolean | Default<false>>;
 }
 
 interface Output {

@@ -23,11 +23,11 @@ interface TranscriptionData {
 }
 
 type Input = {
-  title?: Writable<Default<string, "Voice Note Test">>;
+  title?: Writable<string | Default<"Voice Note Test">>;
 };
 
 type Output = {
-  transcription: Default<TranscriptionData | null, null>;
+  transcription: TranscriptionData | null | Default<null>;
 };
 
 const VoiceNoteSimple = pattern<Input, Output>(

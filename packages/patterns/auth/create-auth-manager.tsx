@@ -45,9 +45,9 @@ export type { AuthInfo, AuthState, TokenExpiryWarning };
 // =============================================================================
 
 export interface AuthManagerInput {
-  requiredScopes?: Default<string[], []>;
-  accountType?: Default<"default" | "personal" | "work", "default">;
-  debugMode?: Default<boolean, false>;
+  requiredScopes?: string[] | Default<[]>;
+  accountType?: "default" | "personal" | "work" | Default<"default">;
+  debugMode?: boolean | Default<false>;
 }
 
 export interface AuthManagerOutput {

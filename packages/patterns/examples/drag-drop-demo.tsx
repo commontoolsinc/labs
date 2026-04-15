@@ -17,8 +17,8 @@ interface Item {
 }
 
 interface DragDropDemoInput {
-  availableItems: Default<Item[], []>;
-  droppedItems: Default<Item[], []>;
+  availableItems: Item[] | Default<[]>;
+  droppedItems: Item[] | Default<[]>;
 }
 
 interface DragDropDemoOutput {

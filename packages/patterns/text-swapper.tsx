@@ -11,8 +11,8 @@ import { Default, handler, pattern, UI, Writable } from "commonfabric";
 type EditingSide = "left" | "right" | null;
 
 interface Input {
-  leftText: Writable<Default<string, "Hello">>;
-  rightText: Writable<Default<string, "World">>;
+  leftText: Writable<string | Default<"Hello">>;
+  rightText: Writable<string | Default<"World">>;
 }
 
 interface Output {

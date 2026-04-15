@@ -87,7 +87,7 @@ export default pattern<
   {
     situation: string;
     context: { [id: string]: any };
-    initialResults: Default<Writable<unknown>[], []>;
+    initialResults: Writable<unknown>[] | Default<[]>;
   },
   WishState<Writable<any>> & { [UI]: VNode }
 >(({ situation, context, initialResults }) => {

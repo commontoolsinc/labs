@@ -19,14 +19,14 @@ import Suggestion from "../system/suggestion.tsx";
 /** A #do item — a task that may do itself */
 export interface DoItem {
   title: string;
-  done: Default<boolean, false>;
-  indent: Default<number, 0>; // 0 = root, 1 = child, 2 = grandchild...
-  aiEnabled: Default<boolean, false>; // future: flag for AI auto-completion
-  attachments: Default<Writable<any>[], []>;
+  done: boolean | Default<false>;
+  indent: number | Default<0>; // 0 = root, 1 = child, 2 = grandchild...
+  aiEnabled: boolean | Default<false>; // future: flag for AI auto-completion
+  attachments: Writable<any>[] | Default<[]>;
 }
 
 interface DoListInput {
-  items?: Writable<Default<DoItem[], []>>;
+  items?: Writable<DoItem[] | Default<[]>>;
 }
 
 interface DoListOutput {
