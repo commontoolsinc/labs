@@ -739,6 +739,69 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis does not treat non-cell set calls as identity array sinks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      class Map<K, V> {
+        set(key: K, value: V): this;
+      }
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece: Piece }) => {
+        const piece = input.piece;
+        const updated = [piece];
+        const cache = new Map<string, Piece[]>();
+        cache.set("items", updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece"), false);
+    assert(input.readPaths.includes("piece"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps array locals structural when methods inspect items before set",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const state: {
+        items: {
+          set(value: unknown): void;
+        };
+      };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece: Piece }) => {
+        const updated = [input.piece];
+        if (updated.length > 0) {
+          state.items.set(updated);
+        }
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece"), false);
+    assert(input.readPaths.includes("piece"));
+    assertEquals(input.readPaths.includes("piece.unused"), false);
+  },
+);
+
+Deno.test(
   "Capability analysis restores local array bindings after nested callbacks",
   () => {
     const { program, sourceFile } = createProgramWithSource(

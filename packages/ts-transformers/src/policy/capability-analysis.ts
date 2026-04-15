@@ -573,6 +573,7 @@ function getIdentityArrayLocalNameForElementUsage(
 
 function collectArrayLocalsPassedToSet(
   body: ts.ConciseBody,
+  checker?: ts.TypeChecker,
 ): ReadonlySet<string> {
   const arrayInitializerLocals = new Set<string>();
   const setArgumentLocals = new Set<string>();
@@ -610,7 +611,11 @@ function collectArrayLocalsPassedToSet(
 
     if (ts.isCallExpression(node)) {
       const methodName = getCallMethodNameFromExpression(node.expression);
-      if (methodName === "set") {
+      const receiver = getCallReceiverFromExpression(node.expression);
+      const receiverIsCellLike = !checker ||
+        (receiver &&
+          isCellLikeType(checker.getTypeAtLocation(receiver), checker));
+      if (methodName === "set" && receiverIsCellLike) {
         for (const argument of node.arguments) {
           const current = unwrapExpression(argument);
           if (ts.isIdentifier(current)) {
@@ -620,9 +625,24 @@ function collectArrayLocalsPassedToSet(
       }
     }
 
+    if (ts.isPropertyAccessExpression(node)) {
+      const current = unwrapExpression(node.expression);
+      const isSetCallReceiver = node.name.text === "set" &&
+        ts.isCallExpression(node.parent) &&
+        node.parent.expression === node;
+      if (ts.isIdentifier(current) && !isSetCallReceiver) {
+        structurallyAccessedArrayLocals.add(current.text);
+      }
+    }
+
     if (ts.isElementAccessExpression(node)) {
       const current = unwrapExpression(node.expression);
-      if (ts.isIdentifier(current)) {
+      const isSetCallReceiver = node.argumentExpression &&
+        isLiteralElement(node.argumentExpression) &&
+        getLiteralElementText(node.argumentExpression) === "set" &&
+        ts.isCallExpression(node.parent) &&
+        node.parent.expression === node;
+      if (ts.isIdentifier(current) && !isSetCallReceiver) {
         structurallyAccessedArrayLocals.add(current.text);
       }
     }
@@ -636,6 +656,19 @@ function collectArrayLocalsPassedToSet(
       setArgumentLocals.has(name) && !structurallyAccessedArrayLocals.has(name)
     ),
   );
+}
+
+function getCallReceiverFromExpression(
+  expression: ts.Expression,
+): ts.Expression | undefined {
+  const current = unwrapExpression(expression);
+  if (ts.isPropertyAccessExpression(current)) {
+    return current.expression;
+  }
+  if (ts.isElementAccessExpression(current)) {
+    return current.expression;
+  }
+  return undefined;
 }
 
 function getCallMethodNameFromExpression(
@@ -1125,7 +1158,7 @@ export function analyzeFunctionCapabilities(
     // encounters a synthetic identifier with no parent pointer, it can skip
     // the blanket read if the alias already has a more specific path.
     const aliasesWithSpecificPaths = new Set<string>();
-    const identityArrayLocals = collectArrayLocalsPassedToSet(fn.body);
+    const identityArrayLocals = collectArrayLocalsPassedToSet(fn.body, checker);
 
     const getIdentifierName = (
       expression: ts.Expression,
