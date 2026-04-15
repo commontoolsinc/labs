@@ -24,7 +24,7 @@ import {
   initWasm,
   sha256Wasm,
 } from "../src/sha256-wasm.ts";
-import type { IncrementalHasher, Sha256Fn } from "../src/interface.ts";
+import type { IncrementalHasher, DigestFn } from "../src/interface.ts";
 import { FIXTURES } from "../test/fixtures.ts";
 
 await initWasm();
@@ -40,7 +40,7 @@ type CreateHasherFn = () => IncrementalHasher;
 
 interface Impl {
   name: string;
-  sha256: Sha256Fn;
+  sha256: DigestFn;
   createHasher: CreateHasherFn;
 }
 
