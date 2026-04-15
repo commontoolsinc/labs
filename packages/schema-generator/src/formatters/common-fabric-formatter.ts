@@ -270,15 +270,10 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     // Keep schema-hint propagation behavior aligned with type-based wrapper formatting.
     let childContext = context;
-    let isArrayPropertyOnlyAccess = false;
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
-        isArrayPropertyOnlyAccess = true;
-        const propertyValue = wrapperKindToBrand(wrapperKind);
-        const itemsOverride: JSONSchema = propertyValue
-          ? { type: "object", properties: {}, asCell: [propertyValue] }
-          : { type: "object", properties: {} };
+        const itemsOverride: JSONSchema = { type: "unknown" };
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -288,10 +283,6 @@ export class CommonFabricFormatter implements TypeFormatter {
       childContext,
       innerTypeNode,
     );
-
-    if (isArrayPropertyOnlyAccess) {
-      return innerSchema;
-    }
 
     if (wrapperKind === "Stream") {
       if (typeof innerSchema === "boolean") {
@@ -394,19 +385,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     const shouldPassTypeNode = innerTypeNode && !innerTypeIsGeneric &&
       (!isSyntheticNode || syntheticNodeNeedsHelp);
 
-    // Check for schema hints on the current typeNode and propagate to child context
-    // This allows array-property-only access patterns (e.g., .length) to generate items: { not: true, asCell/asOpaque: true }
+    // Check for schema hints on the current typeNode and propagate to child context.
+    // This allows identity-only/property-only array access patterns to avoid
+    // materializing full item schemas while preserving the wrapper on the array.
     let childContext = context;
-    let isArrayPropertyOnlyAccess = false;
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
-        isArrayPropertyOnlyAccess = true;
-        // Build items override with object stub and the appropriate wrapper semantic
-        const propertyValue = wrapperKindToBrand(wrapperKind);
-        const itemsOverride: JSONSchema = propertyValue
-          ? { type: "unknown", asCell: [propertyValue] }
-          : { type: "unknown" };
+        const itemsOverride: JSONSchema = { type: "unknown" };
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -416,12 +402,6 @@ export class CommonFabricFormatter implements TypeFormatter {
       childContext,
       shouldPassTypeNode ? innerTypeNode : undefined,
     );
-
-    // For array-property-only access (e.g., .length), don't wrap the result -
-    // we need the array unwrapped so .length is accessible
-    if (isArrayPropertyOnlyAccess) {
-      return innerSchema;
-    }
 
     // Stream<T>: can also reflect inner Cell-ness
     if (wrapperKind === "Stream") {

@@ -1813,7 +1813,10 @@ function applyIdentityOnlyPathsToTypeNode(
   }
   const resolvedSemanticType = semanticType ??
     resolveIdentitySemanticType(node, checker, typeRegistry);
-  if (normalized.some((path) => path.length === 0)) {
+  if (
+    normalized.some((path) => path.length === 0) &&
+    !normalized.some((path) => path.length > 0)
+  ) {
     return createIdentityOnlyRootTypeNode(
       node,
       resolvedSemanticType,
@@ -1862,7 +1865,6 @@ function applyIdentityOnlyPathsToTypeNode(
         return node;
       }
       const arrayNode = factory.updateArrayTypeNode(node, updated);
-      ensureTypeNodeRegistered(arrayNode, checker, typeRegistry);
       return arrayNode;
     }
 
@@ -1888,7 +1890,6 @@ function applyIdentityOnlyPathsToTypeNode(
         node,
         readonlyArray,
       );
-      ensureTypeNodeRegistered(readonlyNode, checker, typeRegistry);
       return readonlyNode;
     }
 
@@ -1916,7 +1917,6 @@ function applyIdentityOnlyPathsToTypeNode(
         node.typeName,
         factory.createNodeArray([updated]),
       );
-      ensureTypeNodeRegistered(arrayRef, checker, typeRegistry);
       return arrayRef;
     }
   }
@@ -1970,10 +1970,7 @@ function applyIdentityOnlyPathsToTypeNode(
     if (!changed) {
       return node;
     }
-    return createRegisteredTypeLiteral(
-      members,
-      { factory, checker, typeRegistry },
-    );
+    return factory.createTypeLiteralNode(members);
   }
 
   if (
@@ -1999,8 +1996,62 @@ function applyIdentityOnlyPathsToTypeNode(
       node.typeName,
       factory.createNodeArray([updated, ...rest]),
     );
-    ensureTypeNodeRegistered(cellNode, checker, typeRegistry);
     return cellNode;
+  }
+
+  if (ts.isTypeReferenceNode(node) && checker) {
+    const members = resolveTypeReferenceMembers(node, checker, typeRegistry);
+    if (members) {
+      const grouped = groupPathsByHead(normalized);
+      const cellLikeGrouped = groupPathsByHead(normalizedCellLikePaths);
+      let changed = false;
+      const updatedMembers = members.map((member) => {
+        if (!ts.isPropertySignature(member) || !member.type || !member.name) {
+          return member;
+        }
+        const propertyName = getRequestedPropertyNameText(member.name, checker);
+        if (!propertyName) {
+          return member;
+        }
+        const childPaths = grouped.get(propertyName);
+        if (!childPaths) {
+          return member;
+        }
+        const updated = applyIdentityOnlyPathsToTypeNode(
+          member.type,
+          childPaths,
+          cellLikeGrouped.get(propertyName) ?? [],
+          factory,
+          checker,
+          getIdentityChildSemanticType(
+            resolvedSemanticType,
+            propertyName,
+            member,
+            checker,
+          ),
+          typeRegistry,
+        );
+        if (updated === member.type) {
+          return member;
+        }
+        changed = true;
+        return factory.updatePropertySignature(
+          member,
+          member.modifiers,
+          member.name,
+          member.questionToken ??
+            (typeNodeIncludesUndefined(updated)
+              ? factory.createToken(ts.SyntaxKind.QuestionToken)
+              : undefined),
+          updated,
+        );
+      });
+
+      if (!changed) {
+        return node;
+      }
+      return factory.createTypeLiteralNode(updatedMembers);
+    }
   }
 
   if (ts.isUnionTypeNode(node)) {
@@ -2025,7 +2076,6 @@ function applyIdentityOnlyPathsToTypeNode(
       return node;
     }
     const unionNode = factory.createUnionTypeNode(members);
-    ensureTypeNodeRegistered(unionNode, checker, typeRegistry);
     return unionNode;
   }
 
@@ -2393,15 +2443,36 @@ export function applyShrinkAndWrap(
       baseType,
       context?.options.typeRegistry,
     )
+    : identityPaths.length > 0
+    ? applyIdentityOnlyPathsToTypeNode(
+      baseTypeNode,
+      identityPaths,
+      identityCellPaths,
+      factory,
+      checker,
+      baseType,
+      context?.options.typeRegistry,
+    )
     : baseTypeNode;
   let shrunk: ts.TypeNode | undefined;
+  const retainedPathsCoveredByIdentityContainers = identityPaths.length > 0 &&
+    retainedPaths.every((path) =>
+      identityPaths.some((identityPath) =>
+        identityPath.length > path.length &&
+        path.every((segment, index) => segment === identityPath[index])
+      )
+    );
   if (
     !identityOnlyRoot &&
     !paramSummary.wildcard &&
-    retainedPaths.length > 0
+    retainedPaths.length > 0 &&
+    !retainedPathsCoveredByIdentityContainers
   ) {
+    const shrinkBaseTypeNode = next;
     const hasDirectAccess = retainedPaths.some((path) => path.length === 0);
-    const preferTypeDriven = !!baseType && isSyntheticTypeNode(baseTypeNode);
+    const preferTypeDriven = !!baseType && isSyntheticTypeNode(
+      shrinkBaseTypeNode,
+    );
     if (preferTypeDriven) {
       // Synthetic inferred nodes can lose property precision in node-only mode.
       const typeDriven = buildShrunkTypeNodeFromType(
@@ -2414,7 +2485,7 @@ export function applyShrinkAndWrap(
         fullShapePaths,
       );
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
-        baseTypeNode,
+        shrinkBaseTypeNode,
         retainedPaths,
         factory,
         checker,
@@ -2425,7 +2496,7 @@ export function applyShrinkAndWrap(
         "type",
         nodeDriven,
         typeDriven,
-        baseTypeNode,
+        shrinkBaseTypeNode,
         retainedPaths,
         checker,
         hasDirectAccess,
@@ -2435,14 +2506,14 @@ export function applyShrinkAndWrap(
       // shrinking can still produce a better result for arrays and inferred
       // wrappers. Compute both and choose the more informative shrink.
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
-        baseTypeNode,
+        shrinkBaseTypeNode,
         retainedPaths,
         factory,
         checker,
         context?.options.typeRegistry,
         fullShapePaths,
       );
-      const typeDriven = baseType
+      const typeDriven = baseType && identityPaths.length === 0
         ? buildShrunkTypeNodeFromType(
           baseType,
           retainedPaths,
@@ -2457,7 +2528,7 @@ export function applyShrinkAndWrap(
         "node",
         nodeDriven,
         typeDriven,
-        baseTypeNode,
+        shrinkBaseTypeNode,
         retainedPaths,
         checker,
         hasDirectAccess,
