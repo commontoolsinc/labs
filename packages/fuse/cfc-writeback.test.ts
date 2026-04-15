@@ -37,13 +37,16 @@ const SECRET_LABEL = {
   confidentiality: [{ type: "test-label", value: "secret" }],
 };
 
-function makeAnnotatedTree(): {
+function makeAnnotatedTree(options: { inodeChurn?: boolean } = {}): {
   tree: FsTree;
   parentIno: bigint;
   fileIno: bigint;
   ref: CfcProjectionRef;
 } {
   const tree = new FsTree();
+  if (options.inodeChurn) {
+    tree.addFile(tree.rootIno, "transient", "churn", "string");
+  }
   const annotator = new CfcProjectionAnnotator(tree, {
     space: "did:key:zSpace",
     entity: "of:piece",
@@ -1183,4 +1186,199 @@ Deno.test("writeback xattrs accept trusted prepare/finalize names only", () => {
     true,
   );
   assertEquals(store.getPrepared(fileIno, "write"), undefined);
+});
+
+Deno.test("writeback recovery store persists crash-point states", async () => {
+  const path = await Deno.makeTempFile();
+  try {
+    const { fileIno, ref } = makeAnnotatedTree();
+    const store = new CfcWritebackStore({ storagePath: path });
+    const prepared = store.setPreparedXattr(
+      fileIno,
+      CFC_WRITEBACK_PREPARE_XATTR,
+      prepareJson("write", ref),
+    );
+    assertEquals(prepared.ok, true);
+    assertEquals(store.snapshot().records[0].status, "pending-prepare");
+
+    store.markMutationApplied(fileIno, "write");
+    assertEquals(store.snapshot().records[0].status, "mutation-applied");
+
+    store.markRunnerCommitFailed(fileIno, "write", "transport closed");
+    assertEquals(store.snapshot().records[0].status, "runner-commit-failed");
+    assertStringIncludes(
+      store.snapshot().records[0].diagnostics.join("\n"),
+      "transport closed",
+    );
+
+    const restarted = new CfcWritebackStore({ storagePath: path });
+    assertEquals(
+      restarted.snapshot().records[0].status,
+      "runner-commit-failed",
+    );
+
+    restarted.markReadyForExactRecomputation(fileIno, "write");
+    assertEquals(
+      restarted.snapshot().records[0].status,
+      "ready-for-exact-recomputation",
+    );
+
+    restarted.markFinalizedPendingCleanup(fileIno, "write");
+    assertEquals(
+      restarted.snapshot().records[0].status,
+      "finalized-pending-cleanup",
+    );
+  } finally {
+    await Deno.remove(path).catch(() => {});
+  }
+});
+
+Deno.test("writeback recovery records malformed and unsupported prepare metadata", () => {
+  const { fileIno } = makeAnnotatedTree();
+  const store = new CfcWritebackStore();
+
+  assertEquals(
+    store.setPreparedXattr(fileIno, CFC_WRITEBACK_PREPARE_XATTR, "{").ok,
+    false,
+  );
+  assertEquals(
+    store.setPreparedXattr(fileIno, "trusted.cfc.unsupported", "{}").ok,
+    false,
+  );
+
+  const snapshot = store.snapshot();
+  assertEquals(
+    snapshot.records.map((record) => record.status),
+    ["malformed-prepare", "malformed-prepare"],
+  );
+  assertStringIncludes(
+    snapshot.records.map((record) => record.diagnostics.join("\n")).join("\n"),
+    "invalid prepare metadata",
+  );
+  assertStringIncludes(
+    snapshot.records.map((record) => record.diagnostics.join("\n")).join("\n"),
+    "unsupported writeback xattr",
+  );
+});
+
+Deno.test("writeback reconciliation reapplies prepared labels after inode rebuild", async () => {
+  const path = await Deno.makeTempFile();
+  try {
+    const { fileIno, ref } = makeAnnotatedTree();
+    const store = new CfcWritebackStore({ storagePath: path });
+    assertEquals(
+      store.setPreparedXattr(
+        fileIno,
+        CFC_WRITEBACK_PREPARE_XATTR,
+        prepareJson("write", ref),
+      ).ok,
+      true,
+    );
+    store.markMutationApplied(fileIno, "write");
+
+    const rebuilt = makeAnnotatedTree({ inodeChurn: true });
+    assertEquals(rebuilt.fileIno === fileIno, false);
+    const restarted = new CfcWritebackStore({ storagePath: path });
+    const result = restarted.reconcileTree(rebuilt.tree);
+
+    assertEquals(result.reapplied, 1);
+    assertStringIncludes(
+      rebuilt.tree.getCfcAnnotation(rebuilt.fileIno)!.generation,
+      "prepared:sha256:",
+    );
+    assertEquals(
+      restarted.snapshot().records[0].status,
+      "mutation-applied",
+    );
+  } finally {
+    await Deno.remove(path).catch(() => {});
+  }
+});
+
+Deno.test("writeback reconciliation finalizes exact annotations when ready for recomputation", () => {
+  const { tree, fileIno, ref } = makeAnnotatedTree();
+  const store = new CfcWritebackStore();
+  assertEquals(
+    store.setPreparedXattr(
+      fileIno,
+      CFC_WRITEBACK_PREPARE_XATTR,
+      prepareJson("write", ref),
+    ).ok,
+    true,
+  );
+  store.markReadyForExactRecomputation(fileIno, "write");
+
+  const exact = tree.getCfcAnnotation(fileIno)!;
+  tree.setCfcAnnotation(fileIno, {
+    ...exact,
+    generation: "generation-2",
+    ref: { ...exact.ref, generation: "generation-2" },
+    incomplete: undefined,
+  });
+
+  const result = store.reconcileTree(tree);
+
+  assertEquals(result.finalized, 1);
+  assertEquals(store.snapshot().records, []);
+  assertEquals(tree.getCfcAnnotation(fileIno)!.generation, "generation-2");
+});
+
+Deno.test("writeback reconciliation cleans finalize-before-cleanup records after exact rebuild", () => {
+  const { tree, fileIno, ref } = makeAnnotatedTree();
+  const store = new CfcWritebackStore();
+  assertEquals(
+    store.setPreparedXattr(
+      fileIno,
+      CFC_WRITEBACK_PREPARE_XATTR,
+      prepareJson("write", ref),
+    ).ok,
+    true,
+  );
+  store.markMutationApplied(fileIno, "write");
+  store.markReadyForExactRecomputation(fileIno, "write");
+  store.markFinalizedPendingCleanup(fileIno, "write");
+
+  const exact = tree.getCfcAnnotation(fileIno)!;
+  tree.setCfcAnnotation(fileIno, {
+    ...exact,
+    generation: "generation-2",
+    ref: { ...exact.ref, generation: "generation-2" },
+    incomplete: undefined,
+  });
+
+  const result = store.reconcileTree(tree);
+
+  assertEquals(result.finalized, 1);
+  assertEquals(store.snapshot().records, []);
+  assertEquals(tree.getCfcAnnotation(fileIno)!.generation, "generation-2");
+});
+
+Deno.test("writeback reconciliation marks stale generations without lowering labels", () => {
+  const { tree, fileIno, ref } = makeAnnotatedTree();
+  const store = new CfcWritebackStore();
+  assertEquals(
+    store.setPreparedXattr(
+      fileIno,
+      CFC_WRITEBACK_PREPARE_XATTR,
+      prepareJson("write", ref),
+    ).ok,
+    true,
+  );
+
+  const exact = tree.getCfcAnnotation(fileIno)!;
+  tree.setCfcAnnotation(fileIno, {
+    ...exact,
+    generation: "generation-2",
+    ref: { ...exact.ref, generation: "generation-2" },
+    incomplete: undefined,
+  });
+
+  const result = store.reconcileTree(tree);
+
+  assertEquals(result.stale, 1);
+  assertEquals(store.snapshot().records[0].status, "stale-generation");
+  assertStringIncludes(
+    tree.getCfcAnnotation(fileIno)!.generation,
+    "prepared:sha256:",
+  );
 });

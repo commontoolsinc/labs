@@ -148,6 +148,8 @@ type ResolveLink = (value: unknown, depth: number) => string | null;
 export interface CellBridgeOptions {
   cfcAnnotations?: boolean;
   projectionGeneration?: string;
+  statusProvider?: () => Record<string, unknown>;
+  onCfcProjectionRebuilt?: () => void;
 }
 
 /** Result of resolving an inode to a writable cell path. */
@@ -290,6 +292,8 @@ export class CellBridge {
   private fsProjectionEntries: Map<bigint, Set<string>> = new Map();
   private cfcAnnotationsEnabled = false;
   private explicitCfcProjectionGeneration: string | undefined;
+  private statusProvider: (() => Record<string, unknown>) | undefined;
+  private onCfcProjectionRebuilt: (() => void) | undefined;
 
   private startedAt = new Date().toISOString();
   /** Inode of the .status file (created by initStatus). */
@@ -306,6 +310,8 @@ export class CellBridge {
     this.execCli = execCli;
     this.cfcAnnotationsEnabled = options.cfcAnnotations ?? false;
     this.explicitCfcProjectionGeneration = options.projectionGeneration;
+    this.statusProvider = options.statusProvider;
+    this.onCfcProjectionRebuilt = options.onCfcProjectionRebuilt;
   }
 
   init(config: {
@@ -318,6 +324,10 @@ export class CellBridge {
 
   setDebug(debug: boolean): void {
     this.debug = debug;
+    this.updateStatus();
+  }
+
+  refreshStatus(): void {
     this.updateStatus();
   }
 
@@ -426,6 +436,7 @@ export class CellBridge {
         pieces: state.pieceMap.size,
       };
     }
+    const extra = this.statusProvider?.() ?? {};
     return JSON.stringify(
       {
         apiUrl: this.apiUrl,
@@ -443,10 +454,19 @@ export class CellBridge {
         },
         startedAt: this.startedAt,
         spaces,
+        ...extra,
       },
       null,
       2,
     );
+  }
+
+  private noteCfcProjectionRebuilt(): void {
+    try {
+      this.onCfcProjectionRebuilt?.();
+    } catch (e) {
+      console.warn(`[fuse] CFC writeback reconciliation error: ${e}`);
+    }
   }
 
   private extractSummary(value: unknown): string {
@@ -1156,6 +1176,7 @@ export class CellBridge {
           this.markPiecePropHydrated(pieceIno, "result");
           this.rebuildStats.completed++;
           this.rebuildStats.lastDurationMs = Date.now() - startedAt;
+          this.noteCfcProjectionRebuilt();
           this.updateStatus();
           return;
         }
@@ -1253,6 +1274,7 @@ export class CellBridge {
 
     this.rebuildStats.completed++;
     this.rebuildStats.lastDurationMs = Date.now() - startedAt;
+    this.noteCfcProjectionRebuilt();
     this.updateStatus();
     this.debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
@@ -3051,5 +3073,6 @@ export class CellBridge {
       );
       state.srcErrorLogInos.set(pieceName, errorLogIno);
     }
+    this.noteCfcProjectionRebuilt();
   }
 }

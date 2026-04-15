@@ -1904,7 +1904,19 @@ Deno.test({
   sanitizeOps: false,
   fn: async () => {
     const tree = new FsTree();
-    const bridge = new CellBridge(tree, "/tmp/cf-exec");
+    let cfcReconciliations = 0;
+    const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+      statusProvider: () => ({
+        cfc: {
+          writeback: {
+            counts: { "mutation-applied": cfcReconciliations },
+          },
+        },
+      }),
+      onCfcProjectionRebuilt: () => {
+        cfcReconciliations++;
+      },
+    });
     bridge.init({
       apiUrl: "http://localhost:8000",
       identity: "/tmp/test-identity.pem",
@@ -1950,6 +1962,11 @@ Deno.test({
     assertEquals(status.rebuilds.pending, 0);
     assertEquals(status.rebuilds.completed >= 1, true);
     assertEquals(status.rebuilds.errors, 0);
+    assertEquals(cfcReconciliations >= 1, true);
+    assertEquals(
+      status.cfc.writeback.counts["mutation-applied"],
+      cfcReconciliations,
+    );
 
     // Cancel subscriptions to avoid timer leaks
     const subs = state.pieceSubs.get("Status-Piece");
