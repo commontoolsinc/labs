@@ -632,14 +632,40 @@ export class UnionFormatter implements TypeFormatter {
   private getObjectTargetProperties(
     schema: JSONSchemaObjMutable,
     rootDefs?: Record<string, unknown>,
+    seen = new Set<JSONSchemaObjMutable>(),
   ): Record<string, unknown> | undefined {
+    if (seen.has(schema)) {
+      return undefined;
+    }
+    seen.add(schema);
+
     if (isRecord(schema.properties)) {
       return schema.properties;
     }
 
     const refSchema = this.resolveLocalRefSchema(schema, rootDefs);
-    if (refSchema && isRecord(refSchema.properties)) {
-      return refSchema.properties;
+    if (refSchema) {
+      return this.getObjectTargetProperties(refSchema, rootDefs, seen);
+    }
+
+    if (Array.isArray(schema.anyOf)) {
+      const candidates = schema.anyOf
+        .map((option) =>
+          isRecord(option)
+            ? this.getObjectTargetProperties(
+              option as JSONSchemaObjMutable,
+              rootDefs,
+              new Set(seen),
+            )
+            : undefined
+        )
+        .filter((properties): properties is Record<string, unknown> =>
+          properties !== undefined
+        );
+
+      if (candidates.length === 1) {
+        return candidates[0];
+      }
     }
 
     return undefined;

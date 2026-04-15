@@ -216,6 +216,44 @@ describe("Schema: Default in unions", () => {
     expect(profile.properties?.email).toBeUndefined();
   });
 
+  it("applies recursive object defaults to nullable object unions", async () => {
+    const code = `
+      interface DeepDefault<V> {}
+      interface Config {
+        theme: string;
+        profile: {
+          name: string;
+          email: string;
+        } | null;
+      }
+      type T = Config | null | DeepDefault<{
+        theme: "dark";
+        profile: {
+          name: "Ada";
+        };
+      }>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+    );
+
+    expect(result.anyOf).toEqual(expect.arrayContaining([
+      { "$ref": "#/$defs/Config" },
+      { type: "null" },
+    ]));
+    expect(result.default).toEqual({
+      theme: "dark",
+      profile: { name: "Ada" },
+    });
+    expect((result.properties?.theme as any)?.default).toBe("dark");
+
+    const profile = result.properties?.profile as any;
+    expect(profile.default).toEqual({ name: "Ada" });
+    expect(profile.properties?.name?.default).toBe("Ada");
+    expect(profile.properties?.email).toBeUndefined();
+  });
+
   it("rejects unknown keys in DeepDefault object defaults", async () => {
     const code = `
       interface DeepDefault<V> {}
