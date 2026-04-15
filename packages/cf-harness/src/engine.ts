@@ -135,6 +135,11 @@ export class CfHarnessEngine {
     };
   }
 
+  setRunStatus(status: HarnessRunState["status"]): HarnessRunState {
+    this.#runState = setHarnessRunStatus(this.#runState, status, this.#now());
+    return this.getRunState();
+  }
+
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],

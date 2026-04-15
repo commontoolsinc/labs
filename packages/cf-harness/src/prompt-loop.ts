@@ -1,0 +1,277 @@
+import {
+  type BuiltinToolInputMap,
+  CfHarnessEngine,
+  type CreateHarnessEngineOptions,
+} from "./engine.ts";
+import {
+  type OpenAIChatCompletionMessage,
+  type OpenAIChatCompletionRequest,
+  type OpenAIChatCompletionResponse,
+  type OpenAIChatCompletionTool,
+  type OpenAIChatCompletionToolCall,
+  type OpenAIChatMessageContent,
+  OpenAICompatibleGatewayClient,
+} from "./gateway/openai-client.ts";
+import type {
+  HarnessAssistantTranscriptMessage,
+  HarnessToolCall,
+  HarnessToolTranscriptMessage,
+  HarnessTranscriptMessage,
+} from "./contracts/transcript.ts";
+import type { ToolResultRef } from "./contracts/tool-result.ts";
+import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
+
+const DEFAULT_MAX_MODEL_TURNS = 8;
+
+export interface CreateHarnessPromptLoopOptions
+  extends CreateHarnessEngineOptions {
+  engine?: CfHarnessEngine;
+  gatewayClient?: OpenAICompatibleGatewayClient;
+  apiKey?: string;
+  fetchFn?: typeof fetch;
+  maxModelTurns?: number;
+}
+
+export interface RunHarnessPromptOptions {
+  prompt: string;
+  systemPrompt?: string;
+  maxModelTurns?: number;
+  model?: string;
+}
+
+export interface HarnessPromptLoopResult {
+  model: string;
+  finalAssistantText: string;
+  transcript: HarnessTranscriptMessage[];
+  modelTurns: number;
+  runState: ReturnType<CfHarnessEngine["getRunState"]>;
+}
+
+const isBuiltinToolId = (input: string): input is BuiltinToolId =>
+  getBuiltinTool(input as BuiltinToolId) !== undefined;
+
+const normalizeTextContent = (content: OpenAIChatMessageContent): string => {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (content === null) {
+    return "";
+  }
+  return content
+    .flatMap((part) =>
+      typeof part === "object" &&
+        part !== null &&
+        "type" in part &&
+        part.type === "text" &&
+        "text" in part &&
+        typeof part.text === "string"
+        ? [part.text]
+        : []
+    )
+    .join("");
+};
+
+const toOpenAIChatMessage = (
+  message: HarnessTranscriptMessage,
+): OpenAIChatCompletionMessage => {
+  switch (message.role) {
+    case "system":
+    case "user":
+      return { role: message.role, content: message.content };
+    case "assistant":
+      return {
+        role: "assistant",
+        content: message.content,
+        ...(message.toolCalls !== undefined
+          ? {
+            tool_calls: message.toolCalls.map((toolCall) => ({ ...toolCall })),
+          }
+          : {}),
+      };
+    case "tool":
+      return {
+        role: "tool",
+        content: message.content,
+        tool_call_id: message.toolCallId,
+      };
+  }
+};
+
+const toOpenAITools = (): OpenAIChatCompletionTool[] =>
+  BUILTIN_TOOLS.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.descriptor.toolId,
+      description: tool.descriptor.description,
+      parameters: typeof tool.descriptor.inputSchema === "boolean"
+        ? tool.descriptor.inputSchema
+        : { ...tool.descriptor.inputSchema },
+    },
+  }));
+
+const parseToolArguments = (
+  toolCall: HarnessToolCall,
+): Record<string, unknown> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(toolCall.function.arguments);
+  } catch (error) {
+    throw new Error(
+      `failed to parse tool arguments for ${toolCall.function.name}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      `tool arguments for ${toolCall.function.name} must decode to an object`,
+    );
+  }
+  return parsed as Record<string, unknown>;
+};
+
+const createAssistantTranscriptMessage = (
+  response: OpenAIChatCompletionResponse,
+): HarnessAssistantTranscriptMessage => {
+  const message = response.choices[0]?.message;
+  if (message === undefined) {
+    throw new Error(
+      "chat completion response did not include a message choice",
+    );
+  }
+  const toolCalls: HarnessToolCall[] | undefined = message.tool_calls?.map((
+    toolCall,
+  ) => ({
+    id: toolCall.id,
+    type: "function",
+    function: {
+      name: toolCall.function.name,
+      arguments: toolCall.function.arguments,
+    },
+  }));
+  return {
+    role: "assistant",
+    content: normalizeTextContent(message.content),
+    ...(toolCalls !== undefined ? { toolCalls } : {}),
+  };
+};
+
+export class CfHarnessPromptLoop {
+  readonly engine: CfHarnessEngine;
+  readonly gatewayClient: OpenAICompatibleGatewayClient;
+  readonly #maxModelTurns: number;
+
+  constructor(options: CreateHarnessPromptLoopOptions = {}) {
+    this.engine = options.engine ?? new CfHarnessEngine(options);
+    this.gatewayClient = options.gatewayClient ??
+      new OpenAICompatibleGatewayClient({
+        baseUrl: this.engine.config.gatewayBaseUrl,
+        apiKey: options.apiKey,
+        fetchFn: options.fetchFn,
+      });
+    this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
+  }
+
+  async runPrompt(
+    options: RunHarnessPromptOptions,
+  ): Promise<HarnessPromptLoopResult> {
+    const model = options.model ?? this.engine.config.model;
+    if (model === undefined) {
+      throw new Error(
+        "a model must be configured before running the prompt loop",
+      );
+    }
+    const transcript: HarnessTranscriptMessage[] = [
+      ...(options.systemPrompt !== undefined
+        ? [{ role: "system", content: options.systemPrompt } as const]
+        : []),
+      { role: "user", content: options.prompt },
+    ];
+    const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
+    let modelTurns = 0;
+    this.engine.setRunStatus("running");
+    try {
+      while (modelTurns < maxModelTurns) {
+        modelTurns += 1;
+        const response = await this.gatewayClient.createChatCompletionJson(
+          this.#buildChatCompletionRequest(model, transcript),
+        );
+        const assistantMessage = createAssistantTranscriptMessage(response);
+        transcript.push(assistantMessage);
+        const toolCalls = assistantMessage.toolCalls ?? [];
+        if (toolCalls.length === 0) {
+          this.engine.setRunStatus("completed");
+          return {
+            model,
+            finalAssistantText: assistantMessage.content,
+            transcript,
+            modelTurns,
+            runState: this.engine.getRunState(),
+          };
+        }
+        for (const toolCall of toolCalls) {
+          transcript.push(await this.#invokeToolCall(toolCall));
+        }
+      }
+    } catch (error) {
+      this.engine.setRunStatus("failed");
+      throw error;
+    }
+    this.engine.setRunStatus("failed");
+    throw new Error(
+      `prompt loop exceeded max model turns (${maxModelTurns}) without a final assistant response`,
+    );
+  }
+
+  #buildChatCompletionRequest(
+    model: string,
+    transcript: readonly HarnessTranscriptMessage[],
+  ): OpenAIChatCompletionRequest {
+    return {
+      model,
+      messages: transcript.map(toOpenAIChatMessage),
+      tools: toOpenAITools(),
+      tool_choice: "auto",
+    };
+  }
+
+  async #invokeToolCall(
+    toolCall: HarnessToolCall,
+  ): Promise<HarnessToolTranscriptMessage> {
+    if (!isBuiltinToolId(toolCall.function.name)) {
+      throw new Error(
+        `unknown builtin tool requested: ${toolCall.function.name}`,
+      );
+    }
+    const input = parseToolArguments(toolCall);
+    const result = await this.#invokeBuiltinTool(
+      toolCall.function.name,
+      input,
+    );
+    return {
+      role: "tool",
+      toolCallId: toolCall.id,
+      toolName: toolCall.function.name,
+      content: JSON.stringify(result.output),
+      resultRef: result.resultRef,
+    };
+  }
+
+  async #invokeBuiltinTool<TToolId extends BuiltinToolId>(
+    toolId: TToolId,
+    input: Record<string, unknown>,
+  ): Promise<{
+    output: Awaited<ReturnType<CfHarnessEngine["invokeBuiltinTool"]>>["output"];
+    resultRef: ToolResultRef;
+  }> {
+    const result = await this.engine.invokeBuiltinTool(
+      toolId,
+      input as unknown as BuiltinToolInputMap[TToolId],
+    );
+    return {
+      output: result.output,
+      resultRef: result.resultRef,
+    };
+  }
+}

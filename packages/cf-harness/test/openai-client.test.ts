@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { OpenAICompatibleGatewayClient } from "../src/gateway/openai-client.ts";
 
 Deno.test("OpenAICompatibleGatewayClient resolves endpoint URLs against the base URL", () => {
@@ -38,4 +38,48 @@ Deno.test("OpenAICompatibleGatewayClient forwards requests through the injected 
     "https://llm.stage.commontools.dev/v1/chat/completions",
   );
   assertEquals(calls[1].init?.method, "POST");
+});
+
+Deno.test("OpenAICompatibleGatewayClient parses successful chat completion JSON responses", async () => {
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    fetchFn: async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: "ok" },
+          }],
+        }),
+        { status: 200 },
+      ),
+  });
+
+  const response = await client.createChatCompletionJson({
+    model: "gpt-5.4",
+    messages: [],
+  });
+
+  assertEquals(response.choices[0]?.message.content, "ok");
+});
+
+Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with response text", async () => {
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    fetchFn: async () =>
+      new Response("bad request", {
+        status: 400,
+        statusText: "Bad Request",
+      }),
+  });
+
+  await assertRejects(
+    () =>
+      client.createChatCompletionJson({
+        model: "gpt-5.4",
+        messages: [],
+      }),
+    Error,
+    "chat completion request failed (400): bad request",
+  );
 });
