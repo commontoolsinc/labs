@@ -3,7 +3,7 @@
  */
 
 import { createSHA256, type IHasher } from "hash-wasm";
-import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
 import type { IncrementalHasher } from "./interface.ts";
 
 /**
@@ -131,36 +131,10 @@ export function initWasm() {
 }
 
 /**
- * Base for WASM-specific incremental hashers.
- */
-abstract class BaseWasmHasher implements IncrementalHasher {
-  digest(): Uint8Array;
-  digest(encoding: "base64url"): string;
-  digest(encoding?: string): Uint8Array | string {
-    const result = this._rawDigest();
-
-    switch (encoding) {
-      case "base64url": {
-        return toUnpaddedBase64url(result);
-      }
-      case undefined: {
-        return result;
-      }
-      default: {
-        throw new Error(`Unknown encoding: ${encoding}`);
-      }
-    }
-  }
-
-  abstract update(data: Uint8Array): void;
-  protected abstract _rawDigest(): Uint8Array;
-}
-
-/**
  * WASM-specific incremental hasher which collects chunks and performs a
  * one-shot digest at the end of processing.
  */
-class WasmCollectingHasher extends BaseWasmHasher {
+class WasmCollectingHasher extends BaseIncrementalHasher {
   /** Finalized chunks. */
   #chunks: Uint8Array[] = [];
 
@@ -240,7 +214,7 @@ class WasmCollectingHasher extends BaseWasmHasher {
  * WASM-specific incremental hasher which has a direct hasher instance and
  * can `update()` it.
  */
-class WasmUpdatingHasher extends BaseWasmHasher {
+class WasmUpdatingHasher extends BaseIncrementalHasher {
   #hasher: IHasher | null = acquireHasher(this);
 
   update(data: Uint8Array) {

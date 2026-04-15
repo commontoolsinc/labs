@@ -3,38 +3,22 @@
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
-import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
 import type { IncrementalHasher } from "./interface.ts";
-
-export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
 /**
  * Noble-specific incremental hasher. Noble notably only has a one-shot digest
  * function.
  */
-class NobleHasher implements IncrementalHasher {
+class NobleHasher extends BaseIncrementalHasher {
   #hasher = sha256.create();
 
   update(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
-  digest(): Uint8Array;
-  digest(encoding: "base64url"): string;
-  digest(encoding?: string): Uint8Array | string {
-    const result = this.#hasher.digest();
-
-    switch (encoding) {
-      case "base64url": {
-        return toUnpaddedBase64url(result);
-      }
-      case undefined: {
-        return result;
-      }
-      default: {
-        throw new Error(`Unknown encoding: ${encoding}`);
-      }
-    }
+  protected _rawDigest(): Uint8Array {
+    return this.#hasher.digest();
   }
 }
 
