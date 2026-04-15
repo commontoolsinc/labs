@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import {
   assert,
+  assertMatch,
   assertNotMatch,
   assertRejects,
   assertStringIncludes,
@@ -103,6 +104,42 @@ export default pattern<{ count: number }>((state) => ({
       '.for(["__patternResult", "tuple", 0], true)',
     );
     assertNotMatch(main, /state\.key\("count"\)\.for/);
+  });
+
+  it("uses stream-scoped causes for handler result streams", async () => {
+    const source = `
+import { handler, pattern } from "commonfabric";
+
+const saveHandler = handler(false, false, () => {});
+
+export default pattern(() => {
+  const save = saveHandler({});
+  return {
+    nested: {
+      cancel: saveHandler({}),
+    },
+    save,
+  };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertMatch(main, /\.for\(\{\s*stream: "save"\s*\}, true\)/s);
+    assertMatch(
+      main,
+      /\.for\(\{\s*stream: \[\s*"__patternResult",\s*"nested",\s*"cancel"\s*\]\s*\}, true\)/s,
+    );
+    assertNotMatch(main, /\.for\("save", true\)/);
+    assertNotMatch(
+      main,
+      /\.for\(\["__patternResult", "nested", "cancel"\], true\)/,
+    );
   });
 
   it("re-roots reactive identifier members in pattern results", async () => {

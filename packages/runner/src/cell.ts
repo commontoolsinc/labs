@@ -323,7 +323,7 @@ declare module "@commonfabric/api" {
       nodes: Set<NodeRef>;
       frame: Frame;
       value?: Opaque<T> | T;
-      name?: string;
+      name?: unknown;
       external?: unknown;
     };
     getAsOpaqueRefProxy(
@@ -1513,7 +1513,7 @@ export class CellImpl<T extends FabricValue>
     nodes: Set<NodeRef>;
     frame: Frame;
     value?: Opaque<T> | T;
-    name?: string;
+    name?: unknown;
     external?: unknown;
   } {
     if (!this._frame) {
@@ -1529,7 +1529,7 @@ export class CellImpl<T extends FabricValue>
       value: this._kind === "stream"
         ? { $stream: true } as unknown as T
         : this._initialValue,
-      name: this._causeContainer.cause as string | undefined,
+      name: this._causeContainer.cause,
       external: this._link.id
         ? this.getAsWriteRedirectLink({
           baseSpace: this._frame.space,

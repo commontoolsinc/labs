@@ -229,8 +229,8 @@ function factoryFromPattern<T, R>(
 
   const usedNames = new Set<string>();
   allCells.forEach((cell) => {
-    const existingName = cell.export().name;
-    if (existingName) usedNames.add(existingName);
+    const existingName = getStableInternalPathSegment(cell.export().name);
+    if (typeof existingName === "string") usedNames.add(existingName);
   });
 
   // First from results
@@ -297,6 +297,7 @@ function factoryFromPattern<T, R>(
     const { cell: top, path, value, name, external } = cell.export();
     if (!external) {
       if (!paths.has(top)) {
+        const stableName = getStableInternalPathSegment(name);
         // HACK(seefeld): For unnamed cells, we've run into an issue when the
         // order changes that a stream might clobber a previously used
         // non-stream, which means the default value won't be assigned and the
@@ -306,7 +307,7 @@ function factoryFromPattern<T, R>(
           : "";
         paths.set(top, [
           "internal",
-          name ?? `__#${count++}${streamMarker}`,
+          stableName ?? `__#${count++}${streamMarker}`,
         ]);
       }
       if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
@@ -395,6 +396,43 @@ function factoryFromPattern<T, R>(
   }, pattern) satisfies PatternFactory<T, R>;
 
   return patternFactory;
+}
+
+function getStableInternalPathSegment(cause: unknown): PropertyKey | undefined {
+  if (
+    typeof cause === "string" ||
+    typeof cause === "number" ||
+    typeof cause === "symbol"
+  ) {
+    return cause;
+  }
+
+  if (isRecord(cause) && "stream" in cause) {
+    return `stream:${formatStableCauseSegment(cause.stream)}`;
+  }
+
+  if (cause !== undefined) {
+    return formatStableCauseSegment(cause);
+  }
+
+  return undefined;
+}
+
+function formatStableCauseSegment(cause: unknown): string {
+  if (typeof cause === "string") return cause;
+  if (
+    typeof cause === "number" ||
+    typeof cause === "boolean" ||
+    cause === null
+  ) {
+    return String(cause);
+  }
+
+  try {
+    return JSON.stringify(cause) ?? String(cause);
+  } catch {
+    return String(cause);
+  }
 }
 
 const frames: Frame[] = [];

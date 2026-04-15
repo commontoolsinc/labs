@@ -22,7 +22,7 @@ import {
   resolveSourceLocationFromStack,
 } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -164,6 +164,45 @@ describe("module", () => {
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
       expect([...nodes][0].inputs.$event).toBe(stream);
+    });
+
+    it("serializes stream causes without losing the stream marker", () => {
+      const clickHandler = handler(
+        false,
+        false,
+        (_event: unknown, _state: unknown) => {},
+      );
+
+      const clickPattern = pattern(() => {
+        const click = clickHandler({} as never).for(
+          { stream: "click" },
+          true,
+        );
+        return { click };
+      });
+
+      expect(clickPattern.result).toEqual({
+        click: {
+          $alias: {
+            path: ["internal", "stream:click"],
+            schema: true,
+          },
+        },
+      });
+      expect(clickPattern.initial).toEqual({
+        internal: {
+          "stream:click": { $stream: true },
+        },
+      });
+      const handlerInputs = clickPattern.nodes[0].inputs as {
+        $event: unknown;
+      };
+      expect(handlerInputs.$event).toEqual({
+        $alias: {
+          path: ["internal", "stream:click"],
+          schema: true,
+        },
+      });
     });
 
     it("supports event and state schema validation", () => {
