@@ -2,7 +2,12 @@ import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { IncrementalHasher } from "./interface.ts";
 
 /**
- * Base implementation for the `IncrementalHasher` interface.
+ * Base implementation for the `IncrementalHasher` interface. This takes
+ * care of:
+ *
+ * * Disallowing use of an instance after `digest()`.
+ * * Converting an array result of `_rawDigest()` into a string when so
+ *   requested.
  */
 export abstract class BaseIncrementalHasher implements IncrementalHasher {
   #done: boolean = false;
