@@ -231,7 +231,6 @@ class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
     releaseHasher(hasher);
     return result;
   }
-
 }
 
 /**
