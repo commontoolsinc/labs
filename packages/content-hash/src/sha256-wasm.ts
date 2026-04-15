@@ -9,7 +9,7 @@ import type { IncrementalHasher } from "./interface.ts";
 /**
  * How many hashers to have available for concurrent use.
  */
-const HASHER_CACHE_SIZE = 5;
+const HASHER_POOL_SIZE = 5;
 
 /**
  * When collecting chunks, size of the first chunk to collect into by default.
@@ -118,7 +118,7 @@ export function initWasm() {
     initResult = (async () => {
       try {
         theOneShotHasher.push(await createSHA256());
-        for (let i = 0; i < HASHER_CACHE_SIZE; i++) {
+        for (let i = 0; i < HASHER_POOL_SIZE; i++) {
           theHashers.push(await createSHA256());
         }
       } catch {
