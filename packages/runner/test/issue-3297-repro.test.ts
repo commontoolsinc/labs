@@ -90,7 +90,10 @@ describe("issue 3297 repro", () => {
     }) as Record<string, unknown>;
     processCell.withTx(tx).setRawUntyped({
       ...raw,
-      internal: { ...(raw.internal as Record<string, unknown>), myHandler: null },
+      internal: {
+        ...(raw.internal as Record<string, unknown>),
+        myHandler: null,
+      },
     });
     tx.commit();
 

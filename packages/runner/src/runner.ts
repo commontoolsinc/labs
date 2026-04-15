@@ -1445,7 +1445,9 @@ export class Runner {
     if (resolvedStreamLink) {
       logger.warn(
         "stream-marker-restored",
-        `Restored missing $stream marker for handler "${name ?? "<anonymous>"}"`,
+        `Restored missing $stream marker for handler "${
+          name ?? "<anonymous>"
+        }"`,
         { resolvedStreamLink, storedValue: value },
       );
       tx.writeValueOrThrow(resolvedStreamLink, { $stream: true });
