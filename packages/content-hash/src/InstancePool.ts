@@ -57,7 +57,7 @@ export class InstancePool<T extends WeakKey> {
    * Performs any necessary initialization of an instance. May be overridden
    * by subclasses. Does nothing by default.
    */
-  protected _initInstance(instance: T) {
+  protected _initInstance(_instance: T) {
     // This space intentionally left blank.
   }
 }
