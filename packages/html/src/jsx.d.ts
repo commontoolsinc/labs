@@ -2975,6 +2975,10 @@ interface CFHScrollElement extends CFHTMLElement {}
 interface CFScrollAreaElement extends CFHTMLElement {}
 interface CFToolCallElement extends CFHTMLElement {}
 
+// Toast components
+type CFToastElement = HTMLElement;
+type CFToastProviderElement = HTMLElement;
+
 interface CFDraggableAttributes<T> extends CFHTMLAttributes<T> {
   "key"?: number;
   "x"?: EventHandler<any>;
@@ -3339,6 +3343,26 @@ interface CFAlertAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?: "default" | "destructive" | "warning" | "success" | "info";
   "dismissible"?: boolean;
   "oncf-dismiss"?: EventHandler<{}>;
+}
+
+interface CFToastAttributes<T> extends CFHTMLAttributes<T> {
+  "variant"?: "default" | "success" | "error" | "warning";
+  "duration"?: number;
+  "dismissable"?: boolean;
+  "open"?: boolean;
+  "oncf-toast-dismiss"?: EventHandler<{ reason: string }>;
+  "oncf-toast-action"?: EventHandler<{}>;
+}
+
+interface CFToastProviderAttributes<T> extends CFHTMLAttributes<T> {
+  "position"?:
+    | "top"
+    | "bottom"
+    | "top-left"
+    | "top-right"
+    | "bottom-left"
+    | "bottom-right";
+  "max"?: number;
 }
 
 interface CFCardAttributes<T> extends CFHTMLAttributes<T> {
@@ -5106,6 +5130,16 @@ declare global {
       "cf-dot-mark": CFDOM.DetailedHTMLProps<
         CFDotMarkAttributes<CFDotMarkElement>,
         CFDotMarkElement
+      >;
+
+      // Toast components
+      "cf-toast": CFDOM.DetailedHTMLProps<
+        CFToastAttributes<CFToastElement>,
+        CFToastElement
+      >;
+      "cf-toast-provider": CFDOM.DetailedHTMLProps<
+        CFToastProviderAttributes<CFToastProviderElement>,
+        CFToastProviderElement
       >;
     }
   }

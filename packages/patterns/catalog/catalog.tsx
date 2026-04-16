@@ -88,6 +88,7 @@ interface CatalogInput {
         { id: "loader"; label: "Loader" },
         { id: "skeleton"; label: "Skeleton" },
         { id: "alert"; label: "Alert" },
+        { id: "toast"; label: "Toast" },
       ];
     },
     {
