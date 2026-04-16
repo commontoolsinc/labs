@@ -232,6 +232,45 @@ describe("push-triggered filtering", () => {
     expect(runtime.scheduler.getMightWrite(action)).toEqual([declaredWrite]);
   });
 
+  it("should keep dynamic collection parent writes for numeric children", async () => {
+    const root = runtime.getCell<{ list: Record<string, unknown> }>(
+      space,
+      "mw-dynamic-collection-root",
+      undefined,
+      tx,
+    );
+    root.set({ list: {} });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const list = root.key("list");
+    const declaredWrite = list.getAsNormalizedFullLink();
+    const firstChild = list.key("0").getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        list.withTx(actionTx).key("0").set({ label: "first" });
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [declaredWrite],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([declaredWrite]);
+    expect(runtime.scheduler.getMightWrite(action)).not.toEqual([firstChild]);
+  });
+
   it("should track filter stats", async () => {
     runtime.scheduler.resetFilterStats();
 

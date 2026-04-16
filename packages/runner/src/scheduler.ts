@@ -1103,8 +1103,15 @@ export class Scheduler {
 
       // Use writersByEntity index for efficient lookup
       if (!shouldMarkDirty) {
+        const entities = new Set<SpaceAndURI>();
         for (const read of effectReads) {
-          const entity = `${read.space}/${read.id}` as SpaceAndURI;
+          entities.add(`${read.space}/${read.id}` as SpaceAndURI);
+        }
+        for (const read of effectShallowReads) {
+          entities.add(`${read.space}/${read.id}` as SpaceAndURI);
+        }
+
+        for (const entity of entities) {
           const writers = this.writersByEntity.get(entity);
           if (!writers) continue;
 
@@ -1116,15 +1123,15 @@ export class Scheduler {
 
             // Check path overlap
             const writerWrites = this.getSchedulingWrites(writer) ?? [];
-            for (const write of writerWrites) {
-              if (
-                write.space === read.space &&
-                write.id === read.id &&
-                arraysOverlap(write.path, read.path)
-              ) {
-                shouldMarkDirty = true;
-                break;
-              }
+            if (
+              this.readsOverlapWrites(
+                effectReads,
+                effectShallowReads,
+                writerWrites,
+              )
+            ) {
+              shouldMarkDirty = true;
+              break;
             }
             if (shouldMarkDirty) break;
           }
@@ -1838,9 +1845,18 @@ export class Scheduler {
       rawExistingCurrentWrites,
       ignoredSchedulingWrites,
     );
+    const currentSeedWrites = writes.length > 0
+      ? writes
+      : existingCurrentWrites.length > 0
+      ? existingCurrentWrites
+      : declaredWrites;
+    const dynamicParentWrites = this.deriveDynamicCollectionParentWrites(
+      writes,
+      declaredWrites,
+    );
     const newCurrentKnownWrites = sortAndCompactPaths([
-      ...declaredWrites,
-      ...writes,
+      ...currentSeedWrites,
+      ...dynamicParentWrites,
       ...potentialWrites,
     ]);
     this.currentKnownWrites.set(action, newCurrentKnownWrites);
@@ -1951,6 +1967,39 @@ export class Scheduler {
         arraysOverlap(write.path, other.path)
       )
     );
+  }
+
+  private deriveDynamicCollectionParentWrites(
+    writes: IMemorySpaceAddress[],
+    declaredWrites: IMemorySpaceAddress[],
+  ): IMemorySpaceAddress[] {
+    const parentWrites: IMemorySpaceAddress[] = [];
+    for (const declaredWrite of declaredWrites) {
+      for (const write of writes) {
+        if (
+          declaredWrite.space !== write.space ||
+          declaredWrite.id !== write.id ||
+          declaredWrite.type !== write.type ||
+          declaredWrite.path.length >= write.path.length ||
+          !arraysOverlap(declaredWrite.path, write.path)
+        ) {
+          continue;
+        }
+
+        const dynamicSegment = write.path[declaredWrite.path.length];
+        if (this.isDynamicCollectionSegment(dynamicSegment)) {
+          parentWrites.push(declaredWrite);
+        }
+      }
+    }
+    return parentWrites;
+  }
+
+  private isDynamicCollectionSegment(
+    segment: MemoryAddressPathComponent | undefined,
+  ): boolean {
+    if (typeof segment === "number") return Number.isInteger(segment);
+    return typeof segment === "string" && /^(0|[1-9]\d*)$/.test(segment);
   }
 
   private addTriggerPaths(

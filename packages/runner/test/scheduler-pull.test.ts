@@ -1048,6 +1048,74 @@ describe("pull-based scheduling", () => {
     expect(schedulerInternal.isStale(effect)).toBe(true);
   });
 
+  it("should schedule a newly resubscribed shallow-read effect when its writer is stale", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-shallow-resubscribe-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const output = runtime.getCell<{ children: number[] }>(
+      space,
+      "pull-shallow-resubscribe-output",
+      undefined,
+      tx,
+    );
+    output.set({ children: [] });
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      output.withTx(actionTx).key("children").set([
+        source.withTx(actionTx).get() ?? 0,
+      ]);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [output.key("children").getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    expect(runtime.scheduler.isDirty(computation)).toBe(true);
+    expect(computationRuns).toBe(0);
+
+    let effectRuns = 0;
+    const effect: Action = (effectTx) => {
+      effectRuns++;
+      output.withTx(effectTx).key("children").getRaw({
+        nonRecursive: true,
+      });
+    };
+
+    runtime.scheduler.resubscribe(
+      effect,
+      {
+        reads: [],
+        shallowReads: [output.key("children").getAsNormalizedFullLink()],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    expect(runtime.scheduler.isDirty(effect)).toBe(true);
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(1);
+    expect(effectRuns).toBe(1);
+    expect(runtime.scheduler.isDirty(computation)).toBe(false);
+    expect(runtime.scheduler.isDirty(effect)).toBe(false);
+  });
+
   it("should clear downstream stale state when upstream recomputes unchanged", async () => {
     runtime.scheduler.enablePullMode();
 
