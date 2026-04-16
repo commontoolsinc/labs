@@ -2,7 +2,9 @@ import { assertEquals, assertThrows } from "@std/assert";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   parseCfcEnforcementMode,
+  parseHarnessGatewayAuthMode,
   resolveCfcEnforcementMode,
+  resolveGatewayAuthMode,
   resolveHarnessConfig,
 } from "../src/config.ts";
 import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
@@ -14,6 +16,12 @@ Deno.test("parseCfcEnforcementMode accepts runner-aligned values", () => {
     "enforce-explicit",
   );
   assertEquals(parseCfcEnforcementMode("bogus"), undefined);
+});
+
+Deno.test("parseHarnessGatewayAuthMode accepts supported values", () => {
+  assertEquals(parseHarnessGatewayAuthMode("bearer"), "bearer");
+  assertEquals(parseHarnessGatewayAuthMode("none"), "none");
+  assertEquals(parseHarnessGatewayAuthMode("bogus"), undefined);
 });
 
 Deno.test("resolveCfcEnforcementMode prefers explicit override", () => {
@@ -44,11 +52,26 @@ Deno.test("resolveCfcEnforcementMode falls back through config and inherited val
   assertEquals(resolveCfcEnforcementMode({}), "disabled");
 });
 
+Deno.test("resolveGatewayAuthMode prefers explicit override", () => {
+  assertEquals(
+    resolveGatewayAuthMode({
+      gatewayAuthModeOverride: "none",
+      gatewayAuthMode: "bearer",
+    }),
+    "none",
+  );
+});
+
+Deno.test("resolveGatewayAuthMode defaults to bearer", () => {
+  assertEquals(resolveGatewayAuthMode({}), "bearer");
+});
+
 Deno.test("resolveHarnessConfig normalizes the gateway base URL", () => {
   const config = resolveHarnessConfig({
     gatewayBaseUrl: "https://llm.stage.commontools.dev",
   });
   assertEquals(config.gatewayBaseUrl, DEFAULT_GATEWAY_BASE_URL);
+  assertEquals(config.gatewayAuthMode, "bearer");
   assertEquals(config.cfcEnforcementMode, "disabled");
 });
 

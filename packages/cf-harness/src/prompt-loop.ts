@@ -3,6 +3,7 @@ import {
   CfHarnessEngine,
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   type OpenAIChatCompletionMessage,
   type OpenAIChatCompletionRequest,
@@ -12,6 +13,11 @@ import {
   type OpenAIChatMessageContent,
   OpenAICompatibleGatewayClient,
 } from "./gateway/openai-client.ts";
+import {
+  createObservationDenied as makeObservationDenied,
+  type ObservationDenied,
+} from "./contracts/observation.ts";
+import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type {
   HarnessAssistantTranscriptMessage,
   HarnessToolCall,
@@ -19,7 +25,10 @@ import type {
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
-import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import type {
+  BuiltinToolId,
+  HarnessToolDescriptor,
+} from "./contracts/tool-descriptor.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -29,6 +38,7 @@ export interface CreateHarnessPromptLoopOptions
   engine?: CfHarnessEngine;
   gatewayClient?: OpenAICompatibleGatewayClient;
   apiKey?: string;
+  apiKeySource?: string;
   fetchFn?: typeof fetch;
   maxModelTurns?: number;
 }
@@ -38,12 +48,14 @@ export interface RunHarnessPromptOptions {
   systemPrompt?: string;
   maxModelTurns?: number;
   model?: string;
+  promptSlotBinding?: PromptSlotBinding;
 }
 
 export interface RunHarnessTranscriptOptions {
   transcript: readonly HarnessTranscriptMessage[];
   maxModelTurns?: number;
   model?: string;
+  promptSlotBinding?: PromptSlotBinding;
 }
 
 export interface HarnessPromptLoopResult {
@@ -163,6 +175,59 @@ const createAssistantTranscriptMessage = (
   };
 };
 
+interface ToolPolicyDecision {
+  allowed: boolean;
+  warningDetail?: string;
+  denial?: ObservationDenied;
+}
+
+const hasDirectCommandBinding = (
+  promptSlotBinding?: PromptSlotBinding,
+): boolean => promptSlotBinding?.role === "direct-command";
+
+const evaluateToolPolicy = (
+  cfcEnforcementMode: CfcEnforcementMode,
+  descriptor: HarnessToolDescriptor,
+  promptSlotBinding?: PromptSlotBinding,
+): ToolPolicyDecision => {
+  const directCommand = hasDirectCommandBinding(promptSlotBinding);
+  switch (cfcEnforcementMode) {
+    case "disabled":
+      return { allowed: true };
+    case "observe":
+      if (!directCommand && descriptor.effectClass !== "read") {
+        return {
+          allowed: true,
+          warningDetail:
+            `${descriptor.toolId} would require direct-command authorization in enforce modes`,
+        };
+      }
+      return { allowed: true };
+    case "enforce-explicit":
+      if (descriptor.effectClass === "read" || directCommand) {
+        return { allowed: true };
+      }
+      return {
+        allowed: false,
+        denial: makeObservationDenied("not-authorized", {
+          detail:
+            `${descriptor.toolId} requires direct-command authorization in enforce-explicit`,
+        }),
+      };
+    case "enforce-strict":
+      if (directCommand) {
+        return { allowed: true };
+      }
+      return {
+        allowed: false,
+        denial: makeObservationDenied("not-authorized", {
+          detail:
+            `${descriptor.toolId} requires direct-command authorization in enforce-strict`,
+        }),
+      };
+  }
+};
+
 export class CfHarnessPromptLoop {
   readonly engine: CfHarnessEngine;
   readonly gatewayClient: OpenAICompatibleGatewayClient;
@@ -173,7 +238,9 @@ export class CfHarnessPromptLoop {
     this.gatewayClient = options.gatewayClient ??
       new OpenAICompatibleGatewayClient({
         baseUrl: this.engine.config.gatewayBaseUrl,
+        authMode: this.engine.config.gatewayAuthMode,
         apiKey: options.apiKey,
+        apiKeySource: options.apiKeySource,
         fetchFn: options.fetchFn,
       });
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
@@ -191,6 +258,7 @@ export class CfHarnessPromptLoop {
       ],
       model: options.model,
       maxModelTurns: options.maxModelTurns,
+      promptSlotBinding: options.promptSlotBinding,
     });
   }
 
@@ -232,7 +300,9 @@ export class CfHarnessPromptLoop {
           };
         }
         for (const toolCall of toolCalls) {
-          transcript.push(await this.#invokeToolCall(toolCall));
+          transcript.push(
+            await this.#invokeToolCall(toolCall, options.promptSlotBinding),
+          );
           await this.engine.persistTranscript(transcript);
         }
       }
@@ -264,11 +334,52 @@ export class CfHarnessPromptLoop {
 
   async #invokeToolCall(
     toolCall: HarnessToolCall,
+    promptSlotBinding?: PromptSlotBinding,
   ): Promise<HarnessToolTranscriptMessage> {
     if (!isBuiltinToolId(toolCall.function.name)) {
       throw new Error(
         `unknown builtin tool requested: ${toolCall.function.name}`,
       );
+    }
+    const tool = getBuiltinTool(toolCall.function.name);
+    if (tool === undefined) {
+      throw new Error(
+        `unknown builtin tool requested: ${toolCall.function.name}`,
+      );
+    }
+    const decision = evaluateToolPolicy(
+      this.engine.getRunState().cfcEnforcementMode,
+      tool.descriptor,
+      promptSlotBinding,
+    );
+    if (decision.warningDetail !== undefined) {
+      await this.engine.recordPolicyEvent({
+        severity: "warning",
+        mode: this.engine.getRunState().cfcEnforcementMode,
+        toolId: toolCall.function.name,
+        toolCallId: toolCall.id,
+        detail: decision.warningDetail,
+      });
+    }
+    if (!decision.allowed) {
+      const denial = decision.denial ??
+        makeObservationDenied("not-authorized", {
+          detail: `${toolCall.function.name} was denied`,
+        });
+      await this.engine.recordPolicyEvent({
+        severity: "denied",
+        mode: this.engine.getRunState().cfcEnforcementMode,
+        toolId: toolCall.function.name,
+        toolCallId: toolCall.id,
+        detail: denial.detail ?? `${toolCall.function.name} was denied`,
+        observationDenied: denial,
+      });
+      return {
+        role: "tool",
+        toolCallId: toolCall.id,
+        toolName: toolCall.function.name,
+        content: JSON.stringify(denial),
+      };
     }
     const input = parseToolArguments(toolCall);
     const result = await this.#invokeBuiltinTool(

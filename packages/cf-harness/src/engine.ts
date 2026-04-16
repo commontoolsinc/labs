@@ -8,12 +8,17 @@ import {
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
+  appendHarnessPolicyEvent,
   appendHarnessToolOutput,
   createHarnessRunState,
   type HarnessRunState,
   setHarnessRunStatus,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
+import {
+  createHarnessPolicyEvent,
+  type HarnessPolicyEvent,
+} from "./contracts/policy.ts";
 import {
   createToolResultRef,
   type ToolOutputId,
@@ -153,12 +158,26 @@ export class CfHarnessEngine {
   getRunState(): HarnessRunState {
     return {
       ...this.#runState,
+      policyEvents: [...this.#runState.policyEvents],
       toolOutputs: [...this.#runState.toolOutputs],
     };
   }
 
   setRunStatus(status: HarnessRunState["status"]): HarnessRunState {
     this.#runState = setHarnessRunStatus(this.#runState, status, this.#now());
+    return this.getRunState();
+  }
+
+  async recordPolicyEvent(
+    event: Omit<HarnessPolicyEvent, "type" | "at">,
+  ): Promise<HarnessRunState> {
+    const now = this.#now();
+    this.#runState = appendHarnessPolicyEvent(
+      this.#runState,
+      createHarnessPolicyEvent({ ...event, at: now }),
+      now,
+    );
+    await this.persistRunState();
     return this.getRunState();
   }
 

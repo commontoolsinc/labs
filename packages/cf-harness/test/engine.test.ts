@@ -52,6 +52,7 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     createdAt: "2026-04-15T19:00:00.000Z",
     updatedAt: "2026-04-15T19:00:00.000Z",
     cfcEnforcementMode: "disabled",
+    policyEvents: [],
     toolOutputs: [],
   });
 });
@@ -100,6 +101,7 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
     createdAt: "2026-04-15T19:00:00.000Z",
     updatedAt: "2026-04-15T19:00:05.000Z",
     cfcEnforcementMode: "observe",
+    policyEvents: [],
     toolOutputs: [first.resultRef, second.resultRef],
   });
 });
@@ -130,6 +132,7 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
     createdAt: "2026-04-15T19:10:00.000Z",
     updatedAt: "2026-04-15T19:10:02.000Z",
     cfcEnforcementMode: "observe",
+    policyEvents: [],
     toolOutputs: [],
   });
 });

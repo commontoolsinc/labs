@@ -42,6 +42,7 @@ class FakeSandboxRuntime implements SandboxRuntime {
 Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant response", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
         { stdout: "hello from file", stderr: "", exitCode: 0 },
@@ -140,6 +141,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
     },
   ]);
   assertEquals(result.runState.status, "completed");
+  assertEquals(result.runState.policyEvents, []);
 
   const firstRequest = JSON.parse(String(fetchCalls[0]?.body)) as {
     tools: Array<{ function: { name: string } }>;
@@ -168,6 +170,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
 
 Deno.test("CfHarnessPromptLoop completes a direct assistant response without tool calls", async () => {
   const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-direct",
@@ -202,11 +205,13 @@ Deno.test("CfHarnessPromptLoop completes a direct assistant response without too
 
   assertEquals(result.finalAssistantText, "No tool call needed.");
   assertEquals(result.runState.status, "completed");
+  assertEquals(result.runState.policyEvents, []);
   assertEquals(result.runState.toolOutputs, []);
 });
 
 Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn cap", async () => {
   const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
         { stdout: "hello", stderr: "", exitCode: 0 },
@@ -244,11 +249,13 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
     "prompt loop exceeded max model turns (1)",
   );
   assertEquals(loop.engine.getRunState().status, "failed");
+  assertEquals(loop.engine.getRunState().policyEvents, []);
 });
 
 Deno.test("CfHarnessPromptLoop can resume from a persisted transcript", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-resume",
@@ -319,4 +326,195 @@ Deno.test("CfHarnessPromptLoop can resume from a persisted transcript", async ()
       content: "hello from file",
     }),
   });
+  assertEquals(result.runState.policyEvents, []);
+});
+
+Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes the tool", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        { stdout: "warned\n", stderr: "", exitCode: 0 },
+      ]),
+      runId: "run-observe-warning",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "observe",
+      now: (() => {
+        const timestamps = [
+          "2026-04-15T22:30:00.000Z",
+          "2026-04-15T22:30:01.000Z",
+          "2026-04-15T22:30:02.000Z",
+          "2026-04-15T22:30:03.000Z",
+          "2026-04-15T22:30:04.000Z",
+          "2026-04-15T22:30:05.000Z",
+        ];
+        return () => timestamps.shift() ?? "2026-04-15T22:30:06.000Z";
+      })(),
+    }),
+    fetchFn: async (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-observe",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "echo warned" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Observed with warning.",
+            },
+          }],
+        };
+      return new Response(JSON.stringify(payload), { status: 200 });
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run a shell command.",
+  });
+
+  assertEquals(result.finalAssistantText, "Observed with warning.");
+  assertEquals(result.runState.policyEvents, [{
+    type: "cf-harness.policy-event",
+    severity: "warning",
+    mode: "observe",
+    toolId: "bash",
+    toolCallId: "call-observe",
+    detail: "bash would require direct-command authorization in enforce modes",
+    at: "2026-04-15T22:30:02.000Z",
+  }]);
+  assertEquals(
+    result.transcript.at(-2),
+    {
+      role: "tool",
+      toolCallId: "call-observe",
+      toolName: "bash",
+      content: JSON.stringify({
+        outputId: createToolOutputId("run-observe-warning", "bash", 1),
+        stdout: "warned\n",
+        stderr: "",
+        exitCode: 0,
+      }),
+      resultRef: {
+        type: "cf-harness.tool-result-ref",
+        outputId: createToolOutputId("run-observe-warning", "bash", 1),
+        toolId: "bash",
+        runId: "run-observe-warning",
+      },
+    },
+  );
+});
+
+Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforce-explicit mode", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-enforce-explicit",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+      now: (() => {
+        const timestamps = [
+          "2026-04-15T22:40:00.000Z",
+          "2026-04-15T22:40:01.000Z",
+          "2026-04-15T22:40:02.000Z",
+          "2026-04-15T22:40:03.000Z",
+        ];
+        return () => timestamps.shift() ?? "2026-04-15T22:40:04.000Z";
+      })(),
+    }),
+    fetchFn: async (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-denied",
+                type: "function",
+                function: {
+                  name: "write_file",
+                  arguments: JSON.stringify({
+                    path: "notes/out.txt",
+                    content: "nope",
+                    mode: "replace",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content:
+                "Write denied; direct-command authorization is required.",
+            },
+          }],
+        };
+      return new Response(JSON.stringify(payload), { status: 200 });
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Write the output file.",
+  });
+
+  assertEquals(
+    result.finalAssistantText,
+    "Write denied; direct-command authorization is required.",
+  );
+  assertEquals(result.runState.toolOutputs, []);
+  assertEquals(result.runState.policyEvents, [{
+    type: "cf-harness.policy-event",
+    severity: "denied",
+    mode: "enforce-explicit",
+    toolId: "write_file",
+    toolCallId: "call-denied",
+    detail:
+      "write_file requires direct-command authorization in enforce-explicit",
+    observationDenied: {
+      type: "cf-harness.observation-denied",
+      reason: "not-authorized",
+      detail:
+        "write_file requires direct-command authorization in enforce-explicit",
+    },
+    at: "2026-04-15T22:40:02.000Z",
+  }]);
+  assertEquals(
+    result.transcript.at(-2),
+    {
+      role: "tool",
+      toolCallId: "call-denied",
+      toolName: "write_file",
+      content: JSON.stringify({
+        type: "cf-harness.observation-denied",
+        reason: "not-authorized",
+        detail:
+          "write_file requires direct-command authorization in enforce-explicit",
+      }),
+    },
+  );
 });

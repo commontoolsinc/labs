@@ -40,6 +40,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.workspace, "/tmp/project");
   assertEquals(parsed.prompt, "Summarize this workspace");
   assertEquals(parsed.model, "gpt-5.4");
+  assertEquals(parsed.gatewayAuthMode, "bearer");
   assertEquals(parsed.artifactRoot, "/tmp/project/.cf-harness-artifacts");
   assertEquals(parsed.maxModelTurns, 8);
   assertEquals(parsed.printTranscript, false);
@@ -70,8 +71,59 @@ Deno.test("parseCfHarnessCliArgs supports prompt files and mode overrides", asyn
     throw new Error("expected config result");
   }
   assertEquals(parsed.prompt, "Prompt from file.");
+  assertEquals(parsed.gatewayAuthMode, "bearer");
   assertEquals(parsed.cfcEnforcementModeOverride, "observe");
   assertEquals(parsed.maxModelTurns, 5);
+});
+
+Deno.test("parseCfHarnessCliArgs supports gateway auth mode override", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--gateway-auth-mode", "none"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.gatewayAuthMode, "none");
+});
+
+Deno.test("parseCfHarnessCliArgs tolerates a leading task-runner separator", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--", "--prompt", "hi", "--gateway-auth-mode", "none"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.prompt, "hi");
+  assertEquals(parsed.gatewayAuthMode, "none");
+});
+
+Deno.test("parseCfHarnessCliArgs prefers CF_HARNESS_API_KEY over OPENAI_API_KEY", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_API_KEY: "cf-key",
+        OPENAI_API_KEY: "openai-key",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.apiKey, "cf-key");
+  assertEquals(parsed.apiKeySource, "CF_HARNESS_API_KEY");
 });
 
 Deno.test("parseCfHarnessCliArgs supports resume-run inputs without a prompt", async () => {
@@ -119,7 +171,7 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
     ],
     {
       io,
-      env: {},
+      env: { CF_HARNESS_API_KEY: "test-key" },
       createPromptLoop: (options) => {
         createdOptions = options as Record<string, unknown>;
         return {
@@ -141,6 +193,7 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
                 artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
                 transcriptPath:
                   "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                policyEvents: [],
                 toolOutputs: [],
               },
             }) satisfies HarnessPromptLoopResult,
@@ -158,6 +211,8 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
     createdOptions?.artifactRoot,
     "/tmp/project/.cf-harness-artifacts",
   );
+  assertEquals(createdOptions?.apiKey, "test-key");
+  assertEquals(createdOptions?.apiKeySource, "CF_HARNESS_API_KEY");
   assertEquals(
     stdout,
     [
@@ -178,6 +233,7 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
           artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
           transcriptPath:
             "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+          policyEvents: [],
           toolOutputs: [],
         },
       }),
@@ -213,13 +269,91 @@ Deno.test("runCfHarnessCli reports argument errors to stderr", async () => {
   );
 });
 
+Deno.test("runCfHarnessCli fails early when no API key is configured", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    ["--prompt", "hello"],
+    { io, env: {} },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(stdout, []);
+  assertEquals(stderr, [
+    "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY\n",
+  ]);
+});
+
+Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  const exitCode = await runCfHarnessCli(
+    ["--prompt", "hello", "--gateway-auth-mode", "none"],
+    {
+      io,
+      env: {},
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: async () =>
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "No auth path.",
+              transcript: [
+                { role: "user", content: "hello" },
+                { role: "assistant", content: "No auth path." },
+              ],
+              modelTurns: 1,
+              runState: {
+                runId: "run-no-auth",
+                status: "completed",
+                createdAt: "2026-04-16T00:00:00.000Z",
+                updatedAt: "2026-04-16T00:00:01.000Z",
+                cfcEnforcementMode: "disabled",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          runTranscript: async () => {
+            throw new Error("unexpected resume path");
+          },
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(createdOptions?.gatewayAuthMode, "none");
+  assertEquals(createdOptions?.apiKey, undefined);
+  assertEquals(stdout, [
+    formatCfHarnessCliResult({
+      model: "gpt-5.4",
+      finalAssistantText: "No auth path.",
+      transcript: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "No auth path." },
+      ],
+      modelTurns: 1,
+      runState: {
+        runId: "run-no-auth",
+        status: "completed",
+        createdAt: "2026-04-16T00:00:00.000Z",
+        updatedAt: "2026-04-16T00:00:01.000Z",
+        cfcEnforcementMode: "disabled",
+        policyEvents: [],
+        toolOutputs: [],
+      },
+    }),
+  ]);
+  assertEquals(stderr, []);
+});
+
 Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
     ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-1/run-state.json"],
     {
       io,
-      env: {},
+      env: { CF_HARNESS_API_KEY: "test-key" },
       readRunArtifacts: async (path) => {
         assertEquals(
           path,
@@ -241,6 +375,7 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
             artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
             transcriptPath:
               "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+            policyEvents: [],
             toolOutputs: [],
           },
           transcript: [
@@ -271,6 +406,7 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
               artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
               transcriptPath:
                 "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+              policyEvents: [],
               toolOutputs: [],
             },
           }) satisfies HarnessPromptLoopResult,
@@ -298,9 +434,50 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
         artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
         transcriptPath:
           "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+        policyEvents: [],
         toolOutputs: [],
       },
     }),
   ]);
   assertEquals(stderr, []);
+});
+
+Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
+  const text = formatCfHarnessCliResult({
+    model: "gpt-5.4",
+    finalAssistantText: "Done.",
+    transcript: [],
+    modelTurns: 1,
+    runState: {
+      runId: "run-policy",
+      status: "completed",
+      createdAt: "2026-04-15T22:20:00.000Z",
+      updatedAt: "2026-04-15T22:20:01.000Z",
+      cfcEnforcementMode: "observe",
+      policyEvents: [{
+        type: "cf-harness.policy-event",
+        severity: "warning",
+        mode: "observe",
+        toolId: "bash",
+        detail:
+          "bash would require direct-command authorization in enforce modes",
+        at: "2026-04-15T22:20:01.000Z",
+      }],
+      toolOutputs: [],
+    },
+  });
+
+  assertEquals(
+    text,
+    [
+      "Done.",
+      "",
+      "runId: run-policy",
+      "status: completed",
+      "modelTurns: 1",
+      "policyEvents: 1",
+      "- warning bash: bash would require direct-command authorization in enforce modes",
+      "",
+    ].join("\n"),
+  );
 });

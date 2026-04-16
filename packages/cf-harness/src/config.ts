@@ -5,9 +5,11 @@ import type {
 import type { HarnessSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
+export type HarnessGatewayAuthMode = "bearer" | "none";
 
 export interface HarnessConfig {
   gatewayBaseUrl: string;
+  gatewayAuthMode: HarnessGatewayAuthMode;
   model?: string;
   vmTarget?: string;
   skillsRoot?: string;
@@ -19,6 +21,8 @@ export interface HarnessConfig {
 
 export interface ResolveHarnessConfigOptions {
   gatewayBaseUrl?: string;
+  gatewayAuthMode?: HarnessGatewayAuthMode;
+  gatewayAuthModeOverride?: string | HarnessGatewayAuthMode;
   model?: string;
   vmTarget?: string;
   skillsRoot?: string;
@@ -36,6 +40,10 @@ const CFC_ENFORCEMENT_MODES: readonly CfcEnforcementMode[] = [
   "enforce-explicit",
   "enforce-strict",
 ];
+const GATEWAY_AUTH_MODES: readonly HarnessGatewayAuthMode[] = [
+  "bearer",
+  "none",
+];
 
 export const isCfcEnforcementMode = (
   input: unknown,
@@ -47,6 +55,17 @@ export const parseCfcEnforcementMode = (
   input: string | null | undefined,
 ): CfcEnforcementMode | undefined =>
   isCfcEnforcementMode(input) ? input : undefined;
+
+export const isHarnessGatewayAuthMode = (
+  input: unknown,
+): input is HarnessGatewayAuthMode =>
+  typeof input === "string" &&
+  GATEWAY_AUTH_MODES.includes(input as HarnessGatewayAuthMode);
+
+export const parseHarnessGatewayAuthMode = (
+  input: string | null | undefined,
+): HarnessGatewayAuthMode | undefined =>
+  isHarnessGatewayAuthMode(input) ? input : undefined;
 
 export const resolveCfcEnforcementMode = (
   options: Pick<
@@ -68,12 +87,27 @@ export const resolveCfcEnforcementMode = (
 export const normalizeGatewayBaseUrl = (input: string): string =>
   new URL(input).toString();
 
+export const resolveGatewayAuthMode = (
+  options: Pick<
+    ResolveHarnessConfigOptions,
+    "gatewayAuthMode" | "gatewayAuthModeOverride"
+  >,
+): HarnessGatewayAuthMode => {
+  const parsedOverride = typeof options.gatewayAuthModeOverride === "string"
+    ? parseHarnessGatewayAuthMode(options.gatewayAuthModeOverride)
+    : options.gatewayAuthModeOverride;
+  return parsedOverride ??
+    options.gatewayAuthMode ??
+    "bearer";
+};
+
 export const resolveHarnessConfig = (
   options: ResolveHarnessConfigOptions = {},
 ): HarnessConfig => ({
   gatewayBaseUrl: normalizeGatewayBaseUrl(
     options.gatewayBaseUrl ?? DEFAULT_GATEWAY_BASE_URL,
   ),
+  gatewayAuthMode: resolveGatewayAuthMode(options),
   ...(options.model !== undefined ? { model: options.model } : {}),
   ...(options.vmTarget !== undefined ? { vmTarget: options.vmTarget } : {}),
   ...(options.skillsRoot !== undefined

@@ -1,6 +1,7 @@
 import { ensureDir } from "@std/fs";
 import { basename, dirname, join } from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
+import { createHarnessPolicyEvent } from "./contracts/policy.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 
@@ -76,10 +77,24 @@ export const createFileSystemHarnessArtifactStore = (
 ): FileSystemHarnessArtifactStore =>
   new FileSystemHarnessArtifactStore(options);
 
+const normalizeHarnessRunState = (
+  state: HarnessRunState,
+): HarnessRunState => ({
+  ...state,
+  policyEvents: (state.policyEvents ?? []).map((event) =>
+    event.type === "cf-harness.policy-event"
+      ? event
+      : createHarnessPolicyEvent(event)
+  ),
+  toolOutputs: [...(state.toolOutputs ?? [])],
+});
+
 export const readHarnessRunState = async (
   path: string,
 ): Promise<HarnessRunState> =>
-  JSON.parse(await Deno.readTextFile(path)) as HarnessRunState;
+  normalizeHarnessRunState(
+    JSON.parse(await Deno.readTextFile(path)) as HarnessRunState,
+  );
 
 export const readHarnessTranscript = async (
   path: string,

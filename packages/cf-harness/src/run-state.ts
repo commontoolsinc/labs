@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
 
 export type HarnessRunStatus =
@@ -16,6 +17,7 @@ export interface HarnessRunState {
   model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
+  policyEvents: HarnessPolicyEvent[];
   toolOutputs: ToolResultRef[];
 }
 
@@ -46,6 +48,7 @@ export const createHarnessRunState = (
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
       : {}),
+    policyEvents: [],
     toolOutputs: [],
   };
 };
@@ -68,6 +71,16 @@ export const appendHarnessToolOutput = (
   ...state,
   updatedAt: now,
   toolOutputs: [...state.toolOutputs, output],
+});
+
+export const appendHarnessPolicyEvent = (
+  state: HarnessRunState,
+  event: HarnessPolicyEvent,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  updatedAt: now,
+  policyEvents: [...state.policyEvents, event],
 });
 
 export const setHarnessTranscriptPath = (

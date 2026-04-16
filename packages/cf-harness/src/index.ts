@@ -7,6 +7,7 @@ export * from "./cli.ts";
 export * from "./gateway/openai-client.ts";
 export * from "./contracts/prompt-slot.ts";
 export * from "./contracts/observation.ts";
+export * from "./contracts/policy.ts";
 export * from "./contracts/tool-result.ts";
 export * from "./contracts/tool-descriptor.ts";
 export * from "./contracts/transcript.ts";

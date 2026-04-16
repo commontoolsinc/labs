@@ -1,11 +1,17 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { dirname, join, resolve } from "@std/path";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import { DEFAULT_GATEWAY_BASE_URL, parseCfcEnforcementMode } from "./config.ts";
+import {
+  DEFAULT_GATEWAY_BASE_URL,
+  type HarnessGatewayAuthMode,
+  parseCfcEnforcementMode,
+  parseHarnessGatewayAuthMode,
+} from "./config.ts";
 import {
   readHarnessRunArtifacts,
   resolveHarnessRunPaths,
 } from "./artifacts.ts";
+import { createCliPromptSlotBinding } from "./contracts/prompt-slot.ts";
 import { CfHarnessEngine } from "./engine.ts";
 import {
   CfHarnessPromptLoop,
@@ -24,11 +30,13 @@ export interface CfHarnessCliConfig {
   systemPrompt?: string;
   model?: string;
   gatewayBaseUrl: string;
+  gatewayAuthMode: HarnessGatewayAuthMode;
   artifactRoot: string;
   cfcEnforcementModeOverride?: CfcEnforcementMode;
   maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
+  apiKeySource?: "CF_HARNESS_API_KEY" | "OPENAI_API_KEY";
 }
 
 export interface CfHarnessCliIO {
@@ -62,11 +70,16 @@ Options:
   --system-prompt <text>        Optional system prompt
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --gateway-base-url <url>      OpenAI-compatible gateway URL
+  --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
   --help                        Show this help text
+
+Environment:
+  CF_HARNESS_API_KEY            Preferred API key for the OpenAI-compatible gateway
+  OPENAI_API_KEY                Fallback API key if CF_HARNESS_API_KEY is unset
 `;
 
 const parsePositiveInteger = (
@@ -131,7 +144,8 @@ export const parseCfHarnessCliArgs = async (
   argv: readonly string[],
   deps: Pick<RunCfHarnessCliDependencies, "cwd" | "env" | "readTextFile"> = {},
 ): Promise<CfHarnessCliConfig | { help: true }> => {
-  const args = parseArgs([...argv], {
+  const normalizedArgv = argv[0] === "--" ? argv.slice(1) : argv;
+  const args = parseArgs([...normalizedArgv], {
     string: [
       "workspace",
       "prompt",
@@ -140,6 +154,7 @@ export const parseCfHarnessCliArgs = async (
       "resume-run",
       "model",
       "gateway-base-url",
+      "gateway-auth-mode",
       "artifact-root",
       "cfc-enforcement-mode",
       "max-model-turns",
@@ -174,6 +189,18 @@ export const parseCfHarnessCliArgs = async (
   const gatewayBaseUrl = typeof args["gateway-base-url"] === "string"
     ? args["gateway-base-url"]
     : DEFAULT_GATEWAY_BASE_URL;
+  const parsedGatewayAuthMode = parseHarnessGatewayAuthMode(
+    typeof args["gateway-auth-mode"] === "string"
+      ? args["gateway-auth-mode"]
+      : undefined,
+  );
+  if (
+    args["gateway-auth-mode"] !== undefined &&
+    parsedGatewayAuthMode === undefined
+  ) {
+    throw new Error("gateway auth mode must be one of bearer, none");
+  }
+  const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
   const cfcEnforcementModeOverride = parseCfcEnforcementMode(
     typeof args["cfc-enforcement-mode"] === "string"
       ? args["cfc-enforcement-mode"]
@@ -194,6 +221,12 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_API_KEY: Deno.env.get("CF_HARNESS_API_KEY"),
       OPENAI_API_KEY: Deno.env.get("OPENAI_API_KEY"),
     };
+  const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
+  const apiKeySource = env.CF_HARNESS_API_KEY !== undefined
+    ? "CF_HARNESS_API_KEY"
+    : env.OPENAI_API_KEY !== undefined
+    ? "OPENAI_API_KEY"
+    : undefined;
   return {
     workspace,
     ...(prompt !== undefined ? { prompt } : {}),
@@ -207,6 +240,7 @@ export const parseCfHarnessCliArgs = async (
       ? { model: DEFAULT_MODEL }
       : {}),
     gatewayBaseUrl,
+    gatewayAuthMode,
     artifactRoot,
     ...(cfcEnforcementModeOverride !== undefined
       ? { cfcEnforcementModeOverride }
@@ -218,9 +252,8 @@ export const parseCfHarnessCliArgs = async (
       "--max-model-turns",
     ),
     printTranscript: Boolean(args["print-transcript"]),
-    ...(env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY
-      ? { apiKey: env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY }
-      : {}),
+    ...(apiKey !== undefined ? { apiKey } : {}),
+    ...(apiKeySource !== undefined ? { apiKeySource } : {}),
   };
 };
 
@@ -242,6 +275,14 @@ export const formatCfHarnessCliResult = (
   if (result.runState.transcriptPath !== undefined) {
     lines.push(`transcriptPath: ${result.runState.transcriptPath}`);
   }
+  if (result.runState.policyEvents.length > 0) {
+    lines.push(`policyEvents: ${result.runState.policyEvents.length}`);
+    for (const event of result.runState.policyEvents) {
+      lines.push(
+        `- ${event.severity} ${event.toolId}: ${event.detail}`,
+      );
+    }
+  }
   return `${lines.join("\n")}\n`;
 };
 
@@ -259,7 +300,16 @@ export const runCfHarnessCli = async (
     const createPromptLoop = deps.createPromptLoop ??
       ((options: CreateHarnessPromptLoopOptions) =>
         new CfHarnessPromptLoop(options));
+    if (parsed.gatewayAuthMode === "bearer" && parsed.apiKey === undefined) {
+      throw new Error(
+        "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
+      );
+    }
     let result: HarnessPromptLoopResult;
+    const promptSlotBinding = createCliPromptSlotBinding({
+      kernelName: "cf-harness",
+      subject: parsed.resumeRun ?? parsed.workspace,
+    });
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
       const artifacts = await readRunArtifacts(parsed.resumeRun);
@@ -270,9 +320,11 @@ export const runCfHarnessCli = async (
           workspaceHostPath: parsed.workspace,
           model: parsed.model ?? artifacts.runState.model,
           gatewayBaseUrl: parsed.gatewayBaseUrl,
+          gatewayAuthMode: parsed.gatewayAuthMode,
           cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         }),
         apiKey: parsed.apiKey,
+        apiKeySource: parsed.apiKeySource,
         maxModelTurns: parsed.maxModelTurns,
       });
       if (artifacts.transcript === undefined) {
@@ -284,6 +336,7 @@ export const runCfHarnessCli = async (
         transcript: artifacts.transcript,
         model: parsed.model ?? artifacts.runState.model,
         maxModelTurns: parsed.maxModelTurns,
+        promptSlotBinding,
       });
     } else {
       const loop = createPromptLoop({
@@ -291,7 +344,9 @@ export const runCfHarnessCli = async (
         artifactRoot: parsed.artifactRoot,
         model: parsed.model,
         gatewayBaseUrl: parsed.gatewayBaseUrl,
+        gatewayAuthMode: parsed.gatewayAuthMode,
         apiKey: parsed.apiKey,
+        apiKeySource: parsed.apiKeySource,
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         maxModelTurns: parsed.maxModelTurns,
       });
@@ -302,6 +357,7 @@ export const runCfHarnessCli = async (
           : {}),
         model: parsed.model,
         maxModelTurns: parsed.maxModelTurns,
+        promptSlotBinding,
       });
     }
     io.stdout(formatCfHarnessCliResult(result));

@@ -98,6 +98,7 @@ Deno.test({
         updatedAt: "2026-04-15T21:00:03.000Z",
         cfcEnforcementMode: "observe",
         artifactRoot: runRoot,
+        policyEvents: [],
         toolOutputs: [result.resultRef],
       });
     } finally {
@@ -116,6 +117,7 @@ Deno.test({
     });
     try {
       const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
         engine: new CfHarnessEngine({
           artifactRoot,
           sandboxRuntime: new FakeSandboxRuntime([
@@ -190,6 +192,7 @@ Deno.test({
       );
       assertEquals(persistedState.transcriptPath, transcriptPath);
       assertEquals(persistedState.artifactRoot, runRoot);
+      assertEquals(persistedState.policyEvents, []);
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }
