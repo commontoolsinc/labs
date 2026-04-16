@@ -99,6 +99,41 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         },
       },
     });
+    const aliceAuthoredText = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-alice-authored-text",
+      undefined,
+      tx,
+    );
+    const aliceAuthoredTextLink = aliceAuthoredText.getAsNormalizedFullLink();
+    tx.writeOrThrow({
+      space: signer.did(),
+      id: aliceAuthoredTextLink.id!,
+      type: "application/json",
+      path: [],
+    }, {
+      value: "Alice signed chat text",
+      cfc: {
+        version: 1,
+        schemaHash: "test-authored-text-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: {
+              integrity: [{ kind: "authored-by", subject: "alice" }],
+            },
+          }],
+        },
+      },
+    });
+    const unsignedText = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-unsigned-text",
+      undefined,
+      tx,
+    );
+    unsignedText.set("Unsigned chat text");
     const commitResult = await tx.commit();
     assertEquals(commitResult.ok !== undefined, true);
 
@@ -109,6 +144,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     const structuredClassified = runtime.getCell<string>(
       signer.did(),
       "cfc-render-policy-structured-secret",
+    );
+    const authoredText = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-alice-authored-text",
+    );
+    const unsignedChatText = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-unsigned-text",
     );
     const dummyTx = runtime.edit();
     const dummyCell = runtime.getCell(
@@ -666,6 +709,343 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           assertEquals(
             renderedText.includes("Content hidden by policy"),
             false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict authorship renders child text with matching integrity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: "alice",
+            verifyTextIntegrity: true,
+          },
+          children: [authoredText as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Alice signed chat text"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict authorship blocks child text with mismatched integrity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: "bob",
+            verifyTextIntegrity: true,
+          },
+          children: [authoredText as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Alice signed chat text"), false);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            true,
+          );
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict authorship blocks unsigned child text",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: "alice",
+            verifyTextIntegrity: true,
+          },
+          children: [unsignedChatText as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Unsigned chat text"), false);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict authorship blocks literal child text by default",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: "alice",
+            verifyTextIntegrity: true,
+          },
+          children: ["Untrusted literal text"],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Untrusted literal text"), false);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict authorship allows literal child text only with an escape hatch",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: "alice",
+            verifyTextIntegrity: true,
+            allowLiteralText: true,
+          },
+          children: ["Trusted literal chrome"],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Trusted literal chrome"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict authorship allows matching cf-chat-message content props",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: "alice",
+            verifyTextIntegrity: true,
+          },
+          children: [{
+            type: "vnode",
+            name: "cf-chat-message",
+            props: {
+              role: "assistant",
+              content: authoredText as never,
+            },
+            children: [],
+          }],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" && op.value === "Alice signed chat text"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "role" && op.value === "assistant"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" &&
+              op.value === "Content hidden by integrity policy"
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict authorship blocks static cf-chat-message content props",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: "alice",
+            verifyTextIntegrity: true,
+          },
+          children: [{
+            type: "vnode",
+            name: "cf-chat-message",
+            props: {
+              role: "assistant",
+              content: "Mallory static override",
+            },
+            children: [],
+          }],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" &&
+              op.value === "Content hidden by integrity policy"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "data-cfc-blocked-props" &&
+              op.value === "content"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "role" && op.value === "assistant"
+            ),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict authorship blocks mismatched cf-chat-message name props",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: "bob",
+            verifyTextIntegrity: true,
+          },
+          children: [{
+            type: "vnode",
+            name: "cf-chat-message",
+            props: {
+              role: "assistant",
+              name: authoredText as never,
+            },
+            children: [],
+          }],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "name" &&
+              op.value === "Content hidden by integrity policy"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            true,
           );
         } finally {
           cancel();

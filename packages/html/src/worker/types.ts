@@ -104,6 +104,17 @@ export interface RenderPolicy {
    * This is a temporary low-level capability hook for trusted UI experiments.
    */
   declassifyConfidentiality: readonly unknown[];
+
+  /**
+   * Integrity required for user-visible text in this subtree.
+   * Undefined means descendant text is not integrity-gated.
+   */
+  textIntegrity?: {
+    kind: string;
+    author: unknown;
+    allowLiteralText: boolean;
+    boundaryNodeId: number;
+  };
 }
 
 /**

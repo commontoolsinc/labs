@@ -1,5 +1,11 @@
 export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
 export { cfcLabelViewForCell, cfcLabelViewFromMetadata } from "./label-view.ts";
+export type { CfcAuthorshipState } from "./authorship.ts";
+export {
+  authorshipStateForLabel,
+  DEFAULT_AUTHORSHIP_KIND,
+  integrityAtomMatchesAuthor,
+} from "./authorship.ts";
 export type {
   AttemptedWrite,
   CfcAddress,

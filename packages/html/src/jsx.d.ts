@@ -3516,6 +3516,9 @@ interface CFCFCAuthorshipAttributes<T> extends CFHTMLAttributes<T> {
   "authorName"?: unknown;
   "avatar"?: unknown;
   "kind"?: string;
+  "verifyTextIntegrity"?: boolean;
+  "allowLiteralText"?: boolean;
+  "textIntegrityState"?: "ok" | "blocked";
 }
 
 interface CFCFCRenderBoundaryAttributes<T> extends CFHTMLAttributes<T> {

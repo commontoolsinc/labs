@@ -49,14 +49,16 @@ function AuthoredBlock(
       <cf-vstack slot="content" gap="2">
         <cf-heading level={3}>{title}</cf-heading>
         <cf-label>{summary}</cf-label>
+        <cf-label>{message.key("channel")}</cf-label>
         <cf-cfc-authorship
           data-authorship-surface={surface}
           $value={message}
           author={message.key("sender")}
           avatar={message.key("sender").key("avatar")}
+          verifyTextIntegrity
+          allowLiteralText={false}
         >
           <div className="authorship-content-block">
-            <cf-label>{message.key("channel")}</cf-label>
             <cf-chat-message
               role="assistant"
               name={message.key("sender").key("name")}
