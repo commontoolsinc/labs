@@ -665,9 +665,9 @@ document.querySelector("cf-form").addEventListener("cf-submit", (e) => {
 
 ### cf-modal (Sheet Presentation)
 
-**Purpose**: Modal dialog with optional bottom-sheet presentation
-**Tag**: `<cf-modal>`
-**Attributes** (in addition to existing open, dismissable, size, label):
+**Purpose**: Modal dialog with optional bottom-sheet presentation **Tag**:
+`<cf-modal>` **Attributes** (in addition to existing open, dismissable, size,
+label):
 
 - `presentation` - "dialog" | "sheet" (default: "dialog")
 - `grabber` - boolean, decorative drag-handle indicator (sheet mode only)
@@ -684,8 +684,8 @@ document.querySelector("cf-form").addEventListener("cf-submit", (e) => {
 
 ### cf-tab-bar / cf-tab-bar-item
 
-**Purpose**: Fixed-position app navigation bar (distinct from cf-tabs)
-**Tags**: `<cf-tab-bar>`, `<cf-tab-bar-item>`
+**Purpose**: Fixed-position app navigation bar (distinct from cf-tabs) **Tags**:
+`<cf-tab-bar>`, `<cf-tab-bar-item>`
 
 **cf-tab-bar Attributes**:
 
@@ -725,8 +725,8 @@ document.querySelector("cf-form").addEventListener("cf-submit", (e) => {
 
 ### cf-toast / cf-toast-provider
 
-**Purpose**: Floating ephemeral notification messages
-**Tags**: `<cf-toast-provider>`, `<cf-toast>`
+**Purpose**: Floating ephemeral notification messages **Tags**:
+`<cf-toast-provider>`, `<cf-toast>`
 
 **cf-toast-provider Attributes**:
 
