@@ -391,20 +391,30 @@ Floating ephemeral notifications. Place a `cf-toast-provider` at the app root an
 
 ## cf-screen
 
-Full-screen container for app-like layouts. Use instead of `<div style={{ height: "100%" }}>` which doesn't work (parent has no explicit height). The component already sets `display: flex; flex-direction: column;` internally.
+Full-height app layout with pinned header, auto-scrolling main area, and pinned
+footer. Use instead of `<div style={{ height: "100%" }}>` which doesn't work
+(parent has no explicit height).
+
+Content in the default slot scrolls automatically when it overflows. Use
+`cf-vscroll` inside `cf-screen` only when you need snap-to-bottom (chat),
+fade-edges, or a styled/hidden scrollbar.
 
 ```tsx
-// ❌ DOESN'T WORK - content appears blank
-<div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-  {/* Content in DOM but invisible */}
-</div>
-
-// ✅ WORKS - full available width and height
+// Simple case — main area scrolls automatically
 <cf-screen>
-  <header>Title</header>
-  <cf-vscroll style="flex: 1;">
-    {/* Scrollable content */}
+  <cf-heading slot="header" level={2}>Title</cf-heading>
+  <cf-vstack gap="4" padding="4">
+    {items}
+  </cf-vstack>
+</cf-screen>
+
+// Chat case — snap-to-bottom + fade-edges
+<cf-screen>
+  <cf-heading slot="header" level={2}>Chat</cf-heading>
+  <cf-vscroll flex snapToBottom fadeEdges>
+    {messages}
   </cf-vscroll>
+  <cf-message-input slot="footer" />
 </cf-screen>
 ```
 

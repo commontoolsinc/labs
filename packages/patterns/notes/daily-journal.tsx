@@ -9,6 +9,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   Stream,
   toSchema,
   UI,
@@ -29,7 +30,7 @@ const toLocalISODate = (d: Date): string => {
   return `${y}-${m}-${day}`;
 };
 
-const getTodayDate = (): string => toLocalISODate(new Date());
+const getTodayDate = (): string => toLocalISODate(new Date(safeDateNow()));
 
 const journalTitle = (dateStr: string): string => {
   const d = new Date(dateStr + "T00:00:00");
@@ -243,8 +244,8 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
 
     // Gather last 7 days of note content for the system prompt
     const recentNotesContext = computed(() => {
-      const today = new Date();
-      const sevenDaysAgo = new Date(today);
+      const today = new Date(safeDateNow());
+      const sevenDaysAgo = new Date(safeDateNow());
       sevenDaysAgo.setDate(today.getDate() - 7);
       const cutoff = toLocalISODate(sevenDaysAgo);
 
@@ -352,60 +353,78 @@ ${notesXml}
       [NAME]: computed(() => `📅 ${title.get()}`),
       [UI]: (
         <cf-screen>
+          {/* Main view — two column layout */}
           <div
             style={{
-              flex: 1,
-              overflow: "auto",
-              minHeight: 0,
+              display: mainDisplay,
+              gap: "24px",
+              padding: "24px",
+              alignItems: "start",
             }}
           >
-            {/* Main view — two column layout */}
-            <div
-              style={{
-                display: mainDisplay,
-                gap: "24px",
-                padding: "24px",
-                alignItems: "start",
-              }}
-            >
-              {/* Column 1: Calendar + Entries */}
-              <div style={{ width: "320px", flexShrink: "0" }}>
-                <cf-vstack gap="4">
-                  {/* Go to Today */}
-                  <cf-button
-                    variant="primary"
-                    onClick={handleGoToToday({
+            {/* Column 1: Calendar + Entries */}
+            <div style={{ width: "320px", flexShrink: "0" }}>
+              <cf-vstack gap="4">
+                {/* Go to Today */}
+                <cf-button
+                  variant="primary"
+                  onClick={handleGoToToday({
+                    entries,
+                    template,
+                    selectedDate,
+                    addPiece,
+                  })}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    fontSize: "16px",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Go to Today's Note
+                </cf-button>
+
+                {/* Mini calendar */}
+                <cf-card>
+                  <cf-calendar
+                    $value={selectedDate}
+                    markedDates={datesWithNotes}
+                    oncf-change={handleCalendarChange({
                       entries,
                       template,
                       selectedDate,
                       addPiece,
                     })}
+                  />
+                </cf-card>
+
+                {/* Entries list */}
+                <cf-vstack gap="2">
+                  <div
                     style={{
-                      width: "100%",
-                      padding: "12px",
-                      fontSize: "16px",
-                      fontWeight: "bold",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
                     }}
                   >
-                    Go to Today's Note
-                  </cf-button>
+                    <h3 style={{ margin: 0, fontSize: "16px" }}>Entries</h3>
+                    <cf-button variant="ghost" onClick={toggleSettings}>
+                      Settings
+                    </cf-button>
+                  </div>
+                  {sortedEntries.map((entry: any) => (
+                    <cf-cell-link $cell={entry} />
+                  ))}
+                </cf-vstack>
+              </cf-vstack>
+            </div>
 
-                  {/* Mini calendar */}
-                  <cf-card>
-                    <cf-calendar
-                      $value={selectedDate}
-                      markedDates={datesWithNotes}
-                      oncf-change={handleCalendarChange({
-                        entries,
-                        template,
-                        selectedDate,
-                        addPiece,
-                      })}
-                    />
-                  </cf-card>
-
-                  {/* Entries list */}
-                  <cf-vstack gap="2">
+            {/* Column 2: Weekly Rollup */}
+            <div style={{ flex: "1", minWidth: "0" }}>
+              {ifElse(
+                hasRecentNotes,
+                <cf-card>
+                  <cf-vstack gap="3" padding="4">
                     <div
                       style={{
                         display: "flex",
@@ -413,65 +432,82 @@ ${notesXml}
                         alignItems: "center",
                       }}
                     >
-                      <h3 style={{ margin: 0, fontSize: "16px" }}>Entries</h3>
-                      <cf-button variant="ghost" onClick={toggleSettings}>
-                        Settings
-                      </cf-button>
-                    </div>
-                    {sortedEntries.map((entry: any) => (
-                      <cf-cell-link $cell={entry} />
-                    ))}
-                  </cf-vstack>
-                </cf-vstack>
-              </div>
-
-              {/* Column 2: Weekly Rollup */}
-              <div style={{ flex: "1", minWidth: "0" }}>
-                {ifElse(
-                  hasRecentNotes,
-                  <cf-card>
-                    <cf-vstack gap="3" padding="4">
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <h3 style={{ margin: 0, fontSize: "14px" }}>
-                          Weekly Rollup
-                        </h3>
-                        <cf-button
-                          variant="ghost"
-                          size="sm"
-                          onClick={triggerRollup({
-                            addMessage: rollupAddMessage,
-                          })}
-                        >
-                          Refresh
-                        </cf-button>
-                      </div>
-
-                      <cf-autostart
-                        onstart={triggerRollup({
+                      <h3 style={{ margin: 0, fontSize: "14px" }}>
+                        Weekly Rollup
+                      </h3>
+                      <cf-button
+                        variant="ghost"
+                        size="sm"
+                        onClick={triggerRollup({
                           addMessage: rollupAddMessage,
                         })}
-                      />
+                      >
+                        Refresh
+                      </cf-button>
+                    </div>
 
-                      {ifElse(
-                        hasRollup,
-                        <cf-vstack gap="3">
-                          <p
+                    <cf-autostart
+                      onstart={triggerRollup({
+                        addMessage: rollupAddMessage,
+                      })}
+                    />
+
+                    {ifElse(
+                      hasRollup,
+                      <cf-vstack gap="3">
+                        <p
+                          style={{
+                            fontSize: "15px",
+                            fontWeight: "600",
+                            margin: 0,
+                            lineHeight: "1.3",
+                          }}
+                        >
+                          {weeklyRollup?.headline}
+                        </p>
+
+                        <cf-vstack gap="1">
+                          <span
                             style={{
-                              fontSize: "15px",
-                              fontWeight: "600",
-                              margin: 0,
-                              lineHeight: "1.3",
+                              fontSize: "11px",
+                              fontWeight: "500",
+                              color: "var(--cf-color-gray-500)",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
                             }}
                           >
-                            {weeklyRollup?.headline}
-                          </p>
+                            Themes
+                          </span>
+                          {weeklyRollup?.themes.map(
+                            (theme: { name: string; detail: string }) => (
+                              <div
+                                style={{
+                                  padding: "6px 8px",
+                                  borderRadius: "6px",
+                                  background: "var(--cf-color-gray-50)",
+                                  fontSize: "13px",
+                                }}
+                              >
+                                <strong>{theme.name}</strong>
+                                {" — "}
+                                <span
+                                  style={{
+                                    color: "var(--cf-color-gray-600)",
+                                  }}
+                                >
+                                  {theme.detail}
+                                </span>
+                              </div>
+                            ),
+                          )}
+                        </cf-vstack>
 
+                        {ifElse(
+                          computed(
+                            () =>
+                              (weeklyRollup?.accomplishments?.length ?? 0) >
+                                0,
+                          ),
                           <cf-vstack gap="1">
                             <span
                               style={{
@@ -482,188 +518,144 @@ ${notesXml}
                                 letterSpacing: "0.05em",
                               }}
                             >
-                              Themes
+                              Done
                             </span>
-                            {weeklyRollup?.themes.map(
-                              (theme: { name: string; detail: string }) => (
-                                <div
-                                  style={{
-                                    padding: "6px 8px",
-                                    borderRadius: "6px",
-                                    background: "var(--cf-color-gray-50)",
-                                    fontSize: "13px",
-                                  }}
-                                >
-                                  <strong>{theme.name}</strong>
-                                  {" — "}
-                                  <span
-                                    style={{
-                                      color: "var(--cf-color-gray-600)",
-                                    }}
-                                  >
-                                    {theme.detail}
-                                  </span>
-                                </div>
-                              ),
-                            )}
-                          </cf-vstack>
+                            <ul
+                              style={{
+                                margin: 0,
+                                paddingLeft: "1.2rem",
+                                fontSize: "13px",
+                                lineHeight: "1.5",
+                              }}
+                            >
+                              {weeklyRollup?.accomplishments.map(
+                                (item: string) => <li>{item}</li>,
+                              )}
+                            </ul>
+                          </cf-vstack>,
+                          <span />,
+                        )}
 
-                          {ifElse(
-                            computed(
-                              () =>
-                                (weeklyRollup?.accomplishments?.length ?? 0) >
-                                  0,
-                            ),
-                            <cf-vstack gap="1">
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  fontWeight: "500",
-                                  color: "var(--cf-color-gray-500)",
-                                  textTransform: "uppercase",
-                                  letterSpacing: "0.05em",
-                                }}
-                              >
-                                Done
-                              </span>
-                              <ul
-                                style={{
-                                  margin: 0,
-                                  paddingLeft: "1.2rem",
-                                  fontSize: "13px",
-                                  lineHeight: "1.5",
-                                }}
-                              >
-                                {weeklyRollup?.accomplishments.map(
-                                  (item: string) => <li>{item}</li>,
-                                )}
-                              </ul>
-                            </cf-vstack>,
-                            <span />,
-                          )}
+                        {ifElse(
+                          computed(
+                            () => (weeklyRollup?.openThreads?.length ?? 0) > 0,
+                          ),
+                          <cf-vstack gap="1">
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: "500",
+                                color: "var(--cf-color-gray-500)",
+                                textTransform: "uppercase",
+                                letterSpacing: "0.05em",
+                              }}
+                            >
+                              Open Threads
+                            </span>
+                            <ul
+                              style={{
+                                margin: 0,
+                                paddingLeft: "1.2rem",
+                                fontSize: "13px",
+                                lineHeight: "1.5",
+                              }}
+                            >
+                              {weeklyRollup?.openThreads.map(
+                                (item: string) => <li>{item}</li>,
+                              )}
+                            </ul>
+                          </cf-vstack>,
+                          <span />,
+                        )}
 
-                          {ifElse(
-                            computed(
-                              () =>
-                                (weeklyRollup?.openThreads?.length ?? 0) > 0,
-                            ),
-                            <cf-vstack gap="1">
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  fontWeight: "500",
-                                  color: "var(--cf-color-gray-500)",
-                                  textTransform: "uppercase",
-                                  letterSpacing: "0.05em",
-                                }}
-                              >
-                                Open Threads
-                              </span>
-                              <ul
-                                style={{
-                                  margin: 0,
-                                  paddingLeft: "1.2rem",
-                                  fontSize: "13px",
-                                  lineHeight: "1.5",
-                                }}
-                              >
-                                {weeklyRollup?.openThreads.map(
-                                  (item: string) => <li>{item}</li>,
-                                )}
-                              </ul>
-                            </cf-vstack>,
-                            <span />,
-                          )}
-
-                          <p
-                            style={{
-                              margin: 0,
-                              fontSize: "13px",
-                              fontStyle: "italic",
-                              color: "var(--cf-color-gray-600)",
-                            }}
-                          >
-                            {weeklyRollup?.mood}
-                          </p>
-                        </cf-vstack>,
-                        <div
+                        <p
                           style={{
-                            textAlign: "center",
-                            color: "var(--cf-color-gray-500)",
-                            padding: "0.5rem",
+                            margin: 0,
                             fontSize: "13px",
+                            fontStyle: "italic",
+                            color: "var(--cf-color-gray-600)",
                           }}
                         >
-                          {ifElse(
-                            rollupPending,
-                            <span>Summarizing your week...</span>,
-                            <span />,
-                          )}
-                        </div>,
-                      )}
-                    </cf-vstack>
-                  </cf-card>,
-                  <span />,
-                )}
-
-                {/* Suggestion based on weekly context */}
-                {ifElse(
-                  hasRollup,
-                  <cf-card style={{ marginTop: "16px" }}>
-                    <cf-vstack gap="2" padding="4">
-                      <span
+                          {weeklyRollup?.mood}
+                        </p>
+                      </cf-vstack>,
+                      <div
                         style={{
-                          fontSize: "11px",
-                          fontWeight: "500",
+                          textAlign: "center",
                           color: "var(--cf-color-gray-500)",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
+                          padding: "0.5rem",
+                          fontSize: "13px",
                         }}
                       >
-                        Suggested
-                      </span>
-                      <Suggestion
-                        situation={suggestionSituation}
-                        context={suggestionContext}
-                        initialResults={[]}
-                      />
-                    </cf-vstack>
-                  </cf-card>,
-                  <span />,
-                )}
-              </div>
-            </div>
+                        {ifElse(
+                          rollupPending,
+                          <span>Summarizing your week...</span>,
+                          <span />,
+                        )}
+                      </div>,
+                    )}
+                  </cf-vstack>
+                </cf-card>,
+                <span />,
+              )}
 
-            {/* Settings view */}
-            <cf-vstack
-              gap="4"
-              padding="6"
+              {/* Suggestion based on weekly context */}
+              {ifElse(
+                hasRollup,
+                <cf-card style={{ marginTop: "16px" }}>
+                  <cf-vstack gap="2" padding="4">
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: "500",
+                        color: "var(--cf-color-gray-500)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      Suggested
+                    </span>
+                    <Suggestion
+                      situation={suggestionSituation}
+                      context={suggestionContext}
+                      initialResults={[]}
+                    />
+                  </cf-vstack>
+                </cf-card>,
+                <span />,
+              )}
+            </div>
+          </div>
+
+          {/* Settings view */}
+          <cf-vstack
+            gap="4"
+            padding="6"
+            style={{
+              display: settingsDisplay,
+            }}
+          >
+            <h3 style={{ margin: 0 }}>Daily Note Template</h3>
+            <p
               style={{
-                display: settingsDisplay,
+                margin: 0,
+                fontSize: "13px",
+                color: "var(--cf-color-text-secondary)",
               }}
             >
-              <h3 style={{ margin: 0 }}>Daily Note Template</h3>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "13px",
-                  color: "var(--cf-color-text-secondary)",
-                }}
-              >
-                Available variables: {"{{date}}"}, {"{{dayOfWeek}}"},
-                {"{{month}}"}, {"{{year}}"}
-              </p>
-              <cf-code-editor
-                $value={template}
-                language="text/markdown"
-                wordWrap
-                style={{ minHeight: "300px" }}
-              />
-              <cf-button variant="primary" onClick={toggleSettings}>
-                Done
-              </cf-button>
-            </cf-vstack>
-          </div>
+              Available variables: {"{{date}}"}, {"{{dayOfWeek}}"},
+              {"{{month}}"}, {"{{year}}"}
+            </p>
+            <cf-code-editor
+              $value={template}
+              language="text/markdown"
+              wordWrap
+              style={{ minHeight: "300px" }}
+            />
+            <cf-button variant="primary" onClick={toggleSettings}>
+              Done
+            </cf-button>
+          </cf-vstack>
         </cf-screen>
       ),
       title,

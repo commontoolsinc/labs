@@ -6,7 +6,7 @@ library.
 
 ## Component Library Overview
 
-The Common Fabric UI library provides 39 secure web components that follow the
+The Common Fabric UI library provides 40 secure web components that follow the
 shadcn/ui design system. All components:
 
 - Use custom element tags prefixed with `cf-`
@@ -518,7 +518,39 @@ Same as cf-hstack **Example**:
 - `scrollToX(x, smooth)` - Scroll to position
 - `scrollByX(x, smooth)` - Scroll by amount
 
-### 37. cf-vscroll
+### 37. cf-screen
+
+**Purpose**: Full-height app layout with pinned header/footer and auto-scrolling
+main area **Tag**: `<cf-screen>`
+
+**Slots**:
+
+- `header` — Fixed content at the top
+- (default) — Main content area; stretches to fill height, scrolls automatically
+  when content overflows
+- `footer` — Fixed content at the bottom
+
+**Usage notes**:
+
+- Content in the default slot scrolls automatically — no need for `cf-vscroll`
+  unless you need snap-to-bottom (chat), fade-edges, or styled scrollbar
+- Do NOT nest `cf-screen` inside another `cf-screen`
+
+**Example**:
+
+```html
+<cf-screen>
+  <cf-heading slot="header" level="2">Title</cf-heading>
+  <cf-vstack gap="4" padding="4">
+    <!-- content scrolls if it overflows -->
+  </cf-vstack>
+  <cf-hstack slot="footer" gap="2" padding="4">
+    <cf-button>Action</cf-button>
+  </cf-hstack>
+</cf-screen>
+```
+
+### 38. cf-vscroll
 
 **Purpose**: Vertical scroll container **Tag**: `<cf-vscroll>` **Attributes**:
 
@@ -531,7 +563,11 @@ Same as cf-hstack **Example**:
 - `scrollToY(y, smooth)` - Scroll to position
 - `scrollByY(y, smooth)` - Scroll by amount
 
-### 38. cf-grid
+**Note**: `cf-vscroll` is only needed inside `cf-screen` when you need
+snap-to-bottom, fade-edges, or styled scrollbar. `cf-screen` scrolls
+automatically on its own.
+
+### 39. cf-grid
 
 **Purpose**: CSS Grid container **Tag**: `<cf-grid>` **Attributes**:
 
@@ -554,7 +590,7 @@ Same as cf-hstack **Example**:
 </cf-grid>
 ```
 
-### 39. cf-table
+### 40. cf-table
 
 **Purpose**: Semantic HTML table **Tag**: `<cf-table>` **Attributes**:
 
