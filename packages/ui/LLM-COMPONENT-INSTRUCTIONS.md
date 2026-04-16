@@ -663,6 +663,102 @@ document.querySelector("cf-form").addEventListener("cf-submit", (e) => {
 });
 ```
 
+### cf-modal (Sheet Presentation)
+
+**Purpose**: Modal dialog with optional bottom-sheet presentation **Tag**:
+`<cf-modal>` **Attributes** (in addition to existing open, dismissable, size,
+label):
+
+- `presentation` - "dialog" | "sheet" (default: "dialog")
+- `grabber` - boolean, decorative drag-handle indicator (sheet mode only)
+- `detent` - "auto" | "half" | "full" (sheet max height, sheet mode only)
+
+**Example**:
+
+```html
+<cf-modal open presentation="sheet" grabber detent="half" dismissable>
+  <span slot="header">Options</span>
+  <p>Sheet slides up from the bottom.</p>
+</cf-modal>
+```
+
+### cf-tab-bar / cf-tab-bar-item
+
+**Purpose**: Fixed-position app navigation bar (distinct from cf-tabs) **Tags**:
+`<cf-tab-bar>`, `<cf-tab-bar-item>`
+
+**cf-tab-bar Attributes**:
+
+- `value` / `$value` - selected item value (Cell or string)
+- `position` - "bottom" | "top" (default: "bottom")
+- `variant` - "default" | "inset" (default: "default")
+
+**cf-tab-bar-item Attributes**:
+
+- `value` - unique identifier string
+- `label` - text label below icon
+- `disabled` - boolean
+
+**Slots**:
+
+- Default slot: `cf-tab-bar-item` elements
+- `action` slot: optional primary action button (FAB)
+- `icon` slot (on item): icon content above label
+
+**Events**:
+
+- `cf-change` - detail: `{ value, oldValue }`
+
+**Example**:
+
+```html
+<cf-tab-bar value="home" variant="inset">
+  <cf-tab-bar-item value="home" label="Home">
+    <span slot="icon">🏠</span>
+  </cf-tab-bar-item>
+  <cf-tab-bar-item value="search" label="Search">
+    <span slot="icon">🔍</span>
+  </cf-tab-bar-item>
+  <cf-button slot="action" variant="primary">＋</cf-button>
+</cf-tab-bar>
+```
+
+### cf-toast / cf-toast-provider
+
+**Purpose**: Floating ephemeral notification messages **Tags**:
+`<cf-toast-provider>`, `<cf-toast>`
+
+**cf-toast-provider Attributes**:
+
+- `position` - "top" | "bottom" | "top-left" | "top-right" | "bottom-left" |
+  "bottom-right" (default: "bottom")
+- `max` - number, max visible toasts (default: 3)
+
+**cf-toast Attributes**:
+
+- `variant` - "default" | "success" | "error" | "warning"
+- `duration` - number, auto-dismiss ms (default: 5000, 0 = persistent)
+- `dismissable` - boolean, show X button
+- `open` - boolean, visibility
+
+**cf-toast Slots**: Default (message), `action`, `icon`
+
+**Events**:
+
+- `cf-toast-dismiss` - detail: `{ reason: "timeout" | "user" }`
+- `cf-toast-action` - detail: `{}`
+
+**Example**:
+
+```html
+<cf-toast-provider position="bottom">
+  <cf-toast open variant="success" duration="4000">
+    Changes saved.
+    <button slot="action">View</button>
+  </cf-toast>
+</cf-toast-provider>
+```
+
 ## Styling Components
 
 Components expose CSS custom properties and parts for styling:
