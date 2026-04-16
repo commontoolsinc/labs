@@ -4,6 +4,7 @@
 
 import { isDeno } from "@commonfabric/utils/env";
 import type { IncrementalHasher } from "./interface.ts";
+import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
 
 // Can't `import` at the top, because then `import`ing this module would fail
 // in a non-Deno environment.
@@ -27,16 +28,14 @@ function cantUse(): never {
 /**
  * Deno-specific incremental hasher.
  */
-class DenoHasher implements IncrementalHasher {
+class DenoHasher extends BaseIncrementalHasher {
   #hasher = (crypto === null) ? cantUse() : crypto.createHash("sha256");
 
-  update(data: Uint8Array) {
+  _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
-  digest(): Uint8Array;
-  digest(encoding: "base64url"): string;
-  digest(encoding?: string): Uint8Array | string {
+  _rawDigest(encoding: string | undefined): Uint8Array | string {
     switch (encoding) {
       case "base64url": {
         return this.#hasher.digest(encoding);

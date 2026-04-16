@@ -3,21 +3,23 @@
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
-import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
 import type { IncrementalHasher } from "./interface.ts";
+import {
+  BaseSmallChunkUpdatingHasher,
+} from "./BaseSmallChunkUpdatingHasher.ts";
 
 /**
  * Noble-specific incremental hasher. Noble notably only has a one-shot digest
  * function.
  */
-class NobleHasher extends BaseIncrementalHasher {
+class NobleHasher extends BaseSmallChunkUpdatingHasher {
   #hasher = sha256.create();
 
-  update(data: Uint8Array) {
+  protected _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
-  protected _rawDigest(): Uint8Array {
+  protected _rawDigest(_encoding: string | undefined): Uint8Array {
     return this.#hasher.digest();
   }
 }
