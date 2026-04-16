@@ -263,6 +263,124 @@ const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
 
 ---
 
+## cf-modal (Sheet Presentation)
+
+`cf-modal` supports a `presentation` attribute that switches between a centered dialog and a bottom sheet:
+
+```tsx
+// Centered dialog (default)
+<cf-modal $open={dialogOpen} presentation="dialog" size="md" dismissable>
+  <span slot="header">Confirm</span>
+  <p>Are you sure?</p>
+</cf-modal>
+
+// Bottom sheet
+<cf-modal $open={sheetOpen} presentation="sheet" grabber detent="half" dismissable>
+  <span slot="header">Options</span>
+  <p>Sheet content slides up from bottom.</p>
+</cf-modal>
+```
+
+Sheet-specific attributes:
+
+- `presentation` — `"dialog"` (default) or `"sheet"`
+- `grabber` — boolean, shows a drag-handle pill above the header
+- `detent` — `"auto"` (content-sized, max 90vh), `"half"` (50vh), `"full"` (92vh)
+
+Both modes share the same slots (header, default, footer, close-button), events, focus trap, Escape handling, and `ModalManager` stacking.
+
+---
+
+## cf-tab-bar
+
+Fixed-position navigation bar for app-like UIs. Distinct from `cf-tabs` — fires selection events instead of managing ARIA tab panels.
+
+```tsx
+const activeTab = Writable.of("home");
+
+<cf-tab-bar $value={activeTab} variant="inset">
+  <cf-tab-bar-item value="home" label="Home">
+    <span slot="icon">🏠</span>
+  </cf-tab-bar-item>
+  <cf-tab-bar-item value="search" label="Search">
+    <span slot="icon">🔍</span>
+  </cf-tab-bar-item>
+  <cf-tab-bar-item value="inbox" label="Inbox">
+    <span slot="icon">📬</span>
+  </cf-tab-bar-item>
+</cf-tab-bar>
+```
+
+- `$value` — Cell binding for the selected item value
+- `position` — `"bottom"` (default) or `"top"`
+- `variant` — `"default"` (full-width) or `"inset"` (floating pill)
+- `action` slot — optional primary action button (FAB) beside the nav pill
+- Events: `cf-change` with `{ value, oldValue }`
+- Keyboard: Arrow keys, Home/End, Enter/Space
+
+### Action slot (FAB)
+
+```tsx
+<cf-tab-bar $value={activeTab} variant="inset">
+  {/* ... tab items ... */}
+  <cf-button slot="action" variant="primary" onClick={openSheet}
+    style="border-radius: var(--cf-border-radius-xl); width: 3.5rem; height: 100%; padding: 0;">
+    ＋
+  </cf-button>
+</cf-tab-bar>
+```
+
+The action button renders beside the nav pill, not inside it. Use a regular `cf-button` — no special FAB component needed.
+
+### View switching
+
+The parent pattern owns view-switching logic via `computed()`:
+
+```tsx
+const mainContent = computed(() => {
+  switch (activeTab.get()) {
+    case "home":    return <HomeView />;
+    case "search":  return <SearchView />;
+    default:        return <HomeView />;
+  }
+});
+```
+
+---
+
+## cf-toast
+
+Floating ephemeral notifications. Place a `cf-toast-provider` at the app root and `cf-toast` elements inside it.
+
+```tsx
+<cf-toast-provider position="bottom">
+  <cf-toast open={saved} variant="success" duration={4000}
+    oncf-toast-dismiss={action(() => saved.set(false))}>
+    Changes saved.
+    <cf-button slot="action" variant="ghost" style="padding: 2px 8px; font-size: 13px;">
+      View
+    </cf-button>
+  </cf-toast>
+</cf-toast-provider>
+```
+
+### cf-toast-provider
+
+- `position` — `"top"`, `"bottom"`, `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`
+- `max` — maximum visible toasts (default 3), oldest dismissed on overflow
+
+### cf-toast
+
+- `variant` — `"default"`, `"success"`, `"error"`, `"warning"`
+- `duration` — auto-dismiss in ms (default 5000, `0` for persistent)
+- `dismissable` — show X button
+- `open` — visibility
+- Slots: default (message), `action`, `icon`
+- Events: `cf-toast-dismiss` with `{ reason: "timeout" | "user" }`, `cf-toast-action`
+- ARIA: error variant uses `role="alert"` + `aria-live="assertive"`, others use `role="status"` + `aria-live="polite"`
+
+---
+
 ## cf-screen
 
 Full-screen container for app-like layouts. Use instead of `<div style={{ height: "100%" }}>` which doesn't work (parent has no explicit height). The component already sets `display: flex; flex-direction: column;` internally.
