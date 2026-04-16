@@ -219,13 +219,29 @@ Working references:
 
 - `header` - Card header content
 - `content` - Main card content
-- `footer` - Card footer content **Example**:
+- `footer` - Card footer content
+
+**CSS custom properties**:
+
+- `--cf-card-background` - Card background, default inherits from surface color.
+  Accepts any CSS `background` value including gradients.
+- `--cf-card-backdrop-blur` - Backdrop blur radius, default `0px`. Set to a blur
+  value (e.g. `8px`) for a frosted-glass effect.
+
+**Example**:
 
 ```html
 <cf-card>
   <h3 slot="header">Card Title</h3>
   <p slot="content">Card content goes here</p>
   <cf-button slot="footer">Action</cf-button>
+</cf-card>
+
+<!-- Gradient tinted card -->
+<cf-card
+  style="--cf-card-background: linear-gradient(145deg, rgba(255, 255, 255, 0.52), #ece9ff); --cf-card-backdrop-blur: 8px"
+>
+  <p slot="content">Frosted glass card</p>
 </cf-card>
 ```
 
@@ -240,6 +256,48 @@ Working references:
 
 ```html
 <cf-badge variant="secondary" removable>Status</cf-badge>
+```
+
+### 13b. cf-chip
+
+**Purpose**: Compact label / tag / action pill **Tag**: `<cf-chip>`
+**Attributes**:
+
+- `label` - string, display text
+- `size` - "sm" | "md" | "lg" (default: "md")
+- `removable` - boolean (shows X button)
+- `disabled` - boolean
+
+**Events**:
+
+- `cf-remove` - Fired when X button clicked (if removable)
+
+**CSS custom properties** (per-instance color overrides):
+
+- `--cf-chip-background` - chip background color or gradient
+- `--cf-chip-color` - chip text color
+- `--cf-chip-border-color` - chip border color
+
+**Example**:
+
+```html
+<!-- Basic chip -->
+<cf-chip label="Draft"></cf-chip>
+
+<!-- Size variants -->
+<cf-chip label="Small" size="sm"></cf-chip>
+<cf-chip label="Large" size="lg"></cf-chip>
+
+<!-- Color override via CSS custom properties -->
+<cf-chip
+  label="Review"
+  size="sm"
+  style="--cf-chip-background: linear-gradient(135deg, #5f89ff, #4d77fb); --cf-chip-color: white"
+>
+</cf-chip>
+
+<!-- Removable -->
+<cf-chip label="Tag" removable></cf-chip>
 ```
 
 ### 14. cf-alert

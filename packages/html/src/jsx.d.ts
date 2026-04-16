@@ -4086,6 +4086,11 @@ interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
     | "primary"
     | "accent"
     | CellLike<"default" | "primary" | "accent">;
+  "size"?:
+    | "sm"
+    | "md"
+    | "lg"
+    | CellLike<"sm" | "md" | "lg">;
   "removable"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;

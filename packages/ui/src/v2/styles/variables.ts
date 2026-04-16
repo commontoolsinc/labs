@@ -118,4 +118,23 @@ export const variablesCSS = `
   --cf-z-index-50: 50;
   --cf-z-index-100: 100;
   --cf-z-index-1000: 1000;
+
+  /* Backdrop Blur */
+  --cf-backdrop-blur-sm: 4px;
+  --cf-backdrop-blur-md: 8px;
+  --cf-backdrop-blur-lg: 16px;
+  --cf-backdrop-blur-xl: 24px;
+
+  /* Translucent Surfaces */
+  --cf-surface-translucent: rgba(255, 255, 255, 0.72);
+  --cf-surface-translucent-strong: rgba(255, 255, 255, 0.88);
+  --cf-overlay-dim: rgba(0, 0, 0, 0.4);
+
+  /* Z-index — Semantic Layers */
+  --cf-z-layer-sticky: 10;
+  --cf-z-layer-fixed: 500;
+  --cf-z-layer-fab: 900;
+  --cf-z-layer-sheet: 950;
+  --cf-z-layer-overlay: 1000;
+  --cf-z-layer-toast: 1100;
 `;

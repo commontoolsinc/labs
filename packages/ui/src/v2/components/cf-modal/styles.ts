@@ -23,7 +23,10 @@ export const modalStyles = css`
 
     /* CSS custom properties for customization */
     --_backdrop-color: var(--cf-modal-backdrop-color, rgba(0, 0, 0, 0.5));
-    --_backdrop-blur: var(--cf-modal-backdrop-blur, 8px);
+    --_backdrop-blur: var(
+      --cf-modal-backdrop-blur,
+      var(--cf-backdrop-blur-md, 8px)
+    );
     --_border-radius: var(--cf-modal-border-radius, 12px);
     --_width-sm: var(--cf-modal-width-sm, 320px);
     --_width-md: var(--cf-modal-width-md, 500px);

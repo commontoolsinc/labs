@@ -7,32 +7,122 @@ interface MobileAppDemoOutput {
   [UI]: unknown;
 }
 
-const tabContent: Record<
-  string,
-  { heading: string; items: { title: string; detail: string; meta: string }[] }
-> = {
-  home: {
-    heading: "Home",
-    items: [
-      {
-        title: "Schedule vet appointment",
-        detail: "Pet care",
-        meta: "Needs action",
-      },
-      {
-        title: "Prepare slides for all-hands",
-        detail: "Work",
-        meta: "In progress",
-      },
-      {
-        title: "Draft pattern implementation",
-        detail: "Fabric",
-        meta: "Ready",
-      },
-      { title: "Triage partner threads", detail: "Comms", meta: "Fresh" },
-      { title: "Review design feedback", detail: "Design", meta: "Pending" },
-    ],
+const IOS_HOME_THEME = {
+  fontFamily:
+    '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif',
+  borderRadius: "18px",
+  density: "comfortable" as const,
+  colorScheme: "light" as const,
+  colors: {
+    primary: "#4f7dff",
+    primaryForeground: "#ffffff",
+    secondary: "#d8dded",
+    secondaryForeground: "#3a4568",
+    background: "#eef1f8",
+    surface: "rgba(255, 255, 255, 0.72)",
+    surfaceHover: "rgba(255, 255, 255, 0.88)",
+    text: "#313a5d",
+    textMuted: "#8e94a8",
+    border: "rgba(67, 75, 97, 0.10)",
+    borderMuted: "rgba(67, 75, 97, 0.06)",
+    accent: "#ff6f52",
+    accentForeground: "#ffffff",
+    success: "#21c17b",
+    successForeground: "#ffffff",
+    error: "#ff6f52",
+    errorForeground: "#ffffff",
+    warning: "#e5a126",
+    warningForeground: "#ffffff",
   },
+};
+
+type TaskItem = {
+  title: string;
+  detail: string;
+  meta: string;
+  actionLabel: string;
+  actionTone: "blue" | "coral" | "graphite";
+  section: "Needs action" | "Knock something out";
+};
+
+type ShortcutItem = {
+  icon: string;
+  title: string;
+  subtitle: string;
+};
+
+type ArtifactItem = {
+  title: string;
+  tint: string;
+};
+
+type TabContent = {
+  heading: string;
+  subtitle?: string;
+  tasks?: TaskItem[];
+  shortcuts?: ShortcutItem[];
+  artifacts?: ArtifactItem[];
+  items?: { title: string; detail: string; meta: string }[];
+};
+
+const TASK_SECTIONS: Array<"Needs action" | "Knock something out"> = [
+  "Needs action",
+  "Knock something out",
+];
+
+const HOME_CONTENT: TabContent = {
+  heading: "Good evening.",
+  subtitle: "Last woven just now",
+  tasks: [
+    {
+      title: "Schedule an appointment with a vet specializing in GI",
+      detail: "Pet care",
+      meta: "Needs action",
+      actionLabel: "Review",
+      actionTone: "blue",
+      section: "Needs action",
+    },
+    {
+      title: "Prepare slides for all-hands meeting",
+      detail: "Work",
+      meta: "Needs action",
+      actionLabel: "Launch",
+      actionTone: "coral",
+      section: "Needs action",
+    },
+    {
+      title: "Draft the Pattern implementation for the new home surface",
+      detail: "Fabric",
+      meta: "Ready",
+      actionLabel: "Start",
+      actionTone: "graphite",
+      section: "Knock something out",
+    },
+    {
+      title: "Triage the latest partner threads before tomorrow morning",
+      detail: "Comms",
+      meta: "Fresh",
+      actionLabel: "Reply",
+      actionTone: "blue",
+      section: "Knock something out",
+    },
+  ],
+  shortcuts: [
+    { icon: "✦", title: "Answer", subtitle: "questions" },
+    { icon: "◎", title: "Create", subtitle: "pattern" },
+    { icon: "▤", title: "Learn", subtitle: "about Fabric" },
+    { icon: "◌", title: "Review", subtitle: "activity" },
+  ],
+  artifacts: [
+    { title: "Launch brief", tint: "#ece9ff" },
+    { title: "Roadmap v2", tint: "#dfeaff" },
+    { title: "Brand draft", tint: "#ffe9df" },
+    { title: "Workspace map", tint: "#e5f6ef" },
+  ],
+};
+
+const tabContent: Record<string, TabContent> = {
+  home: HOME_CONTENT,
   search: {
     heading: "Search",
     items: [
@@ -74,11 +164,25 @@ const tabContent: Record<
     heading: "Profile",
     items: [
       { title: "Edit display name", detail: "Settings", meta: "Account" },
-      { title: "Notification preferences", detail: "Settings", meta: "Alerts" },
+      {
+        title: "Notification preferences",
+        detail: "Settings",
+        meta: "Alerts",
+      },
       { title: "Connected apps", detail: "2 active", meta: "Integrations" },
     ],
   },
 };
+
+function chipStyle(tone: "blue" | "coral" | "graphite"): string {
+  if (tone === "blue") {
+    return "--cf-chip-background: linear-gradient(135deg, #5f89ff, #4d77fb); --cf-chip-color: white; --cf-chip-border-color: transparent;";
+  }
+  if (tone === "coral") {
+    return "--cf-chip-background: linear-gradient(135deg, #ff7f5f, #ff6846); --cf-chip-color: white; --cf-chip-border-color: transparent;";
+  }
+  return "--cf-chip-background: linear-gradient(135deg, #5b6274, #444d61); --cf-chip-color: white; --cf-chip-border-color: transparent;";
+}
 
 export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
   const activeTab = Writable.of("home");
@@ -96,106 +200,240 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
   return {
     [NAME]: "Mobile App Demo",
     [UI]: (
-      <cf-screen>
-        <cf-heading level={3} slot="header" style="padding: 20px 20px 8px;">
-          {computed(() =>
-            (tabContent[activeTab.get()] ?? tabContent.home).heading
-          )}
-        </cf-heading>
+      <cf-theme theme={IOS_HOME_THEME}>
+        <cf-screen>
+          {computed(() => {
+            const tab = activeTab.get();
+            const content = tabContent[tab] ?? tabContent.home;
+            const isHome = tab === "home";
 
-        <cf-vscroll style="padding: 0 16px 100px;">
-          <cf-vstack gap="3">
-            {computed(() =>
-              (tabContent[activeTab.get()] ?? tabContent.home).items.map((
-                item: { title: string; detail: string; meta: string },
-              ) => (
-                <cf-card>
-                  <cf-vstack gap="1">
-                    <span style="font-weight: 600;">{item.title}</span>
-                    <cf-hstack justify="between">
-                      <cf-label style="color: var(--cf-theme-color-text-muted, #8e94a8);">
-                        {item.detail}
+            if (isHome) {
+              const home = content as typeof HOME_CONTENT;
+              return (
+                <cf-vscroll style="padding: 0 16px 100px;">
+                  <cf-vstack gap="4" style="padding-top: 8px;">
+                    {/* Header */}
+                    <div>
+                      <cf-heading
+                        level={1}
+                        style="font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -0.05em; line-height: 1.05; margin: 0 0 4px;"
+                      >
+                        {home.heading}
+                      </cf-heading>
+                      <cf-label style="font-size: 1.1rem; color: var(--cf-theme-color-text-muted, #8e94a8); letter-spacing: -0.02em;">
+                        {home.subtitle}
                       </cf-label>
-                      <cf-label style="color: var(--cf-theme-color-text-muted, #8e94a8);">
-                        {item.meta}
-                      </cf-label>
-                    </cf-hstack>
+                    </div>
+
+                    {/* Task sections */}
+                    {TASK_SECTIONS.map((
+                      section: "Needs action" | "Knock something out",
+                    ) => (
+                      <cf-vstack gap="2">
+                        <cf-hstack align="center" style="padding-bottom: 6px;">
+                          <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #8e94a8); letter-spacing: 0.01em;">
+                            {section}
+                          </span>
+                          <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                            ›
+                          </span>
+                        </cf-hstack>
+                        <cf-separator />
+                        <cf-vstack gap="2">
+                          {(home.tasks ?? [])
+                            .filter((t: TaskItem) => t.section === section)
+                            .map((task: TaskItem) => (
+                              <cf-card style="--cf-card-background: rgba(255,255,255,0.52);">
+                                <cf-hstack align="start" justify="between">
+                                  <cf-vstack
+                                    gap="1"
+                                    style="flex: 1; min-width: 0;"
+                                  >
+                                    <span style="font-weight: 600; font-size: 0.9rem; line-height: 1.35; letter-spacing: -0.015em;">
+                                      {task.title}
+                                    </span>
+                                    <cf-label style="font-size: 0.75rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                                      {task.detail}
+                                    </cf-label>
+                                  </cf-vstack>
+                                  <cf-chip
+                                    label={task.actionLabel}
+                                    size="sm"
+                                    style={chipStyle(task.actionTone)}
+                                  />
+                                </cf-hstack>
+                              </cf-card>
+                            ))}
+                        </cf-vstack>
+                      </cf-vstack>
+                    ))}
+
+                    {/* Shortcuts */}
+                    <cf-vstack gap="2">
+                      <cf-hstack align="center" style="padding-bottom: 6px;">
+                        <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #8e94a8); letter-spacing: 0.01em;">
+                          Shortcuts
+                        </span>
+                        <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                          ›
+                        </span>
+                      </cf-hstack>
+                      <cf-separator />
+                      <cf-hscroll fadeEdges>
+                        <cf-hstack gap="3" style="padding-bottom: 4px;">
+                          {(home.shortcuts ?? []).map((sc: ShortcutItem) => (
+                            <cf-card style="--cf-card-background: rgba(255,255,255,0.48); --cf-card-backdrop-blur: 8px; min-width: 88px; width: 88px;">
+                              <cf-vstack
+                                gap="1"
+                                align="center"
+                                style="padding: 4px 0; text-align: center;"
+                              >
+                                <span style="font-size: 1.15rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                                  {sc.icon}
+                                </span>
+                                <span style="font-size: 0.76rem; font-weight: 600; color: var(--cf-theme-color-text, #313a5d); line-height: 1.15;">
+                                  {sc.title}
+                                </span>
+                                <span style="font-size: 0.72rem; color: var(--cf-theme-color-text-muted, #8e94a8); line-height: 1.15;">
+                                  {sc.subtitle}
+                                </span>
+                              </cf-vstack>
+                            </cf-card>
+                          ))}
+                        </cf-hstack>
+                      </cf-hscroll>
+                    </cf-vstack>
+
+                    {/* Artifacts */}
+                    <cf-vstack gap="2">
+                      <cf-hstack align="center" style="padding-bottom: 6px;">
+                        <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #8e94a8); letter-spacing: 0.01em;">
+                          Recent artifacts
+                        </span>
+                        <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                          ›
+                        </span>
+                      </cf-hstack>
+                      <cf-separator />
+                      <cf-grid columns="2" gap="3">
+                        {(home.artifacts ?? []).map((
+                          artifact: ArtifactItem,
+                        ) => (
+                          <cf-card
+                            style={`--cf-card-background: linear-gradient(145deg, rgba(255,255,255,0.52), ${artifact.tint}); min-height: 100px;`}
+                          >
+                            <span style="font-size: 0.72rem; font-weight: 600; color: rgba(69, 75, 93, 0.72); letter-spacing: -0.01em;">
+                              {artifact.title}
+                            </span>
+                          </cf-card>
+                        ))}
+                      </cf-grid>
+                    </cf-vstack>
                   </cf-vstack>
-                </cf-card>
-              ))
-            )}
-          </cf-vstack>
-        </cf-vscroll>
+                </cf-vscroll>
+              );
+            }
 
-        <cf-tab-bar $value={activeTab} variant="inset" slot="footer">
-          <cf-tab-bar-item value="home" label="Home">
-            <span slot="icon">&#127968;</span>
-          </cf-tab-bar-item>
-          <cf-tab-bar-item value="search" label="Search">
-            <span slot="icon">&#128269;</span>
-          </cf-tab-bar-item>
-          <cf-tab-bar-item value="inbox" label="Inbox">
-            <span slot="icon">&#128236;</span>
-          </cf-tab-bar-item>
-          <cf-tab-bar-item value="profile" label="Profile">
-            <span slot="icon">&#128100;</span>
-          </cf-tab-bar-item>
-          <cf-button
-            slot="action"
-            variant="primary"
-            onClick={openSheet}
-            style="border-radius: var(--cf-border-radius-xl, 0.75rem); width: 3.5rem; height: 100%; padding: 0; flex-shrink: 0;"
-          >
-            &#65291;
-          </cf-button>
-        </cf-tab-bar>
+            // Non-home tabs: simple card list
+            const items = content.items ?? [];
+            return (
+              <cf-vscroll style="padding: 0 16px 100px;">
+                <cf-vstack gap="3" style="padding-top: 8px;">
+                  <cf-heading level={3} style="margin: 12px 0 4px;">
+                    {content.heading}
+                  </cf-heading>
+                  {items.map((
+                    item: { title: string; detail: string; meta: string },
+                  ) => (
+                    <cf-card>
+                      <cf-vstack gap="1">
+                        <span style="font-weight: 600;">{item.title}</span>
+                        <cf-hstack justify="between">
+                          <cf-label style="color: var(--cf-theme-color-text-muted, #8e94a8);">
+                            {item.detail}
+                          </cf-label>
+                          <cf-label style="color: var(--cf-theme-color-text-muted, #8e94a8);">
+                            {item.meta}
+                          </cf-label>
+                        </cf-hstack>
+                      </cf-vstack>
+                    </cf-card>
+                  ))}
+                </cf-vstack>
+              </cf-vscroll>
+            );
+          })}
 
-        <cf-modal
-          $open={sheetOpen}
-          presentation="sheet"
-          grabber
-          detent="half"
-          dismissable
-        >
-          <div slot="header">
-            <cf-heading level={5}>New Task</cf-heading>
-          </div>
-          <cf-vstack gap="3" style="padding: 4px 0;">
-            <cf-textarea
-              placeholder="What needs to be done?"
-              style="min-height: 80px;"
-            />
-          </cf-vstack>
-          <div slot="footer">
-            <cf-hstack gap="2" justify="end" style="width: 100%;">
-              <cf-button variant="secondary" onClick={closeSheet}>
-                Cancel
-              </cf-button>
-              <cf-button variant="primary" onClick={handleCreate}>
-                Create
-              </cf-button>
-            </cf-hstack>
-          </div>
-        </cf-modal>
-
-        <cf-toast-provider position="bottom">
-          <cf-toast
-            open={toastOpen}
-            variant="success"
-            duration={4000}
-            oncf-toast-dismiss={dismissToast}
-          >
-            Task created.
+          <cf-tab-bar $value={activeTab} variant="inset" slot="footer">
+            <cf-tab-bar-item value="home" label="Home">
+              <span slot="icon">&#127968;</span>
+            </cf-tab-bar-item>
+            <cf-tab-bar-item value="search" label="Search">
+              <span slot="icon">&#128269;</span>
+            </cf-tab-bar-item>
+            <cf-tab-bar-item value="inbox" label="Inbox">
+              <span slot="icon">&#128236;</span>
+            </cf-tab-bar-item>
+            <cf-tab-bar-item value="profile" label="Profile">
+              <span slot="icon">&#128100;</span>
+            </cf-tab-bar-item>
             <cf-button
               slot="action"
-              variant="ghost"
-              style="padding: 2px 8px; font-size: 13px;"
+              variant="primary"
+              onClick={openSheet}
+              style="border-radius: var(--cf-border-radius-xl, 0.75rem); width: 3.5rem; height: 100%; padding: 0; flex-shrink: 0;"
             >
-              View
+              &#65291;
             </cf-button>
-          </cf-toast>
-        </cf-toast-provider>
-      </cf-screen>
+          </cf-tab-bar>
+
+          <cf-modal
+            $open={sheetOpen}
+            presentation="sheet"
+            grabber
+            detent="half"
+            dismissable
+          >
+            <div slot="header">
+              <cf-heading level={5}>New Task</cf-heading>
+            </div>
+            <cf-vstack gap="3" style="padding: 4px 0;">
+              <cf-textarea
+                placeholder="What needs to be done?"
+                style="min-height: 80px;"
+              />
+            </cf-vstack>
+            <div slot="footer">
+              <cf-hstack gap="2" justify="end" style="width: 100%;">
+                <cf-button variant="secondary" onClick={closeSheet}>
+                  Cancel
+                </cf-button>
+                <cf-button variant="primary" onClick={handleCreate}>
+                  Create
+                </cf-button>
+              </cf-hstack>
+            </div>
+          </cf-modal>
+
+          <cf-toast-provider position="bottom">
+            <cf-toast
+              open={toastOpen}
+              variant="success"
+              duration={4000}
+              oncf-toast-dismiss={dismissToast}
+            >
+              Task created.
+              <cf-button
+                slot="action"
+                variant="ghost"
+                style="padding: 2px 8px; font-size: 13px;"
+              >
+                View
+              </cf-button>
+            </cf-toast>
+          </cf-toast-provider>
+        </cf-screen>
+      </cf-theme>
     ),
   };
 });
