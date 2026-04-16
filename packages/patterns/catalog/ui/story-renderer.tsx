@@ -60,7 +60,7 @@ interface StoryRendererInput {
 interface StoryRendererOutput {
   [NAME]: string;
   [UI]: VNode;
-  controls: VNode;
+  controls?: VNode;
 }
 
 type CatalogStory = {
@@ -185,7 +185,7 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
     return {
       [NAME]: "StoryRenderer",
       [UI]: <>{story}</>,
-      controls: <>{story?.controls ?? null}</>,
+      controls: story?.controls,
     };
   },
 );
