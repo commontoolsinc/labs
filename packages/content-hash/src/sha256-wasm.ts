@@ -7,6 +7,7 @@ import { BaseCollectingHasher } from "./BaseCollectingHasher.ts";
 import {
   BaseSmallChunkUpdatingHasher,
 } from "./BaseSmallChunkUpdatingHasher.ts";
+import { InstancePool } from "./InstancePool.ts";
 import type { IncrementalHasher } from "./interface.ts";
 
 /**
@@ -15,24 +16,20 @@ import type { IncrementalHasher } from "./interface.ts";
 const HASHER_POOL_SIZE = 5;
 
 /**
- * Pool of usable hasher instances. This array is populated at module init
- * time, a tactic that is necessary since this module exposes a synchronous
- * interface for actual hashing (once loaded), whereas `hash-wasm` only allows
+ * Pool of usable hasher instances. This is populated at module init time, a
+ * tactic that is necessary since this module exposes a synchronous interface
+ * for actual hashing (once loaded), whereas `hash-wasm` only allows
  * asynchronous hasher construction. Once constructed, though, hashers can be
  * used synchronously).
  */
-const theHashers: IHasher[] = [];
-
-/**
- * Finalization registry used to re-pool instances that were in use but whose
- * "public" facet (a `WasmUpdatingHasher`) never ended up releasing the
- * instance.
- */
-const hasherRepooler = new FinalizationRegistry((hasher: IHasher) => {
-  if (theHashers.indexOf(hasher) === -1) {
-    theHashers.push(hasher);
+class HasherPool extends InstancePool<IHasher> {
+  protected override _initInstance(instance: IHasher) {
+    instance.init();
   }
-});
+}
+
+/** Unique instance of `HasherPool`. */
+const hasherPool = new HasherPool();
 
 /**
  * A hasher instance which _isn't_ allowed to be acquired for concurrent use.
@@ -50,38 +47,6 @@ let initResult: Promise<boolean> | null = null;
  * Is this module actually usable?
  */
 let moduleIsUsable: boolean = false;
-
-/**
- * Is there an available hasher that could be acquired?
- */
-function canAcquireHasher(): boolean {
-  return theHashers.length !== 0;
-}
-
-/**
- * Gets a freshly-initialized hasher instance, or throws an error indicating
- * that this module is not usable.
- */
-function acquireHasher(owner: WasmUpdatingHasher): IHasher {
-  if (theHashers.length === 0) {
-    throw new Error("Too many concurrent hashers.");
-  }
-
-  const result = theHashers.pop()!;
-  result.init();
-
-  hasherRepooler.register(owner, result, result);
-
-  return result;
-}
-
-/**
- * Releases a previously-acquired hasher, or adds one to the pool.
- */
-function releaseHasher(hasher: IHasher) {
-  hasherRepooler.unregister(hasher);
-  theHashers.push(hasher);
-}
 
 /**
  * Gets and initializes the unique one-shot hasher instance.
@@ -112,15 +77,13 @@ export function initWasm() {
       try {
         theOneShotHasher.push(await createSHA256());
         for (let i = 0; i < HASHER_POOL_SIZE; i++) {
-          theHashers.push(await createSHA256());
+          hasherPool.add(await createSHA256());
         }
+        moduleIsUsable = true;
       } catch {
         // `hash-wasm` not available, or couldn't be fully initialized.
-        theOneShotHasher.length = 0;
-        theHashers.length = 0;
       }
 
-      moduleIsUsable = theHashers.length !== 0;
       return moduleIsUsable;
     })();
   }
@@ -152,7 +115,7 @@ class WasmCollectingHasher extends BaseCollectingHasher {
  * can `update()` it.
  */
 class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
-  #hasher: IHasher = acquireHasher(this);
+  #hasher: IHasher = hasherPool.acquire(this);
 
   protected _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
@@ -162,7 +125,7 @@ class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
     const hasher = this.#hasher;
     const result: Uint8Array = hasher.digest("binary");
 
-    releaseHasher(hasher);
+    hasherPool.release(hasher);
     return result;
   }
 }
@@ -182,7 +145,7 @@ export function sha256Wasm(payload: Uint8Array): Uint8Array {
  */
 export function createHasherWasm(): IncrementalHasher {
   assertUsable();
-  return canAcquireHasher()
+  return hasherPool.canAcquire()
     ? new WasmUpdatingHasher()
     : new WasmCollectingHasher();
 }
