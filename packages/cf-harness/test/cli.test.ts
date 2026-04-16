@@ -1,12 +1,16 @@
 import { assertEquals } from "@std/assert";
 import {
+  buildCfHarnessOperatorSystemPrompt,
   type CfHarnessCliIO,
   formatCfHarnessCliResult,
   formatCfHarnessCliUsage,
   parseCfHarnessCliArgs,
   runCfHarnessCli,
 } from "../src/cli.ts";
-import type { HarnessPromptLoopResult } from "../src/prompt-loop.ts";
+import type {
+  HarnessPromptLoopResult,
+  RunHarnessPromptOptions,
+} from "../src/prompt-loop.ts";
 
 const createIoBuffers = (): {
   io: CfHarnessCliIO;
@@ -41,6 +45,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.prompt, "Summarize this workspace");
   assertEquals(parsed.model, "gpt-5.4");
   assertEquals(parsed.gatewayAuthMode, "bearer");
+  assertEquals(parsed.promptSlotRole, "direct-command");
   assertEquals(parsed.artifactRoot, "/tmp/project/.cf-harness-artifacts");
   assertEquals(parsed.maxModelTurns, 8);
   assertEquals(parsed.printTranscript, false);
@@ -89,6 +94,42 @@ Deno.test("parseCfHarnessCliArgs supports gateway auth mode override", async () 
     throw new Error("expected config result");
   }
   assertEquals(parsed.gatewayAuthMode, "none");
+});
+
+Deno.test("parseCfHarnessCliArgs resolves focus-root relative to workspace", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--focus-root",
+      "packages/cf-harness",
+      "--prompt",
+      "hi",
+    ],
+    {
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.focusRoot, "/tmp/project/packages/cf-harness");
+});
+
+Deno.test("parseCfHarnessCliArgs supports prompt-slot-role override", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--prompt-slot-role", "context"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.promptSlotRole, "context");
 });
 
 Deno.test("parseCfHarnessCliArgs tolerates a leading task-runner separator", async () => {
@@ -159,10 +200,13 @@ Deno.test("runCfHarnessCli prints usage for help", async () => {
 Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   let createdOptions: Record<string, unknown> | undefined;
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
       "--workspace",
       "/tmp/project",
+      "--focus-root",
+      "packages/cf-harness",
       "--prompt",
       "Inspect the workspace",
       "--model",
@@ -175,8 +219,9 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
       createPromptLoop: (options) => {
         createdOptions = options as Record<string, unknown>;
         return {
-          runPrompt: async () =>
-            ({
+          runPrompt: async (options) => {
+            runPromptOptions = options;
+            return ({
               model: "gpt-5.4",
               finalAssistantText: "Inspection complete.",
               transcript: [
@@ -196,7 +241,8 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
                 policyEvents: [],
                 toolOutputs: [],
               },
-            }) satisfies HarnessPromptLoopResult,
+            }) satisfies HarnessPromptLoopResult;
+          },
           runTranscript: async () => {
             throw new Error("unexpected resume path");
           },
@@ -213,6 +259,15 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
   );
   assertEquals(createdOptions?.apiKey, "test-key");
   assertEquals(createdOptions?.apiKeySource, "CF_HARNESS_API_KEY");
+  assertEquals(
+    runPromptOptions?.systemPrompt,
+    buildCfHarnessOperatorSystemPrompt({
+      workspace: "/tmp/project",
+      focusRoot: "/tmp/project/packages/cf-harness",
+      systemPrompt: undefined,
+    }),
+  );
+  assertEquals(runPromptOptions?.promptSlotBinding?.role, "direct-command");
   assertEquals(
     stdout,
     [
@@ -250,6 +305,81 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
     ],
   );
   assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Inspect the workspace",
+      "--prompt-slot-role",
+      "context",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      createPromptLoop: () => ({
+        runPrompt: async (options) => {
+          runPromptOptions = options;
+          return {
+            model: "gpt-5.4",
+            finalAssistantText: "Inspection complete.",
+            transcript: [
+              { role: "user", content: "Inspect the workspace" },
+              { role: "assistant", content: "Inspection complete." },
+            ],
+            modelTurns: 1,
+            runState: {
+              runId: "run-cli-context",
+              status: "completed",
+              createdAt: "2026-04-16T21:10:00.000Z",
+              updatedAt: "2026-04-16T21:10:01.000Z",
+              cfcEnforcementMode: "disabled",
+              artifactRoot:
+                "/tmp/project/.cf-harness-artifacts/run-cli-context",
+              transcriptPath:
+                "/tmp/project/.cf-harness-artifacts/run-cli-context/transcript.json",
+              policyEvents: [],
+              toolOutputs: [],
+            },
+          } satisfies HarnessPromptLoopResult;
+        },
+        runTranscript: async () => {
+          throw new Error("unexpected resume path");
+        },
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(runPromptOptions?.promptSlotBinding?.role, "context");
+  assertEquals(stderr, []);
+  assertEquals(stdout.length, 1);
+});
+
+Deno.test("buildCfHarnessOperatorSystemPrompt appends user instructions after guardrails", () => {
+  assertEquals(
+    buildCfHarnessOperatorSystemPrompt({
+      workspace: "/tmp/project",
+      focusRoot: "/tmp/project/packages/cf-harness",
+      systemPrompt: "Use bash and read_file only. Do not modify files.",
+    }),
+    [
+      "Operator guidance for cf-harness runs:",
+      "- Prefer exploration within /workspace/packages/cf-harness.",
+      "- Start from README files and the package manifest before reading source files.",
+      "- Use bash only for narrow discovery; avoid broad workspace scans when a focused path is available.",
+      "- Read source files only when needed to answer the prompt accurately.",
+      "- Stop once you have enough evidence to answer.",
+      "",
+      "Additional instructions:",
+      "Use bash and read_file only. Do not modify files.",
+    ].join("\n"),
+  );
 });
 
 Deno.test("runCfHarnessCli reports argument errors to stderr", async () => {

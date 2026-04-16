@@ -11,7 +11,10 @@ import {
   readHarnessRunArtifacts,
   resolveHarnessRunPaths,
 } from "./artifacts.ts";
-import { createCliPromptSlotBinding } from "./contracts/prompt-slot.ts";
+import {
+  createCliPromptSlotBinding,
+  type PromptSlotRole,
+} from "./contracts/prompt-slot.ts";
 import { CfHarnessEngine } from "./engine.ts";
 import {
   CfHarnessPromptLoop,
@@ -25,6 +28,8 @@ const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 
 export interface CfHarnessCliConfig {
   workspace: string;
+  focusRoot?: string;
+  promptSlotRole: PromptSlotRole;
   prompt?: string;
   resumeRun?: string;
   systemPrompt?: string;
@@ -64,6 +69,8 @@ const usage = `Usage: deno run -A src/main.ts [options] [prompt text]
 
 Options:
   --workspace <path>            Workspace host path (defaults to current directory)
+  --focus-root <path>           Narrow exploration to a workspace subpath when possible
+  --prompt-slot-role <role>     direct-command | context | quote (default: direct-command)
   --prompt <text>               Prompt text to run
   --prompt-file <path>          Read prompt text from a file
   --resume-run <path>           Resume from a run root or run-state.json path
@@ -95,6 +102,16 @@ const parsePositiveInteger = (
   }
   return parsed;
 };
+
+const PROMPT_SLOT_ROLES = ["direct-command", "context", "quote"] as const;
+
+const parsePromptSlotRole = (
+  input: string | undefined,
+): PromptSlotRole | undefined =>
+  input !== undefined &&
+    (PROMPT_SLOT_ROLES as readonly string[]).includes(input)
+    ? input as PromptSlotRole
+    : undefined;
 
 const resolvePrompt = async (
   args: ReturnType<typeof parseArgs>,
@@ -148,6 +165,8 @@ export const parseCfHarnessCliArgs = async (
   const args = parseArgs([...normalizedArgv], {
     string: [
       "workspace",
+      "focus-root",
+      "prompt-slot-role",
       "prompt",
       "prompt-file",
       "system-prompt",
@@ -176,6 +195,22 @@ export const parseCfHarnessCliArgs = async (
   const workspace = resolve(
     typeof args.workspace === "string" ? args.workspace : cwd,
   );
+  const focusRoot = typeof args["focus-root"] === "string"
+    ? resolve(workspace, args["focus-root"])
+    : undefined;
+  const promptSlotRole = parsePromptSlotRole(
+    typeof args["prompt-slot-role"] === "string"
+      ? args["prompt-slot-role"]
+      : undefined,
+  );
+  if (
+    args["prompt-slot-role"] !== undefined &&
+    promptSlotRole === undefined
+  ) {
+    throw new Error(
+      "prompt slot role must be one of direct-command, context, quote",
+    );
+  }
   const resumeRun = typeof args["resume-run"] === "string"
     ? resolve(args["resume-run"])
     : undefined;
@@ -229,6 +264,8 @@ export const parseCfHarnessCliArgs = async (
     : undefined;
   return {
     workspace,
+    ...(focusRoot !== undefined ? { focusRoot } : {}),
+    promptSlotRole: promptSlotRole ?? "direct-command",
     ...(prompt !== undefined ? { prompt } : {}),
     ...(resumeRun !== undefined ? { resumeRun } : {}),
     ...(typeof args["system-prompt"] === "string"
@@ -258,6 +295,42 @@ export const parseCfHarnessCliArgs = async (
 };
 
 export const formatCfHarnessCliUsage = (): string => usage;
+
+const toWorkspaceSandboxPath = (
+  workspaceHostPath: string,
+  hostPath?: string,
+): string => {
+  if (hostPath === undefined) {
+    return "/workspace";
+  }
+  const relativePath = hostPath.startsWith(`${workspaceHostPath}/`)
+    ? hostPath.slice(workspaceHostPath.length + 1)
+    : hostPath === workspaceHostPath
+    ? ""
+    : undefined;
+  if (relativePath === undefined) {
+    return "/workspace";
+  }
+  return relativePath.length > 0 ? `/workspace/${relativePath}` : "/workspace";
+};
+
+export const buildCfHarnessOperatorSystemPrompt = (
+  config: Pick<CfHarnessCliConfig, "workspace" | "focusRoot" | "systemPrompt">,
+): string => {
+  const focusRoot = toWorkspaceSandboxPath(config.workspace, config.focusRoot);
+  const lines = [
+    "Operator guidance for cf-harness runs:",
+    `- Prefer exploration within ${focusRoot}.`,
+    "- Start from README files and the package manifest before reading source files.",
+    "- Use bash only for narrow discovery; avoid broad workspace scans when a focused path is available.",
+    "- Read source files only when needed to answer the prompt accurately.",
+    "- Stop once you have enough evidence to answer.",
+  ];
+  if (config.systemPrompt !== undefined) {
+    lines.push("", "Additional instructions:", config.systemPrompt);
+  }
+  return lines.join("\n");
+};
 
 export const formatCfHarnessCliResult = (
   result: HarnessPromptLoopResult,
@@ -308,6 +381,7 @@ export const runCfHarnessCli = async (
     let result: HarnessPromptLoopResult;
     const promptSlotBinding = createCliPromptSlotBinding({
       kernelName: "cf-harness",
+      role: parsed.promptSlotRole,
       subject: parsed.resumeRun ?? parsed.workspace,
     });
     if (parsed.resumeRun !== undefined) {
@@ -352,9 +426,7 @@ export const runCfHarnessCli = async (
       });
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
-        ...(parsed.systemPrompt !== undefined
-          ? { systemPrompt: parsed.systemPrompt }
-          : {}),
+        systemPrompt: buildCfHarnessOperatorSystemPrompt(parsed),
         model: parsed.model,
         maxModelTurns: parsed.maxModelTurns,
         promptSlotBinding,

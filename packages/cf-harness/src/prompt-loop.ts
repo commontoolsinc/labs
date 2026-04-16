@@ -3,7 +3,10 @@ import {
   CfHarnessEngine,
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import {
+  type CfcEnforcementMode,
+  evaluateHarnessWriteFileAuthorization,
+} from "@commonfabric/runner/cfc";
 import {
   type OpenAIChatCompletionMessage,
   type OpenAIChatCompletionRequest,
@@ -189,8 +192,35 @@ const evaluateToolPolicy = (
   cfcEnforcementMode: CfcEnforcementMode,
   descriptor: HarnessToolDescriptor,
   promptSlotBinding?: PromptSlotBinding,
+  input?: Record<string, unknown>,
 ): ToolPolicyDecision => {
   const directCommand = hasDirectCommandBinding(promptSlotBinding);
+  if (descriptor.toolId === "write_file") {
+    const decision = evaluateHarnessWriteFileAuthorization({
+      enforcementMode: cfcEnforcementMode,
+      promptSlot: promptSlotBinding === undefined ? undefined : {
+        role: promptSlotBinding.role,
+        surface: promptSlotBinding.surface,
+        subject: promptSlotBinding.subject,
+        eventId: promptSlotBinding.eventId,
+      },
+      path: typeof input?.path === "string" ? input.path : "unknown",
+      mode: input?.mode === "append" ? "append" : "replace",
+    });
+    return decision.allowed
+      ? {
+        allowed: true,
+        ...(decision.warningDetail !== undefined
+          ? { warningDetail: decision.warningDetail }
+          : {}),
+      }
+      : {
+        allowed: false,
+        denial: makeObservationDenied("not-authorized", {
+          detail: decision.denialDetail ?? "write_file was denied",
+        }),
+      };
+  }
   switch (cfcEnforcementMode) {
     case "disabled":
       return { allowed: true };
@@ -347,10 +377,12 @@ export class CfHarnessPromptLoop {
         `unknown builtin tool requested: ${toolCall.function.name}`,
       );
     }
+    const input = parseToolArguments(toolCall);
     const decision = evaluateToolPolicy(
       this.engine.getRunState().cfcEnforcementMode,
       tool.descriptor,
       promptSlotBinding,
+      input,
     );
     if (decision.warningDetail !== undefined) {
       await this.engine.recordPolicyEvent({
@@ -381,7 +413,6 @@ export class CfHarnessPromptLoop {
         content: JSON.stringify(denial),
       };
     }
-    const input = parseToolArguments(toolCall);
     const result = await this.#invokeBuiltinTool(
       toolCall.function.name,
       input,

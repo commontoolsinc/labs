@@ -16,6 +16,7 @@ export interface PromptSlotBinding {
 
 export interface CreateCliPromptSlotBindingOptions {
   kernelName: string;
+  role?: PromptSlotRole;
   surface?: string;
   subject?: string;
   eventId?: string;
@@ -27,7 +28,7 @@ export const createCliPromptSlotBinding = (
   options: CreateCliPromptSlotBindingOptions,
 ): PromptSlotBinding => ({
   type: "cf-harness.prompt-slot-binding",
-  role: "direct-command",
+  role: options.role ?? "direct-command",
   kernelName: options.kernelName,
   surface: options.surface ?? "cli",
   ...(options.subject !== undefined ? { subject: options.subject } : {}),
