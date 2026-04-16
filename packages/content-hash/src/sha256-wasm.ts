@@ -134,6 +134,7 @@ class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
  * Performs a hash on a single array.
  */
 export function sha256Wasm(payload: Uint8Array): Uint8Array {
+  assertUsable();
   const hasher = getOneShotHasher();
 
   hasher.update(payload);
