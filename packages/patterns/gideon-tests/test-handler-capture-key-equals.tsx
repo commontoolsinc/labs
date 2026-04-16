@@ -13,7 +13,7 @@ export interface InboxItem {
 }
 
 interface InboxListInput {
-  inboxItems: Default<InboxItem[], []>;
+  inboxItems: InboxItem[] | Default<[]>;
 }
 
 interface InboxListOutput {

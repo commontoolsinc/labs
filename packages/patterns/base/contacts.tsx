@@ -41,8 +41,8 @@ import FamilyMemberPattern from "./family-member.tsx";
 
 interface Input {
   // Store piece results, not raw data
-  contacts: Writable<Default<ContactPiece[], []>>;
-  groups: Writable<Default<ContactGroup[], []>>;
+  contacts: Writable<ContactPiece[] | Default<[]>>;
+  groups: Writable<ContactGroup[] | Default<[]>>;
 }
 
 interface Output {

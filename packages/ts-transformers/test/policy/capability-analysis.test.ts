@@ -739,6 +739,286 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis does not treat non-cell set calls as identity array sinks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      class Map<K, V> {
+        set(key: K, value: V): this;
+      }
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece: Piece }) => {
+        const piece = input.piece;
+        const updated = [piece];
+        const cache = new Map<string, Piece[]>();
+        cache.set("items", updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece"), false);
+    assert(input.readPaths.includes("piece"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps array locals structural when methods inspect items before set",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const state: {
+        items: {
+          set(value: unknown): void;
+        };
+      };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece: Piece }) => {
+        const updated = [input.piece];
+        if (updated.length > 0) {
+          state.items.set(updated);
+        }
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece"), false);
+    assert(input.readPaths.includes("piece"));
+    assertEquals(input.readPaths.includes("piece.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps array-literal map chains structural before set",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      interface Array<T> {
+        map<U>(mapper: (value: T) => U): U[];
+      }
+
+      declare const state: { items: Cell<{ title: string }[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece?: Piece }) => {
+        const piece = input?.piece;
+        if (!piece) return;
+        const updated = [piece].map((p) => ({ title: p.title }));
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece"), false);
+    assert(
+      input.readPaths.includes("piece") ||
+        input.readPaths.includes("piece.title"),
+    );
+  },
+);
+
+Deno.test(
+  "Capability analysis treats direct local array set payloads as identity-only",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      declare const state: { items: Cell<Piece[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece?: Piece }) => {
+        const piece = input?.piece;
+        if (!piece) return;
+        const updated = [piece];
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.identityPaths.includes("piece"));
+    assert(input.identityCellPaths.includes("piece"));
+    assertEquals(input.readPaths.includes("piece"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis treats local array push, unshift, and splice payloads as identity-only",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      interface Array<T> {
+        push(...items: T[]): number;
+        unshift(...items: T[]): number;
+        splice(start: number, deleteCount: number, ...items: T[]): T[];
+      }
+
+      declare const state: { items: Cell<Piece[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { first?: Piece; second?: Piece; third?: Piece }) => {
+        const first = input?.first;
+        const second = input?.second;
+        const third = input?.third;
+        if (!first) return;
+        if (!second) return;
+        if (!third) return;
+        const updated: Piece[] = [];
+        updated.push(first);
+        updated.unshift(second);
+        updated.splice(1, 0, third);
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.identityPaths.includes("first"));
+    assert(input.identityPaths.includes("second"));
+    assert(input.identityPaths.includes("third"));
+    assert(input.identityCellPaths.includes("first"));
+    assert(input.identityCellPaths.includes("second"));
+    assert(input.identityCellPaths.includes("third"));
+    assertEquals(input.readPaths.includes("first"), false);
+    assertEquals(input.readPaths.includes("second"), false);
+    assertEquals(input.readPaths.includes("third"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps splice control arguments structural",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      interface Array<T> {
+        splice(start: number, deleteCount: number, ...items: T[]): T[];
+      }
+
+      declare const state: { items: Cell<Piece[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (
+        input: { piece?: Piece; index: number; deleteCount: number },
+      ) => {
+        const piece = input?.piece;
+        if (!piece) return;
+        const updated: Piece[] = [];
+        updated.splice(input.index, input.deleteCount, piece);
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.identityPaths.includes("piece"));
+    assert(input.identityCellPaths.includes("piece"));
+    assert(input.readPaths.includes("index"));
+    assert(input.readPaths.includes("deleteCount"));
+    assertEquals(input.readPaths.includes("piece"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps primitive local array writer payloads structural",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      interface Array<T> {
+        push(...items: T[]): number;
+      }
+
+      declare const state: { items: Cell<string[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece: Piece }) => {
+        const updated: string[] = [];
+        updated.push(input.piece.title);
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece.title"), false);
+    assert(input.readPaths.includes("piece.title"));
+    assertEquals(input.readPaths.includes("piece.unused"), false);
+  },
+);
+
+Deno.test(
   "Capability analysis restores local array bindings after nested callbacks",
   () => {
     const { program, sourceFile } = createProgramWithSource(

@@ -40,7 +40,7 @@ interface NoteOutput extends NotePiece {
   title: string;
   content: string;
   summary: string;
-  mentioned: Default<MentionablePiece[], []>;
+  mentioned: MentionablePiece[] | Default<[]>;
   backlinks: MentionablePiece[];
   isHidden: boolean;
   grep: PatternToolResult<{ content: string }>;
@@ -165,7 +165,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>(
       { query: "#default", headless: true },
     ).result!;
-    const mentionable = wish<Default<MentionablePiece[], []>>(
+    const mentionable = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
     ).result;
     const _recentPieces = wish<MinimalPiece[]>(

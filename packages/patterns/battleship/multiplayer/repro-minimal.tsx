@@ -18,7 +18,7 @@
  * - otherData.items[0]?.id: 10
  *
  * KEY CONDITIONS TO TRIGGER:
- * 1. Parent pattern owns cells with Writable<Default<T | null, null>>
+ * 1. Parent pattern owns cells with Writable<T | null | Default<null>>
  * 2. Child pattern receives cells as Writable<T | null> (no Default wrapper)
  * 3. Cell data is SET by one browser session (piece instance)
  * 4. Cell data is READ by a DIFFERENT browser session (piece instance)
@@ -159,12 +159,12 @@ const Child = pattern<ChildInput, object>(
 // ============================================================================
 
 /**
- * Parent uses Writable<Default<T>> but child receives Writable<T>.
+ * Parent uses Writable<T | Default<...>> but child receives Writable<T>.
  * This type mismatch may be related to the bug.
  */
 interface ParentInput {
-  data1: Writable<Default<Container | null, null>>;
-  data2: Writable<Default<Container | null, null>>;
+  data1: Writable<Container | null | Default<null>>;
+  data2: Writable<Container | null | Default<null>>;
 }
 
 let nav:

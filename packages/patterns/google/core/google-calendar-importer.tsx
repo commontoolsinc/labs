@@ -23,17 +23,17 @@ import {
 
 // This is used by the various Google tokens created with tokenToAuthData
 export type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 export type CalendarEvent = {
@@ -50,10 +50,9 @@ export type CalendarEvent = {
   htmlLink: string;
   calendarId: string;
   calendarName: string;
-  attendees: Default<
-    { email: string; displayName: string; responseStatus: string }[],
-    []
-  >;
+  attendees:
+    | { email: string; displayName: string; responseStatus: string }[]
+    | Default<[]>;
   organizer: { email: string; displayName: string };
 };
 
@@ -68,13 +67,13 @@ export type Calendar = {
 
 type Settings = {
   // Number of days in the past to fetch
-  daysBack: Default<number, 7>;
+  daysBack: number | Default<7>;
   // Number of days in the future to fetch
-  daysForward: Default<number, 30>;
+  daysForward: number | Default<30>;
   // Maximum number of events to fetch per calendar
-  maxResults: Default<number, 100>;
+  maxResults: number | Default<100>;
   // Enable verbose console logging for debugging
-  debugMode: Default<boolean, false>;
+  debugMode: boolean | Default<false>;
 };
 
 // Debug logging helpers
@@ -503,12 +502,14 @@ function formatEventDate(
 }
 
 interface GoogleCalendarImporterInput {
-  settings?: Default<Settings, {
-    daysBack: 7;
-    daysForward: 30;
-    maxResults: 100;
-    debugMode: false;
-  }>;
+  settings?:
+    | Settings
+    | Default<{
+      daysBack: 7;
+      daysForward: 30;
+      maxResults: 100;
+      debugMode: false;
+    }>;
   // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
   // Use: cf piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
   overrideAuth?: Auth;

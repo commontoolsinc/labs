@@ -74,10 +74,10 @@ type FoodPreference = InferItem<typeof FoodSchema> & { extractedAt: number };
 // PATTERN INPUT/OUTPUT
 // ============================================================================
 interface FavoriteFoodsInput {
-  foods?: Default<FoodPreference[], []>;
-  lastScanAt?: Default<number, 0>;
-  isScanning?: Default<boolean, false>;
-  maxSearches?: Default<number, 5>;
+  foods?: FoodPreference[] | Default<[]>;
+  lastScanAt?: number | Default<0>;
+  isScanning?: boolean | Default<false>;
+  maxSearches?: number | Default<5>;
 }
 
 /** Favorite foods extractor from Gmail. #favoriteFoods */

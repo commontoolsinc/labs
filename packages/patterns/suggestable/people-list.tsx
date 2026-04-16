@@ -15,7 +15,7 @@ type PersonListInput = Record<string, never>;
 type Person = {
   contact: {
     name: string;
-    email: Default<string, "">;
+    email: string | Default<"">;
   };
 };
 

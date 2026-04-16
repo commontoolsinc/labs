@@ -55,20 +55,18 @@ const RELATIONSHIP_OPTIONS = [
 
 interface Input {
   member: Writable<
-    Default<
-      FamilyMember,
-      {
-        firstName: "";
-        lastName: "";
-        relationship: "";
-        birthday: "";
-        dietaryRestrictions: [];
-        notes: "";
-        tags: [];
-        allergies: [];
-        giftIdeas: [];
-      }
-    >
+    | FamilyMember
+    | Default<{
+      firstName: "";
+      lastName: "";
+      relationship: "";
+      birthday: "";
+      dietaryRestrictions: [];
+      notes: "";
+      tags: [];
+      allergies: [];
+      giftIdeas: [];
+    }>
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
   sameAs?: Writable<ContactPiece[]>;

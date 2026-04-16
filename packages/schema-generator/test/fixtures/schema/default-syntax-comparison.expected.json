@@ -1,0 +1,245 @@
+{
+  "$defs": {
+    "Preferences": {
+      "properties": {
+        "profile": {
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "flags": {
+              "properties": {
+                "marketing": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "marketing"
+              ],
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "email",
+            "flags",
+            "name"
+          ],
+          "type": "object"
+        },
+        "retries": {
+          "type": "number"
+        },
+        "theme": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile",
+        "retries",
+        "theme"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "deep": {
+      "properties": {
+        "preferences": {
+          "$ref": "#/$defs/Preferences",
+          "default": {
+            "profile": {
+              "flags": {
+                "marketing": false
+              },
+              "name": "Ada"
+            },
+            "theme": "dark"
+          },
+          "properties": {
+            "profile": {
+              "default": {
+                "flags": {
+                  "marketing": false
+                },
+                "name": "Ada"
+              },
+              "properties": {
+                "flags": {
+                  "default": {
+                    "marketing": false
+                  },
+                  "properties": {
+                    "marketing": {
+                      "default": false
+                    }
+                  }
+                },
+                "name": {
+                  "default": "Ada"
+                }
+              }
+            },
+            "theme": {
+              "default": "dark"
+            }
+          }
+        }
+      },
+      "required": [
+        "preferences"
+      ],
+      "type": "object"
+    },
+    "legacy": {
+      "properties": {
+        "count": {
+          "default": 0,
+          "type": "number"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "nullable": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": null
+        },
+        "preferences": {
+          "$ref": "#/$defs/Preferences",
+          "default": {
+            "profile": {
+              "email": "",
+              "flags": {
+                "marketing": false
+              },
+              "name": "Ada"
+            },
+            "retries": 3,
+            "theme": "dark"
+          }
+        },
+        "tags": {
+          "default": [
+            "default",
+            "tags"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        },
+        "writableTags": {
+          "asCell": [
+            "cell"
+          ],
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "count",
+        "enabled",
+        "nullable",
+        "preferences",
+        "tags",
+        "title",
+        "writableTags"
+      ],
+      "type": "object"
+    },
+    "shorthand": {
+      "properties": {
+        "count": {
+          "default": 0,
+          "type": "number"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "nullable": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": null
+        },
+        "preferences": {
+          "$ref": "#/$defs/Preferences",
+          "default": {
+            "profile": {
+              "email": "",
+              "flags": {
+                "marketing": false
+              },
+              "name": "Ada"
+            },
+            "retries": 3,
+            "theme": "dark"
+          }
+        },
+        "tags": {
+          "default": [
+            "default",
+            "tags"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        },
+        "writableTags": {
+          "asCell": [
+            "cell"
+          ],
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "count",
+        "enabled",
+        "nullable",
+        "preferences",
+        "tags",
+        "title",
+        "writableTags"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "deep",
+    "legacy",
+    "shorthand"
+  ],
+  "type": "object"
+}

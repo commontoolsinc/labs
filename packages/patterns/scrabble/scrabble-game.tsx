@@ -1166,15 +1166,15 @@ const getBagCount = lift<{ bagJson: string; bagIndex: number }, number>(
 // =============================================================================
 
 interface GameInput {
-  gameName: Default<string, "Scrabble Match">;
-  boardJson: Writable<Default<string, "">>; // JSON string of PlacedTile[]
-  bagJson: Writable<Default<string, "">>;
-  bagIndex: Writable<Default<number, 0>>;
-  playersJson: Writable<Default<string, "[]">>; // JSON string of Player[]
-  gameEventsJson: Writable<Default<string, "[]">>; // JSON string of GameEvent[]
-  allRacksJson: Writable<Default<string, "{}">>; // JSON string of AllRacks
-  allPlacedJson: Writable<Default<string, "{}">>; // JSON string of AllPlaced
-  myName: Default<string, "">;
+  gameName: string | Default<"Scrabble Match">;
+  boardJson: Writable<string | Default<"">>; // JSON string of PlacedTile[]
+  bagJson: Writable<string | Default<"">>;
+  bagIndex: Writable<number | Default<0>>;
+  playersJson: Writable<string | Default<"[]">>; // JSON string of Player[]
+  gameEventsJson: Writable<string | Default<"[]">>; // JSON string of GameEvent[]
+  allRacksJson: Writable<string | Default<"{}">>; // JSON string of AllRacks
+  allPlacedJson: Writable<string | Default<"{}">>; // JSON string of AllPlaced
+  myName: string | Default<"">;
 }
 
 interface GameOutput {

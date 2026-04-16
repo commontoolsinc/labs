@@ -173,7 +173,7 @@ const listPiecesPattern = pattern<
 // --- Main pattern ---
 
 const KnowledgeGraph = pattern<Input>(() => {
-  const mentionable = wish<Default<Writable<MentionablePiece>[], []>>({
+  const mentionable = wish<Writable<MentionablePiece>[] | Default<[]>>({
     query: "#mentionable",
   }).result;
 

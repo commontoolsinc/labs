@@ -44,14 +44,14 @@ type WallPosition =
 
 interface Aisle {
   name: string; // Just the number, e.g., "1", "2", "5A"
-  description: Default<string, "">;
+  description: string | Default<"">;
 }
 
 interface Department {
   name: string;
   icon: string;
-  location: Default<WallPosition, "unassigned">;
-  description: Default<string, "">;
+  location: WallPosition | Default<"unassigned">;
+  description: string | Default<"">;
 }
 
 interface Entrance {
@@ -61,16 +61,16 @@ interface Entrance {
 interface ItemLocation {
   itemName: string;
   correctAisle: string;
-  incorrectAisle: Default<string, "">;
+  incorrectAisle: string | Default<"">;
   timestamp: number;
 }
 
 interface Input {
-  storeName: Writable<Default<string, "My Store">>;
-  aisles: Writable<Default<Aisle[], []>>;
-  departments: Writable<Default<Department[], []>>;
-  entrances: Writable<Default<Entrance[], []>>;
-  itemLocations: Writable<Default<ItemLocation[], []>>;
+  storeName: Writable<string | Default<"My Store">>;
+  aisles: Writable<Aisle[] | Default<[]>>;
+  departments: Writable<Department[] | Default<[]>>;
+  entrances: Writable<Entrance[] | Default<[]>>;
+  itemLocations: Writable<ItemLocation[] | Default<[]>>;
 }
 
 interface Output {

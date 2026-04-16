@@ -16,19 +16,21 @@ import GoogleAuth, {
 } from "./google-auth.tsx";
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
-    gmail: true;
-    gmailSend: true;
-    gmailModify: true;
-    calendar: true;
-    calendarWrite: true;
-    drive: true;
-    docs: true;
-    contacts: true;
-  }>;
-  auth: Default<
-    Auth,
-    {
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
+      gmail: true;
+      gmailSend: true;
+      gmailModify: true;
+      calendar: true;
+      calendarWrite: true;
+      drive: true;
+      docs: true;
+      contacts: true;
+    }>;
+  auth:
+    | Auth
+    | Default<{
       token: "";
       tokenType: "";
       scope: [];
@@ -36,8 +38,7 @@ interface Input {
       expiresAt: 0;
       refreshToken: "";
       user: { email: ""; name: ""; picture: "" };
-    }
-  >;
+    }>;
 }
 
 /** Work Google account. #googleAuth #googleAuthWork */

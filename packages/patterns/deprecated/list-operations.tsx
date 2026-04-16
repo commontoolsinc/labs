@@ -20,7 +20,7 @@ interface Item {
 }
 
 interface ListInput {
-  items: Writable<Default<Item[], []>>;
+  items: Writable<Item[] | Default<[]>>;
 }
 
 interface ListOutput extends ListInput {}

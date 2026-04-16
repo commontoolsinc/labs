@@ -220,32 +220,32 @@ export function createPreviewUI(
  * Use direct property access: \`airtableAuthPiece.auth\`
  */
 export type AirtableAuth = {
-  accessToken: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  accessToken: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 // Selected scopes configuration
 export type SelectedScopes = {
-  "data.records:read": Default<boolean, true>;
-  "data.records:write": Default<boolean, false>;
-  "data.recordComments:read": Default<boolean, false>;
-  "data.recordComments:write": Default<boolean, false>;
-  "schema.bases:read": Default<boolean, true>;
-  "schema.bases:write": Default<boolean, false>;
-  "webhook:manage": Default<boolean, false>;
+  "data.records:read": boolean | Default<true>;
+  "data.records:write": boolean | Default<false>;
+  "data.recordComments:read": boolean | Default<false>;
+  "data.recordComments:write": boolean | Default<false>;
+  "schema.bases:read": boolean | Default<true>;
+  "schema.bases:write": boolean | Default<false>;
+  "webhook:manage": boolean | Default<false>;
 };
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
+  selectedScopes: SelectedScopes | Default<{
     "data.records:read": true;
     "data.records:write": false;
     "data.recordComments:read": false;
@@ -254,7 +254,7 @@ interface Input {
     "schema.bases:write": false;
     "webhook:manage": false;
   }>;
-  auth: Default<AirtableAuth, {
+  auth: AirtableAuth | Default<{
     accessToken: "";
     tokenType: "";
     scope: [];
@@ -1382,8 +1382,8 @@ type BaseInfo = { id: string; name: string };
 type TableInfo = { id: string; name: string };
 
 interface Input {
-  selectedBaseId: Default<string, "">;
-  selectedTableId: Default<string, "">;
+  selectedBaseId: string | Default<"">;
+  selectedTableId: string | Default<"">;
 }
 
 /** Import records from an Airtable base. #airtableImporter */
@@ -2081,8 +2081,10 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
 - **\`navigateTo(piece)\`** — Navigate to another piece.
 - **\`[NAME]\`** — Special symbol for the piece's display name.
 - **\`[UI]\`** — Special symbol for the piece's rendered UI.
-- **\`Default<T, D>\`** — Type with a default value. For mutable arrays in schemas,
-  the standard pattern is \`Writable<Default<T[], []>>\`.
+- **\`T | Default<D>\`** — Type with a default value. For mutable arrays in schemas,
+  the standard pattern is \`Writable<T[] | Default<[]>>\`.
+- **\`T | DeepDefault<D>\`** — Object type with a partial recursive default.
+  Use this when the default lists only some nested object properties.
 - **\`Secret<T>\`** — Local no-op type alias (\`type Secret<T> = T;\`) for marking sensitive fields.
 - **\`Stream<T>\`** — Stateless channel. Written via \`.send()\`. Used for handlers
   that can be called from other pieces.
@@ -2276,13 +2278,13 @@ from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 
 - CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
 - Export a type \`${pascalName}Auth\` with fields:
-  - \`accessToken: Default<Secret<string>, "">\`  (or \`token\` if the provider uses that convention)
-  - \`tokenType: Default<string, "">\`
-  - \`scope: Default<string[], []>\`
-  - \`expiresIn: Default<number, 0>\`
-  - \`expiresAt: Default<number, 0>\`
-  - \`refreshToken: Default<Secret<string>, "">\`
-  - \`user: Default<{ email: string; name: string; picture: string }, { email: ""; name: ""; picture: "" }>\`
+  - \`accessToken: Secret<string> | Default<"">\`  (or \`token\` if the provider uses that convention)
+  - \`tokenType: string | Default<"">\`
+  - \`scope: string[] | Default<[]>\`
+  - \`expiresIn: number | Default<0>\`
+  - \`expiresAt: number | Default<0>\`
+  - \`refreshToken: Secret<string> | Default<"">\`
+  - \`user: { email: string; name: string; picture: string } | Default<{ email: ""; name: ""; picture: "" }>\`
 - Use the \`#${
     hashTag.slice(1)
   }\` tag in the Output interface JSDoc comment for wish() discovery

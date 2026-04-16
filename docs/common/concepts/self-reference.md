@@ -53,14 +53,14 @@ const createChild = action(() => {
 interface Input { title?: string; }
 
 // GOOD: Default<> ensures a value always exists
-interface Input { title: Default<string, "Untitled">; }
+interface Input { title: string | Default<"Untitled">; }
 ```
 
 ## Key Rules
 
 - **Both type params required:** Use `pattern<Input, Output>()` - single param `pattern<Input>()` will error if you access SELF
 - **`self` is typed as the output** - the instantiated piece itself, enabling recursive structures
-- **Inputs need defaults:** If an input feeds into the output, use `Default<T, V>` so `self` can bind
+- **Inputs need defaults:** If an input feeds into the output, use `T | Default<V>` so `self` can bind
 
 ## See Also
 

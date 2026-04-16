@@ -59,10 +59,10 @@ type MentionablePiece = {
 };
 
 interface Input {
-  title?: Default<string, "Weekly Calendar">;
-  events: Writable<Default<EventPiece[], []>>;
-  isCalendar?: Default<boolean, true>; // Marker for identification
-  isHidden?: Default<boolean, false>;
+  title?: string | Default<"Weekly Calendar">;
+  events: Writable<EventPiece[] | Default<[]>>;
+  isCalendar?: boolean | Default<true>; // Marker for identification
+  isHidden?: boolean | Default<false>;
 }
 
 interface Output {

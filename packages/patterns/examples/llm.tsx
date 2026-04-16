@@ -11,7 +11,7 @@ import {
 } from "commonfabric";
 
 type LLMTestInput = {
-  title: Default<string, "LLM Test">;
+  title: string | Default<"LLM Test">;
 };
 
 type LLMTestResult = {

@@ -60,52 +60,58 @@ interface ExtractorModuleInput {
   parentTitle: Writable<string>;
   // Source selection state (index -> selected, default true)
   sourceSelections: Writable<
-    Default<Record<number, boolean>, Record<number, never>>
+    Record<number, boolean> | Default<Record<number, never>>
   >;
   // Trash selection state (index -> should trash, default false)
   trashSelections: Writable<
-    Default<Record<number, boolean>, Record<number, never>>
+    Record<number, boolean> | Default<Record<number, never>>
   >;
   // Field selections for preview
-  selections: Writable<Default<Record<string, boolean>, Record<string, never>>>;
+  selections: Writable<
+    Record<string, boolean> | Default<Record<string, never>>
+  >;
   // Extraction phase
   extractPhase: Writable<
-    Default<"select" | "extracting" | "preview", "select">
+    "select" | "extracting" | "preview" | Default<"select">
   >;
   // Combined content for extraction (built from sources)
-  extractionPrompt: Writable<Default<string, "">>;
+  extractionPrompt: Writable<string | Default<"">>;
   // Notes cleanup state
-  cleanupNotesEnabled: Writable<Default<boolean, true>>;
+  cleanupNotesEnabled: Writable<boolean | Default<true>>;
   // Snapshot of Notes content at extraction start (for cleanup comparison)
   // Map of subPiece index (as string) -> original content for ALL selected Notes modules
   // NOTE: Uses string keys to avoid Cell coercing numeric keys to array indices
   notesContentSnapshot: Writable<
-    Default<Record<string, string>, Record<string, never>>
+    Record<string, string> | Default<Record<string, never>>
   >;
   // Cleanup application status tracking
   cleanupApplyStatus: Writable<
-    Default<"pending" | "success" | "failed" | "skipped", "pending">
+    "pending" | "success" | "failed" | "skipped" | Default<"pending">
   >;
   // Apply in progress guard (prevents double-click race condition)
-  applyInProgress: Writable<Default<boolean, false>>;
+  applyInProgress: Writable<boolean | Default<false>>;
   // Error details expanded state (for showing full error in UI)
-  errorDetailsExpanded: Writable<Default<boolean, false>>;
+  errorDetailsExpanded: Writable<boolean | Default<false>>;
 }
 
 interface ExtractorModuleOutput {
-  sourceSelections?: Default<Record<number, boolean>, Record<number, never>>;
-  trashSelections?: Default<Record<number, boolean>, Record<number, never>>;
-  selections?: Default<Record<string, boolean>, Record<string, never>>;
-  extractPhase?: Default<"select" | "extracting" | "preview", "select">;
-  extractionPrompt?: Default<string, "">;
-  cleanupNotesEnabled?: Default<boolean, true>;
-  notesContentSnapshot?: Default<Record<string, string>, Record<string, never>>;
-  cleanupApplyStatus?: Default<
-    "pending" | "success" | "failed" | "skipped",
-    "pending"
-  >;
-  applyInProgress?: Default<boolean, false>;
-  errorDetailsExpanded?: Default<boolean, false>;
+  sourceSelections?: Record<number, boolean> | Default<Record<number, never>>;
+  trashSelections?: Record<number, boolean> | Default<Record<number, never>>;
+  selections?: Record<string, boolean> | Default<Record<string, never>>;
+  extractPhase?: "select" | "extracting" | "preview" | Default<"select">;
+  extractionPrompt?: string | Default<"">;
+  cleanupNotesEnabled?: boolean | Default<true>;
+  notesContentSnapshot?:
+    | Record<string, string>
+    | Default<Record<string, never>>;
+  cleanupApplyStatus?:
+    | "pending"
+    | "success"
+    | "failed"
+    | "skipped"
+    | Default<"pending">;
+  applyInProgress?: boolean | Default<false>;
+  errorDetailsExpanded?: boolean | Default<false>;
 }
 
 // ===== Constants =====
@@ -953,7 +959,7 @@ const toggleSourceHandler = handler<
   {
     index: number;
     sourceSelectionsCell: Writable<
-      Default<Record<number, boolean>, Record<number, never>>
+      Record<number, boolean> | Default<Record<number, never>>
     >;
   }
 >((_event, { index, sourceSelectionsCell }) => {
@@ -974,7 +980,7 @@ const toggleTrashHandler = handler<
   {
     index: number;
     trashSelectionsCell: Writable<
-      Default<Record<number, boolean>, Record<number, never>>
+      Record<number, boolean> | Default<Record<number, never>>
     >;
   }
 >((_event, { index, trashSelectionsCell }) => {
@@ -995,7 +1001,7 @@ const toggleFieldHandler = handler<
   {
     fieldKey: string;
     selectionsCell: Writable<
-      Default<Record<string, boolean>, Record<string, never>>
+      Record<string, boolean> | Default<Record<string, never>>
     >;
     defaultSelected: boolean;
   }
@@ -1022,14 +1028,14 @@ const startExtraction = handler<
   unknown,
   {
     sourceSelectionsCell: Writable<
-      Default<Record<number, boolean>, Record<number, never>>
+      Record<number, boolean> | Default<Record<number, never>>
     >;
     parentSubPiecesCell: Writable<SubPieceEntry[]>;
     extractPhaseCell: Writable<
-      Default<"select" | "extracting" | "preview", "select">
+      "select" | "extracting" | "preview" | Default<"select">
     >;
     notesContentSnapshotCell: Writable<
-      Default<Record<number, string>, Record<number, never>>
+      Record<number, string> | Default<Record<number, never>>
     >;
   }
 >(
@@ -1209,7 +1215,7 @@ interface NotesCleanupParams {
   cleanedNotesValue: string;
   notesSnapshotMapValue: Record<string, string>;
   cleanupApplyStatusCell: Writable<
-    Default<"pending" | "success" | "failed" | "skipped", "pending">
+    "pending" | "success" | "failed" | "skipped" | Default<"pending">
   >;
 }
 
@@ -1376,19 +1382,19 @@ const applySelected = handler<
       { confidence: number; explanation: string; sourceExcerpt?: string }
     >;
     selectionsCell: Writable<
-      Default<Record<string, boolean>, Record<string, never>>
+      Record<string, boolean> | Default<Record<string, never>>
     >;
     trashSelectionsCell: Writable<
-      Default<Record<number, boolean>, Record<number, never>>
+      Record<number, boolean> | Default<Record<number, never>>
     >;
     cleanupEnabledValue: boolean;
     cleanedNotesValue: string;
     // Dereferenced value from notesContentSnapshot Cell (map of Notes module index as string -> original content)
     notesSnapshotMapValue: Record<string, string>;
     cleanupApplyStatusCell: Writable<
-      Default<"pending" | "success" | "failed" | "skipped", "pending">
+      "pending" | "success" | "failed" | "skipped" | Default<"pending">
     >;
-    applyInProgressCell: Writable<Default<boolean, false>>;
+    applyInProgressCell: Writable<boolean | Default<false>>;
   }
 >(
   (

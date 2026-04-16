@@ -5,14 +5,14 @@
 **Tempting but wrong diagnosis:** "I need to unwrap with `.get()`"
 
 **Actual cause:** The value isn't an array (yet). This usually means:
-1. The array hasn't been initialized (missing `Default<T[], []>`)
+1. The array hasn't been initialized (missing `T[] | Default<[]>`)
 2. You're accessing a nested property that doesn't exist
 3. A computed is returning the wrong type
 
 ```typescript
 // CORRECT - Ensure array has a default value
 interface Input {
-  items: Default<Item[], []>;  // Defaults to empty array
+  items: Item[] | Default<[]>;  // Defaults to empty array
 }
 
 // CORRECT - Inside computed(), just use the value directly
@@ -30,7 +30,7 @@ const handleClear = handler<never, { items: Writable<Item[]> }>(
 **Diagnostic questions:**
 1. Is the source a `Writable<>`? -> Use `.get()` to read the value
 2. Is it a `computed()` or `lift()` result? -> Access directly, no `.get()`
-3. Is the value possibly undefined? -> Add `Default<T[], []>` to the interface
+3. Is the value possibly undefined? -> Add `T[] | Default<[]>` to the interface
 
 ## See Also
 

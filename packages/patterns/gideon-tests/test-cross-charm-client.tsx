@@ -37,13 +37,13 @@ import {
 
 interface Input {
   // Toggle between Mode A (wish only) and Mode B (wish + <cf-render>)
-  useCfRender: Default<boolean, false>;
+  useCfRender: boolean | Default<false>;
 
   // Track last invocation result
-  lastInvocationStatus: Default<string, "Not invoked yet">;
+  lastInvocationStatus: string | Default<"Not invoked yet">;
 
   // Track invocation count
-  invocationCount: Default<number, 0>;
+  invocationCount: number | Default<0>;
 }
 
 interface Output {

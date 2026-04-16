@@ -12,13 +12,13 @@ import {
 // ===== Types =====
 
 type ChecklistInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 
 type ChecklistItem = {
   label: string;
-  done: Default<boolean, false>;
+  done: boolean | Default<false>;
 };
 
 type ChecklistOutput = {

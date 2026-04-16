@@ -1,7 +1,7 @@
 import { Default, ifElse, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface CheckboxSimpleInput {
-  enabled: Writable<Default<boolean, false>>;
+  enabled: Writable<boolean | Default<false>>;
 }
 
 interface CheckboxSimpleOutput extends CheckboxSimpleInput {}

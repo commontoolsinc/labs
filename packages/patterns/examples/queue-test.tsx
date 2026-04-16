@@ -8,7 +8,7 @@ import {
 } from "commonfabric";
 
 type QueueTestInput = {
-  title: Default<string, "Queue Test">;
+  title: string | Default<"Queue Test">;
 };
 
 /**

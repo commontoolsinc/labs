@@ -49,8 +49,8 @@ export const defaultPile2: Card[] = [
 ];
 
 interface CardPilesInput {
-  pile1: Writable<Default<Card[], typeof defaultPile1>>;
-  pile2: Writable<Default<Card[], typeof defaultPile2>>;
+  pile1: Writable<Card[] | Default<typeof defaultPile1>>;
+  pile2: Writable<Card[] | Default<typeof defaultPile2>>;
 }
 
 interface CardPilesOutput {

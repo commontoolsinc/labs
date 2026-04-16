@@ -131,7 +131,10 @@ const goToCharm = handler({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
-        charm: true
+        charm: {
+            type: "unknown",
+            asCell: ["opaque"]
+        }
     },
     required: ["charm"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { charm }) => {

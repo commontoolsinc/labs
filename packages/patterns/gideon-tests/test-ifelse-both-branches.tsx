@@ -35,8 +35,8 @@ import {
 } from "commonfabric";
 
 interface Input {
-  condition: Default<boolean, true>;
-  toggleCount: Default<number, 0>;
+  condition: boolean | Default<true>;
+  toggleCount: number | Default<0>;
 }
 
 interface Output {

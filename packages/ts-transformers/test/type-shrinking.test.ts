@@ -300,7 +300,7 @@ Deno.test("applyShrinkAndWrap turns identity-only wrapped inputs into OpaqueCell
       identityOnly: true,
       passthrough: true,
     }),
-    alias.type,
+    ts.factory.createTypeReferenceNode("Input"),
     baseType,
     true,
     checker,
@@ -356,7 +356,7 @@ Deno.test("applyShrinkAndWrap turns identity-only cell leaves into OpaqueCell<un
       identityPaths: [["left"], ["right"]],
       identityCellPaths: [["left"], ["right"]],
     }),
-    ts.factory.createTypeReferenceNode("Input"),
+    alias.type,
     baseType,
     false,
     checker,
@@ -369,6 +369,35 @@ Deno.test("applyShrinkAndWrap turns identity-only cell leaves into OpaqueCell<un
   assertStringIncludes(printed, "right: __cfHelpers.OpaqueCell<unknown>");
   assertEquals(printed.includes("name"), false);
   assertEquals(printed.includes("nested"), false);
+});
+
+Deno.test("applyShrinkAndWrap lets identity containers cover retained child paths", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Input = {
+      item: { active: boolean; name: string };
+      untouched: string;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["item", "active"]],
+      identityPaths: [["item"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "item: unknown");
+  assertEquals(printed.includes("active"), false);
+  assertEquals(printed.includes("name"), false);
 });
 
 Deno.test("applyShrinkAndWrap shrinks direct array parameters to used item fields", () => {

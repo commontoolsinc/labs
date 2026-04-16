@@ -15,9 +15,9 @@
 import { action, Default, pattern, Stream, Writable } from "commonfabric";
 
 function flushLater(
-  fileId: Writable<Default<string, "">>,
-  content: Writable<Default<string, "">>,
-  savedContent: Writable<Default<string, "">>,
+  fileId: Writable<string | Default<"">>,
+  content: Writable<string | Default<"">>,
+  savedContent: Writable<string | Default<"">>,
   onSaveFile: Stream<{ fileId: string; content: string }>,
 ): void {
   const nextContent = content.get();
@@ -28,9 +28,9 @@ function flushLater(
 }
 
 interface Input {
-  fileId: Writable<Default<string, "">>;
-  content: Writable<Default<string, "">>;
-  savedContent: Writable<Default<string, "">>;
+  fileId: Writable<string | Default<"">>;
+  content: Writable<string | Default<"">>;
+  savedContent: Writable<string | Default<"">>;
   onSaveFile: Stream<{ fileId: string; content: string }>;
 }
 

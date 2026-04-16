@@ -61,11 +61,10 @@ const showRefineInput = handler<unknown, { showRefine: Writable<boolean> }>(
 
 export default pattern<
   {
-    situation: Default<
-      string,
-      "What are the latest developments in AI agents?"
-    >;
-    messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+    situation:
+      | string
+      | Default<"What are the latest developments in AI agents?">;
+    messages?: Writable<Array<BuiltInLLMMessage> | Default<[]>>;
     context?: { [id: string]: any };
   },
   { result: any; [UI]: VNode }
