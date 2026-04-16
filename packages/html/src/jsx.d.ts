@@ -3518,6 +3518,7 @@ interface CFCFCAuthorshipAttributes<T> extends CFHTMLAttributes<T> {
   "kind"?: string;
   "verifyTextIntegrity"?: boolean;
   "allowLiteralText"?: boolean;
+  "requiredTextIntegrity"?: unknown | readonly unknown[];
   "textIntegrityState"?: "ok" | "blocked";
 }
 

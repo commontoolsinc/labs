@@ -41,10 +41,8 @@ import type {
 } from "./types.ts";
 import { isWorkerVNode } from "./types.ts";
 import {
-  authorshipStateForLabel,
   type CfcLabelView,
   cfcLabelViewForCell,
-  DEFAULT_AUTHORSHIP_KIND,
   markRendererTrustedEvent,
 } from "@commonfabric/runner/cfc";
 import type { VDomOp } from "../vdom-ops.ts";
@@ -400,16 +398,16 @@ export class WorkerReconciler {
       "allow-literal-text",
       "data-cfc-allow-literal-text",
     ]) ?? false;
-    const kind = this.nodePropAsString(node, ["kind"]) ??
-      DEFAULT_AUTHORSHIP_KIND;
-    const author = this.nodePropForRenderPolicy(node, "author") ??
-      this.nodePropForRenderPolicy(node, "$author");
+    const requiredIntegrity = this.nodePropAsAtomList(node, [
+      "requiredTextIntegrity",
+      "requiredIntegrity",
+      "data-cfc-required-text-integrity",
+    ]) ?? [];
 
     return {
       ...policy,
       textIntegrity: {
-        kind,
-        author,
+        requiredIntegrity,
         allowLiteralText,
         boundaryNodeId: nodeId,
       },
@@ -500,15 +498,22 @@ export class WorkerReconciler {
     return undefined;
   }
 
-  private nodePropAsString(
+  private nodePropAsAtomList(
     node: WorkerVNode,
     keys: readonly string[],
-  ): string | undefined {
+  ): readonly unknown[] | undefined {
     for (const key of keys) {
       const value = this.nodePropForRenderPolicy(node, key);
-      if (typeof value === "string") {
-        return value;
+      if (typeof value === "function") {
+        continue;
       }
+      const resolved = isCell(value)
+        ? this.readCellValue(value as Cell<unknown>)
+        : value;
+      if (resolved === undefined) {
+        continue;
+      }
+      return Array.isArray(resolved) ? resolved : [resolved];
     }
     return undefined;
   }
@@ -660,11 +665,12 @@ export class WorkerReconciler {
     if (leftPolicy === undefined || rightPolicy === undefined) {
       return leftPolicy === rightPolicy;
     }
-    return leftPolicy.kind === rightPolicy.kind &&
+    return this.atomListsEqual(
+      leftPolicy.requiredIntegrity,
+      rightPolicy.requiredIntegrity,
+    ) &&
       leftPolicy.allowLiteralText === rightPolicy.allowLiteralText &&
-      leftPolicy.boundaryNodeId === rightPolicy.boundaryNodeId &&
-      (Object.is(leftPolicy.author, rightPolicy.author) ||
-        deepEqual(leftPolicy.author, rightPolicy.author));
+      leftPolicy.boundaryNodeId === rightPolicy.boundaryNodeId;
   }
 
   private atomListsEqual(
@@ -782,7 +788,9 @@ export class WorkerReconciler {
   }
 
   private isTextIntegrityPolicyProp(key: string): boolean {
-    return key === "author" || key === "$author";
+    return key === "requiredTextIntegrity" ||
+      key === "requiredIntegrity" ||
+      key === "data-cfc-required-text-integrity";
   }
 
   private initializeTextIntegrityBoundary(
@@ -821,6 +829,9 @@ export class WorkerReconciler {
     if (textIntegrity === undefined) {
       return true;
     }
+    if (textIntegrity.requiredIntegrity.length === 0) {
+      return false;
+    }
 
     let labelView: CfcLabelView | undefined;
     try {
@@ -828,31 +839,38 @@ export class WorkerReconciler {
     } catch {
       return false;
     }
+    if (labelView === undefined) {
+      return false;
+    }
 
-    return authorshipStateForLabel(
-      labelView,
-      this.readAuthorClaim(textIntegrity.author),
-      textIntegrity.kind,
-    ) === "verified";
+    const integrity = this.integrityLabels(labelView);
+    return textIntegrity.requiredIntegrity.every((required) =>
+      integrity.some((atom) => deepEqual(atom, required))
+    );
   }
 
-  private readAuthorClaim(author: unknown): unknown {
-    if (!isCell(author)) {
-      return author;
-    }
-    const authorCell = author as Cell<unknown> & {
+  private integrityLabels(labelView: CfcLabelView): readonly unknown[] {
+    return ContextualFlowControl.uniqueAtoms(
+      labelView.entries.flatMap((entry) => [
+        ...(entry.label.integrity ?? []),
+      ]),
+    );
+  }
+
+  private readCellValue(cell: Cell<unknown>): unknown {
+    const readableCell = cell as Cell<unknown> & {
       get?: (options?: { traverseCells?: boolean }) => unknown;
       getRawUntyped?: (options?: { frozen?: false }) => unknown;
     };
     try {
-      if (typeof authorCell.get === "function") {
-        return authorCell.get({ traverseCells: true });
+      if (typeof readableCell.get === "function") {
+        return readableCell.get({ traverseCells: true });
       }
     } catch {
       // Fall back to the raw read below.
     }
     try {
-      return authorCell.getRawUntyped?.({ frozen: false });
+      return readableCell.getRawUntyped?.({ frozen: false });
     } catch {
       return undefined;
     }

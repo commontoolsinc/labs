@@ -44,6 +44,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     uri: "https://other-system.example/records",
     fetchedAt: 0,
   };
+  const signedReleaseAtom = {
+    kind: "signed-release",
+    subject: "release-2026",
+  };
+  const otherReleaseAtom = {
+    kind: "signed-release",
+    subject: "other-release",
+  };
 
   try {
     const tx = runtime.edit();
@@ -99,29 +107,29 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         },
       },
     });
-    const aliceAuthoredText = runtime.getCell<string>(
+    const signedReleaseText = runtime.getCell<string>(
       signer.did(),
-      "cfc-render-policy-alice-authored-text",
+      "cfc-render-policy-signed-release-text",
       undefined,
       tx,
     );
-    const aliceAuthoredTextLink = aliceAuthoredText.getAsNormalizedFullLink();
+    const signedReleaseTextLink = signedReleaseText.getAsNormalizedFullLink();
     tx.writeOrThrow({
       space: signer.did(),
-      id: aliceAuthoredTextLink.id!,
+      id: signedReleaseTextLink.id!,
       type: "application/json",
       path: [],
     }, {
-      value: "Alice signed chat text",
+      value: "Verified release note",
       cfc: {
         version: 1,
-        schemaHash: "test-authored-text-schema",
+        schemaHash: "test-signed-release-text-schema",
         labelMap: {
           version: 1,
           entries: [{
             path: [],
             label: {
-              integrity: [{ kind: "authored-by", subject: "alice" }],
+              integrity: [signedReleaseAtom],
             },
           }],
         },
@@ -133,7 +141,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       undefined,
       tx,
     );
-    unsignedText.set("Unsigned chat text");
+    unsignedText.set("Unsigned release note");
     const commitResult = await tx.commit();
     assertEquals(commitResult.ok !== undefined, true);
 
@@ -145,11 +153,11 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       signer.did(),
       "cfc-render-policy-structured-secret",
     );
-    const authoredText = runtime.getCell<string>(
+    const verifiedText = runtime.getCell<string>(
       signer.did(),
-      "cfc-render-policy-alice-authored-text",
+      "cfc-render-policy-signed-release-text",
     );
-    const unsignedChatText = runtime.getCell<string>(
+    const unsignedReleaseText = runtime.getCell<string>(
       signer.did(),
       "cfc-render-policy-unsigned-text",
     );
@@ -717,7 +725,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "strict authorship renders child text with matching integrity",
+      "strict text integrity renders child text with matching integrity",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -727,10 +735,10 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-authorship",
           props: {
-            author: "alice",
             verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
           },
-          children: [authoredText as never],
+          children: [verifiedText as never],
         };
 
         const cancel = reconciler.mount(root);
@@ -739,7 +747,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
 
           const renderedText = collector.getOpsOfType("create-text")
             .map((op) => op.text);
-          assertEquals(renderedText.includes("Alice signed chat text"), true);
+          assertEquals(renderedText.includes("Verified release note"), true);
           assertEquals(
             renderedText.includes("Content hidden by integrity policy"),
             false,
@@ -751,7 +759,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "strict authorship blocks child text with mismatched integrity",
+      "strict text integrity blocks child text with mismatched integrity",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -761,10 +769,10 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-authorship",
           props: {
-            author: "bob",
             verifyTextIntegrity: true,
+            requiredTextIntegrity: otherReleaseAtom,
           },
-          children: [authoredText as never],
+          children: [verifiedText as never],
         };
 
         const cancel = reconciler.mount(root);
@@ -773,7 +781,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
 
           const renderedText = collector.getOpsOfType("create-text")
             .map((op) => op.text);
-          assertEquals(renderedText.includes("Alice signed chat text"), false);
+          assertEquals(renderedText.includes("Verified release note"), false);
           assertEquals(
             renderedText.includes("Content hidden by integrity policy"),
             true,
@@ -791,7 +799,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "strict authorship blocks unsigned child text",
+      "strict text integrity blocks unsigned child text",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -801,10 +809,10 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-authorship",
           props: {
-            author: "alice",
             verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
           },
-          children: [unsignedChatText as never],
+          children: [unsignedReleaseText as never],
         };
 
         const cancel = reconciler.mount(root);
@@ -813,7 +821,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
 
           const renderedText = collector.getOpsOfType("create-text")
             .map((op) => op.text);
-          assertEquals(renderedText.includes("Unsigned chat text"), false);
+          assertEquals(renderedText.includes("Unsigned release note"), false);
           assertEquals(
             renderedText.includes("Content hidden by integrity policy"),
             true,
@@ -825,7 +833,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "strict authorship blocks literal child text by default",
+      "strict text integrity blocks literal child text by default",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -835,8 +843,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-authorship",
           props: {
-            author: "alice",
             verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
           },
           children: ["Untrusted literal text"],
         };
@@ -859,7 +867,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "strict authorship allows literal child text only with an escape hatch",
+      "strict text integrity allows literal child text only with an escape hatch",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -869,9 +877,9 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-authorship",
           props: {
-            author: "alice",
             verifyTextIntegrity: true,
             allowLiteralText: true,
+            requiredTextIntegrity: signedReleaseAtom,
           },
           children: ["Trusted literal chrome"],
         };
@@ -894,7 +902,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "strict authorship allows matching cf-chat-message content props",
+      "strict text integrity allows matching visible content props",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -904,15 +912,15 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-authorship",
           props: {
-            author: "alice",
             verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
           },
           children: [{
             type: "vnode",
             name: "cf-chat-message",
             props: {
               role: "assistant",
-              content: authoredText as never,
+              content: verifiedText as never,
             },
             children: [],
           }],
@@ -925,7 +933,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           const setPropOps = collector.getOpsOfType("set-prop");
           assertEquals(
             setPropOps.some((op) =>
-              op.key === "content" && op.value === "Alice signed chat text"
+              op.key === "content" && op.value === "Verified release note"
             ),
             true,
           );
@@ -949,7 +957,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "strict authorship blocks static cf-chat-message content props",
+      "strict text integrity blocks static visible content props",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -959,8 +967,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-authorship",
           props: {
-            author: "alice",
             verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
           },
           children: [{
             type: "vnode",
@@ -1005,7 +1013,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
-      "strict authorship blocks mismatched cf-chat-message name props",
+      "strict text integrity blocks mismatched visible name props",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -1015,15 +1023,15 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "cf-cfc-authorship",
           props: {
-            author: "bob",
             verifyTextIntegrity: true,
+            requiredTextIntegrity: otherReleaseAtom,
           },
           children: [{
             type: "vnode",
             name: "cf-chat-message",
             props: {
               role: "assistant",
-              name: authoredText as never,
+              name: verifiedText as never,
             },
             children: [],
           }],

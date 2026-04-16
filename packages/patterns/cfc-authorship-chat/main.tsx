@@ -44,6 +44,11 @@ type AuthorshipChatOutput = {
 function AuthoredBlock(
   { title, summary, message, surface }: AuthoredBlockProps,
 ) {
+  const requiredTextIntegrity = computed(() => ({
+    kind: "authored-by",
+    subject: message.key("sender").key("id").get(),
+  } satisfies AuthorshipIntegrity<string>));
+
   return (
     <cf-card data-authorship-card={surface}>
       <cf-vstack slot="content" gap="2">
@@ -57,6 +62,7 @@ function AuthoredBlock(
           avatar={message.key("sender").key("avatar")}
           verifyTextIntegrity
           allowLiteralText={false}
+          requiredTextIntegrity={requiredTextIntegrity}
         >
           <div className="authorship-content-block">
             <cf-chat-message

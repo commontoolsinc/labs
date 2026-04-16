@@ -110,8 +110,7 @@ export interface RenderPolicy {
    * Undefined means descendant text is not integrity-gated.
    */
   textIntegrity?: {
-    kind: string;
-    author: unknown;
+    requiredIntegrity: readonly unknown[];
     allowLiteralText: boolean;
     boundaryNodeId: number;
   };
