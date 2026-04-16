@@ -81,15 +81,15 @@ function getNextUnusedLabel(
 // ===== Types =====
 
 interface RecordInput {
-  title?: Default<string, "">;
-  subPieces?: Default<SubPieceEntry[], []>;
-  trashedSubPieces?: Default<TrashedSubPieceEntry[], []>;
+  title?: string | Default<"">;
+  subPieces?: SubPieceEntry[] | Default<[]>;
+  trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
 }
 
 interface RecordOutput {
-  title?: Default<string, "">;
-  subPieces?: Default<SubPieceEntry[], []>;
-  trashedSubPieces?: Default<TrashedSubPieceEntry[], []>;
+  title?: string | Default<"">;
+  subPieces?: SubPieceEntry[] | Default<[]>;
+  trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
   /** Self-reference for sub-pieces to access their parent Record */
   parentRecord?: RecordOutput | null;
 }

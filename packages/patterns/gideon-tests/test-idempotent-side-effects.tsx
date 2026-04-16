@@ -37,7 +37,7 @@ import {
 
 interface TestInput {
   // Trigger value that we can change to force re-computation
-  triggerCount: Default<number, 0>;
+  triggerCount: number | Default<0>;
 }
 
 interface TestOutput {

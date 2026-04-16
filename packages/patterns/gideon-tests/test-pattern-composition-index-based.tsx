@@ -21,8 +21,8 @@ import {
 
 interface ShoppingItem {
   title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Uncategorized">;
+  done: boolean | Default<false>;
+  category: string | Default<"Uncategorized">;
 }
 
 // INDEX-BASED removal handler - no .equals() needed
@@ -175,14 +175,13 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
 
 // Main pattern
 interface ComposedInput {
-  items: Default<
-    ShoppingItem[],
-    [
+  items:
+    | ShoppingItem[]
+    | Default<[
       { title: "Milk"; done: false; category: "Dairy" },
       { title: "Bread"; done: false; category: "Bakery" },
       { title: "Cheese"; done: true; category: "Dairy" },
-    ]
-  >;
+    ]>;
 }
 
 export default pattern<ComposedInput>(({ items }) => {

@@ -27,11 +27,11 @@ import {
 export interface Person {
   name: string;
   email: string;
-  role: Default<"user" | "admin", "user">;
+  role: "user" | "admin" | Default<"user">;
 }
 
 interface FormDemoInput {
-  people: Writable<Default<Person[], []>>;
+  people: Writable<Person[] | Default<[]>>;
 }
 
 interface FormDemoOutput {

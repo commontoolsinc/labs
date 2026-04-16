@@ -15,15 +15,15 @@ export type ItemStatus = "want" | "reading" | "finished" | "abandoned";
 
 /** Input for creating a new reading item detail piece */
 interface ReadingItemDetailInput {
-  title?: Writable<Default<string, "">>;
-  author?: Writable<Default<string, "">>;
-  url?: Writable<Default<string, "">>;
-  type?: Writable<Default<ItemType, "article">>;
-  status?: Writable<Default<ItemStatus, "want">>;
-  rating?: Writable<Default<number | null, null>>;
-  notes?: Writable<Default<string, "">>;
-  addedAt?: Default<number, 0>;
-  finishedAt?: Default<number | null, null>;
+  title?: Writable<string | Default<"">>;
+  author?: Writable<string | Default<"">>;
+  url?: Writable<string | Default<"">>;
+  type?: Writable<ItemType | Default<"article">>;
+  status?: Writable<ItemStatus | Default<"want">>;
+  rating?: Writable<number | null | Default<null>>;
+  notes?: Writable<string | Default<"">>;
+  addedAt?: number | Default<0>;
+  finishedAt?: number | null | Default<null>;
 }
 
 /** Output shape of the reading item piece - this is what gets stored in lists

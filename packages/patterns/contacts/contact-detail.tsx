@@ -3,11 +3,11 @@ import { computed, Default, NAME, pattern, UI, Writable } from "commonfabric";
 /** Raw data shape - use in collection patterns */
 export interface Contact {
   name: string;
-  email: Default<string, "">;
-  phone: Default<string, "">;
-  company: Default<string, "">;
-  tags: Default<string[], []>;
-  notes: Default<string, "">;
+  email: string | Default<"">;
+  phone: string | Default<"">;
+  company: string | Default<"">;
+  tags: string[] | Default<[]>;
+  notes: string | Default<"">;
   createdAt: number;
 }
 

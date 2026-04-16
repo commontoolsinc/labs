@@ -5,7 +5,7 @@
 import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface Input {
-  content: Default<string, "">;
+  content: string | Default<"">;
 }
 
 export default pattern<Input>(({ content }) => {

@@ -2,7 +2,7 @@ import { Default, NAME, pattern, Stream, UI } from "commonfabric";
 import { getValue, roll } from "./dice-handlers.ts";
 
 interface PatternState {
-  value: Default<number, 1>;
+  value: number | Default<1>;
 }
 
 interface PatternOutput {

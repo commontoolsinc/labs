@@ -47,11 +47,11 @@ type GiftTier = "always" | "occasions" | "reciprocal" | "none";
 
 export interface GiftPrefsModuleInput {
   /** Gift giving tier */
-  giftTier: Default<GiftTier | "", "">;
+  giftTier: GiftTier | "" | Default<"">;
   /** Favorite things (interests, hobbies, brands) */
-  favorites: Default<string[], []>;
+  favorites: string[] | Default<[]>;
   /** Things to avoid (allergies, dislikes) */
-  avoid: Default<string[], []>;
+  avoid: string[] | Default<[]>;
 }
 
 // ===== Constants =====

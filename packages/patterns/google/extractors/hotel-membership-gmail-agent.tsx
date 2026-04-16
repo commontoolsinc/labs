@@ -98,21 +98,23 @@ type MembershipRecord = InferItem<typeof MembershipSchema> & {
 };
 
 interface HotelMembershipInput {
-  memberships?: Default<MembershipRecord[], []>;
-  lastScanAt?: Default<number, 0>;
-  isScanning?: Default<boolean, false>;
-  maxSearches?: Default<number, 0>; // 0 = unlimited, >0 = limit searches
+  memberships?: MembershipRecord[] | Default<[]>;
+  lastScanAt?: number | Default<0>;
+  isScanning?: boolean | Default<false>;
+  maxSearches?: number | Default<0>; // 0 = unlimited, >0 = limit searches
   // Current scan mode - persisted to know if last scan was full or recent
-  currentScanMode?: Default<ScanMode, "full">;
+  currentScanMode?: ScanMode | Default<"full">;
   // Multi-account support: which Google account to use
-  accountType?: Default<"default" | "personal" | "work", "default">;
+  accountType?: "default" | "personal" | "work" | Default<"default">;
   // Shared with base pattern for coordinating progress UI
-  searchProgress?: Default<SearchProgress, {
-    currentQuery: "";
-    completedQueries: [];
-    status: "idle";
-    searchCount: 0;
-  }>;
+  searchProgress?:
+    | SearchProgress
+    | Default<{
+      currentQuery: "";
+      completedQueries: [];
+      status: "idle";
+      searchCount: 0;
+    }>;
 }
 
 /** Hotel loyalty membership extractor from Gmail. #hotelMemberships */
@@ -176,9 +178,9 @@ const startScan = handler<
   {
     mode: ScanMode;
     searchLimit: number; // 0 = unlimited, >0 = limit
-    currentScanMode: Writable<Default<ScanMode, "full">>;
-    maxSearches: Writable<Default<number, 0>>;
-    isScanning: Writable<Default<boolean, false>>;
+    currentScanMode: Writable<ScanMode | Default<"full">>;
+    maxSearches: Writable<number | Default<0>>;
+    isScanning: Writable<boolean | Default<false>>;
     searchProgress: Writable<SearchProgress>;
   }
 >((_, state) => {

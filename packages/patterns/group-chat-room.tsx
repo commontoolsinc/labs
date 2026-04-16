@@ -45,15 +45,15 @@ export interface User {
 }
 
 interface RoomInput {
-  messages: Writable<Default<Message[], []>>;
-  users: Writable<Default<User[], []>>;
-  myName: Default<string, "">;
-  mySessionId: Default<string, "">;
-  currentSessionId: Writable<Default<string, "">>;
+  messages: Writable<Message[] | Default<[]>>;
+  users: Writable<User[] | Default<[]>>;
+  myName: string | Default<"">;
+  mySessionId: string | Default<"">;
+  currentSessionId: Writable<string | Default<"">>;
 }
 
 interface RoomOutput {
-  myName: Default<string, "">;
+  myName: string | Default<"">;
 }
 
 // Common reaction emojis

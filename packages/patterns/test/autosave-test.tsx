@@ -9,13 +9,13 @@ import {
 } from "commonfabric";
 
 interface State {
-  data: Default<string, "Initial test data">;
-  counter: Default<number, 0>;
+  data: string | Default<"Initial test data">;
+  counter: number | Default<0>;
 }
 
 interface WritableState {
-  data: Writable<Default<string, "Initial test data">>;
-  counter: Writable<Default<number, 0>>;
+  data: Writable<string | Default<"Initial test data">>;
+  counter: Writable<number | Default<0>>;
 }
 
 interface Output {

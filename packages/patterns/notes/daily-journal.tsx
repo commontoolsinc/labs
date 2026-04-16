@@ -160,9 +160,9 @@ const triggerRollup = handler<
 // ===== Input / Output types =====
 
 interface DailyJournalInput {
-  title?: Writable<Default<string, "Daily Journal">>;
-  entries?: Writable<Default<NotePiece[], []>>;
-  template?: Writable<Default<string, "">>;
+  title?: Writable<string | Default<"Daily Journal">>;
+  entries?: Writable<NotePiece[] | Default<[]>>;
+  template?: Writable<string | Default<"">>;
 }
 
 interface DailyJournalOutput {

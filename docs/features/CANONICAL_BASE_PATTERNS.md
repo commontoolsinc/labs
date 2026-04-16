@@ -684,7 +684,7 @@ export interface Contact extends PersonLike {
   phone?: string;
 }
 
-export default pattern<{ contact: Writable<Default<Contact, { name: "" }>> }, { contact: Contact }>(({ contact }) => {
+export default pattern<{ contact: Writable<Contact | Default<{ name: "" }>> }, { contact: Contact }>(({ contact }) => {
   return {
     [NAME]: computed(() => contact.name || "Contact"),
     [UI]: (
@@ -719,7 +719,7 @@ export interface FamilyMember extends PersonLike {
   giftPreferences?: string[];     // Added: for gift giving
 }
 
-export default pattern<{ member: Writable<Default<FamilyMember, { name: "", relationship: "" }>> }, { member: FamilyMember }>(({ member }) => {
+export default pattern<{ member: Writable<FamilyMember | Default<{ name: "", relationship: "" }>> }, { member: FamilyMember }>(({ member }) => {
   return {
     [NAME]: computed(() => member.name || "Family Member"),
     [UI]: (

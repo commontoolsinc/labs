@@ -53,6 +53,10 @@ const userHandler = handler({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        },
         users: {
             type: "array",
             items: {
@@ -72,16 +76,12 @@ const userHandler = handler({
             },
             asCell: ["cell"]
         },
-        count: {
-            type: "number",
-            asCell: ["cell"]
-        },
         lastAction: {
             type: "string",
             asCell: ["cell"]
         }
     },
-    required: ["users", "count", "lastAction"]
+    required: ["count", "users", "lastAction"]
 } as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     if (event.action === "create") {
         state.users.push({

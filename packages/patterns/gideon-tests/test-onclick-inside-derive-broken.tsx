@@ -26,7 +26,7 @@ import {
 } from "commonfabric";
 
 interface State {
-  count: Default<number, 0>;
+  count: number | Default<0>;
 }
 
 const incrementHandler = handler<unknown, { count: Writable<number> }>(

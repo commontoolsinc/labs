@@ -23,11 +23,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface LocationModuleInput {
   /** Location name (e.g., venue, landmark) */
-  locationName: Default<string, "">;
+  locationName: string | Default<"">;
   /** Full address */
-  locationAddress: Default<string, "">;
+  locationAddress: string | Default<"">;
   /** Coordinates in lat,lng format */
-  coordinates: Default<string, "">;
+  coordinates: string | Default<"">;
 }
 
 // ===== The Pattern =====

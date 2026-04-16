@@ -280,12 +280,10 @@ function applyCapabilitySummaryToParameter(
     fn,
     parameterIndex,
     capabilityRegistry,
-    parameterNode.pos < 0 || parameterNode.end < 0
-      ? {
-        checker,
-        includeNestedCallbacks: true,
-      }
-      : undefined,
+    {
+      checker,
+      includeNestedCallbacks: true,
+    },
   );
   if (!paramSummary) {
     return parameterNode;
@@ -761,7 +759,10 @@ function createSchemaCallWithRegistryTransfer(
 
   // Transfer TypeRegistry entry from source typeNode to schema call
   // This preserves type information for closure-captured variables
-  if (typeRegistry && emittedTypeNode === typeNode) {
+  if (
+    typeRegistry && emittedTypeNode === typeNode &&
+    !containsAnyOrUnknownTypeNode(emittedTypeNode)
+  ) {
     const typeFromRegistry = typeRegistry.get(typeNode);
     if (typeFromRegistry) {
       typeRegistry.set(schemaCall, typeFromRegistry);
@@ -769,6 +770,43 @@ function createSchemaCallWithRegistryTransfer(
   }
 
   return schemaCall;
+}
+
+function applyIdentityArrayItemSchemaHints(
+  typeNode: ts.TypeNode,
+  identityPaths: readonly (readonly string[])[],
+  context: TransformationContext,
+): void {
+  const schemaHints = context.options.schemaHints;
+  if (!schemaHints || identityPaths.length === 0) return;
+
+  const grouped = new Map<string, boolean>();
+  for (const path of identityPaths) {
+    const [head, second] = path;
+    if (head && second !== undefined && /^\d+$/.test(second)) {
+      grouped.set(head, true);
+    }
+  }
+  if (grouped.size === 0) return;
+
+  const visitObject = (node: ts.TypeNode): void => {
+    if (ts.isTypeLiteralNode(node)) {
+      for (const member of node.members) {
+        if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+          continue;
+        }
+        const name = ts.isIdentifier(member.name) ||
+            ts.isStringLiteral(member.name)
+          ? member.name.text
+          : undefined;
+        if (name && grouped.has(name)) {
+          schemaHints.set(member.type, { items: false });
+        }
+      }
+    }
+  };
+
+  visitObject(typeNode);
 }
 
 function createRegisteredSchemaCallFromResolvedType(
@@ -2518,6 +2556,17 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               context,
               handlerFn,
             ) ?? stateType;
+            const stateSummary = findCapabilitySummaryForParameter(
+              handlerFn,
+              1,
+              capabilityRegistry,
+              { checker, includeNestedCallbacks: true },
+            );
+            applyIdentityArrayItemSchemaHints(
+              stateTypeNode,
+              stateSummary?.identityPaths ?? [],
+              context,
+            );
           }
 
           const toSchemaEvent = createSchemaCallWithRegistryTransfer(
@@ -2608,6 +2657,17 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               context,
               handlerFn,
             ) ?? stateTypeBase;
+            const stateSummary = findCapabilitySummaryForParameter(
+              handlerFn,
+              1,
+              capabilityRegistry,
+              { checker, includeNestedCallbacks: true },
+            );
+            applyIdentityArrayItemSchemaHints(
+              stateType,
+              stateSummary?.identityPaths ?? [],
+              context,
+            );
 
             // Always transform - generate schemas regardless of parameter presence
             const toSchemaEvent = createSchemaCallWithRegistryTransfer(

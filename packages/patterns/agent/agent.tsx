@@ -20,14 +20,14 @@ export type { AgentPiece };
 // ===== Types =====
 
 interface AgentInput {
-  agentName?: Writable<Default<string, "Unnamed Agent">>;
-  directive?: Writable<Default<string, "">>;
-  enabled?: Writable<Default<boolean, true>>;
-  learned?: Writable<Default<string, "">>;
-  status?: Writable<Default<AgentStatus, "idle">>;
-  lastRun?: Writable<Default<string, "">>;
-  lastRunSummary?: Writable<Default<string, "">>;
-  isAgent?: Default<boolean, true>;
+  agentName?: Writable<string | Default<"Unnamed Agent">>;
+  directive?: Writable<string | Default<"">>;
+  enabled?: Writable<boolean | Default<true>>;
+  learned?: Writable<string | Default<"">>;
+  status?: Writable<AgentStatus | Default<"idle">>;
+  lastRun?: Writable<string | Default<"">>;
+  lastRunSummary?: Writable<string | Default<"">>;
+  isAgent?: boolean | Default<true>;
 }
 
 /** An #agent piece — autonomous worker with directive, learned state, and status. */

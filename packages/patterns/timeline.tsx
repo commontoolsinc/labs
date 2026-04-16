@@ -31,11 +31,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface TimelineModuleInput {
   /** Start date (ISO format YYYY-MM-DD) */
-  startDate: Default<string, "">;
+  startDate: string | Default<"">;
   /** Target completion date (ISO format YYYY-MM-DD) */
-  targetDate: Default<string, "">;
+  targetDate: string | Default<"">;
   /** Actual completion date (ISO format YYYY-MM-DD) */
-  completedDate: Default<string, "">;
+  completedDate: string | Default<"">;
 }
 
 // ===== The Pattern =====

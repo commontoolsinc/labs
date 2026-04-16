@@ -264,7 +264,7 @@ const deleteSelectedNotes = handler<
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allPieces: Writable<Default<NotePiece[], []>>;
+    allPieces: Writable<NotePiece[] | Default<[]>>;
     notebooks: Writable<NotebookPiece[]>;
   }
 >((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {

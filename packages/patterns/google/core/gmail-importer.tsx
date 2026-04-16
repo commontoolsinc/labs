@@ -43,20 +43,17 @@ type SyncableWritable<T> = Writable<T> & {
  * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
  */
 export type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<
-    {
-      email: string;
-      name: string;
-      picture: string;
-    },
-    { email: ""; name: ""; picture: "" }
-  >;
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
+    email: string;
+    name: string;
+    picture: string;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 function htmlToMarkdown(htmlContent: string): string {
@@ -83,7 +80,7 @@ export type Email = {
   // Identifier for the email thread
   threadId: string;
   // Labels assigned to the email
-  labelIds: Default<string[], []>;
+  labelIds: string[] | Default<[]>;
   // Brief preview of the email content
   snippet: string;
   // Email subject line
@@ -101,22 +98,22 @@ export type Email = {
   // Email content converted to Markdown format. Often best for processing email contents.
   markdownContent: string;
   // Summary for search indexing
-  summary: Default<string, "">;
+  summary: string | Default<"">;
 };
 
 type Settings = {
   // Gmail filter query to use for fetching emails
-  gmailFilterQuery: Default<string, "in:INBOX">;
+  gmailFilterQuery: string | Default<"in:INBOX">;
   // Maximum number of emails to fetch
-  limit: Default<number, 10>;
+  limit: number | Default<10>;
   // Enable verbose console logging for debugging
-  debugMode: Default<boolean, false>;
+  debugMode: boolean | Default<false>;
   // Automatically fetch emails when auth becomes valid (opt-in)
-  autoFetchOnAuth: Default<boolean, false>;
+  autoFetchOnAuth: boolean | Default<false>;
   // Resolve inline image attachments (cid: references) to base64 data URLs
   // Enable this for emails with embedded images (e.g., USPS Informed Delivery)
   // Note: This fetches additional attachment data which may be slower
-  resolveInlineImages: Default<boolean, false>;
+  resolveInlineImages: boolean | Default<false>;
 };
 
 /** Gmail email importer for fetching and viewing emails. #gmailEmails */
@@ -171,16 +168,14 @@ const googleUpdater = handler<
     emails: SyncableWritable<Array<Writable<Email>>>;
     auth: SyncableWritable<Auth>;
     settings: SyncableWritable<
-      Default<
-        Settings,
-        {
-          gmailFilterQuery: "in:INBOX";
-          limit: 10;
-          debugMode: false;
-          autoFetchOnAuth: false;
-          resolveInlineImages: false;
-        }
-      >
+      | Settings
+      | Default<{
+        gmailFilterQuery: "in:INBOX";
+        limit: 10;
+        debugMode: false;
+        autoFetchOnAuth: false;
+        resolveInlineImages: false;
+      }>
     >;
     historyId: SyncableWritable<string>;
     fetching?: Writable<boolean>;
@@ -1090,16 +1085,15 @@ const EmailCard = pattern<
 
 export default pattern<
   {
-    settings: Default<
-      Settings,
-      {
+    settings:
+      | Settings
+      | Default<{
         gmailFilterQuery: "in:INBOX";
         limit: 10;
         debugMode: false;
         autoFetchOnAuth: false;
         resolveInlineImages: false;
-      }
-    >;
+      }>;
     // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
     // Use: cf piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
     overrideAuth?: Auth;

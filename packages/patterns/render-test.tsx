@@ -2,19 +2,19 @@ import { Cell, Default, handler, NAME, pattern, UI } from "commonfabric";
 
 interface SubItem {
   label: string;
-  count: Default<number, 0>;
+  count: number | Default<0>;
 }
 
 interface Item {
   name: string;
-  value: Default<number, 0>;
-  subItems: Default<SubItem[], []>;
+  value: number | Default<0>;
+  subItems: SubItem[] | Default<[]>;
 }
 
 interface Input {
-  title: Default<string, "Render Test">;
-  globalCounter: Default<number, 0>;
-  items: Default<Item[], []>;
+  title: string | Default<"Render Test">;
+  globalCounter: number | Default<0>;
+  items: Item[] | Default<[]>;
 }
 
 // Root level: increment global counter

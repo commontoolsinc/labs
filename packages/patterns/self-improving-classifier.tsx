@@ -147,16 +147,16 @@ const DEFAULT_CONFIG: ClassifierConfig = {
 // =============================================================================
 
 interface ClassifierInput {
-  config: Writable<Default<ClassifierConfig, typeof DEFAULT_CONFIG>>;
-  examples: Writable<Default<LabeledExample[], []>>;
-  rules: Writable<Default<ClassificationRule[], []>>;
+  config: Writable<ClassifierConfig | Default<typeof DEFAULT_CONFIG>>;
+  examples: Writable<LabeledExample[] | Default<[]>>;
+  rules: Writable<ClassificationRule[] | Default<[]>>;
   // NOTE: pendingClassifications is reserved for future batch processing API.
   // Currently items flow through currentItem → LLM → user confirmation → examples.
   // External systems could use this queue for bulk submissions in the future.
-  pendingClassifications: Writable<Default<PendingClassification[], []>>;
+  pendingClassifications: Writable<PendingClassification[] | Default<[]>>;
   // The item currently being classified (null when idle)
   // Only one item can be classified at a time
-  currentItem: Writable<Default<ClassifiableInput | null, null>>;
+  currentItem: Writable<ClassifiableInput | null | Default<null>>;
 }
 
 /** Self-improving binary classifier with LLM + regex rules. #classifier #learning */

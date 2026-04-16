@@ -1,7 +1,7 @@
 import { Default, handler, nonPrivateRandom, Writable } from "commonfabric";
 
 export const roll = handler<
-  { sides?: Default<number, 6> },
+  { sides?: number | Default<6> },
   { value: Writable<number> }
 >(
   (args, state) => {

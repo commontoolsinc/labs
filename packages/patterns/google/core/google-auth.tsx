@@ -218,51 +218,55 @@ export function createPreviewUI(
  * Use direct property access: `googleAuthPiece.auth`
  */
 export type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 // Selected scopes configuration - exported for wrapper patterns
 export type SelectedScopes = {
-  gmail: Default<boolean, false>;
-  gmailSend: Default<boolean, false>;
-  gmailModify: Default<boolean, false>;
-  calendar: Default<boolean, false>;
-  calendarWrite: Default<boolean, false>;
-  drive: Default<boolean, false>;
-  docs: Default<boolean, false>;
-  contacts: Default<boolean, false>;
+  gmail: boolean | Default<false>;
+  gmailSend: boolean | Default<false>;
+  gmailModify: boolean | Default<false>;
+  calendar: boolean | Default<false>;
+  calendarWrite: boolean | Default<false>;
+  drive: boolean | Default<false>;
+  docs: boolean | Default<false>;
+  contacts: boolean | Default<false>;
 };
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
-    gmail: true;
-    gmailSend: true;
-    gmailModify: true;
-    calendar: true;
-    calendarWrite: true;
-    drive: true;
-    docs: true;
-    contacts: true;
-  }>;
-  auth: Default<Auth, {
-    token: "";
-    tokenType: "";
-    scope: [];
-    expiresIn: 0;
-    expiresAt: 0;
-    refreshToken: "";
-    user: { email: ""; name: ""; picture: "" };
-  }>;
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
+      gmail: true;
+      gmailSend: true;
+      gmailModify: true;
+      calendar: true;
+      calendarWrite: true;
+      drive: true;
+      docs: true;
+      contacts: true;
+    }>;
+  auth:
+    | Auth
+    | Default<{
+      token: "";
+      tokenType: "";
+      scope: [];
+      expiresIn: 0;
+      expiresAt: 0;
+      refreshToken: "";
+      user: { email: ""; name: ""; picture: "" };
+    }>;
 }
 
 /** Google OAuth authentication for Google APIs. #googleAuth */

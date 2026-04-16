@@ -31,8 +31,8 @@ type BaseInfo = { id: string; name: string };
 type TableInfo = { id: string; name: string };
 
 interface Input {
-  selectedBaseId: Default<string, "">;
-  selectedTableId: Default<string, "">;
+  selectedBaseId: string | Default<"">;
+  selectedTableId: string | Default<"">;
 }
 
 /** Import records from an Airtable base. #airtableImporter */

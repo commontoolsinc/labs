@@ -36,7 +36,7 @@ interface ProductIdea {
 }
 
 interface Input {
-  userInput: Default<string, "a self-watering plant pot">;
+  userInput: string | Default<"a self-watering plant pot">;
 }
 
 export default pattern<Input, Input>(({ userInput }) => {

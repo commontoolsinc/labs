@@ -77,12 +77,15 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           ? { widenLiterals }
           : undefined;
 
-        // If Type resolved to 'any' and we have a synthetic TypeNode, use new method
+        // If Type resolved to 'any' or the synthetic TypeNode intentionally
+        // contains unknown, use the synthetic-node generator so the checker
+        // does not recover a wider semantic type from the original source.
         let schema: unknown;
         if (
-          (type.flags & ts.TypeFlags.Any) &&
-          typeArg.pos === -1 &&
-          typeArg.end === -1
+          ((typeArg.pos === -1 &&
+            typeArg.end === -1 &&
+            (type.flags & ts.TypeFlags.Any)) ||
+            containsAnyOrUnknownTypeNode(typeArg))
         ) {
           // Synthetic TypeNode path - use new method that shares context properly
           schema = schemaTransformer.generateSchemaFromSyntheticTypeNode(
@@ -448,6 +451,24 @@ function evaluateExpression(
 interface ToSchemaNode extends ts.CallExpression {
   typeArguments: ts.NodeArray<ts.TypeNode>;
 }
+
+function containsAnyOrUnknownTypeNode(node: ts.TypeNode): boolean {
+  let found = false;
+  const visit = (current: ts.Node): void => {
+    if (found) return;
+    if (
+      current.kind === ts.SyntaxKind.AnyKeyword ||
+      current.kind === ts.SyntaxKind.UnknownKeyword
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return found;
+}
+
 function isToSchemaNode(node: ts.Node): node is ToSchemaNode {
   if (!ts.isCallExpression(node)) return false;
   const { typeArguments, expression } = node;

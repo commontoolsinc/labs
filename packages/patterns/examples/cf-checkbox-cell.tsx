@@ -9,8 +9,8 @@ import {
 } from "commonfabric";
 
 interface CheckboxDemoInput {
-  simpleEnabled: Writable<Default<boolean, false>>;
-  trackedEnabled: Writable<Default<boolean, false>>;
+  simpleEnabled: Writable<boolean | Default<false>>;
+  trackedEnabled: Writable<boolean | Default<false>>;
 }
 
 interface CheckboxDemoOutput extends CheckboxDemoInput {}

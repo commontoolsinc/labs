@@ -8,7 +8,8 @@ Common Fabric UI components with bidirectional binding support.
 
 ## Bidirectional Binding
 
-Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
+Use `$` prefix for explicit two-way sync. That is the normal authoring form for
+Common Fabric controls. No handler is needed for simple updates.
 
 ```tsx
 <cf-checkbox $checked={item.done} />    // Auto-syncs checkbox state
@@ -95,11 +96,13 @@ Useful styling hooks include:
 // With placeholder
 <cf-input $value={searchQuery} placeholder="Search..." />
 
-// Manual handler for side effects
-<cf-input value={title} oncf-input={(e) => {
-  title.set(e.detail.value);
-  console.log("Changed:", e.detail.value);
-}} />
+// Binding plus side effect
+<cf-input
+  $value={title}
+  oncf-input={(e) => {
+    console.log("Changed:", e.detail.value);
+  }}
+/>
 ```
 
 Useful styling hooks include:
@@ -154,6 +157,11 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
   items={users.map(u => ({ label: u.name, value: u }))}
 />
 ```
+
+When a control is already bound to a cell, usually via `$value`, treat that
+binding as the primary value path. Avoid `oncf-change` handlers that simply
+write the same value back into that same cell. Use `oncf-change` only for
+dependent state updates or other side effects.
 
 ---
 

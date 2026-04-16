@@ -22,17 +22,17 @@ type Secret<T> = T;
 // =============================================================================
 
 export type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 export interface GoogleComment {

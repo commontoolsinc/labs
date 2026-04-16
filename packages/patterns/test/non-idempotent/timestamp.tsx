@@ -26,7 +26,7 @@ const preset: Item[] = [
 ];
 
 export default pattern<{
-  items: Writable<Default<Item[], typeof preset>>;
+  items: Writable<Item[] | Default<typeof preset>>;
 }>(({ items }) => {
   // Anti-pattern: safeDateNow() in computed() — every run produces different timestamps
   const processed = Writable.of<ProcessedItem[]>([]);

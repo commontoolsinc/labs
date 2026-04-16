@@ -1,6 +1,6 @@
 import { computed, Default, pattern, UI } from "commonfabric";
 
-export default pattern<{ value?: Default<string, "hello"> }>(({ value }) => {
+export default pattern<{ value?: string | Default<"hello"> }>(({ value }) => {
   // This computed throws; current runner surfaces the failure via scheduler
   // error reporting and blanks the poisoned output path.
   const poisoned = computed(() => {

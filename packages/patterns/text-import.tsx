@@ -35,9 +35,9 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface TextImportModuleInput {
   /** The text content from the uploaded file */
-  content: Default<string, "">;
+  content: string | Default<"">;
   /** The original filename */
-  filename: Default<string, "">;
+  filename: string | Default<"">;
 }
 
 // Output interface with unknown for UI properties to prevent OOM (CT-1148)

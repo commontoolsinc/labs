@@ -74,17 +74,14 @@ export default pattern((__cf_pattern_input) => {
             },
             fileId: {
                 type: "string",
-                "default": "",
                 asCell: ["cell"]
             },
             content: {
                 type: "string",
-                "default": "",
                 asCell: ["cell"]
             },
             savedContent: {
                 type: "string",
-                "default": "",
                 asCell: ["cell"]
             },
             onSaveFile: {

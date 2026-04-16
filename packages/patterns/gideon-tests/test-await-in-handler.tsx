@@ -121,16 +121,16 @@ const resetAll = handler<
 
 interface PatternState {
   // State for await test
-  awaitStatus: Default<string, "Ready">;
-  awaitResult: Default<string, "">;
-  awaitCount: Default<number, 0>;
+  awaitStatus: string | Default<"Ready">;
+  awaitResult: string | Default<"">;
+  awaitCount: number | Default<0>;
 
   // State for reactive/fetchData test
-  fetchTrigger: Default<number, 0>;
-  fetchCount: Default<number, 0>;
+  fetchTrigger: number | Default<0>;
+  fetchCount: number | Default<0>;
 
   // Interactive counter to test responsiveness
-  counter: Default<number, 0>;
+  counter: number | Default<0>;
 }
 
 export default pattern<PatternState>((state) => {

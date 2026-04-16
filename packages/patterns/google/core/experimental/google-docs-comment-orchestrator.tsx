@@ -99,17 +99,17 @@ interface GoogleComment {
 // =============================================================================
 
 type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 // =============================================================================
@@ -137,27 +137,27 @@ interface AIResponseSuggestion {
 
 interface Input {
   // Config
-  docUrl?: Writable<Default<string, "">>;
-  globalPrompt?: Writable<Default<string, "">>;
+  docUrl?: Writable<string | Default<"">>;
+  globalPrompt?: Writable<string | Default<"">>;
 
   // Fetched data
-  comments?: Writable<Default<GoogleComment[], []>>;
-  docContent?: Writable<Default<string, "">>;
+  comments?: Writable<GoogleComment[] | Default<[]>>;
+  docContent?: Writable<string | Default<"">>;
 
   // Per-comment state (keyed by comment ID)
   commentStates?: Writable<
-    Default<Record<string, CommentState>, Record<string, never>>
+    Record<string, CommentState> | Default<Record<string, never>>
   >;
 
   // UI state
-  expandedCommentId?: Writable<Default<string | null, null>>;
-  isFetching?: Writable<Default<boolean, false>>;
-  showGlobalPrompt?: Writable<Default<boolean, false>>;
-  lastError?: Writable<Default<string | null, null>>;
+  expandedCommentId?: Writable<string | null | Default<null>>;
+  isFetching?: Writable<boolean | Default<false>>;
+  showGlobalPrompt?: Writable<boolean | Default<false>>;
+  lastError?: Writable<string | null | Default<null>>;
 
   // Pending action for trusted confirmation
-  pendingAction?: Writable<Default<PendingCommentAction | null, null>>;
-  isExecuting?: Writable<Default<boolean, false>>;
+  pendingAction?: Writable<PendingCommentAction | null | Default<null>>;
+  isExecuting?: Writable<boolean | Default<false>>;
 }
 
 /** Google Docs Comment Orchestrator. AI-powered comment responses. #googleDocsComments */

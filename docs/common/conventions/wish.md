@@ -56,7 +56,7 @@ Decorate your schema with a jsdoc comment containing a `#tag`:
 ```tsx
 /** Represents a small #note a user took to remember some text. */
 type Output = {
-  content: Default<string, "">;
+  content: string | Default<"">;
 };
 ```
 
