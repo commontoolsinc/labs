@@ -50,41 +50,12 @@ export default pattern((__cf_pattern_input) => {
             items: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Item"
+                    type: "unknown"
                 },
                 asCell: ["cell"]
             }
         },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    label: {
-                        type: "string"
-                    },
-                    tags: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Tag"
-                        }
-                    }
-                },
-                required: ["label", "tags"]
-            },
-            Tag: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    active: {
-                        type: "boolean"
-                    }
-                },
-                required: ["name", "active"]
-            }
-        }
+        required: ["items"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0).for("hasItems", true);
@@ -102,11 +73,11 @@ export default pattern((__cf_pattern_input) => {
                 }]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }, {
                     type: "array",
                     items: {}
+                }, {
+                    type: "object",
+                    properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
@@ -170,25 +141,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, showInactive, __cfHelpers.derive({
-                        type: "object",
-                        properties: {
-                            tag: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        },
-                        required: ["tag"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, { tag: {
-                            name: tag.key("name")
-                        } }, ({ tag }) => `(${tag.name})`), ""))}
+                    } as const satisfies __cfHelpers.JSONSchema, showInactive, `(${tag.key("name")})`, ""))}
                   </li>);
                 }, {
                     type: "object",

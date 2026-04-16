@@ -69,14 +69,11 @@ export const ComputedLogicalAnd = pattern((__cf_pattern_input) => {
     return (<div>{__cfHelpers.derive({
         type: "object",
         properties: {
-            foo: {
-                type: "boolean"
-            },
             bar: {
                 type: "string"
             }
         },
-        required: ["foo", "bar"]
+        required: ["bar"]
     } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
                 type: "string"

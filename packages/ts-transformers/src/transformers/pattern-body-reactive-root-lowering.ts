@@ -3,12 +3,14 @@ import {
   getDeriveInputAndCallbackArgument,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
+  type NormalizedDataFlow,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
+  getCommonFabricKeyName,
   isCommonFabricKeyExpression,
 } from "../utils/reactive-keys.ts";
 import {
@@ -23,6 +25,7 @@ import {
 } from "./expression-rewrite/rewrite-helpers.ts";
 import {
   addBindingTargetSymbols,
+  classifyOpaquePathTerminalCall,
   collectLocalOpaqueRootSymbols,
   getOpaqueAccessInfo,
   isOpaqueRootInfo,
@@ -36,6 +39,7 @@ import {
 import {
   classifyUnsupportedExpressionSiteCallRoot,
 } from "./expression-site-policy.ts";
+import { getCellKind } from "./opaque-ref/opaque-ref.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "set",
@@ -243,8 +247,83 @@ function rewriteTrackedOpaquePatternBody(
   const getRelevantDataFlowsForExpression = (
     expression: ts.Expression,
   ) => {
-    const relevantDataFlows = context.getRelevantDataFlows(expression);
+    const relevantDataFlows = context.getRelevantDataFlows(expression).map(
+      (dataFlow) => canonicalizeDataFlowForDerive(dataFlow),
+    );
     return relevantDataFlows.length > 0 ? relevantDataFlows : undefined;
+  };
+
+  const canonicalizeDataFlowForDerive = (
+    dataFlow: NormalizedDataFlow,
+  ): NormalizedDataFlow => {
+    const info = getTrackedOpaqueAccessInfo(dataFlow.expression);
+    if (
+      !info?.root ||
+      info.dynamic ||
+      info.path.length === 0 ||
+      !info.path.every((segment) => typeof segment === "string")
+    ) {
+      return dataFlow;
+    }
+
+    const expression = createKeyCall(
+      context.factory.createIdentifier(info.root),
+      info.path,
+      context.factory,
+    );
+    registerReplacementType(expression, dataFlow.expression, context);
+    return { ...dataFlow, expression };
+  };
+
+  const isDynamicElementAccess = (
+    expression: ts.Expression,
+  ): expression is ts.ElementAccessExpression => {
+    return ts.isElementAccessExpression(expression) &&
+      !!expression.argumentExpression &&
+      ts.isExpression(expression.argumentExpression) &&
+      !(
+        ts.isLiteralExpression(expression.argumentExpression) ||
+        ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression)
+      );
+  };
+
+  const hasJsxExpressionAncestor = (node: ts.Node): boolean => {
+    const scan = (start: ts.Node | undefined): boolean => {
+      let current = start;
+      while (current) {
+        if (ts.isJsxExpression(current)) {
+          return true;
+        }
+        current = current.parent;
+      }
+      return false;
+    };
+
+    if (scan(node.parent)) {
+      return true;
+    }
+
+    const original = ts.getOriginalNode(node);
+    return original !== node && scan(original.parent);
+  };
+
+  const shouldWrapDirectJsxExpression = (node: ts.Node): boolean => {
+    if (!hasJsxExpressionAncestor(node)) {
+      return false;
+    }
+
+    let current = node.parent;
+    while (current) {
+      if (
+        (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) &&
+        context.isSyntheticComputeCallback(current)
+      ) {
+        return false;
+      }
+      current = current.parent;
+    }
+
+    return true;
   };
 
   const reportTrackedOpaqueComputation = (
@@ -301,12 +380,14 @@ function rewriteTrackedOpaquePatternBody(
       return undefined;
     }
 
-    assertValidComputeWrapCandidate(
-      pendingWrap,
-      initializer,
-      "pattern callback initializer",
-      context,
-    );
+    if (context.getReactiveContext(pendingWrap).kind !== "compute") {
+      assertValidComputeWrapCandidate(
+        pendingWrap,
+        initializer,
+        "pattern callback initializer",
+        context,
+      );
+    }
 
     return createReactiveWrapperForExpression(
       initializer,
@@ -318,10 +399,7 @@ function rewriteTrackedOpaquePatternBody(
   const maybeWrapDynamicJsxAccess = (
     expression: ts.Expression,
   ): ts.Expression | undefined => {
-    const reactiveContext = context.getReactiveContext(expression);
-    if (
-      reactiveContext.kind !== "pattern" || !reactiveContext.inJsxExpression
-    ) {
+    if (!shouldWrapDirectJsxExpression(expression)) {
       return undefined;
     }
 
@@ -335,6 +413,59 @@ function rewriteTrackedOpaquePatternBody(
       relevantDataFlows,
       context,
       {
+        allowDirectExpressionWrap: true,
+        preferDeriveWrapper: true,
+      },
+    );
+  };
+
+  const maybeWrapCellGetJsxCall = (
+    expression: ts.CallExpression,
+  ): ts.Expression | undefined => {
+    if (classifyOpaquePathTerminalCall(expression) !== "get") {
+      return undefined;
+    }
+
+    if (!shouldWrapDirectJsxExpression(expression)) {
+      return undefined;
+    }
+
+    const callee = expression.expression;
+    if (
+      !ts.isPropertyAccessExpression(callee) &&
+      !ts.isElementAccessExpression(callee)
+    ) {
+      return undefined;
+    }
+
+    let receiverIsCellLike = !!getTrackedOpaqueAccessInfo(callee.expression);
+    if (!receiverIsCellLike) {
+      try {
+        const receiverType = context.checker.getTypeAtLocation(
+          callee.expression,
+        );
+        receiverIsCellLike = getCellKind(receiverType, context.checker) !==
+          undefined;
+      } catch {
+        receiverIsCellLike = false;
+      }
+    }
+
+    if (!receiverIsCellLike) {
+      return undefined;
+    }
+
+    const relevantDataFlows = getRelevantDataFlowsForExpression(expression);
+    if (!relevantDataFlows) {
+      return undefined;
+    }
+
+    return createReactiveWrapperForExpression(
+      expression,
+      relevantDataFlows,
+      context,
+      {
+        allowDirectExpressionWrap: true,
         preferDeriveWrapper: true,
       },
     );
@@ -475,7 +606,27 @@ function rewriteTrackedOpaquePatternBody(
     }
 
     if (ts.isCallExpression(node)) {
+      const wrappedCellGet = maybeWrapCellGetJsxCall(node);
+      if (wrappedCellGet) {
+        registerReplacementType(wrappedCellGet, node, context);
+        return wrappedCellGet;
+      }
+
       callTargetParents.set(node.expression, node);
+    }
+
+    if (
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      isTopmostMemberAccess(node)
+    ) {
+      if (isDynamicElementAccess(node)) {
+        const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(node);
+        if (wrappedDynamicAccess) {
+          registerReplacementType(wrappedDynamicAccess, node, context);
+          return wrappedDynamicAccess;
+        }
+      }
     }
 
     if (
@@ -513,6 +664,14 @@ function rewriteTrackedOpaquePatternBody(
         ts.isElementAccessExpression(visited)) &&
       isTopmostMemberAccess(visited)
     ) {
+      if (isDynamicElementAccess(visited)) {
+        const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(visited);
+        if (wrappedDynamicAccess) {
+          registerReplacementType(wrappedDynamicAccess, visited, context);
+          return wrappedDynamicAccess;
+        }
+      }
+
       const info = getTrackedOpaqueAccessInfo(visited);
       if (!info?.root) {
         return visited;
@@ -725,11 +884,20 @@ function rewriteNestedDeriveCallbackBodies(
       processedBody,
       context,
     );
+    const localOpaqueRoots = new Set<string>();
+    for (const parameter of callbackArg.parameters) {
+      collectBindingNames(parameter.name, localOpaqueRoots);
+    }
 
     processedBody = rewriteTrackedOpaquePatternBody(
       processedBody,
       new Set(),
       localOpaqueRootSymbols,
+      context,
+    );
+    processedBody = rewriteDeriveCallbackComputedKeyAccesses(
+      processedBody,
+      localOpaqueRoots,
       context,
     );
 
@@ -774,4 +942,71 @@ function rewriteNestedDeriveCallbackBodies(
     ) as ts.Block;
   }
   return visit(body) as ts.Expression;
+}
+
+function rewriteDeriveCallbackComputedKeyAccesses(
+  body: ts.ConciseBody,
+  opaqueRoots: ReadonlySet<string>,
+  context: TransformationContext,
+): ts.ConciseBody {
+  if (opaqueRoots.size === 0) {
+    return body;
+  }
+
+  const visit = (node: ts.Node): ts.Node => {
+    if (ts.isFunctionLike(node)) {
+      return node;
+    }
+
+    const visited = visitEachChildWithJsx(node, visit, context.tsContext);
+    if (
+      !ts.isElementAccessExpression(visited) ||
+      !isTopmostMemberAccess(visited) ||
+      !ts.isIdentifier(visited.expression) ||
+      !opaqueRoots.has(visited.expression.text) ||
+      !visited.argumentExpression
+    ) {
+      return visited;
+    }
+
+    const keyName = getCommonFabricKeyName(
+      visited.argumentExpression,
+      context.checker,
+    );
+    if (!keyName) {
+      return visited;
+    }
+
+    const rewritten = context.factory.createElementAccessExpression(
+      context.factory.createIdentifier(visited.expression.text),
+      context.cfHelpers.getHelperExpr(keyName),
+    );
+    registerReplacementType(rewritten, visited, context);
+    return rewritten;
+  };
+
+  if (ts.isBlock(body)) {
+    return visitEachChildWithJsx(
+      body,
+      visit,
+      context.tsContext,
+    ) as ts.Block;
+  }
+  return visit(body) as ts.Expression;
+}
+
+function collectBindingNames(
+  name: ts.BindingName,
+  names: Set<string>,
+): void {
+  if (ts.isIdentifier(name)) {
+    names.add(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) {
+      continue;
+    }
+    collectBindingNames(element.name, names);
+  }
 }

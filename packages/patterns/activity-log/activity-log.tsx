@@ -36,8 +36,8 @@ export interface ActivityEvent {
 }
 
 interface ActivityLogInput {
-  events?: Writable<Default<ActivityEvent[], []>>;
-  mentioned?: Writable<Default<MentionablePiece[], []>>;
+  events?: Writable<ActivityEvent[] | Default<[]>>;
+  mentioned?: Writable<MentionablePiece[] | Default<[]>>;
 }
 
 /** An #activity-log for recording structured agent events. */

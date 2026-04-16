@@ -26,7 +26,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface RecordIconModuleInput {
   /** Custom emoji/icon */
-  icon: Default<string, "">;
+  icon: string | Default<"">;
 }
 
 // ===== The Pattern =====

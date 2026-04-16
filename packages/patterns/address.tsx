@@ -36,15 +36,15 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface AddressModuleInput {
   /** Label for this address (Home, Work, Billing, etc.) */
-  label: Default<string, "Home">;
+  label: string | Default<"Home">;
   /** Street address */
-  street: Default<string, "">;
+  street: string | Default<"">;
   /** City */
-  city: Default<string, "">;
+  city: string | Default<"">;
   /** State/Province */
-  state: Default<string, "">;
+  state: string | Default<"">;
   /** ZIP/Postal code */
-  zip: Default<string, "">;
+  zip: string | Default<"">;
 }
 
 // ===== The Pattern =====

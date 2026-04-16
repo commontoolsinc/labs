@@ -218,51 +218,55 @@ export function createPreviewUI(
  * Use direct property access: `googleAuthPiece.auth`
  */
 export type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 // Selected scopes configuration - exported for wrapper patterns
 export type SelectedScopes = {
-  gmail: Default<boolean, false>;
-  gmailSend: Default<boolean, false>;
-  gmailModify: Default<boolean, false>;
-  calendar: Default<boolean, false>;
-  calendarWrite: Default<boolean, false>;
-  drive: Default<boolean, false>;
-  docs: Default<boolean, false>;
-  contacts: Default<boolean, false>;
+  gmail: boolean | Default<false>;
+  gmailSend: boolean | Default<false>;
+  gmailModify: boolean | Default<false>;
+  calendar: boolean | Default<false>;
+  calendarWrite: boolean | Default<false>;
+  drive: boolean | Default<false>;
+  docs: boolean | Default<false>;
+  contacts: boolean | Default<false>;
 };
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
-    gmail: true;
-    gmailSend: true;
-    gmailModify: true;
-    calendar: true;
-    calendarWrite: true;
-    drive: true;
-    docs: true;
-    contacts: true;
-  }>;
-  auth: Default<Auth, {
-    token: "";
-    tokenType: "";
-    scope: [];
-    expiresIn: 0;
-    expiresAt: 0;
-    refreshToken: "";
-    user: { email: ""; name: ""; picture: "" };
-  }>;
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
+      gmail: true;
+      gmailSend: true;
+      gmailModify: true;
+      calendar: true;
+      calendarWrite: true;
+      drive: true;
+      docs: true;
+      contacts: true;
+    }>;
+  auth:
+    | Auth
+    | Default<{
+      token: "";
+      tokenType: "";
+      scope: [];
+      expiresIn: 0;
+      expiresAt: 0;
+      refreshToken: "";
+      user: { email: ""; name: ""; picture: "" };
+    }>;
 }
 
 /** Google OAuth authentication for Google APIs. #googleAuth */
@@ -616,24 +620,134 @@ export default pattern<Input, Output>(
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
             >
-              {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    cursor: loggedIn ? "not-allowed" : "pointer",
-                    color: loggedIn ? "#9ca3af" : "inherit",
-                  }}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.gmail}
+                  disabled={checkboxesDisabled}
                 >
-                  <cf-checkbox
-                    $checked={selectedScopes[key as keyof SelectedScopes]}
-                    disabled={checkboxesDisabled}
-                  >
-                    {description}
-                  </cf-checkbox>
-                </label>
-              ))}
+                  {SCOPE_DESCRIPTIONS.gmail}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.gmailSend}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.gmailSend}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.gmailModify}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.gmailModify}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.calendar}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.calendar}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.calendarWrite}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.calendarWrite}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.drive}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.drive}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.docs}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.docs}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.contacts}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.contacts}
+                </cf-checkbox>
+              </label>
             </div>
           </div>
 

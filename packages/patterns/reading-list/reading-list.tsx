@@ -23,7 +23,7 @@ import ReadingItemDetail, {
 export type { ItemStatus, ItemType, ReadingItemPiece };
 
 interface ReadingListInput {
-  items?: Writable<Default<ReadingItemPiece[], []>>;
+  items?: Writable<ReadingItemPiece[] | Default<[]>>;
 }
 
 interface ReadingListOutput {

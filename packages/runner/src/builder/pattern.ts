@@ -38,6 +38,7 @@ import {
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
 import { Runtime } from "../runtime.ts";
+import type { ImplementationIdentity } from "../cfc/types.ts";
 import {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -228,8 +229,8 @@ function factoryFromPattern<T, R>(
 
   const usedNames = new Set<string>();
   allCells.forEach((cell) => {
-    const existingName = cell.export().name;
-    if (existingName) usedNames.add(existingName);
+    const existingName = getStableInternalPathSegment(cell.export().name);
+    if (typeof existingName === "string") usedNames.add(existingName);
   });
 
   // First from results
@@ -296,6 +297,7 @@ function factoryFromPattern<T, R>(
     const { cell: top, path, value, name, external } = cell.export();
     if (!external) {
       if (!paths.has(top)) {
+        const stableName = getStableInternalPathSegment(name);
         // HACK(seefeld): For unnamed cells, we've run into an issue when the
         // order changes that a stream might clobber a previously used
         // non-stream, which means the default value won't be assigned and the
@@ -305,7 +307,7 @@ function factoryFromPattern<T, R>(
           : "";
         paths.set(top, [
           "internal",
-          name ?? `__#${count++}${streamMarker}`,
+          stableName ?? `__#${count++}${streamMarker}`,
         ]);
       }
       if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
@@ -317,14 +319,23 @@ function factoryFromPattern<T, R>(
 
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
+  const internalSchema: Record<string, any> = {
+    type: "object",
+    properties: {},
+  };
+  let hasInternalSchema = false;
   allCells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === (inputs as unknown)) return;
-    const { path, value, external } = cell.export();
+    const { path, value, schema, external } = cell.export();
     if (path.length > 0 || external) return;
 
     const cellPath = paths.get(cell)!;
     if (value !== undefined) setValueAtPath(initial, cellPath, value);
+    if (schema !== undefined && cellPath[0] === "internal") {
+      setSchemaAtPath(internalSchema, cellPath.slice(1), schema);
+      hasInternalSchema = true;
+    }
   });
 
   const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
@@ -347,6 +358,14 @@ function factoryFromPattern<T, R>(
       keepStreams: true,
     }),
     resultSchema: sanitizeSchemaForLinks(resultSchema, { keepStreams: true }),
+    ...(hasInternalSchema
+      ? {
+        internalSchema: sanitizeSchemaForLinks(
+          internalSchema as JSONSchema,
+          { keepStreams: true },
+        ),
+      }
+      : {}),
     initial,
     result,
     nodes: serializedNodes,
@@ -379,6 +398,43 @@ function factoryFromPattern<T, R>(
   return patternFactory;
 }
 
+function getStableInternalPathSegment(cause: unknown): PropertyKey | undefined {
+  if (
+    typeof cause === "string" ||
+    typeof cause === "number" ||
+    typeof cause === "symbol"
+  ) {
+    return cause;
+  }
+
+  if (isRecord(cause) && "stream" in cause) {
+    return `stream:${formatStableCauseSegment(cause.stream)}`;
+  }
+
+  if (cause !== undefined) {
+    return formatStableCauseSegment(cause);
+  }
+
+  return undefined;
+}
+
+function formatStableCauseSegment(cause: unknown): string {
+  if (typeof cause === "string") return cause;
+  if (
+    typeof cause === "number" ||
+    typeof cause === "boolean" ||
+    cause === null
+  ) {
+    return String(cause);
+  }
+
+  try {
+    return JSON.stringify(cause) ?? String(cause);
+  } catch {
+    return String(cause);
+  }
+}
+
 const frames: Frame[] = [];
 
 export function pushFrame(frame: Partial<Frame> = {}): Frame {
@@ -389,6 +445,9 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
     opaqueRefs: new Set(),
     generatedIdCounter: 0,
     ...(parent?.verifiedLoadId && { verifiedLoadId: parent.verifiedLoadId }),
+    ...(parent?.implementationIdentity && {
+      implementationIdentity: parent.implementationIdentity,
+    }),
     ...(parent?.runtime && { runtime: parent.runtime }),
     ...(parent?.tx && { tx: parent.tx }),
     ...(parent?.space && { space: parent.space }),
@@ -408,6 +467,7 @@ export function pushFrameFromCause(
     unsafe_binding?: UnsafeBinding;
     inHandler?: boolean;
     verifiedLoadId?: string;
+    implementationIdentity?: ImplementationIdentity;
     runtime?: Runtime;
     tx?: IExtendedStorageTransaction;
     space?: MemorySpace;
@@ -428,7 +488,13 @@ export function pushFrameFromCause(
     generatedIdCounter: 0,
     opaqueRefs: new Set(),
     ...(parent?.verifiedLoadId && { verifiedLoadId: parent.verifiedLoadId }),
+    ...(parent?.implementationIdentity && {
+      implementationIdentity: parent.implementationIdentity,
+    }),
     ...(verifiedLoadId && { verifiedLoadId }),
+    ...(props.implementationIdentity && {
+      implementationIdentity: props.implementationIdentity,
+    }),
     ...(frameRuntime && { runtime: frameRuntime }),
     ...(frameSpace && { space: frameSpace }),
     ...(frameTx && { tx: frameTx }),
@@ -466,6 +532,38 @@ export function popFrame(frame?: Frame): void {
 export function getTopFrame(): Frame | undefined {
   return frames.length ? frames[frames.length - 1] : undefined;
 }
+
+const setSchemaAtPath = (
+  schema: Record<string, any>,
+  path: readonly PropertyKey[],
+  value: JSONSchema,
+): void => {
+  if (path.length !== 1) {
+    throw new Error(
+      `Internal cell schemas must be leaf paths, got ${path.length} segments`,
+    );
+  }
+  if (typeof path[0] === "symbol") {
+    throw new Error("Internal cell schema paths cannot use symbol keys");
+  }
+  if (schema.$ref !== undefined) {
+    throw new Error("Cannot add internal cell schemas to a $ref schema");
+  }
+  if (schema.type !== undefined && schema.type !== "object") {
+    throw new Error("Internal cell schema root must be an object schema");
+  }
+  if (schema.properties !== undefined && !isRecord(schema.properties)) {
+    throw new Error("Internal cell schema properties must be an object");
+  }
+
+  schema.type ??= "object";
+  schema.properties ??= {};
+  const segment = String(path[0]);
+  if (segment in schema.properties) {
+    throw new Error(`Duplicate internal cell schema path: ${segment}`);
+  }
+  schema.properties[segment] = value;
+};
 
 /** The full type of the `pattern` function including all overloads. */
 export type PatternBuilder = typeof pattern;

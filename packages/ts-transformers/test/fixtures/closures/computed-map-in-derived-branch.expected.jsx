@@ -83,26 +83,12 @@ export default pattern((__cf_pattern_input) => {
             people: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Person"
+                    type: "unknown"
                 },
                 asCell: ["cell"]
             }
         },
-        required: ["people"],
-        $defs: {
-            Person: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    rank: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "rank"]
-            }
-        }
+        required: ["people"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length).for("count", true);
@@ -125,56 +111,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, showAdmin, __cfHelpers.derive({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number"
-                },
-                adminData: {
-                    type: "array",
-                    items: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            rank: {
-                                type: "number"
-                            },
-                            isFirst: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "rank", "isFirst"]
-                    }
-                }
-            },
-            required: ["count", "adminData"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            count: count,
-            adminData: adminData
-        }, ({ count, adminData }) => (() => {
+        } as const satisfies __cfHelpers.JSONSchema, showAdmin, (() => {
             const peopleCount = count + " people";
             return (<div>
                 <span>{peopleCount}</span>
@@ -185,7 +122,7 @@ export default pattern((__cf_pattern_input) => {
                     </li>))}
                 </ul>
               </div>);
-        })()), null)}
+        })(), null)}
       </div>),
     };
 }, {

@@ -29,7 +29,7 @@ type StatusValue = "planned" | "active" | "blocked" | "done" | "archived";
 
 export interface StatusModuleInput {
   /** Project status */
-  status: Default<StatusValue | "", "">;
+  status: StatusValue | "" | Default<"">;
 }
 
 // ===== Constants =====

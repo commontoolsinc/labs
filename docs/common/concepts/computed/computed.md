@@ -5,12 +5,12 @@ import { computed, Default, NAME, pattern, UI } from "commonfabric";
 
 interface Item {
   title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Other">;
+  done: boolean | Default<false>;
+  category: string | Default<"Other">;
 }
 
 interface Input {
-  items: Default<Item[], []>;
+  items: Item[] | Default<[]>;
 }
 
 export default pattern<Input, Input>(({ items }) => {
@@ -166,7 +166,7 @@ const result = {
 If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
 
 ```typescript
-import { computed, Writable } from 'commonfabric';
+import { computed, safeDateNow, Writable } from 'commonfabric';
 
 interface Item {}
 declare const items: Item[];
@@ -176,7 +176,7 @@ const cacheMap = Writable.of<Record<string, number>>({});
 // ❌ Non-idempotent - appends on every run
 const badComputed = computed(() => {
   const current = logArray.get();
-  logArray.set([...current, { timestamp: Date.now() }]);  // Grows forever
+  logArray.set([...current, { timestamp: safeDateNow() }]);  // Grows forever
   return items.length;
 });
 
@@ -185,11 +185,14 @@ const goodComputed = computed(() => {
   const current = cacheMap.get();
   const key = `items-${items.length}`;
   if (!(key in current)) {
-    cacheMap.set({ ...current, [key]: Date.now() });
+    cacheMap.set({ ...current, [key]: safeDateNow() });
   }
   return items.length;
 });
 ```
+
+These examples use `safeDateNow()` to stay within authored APIs. The bug is the
+non-idempotent write pattern inside `computed()`, not the helper choice.
 
 The scheduler re-runs computations when their dependencies change. If a computation modifies a cell it depends on, it triggers itself. With idempotent operations, the second run produces no change, so the system settles.
 

@@ -43,9 +43,9 @@ import {
 } from "commonfabric";
 
 interface TestInput {
-  firstName: Default<string, "John">;
-  lastName: Default<string, "Doe">;
-  age: Default<number, 30>;
+  firstName: string | Default<"John">;
+  lastName: string | Default<"Doe">;
+  age: number | Default<30>;
 }
 
 const updateNames = handler<

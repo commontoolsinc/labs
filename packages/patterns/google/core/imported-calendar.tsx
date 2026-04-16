@@ -58,8 +58,8 @@ type LocalEvent = {
 };
 
 interface Input {
-  title?: Default<string, "Imported Calendar">;
-  localEvents?: Writable<Default<LocalEvent[], []>>;
+  title?: string | Default<"Imported Calendar">;
+  localEvents?: Writable<LocalEvent[] | Default<[]>>;
 }
 
 interface Output {

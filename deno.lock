@@ -93,6 +93,7 @@
     "npm:@lit/context@^1.1.5": "1.1.6",
     "npm:@lit/task@^1.0.2": "1.0.3",
     "npm:@noble/ed25519@^2.2.3": "2.3.0",
+    "npm:@noble/hashes@^2.2.0": "2.2.0",
     "npm:@opentelemetry/api@^1.7.0": "1.9.0",
     "npm:@opentelemetry/api@^1.9.0": "1.9.0",
     "npm:@opentelemetry/context-async-hooks@^1.19.0": "1.30.1_@opentelemetry+api@1.9.0",
@@ -121,7 +122,7 @@
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:fake-indexeddb@6.0.0": "6.0.0",
     "npm:gcp-metadata@6.1.0": "6.1.0",
-    "npm:hash-wasm@^4.11.0": "4.12.0",
+    "npm:hash-wasm@^4.12.0": "4.12.0",
     "npm:hono-pino@0.7": "0.7.2_hono@4.10.5_pino@9.14.0",
     "npm:hono@^4.7.0": "4.10.5",
     "npm:htmlparser2@*": "10.0.0",
@@ -871,6 +872,9 @@
     },
     "@noble/hashes@1.8.0": {
       "integrity": "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="
+    },
+    "@noble/hashes@2.2.0": {
+      "integrity": "sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg=="
     },
     "@opentelemetry/api-logs@0.46.0": {
       "integrity": "sha512-+9BcqfiEDGPXEIo+o3tso/aqGM5dGbGwAkGVp3FPpZ8GlkK1YlaKRd9gMVyPaeRATwvO5wYGGnCsAc/sMMM9Qw==",
@@ -1938,8 +1942,9 @@
       "jsr:@std/http@1",
       "jsr:@std/path@1",
       "jsr:@std/testing@1",
+      "npm:@noble/hashes@^2.2.0",
       "npm:dagre@~0.8.5",
-      "npm:hash-wasm@^4.11.0",
+      "npm:hash-wasm@^4.12.0",
       "npm:lit@^3.3.0",
       "npm:merkle-reference@^2.2.0",
       "npm:multiformats@^13.3.2",

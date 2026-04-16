@@ -48,7 +48,7 @@ export default pattern((input: Writable<State>) => {
             }
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input: input_1 }) => input.key("foo").get())}</div>,
+        } as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input }) => input.key("foo").get())}</div>,
     };
 }, {
     $ref: "#/$defs/State",

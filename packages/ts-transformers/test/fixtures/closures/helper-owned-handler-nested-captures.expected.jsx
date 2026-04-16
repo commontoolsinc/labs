@@ -74,17 +74,14 @@ export default pattern((__cf_pattern_input) => {
             },
             fileId: {
                 type: "string",
-                "default": "",
                 asCell: ["cell"]
             },
             content: {
                 type: "string",
-                "default": "",
                 asCell: ["cell"]
             },
             savedContent: {
                 type: "string",
-                "default": "",
                 asCell: ["cell"]
             },
             onSaveFile: {
@@ -115,8 +112,8 @@ export default pattern((__cf_pattern_input) => {
         content: content,
         savedContent: savedContent,
         onSaveFile: onSaveFile
-    }).for("trigger", true);
-    return { trigger: trigger.for(["__patternResult", "trigger"], true) };
+    }).for({ stream: "trigger" }, true);
+    return { trigger: trigger.for({ stream: ["__patternResult", "trigger"] }, true) };
 }, {
     type: "object",
     properties: {

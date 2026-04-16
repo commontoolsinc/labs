@@ -16,6 +16,7 @@ import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 
 /**
@@ -67,6 +68,10 @@ export function map(
 
   return (tx: IExtendedStorageTransaction) => {
     if (!result) {
+      const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
+        tx.getCfcState().implementationIdentity,
+        "map",
+      );
       result = runtime.getCell<any[]>(
         parentCell.space,
         {
@@ -74,7 +79,7 @@ export function map(
           op: inputsCell.getAsQueryResult([], tx)?.op,
           cause,
         },
-        undefined,
+        resultSchema,
         tx,
       );
       result.send([]);

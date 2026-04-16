@@ -23,11 +23,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface TimingModuleInput {
   /** Prep time in minutes */
-  prepTime: Default<number | null, null>;
+  prepTime: number | null | Default<null>;
   /** Cook time in minutes */
-  cookTime: Default<number | null, null>;
+  cookTime: number | null | Default<null>;
   /** Rest time in minutes */
-  restTime: Default<number | null, null>;
+  restTime: number | null | Default<null>;
 }
 
 // ===== Helpers =====

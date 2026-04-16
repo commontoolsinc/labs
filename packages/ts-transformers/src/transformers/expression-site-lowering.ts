@@ -22,6 +22,8 @@ import {
 } from "./expression-rewrite/rewrite-helpers.ts";
 import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
+import { createDeriveCall } from "./builtins/derive.ts";
+import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 
 interface RewriteExpressionSiteParams {
   readonly expression: ts.Expression;
@@ -129,6 +131,104 @@ function markSyntheticReactiveCollectionDeclarationIfNeeded(
   }
   context.markSyntheticReactiveCollectionDeclaration(original);
   context.markSyntheticReactiveCollectionDeclaration(rewritten);
+}
+
+function getTerminalGetReceiver(
+  expression: ts.Expression,
+): ts.Expression | undefined {
+  if (
+    !ts.isCallExpression(expression) ||
+    classifyOpaquePathTerminalCall(expression) !== "get"
+  ) {
+    return undefined;
+  }
+
+  const callee = expression.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return undefined;
+  }
+
+  return callee.expression;
+}
+
+function getEnclosingZeroArgInlineIifeCall(
+  node: ts.Node,
+): ts.CallExpression | undefined {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isFunctionLike(current)) {
+      let callee: ts.Node = current;
+      let parent = callee.parent;
+      while (
+        parent &&
+        ts.isParenthesizedExpression(parent) &&
+        parent.expression === callee
+      ) {
+        callee = parent;
+        parent = callee.parent;
+      }
+
+      if (
+        parent &&
+        ts.isCallExpression(parent) &&
+        parent.expression === callee &&
+        parent.arguments.length === 0
+      ) {
+        return parent;
+      }
+
+      return undefined;
+    }
+
+    current = current.parent;
+  }
+
+  return undefined;
+}
+
+function rewriteDirectCellGetInitializer(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): ts.Expression | undefined {
+  const iifeCall = getEnclosingZeroArgInlineIifeCall(expression);
+  if (
+    !iifeCall ||
+    context.getReactiveContext(iifeCall).kind !== "pattern" ||
+    context.getReactiveContext(expression).kind !== "pattern"
+  ) {
+    return undefined;
+  }
+
+  const receiver = getTerminalGetReceiver(expression);
+  if (!receiver) {
+    return undefined;
+  }
+
+  const analysis = analyze(expression);
+  const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(analysis);
+  const wrapped = createReactiveWrapperForExpression(
+    expression,
+    relevantDataFlows,
+    context,
+    {
+      allowDirectExpressionWrap: true,
+      preferDeriveWrapper: true,
+    },
+  );
+  if (wrapped) {
+    return wrapped;
+  }
+
+  return createDeriveCall(expression, [receiver], {
+    factory: context.factory,
+    tsContext: context.tsContext,
+    cfHelpers: context.cfHelpers,
+    context,
+  });
 }
 
 function rewriteLateArrayMethodCallbackCall(
@@ -300,12 +400,29 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
 
     if (ts.isVariableDeclaration(node) && ts.isVariableDeclaration(visited)) {
+      let rewrittenDeclaration = visited;
+      if (visited.initializer) {
+        const rewrittenInitializer = rewriteDirectCellGetInitializer(
+          visited.initializer,
+          context,
+          analyze,
+        );
+        if (rewrittenInitializer) {
+          rewrittenDeclaration = context.factory.updateVariableDeclaration(
+            visited,
+            visited.name,
+            visited.exclamationToken,
+            visited.type,
+            rewrittenInitializer,
+          );
+        }
+      }
       markSyntheticReactiveCollectionDeclarationIfNeeded(
         node,
-        visited,
+        rewrittenDeclaration,
         context,
       );
-      return visited;
+      return rewrittenDeclaration;
     }
 
     if (ts.isExpression(visited)) {

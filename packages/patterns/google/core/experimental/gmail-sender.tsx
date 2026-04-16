@@ -39,19 +39,19 @@ import { type Auth, createGoogleAuth } from "../util/google-auth-manager.tsx";
 
 type EmailDraft = {
   /** Recipient email address */
-  to: Default<string, "">;
+  to: string | Default<"">;
   /** Email subject line */
-  subject: Default<string, "">;
+  subject: string | Default<"">;
   /** Plain text body */
-  body: Default<string, "">;
+  body: string | Default<"">;
   /** CC recipients (comma-separated) */
-  cc: Default<string, "">;
+  cc: string | Default<"">;
   /** BCC recipients (comma-separated) */
-  bcc: Default<string, "">;
+  bcc: string | Default<"">;
   /** Message ID to reply to (for threading) */
-  replyToMessageId: Default<string, "">;
+  replyToMessageId: string | Default<"">;
   /** Thread ID to reply to (for threading) */
-  replyToThreadId: Default<string, "">;
+  replyToThreadId: string | Default<"">;
 };
 
 type SendResult = {
@@ -64,9 +64,9 @@ type SendResult = {
 
 interface Input {
   /** Email draft to compose/send */
-  draft: Default<
-    EmailDraft,
-    {
+  draft:
+    | EmailDraft
+    | Default<{
       to: "";
       subject: "";
       body: "";
@@ -74,8 +74,7 @@ interface Input {
       bcc: "";
       replyToMessageId: "";
       replyToThreadId: "";
-    }
-  >;
+    }>;
 }
 
 /** Gmail email sender with confirmation dialog. #gmailSender */

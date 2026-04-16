@@ -32,37 +32,7 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
         {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (<label>
-            <cf-checkbox $checked={__cfHelpers.derive({
-                type: "object",
-                properties: {
-                    selectedScopes: {
-                        $ref: "#/$defs/SelectedScopes"
-                    },
-                    key: {
-                        type: "string"
-                    }
-                },
-                required: ["selectedScopes", "key"],
-                $defs: {
-                    SelectedScopes: {
-                        type: "object",
-                        properties: {
-                            gmail: {
-                                type: "boolean"
-                            },
-                            calendar: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["gmail", "calendar"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                selectedScopes: selectedScopes,
-                key: key
-            }, ({ selectedScopes, key }) => selectedScopes[key as keyof SelectedScopes])}>
+            <cf-checkbox $checked={selectedScopes[key as keyof SelectedScopes]}>
               {description}
             </cf-checkbox>
           </label>))}

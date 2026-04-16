@@ -27,6 +27,7 @@ import {
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
   HelpersOnlyTransformer,
+  type SchemaHint,
   TransformationContext,
   type TypeRegistry,
 } from "../core/mod.ts";
@@ -38,6 +39,8 @@ import {
   isCellLikeTypeNode,
   printTypeNode,
 } from "./type-shrinking.ts";
+
+type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 
 /**
  * Schema Injection Transformer - TypeRegistry Integration
@@ -277,12 +280,10 @@ function applyCapabilitySummaryToParameter(
     fn,
     parameterIndex,
     capabilityRegistry,
-    parameterNode.pos < 0 || parameterNode.end < 0
-      ? {
-        checker,
-        includeNestedCallbacks: true,
-      }
-      : undefined,
+    {
+      checker,
+      includeNestedCallbacks: true,
+    },
   );
   if (!paramSummary) {
     return parameterNode;
@@ -465,6 +466,47 @@ function collectFunctionSchemaTypeNodes(
     resultType = undefined;
   }
 
+  const returnExpr = getCallbackReturnExpression(fn);
+  const unwrappedReturnExpr = returnExpr
+    ? unwrapExpression(returnExpr)
+    : undefined;
+  const uiContractHint = context?.options.schemaHints &&
+      unwrappedReturnExpr &&
+      ts.isObjectLiteralExpression(unwrappedReturnExpr)
+    ? propagateUiContractHintsFromObjectLiteral(
+      unwrappedReturnExpr,
+      resultNode,
+      context,
+    )
+    : undefined;
+
+  if (
+    uiContractHint &&
+    context &&
+    unwrappedReturnExpr &&
+    ts.isObjectLiteralExpression(unwrappedReturnExpr)
+  ) {
+    const previousResultNode = resultNode;
+    const synthesizedResult = buildObjectLiteralReturnTypeNode(
+      unwrappedReturnExpr,
+      checker,
+      sourceFile,
+      factory,
+      typeRegistry,
+      capabilityRegistry,
+      context,
+    );
+    if (synthesizedResult) {
+      preserveUiContractHint(
+        previousResultNode,
+        synthesizedResult,
+        context.options.schemaHints,
+      );
+      resultNode = synthesizedResult;
+      resultType = undefined;
+    }
+  }
+
   const needsResultRecovery = !resultNode ||
     containsAnyOrUnknownTypeNode(resultNode) ||
     shouldDropFallbackTypeForSchema(
@@ -475,10 +517,13 @@ function collectFunctionSchemaTypeNodes(
     );
 
   if (needsResultRecovery) {
-    const returnExpr = getCallbackReturnExpression(fn);
-    if (context && returnExpr && ts.isObjectLiteralExpression(returnExpr)) {
+    if (
+      context &&
+      unwrappedReturnExpr &&
+      ts.isObjectLiteralExpression(unwrappedReturnExpr)
+    ) {
       const recoveredNode = buildObjectLiteralReturnTypeNode(
-        returnExpr,
+        unwrappedReturnExpr,
         checker,
         sourceFile,
         factory,
@@ -487,6 +532,11 @@ function collectFunctionSchemaTypeNodes(
         context,
       );
       if (recoveredNode) {
+        preserveUiContractHint(
+          resultNode,
+          recoveredNode,
+          context.options.schemaHints,
+        );
         resultNode = recoveredNode;
         resultType = undefined;
       }
@@ -502,6 +552,11 @@ function collectFunctionSchemaTypeNodes(
         typeRegistry,
       );
       if (projectedResult?.result) {
+        preserveUiContractHint(
+          resultNode,
+          projectedResult.result,
+          context?.options.schemaHints,
+        );
         resultNode = projectedResult.result;
         resultType = projectedResult.resultType;
       }
@@ -691,6 +746,7 @@ function createSchemaCallWithRegistryTransfer(
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
   options?: { widenLiterals?: boolean },
+  schemaHints?: TransformationContext["options"]["schemaHints"],
 ): ts.CallExpression {
   const emittedTypeNode = normalizeSchemaInjectionTypeNode(
     typeNode,
@@ -699,10 +755,14 @@ function createSchemaCallWithRegistryTransfer(
     typeRegistry,
   );
   const schemaCall = createToSchemaCall(context, emittedTypeNode, options);
+  preserveUiContractHint(typeNode, schemaCall, schemaHints);
 
   // Transfer TypeRegistry entry from source typeNode to schema call
   // This preserves type information for closure-captured variables
-  if (typeRegistry && emittedTypeNode === typeNode) {
+  if (
+    typeRegistry && emittedTypeNode === typeNode &&
+    !containsAnyOrUnknownTypeNode(emittedTypeNode)
+  ) {
     const typeFromRegistry = typeRegistry.get(typeNode);
     if (typeFromRegistry) {
       typeRegistry.set(schemaCall, typeFromRegistry);
@@ -710,6 +770,43 @@ function createSchemaCallWithRegistryTransfer(
   }
 
   return schemaCall;
+}
+
+function applyIdentityArrayItemSchemaHints(
+  typeNode: ts.TypeNode,
+  identityPaths: readonly (readonly string[])[],
+  context: TransformationContext,
+): void {
+  const schemaHints = context.options.schemaHints;
+  if (!schemaHints || identityPaths.length === 0) return;
+
+  const grouped = new Map<string, boolean>();
+  for (const path of identityPaths) {
+    const [head, second] = path;
+    if (head && second !== undefined && /^\d+$/.test(second)) {
+      grouped.set(head, true);
+    }
+  }
+  if (grouped.size === 0) return;
+
+  const visitObject = (node: ts.TypeNode): void => {
+    if (ts.isTypeLiteralNode(node)) {
+      for (const member of node.members) {
+        if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+          continue;
+        }
+        const name = ts.isIdentifier(member.name) ||
+            ts.isStringLiteral(member.name)
+          ? member.name.text
+          : undefined;
+        if (name && grouped.has(name)) {
+          schemaHints.set(member.type, { items: false });
+        }
+      }
+    }
+  };
+
+  visitObject(typeNode);
 }
 
 function createRegisteredSchemaCallFromResolvedType(
@@ -849,7 +946,10 @@ function resolveDualSchemaBuilderTypes(
   },
 ): ResolvedDualSchemaBuilderTypes | undefined {
   let argumentTypeNode = options?.explicitArgumentTypeNode;
-  let argumentTypeValue = options?.explicitArgumentTypeValue;
+  let argumentTypeValue = options?.explicitArgumentTypeValue ??
+    (argumentTypeNode
+      ? getTypeFromTypeNodeWithFallback(argumentTypeNode, checker, typeRegistry)
+      : undefined);
 
   if (
     callback &&
@@ -950,11 +1050,17 @@ function resolveDualSchemaBuilderTypes(
     inferred?.result ??
     createUnknownSchemaTypeNode(factory);
   const resultTypeValue = options?.explicitResultTypeValue ??
-    getTypeFromRegistryOrFallback(
-      resultTypeNode,
-      inferred?.resultType,
-      typeRegistry,
-    );
+    (options?.explicitResultTypeNode
+      ? getTypeFromTypeNodeWithFallback(
+        resultTypeNode,
+        checker,
+        typeRegistry,
+      )
+      : getTypeFromRegistryOrFallback(
+        resultTypeNode,
+        inferred?.resultType,
+        typeRegistry,
+      ));
 
   return {
     argumentTypeNode,
@@ -1398,6 +1504,21 @@ function buildObjectLiteralReturnTypeNode(
       return undefined;
     }
     typeRegistry?.set(valueTypeNode, valueType);
+    const valueHint = getUiContractHintFromNode(
+      valueExpr,
+      context?.options.schemaHints,
+    );
+    if (valueHint && context?.options.schemaHints) {
+      context.options.schemaHints.set(valueTypeNode, {
+        cfcUiContract: valueHint,
+      });
+      const originalValueTypeNode = ts.getOriginalNode(valueTypeNode);
+      if (originalValueTypeNode !== valueTypeNode) {
+        context.options.schemaHints.set(originalValueTypeNode, {
+          cfcUiContract: valueHint,
+        });
+      }
+    }
 
     members.push(
       factory.createPropertySignature(
@@ -1413,6 +1534,236 @@ function buildObjectLiteralReturnTypeNode(
     members,
     { factory, checker, typeRegistry },
   );
+}
+
+function propagateUiContractHintsFromObjectLiteral(
+  expr: ts.ObjectLiteralExpression,
+  resultNode: ts.TypeNode | undefined,
+  context: TransformationContext,
+):
+  | UiContractHint
+  | undefined {
+  const schemaHints = context.options.schemaHints;
+  if (!schemaHints || !resultNode) {
+    return undefined;
+  }
+
+  const target = unwrapParenthesizedSchemaTypeNode(resultNode);
+  let resultHint:
+    | UiContractHint
+    | undefined;
+  for (const property of expr.properties) {
+    if (
+      !ts.isPropertyAssignment(property) &&
+      !ts.isShorthandPropertyAssignment(property)
+    ) {
+      continue;
+    }
+
+    const valueExpr = ts.isPropertyAssignment(property)
+      ? property.initializer
+      : property.name;
+    const hint = getUiContractHintFromNode(valueExpr, schemaHints);
+    if (!hint) {
+      continue;
+    }
+    resultHint = resultHint ?? hint;
+
+    if (ts.isTypeLiteralNode(target)) {
+      const memberName = getObjectLiteralPropertyName(property.name);
+      if (!memberName) {
+        continue;
+      }
+
+      const member = target.members.find(
+        (entry): entry is ts.PropertySignature =>
+          ts.isPropertySignature(entry) &&
+          getObjectLiteralPropertyName(entry.name) === memberName,
+      );
+      if (member?.type) {
+        schemaHints.set(member.type, { cfcUiContract: hint });
+        const originalMemberType = ts.getOriginalNode(member.type);
+        if (originalMemberType !== member.type) {
+          schemaHints.set(originalMemberType, { cfcUiContract: hint });
+        }
+      }
+    }
+  }
+
+  if (resultHint) {
+    schemaHints.set(target, { cfcUiContract: resultHint });
+    const originalTarget = ts.getOriginalNode(target);
+    if (originalTarget !== target) {
+      schemaHints.set(originalTarget, { cfcUiContract: resultHint });
+    }
+    return resultHint;
+  }
+
+  return undefined;
+}
+
+function getUiContractHintFromObjectLiteral(
+  expr: ts.ObjectLiteralExpression,
+  schemaHints: TransformationContext["options"]["schemaHints"],
+):
+  | UiContractHint
+  | undefined {
+  if (!schemaHints) {
+    return undefined;
+  }
+
+  for (const property of expr.properties) {
+    if (
+      !ts.isPropertyAssignment(property) &&
+      !ts.isShorthandPropertyAssignment(property)
+    ) {
+      continue;
+    }
+    const valueExpr = ts.isPropertyAssignment(property)
+      ? property.initializer
+      : property.name;
+    const hint = getUiContractHintFromNode(valueExpr, schemaHints);
+    if (hint) {
+      return hint;
+    }
+  }
+
+  return undefined;
+}
+
+function setUiContractHint(
+  target: ts.Node | undefined,
+  hint: UiContractHint | undefined,
+  schemaHints: TransformationContext["options"]["schemaHints"],
+): void {
+  if (!schemaHints || !target || !hint) {
+    return;
+  }
+
+  schemaHints.set(target, { cfcUiContract: hint });
+  const originalTarget = ts.getOriginalNode(target);
+  if (originalTarget !== target) {
+    schemaHints.set(originalTarget, { cfcUiContract: hint });
+  }
+}
+
+function preserveUiContractHint(
+  fromNode: ts.Node | undefined,
+  toNode: ts.Node | undefined,
+  schemaHints: TransformationContext["options"]["schemaHints"],
+): void {
+  if (!schemaHints || !fromNode || !toNode) {
+    return;
+  }
+
+  const hint = schemaHints.get(fromNode)?.cfcUiContract ??
+    schemaHints.get(ts.getOriginalNode(fromNode))?.cfcUiContract;
+  if (!hint) {
+    return;
+  }
+
+  schemaHints.set(toNode, { cfcUiContract: hint });
+  const originalTarget = ts.getOriginalNode(toNode);
+  if (originalTarget !== toNode) {
+    schemaHints.set(originalTarget, { cfcUiContract: hint });
+  }
+}
+
+function getUiContractHintFromNode(
+  node: ts.Node | undefined,
+  schemaHints: TransformationContext["options"]["schemaHints"],
+):
+  | UiContractHint
+  | undefined {
+  if (!node) {
+    return undefined;
+  }
+
+  const storedHint = schemaHints?.get(node)?.cfcUiContract ??
+    schemaHints?.get(ts.getOriginalNode(node))?.cfcUiContract;
+  if (storedHint) {
+    return storedHint;
+  }
+
+  return extractUiContractFromLoweredJsx(node);
+}
+
+function extractUiContractFromLoweredJsx(
+  node: ts.Node,
+):
+  | UiContractHint
+  | undefined {
+  const attributes = ts.isJsxElement(node)
+    ? node.openingElement.attributes.properties
+    : ts.isJsxSelfClosingElement(node)
+    ? node.attributes.properties
+    : undefined;
+  if (!attributes) {
+    return undefined;
+  }
+
+  const getLiteralAttr = (name: string): string | undefined => {
+    for (const attribute of attributes) {
+      if (
+        !ts.isJsxAttribute(attribute) ||
+        !ts.isIdentifier(attribute.name) ||
+        attribute.name.text !== name ||
+        !attribute.initializer
+      ) {
+        continue;
+      }
+      if (ts.isStringLiteral(attribute.initializer)) {
+        return attribute.initializer.text;
+      }
+      if (
+        ts.isJsxExpression(attribute.initializer) &&
+        attribute.initializer.expression &&
+        ts.isStringLiteral(attribute.initializer.expression)
+      ) {
+        return attribute.initializer.expression.text;
+      }
+    }
+    return undefined;
+  };
+
+  const action = getLiteralAttr("data-ui-action");
+  if (action) {
+    return { helper: "UiAction", action };
+  }
+
+  const surface = getLiteralAttr("data-ui-surface");
+  if (surface) {
+    const role = getLiteralAttr("data-ui-role");
+    return role ? { helper: "UiPromptSlot", surface, role } : undefined;
+  }
+
+  const kind = getLiteralAttr("data-ui-disclosure-kind");
+  return kind ? { helper: "UiDisclosure", kind } : undefined;
+}
+
+function unwrapParenthesizedSchemaTypeNode(node: ts.TypeNode): ts.TypeNode {
+  let current = node;
+  while (ts.isParenthesizedTypeNode(current)) {
+    current = current.type;
+  }
+  return current;
+}
+
+function getObjectLiteralPropertyName(
+  name: ts.PropertyName,
+): string | undefined {
+  if (
+    ts.isIdentifier(name) || ts.isStringLiteral(name) ||
+    ts.isNumericLiteral(name)
+  ) {
+    return name.text;
+  }
+  if (
+    ts.isComputedPropertyName(name) && ts.isIdentifier(name.expression)
+  ) {
+    return name.expression.text;
+  }
+  return undefined;
 }
 
 /**
@@ -1838,6 +2189,10 @@ function handlePatternSchemaInjection(
     return undefined; // No function found - skip transformation
   }
   const builderFunction = builderFunctionArg.callback;
+  const patternReturnExpr = getCallbackReturnExpression(builderFunction);
+  const unwrappedPatternReturnExpr = patternReturnExpr
+    ? unwrapExpression(patternReturnExpr)
+    : undefined;
 
   const argumentCapabilityMode: CapabilitySummaryApplicationMode =
     context.isArrayMethodCallback(builderFunction) ||
@@ -1883,6 +2238,19 @@ function handlePatternSchemaInjection(
       checker,
       typeRegistry,
     );
+    if (
+      unwrappedPatternReturnExpr &&
+      ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
+    ) {
+      setUiContractHint(
+        resultTypeNode,
+        getUiContractHintFromObjectLiteral(
+          unwrappedPatternReturnExpr,
+          context.options.schemaHints,
+        ),
+        context.options.schemaHints,
+      );
+    }
   } else if (typeArgs && typeArgs.length === 1) {
     // Case 2: One type argument → input from type arg, result inferred
     inputTypeNode = typeArgs[0]!;
@@ -1969,12 +2337,34 @@ function handlePatternSchemaInjection(
 
       // Use existing schema directly as input, create result schema from type
       const toSchemaResult = createToSchemaCall(context, resultTypeNode);
+      preserveUiContractHint(
+        resultTypeNode,
+        toSchemaResult,
+        context.options.schemaHints,
+      );
+      preserveUiContractHint(
+        getCallbackReturnExpression(builderFunction),
+        toSchemaResult,
+        context.options.schemaHints,
+      );
       if (resultType && typeRegistry) {
         typeRegistry.set(toSchemaResult, resultType);
       }
 
       const updated = buildCallExpression(existingInputSchema, toSchemaResult);
-      return ts.visitEachChild(updated, visit, transformation);
+      const visited = ts.visitEachChild(updated, visit, transformation);
+      setUiContractHint(
+        visited,
+        unwrappedPatternReturnExpr &&
+          ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
+          ? getUiContractHintFromObjectLiteral(
+            unwrappedPatternReturnExpr,
+            context.options.schemaHints,
+          )
+          : undefined,
+        context.options.schemaHints,
+      );
+      return visited;
     } else {
       // Case 3b: No type arguments, no schema args → infer both from function
       const inputParam = builderFunction.parameters[0];
@@ -2036,18 +2426,53 @@ function handlePatternSchemaInjection(
   }
 
   // Create both schemas
-  const inputSchemaCall = createToSchemaCall(context, inputTypeNode);
+  const inputSchemaCall = createSchemaCallWithRegistryTransfer(
+    context,
+    inputTypeNode,
+    checker,
+    typeRegistry,
+  );
   if (inputType && typeRegistry) {
     typeRegistry.set(inputSchemaCall, inputType);
   }
 
-  const resultSchemaCall = createToSchemaCall(context, resultTypeNode);
+  const resultSchemaCall = createSchemaCallWithRegistryTransfer(
+    context,
+    resultTypeNode,
+    checker,
+    typeRegistry,
+  );
+  if (
+    unwrappedPatternReturnExpr &&
+    ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
+  ) {
+    setUiContractHint(
+      resultSchemaCall,
+      getUiContractHintFromObjectLiteral(
+        unwrappedPatternReturnExpr,
+        context.options.schemaHints,
+      ),
+      context.options.schemaHints,
+    );
+  }
   if (resultType && typeRegistry) {
     typeRegistry.set(resultSchemaCall, resultType);
   }
 
   const updated = buildCallExpression(inputSchemaCall, resultSchemaCall);
-  return ts.visitEachChild(updated, visit, transformation);
+  const visited = ts.visitEachChild(updated, visit, transformation);
+  setUiContractHint(
+    visited,
+    unwrappedPatternReturnExpr &&
+      ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
+      ? getUiContractHintFromObjectLiteral(
+        unwrappedPatternReturnExpr,
+        context.options.schemaHints,
+      )
+      : undefined,
+    context.options.schemaHints,
+  );
+  return visited;
 }
 
 export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
@@ -2131,6 +2556,17 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               context,
               handlerFn,
             ) ?? stateType;
+            const stateSummary = findCapabilitySummaryForParameter(
+              handlerFn,
+              1,
+              capabilityRegistry,
+              { checker, includeNestedCallbacks: true },
+            );
+            applyIdentityArrayItemSchemaHints(
+              stateTypeNode,
+              stateSummary?.identityPaths ?? [],
+              context,
+            );
           }
 
           const toSchemaEvent = createSchemaCallWithRegistryTransfer(
@@ -2221,6 +2657,17 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               context,
               handlerFn,
             ) ?? stateTypeBase;
+            const stateSummary = findCapabilitySummaryForParameter(
+              handlerFn,
+              1,
+              capabilityRegistry,
+              { checker, includeNestedCallbacks: true },
+            );
+            applyIdentityArrayItemSchemaHints(
+              stateType,
+              stateSummary?.identityPaths ?? [],
+              context,
+            );
 
             // Always transform - generate schemas regardless of parameter presence
             const toSchemaEvent = createSchemaCallWithRegistryTransfer(

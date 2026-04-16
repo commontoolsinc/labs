@@ -4,8 +4,8 @@ import { Default, NAME, Stream, UI, type VNode, Writable } from "commonfabric";
 
 export interface Habit {
   name: string;
-  icon: Default<string, "✓">;
-  color: Default<string, "#3b82f6">;
+  icon: string | Default<"✓">;
+  color: string | Default<"#3b82f6">;
 }
 
 export interface HabitLog {
@@ -17,8 +17,8 @@ export interface HabitLog {
 // === Pattern Types ===
 
 export interface HabitTrackerInput {
-  habits: Writable<Default<Habit[], []>>;
-  logs: Writable<Default<HabitLog[], []>>;
+  habits: Writable<Habit[] | Default<[]>>;
+  logs: Writable<HabitLog[] | Default<[]>>;
 }
 
 export interface HabitTrackerOutput {

@@ -49,19 +49,19 @@ type CalendarOperation = "create" | "update" | "delete" | "rsvp";
 
 type EventDraft = {
   /** Event title/summary */
-  summary: Default<string, "">;
+  summary: string | Default<"">;
   /** Start datetime (ISO or datetime-local format) */
-  start: Default<string, "">;
+  start: string | Default<"">;
   /** End datetime (ISO or datetime-local format) */
-  end: Default<string, "">;
+  end: string | Default<"">;
   /** Calendar ID (primary for main calendar) */
-  calendarId: Default<string, "primary">;
+  calendarId: string | Default<"primary">;
   /** Event description */
-  description: Default<string, "">;
+  description: string | Default<"">;
   /** Event location */
-  location: Default<string, "">;
+  location: string | Default<"">;
   /** Attendee emails (comma-separated) */
-  attendeesText: Default<string, "">;
+  attendeesText: string | Default<"">;
 };
 
 type ExistingEvent = {
@@ -98,9 +98,9 @@ type OperationResult = {
 
 interface Input {
   /** Event draft for creating/editing */
-  draft: Default<
-    EventDraft,
-    {
+  draft:
+    | EventDraft
+    | Default<{
       summary: "";
       start: "";
       end: "";
@@ -108,10 +108,9 @@ interface Input {
       description: "";
       location: "";
       attendeesText: "";
-    }
-  >;
+    }>;
   /** Existing event for update/delete/rsvp operations */
-  existingEvent: Default<ExistingEvent, null>;
+  existingEvent: ExistingEvent | Default<null>;
 }
 
 /** Google Calendar event manager for creating/editing/deleting events. #calendarManager */

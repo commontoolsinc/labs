@@ -91,6 +91,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       spaceName: options.spaceName,
       memoryVersion: options.memoryVersion,
       experimental: options.experimental,
+      cfcEnforcementMode: options.cfcEnforcementMode,
+      trustSnapshot: options.trustSnapshot,
       buildHash: options.buildHash,
     });
     return new RuntimeClient(initialized, options);

@@ -10,7 +10,7 @@ import { Default } from "commonfabric";
 export interface Expense {
   description: string;
   amount: number;
-  category: Default<string, "Other">;
+  category: string | Default<"Other">;
   date: string; // YYYY-MM-DD
 }
 

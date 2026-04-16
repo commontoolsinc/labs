@@ -17,7 +17,7 @@ const TEMPLATE =
   `import { computed, handler, Default, NAME, pattern, UI } from "commonfabric";
 
 interface Input {
-  value: Default<number, 0>;
+  value: number | Default<0>;
 }
 
 const increment = handler<unknown, { value: Writable<number> }>(
@@ -61,7 +61,7 @@ ${TEMPLATE}
 Generate ONLY the TypeScript code, no explanations or markdown.`;
 
 interface Input {
-  prompt: Default<string, "Create a simple counter">;
+  prompt: string | Default<"Create a simple counter">;
 }
 
 interface Output {

@@ -12,14 +12,14 @@ import {
 // ===== Types =====
 
 type BudgetInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
-  maxAmount?: Default<number, 1000>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
+  maxAmount?: number | Default<1000>;
 };
 
 type BudgetItem = {
   name: string;
-  amount: Default<number, 0>;
+  amount: number | Default<0>;
 };
 
 type BudgetOutput = {

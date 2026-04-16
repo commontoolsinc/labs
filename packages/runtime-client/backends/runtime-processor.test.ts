@@ -1,10 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  runtimeOptionsFromInitializationData,
   RuntimeProcessor,
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
-import { RequestType } from "../protocol/mod.ts";
+import { type CellRef, RequestType } from "../protocol/mod.ts";
 
 describe("sanitizeForPostMessage", () => {
   describe("primitives", () => {
@@ -376,5 +377,160 @@ describe("RuntimeProcessor diagnosis helpers", () => {
       },
     );
     expect(writeTraceMatchers).toEqual([[]]);
+  });
+});
+
+describe("RuntimeProcessor CFC label IPC", () => {
+  it("returns a label view for a cell ref", () => {
+    const ref: CellRef = {
+      id: "of:cfc-label-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      type: "application/json",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          runtime: {
+            readTx: () => ({
+              readOrThrow: () => ({
+                value: "labelled data",
+                cfc: {
+                  version: 1,
+                  schemaHash: "test-schema",
+                  labelMap: {
+                    version: 1,
+                    entries: [{
+                      path: [],
+                      label: { confidentiality: ["prompt-risk"] },
+                    }],
+                  },
+                },
+              }),
+            }),
+          },
+          getAsNormalizedFullLink: () => ref,
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    expect(
+      RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
+        type: RequestType.CellGetCfcLabel,
+        cell: ref,
+      }),
+    ).toEqual({
+      cfcLabel: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: { confidentiality: ["prompt-risk"] },
+        }],
+      },
+    });
+  });
+});
+
+describe("RuntimeProcessor CFC commit preparation", () => {
+  const ref: CellRef = {
+    id: "of:cfc-client-write" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    type: "application/json",
+    path: [],
+    schema: {
+      type: "string",
+      ifc: { confidentiality: ["client-write"] },
+    },
+  };
+
+  const createProcessor = () => {
+    let prepared = false;
+    const tx = {
+      commit: () => {
+        expect(prepared).toBe(true);
+        return Promise.resolve({ ok: {} });
+      },
+    };
+    const cellWithTx = {
+      set: (value: unknown) => {
+        expect(value).toBe("new value");
+      },
+      send: (value: unknown) => {
+        expect(value).toBe("new value");
+      },
+    };
+    return {
+      processor: {
+        runtime: {
+          edit: () => tx,
+          prepareTxForCommit: (candidate: unknown) => {
+            expect(candidate).toBe(tx);
+            prepared = true;
+          },
+          getCellFromLink: (candidate: unknown) => {
+            expect(candidate).toBe(ref);
+            return {
+              withTx: (candidateTx: unknown) => {
+                expect(candidateTx).toBe(tx);
+                return cellWithTx;
+              },
+            };
+          },
+        },
+      } as unknown as RuntimeProcessor,
+    };
+  };
+
+  it("prepares cell set transactions before committing", async () => {
+    const { processor } = createProcessor();
+
+    await RuntimeProcessor.prototype.handleCellSet.call(processor, {
+      type: RequestType.CellSet,
+      cell: ref,
+      value: "new value",
+    });
+  });
+
+  it("prepares cell send transactions before committing", async () => {
+    const { processor } = createProcessor();
+
+    await RuntimeProcessor.prototype.handleCellSend.call(processor, {
+      type: RequestType.CellSend,
+      cell: ref,
+      event: "new value",
+    });
+  });
+});
+
+describe("runtimeOptionsFromInitializationData", () => {
+  it("threads CFC initialization settings into runtime options", () => {
+    const telemetry = { marker() {} } as unknown as Parameters<
+      typeof runtimeOptionsFromInitializationData
+    >[2];
+    const storageManager = {
+      as: { did: () => "did:key:worker" },
+    } as unknown as Parameters<typeof runtimeOptionsFromInitializationData>[1];
+
+    const options = runtimeOptionsFromInitializationData(
+      {
+        apiUrl: "http://worker.test/",
+        identity: {} as never,
+        spaceDid: "did:key:space",
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: "principal:did:key:worker",
+          actingPrincipal: "did:key:worker",
+        },
+      },
+      storageManager,
+      telemetry,
+      undefined,
+    );
+
+    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.trustSnapshotProvider?.()).toEqual({
+      id: "principal:did:key:worker",
+      actingPrincipal: "did:key:worker",
+    });
   });
 });

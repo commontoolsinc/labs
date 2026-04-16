@@ -14,7 +14,7 @@ interface LinkedList {
 }
 
 interface InputSchema {
-  title: Default<string, "untitled">;
+  title: string | Default<"untitled">;
 }
 
 type InputEventType = {

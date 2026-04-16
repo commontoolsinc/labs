@@ -54,7 +54,7 @@ interface Sentiment {
 }
 
 interface Input {
-  items: Default<Item[], []>;
+  items: Item[] | Default<[]>;
 }
 
 const addItem = handler<

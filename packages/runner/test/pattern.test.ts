@@ -232,7 +232,7 @@ describe("pattern", () => {
     expect(typeof innerModule.implementation).toBe("function");
   });
 
-  it("pattern with ifc property has correct classification tracking", () => {
+  it("pattern with ifc property has correct confidentiality tracking", () => {
     const ArgumentSchema = {
       description: "Double a number",
       type: "object",
@@ -240,7 +240,7 @@ describe("pattern", () => {
         x: {
           type: "integer",
           default: 1,
-          ifc: { classification: ["confidential"] },
+          ifc: { confidentiality: ["confidential"] },
         },
       },
       required: ["x"],
@@ -331,7 +331,7 @@ describe("pattern", () => {
     });
   });
 
-  it("pattern with mixed ifc properties has correct classification in the schema of the ssn result", () => {
+  it("pattern with mixed ifc properties has correct confidentiality in the schema of the ssn result", () => {
     const ArgumentSchema = {
       description: "Capitalize a word",
       type: "object",
@@ -374,7 +374,7 @@ describe("pattern", () => {
         ssn: {
           type: "string",
           default: "123-45-6789",
-          ifc: { classification: ["confidential"] },
+          ifc: { confidentiality: ["confidential"] },
         },
       },
       required: ["word"],
@@ -401,23 +401,23 @@ describe("pattern", () => {
     const nodeOutputAlias = (nodes[0].outputs as any)["$alias"];
     expect(nodeOutputAlias).toMatchObject({
       path: ["internal", "__#0"],
-      schema: { ifc: { classification: ["confidential"] } },
+      schema: { ifc: { confidentiality: ["confidential"] } },
     });
     expect(result).toMatchObject({
       capitalized: {
         $alias: {
           path: ["internal", "__#0", "capitalized"],
-          schema: { ifc: { classification: ["confidential"] } },
+          schema: { ifc: { confidentiality: ["confidential"] } },
         },
       },
     });
     expect(resultSchema).toMatchObject({
       ...ResultSchema,
-      ...{ ifc: { classification: ["confidential"] } },
+      ...{ ifc: { confidentiality: ["confidential"] } },
     });
 
     // Perhaps I should handle a similar pattern that only accesses the name
-    // in such a way that it does not end up classified. For now, I've decided
+    // in such a way that it does not end up confidential. For now, I've decided
     // not to do this, since I'm not confident enough that code can't get out.
   });
 

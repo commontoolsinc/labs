@@ -1,5 +1,5 @@
 /**
- * Incremental SHA-256 hasher. Feed data via `update()`, finalize with
+ * Incremental hasher. Feed data via `update()`, finalize with
  * `digest()`. A hasher must not be reused after `digest()` is called.
  */
 export interface IncrementalHasher {
@@ -9,6 +9,7 @@ export interface IncrementalHasher {
 }
 
 /**
- * All-at-once SHA-256: `(payload) => digest`.
+ * All-at-once hash digest function, which takes a payload array and returns
+ * the digest.
  */
-export type Sha256Fn = (payload: Uint8Array) => Uint8Array;
+export type DigestFn = (payload: Uint8Array) => Uint8Array;

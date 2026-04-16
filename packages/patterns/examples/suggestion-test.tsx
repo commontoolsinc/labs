@@ -8,7 +8,7 @@ import BudgetPlanner from "../suggestable/budget-planner.tsx";
 import PeopleList from "../suggestable/people-list.tsx";
 import EventList from "../suggestable/event-list.tsx";
 
-export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
+export default pattern<{ title: string | Default<"Suggestion Tester"> }>(
   ({ title }) => {
     const suggestion = Suggestion({
       situation: "gimme counter plz",

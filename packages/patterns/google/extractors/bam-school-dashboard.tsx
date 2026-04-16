@@ -37,10 +37,10 @@ import ProcessingStatus from "../core/processing-status.tsx";
 // =============================================================================
 
 interface SchoolSettings {
-  childName: Default<string, "Adeline Komoroske">;
-  schoolName: Default<string, "Berkeley Arts Magnet">;
-  grade: Default<string, "Kindergarten">;
-  teacher: Default<string, "Mr. Zaragoza">;
+  childName: string | Default<"Adeline Komoroske">;
+  schoolName: string | Default<"Berkeley Arts Magnet">;
+  grade: string | Default<"Kindergarten">;
+  teacher: string | Default<"Mr. Zaragoza">;
 }
 
 type EventCategory =
@@ -278,16 +278,15 @@ const restoreEvent = handler<
 // =============================================================================
 
 interface PatternInput {
-  settings?: Default<
-    SchoolSettings,
-    {
+  settings?:
+    | SchoolSettings
+    | Default<{
       childName: "Adeline Komoroske";
       schoolName: "Berkeley Arts Magnet";
       grade: "Kindergarten";
       teacher: "Mr. Zaragoza";
-    }
-  >;
-  dismissedIds?: Writable<Default<string[], []>>;
+    }>;
+  dismissedIds?: Writable<string[] | Default<[]>>;
   overrideAuth?: Auth;
 }
 

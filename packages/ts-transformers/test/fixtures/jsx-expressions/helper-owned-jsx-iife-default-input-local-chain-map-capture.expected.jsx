@@ -75,7 +75,7 @@ export default pattern((__cf_pattern_input) => {
         path.push(name);
     })({
         path: path
-    }).for("handleNavigateInto", true);
+    }).for({ stream: "handleNavigateInto" }, true);
     const handleOpenFile = __cfHelpers.handler({
         type: "object",
         properties: {
@@ -115,7 +115,7 @@ export default pattern((__cf_pattern_input) => {
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, ({ item }, __cf_action_params) => {
         void item;
-    })({}).for("handleOpenFile", true);
+    })({}).for({ stream: "handleOpenFile" }, true);
     return {
         [UI]: (<div>
         {(() => {

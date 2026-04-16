@@ -12,10 +12,10 @@ import {
 
 /** Input for creating a new event detail piece */
 interface EventDetailInput {
-  title?: Writable<Default<string, "">>;
-  date?: Writable<Default<string, "">>;
-  time?: Writable<Default<string, "">>;
-  notes?: Writable<Default<string, "">>;
+  title?: Writable<string | Default<"">>;
+  date?: Writable<string | Default<"">>;
+  time?: Writable<string | Default<"">>;
+  notes?: Writable<string | Default<"">>;
 }
 
 /**

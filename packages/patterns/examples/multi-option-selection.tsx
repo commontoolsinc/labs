@@ -1,10 +1,10 @@
 import { Default, NAME, pattern, UI, Writable } from "commonfabric";
 
 type Input = {
-  selected: Writable<Default<string, "opt_1">>;
-  numericChoice: Writable<Default<number, 1>>;
-  category: Writable<Default<string, "Other">>;
-  activeTab: Writable<Default<string, "tab1">>;
+  selected: Writable<string | Default<"opt_1">>;
+  numericChoice: Writable<number | Default<1>>;
+  category: Writable<string | Default<"Other">>;
+  activeTab: Writable<string | Default<"tab1">>;
 };
 
 type Result = {

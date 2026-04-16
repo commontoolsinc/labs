@@ -1,12 +1,12 @@
 import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface Item {
-  text: Default<string, "">;
+  text: string | Default<"">;
 }
 
 interface InputSchema {
-  title: Default<string, "untitled">;
-  items: Default<Item[], []>;
+  title: string | Default<"untitled">;
+  items: Item[] | Default<[]>;
 }
 
 type InputEventType = {

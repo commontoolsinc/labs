@@ -1,9 +1,9 @@
 import { Default, pattern, SELF, UI, Writable } from "commonfabric";
 
 interface Input {
-  label: Default<string, "Untitled">;
-  parent: Default<Output | null, null>;
-  registry: Writable<Default<Output[], []>>;
+  label: string | Default<"Untitled">;
+  parent: Output | null | Default<null>;
+  registry: Writable<Output[] | Default<[]>>;
 }
 interface Output {
   label: string;

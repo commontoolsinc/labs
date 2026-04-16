@@ -8,8 +8,8 @@ import {
 } from "commonfabric";
 
 type ImageInput = {
-  url: Default<string, "">;
-  caption: Default<string, "">;
+  url: string | Default<"">;
+  caption: string | Default<"">;
 };
 
 type ImageOutput = {

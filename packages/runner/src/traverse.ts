@@ -980,7 +980,7 @@ export abstract class BaseObjectTraverser {
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow beyond doc.address.path
  * @param tracker - Prevents pointer cycles
- * @param cfc: ContextualFlowControl with classification rules
+ * @param cfc: ContextualFlowControl with confidentiality rules
  * @param schemaTracker: Tracks schema used for loaded docs
  * @param selector: The selector being used (its path is relative to doc's root)
  * @param includeSource: if true, we will include linked source as well as
@@ -1155,7 +1155,7 @@ function getTrackerKey(
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
  * @param tracker - Prevents infinite pointer cycles
- * @param cfc: ContextualFlowControl with classification rules
+ * @param cfc: ContextualFlowControl with confidentiality rules
  * @param schemaTracker: Tracks schema to use for loaded docs
  * @param selector: SchemaPathSelector used to query the target doc
  * @param includeSource: if true, we will include linked source as well as

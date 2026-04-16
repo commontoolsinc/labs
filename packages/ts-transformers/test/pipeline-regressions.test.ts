@@ -4,6 +4,7 @@ import {
   assertMatch,
   assertStringIncludes,
 } from "@std/assert";
+import { CFC_TRANSFORMER_STAGE_NAMES } from "../src/cf-pipeline.ts";
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
@@ -91,6 +92,31 @@ const p = pattern<{ items: string[] }>((state) => ({
 );
 
 Deno.test(
+  "Pipeline regression: CFC transformer stages stay in the fixed order",
+  () => {
+    assertEquals(CFC_TRANSFORMER_STAGE_NAMES, [
+      "CastValidationTransformer",
+      "EmptyArrayOfValidationTransformer",
+      "OpaqueGetValidationTransformer",
+      "PatternContextValidationTransformer",
+      "JsxExpressionSiteRouterTransformer",
+      "ComputedTransformer",
+      "ClosureTransformer",
+      "PatternOwnedExpressionSiteLoweringTransformer",
+      "HelperOwnedExpressionSiteLoweringTransformer",
+      "WriteAuthorizedByValidationTransformer",
+      "PatternCallbackLoweringTransformer",
+      "SchemaInjectionTransformer",
+      "SchemaGeneratorTransformer",
+      "ReactiveVariableForTransformer",
+      "ModuleScopeShadowingTransformer",
+      "ModuleScopeCfDataTransformer",
+      "ModuleScopeFunctionHardeningTransformer",
+    ]);
+  },
+);
+
+Deno.test(
   "Pipeline regression: opaque key lowering preserves literal-typed key evaluation",
   async () => {
     const source = `/// <cts-enable />
@@ -135,7 +161,7 @@ const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, "return c.key(__cfHelpers.NAME)!");
+    assertStringIncludes(output, "c[__cfHelpers.NAME]");
     assert(!output.includes("return c.key(NAME)!"));
   },
 );
@@ -519,5 +545,30 @@ export default pattern<{ values: string[] }>(({ values }) => {
       normalized,
       /const result = derive\([\s\S]*, values, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\)\.for\("result", true\);/,
     );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: helper-owned IIFE local cell reads lower before use",
+  async () => {
+    const source = `import { pattern, UI, Writable } from "commonfabric";
+
+export default pattern<{ enabled: Writable<boolean> }>(({ enabled }) => ({
+  [UI]: <div>{(() => {
+    const raw = enabled.get();
+    return typeof raw === "boolean" ? raw : true;
+  })()}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assert(
+      !output.includes("const raw = enabled.get();"),
+      "expected the eager cell read to be lowered into a derive before the IIFE body uses it",
+    );
+    assertStringIncludes(output, "({ enabled }) => enabled.get()");
   },
 );

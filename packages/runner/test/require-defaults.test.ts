@@ -11,7 +11,7 @@ import type {
   RequireDefaults,
   StripDefaultBrand,
 } from "../src/builder/types.ts";
-import type { Default } from "@commonfabric/api";
+import type { DeepDefault, Default } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
 
 // ============================================================================
@@ -71,6 +71,14 @@ const _stripDefaultNumber: MustBeTrue<
 
 const _stripDefaultBoolean: MustBeTrue<
   AssertEqual<StripDefaultBrand<Default<boolean, true>>, boolean>
+> = true;
+
+const _stripDefaultNull: MustBeTrue<
+  AssertEqual<StripDefaultBrand<Default<null>>, null>
+> = true;
+
+const _stripUnionDefaultNull: MustBeTrue<
+  AssertEqual<StripDefaultBrand<string | Default<null>>, string | null>
 > = true;
 
 // Default<T|undefined, V> strips to T|undefined (brand removed, undefined kept)
@@ -182,6 +190,57 @@ const _unionDefault: MustBeTrue<
   AssertEqual<
     Simplify<RequireDefaults<{ value?: Default<string, "x"> | number }>>,
     { value: string | number }
+  >
+> = true;
+
+const _unionNullDefault: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ value?: string | Default<null> }>>,
+    { value: string | null }
+  >
+> = true;
+
+const _cellUnionNullDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ value?: Cell<string | Default<null>> }>>,
+    { value: Cell<string | null> }
+  >
+> = true;
+
+const _arrayUnionEmptyDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ items?: string[] | Default<[]> }>>,
+    { items: string[] }
+  >
+> = true;
+
+const _cellArrayUnionEmptyDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ items?: Cell<string[] | Default<[]>> }>>,
+    { items: Cell<string[]> }
+  >
+> = true;
+
+const _nullDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ value?: Default<null> }>>,
+    { value: null }
+  >
+> = true;
+
+type DeepDefaultConfig = {
+  theme: string;
+  retries: number;
+};
+
+const _deepDefaultUnion: MustBeTrue<
+  AssertEqual<
+    Simplify<
+      RequireDefaults<
+        { config?: DeepDefaultConfig | DeepDefault<{ theme: "dark" }> }
+      >
+    >,
+    { config: DeepDefaultConfig }
   >
 > = true;
 

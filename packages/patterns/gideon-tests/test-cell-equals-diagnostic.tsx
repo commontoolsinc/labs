@@ -23,9 +23,9 @@ interface Item {
 }
 
 interface DiagInput {
-  items: Default<Item[], []>;
-  selectedItem: Default<Item | null, null>;
-  log: Default<string[], []>;
+  items: Item[] | Default<[]>;
+  selectedItem: Item | null | Default<null>;
+  log: string[] | Default<[]>;
 }
 
 // Add item handler

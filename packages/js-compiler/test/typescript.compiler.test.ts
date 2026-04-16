@@ -85,6 +85,22 @@ describe("TypeScriptCompiler", () => {
     });
   });
 
+  it("Resolves nested relative type imports from runtime module typedefs", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
+      "@std/math.d.ts": `
+export type { Num } from "./num.ts";
+import type { Num } from "./num.ts";
+export declare function add(x: Num, y: Num): Num;
+`,
+      "@std/num.ts": "export type Num = number;",
+    });
+    await compiler.resolveAndCompile(program, {
+      runtimeModules: ["@std/math"],
+    });
+  });
+
   it("Throws if runtime module not defined", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {

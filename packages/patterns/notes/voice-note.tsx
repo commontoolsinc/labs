@@ -25,12 +25,12 @@ interface TranscriptionData {
 }
 
 type Input = {
-  title?: Writable<Default<string, "Voice Note">>;
+  title?: Writable<string | Default<"Voice Note">>;
 };
 
 type Output = {
-  transcription: Default<TranscriptionData | null, null>;
-  notes: Default<TranscriptionData[], []>;
+  transcription: TranscriptionData | null | Default<null>;
+  notes: TranscriptionData[] | Default<[]>;
 };
 
 const handleDeleteNote = handler<

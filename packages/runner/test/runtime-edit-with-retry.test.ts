@@ -122,4 +122,183 @@ describe("Runtime.editWithRetry", () => {
     expect(attempts).toBe(DEFAULT_MAX_RETRIES + 1);
     expect(cell.get()).toBe(0);
   });
+
+  it("prepares relevant transactions before committing in enforcing modes", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    let committedTx: IExtendedStorageTransaction | undefined;
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      committedTx = t;
+      const cell = runtime.getCell(
+        space,
+        "editWithRetry-cfc-prepare",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        t,
+      );
+      cell.set({ secret: "value" });
+      return true;
+    });
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(committedTx?.getCfcState().prepare.status).toBe("prepared");
+  });
+
+  it("recomputes prepare on each retry with fresh transactions", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const attempts: IExtendedStorageTransaction[] = [];
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      attempts.push(t);
+      const cell = runtime.getCell(
+        space,
+        "editWithRetry-cfc-retry",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        t,
+      );
+      if (attempts.length === 1) {
+        t.abort("force retry");
+        return false;
+      }
+      cell.set({ secret: "value" });
+      return true;
+    }, 2);
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(attempts.length).toBe(2);
+    expect(attempts[0]).not.toBe(attempts[1]);
+    expect(attempts[0].getCfcState().prepare.status).not.toBe("prepared");
+    expect(attempts[1].getCfcState().prepare.status).toBe("prepared");
+  });
+
+  it("recomputes trust snapshots on each retry with fresh transactions", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    let snapshotCalls = 0;
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: `trust-${++snapshotCalls}`,
+        actingPrincipal: signer.did(),
+        revision: `rev-${snapshotCalls}`,
+      }),
+    });
+
+    const snapshots: string[] = [];
+    let attempts = 0;
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      attempts++;
+      snapshots.push(t.getCfcState().trustSnapshot?.id ?? "");
+      const cell = runtime.getCell(
+        space,
+        "editWithRetry-trust-snapshot",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        t,
+      );
+      if (attempts === 1) {
+        t.abort("force retry");
+        return false;
+      }
+      cell.set({ secret: "value" });
+      return true;
+    }, 2);
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(attempts).toBe(2);
+    expect(snapshotCalls).toBe(2);
+    expect(snapshots).toEqual(["trust-1", "trust-2"]);
+  });
+
+  it("fires success callbacks once after the winning retry commit", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "editWithRetry-oncommit-once",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const statuses: string[] = [];
+    let attempts = 0;
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      attempts++;
+      if (attempts === 1) {
+        t.abort("force retry");
+        return false;
+      }
+      cell.withTx(t).set(1, (committedTx) => {
+        statuses.push(committedTx.status().status);
+      });
+      return true;
+    }, 2);
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(attempts).toBe(2);
+    expect(statuses).toEqual(["done"]);
+    expect(cell.get()).toBe(1);
+  });
 });

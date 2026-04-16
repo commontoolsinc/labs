@@ -48,13 +48,13 @@ export interface AnnotationPiece {
 }
 
 export interface AnnotationInput {
-  content: Writable<Default<string, "">>;
-  kind: Writable<Default<AnnotationKind, "note">>;
-  status: Writable<Default<AnnotationStatus, "open">>;
-  targetPiece: Writable<Default<MentionablePiece | null, null>>;
-  blockedBy: Writable<Default<AnnotationPiece[], []>>;
-  isAnnotation: Default<boolean, true>;
-  isHidden: Default<boolean, false>;
+  content: Writable<string | Default<"">>;
+  kind: Writable<AnnotationKind | Default<"note">>;
+  status: Writable<AnnotationStatus | Default<"open">>;
+  targetPiece: Writable<MentionablePiece | null | Default<null>>;
+  blockedBy: Writable<AnnotationPiece[] | Default<[]>>;
+  isAnnotation: boolean | Default<true>;
+  isHidden: boolean | Default<false>;
 }
 
 /** An #annotation pointing at an existing cell, optionally blocked by other annotations. */
@@ -458,9 +458,7 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                             cursor: "pointer",
                           }}
                         >
-                          {ann?.[NAME] ??
-                            ann?.content?.slice(0, 40) ??
-                            "(unnamed)"}
+                          {ann?.[NAME] ?? ann?.content ?? "(unnamed)"}
                         </button>
                       ),
                   )}

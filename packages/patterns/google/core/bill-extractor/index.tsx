@@ -130,7 +130,7 @@ export interface BillExtractorInput {
   shortName: string;
 
   /** Brand color for website button (hex) */
-  brandColor?: Default<string, "#3b82f6">;
+  brandColor?: string | Default<"#3b82f6">;
 
   /** Provider website URL */
   websiteUrl?: string;
@@ -139,20 +139,20 @@ export interface BillExtractorInput {
   overrideAuth?: Auth;
 
   /** State for persistence - which bills user manually marked as paid */
-  manuallyPaid?: Writable<Default<string[], []>>;
+  manuallyPaid?: Writable<string[] | Default<[]>>;
 
   /** Whether to show fake amounts for privacy (demo mode) */
-  demoMode?: Writable<Default<boolean, true>>;
+  demoMode?: Writable<boolean | Default<true>>;
 
   /** Maximum number of emails to fetch */
-  limit?: Default<number, 100>;
+  limit?: number | Default<100>;
 
   /**
    * Whether this provider sends payment confirmation emails.
    * When false, shows a banner explaining manual tracking is required.
    * Defaults to true.
    */
-  supportsAutoDetect?: Default<boolean, true>;
+  supportsAutoDetect?: boolean | Default<true>;
 }
 
 /**

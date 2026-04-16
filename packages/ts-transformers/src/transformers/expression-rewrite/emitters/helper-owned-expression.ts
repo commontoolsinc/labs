@@ -47,6 +47,31 @@ function isHelperOwnedCellGetExpression(
   }
 }
 
+function hasSyntheticComputeCallbackAncestor(
+  node: ts.Node,
+  context: Parameters<Emitter>[0]["context"],
+): boolean {
+  let current = node.parent;
+  while (current) {
+    if (
+      (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) &&
+      context.isSyntheticComputeCallback(current)
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isAlreadySyntheticComputeOwned(
+  node: ts.Node,
+  context: Parameters<Emitter>[0]["context"],
+): boolean {
+  return context.getReactiveContext(node).kind === "compute" &&
+    context.isSyntheticComputeOwnedNode(node);
+}
+
 interface RewriteHelperOwnedExpressionParams {
   readonly expression: ts.Expression;
   readonly containerLabel: string;
@@ -82,7 +107,11 @@ export function rewriteHelperOwnedExpression(
     ? findPendingComputeWrapCandidate(expression, analyze, context)
     : undefined;
 
-  if (pendingRewrite) {
+  if (
+    pendingRewrite &&
+    !hasSyntheticComputeCallbackAncestor(pendingRewrite, context) &&
+    !isAlreadySyntheticComputeOwned(pendingRewrite, context)
+  ) {
     assertValidComputeWrapCandidate(
       pendingRewrite,
       assertContainer ?? expression,

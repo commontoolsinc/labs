@@ -14,7 +14,7 @@ interface Item {}
 
 // ✅ Read-only - No Writable<> needed (still reactive!)
 interface ReadOnlyInput {
-  count: Default<number, 0>;         // Just display it (defaults to 0)
+  count: number | Default<0>;         // Just display it (defaults to 0)
   items: Item[];                     // Just map/display
   userName: string;                  // Just show it
 }
@@ -33,7 +33,7 @@ export const ReadOnly = pattern<ReadOnlyInput>(({ count, items, userName }) => {
 
 // ✅ Write access - Writable<> required
 interface WritableInput {
-  count: Writable<Default<number, 0>>;  // Will call count.set()
+  count: Writable<number | Default<0>>;  // Will call count.set()
   items: Writable<Item[]>;              // Will call items.push()
   title: Writable<string>;              // Will call title.set()
 }

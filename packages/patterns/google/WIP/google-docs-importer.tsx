@@ -56,13 +56,13 @@ import Note from "../../notes/note.tsx";
 // =============================================================================
 
 interface Input {
-  docUrl?: Cell<Default<string, "">>;
-  markdown?: Cell<Default<string, "">>;
-  docTitle?: Cell<Default<string, "">>;
-  isFetching?: Cell<Default<boolean, false>>;
-  lastError?: Cell<Default<string | null, null>>;
-  includeComments?: Cell<Default<boolean, true>>;
-  embedImages?: Cell<Default<boolean, false>>;
+  docUrl?: Cell<string | Default<"">>;
+  markdown?: Cell<string | Default<"">>;
+  docTitle?: Cell<string | Default<"">>;
+  isFetching?: Cell<boolean | Default<false>>;
+  lastError?: Cell<string | null | Default<null>>;
+  includeComments?: Cell<boolean | Default<true>>;
+  embedImages?: Cell<boolean | Default<false>>;
 }
 
 /** Google Docs Markdown Importer. Import Google Docs as Markdown with comments. #googleDocsImporter */

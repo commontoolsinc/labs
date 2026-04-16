@@ -219,8 +219,7 @@ export type IsThisArray =
  * attaches the internal methods..
  */
 // deno-lint-ignore no-empty-interface
-export interface IAnyCell<T> {
-}
+export interface IAnyCell<T> {}
 
 /**
  * Readable cells can retrieve their current value.
@@ -1182,6 +1181,7 @@ export type AnyCellWrapping<T> =
 export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
+  internalSchema?: JSONSchema;
 }
 export interface Module {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
@@ -1364,8 +1364,32 @@ export type JSONSchemaObj = {
   readonly asStream?: boolean;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
-    readonly classification?: readonly string[];
-    readonly integrity?: readonly string[];
+    readonly confidentiality?: readonly ImmutableJSONValue[];
+    readonly integrity?: readonly ImmutableJSONValue[];
+    readonly addIntegrity?: readonly ImmutableJSONValue[];
+    readonly requiredIntegrity?: readonly ImmutableJSONValue[];
+    readonly maxConfidentiality?: readonly ImmutableJSONValue[];
+    readonly writeAuthorizedBy?:
+      | readonly string[]
+      | {
+        readonly __ctWriterIdentityOf?: {
+          readonly bundleId?: string;
+          readonly file?: string;
+          readonly path?: readonly string[];
+        };
+      };
+    readonly exactCopyOf?: readonly string[];
+    readonly projection?: readonly string[];
+    readonly collection?: readonly string[];
+    readonly uiContract?: {
+      readonly helper?: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+      readonly action?: string;
+      readonly surface?: string;
+      readonly role?: string;
+      readonly kind?: string;
+      readonly trustedPattern?: string;
+      readonly requiredEventIntegrity?: readonly string[];
+    };
   };
 };
 
@@ -1390,6 +1414,9 @@ export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
  * value) and `false` (reject all values) as valid schemas.
  */
 export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
+
+export type * from "./cfc.ts";
+export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
 
 /**
  * Selects a sub-path within a document, optionally paired with a schema
@@ -1912,13 +1939,26 @@ export type CreateNodeFactoryFunction = <T = any, R = any>(
 // This is a compile-time-only brand; at runtime Default<> is just T.
 export declare const DEFAULT_MARKER: unique symbol;
 
+type DefaultMarker<T> = { readonly [DEFAULT_MARKER]: T };
+
 // Default type for specifying default values in type definitions.
 // The DEFAULT_MARKER brand enables RequireDefaults<T> to detect which fields
 // have runtime-provided defaults and make them non-optional in pattern bodies.
 // Detection uses conditional type inference (not keyof) for performance.
+// Nullish-only defaults need a standalone marker because `null & Brand` and
+// `undefined & Brand` collapse to `never`.
 export type Default<T, V extends T = T> =
-  | (T & { readonly [DEFAULT_MARKER]: T })
+  | ([T] extends [null | undefined] ? DefaultMarker<T>
+    : T & DefaultMarker<T>)
   | T;
+
+/**
+ * Marker for partial, recursive object defaults in `T | DeepDefault<V>` schema
+ * declarations. It is stripped from pattern body types by RequireDefaults<T>;
+ * schema generation reads `V` from the AST and applies it as object/property
+ * defaults.
+ */
+export type DeepDefault<V> = DefaultMarker<V>;
 
 /** Detect if T is `any` (used to avoid false positives in brand detection). */
 type IsAny<T> = 0 extends 1 & T ? true : false;
@@ -1964,6 +2004,34 @@ export type StripDefaultBrand<T> = Exclude<
   { readonly [DEFAULT_MARKER]: any }
 >;
 
+type RemoveRedundantUnionMembers<T, All = T> = T extends any
+  ? [Exclude<All, T>] extends [never] ? T
+  : T extends Exclude<All, T> ? never
+  : T
+  : never;
+
+type StripDefaultUnion<T> = RemoveRedundantUnionMembers<StripDefaultBrand<T>>;
+
+/**
+ * Cell-aware default stripping for pattern input normalization. The public
+ * StripDefaultBrand<T> intentionally stays shallow because it is used by cell
+ * interfaces in variance-sensitive positions.
+ */
+type StripDefaultField<T> = IsAny<T> extends true ? T
+  : StripDefaultFieldInner<StripDefaultUnion<T>>;
+
+type StripDefaultFieldInner<T> = T extends Cell<infer U>
+  ? Cell<StripDefaultUnion<U>>
+  : T extends OpaqueCell<infer U> ? OpaqueCell<StripDefaultUnion<U>>
+  : T extends Stream<infer U> ? Stream<StripDefaultUnion<U>>
+  : T extends ComparableCell<infer U> ? ComparableCell<StripDefaultUnion<U>>
+  : T extends ReadonlyCell<infer U> ? ReadonlyCell<StripDefaultUnion<U>>
+  : T extends WriteonlyCell<infer U> ? WriteonlyCell<StripDefaultUnion<U>>
+  : T extends AnyCell<infer U> ? AnyCell<StripDefaultUnion<U>>
+  : T extends AnyBrandedCell<infer U, infer Kind>
+    ? AnyBrandedCell<StripDefaultUnion<U>, Kind>
+  : T;
+
 /**
  * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required
  * (removing `?`) and have their brand stripped, while all other fields are left
@@ -1983,7 +2051,7 @@ export type RequireDefaults<T> =
   // `Default<X,V> | undefined`. In a non-distributive conditional context, `boolean extends true`
   // is `false`, but `true extends boolean` is `true` — correctly triggering the true branch.
   & {
-    [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultBrand<T[K]>
+    [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultField<T[K]>
       : T[K];
   }
   // Refinement: remove `?` from keys that carry the Default brand.
@@ -1994,7 +2062,7 @@ export type RequireDefaults<T> =
   // possibly-undefined in the pattern body despite being required.
   & {
     [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?:
-      StripDefaultBrand<Exclude<T[K], undefined>>;
+      StripDefaultField<Exclude<T[K], undefined>>;
   };
 
 // Internal-only way to instantiate internal modules
@@ -2084,6 +2152,29 @@ export declare const byRef: ByRefFunction;
 export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
 export declare const nonPrivateRandom: NonPrivateRandomFunction;
 export declare const safeDateNow: SafeDateNowFunction;
+
+export interface UiActionProps {
+  readonly as?: string;
+  readonly action: string;
+  readonly children?: RenderNode;
+}
+
+export interface UiPromptSlotProps {
+  readonly as?: string;
+  readonly surface: string;
+  readonly role: string;
+  readonly children?: RenderNode;
+}
+
+export interface UiDisclosureProps {
+  readonly as?: string;
+  readonly kind: string;
+  readonly children?: RenderNode;
+}
+
+export declare function UiAction(props: UiActionProps): JSXElement;
+export declare function UiPromptSlot(props: UiPromptSlotProps): JSXElement;
+export declare function UiDisclosure(props: UiDisclosureProps): JSXElement;
 
 /**
  * Get the entity ID from a cell or value.

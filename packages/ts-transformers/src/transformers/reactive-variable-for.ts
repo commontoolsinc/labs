@@ -21,6 +21,7 @@ import {
 
 type CausePathElement = string | number;
 type CausePath = readonly CausePathElement[];
+type ForCause = string | CausePath | { readonly stream: string | CausePath };
 
 const PATTERN_RESULT_CAUSE = "__patternResult";
 
@@ -800,11 +801,14 @@ function createForCall(
   cause: string | CausePath,
   context: TransformationContext,
 ): ts.Expression {
+  const stableCause: ForCause = shouldUseStreamCause(initializer, context)
+    ? { stream: cause }
+    : cause;
   const call = context.factory.createCallExpression(
     context.factory.createPropertyAccessExpression(initializer, "for"),
     undefined,
     [
-      createCauseExpression(cause, context),
+      createCauseExpression(stableCause, context),
       context.factory.createTrue(),
     ],
   );
@@ -816,11 +820,20 @@ function createForCall(
 }
 
 function createCauseExpression(
-  cause: string | CausePath,
+  cause: ForCause,
   context: TransformationContext,
 ): ts.Expression {
   if (typeof cause === "string") {
     return context.factory.createStringLiteral(cause);
+  }
+
+  if (isStreamCause(cause)) {
+    return context.factory.createObjectLiteralExpression([
+      context.factory.createPropertyAssignment(
+        "stream",
+        createCauseExpression(cause.stream, context),
+      ),
+    ], false);
   }
 
   if (cause.length === 1 && typeof cause[0] === "string") {
@@ -835,4 +848,53 @@ function createCauseExpression(
     ),
     false,
   );
+}
+
+function isStreamCause(
+  cause: ForCause,
+): cause is { readonly stream: string | CausePath } {
+  return typeof cause === "object" && cause !== null &&
+    !Array.isArray(cause) && "stream" in cause;
+}
+
+function shouldUseStreamCause(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const target = unwrapExpression(expression);
+  if (ts.isCallExpression(target)) {
+    const callKind = detectCallKind(target, context.checker);
+    if (
+      callKind?.kind === "builder" &&
+      (callKind.builderName === "handler" || callKind.builderName === "action")
+    ) {
+      return true;
+    }
+  }
+
+  const type = getTypeAtLocationWithFallback(
+    target,
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+  return isStreamLikeType(type, context.checker);
+}
+
+function isStreamLikeType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!type) return false;
+
+  const parts = type.isUnionOrIntersection() ? type.types : [type];
+  return parts.some((part) => {
+    const symbols = [
+      part.aliasSymbol,
+      part.getSymbol(),
+      checker.getApparentType(part).aliasSymbol,
+      checker.getApparentType(part).getSymbol(),
+    ];
+    return symbols.some((symbol) => symbol?.getName() === "Stream");
+  });
 }

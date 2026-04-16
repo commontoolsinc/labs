@@ -24,20 +24,20 @@ import GoogleAuthWork from "../google-auth-work.tsx";
 
 // Same selected scopes type as base GoogleAuth
 type SelectedScopes = {
-  gmail: Default<boolean, false>;
-  gmailSend: Default<boolean, false>;
-  gmailModify: Default<boolean, false>;
-  calendar: Default<boolean, false>;
-  calendarWrite: Default<boolean, false>;
-  drive: Default<boolean, false>;
-  docs: Default<boolean, false>;
-  contacts: Default<boolean, false>;
+  gmail: boolean | Default<false>;
+  gmailSend: boolean | Default<false>;
+  gmailModify: boolean | Default<false>;
+  calendar: boolean | Default<false>;
+  calendarWrite: boolean | Default<false>;
+  drive: boolean | Default<false>;
+  docs: boolean | Default<false>;
+  contacts: boolean | Default<false>;
 };
 
 interface Input {
-  selectedScopes: Default<
-    SelectedScopes,
-    {
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
       gmail: true;
       gmailSend: false;
       gmailModify: false;
@@ -46,11 +46,10 @@ interface Input {
       drive: false;
       docs: false;
       contacts: false;
-    }
-  >;
-  auth: Default<
-    Auth,
-    {
+    }>;
+  auth:
+    | Auth
+    | Default<{
       token: "";
       tokenType: "";
       scope: [];
@@ -58,8 +57,7 @@ interface Input {
       expiresAt: 0;
       refreshToken: "";
       user: { email: ""; name: ""; picture: "" };
-    }
-  >;
+    }>;
 }
 
 /** Google account switcher for choosing personal/work accounts. #googleAuthSwitcher */

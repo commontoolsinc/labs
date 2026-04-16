@@ -11,7 +11,32 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: name, params: {} }) => (<li>{__cfHelpers.derive({
+const __cfModuleCallback_1 = __cfHardenFn(({ element: x, params: { state } }) => (<li>Value: {__cfHelpers.derive({
+    type: "object",
+    properties: {
+        x: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                factor: {
+                    type: "number"
+                }
+            },
+            required: ["factor"]
+        }
+    },
+    required: ["x", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, {
+    x: x,
+    state: {
+        factor: state.factor
+    }
+}, ({ x, state }) => x * state.factor)}</li>));
+const __cfModuleCallback_2 = __cfHardenFn(({ element: name, params: {} }) => (<li>{__cfHelpers.derive({
     type: "object",
     properties: {
         name: {
@@ -162,138 +187,86 @@ export default pattern((state) => {
         {/* Filter then map */}
         <ul>
           {state.key("items").filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const x = __cf_pattern_input.key("element");
-            const state = __cf_pattern_input.key("params", "state");
-            return __cfHelpers.derive({
+                const x = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
+                return x > state.key("threshold");
+            }, {
                 type: "object",
                 properties: {
-                    x: {
+                    element: {
                         type: "number"
                     },
-                    state: {
+                    params: {
                         type: "object",
                         properties: {
-                            threshold: {
-                                type: "number"
+                            state: {
+                                type: "object",
+                                properties: {
+                                    threshold: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["threshold"]
                             }
                         },
-                        required: ["threshold"]
+                        required: ["state"]
                     }
                 },
-                required: ["x", "state"]
+                required: ["element", "params"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                x: x,
+            } as const satisfies __cfHelpers.JSONSchema), {
                 state: {
                     threshold: state.key("threshold")
                 }
-            }, ({ x, state }) => x > state.threshold).for("__patternResult", true);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                threshold: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["threshold"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema), {
-            state: {
-                threshold: state.key("threshold")
-            }
-        }).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const x = __cf_pattern_input.key("element");
-            const state = __cf_pattern_input.key("params", "state");
-            return (<li>Value: {__cfHelpers.derive({
+            }).mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
-                    x: {
+                    element: {
                         type: "number"
                     },
-                    state: {
+                    params: {
                         type: "object",
                         properties: {
-                            factor: {
-                                type: "number"
+                            state: {
+                                type: "object",
+                                properties: {
+                                    factor: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["factor"]
                             }
                         },
-                        required: ["factor"]
+                        required: ["state"]
                     }
                 },
-                required: ["x", "state"]
+                required: ["element", "params"]
             } as const satisfies __cfHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                x: x,
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __cfHelpers.JSONSchema), {
                 state: {
                     factor: state.key("factor")
                 }
-            }, ({ x, state }) => x * state.factor)}</li>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                factor: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["factor"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {
-            state: {
-                factor: state.key("factor")
-            }
-        })}
+            })}
         </ul>
 
         {/* Multiple filters */}
@@ -430,7 +403,7 @@ export default pattern((state) => {
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.key("names").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+          {state.key("names").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
                 type: "object",
                 properties: {
                     element: {
@@ -915,7 +888,7 @@ export default pattern((state) => {
                 words: state.key("words"),
                 separator: state.key("separator")
             } }, ({ state }) => state.words.join(state.separator).toUpperCase())}</p>
-      </div>)
+      </div>),
     };
 }, {
     type: "object",

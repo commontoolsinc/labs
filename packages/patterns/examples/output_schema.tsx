@@ -13,7 +13,7 @@ const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
 });
 
 interface Input {
-  value: Default<number, 0>;
+  value: number | Default<0>;
 }
 interface Output {
   value: number;

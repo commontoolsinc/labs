@@ -49,8 +49,8 @@ import {
 } from "commonfabric";
 
 interface State {
-  count: Default<number, 0>;
-  showButton: Default<boolean, true>;
+  count: number | Default<0>;
+  showButton: boolean | Default<true>;
 }
 
 const incrementHandler = handler<unknown, { count: Writable<number> }>(

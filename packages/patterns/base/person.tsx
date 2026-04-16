@@ -182,26 +182,24 @@ const removeSocialProfile = handler<
 
 interface Input {
   person: Writable<
-    Default<
-      Person,
-      {
-        firstName: "";
-        lastName: "";
-        middleName: "";
-        nickname: "";
-        prefix: "";
-        suffix: "";
-        pronouns: "";
-        birthday: { month: 0; day: 0; year: 0 };
-        photo: "";
-        email: "";
-        phone: "";
-        notes: "";
-        tags: [];
-        addresses: [];
-        socialProfiles: [];
-      }
-    >
+    | Person
+    | Default<{
+      firstName: "";
+      lastName: "";
+      middleName: "";
+      nickname: "";
+      prefix: "";
+      suffix: "";
+      pronouns: "";
+      birthday: { month: 0; day: 0; year: 0 };
+      photo: "";
+      email: "";
+      phone: "";
+      notes: "";
+      tags: [];
+      addresses: [];
+      socialProfiles: [];
+    }>
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
   sameAs?: Writable<ContactPiece[]>;

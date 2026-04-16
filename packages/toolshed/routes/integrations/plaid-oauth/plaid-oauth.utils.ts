@@ -19,7 +19,7 @@ export const PlaidAuthSchema = {
         properties: {
           accessToken: {
             type: "string",
-            ifc: { classification: ["secret"] },
+            ifc: { confidentiality: ["secret"] },
           },
           itemId: { type: "string" },
           institutionId: { type: "string" },

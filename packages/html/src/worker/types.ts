@@ -90,6 +90,23 @@ export interface ChildrenState {
 }
 
 /**
+ * Ambient CFC render policy while walking a VDOM subtree.
+ */
+export interface RenderPolicy {
+  /**
+   * Confidentiality atoms allowed to render in this subtree.
+   * Undefined means no render-time confidentiality bound is active.
+   */
+  maxConfidentiality?: readonly unknown[];
+
+  /**
+   * Confidentiality atoms this subtree may declassify before applying the max bound.
+   * This is a temporary low-level capability hook for trusted UI experiments.
+   */
+  declassifyConfidentiality: readonly unknown[];
+}
+
+/**
  * State tracked for each rendered node in the worker reconciler.
  * This is used to manage subscriptions and track DOM node IDs.
  */
@@ -117,6 +134,18 @@ export interface NodeState {
 
   /** Track child order to optimize inserts */
   childOrder: string[];
+
+  /** Ambient policy that applied to this node itself. */
+  renderPolicy: RenderPolicy;
+
+  /** Policy that should apply to this node's descendants. */
+  childRenderPolicy: RenderPolicy;
+
+  /** Whether this node's own render-policy boundary blocked its children. */
+  childrenBlockedByPolicy: boolean;
+
+  /** Original authored children, before any render-policy placeholder rewrite. */
+  sourceChildren?: WorkerVNode["children"];
 }
 
 /**
@@ -152,13 +181,17 @@ export interface ReconcileContext {
   nextNodeId: () => number;
 
   /** Register an event handler and get its ID */
-  registerHandler: (handler: (event: unknown) => void) => number;
+  registerHandler: (
+    handler: (event: unknown) => void,
+  ) => number;
 
   /** Unregister an event handler by ID */
   unregisterHandler: (handlerId: number) => void;
 
   /** Get handler by ID for event dispatch */
-  getHandler: (handlerId: number) => ((event: unknown) => void) | undefined;
+  getHandler: (
+    handlerId: number,
+  ) => ((event: unknown) => void) | undefined;
 
   /** Optional document for SSR or testing */
   document?: Document;

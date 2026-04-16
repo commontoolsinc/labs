@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ContextualFlowControl } from "../src/cfc.ts";
+import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
+import { schemaHasIfc } from "../src/schema.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 
@@ -27,6 +28,115 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
       $defs: { Test: { type: "array", items: { type: "string" } } },
     };
     expect(ContextualFlowControl.isTrueSchema(schema)).toBe(true);
+  });
+
+  it("carries nested property $defs while traversing through array item refs", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        argument: {
+          type: "object",
+          $defs: {
+            Item: {
+              type: "object",
+              properties: {
+                values: {
+                  type: "array",
+                  items: { type: "number" },
+                },
+              },
+            },
+          },
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/$defs/Item" },
+            },
+          },
+        },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["argument", "items", "0", "values"]))
+      .toEqual({
+        type: "array",
+        items: { type: "number" },
+        $defs: {
+          Item: {
+            type: "object",
+            properties: {
+              values: {
+                type: "array",
+                items: { type: "number" },
+              },
+            },
+          },
+        },
+      });
+  });
+});
+
+describe("ContextualFlowControl atom joins", () => {
+  it("preserves arbitrary confidentiality atoms instead of collapsing through fixed lattice levels", () => {
+    const cfc = new ContextualFlowControl();
+    const caveatAtom = cfcAtom.caveat("prompt-influence", "of:prompt-source");
+    const provenanceAtom = cfcAtom.resource(
+      "SourceProvenance",
+      "did:example:source",
+    );
+    const schema: JSONSchema = {
+      type: "object",
+      ifc: { confidentiality: [caveatAtom] },
+      properties: {
+        body: {
+          type: "string",
+          ifc: { confidentiality: [provenanceAtom] },
+        },
+      },
+    };
+
+    const joined = new Set<unknown>();
+    ContextualFlowControl.joinSchema(joined, schema);
+
+    expect(cfc.lub(joined)).toEqual([caveatAtom, provenanceAtom]);
+    expect(cfc.schemaAtPath(schema, ["body"])).toMatchObject({
+      type: "string",
+      ifc: {
+        confidentiality: [caveatAtom, provenanceAtom],
+      },
+    });
+  });
+});
+
+describe("schemaHasIfc", () => {
+  it("resolves nested $defs while scanning child schemas", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          $ref: "#/$defs/Nested",
+          $defs: {
+            Nested: {
+              type: "object",
+              properties: {
+                value: {
+                  $ref: "#/$defs/SecretValue",
+                },
+              },
+            },
+            SecretValue: {
+              type: "string",
+              ifc: {
+                confidentiality: [cfcAtom.resource("NestedSecret")],
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(schemaHasIfc(schema)).toBe(true);
   });
 });
 

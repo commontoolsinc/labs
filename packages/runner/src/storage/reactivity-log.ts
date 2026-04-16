@@ -17,6 +17,10 @@ const allowMutableTransactionReadMarker: unique symbol = Symbol(
   "allowMutableTransactionReadMarker",
 );
 
+const internalVerifierReadMarker: unique symbol = Symbol(
+  "internalVerifierReadMarker",
+);
+
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
@@ -29,6 +33,10 @@ export const allowMutableTransactionRead: Metadata = {
   [allowMutableTransactionReadMarker]: true,
 };
 
+export const internalVerifierRead: Metadata = {
+  [internalVerifierReadMarker]: true,
+};
+
 export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
   return meta?.[ignoreReadForSchedulingMarker] === true;
 }
@@ -39,6 +47,10 @@ export function isReadMarkedAsPotentialWrite(meta?: Metadata): boolean {
 
 export function isMutableTransactionReadAllowed(meta?: Metadata): boolean {
   return meta?.[allowMutableTransactionReadMarker] === true;
+}
+
+export function isInternalVerifierRead(meta?: Metadata): boolean {
+  return meta?.[internalVerifierReadMarker] === true;
 }
 
 export function reactivityLogFromActivities(

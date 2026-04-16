@@ -131,7 +131,10 @@ const goToCharm = handler({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
-        charm: true
+        charm: {
+            type: "unknown",
+            asCell: ["opaque"]
+        }
     },
     required: ["charm"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { charm }) => {
@@ -191,29 +194,9 @@ export default pattern(() => {
                 const index = __cf_pattern_input.key("index");
                 return (<li>
                 <cf-button onClick={goToCharm({ charm })}>
-                  Go to Charm {__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        }
-                    },
-                    required: ["index"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
+                  Go to Charm {index + 1}
                 </cf-button>
-                <span>Charm {__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        }
-                    },
-                    required: ["index"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
+                <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
@@ -221,7 +204,7 @@ export default pattern(() => {
                         charm: true
                     },
                     required: ["charm"]
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
+                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[__cfHelpers.NAME]), "Unnamed")}</span>
               </li>);
             }, {
                 type: "object",

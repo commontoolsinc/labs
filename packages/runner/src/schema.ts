@@ -1,6 +1,7 @@
 import { AnyCellWrapping } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Immutable, isRecord } from "@commonfabric/utils/types";
+import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
 import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
@@ -32,6 +33,7 @@ import {
   SchemaObjectTraverser,
 } from "@commonfabric/runner/traverse";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -89,6 +91,62 @@ export function resolveSchema(
   return isNontrivialSchema(resolvedSchema)
     ? toDeepFrozenSchema(resolvedSchema)
     : undefined;
+}
+
+export function schemaHasIfc(
+  schema: JSONSchema | undefined,
+  seen: Set<JSONSchema> = new Set(),
+  fullSchema: JSONSchema | undefined = schema,
+): boolean {
+  if (schema === undefined || typeof schema === "boolean") {
+    return false;
+  }
+  if (seen.has(schema)) {
+    return false;
+  }
+  seen.add(schema);
+
+  const schemaRoot = schema.$defs !== undefined ? schema : fullSchema ?? schema;
+  const resolved = typeof schema.$ref === "string"
+    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
+    : schema;
+  if (resolved === true || resolved === false || !isRecord(resolved)) {
+    return false;
+  }
+  const childFullSchema = resolved.$defs !== undefined ? resolved : fullSchema;
+  if (resolved.ifc !== undefined) {
+    return true;
+  }
+
+  const compound = [
+    ...(resolved.anyOf ?? []),
+    ...(resolved.oneOf ?? []),
+    ...(resolved.allOf ?? []),
+  ];
+  if (compound.some((item) => schemaHasIfc(item, seen, childFullSchema))) {
+    return true;
+  }
+  if (
+    resolved.properties !== undefined &&
+    Object.values(resolved.properties).some((item) =>
+      schemaHasIfc(item, seen, childFullSchema)
+    )
+  ) {
+    return true;
+  }
+  if (
+    typeof resolved.additionalProperties === "object" &&
+    schemaHasIfc(resolved.additionalProperties, seen, childFullSchema)
+  ) {
+    return true;
+  }
+  if (
+    typeof resolved.items === "object" &&
+    schemaHasIfc(resolved.items, seen, childFullSchema)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
@@ -189,7 +247,10 @@ export function processDefaultValue(
         const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
         const propSchema =
           (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
-            ? ContextualFlowControl.resolveSchemaRefs(rawPropSchema)
+            ? ContextualFlowControl.resolveSchemaRefs(
+              rawPropSchema,
+              resolvedSchema,
+            )
             : rawPropSchema;
         if (key in defaultValue) {
           result[key] = processDefaultValue(
@@ -422,6 +483,12 @@ export function validateAndTransform(
       : resolvedSchema
     : resolvedLinkSchema;
   const filteredSchema = filterAsCell(effectiveSchema);
+  if (
+    schemaHasIfc(effectiveSchema) ||
+    storedCfcMetadataAppliesToPath(tx, resolvedLink)
+  ) {
+    tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
+  }
 
   // Unlike the original, we have kept the asCell markers in the schema
   link = {
@@ -483,7 +550,9 @@ export function validateAndTransform(
   };
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
-  const value = tx.readOrThrow(address, { meta: ignoreReadForScheduling });
+  const value = tx.readOrThrow(address, {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  });
   const doc = { address, value: value };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {

@@ -91,7 +91,8 @@ export default pattern(() => {
             type: "object",
             properties: {
                 argumentSchema: true,
-                resultSchema: true
+                resultSchema: true,
+                internalSchema: true
             },
             required: ["argumentSchema", "resultSchema"]
         }

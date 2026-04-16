@@ -330,6 +330,7 @@ export class DomApplicator {
 
     // Remove existing listener for this event type
     this.removeEvent(nodeId, eventType);
+    this.removeEventForNode(node, eventType);
 
     // Create new listener
     const listener: EventListener = (event: Event) => {
@@ -353,6 +354,22 @@ export class DomApplicator {
 
     // Add to DOM
     (node as EventTarget).addEventListener(eventType, listener);
+  }
+
+  private removeEventForNode(node: Node, eventType: string): void {
+    for (const [trackedNodeId, listeners] of this.eventListeners) {
+      const trackedNode = this.nodes.get(trackedNodeId);
+      if (trackedNode !== node) continue;
+
+      const listener = listeners.get(eventType);
+      if (!listener) continue;
+
+      (node as EventTarget).removeEventListener(eventType, listener);
+      listeners.delete(eventType);
+      if (listeners.size === 0) {
+        this.eventListeners.delete(trackedNodeId);
+      }
+    }
   }
 
   private removeEvent(nodeId: number, eventType: string): void {
@@ -379,6 +396,29 @@ export class DomApplicator {
     // Set the CellHandle on the element's property
     // Custom elements like cf-input and cf-checkbox expect this
     (node as any)[propName] = cellHandle;
+    this.notifyBoundProperty(node, propName);
+  }
+
+  private notifyBoundProperty(
+    node: HTMLElement,
+    propName: string,
+  ): void {
+    const element = node as HTMLElement & {
+      requestUpdate?: (name?: PropertyKey, oldValue?: unknown) => void;
+    };
+
+    if (typeof element.requestUpdate === "function") {
+      element.requestUpdate(propName, undefined);
+      return;
+    }
+
+    const tagName = element.localName ?? element.tagName?.toLowerCase();
+    if (!tagName || !tagName.includes("-")) {
+      return;
+    }
+    void globalThis.customElements?.whenDefined(tagName).then(() => {
+      element.requestUpdate?.(propName, undefined);
+    });
   }
 
   private insertChild(

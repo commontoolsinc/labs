@@ -14,7 +14,9 @@ const sha256Funcs = [
 ] as const;
 
 beforeAll(async () => {
-  await initWasm();
+  if (!await initWasm()) {
+    throw new Error("`sha256-wasm not available!");
+  }
 });
 
 describe("sha256()", () => {
@@ -25,11 +27,7 @@ describe("sha256()", () => {
 });
 
 for (const shaFunc of sha256Funcs) {
-  // Tweak the name for `sha256Noble` because the actual function is a
-  // re-`export`.
-  const funcName = (shaFunc === sha256Noble) ? "sha256Noble" : shaFunc.name;
-
-  describe(`${funcName}()`, () => {
+  describe(`${shaFunc.name}()`, () => {
     let i = 1;
     for (const { bytes, sha256: hashStr } of FIXTURES) {
       const hashMsg = `${hashStr.slice(0, 8)}...`;

@@ -144,61 +144,64 @@ export interface PendingSubmission {
 
 export interface GmailAgenticSearchInput {
   // Agent configuration - the main prompt/goal (can be reactive Cell)
-  agentGoal?: Default<string, "">;
+  agentGoal?: string | Default<"">;
 
   // Additional system context
-  systemPrompt?: Default<string, "">;
+  systemPrompt?: string | Default<"">;
 
   // Suggested queries for the agent to try
-  suggestedQueries?: Default<string[], []>;
+  suggestedQueries?: string[] | Default<[]>;
 
   // JSON schema for agent's structured output
-  resultSchema?: Default<object, Record<string, never>>;
+  resultSchema?: object | Default<Record<string, never>>;
 
   // Account type for multi-account support
   // "default" = any #googleAuth, "personal" = #googleAuthPersonal, "work" = #googleAuthWork
-  accountType?: Default<"default" | "personal" | "work", "default">;
+  accountType?: "default" | "personal" | "work" | Default<"default">;
 
   // Additional tools beyond searchGmail
-  additionalTools?: Default<
-    Record<string, ToolDefinition>,
-    Record<string, never>
-  >;
+  additionalTools?:
+    | Record<string, ToolDefinition>
+    | Default<Record<string, never>>;
 
   // UI customization
-  title?: Default<string, "Gmail Agentic Search">;
-  scanButtonLabel?: Default<string, "Scan">;
+  title?: string | Default<"Gmail Agentic Search">;
+  scanButtonLabel?: string | Default<"Scan">;
 
   // Limits
-  maxSearches?: Default<number, 0>; // 0 = unlimited
+  maxSearches?: number | Default<0>; // 0 = unlimited
 
   // State persistence
-  isScanning?: Default<boolean, false>;
-  lastScanAt?: Default<number, 0>;
+  isScanning?: boolean | Default<false>;
+  lastScanAt?: number | Default<0>;
 
   // Progress state - can be passed in for parent pattern coordination
-  searchProgress?: Default<SearchProgress, {
-    currentQuery: "";
-    completedQueries: [];
-    status: "idle";
-    searchCount: 0;
-  }>;
+  searchProgress?:
+    | SearchProgress
+    | Default<{
+      currentQuery: "";
+      completedQueries: [];
+      status: "idle";
+      searchCount: 0;
+    }>;
 
   // Debug log - tracks agent activity for debugging
-  debugLog?: Default<DebugLogEntry[], []>;
+  debugLog?: DebugLogEntry[] | Default<[]>;
 
   // WORKAROUND (CT-1085): Accept auth as direct input since favorites don't persist.
   // Users can manually link gmail-auth's auth output to this input.
   // If provided, this takes precedence over wish-based auth.
-  auth?: Default<Auth, {
-    token: "";
-    tokenType: "";
-    scope: [];
-    expiresIn: 0;
-    expiresAt: 0;
-    refreshToken: "";
-    user: { email: ""; name: ""; picture: "" };
-  }>;
+  auth?:
+    | Auth
+    | Default<{
+      token: "";
+      tokenType: "";
+      scope: [];
+      expiresIn: 0;
+      expiresAt: 0;
+      refreshToken: "";
+      user: { email: ""; name: ""; picture: "" };
+    }>;
 
   // ========================================================================
   // SHARED SEARCH STRINGS SUPPORT
@@ -206,25 +209,25 @@ export interface GmailAgenticSearchInput {
 
   // GitHub raw URL to identify this agent type for community query sharing
   // Example: "https://raw.githubusercontent.com/anthropics/community-patterns/main/patterns/jkomoros/hotel-membership-gmail-agent.tsx"
-  agentTypeUrl?: Default<string, "">;
+  agentTypeUrl?: string | Default<"">;
 
   // Local queries saved by this agent instance
-  localQueries?: Default<LocalQuery[], []>;
+  localQueries?: LocalQuery[] | Default<[]>;
 
   // Queries pending user review before community submission
-  pendingSubmissions?: Default<PendingSubmission[], []>;
+  pendingSubmissions?: PendingSubmission[] | Default<[]>;
 
   // Whether to fetch and use community queries (requires registry setup)
-  enableCommunityQueries?: Default<boolean, true>;
+  enableCommunityQueries?: boolean | Default<true>;
 
   // When true, only show queries in "My Saved Queries" that have found target items
   // (via itemFoundSignal). Default false shows all queries that found emails.
-  onlySaveQueriesWithItems?: Default<boolean, false>;
+  onlySaveQueriesWithItems?: boolean | Default<false>;
 
   // Optional signal cell for consuming patterns to indicate "found an item"
   // When this value increases, marks the most recent query as having found items
   // Create with Writable.of<number>(0) and pass in - both patterns share the same cell
-  itemFoundSignal?: Default<number, 0>;
+  itemFoundSignal?: number | Default<0>;
 }
 
 /** Reusable Gmail agentic search base pattern. #gmailAgenticSearch */
@@ -285,7 +288,7 @@ export interface GmailAgenticSearchOutput {
 
   // Cell that consuming patterns can increment to signal "found an item"
   // When this value increases, the base pattern marks the most recent query as having found items
-  // Note: This is an input cell (Default<number, 0>) exposed for external access
+  // Note: This is an input cell (number | Default<0>) exposed for external access
   itemFoundSignal: number;
 }
 
@@ -370,8 +373,8 @@ const setAccountTypeHandler = handler<
 const stopScanHandler = handler<
   unknown,
   {
-    lastScanAt: Writable<Default<number, 0>>;
-    isScanning: Writable<Default<boolean, false>>;
+    lastScanAt: Writable<number | Default<0>>;
+    isScanning: Writable<boolean | Default<false>>;
   }
 >((_, state) => {
   state.lastScanAt.set(safeDateNow());
@@ -385,8 +388,8 @@ const stopScanHandler = handler<
 const completeScanHandler = handler<
   unknown,
   {
-    lastScanAt: Writable<Default<number, 0>>;
-    isScanning: Writable<Default<boolean, false>>;
+    lastScanAt: Writable<number | Default<0>>;
+    isScanning: Writable<boolean | Default<false>>;
   }
 >((_, state) => {
   state.lastScanAt.set(safeDateNow());
@@ -433,7 +436,7 @@ const searchGmailHandler = handler<
     // Stream<T> in signature lets framework unwrap opaque stream from wished pieces
     authRefreshStream: RefreshStreamType | null;
     progress: Writable<SearchProgress>;
-    maxSearches: Writable<Default<number, 0>>;
+    maxSearches: Writable<number | Default<0>>;
     debugLog: Writable<DebugLogEntry[]>;
     localQueries: Writable<LocalQuery[]>;
     communityQueryRefs: Writable<CommunityQueryRef[]>;
@@ -726,7 +729,7 @@ const searchGmailHandler = handler<
 const startScanHandler = handler<
   unknown,
   {
-    isScanning: Writable<Default<boolean, false>>;
+    isScanning: Writable<boolean | Default<false>>;
     isAuthenticated: Writable<boolean>;
     progress: Writable<SearchProgress>;
     auth: Writable<Auth>;
@@ -1024,7 +1027,7 @@ const GmailAgenticSearch = pattern<
     // ========================================================================
     // Use input cells directly - Default<> types handle writability and defaults.
     // Cannot call .get() on input cells at build time (causes "space is required" error).
-    // Input cells from Default<T[], D> are OpaqueCell types that have writable methods at runtime.
+    // Input cells from T[] | Default<D> are OpaqueCell types that have writable methods at runtime.
     // Use 'any' to avoid double-casting (as unknown as) which is disallowed by the compiler.
     // See: patterns/jkomoros/util/agentic-tools.ts for similar pattern
     const localQueries: any = localQueriesInput;
@@ -1033,7 +1036,7 @@ const GmailAgenticSearch = pattern<
     // ========================================================================
     // QUERY TRACKING (for foundItems feature)
     // ========================================================================
-    // Use the input signal cell directly - Default<number, 0> provides the default
+    // Use the input signal cell directly - number | Default<0> provides the default
     // This follows the "share cells by making them inputs" pattern
     // See: community-docs/superstitions/2025-12-04-share-cells-between-composed-patterns.md
     const itemFoundSignal = itemFoundSignalInput;
@@ -1186,7 +1189,7 @@ const GmailAgenticSearch = pattern<
     const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
     const hasGmailScope = derive(auth, (a: Auth) => {
-      const scopes = a?.scope || [];
+      const scopes = (a?.scope || []) as string[];
       return scopes.includes(GMAIL_SCOPE);
     });
 

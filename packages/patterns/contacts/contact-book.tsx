@@ -27,12 +27,12 @@ export const matchesSearch = (contact: Contact, query: string): boolean => {
 interface Relationship {
   fromName: string;
   toName: string;
-  label: Default<string, "">;
+  label: string | Default<"">;
 }
 
 interface ContactBookInput {
-  contacts: Writable<Default<Contact[], []>>;
-  relationships: Writable<Default<Relationship[], []>>;
+  contacts: Writable<Contact[] | Default<[]>>;
+  relationships: Writable<Relationship[] | Default<[]>>;
 }
 
 interface ContactBookOutput {

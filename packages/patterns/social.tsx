@@ -50,11 +50,11 @@ type SocialPlatform =
 
 export interface SocialModuleInput {
   /** Social platform (normalize: Insta→instagram, X→twitter) */
-  platform: Default<SocialPlatform | "", "">;
+  platform: SocialPlatform | "" | Default<"">;
   /** Username/handle without @ prefix */
-  handle: Default<string, "">;
+  handle: string | Default<"">;
   /** Profile URL */
-  profileUrl: Default<string, "">;
+  profileUrl: string | Default<"">;
 }
 
 // ===== Constants =====
