@@ -24,7 +24,7 @@ import {
   initWasm,
   sha256Wasm,
 } from "../src/sha256-wasm.ts";
-import type { IncrementalHasher, DigestFn } from "../src/interface.ts";
+import type { DigestFn, IncrementalHasher } from "../src/interface.ts";
 import { FIXTURES } from "../test/fixtures.ts";
 
 await initWasm();

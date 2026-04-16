@@ -9,12 +9,12 @@
  * 3. `@noble/hashes` (fallback) -- pure JS
  */
 
-import type { IncrementalHasher, DigestFn } from "./interface.ts";
+import type { DigestFn, IncrementalHasher } from "./interface.ts";
 import { canUseDeno, createHasherDeno, sha256Deno } from "./sha256-deno.ts";
 import { createHasherNoble, sha256Noble } from "./sha256-noble.ts";
 import { createHasherWasm, initWasm, sha256Wasm } from "./sha256-wasm.ts";
 
-export type { IncrementalHasher, DigestFn } from "./interface.ts";
+export type { DigestFn, IncrementalHasher } from "./interface.ts";
 
 let sha256: DigestFn;
 let createHasher: () => IncrementalHasher;

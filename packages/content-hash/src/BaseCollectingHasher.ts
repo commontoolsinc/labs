@@ -16,8 +16,7 @@ const CHUNK_SIZE_USUAL = 65536;
  * an array of chunks, for processing all at once when `digest()` is ultimately
  * called.
  */
-export abstract class BaseCollectingHasher
-  extends BaseIncrementalHasher {
+export abstract class BaseCollectingHasher extends BaseIncrementalHasher {
   /** Finalized chunks. */
   #chunks: Uint8Array[] = [];
 
@@ -60,9 +59,9 @@ export abstract class BaseCollectingHasher
   }
 
   /**
-    * Arranges for there to be a `currentChunk` with enough room for the
-    * indicated amount of data.
-    */
+   * Arranges for there to be a `currentChunk` with enough room for the
+   * indicated amount of data.
+   */
   #prepChunk(length: number) {
     const current = this.#currentChunk;
     const offset = this.#currentOffset;
