@@ -81,6 +81,39 @@ describe("Schema: Default in unions", () => {
     });
   });
 
+  it("does not treat same-name imported aliases as circular", async () => {
+    const { type, checker } = await getTypeFromFiles(
+      {
+        "/base.ts": `
+        export interface Default<T, V extends T = T> {}
+        export type WithDefault = string | Default<"">;
+      `,
+        "/wrapper.ts": `
+        import type { WithDefault as ImportedWithDefault } from "./base.ts";
+        export type WithDefault = ImportedWithDefault;
+      `,
+        "/main.ts": `
+        import type { WithDefault } from "./wrapper.ts";
+        export interface X {
+          title: WithDefault;
+        }
+      `,
+      },
+      "/main.ts",
+      "X",
+    );
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const title = result.properties?.title as any;
+    expect(title.$ref).toBe("#/$defs/WithDefault");
+    expect((result as any).$defs?.WithDefault).toEqual({
+      type: "string",
+      default: "",
+    });
+  });
+
   it("applies null defaults from T | Default<null>", async () => {
     const code = `
       interface Default<T, V extends T = T> {}
