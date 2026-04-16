@@ -1,10 +1,4 @@
-import { ifElse, NAME, pattern, UI, type VNode, Writable } from "commonfabric";
-
-import {
-  Controls,
-  SelectControl,
-  SwitchControl,
-} from "../ui/controls/index.ts";
+import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
 // deno-lint-ignore no-empty-interface
 interface TabBarStoryInput {}
@@ -15,97 +9,111 @@ interface TabBarStoryOutput {
 }
 
 export default pattern<TabBarStoryInput, TabBarStoryOutput>(() => {
-  const activeTab = Writable.of("home");
-  const position = Writable.of<"bottom" | "top">("bottom");
-  const variant = Writable.of<"default" | "inset">("default");
-  const showAction = Writable.of(false);
+  const activeTab1 = Writable.of("home");
+  const activeTab2 = Writable.of("home");
+  const activeTab3 = Writable.of("home");
+
+  const items = (
+    <>
+      <cf-tab-bar-item value="home" label="Home">
+        <span slot="icon">&#127968;</span>
+      </cf-tab-bar-item>
+      <cf-tab-bar-item value="explore" label="Explore">
+        <span slot="icon">&#128269;</span>
+      </cf-tab-bar-item>
+      <cf-tab-bar-item value="inbox" label="Inbox">
+        <span slot="icon">&#128236;</span>
+      </cf-tab-bar-item>
+      <cf-tab-bar-item value="profile" label="Profile">
+        <span slot="icon">&#128100;</span>
+      </cf-tab-bar-item>
+    </>
+  );
 
   return {
     [NAME]: "cf-tab-bar Story",
     [UI]: (
-      <div
-        style={{
-          position: "relative",
-          height: "300px",
-          background: "#f8fafc",
-          border: "1px solid #e2e8f0",
-          borderRadius: "8px",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            padding: "1rem",
-            fontSize: "14px",
-            color: "#374151",
-          }}
-        >
-          Selected tab: <strong>{activeTab}</strong>
-        </div>
-
-        <cf-tab-bar
-          $value={activeTab}
-          position={position}
-          variant={variant}
-          style="position: absolute;"
-        >
-          <cf-tab-bar-item value="home" label="Home">
-            <span slot="icon">&#127968;</span>
-          </cf-tab-bar-item>
-          <cf-tab-bar-item value="explore" label="Explore">
-            <span slot="icon">&#128269;</span>
-          </cf-tab-bar-item>
-          <cf-tab-bar-item value="inbox" label="Inbox">
-            <span slot="icon">&#128236;</span>
-          </cf-tab-bar-item>
-          <cf-tab-bar-item value="profile" label="Profile">
-            <span slot="icon">&#128100;</span>
-          </cf-tab-bar-item>
-          {ifElse(
-            showAction,
-            <cf-button
-              slot="action"
-              variant="primary"
-              style="border-radius: 9999px; width: 3.5rem; height: 3.5rem; padding: 0; flex-shrink: 0;"
+      <cf-vstack gap="6" style="padding: 1rem;">
+        <cf-vstack gap="2">
+          <cf-heading level={5}>Default variant</cf-heading>
+          <span style="font-size: 13px; color: #6b7280;">
+            Full-width bar with top border, anchored to edge.
+          </span>
+          <div
+            style={{
+              position: "relative",
+              height: "120px",
+              background: "#f0f4f8",
+              borderRadius: "8px",
+              overflow: "hidden",
+            }}
+          >
+            <cf-tab-bar
+              $value={activeTab1}
+              variant="default"
+              style="position: absolute;"
             >
-              &#65291;
-            </cf-button>,
-            null,
-          )}
-        </cf-tab-bar>
-      </div>
+              {items}
+            </cf-tab-bar>
+          </div>
+        </cf-vstack>
+
+        <cf-vstack gap="2">
+          <cf-heading level={5}>Inset variant</cf-heading>
+          <span style="font-size: 13px; color: #6b7280;">
+            Floating pill, content-sized, centered.
+          </span>
+          <div
+            style={{
+              position: "relative",
+              height: "120px",
+              background: "#f0f4f8",
+              borderRadius: "8px",
+              overflow: "hidden",
+            }}
+          >
+            <cf-tab-bar
+              $value={activeTab2}
+              variant="inset"
+              style="position: absolute;"
+            >
+              {items}
+            </cf-tab-bar>
+          </div>
+        </cf-vstack>
+
+        <cf-vstack gap="2">
+          <cf-heading level={5}>Inset variant with action (FAB)</cf-heading>
+          <span style="font-size: 13px; color: #6b7280;">
+            Floating pill with primary action button beside it.
+          </span>
+          <div
+            style={{
+              position: "relative",
+              height: "120px",
+              background: "#f0f4f8",
+              borderRadius: "8px",
+              overflow: "hidden",
+            }}
+          >
+            <cf-tab-bar
+              $value={activeTab3}
+              variant="inset"
+              style="position: absolute;"
+            >
+              {items}
+              <cf-button
+                slot="action"
+                variant="primary"
+                style="border-radius: var(--cf-border-radius-xl, 0.75rem); width: 3.5rem; height: 100%; padding: 0; flex-shrink: 0;"
+              >
+                &#65291;
+              </cf-button>
+            </cf-tab-bar>
+          </div>
+        </cf-vstack>
+      </cf-vstack>
     ),
-    controls: (
-      <Controls>
-        <>
-          <SelectControl
-            label="position"
-            description="Whether the bar is fixed to the bottom or top of the viewport"
-            defaultValue="bottom"
-            value={position}
-            items={[
-              { label: "Bottom", value: "bottom" },
-              { label: "Top", value: "top" },
-            ]}
-          />
-          <SelectControl
-            label="variant"
-            description="Layout style: full-width or inset pill shape"
-            defaultValue="default"
-            value={variant}
-            items={[
-              { label: "Default", value: "default" },
-              { label: "Inset", value: "inset" },
-            ]}
-          />
-          <SwitchControl
-            label="showAction"
-            description="Show a primary action button (FAB) in the action slot beside the nav pill"
-            defaultValue="false"
-            checked={showAction}
-          />
-        </>
-      </Controls>
-    ),
+    controls: <></>,
   };
 });
