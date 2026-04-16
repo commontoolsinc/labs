@@ -137,6 +137,10 @@ export class CFTabBar extends BaseElement {
             padding-bottom: 0;
           }
 
+          :host([variant="inset"][position="top"]) .container {
+            padding-top: 0;
+          }
+
           :host([variant="inset"]) .bar {
             flex: 0 1 auto;
             border-radius: var(
@@ -359,7 +363,12 @@ export class CFTabBar extends BaseElement {
         const nextItem = enabledItems[nextIndex];
         if (nextItem) {
           nextItem.focus();
-          nextItem.click();
+          const button = nextItem.button;
+          if (button) {
+            button.click();
+          } else {
+            nextItem.click();
+          }
         }
       };
 

@@ -137,7 +137,7 @@ export class CFToastProvider extends BaseElement {
       childList: true,
       attributes: true,
       attributeFilter: ["open"],
-      subtree: false,
+      subtree: true,
     });
     this._updateStack();
   }

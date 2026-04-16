@@ -220,6 +220,10 @@ export class CFToast extends BaseElement {
       }
       this._prevOpen = this.open;
     }
+
+    if (changedProperties.has("duration") && this.open) {
+      this._startTimer();
+    }
   }
 
   private _updateAria(): void {

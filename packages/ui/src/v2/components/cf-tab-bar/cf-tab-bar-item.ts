@@ -136,7 +136,9 @@ export class CFTabBarItem extends BaseElement {
     override render() {
       return html`
         <button
+          type="button"
           class="item"
+          ?disabled=${this.disabled}
           part="item"
           data-selected="${this.selected}"
           @click="${this._handleClick}"

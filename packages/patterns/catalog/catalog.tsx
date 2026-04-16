@@ -180,7 +180,7 @@ export default pattern<CatalogInput, CatalogOutput>(
       [UI]: (
         <cf-screen>
           <div style={styles.root}>
-            {sidebarOpen
+            {sidebarOpen.get()
               ? (
                 <Sidebar
                   selected={selected}
