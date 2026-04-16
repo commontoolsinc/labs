@@ -13,6 +13,7 @@ export interface HarnessRunState {
   createdAt: string;
   updatedAt: string;
   cfcEnforcementMode: CfcEnforcementMode;
+  model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
   toolOutputs: ToolResultRef[];
@@ -22,6 +23,7 @@ export interface CreateHarnessRunStateOptions {
   runId?: string;
   status?: HarnessRunStatus;
   cfcEnforcementMode: CfcEnforcementMode;
+  model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
   now?: string;
@@ -37,6 +39,7 @@ export const createHarnessRunState = (
     createdAt: now,
     updatedAt: now,
     cfcEnforcementMode: options.cfcEnforcementMode,
+    ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
       : {}),

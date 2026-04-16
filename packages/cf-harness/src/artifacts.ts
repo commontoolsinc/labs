@@ -1,5 +1,5 @@
 import { ensureDir } from "@std/fs";
-import { join } from "@std/path";
+import { basename, dirname, join } from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
@@ -85,3 +85,52 @@ export const readHarnessTranscript = async (
   path: string,
 ): Promise<HarnessTranscriptMessage[]> =>
   JSON.parse(await Deno.readTextFile(path)) as HarnessTranscriptMessage[];
+
+export interface HarnessRunArtifacts {
+  runRoot: string;
+  runStatePath: string;
+  transcriptPath?: string;
+  runState: HarnessRunState;
+  transcript?: HarnessTranscriptMessage[];
+}
+
+export const resolveHarnessRunPaths = (
+  input: string,
+): {
+  runRoot: string;
+  runStatePath: string;
+  transcriptPath: string;
+} => {
+  const runStatePath = basename(input) === "run-state.json"
+    ? input
+    : join(input, "run-state.json");
+  const runRoot = dirname(runStatePath);
+  return {
+    runRoot,
+    runStatePath,
+    transcriptPath: join(runRoot, "transcript.json"),
+  };
+};
+
+export const readHarnessRunArtifacts = async (
+  input: string,
+): Promise<HarnessRunArtifacts> => {
+  const paths = resolveHarnessRunPaths(input);
+  const runState = await readHarnessRunState(paths.runStatePath);
+  const transcriptPath = runState.transcriptPath ?? paths.transcriptPath;
+  let transcript: HarnessTranscriptMessage[] | undefined;
+  try {
+    transcript = await readHarnessTranscript(transcriptPath);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
+    }
+  }
+  return {
+    runRoot: paths.runRoot,
+    runStatePath: paths.runStatePath,
+    ...(transcript !== undefined ? { transcriptPath } : {}),
+    runState,
+    ...(transcript !== undefined ? { transcript } : {}),
+  };
+};

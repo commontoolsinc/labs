@@ -245,3 +245,78 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
   );
   assertEquals(loop.engine.getRunState().status, "failed");
 });
+
+Deno.test("CfHarnessPromptLoop can resume from a persisted transcript", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-resume",
+      model: "gpt-5.4",
+    }),
+    fetchFn: async (_input, init) => {
+      fetchCalls.push(init ?? {});
+      return new Response(
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Resumed summary.",
+            },
+          }],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  const result = await loop.runTranscript({
+    transcript: [
+      { role: "user", content: "Read the file." },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-1",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: JSON.stringify({ path: "notes/todo.txt" }),
+          },
+        }],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-1",
+        toolName: "read_file",
+        content: JSON.stringify({
+          outputId: createToolOutputId("run-resume", "read_file", 1),
+          path: "/workspace/notes/todo.txt",
+          content: "hello from file",
+        }),
+        resultRef: {
+          type: "cf-harness.tool-result-ref",
+          outputId: createToolOutputId("run-resume", "read_file", 1),
+          toolId: "read_file",
+          runId: "run-resume",
+        },
+      },
+    ],
+  });
+
+  assertEquals(result.finalAssistantText, "Resumed summary.");
+  assertEquals(result.modelTurns, 1);
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    messages: Array<{ role: string; tool_call_id?: string; content: string }>;
+  };
+  assertEquals(request.messages.at(-1), {
+    role: "tool",
+    tool_call_id: "call-1",
+    content: JSON.stringify({
+      outputId: createToolOutputId("run-resume", "read_file", 1),
+      path: "/workspace/notes/todo.txt",
+      content: "hello from file",
+    }),
+  });
+});

@@ -1,7 +1,12 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { join, resolve } from "@std/path";
+import { dirname, join, resolve } from "@std/path";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import { DEFAULT_GATEWAY_BASE_URL, parseCfcEnforcementMode } from "./config.ts";
+import {
+  readHarnessRunArtifacts,
+  resolveHarnessRunPaths,
+} from "./artifacts.ts";
+import { CfHarnessEngine } from "./engine.ts";
 import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
@@ -14,9 +19,10 @@ const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 
 export interface CfHarnessCliConfig {
   workspace: string;
-  prompt: string;
+  prompt?: string;
+  resumeRun?: string;
   systemPrompt?: string;
-  model: string;
+  model?: string;
   gatewayBaseUrl: string;
   artifactRoot: string;
   cfcEnforcementModeOverride?: CfcEnforcementMode;
@@ -35,9 +41,10 @@ export interface RunCfHarnessCliDependencies {
   env?: Record<string, string | undefined>;
   io?: CfHarnessCliIO;
   readTextFile?: (path: string) => Promise<string>;
+  readRunArtifacts?: typeof readHarnessRunArtifacts;
   createPromptLoop?: (
     options: CreateHarnessPromptLoopOptions,
-  ) => Pick<CfHarnessPromptLoop, "runPrompt">;
+  ) => Pick<CfHarnessPromptLoop, "runPrompt" | "runTranscript">;
 }
 
 const defaultCliIo = (): CfHarnessCliIO => ({
@@ -51,6 +58,7 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --prompt <text>               Prompt text to run
   --prompt-file <path>          Read prompt text from a file
+  --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --gateway-base-url <url>      OpenAI-compatible gateway URL
@@ -78,15 +86,19 @@ const parsePositiveInteger = (
 const resolvePrompt = async (
   args: ReturnType<typeof parseArgs>,
   readTextFile: (path: string) => Promise<string>,
-): Promise<string> => {
+): Promise<string | undefined> => {
   const promptFlag = typeof args.prompt === "string" ? args.prompt : undefined;
   const promptFile = typeof args["prompt-file"] === "string"
     ? args["prompt-file"]
+    : undefined;
+  const resumeRun = typeof args["resume-run"] === "string"
+    ? args["resume-run"]
     : undefined;
   const positionalPrompt = args._.length > 0
     ? args._.map(String).join(" ").trim()
     : undefined;
   const promptSources = [
+    resumeRun !== undefined ? "resume-run" : undefined,
     promptFlag !== undefined ? "prompt" : undefined,
     promptFile !== undefined ? "prompt-file" : undefined,
     positionalPrompt !== undefined && positionalPrompt.length > 0
@@ -95,13 +107,16 @@ const resolvePrompt = async (
   ].filter((value): value is string => value !== undefined);
   if (promptSources.length === 0) {
     throw new Error(
-      "a prompt is required via --prompt, --prompt-file, or positional text",
+      "a prompt is required via --prompt, --prompt-file, positional text, or --resume-run",
     );
   }
   if (promptSources.length > 1) {
     throw new Error(
-      "provide prompt input using only one of --prompt, --prompt-file, or positional text",
+      "provide input using only one of --prompt, --prompt-file, positional text, or --resume-run",
     );
+  }
+  if (resumeRun !== undefined) {
+    return undefined;
   }
   if (promptFlag !== undefined) {
     return promptFlag;
@@ -122,6 +137,7 @@ export const parseCfHarnessCliArgs = async (
       "prompt",
       "prompt-file",
       "system-prompt",
+      "resume-run",
       "model",
       "gateway-base-url",
       "artifact-root",
@@ -145,9 +161,14 @@ export const parseCfHarnessCliArgs = async (
   const workspace = resolve(
     typeof args.workspace === "string" ? args.workspace : cwd,
   );
+  const resumeRun = typeof args["resume-run"] === "string"
+    ? resolve(args["resume-run"])
+    : undefined;
   const artifactRoot = resolve(
     typeof args["artifact-root"] === "string"
       ? args["artifact-root"]
+      : resumeRun !== undefined
+      ? dirname(resolveHarnessRunPaths(resumeRun).runRoot)
       : join(workspace, DEFAULT_ARTIFACT_DIRNAME),
   );
   const gatewayBaseUrl = typeof args["gateway-base-url"] === "string"
@@ -175,11 +196,16 @@ export const parseCfHarnessCliArgs = async (
     };
   return {
     workspace,
-    prompt,
+    ...(prompt !== undefined ? { prompt } : {}),
+    ...(resumeRun !== undefined ? { resumeRun } : {}),
     ...(typeof args["system-prompt"] === "string"
       ? { systemPrompt: args["system-prompt"] }
       : {}),
-    model: typeof args.model === "string" ? args.model : DEFAULT_MODEL,
+    ...(typeof args.model === "string"
+      ? { model: args.model }
+      : resumeRun === undefined
+      ? { model: DEFAULT_MODEL }
+      : {}),
     gatewayBaseUrl,
     artifactRoot,
     ...(cfcEnforcementModeOverride !== undefined
@@ -233,23 +259,51 @@ export const runCfHarnessCli = async (
     const createPromptLoop = deps.createPromptLoop ??
       ((options: CreateHarnessPromptLoopOptions) =>
         new CfHarnessPromptLoop(options));
-    const loop = createPromptLoop({
-      workspaceHostPath: parsed.workspace,
-      artifactRoot: parsed.artifactRoot,
-      model: parsed.model,
-      gatewayBaseUrl: parsed.gatewayBaseUrl,
-      apiKey: parsed.apiKey,
-      cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-      maxModelTurns: parsed.maxModelTurns,
-    });
-    const result = await loop.runPrompt({
-      prompt: parsed.prompt,
-      ...(parsed.systemPrompt !== undefined
-        ? { systemPrompt: parsed.systemPrompt }
-        : {}),
-      model: parsed.model,
-      maxModelTurns: parsed.maxModelTurns,
-    });
+    let result: HarnessPromptLoopResult;
+    if (parsed.resumeRun !== undefined) {
+      const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
+      const artifacts = await readRunArtifacts(parsed.resumeRun);
+      const loop = createPromptLoop({
+        engine: new CfHarnessEngine({
+          runState: artifacts.runState,
+          artifactRoot: parsed.artifactRoot,
+          workspaceHostPath: parsed.workspace,
+          model: parsed.model ?? artifacts.runState.model,
+          gatewayBaseUrl: parsed.gatewayBaseUrl,
+          cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        }),
+        apiKey: parsed.apiKey,
+        maxModelTurns: parsed.maxModelTurns,
+      });
+      if (artifacts.transcript === undefined) {
+        throw new Error(
+          `resume run is missing transcript data: ${parsed.resumeRun}`,
+        );
+      }
+      result = await loop.runTranscript({
+        transcript: artifacts.transcript,
+        model: parsed.model ?? artifacts.runState.model,
+        maxModelTurns: parsed.maxModelTurns,
+      });
+    } else {
+      const loop = createPromptLoop({
+        workspaceHostPath: parsed.workspace,
+        artifactRoot: parsed.artifactRoot,
+        model: parsed.model,
+        gatewayBaseUrl: parsed.gatewayBaseUrl,
+        apiKey: parsed.apiKey,
+        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        maxModelTurns: parsed.maxModelTurns,
+      });
+      result = await loop.runPrompt({
+        prompt: parsed.prompt!,
+        ...(parsed.systemPrompt !== undefined
+          ? { systemPrompt: parsed.systemPrompt }
+          : {}),
+        model: parsed.model,
+        maxModelTurns: parsed.maxModelTurns,
+      });
+    }
     io.stdout(formatCfHarnessCliResult(result));
     if (parsed.printTranscript) {
       io.stdout(`${JSON.stringify(result.transcript, null, 2)}\n`);

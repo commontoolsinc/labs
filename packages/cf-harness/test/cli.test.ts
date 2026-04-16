@@ -74,6 +74,27 @@ Deno.test("parseCfHarnessCliArgs supports prompt files and mode overrides", asyn
   assertEquals(parsed.maxModelTurns, 5);
 });
 
+Deno.test("parseCfHarnessCliArgs supports resume-run inputs without a prompt", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-1"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(
+    parsed.resumeRun,
+    "/tmp/project/.cf-harness-artifacts/run-1",
+  );
+  assertEquals(parsed.prompt, undefined);
+  assertEquals(parsed.artifactRoot, "/tmp/project/.cf-harness-artifacts");
+  assertEquals(parsed.model, undefined);
+});
+
 Deno.test("runCfHarnessCli prints usage for help", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(["--help"], { io });
@@ -123,6 +144,9 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
                 toolOutputs: [],
               },
             }) satisfies HarnessPromptLoopResult,
+          runTranscript: async () => {
+            throw new Error("unexpected resume path");
+          },
         };
       },
     },
@@ -184,7 +208,99 @@ Deno.test("runCfHarnessCli reports argument errors to stderr", async () => {
   assertEquals(
     stderr,
     [
-      "provide prompt input using only one of --prompt, --prompt-file, or positional text\n",
+      "provide input using only one of --prompt, --prompt-file, positional text, or --resume-run\n",
     ],
   );
+});
+
+Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-1/run-state.json"],
+    {
+      io,
+      env: {},
+      readRunArtifacts: async (path) => {
+        assertEquals(
+          path,
+          "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+        );
+        return {
+          runRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+          runStatePath:
+            "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+          transcriptPath:
+            "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+          runState: {
+            runId: "run-1",
+            status: "failed",
+            createdAt: "2026-04-15T22:10:00.000Z",
+            updatedAt: "2026-04-15T22:10:01.000Z",
+            cfcEnforcementMode: "disabled",
+            model: "gpt-5.4",
+            artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+            transcriptPath:
+              "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+            toolOutputs: [],
+          },
+          transcript: [
+            { role: "user", content: "Continue." },
+          ],
+        };
+      },
+      createPromptLoop: () => ({
+        runPrompt: async () => {
+          throw new Error("unexpected prompt path");
+        },
+        runTranscript: async ({ transcript, model }) =>
+          ({
+            model: model ?? "gpt-5.4",
+            finalAssistantText: "Resumed.",
+            transcript: [
+              ...transcript,
+              { role: "assistant", content: "Resumed." },
+            ],
+            modelTurns: 1,
+            runState: {
+              runId: "run-1",
+              status: "completed",
+              createdAt: "2026-04-15T22:10:00.000Z",
+              updatedAt: "2026-04-15T22:10:02.000Z",
+              cfcEnforcementMode: "disabled",
+              model: "gpt-5.4",
+              artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+              transcriptPath:
+                "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+              toolOutputs: [],
+            },
+          }) satisfies HarnessPromptLoopResult,
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stdout, [
+    formatCfHarnessCliResult({
+      model: "gpt-5.4",
+      finalAssistantText: "Resumed.",
+      transcript: [
+        { role: "user", content: "Continue." },
+        { role: "assistant", content: "Resumed." },
+      ],
+      modelTurns: 1,
+      runState: {
+        runId: "run-1",
+        status: "completed",
+        createdAt: "2026-04-15T22:10:00.000Z",
+        updatedAt: "2026-04-15T22:10:02.000Z",
+        cfcEnforcementMode: "disabled",
+        model: "gpt-5.4",
+        artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+        transcriptPath:
+          "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+        toolOutputs: [],
+      },
+    }),
+  ]);
+  assertEquals(stderr, []);
 });

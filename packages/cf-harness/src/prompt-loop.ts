@@ -40,6 +40,12 @@ export interface RunHarnessPromptOptions {
   model?: string;
 }
 
+export interface RunHarnessTranscriptOptions {
+  transcript: readonly HarnessTranscriptMessage[];
+  maxModelTurns?: number;
+  model?: string;
+}
+
 export interface HarnessPromptLoopResult {
   model: string;
   finalAssistantText: string;
@@ -176,22 +182,34 @@ export class CfHarnessPromptLoop {
   async runPrompt(
     options: RunHarnessPromptOptions,
   ): Promise<HarnessPromptLoopResult> {
-    const model = options.model ?? this.engine.config.model;
+    return await this.runTranscript({
+      transcript: [
+        ...(options.systemPrompt !== undefined
+          ? [{ role: "system", content: options.systemPrompt } as const]
+          : []),
+        { role: "user", content: options.prompt },
+      ],
+      model: options.model,
+      maxModelTurns: options.maxModelTurns,
+    });
+  }
+
+  async runTranscript(
+    options: RunHarnessTranscriptOptions,
+  ): Promise<HarnessPromptLoopResult> {
+    const model = options.model ?? this.engine.getRunState().model ??
+      this.engine.config.model;
     if (model === undefined) {
       throw new Error(
         "a model must be configured before running the prompt loop",
       );
     }
-    const transcript: HarnessTranscriptMessage[] = [
-      ...(options.systemPrompt !== undefined
-        ? [{ role: "system", content: options.systemPrompt } as const]
-        : []),
-      { role: "user", content: options.prompt },
-    ];
+    const transcript: HarnessTranscriptMessage[] = [...options.transcript];
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     let modelTurns = 0;
     this.engine.setRunStatus("running");
     await this.engine.persistRunState();
+    await this.engine.persistTranscript(transcript);
     try {
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;

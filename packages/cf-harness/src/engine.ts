@@ -25,6 +25,7 @@ import {
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
 } from "./sandbox/docker-runsc.ts";
+import { dirname } from "@std/path";
 import type { ProcessRunner } from "./sandbox/process-runner.ts";
 import type { HarnessSandboxConfig, SandboxRuntime } from "./sandbox/types.ts";
 import {
@@ -130,9 +131,11 @@ export class CfHarnessEngine {
         options.processRunner,
       );
     this.artifactStore = options.artifactStore ??
-      (this.config.artifactRoot !== undefined
+      ((this.config.artifactRoot ?? options.runState?.artifactRoot) !==
+          undefined
         ? createFileSystemHarnessArtifactStore({
-          artifactRoot: this.config.artifactRoot,
+          artifactRoot: this.config.artifactRoot ??
+            dirname(options.runState!.artifactRoot!),
           runId,
         })
         : undefined);
@@ -140,6 +143,7 @@ export class CfHarnessEngine {
       createHarnessRunState({
         runId,
         cfcEnforcementMode: this.config.cfcEnforcementMode,
+        model: this.config.model,
         artifactRoot: this.artifactStore?.runRoot,
         now: this.#now(),
       });
