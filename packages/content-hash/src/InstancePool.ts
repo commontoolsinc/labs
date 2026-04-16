@@ -2,7 +2,6 @@
  * Pool of instances of some specific type, which can be `acquire()`d and
  * `release()`d, with support for recovering insstances which were never
  * `release()` before their owners got GCed.
- *
  */
 export class InstancePool<T extends WeakKey> {
   /** The instance pool. */
