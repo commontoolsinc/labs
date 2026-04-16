@@ -2832,7 +2832,9 @@ interface CFThemeDef {
   colors: CFThemeColors;
 }
 
-type CFThemeInput = Partial<CFThemeDef> & Record<string, unknown>;
+type CFThemeInput =
+  & Partial<Omit<CFThemeDef, "colors"> & { colors: Partial<CFThemeColors> }>
+  & Record<string, unknown>;
 
 type CFEvent<T> = {
   detail: T;

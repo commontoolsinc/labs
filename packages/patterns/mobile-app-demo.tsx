@@ -8,31 +8,10 @@ interface MobileAppDemoOutput {
 }
 
 const IOS_HOME_THEME = {
-  fontFamily:
-    '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif',
   borderRadius: "18px",
-  density: "comfortable" as const,
-  colorScheme: "light" as const,
   colors: {
-    primary: "#4f7dff",
-    primaryForeground: "#ffffff",
-    secondary: "#d8dded",
-    secondaryForeground: "#3a4568",
-    background: "#eef1f8",
     surface: "rgba(255, 255, 255, 0.72)",
     surfaceHover: "rgba(255, 255, 255, 0.88)",
-    text: "#313a5d",
-    textMuted: "#8e94a8",
-    border: "rgba(67, 75, 97, 0.10)",
-    borderMuted: "rgba(67, 75, 97, 0.06)",
-    accent: "#ff6f52",
-    accentForeground: "#ffffff",
-    success: "#21c17b",
-    successForeground: "#ffffff",
-    error: "#ff6f52",
-    errorForeground: "#ffffff",
-    warning: "#e5a126",
-    warningForeground: "#ffffff",
   },
 };
 
@@ -319,13 +298,13 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                         {(home.artifacts ?? []).map((
                           artifact: ArtifactItem,
                         ) => (
-                          <cf-card
-                            style={`--cf-card-background: linear-gradient(145deg, rgba(255,255,255,0.52), ${artifact.tint}); min-height: 100px;`}
+                          <div
+                            style={`background: linear-gradient(145deg, rgba(255,255,255,0.52), ${artifact.tint}); height: 120px; border-radius: var(--cf-theme-border-radius, 0.5rem); border: 1px solid var(--cf-theme-color-border, rgba(67,75,97,0.10)); display: flex; align-items: flex-end; padding: 12px;`}
                           >
-                            <span style="font-size: 0.72rem; font-weight: 600; color: rgba(69, 75, 93, 0.72); letter-spacing: -0.01em;">
+                            <cf-label style="font-size: 0.72rem; font-weight: 600; color: rgba(69, 75, 93, 0.72); letter-spacing: -0.01em;">
                               {artifact.title}
-                            </span>
-                          </cf-card>
+                            </cf-label>
+                          </div>
                         ))}
                       </cf-grid>
                     </cf-vstack>
