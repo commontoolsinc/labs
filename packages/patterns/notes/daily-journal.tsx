@@ -9,6 +9,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   Stream,
   toSchema,
   UI,
@@ -29,7 +30,7 @@ const toLocalISODate = (d: Date): string => {
   return `${y}-${m}-${day}`;
 };
 
-const getTodayDate = (): string => toLocalISODate(new Date());
+const getTodayDate = (): string => toLocalISODate(new Date(safeDateNow()));
 
 const journalTitle = (dateStr: string): string => {
   const d = new Date(dateStr + "T00:00:00");
@@ -243,8 +244,8 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
 
     // Gather last 7 days of note content for the system prompt
     const recentNotesContext = computed(() => {
-      const today = new Date();
-      const sevenDaysAgo = new Date(today);
+      const today = new Date(safeDateNow());
+      const sevenDaysAgo = new Date(safeDateNow());
       sevenDaysAgo.setDate(today.getDate() - 7);
       const cutoff = toLocalISODate(sevenDaysAgo);
 
