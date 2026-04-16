@@ -479,10 +479,13 @@ export class WorkerReconciler {
     keys: readonly string[],
   ): boolean | undefined {
     for (const key of keys) {
-      const value = this.nodePropForRenderPolicy(node, key);
-      if (isCell(value) || typeof value === "function") {
+      const rawValue = this.nodePropForRenderPolicy(node, key);
+      if (typeof rawValue === "function") {
         continue;
       }
+      const value = isCell(rawValue)
+        ? this.readCellPolicyValue(rawValue as Cell<unknown>)
+        : rawValue;
       if (typeof value === "boolean") {
         return value;
       }
@@ -508,7 +511,7 @@ export class WorkerReconciler {
         continue;
       }
       const resolved = isCell(value)
-        ? this.readCellValue(value as Cell<unknown>)
+        ? this.readCellPolicyValue(value as Cell<unknown>)
         : value;
       if (resolved === undefined) {
         continue;
@@ -876,6 +879,26 @@ export class WorkerReconciler {
     }
   }
 
+  private readCellPolicyValue(cell: Cell<unknown>): unknown {
+    const readableCell = cell as Cell<unknown> & {
+      get?: (options?: { traverseCells?: boolean }) => unknown;
+      getRawUntyped?: (options?: { frozen?: false }) => unknown;
+    };
+    try {
+      return readableCell.getRawUntyped?.({ frozen: false });
+    } catch {
+      // Fall back to the schema-shaped read below.
+    }
+    try {
+      if (typeof readableCell.get === "function") {
+        return readableCell.get({ traverseCells: true });
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
   private shouldBlockLiteralText(
     value: unknown,
     policy: RenderPolicy,
@@ -892,12 +915,18 @@ export class WorkerReconciler {
     cell: Cell<unknown>,
     policy: RenderPolicy,
   ): boolean {
-    if (
-      policy.textIntegrity === undefined || !this.hasVisibleTextValue(value)
-    ) {
+    if (policy.textIntegrity === undefined) {
       return false;
     }
+    if (isWorkerVNode(value) || this.isRenderableObject(value)) {
+      return false;
+    }
+    if (!this.hasVisibleTextValue(value)) return false;
     return !this.canRenderCellTextUnderPolicy(cell, policy);
+  }
+
+  private isRenderableObject(value: unknown): boolean {
+    return value !== null && typeof value === "object" && UI in value;
   }
 
   private hasVisibleTextValue(value: unknown): boolean {
@@ -1442,9 +1471,13 @@ export class WorkerReconciler {
   ): Cancel {
     const [cancel, addCancel] = useCancelGroup();
     let hasSeenInitialProps = false;
-    const refreshPolicyAfterPropsUpdate = () => {
+    const refreshPolicyAfterPropsUpdate = (
+      resolvedProps?: WorkerProps | null,
+    ) => {
       if (hasSeenInitialProps) {
-        this.refreshBoundaryPolicyFromCellProps(ctx, state, propsCell);
+        this.refreshBoundaryPolicyFromProps(ctx, state, resolvedProps);
+      } else {
+        this.refreshInitialBoundaryPolicyFromProps(state, resolvedProps);
       }
       hasSeenInitialProps = true;
     };
@@ -1468,7 +1501,7 @@ export class WorkerReconciler {
         if (cellPropsSub) {
           state.propSubscriptions.set(CELL_PROPS_KEY, cellPropsSub);
         }
-        refreshPolicyAfterPropsUpdate();
+        refreshPolicyAfterPropsUpdate(undefined);
         return;
       }
 
@@ -1643,7 +1676,7 @@ export class WorkerReconciler {
           });
         }
       }
-      refreshPolicyAfterPropsUpdate();
+      refreshPolicyAfterPropsUpdate(props as WorkerProps);
     });
 
     addCancel(sinkCancel);
@@ -1655,10 +1688,10 @@ export class WorkerReconciler {
     return cancel;
   }
 
-  private refreshBoundaryPolicyFromCellProps(
+  private refreshBoundaryPolicyFromProps(
     ctx: ReconcileContext,
     state: NodeState,
-    propsCell: Cell<WorkerProps>,
+    props: WorkerProps | null | undefined,
   ): void {
     if (
       state.tagName !== CFC_RENDER_BOUNDARY_TAG &&
@@ -1673,7 +1706,7 @@ export class WorkerReconciler {
     const node: WorkerVNode = {
       type: "vnode",
       name: state.tagName,
-      props: propsCell,
+      props,
       children: state.sourceChildren,
     };
     const childPolicy = this.childRenderPolicyForNode(
@@ -1707,6 +1740,38 @@ export class WorkerReconciler {
     }
   }
 
+  private refreshInitialBoundaryPolicyFromProps(
+    state: NodeState,
+    props: WorkerProps | null | undefined,
+  ): void {
+    if (
+      state.tagName !== CFC_RENDER_BOUNDARY_TAG &&
+      state.tagName !== CFC_AUTHORSHIP_TAG
+    ) {
+      return;
+    }
+    if (state.sourceChildren === undefined) {
+      return;
+    }
+
+    const node: WorkerVNode = {
+      type: "vnode",
+      name: state.tagName,
+      props,
+      children: state.sourceChildren,
+    };
+    const childPolicy = this.childRenderPolicyForNode(
+      node,
+      state.renderPolicy,
+      state.nodeId,
+    );
+    const policyChildren = this.childrenForRenderPolicy(node, childPolicy);
+
+    state.childRenderPolicy = childPolicy;
+    state.childrenBlockedByPolicy = policyChildren.blocked;
+    this.initializeTextIntegrityBoundary(childPolicy, state.nodeId);
+  }
+
   private resolveTextPropSourceCell(
     state: NodeState,
     propsCell: Cell<WorkerProps>,
@@ -1732,9 +1797,6 @@ export class WorkerReconciler {
     key: string,
     value: unknown,
   ): Cell<unknown> {
-    if (isCell(value)) {
-      return value as Cell<unknown>;
-    }
     const propCell = propsCell.key(key).asSchema(true);
     const rawValue = this.readRawBindingPropValue(propsCell, propCell, key);
     let base:
@@ -1750,6 +1812,9 @@ export class WorkerReconciler {
       : parseLink(rawValue) ?? parseLink(value);
     if (link?.id && link.space && link.type) {
       return propsCell.runtime.getCellFromLink(link);
+    }
+    if (isCell(value)) {
+      return value as Cell<unknown>;
     }
     return propCell.resolveAsCell();
   }
@@ -1990,18 +2055,24 @@ export class WorkerReconciler {
     };
     this.initializeTextIntegrityBoundary(childPolicy, nodeId);
 
-    // Bind props
+    // Bind props. Cell<Props> can synchronously resolve boundary policy props;
+    // bind children from the current state policy after props are bound.
     addCancel(this.bindProps(ctx, state, sanitized.props));
 
     // Bind children
-    if (policyChildren.children !== undefined) {
+    const activePolicyChildren = this.childrenForRenderPolicy(
+      sanitized,
+      state.childRenderPolicy,
+    );
+    state.childrenBlockedByPolicy = activePolicyChildren.blocked;
+    if (activePolicyChildren.children !== undefined) {
       addCancel(
         this.bindChildren(
           ctx,
           state,
-          policyChildren.children,
+          activePolicyChildren.children,
           visited,
-          childPolicy,
+          state.childRenderPolicy,
         ),
       );
     }

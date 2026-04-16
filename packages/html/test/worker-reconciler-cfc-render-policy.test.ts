@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { isCell as isRuntimeCell, Runtime } from "@commonfabric/runner";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { WorkerVNode } from "../src/worker/types.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
@@ -198,6 +199,10 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     class MockPropsCell extends MockCell {
       private propCells = new Map<string, MockPropCell>();
 
+      constructor(value: unknown, private rawValue: unknown = value) {
+        super(value);
+      }
+
       key(propName: string) {
         if (!this.propCells.has(propName)) {
           this.propCells.set(propName, new MockPropCell(this, propName));
@@ -206,10 +211,11 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       }
 
       getRawUntyped() {
-        return this.value;
+        return this.rawValue;
       }
 
       override set(newValue: unknown) {
+        this.rawValue = newValue;
         super.set(newValue);
         for (const propCell of this.propCells.values()) {
           propCell.refresh();
@@ -1005,6 +1011,160 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
               op.key === "role" && op.value === "assistant"
             ),
             true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict text integrity uses initial boundary props from Cell<Props>",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const boundaryProps = new MockPropsCell({
+          verifyTextIntegrity: true,
+          requiredTextIntegrity: signedReleaseAtom,
+        }, undefined);
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: boundaryProps as never,
+          children: [{
+            type: "vnode",
+            name: "cf-chat-message",
+            props: {
+              role: "assistant",
+              content: "Static override from resolved props",
+            },
+            children: [],
+          }],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" &&
+              op.value === "Content hidden by integrity policy"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" &&
+              op.value === "Static override from resolved props"
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict text integrity reads linked object atoms from VDOM props raw values",
+      async () => {
+        const tx = runtime.edit();
+        const message = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-linked-message",
+          undefined,
+          tx,
+        );
+        const messageLink = message.getAsNormalizedFullLink();
+        tx.writeOrThrow({
+          space: signer.did(),
+          id: messageLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: {
+            body: "Verified linked child",
+          },
+          cfc: {
+            version: 1,
+            schemaHash: "test-linked-message-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: {
+                  integrity: [signedReleaseAtom],
+                },
+              }],
+            },
+          },
+        });
+        const requiredIntegrity = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-linked-required-integrity",
+          undefined,
+          tx,
+        );
+        requiredIntegrity.set(signedReleaseAtom);
+        const root = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-linked-vdom-root",
+          undefined,
+          tx,
+        );
+        root.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            $value: message.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: requiredIntegrity.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+          },
+          children: [
+            message.key("body").getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+          ],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-linked-vdom-root",
+        ).asSchema(rendererVDOMSchema);
+
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Verified linked child"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            false,
           );
         } finally {
           cancel();
