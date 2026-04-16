@@ -110,6 +110,7 @@ interface CatalogInput {
         { id: "note"; label: "Note" },
         { id: "vignette-recipe"; label: "Vignette: Recipe" },
         { id: "vignette-finance"; label: "Vignette: Finance" },
+        { id: "vignette-mobile-app"; label: "Vignette: Mobile App" },
       ];
     },
   ]>;

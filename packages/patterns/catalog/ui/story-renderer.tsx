@@ -50,6 +50,7 @@ import TagsStory from "../stories/cf-tags-story.tsx";
 import GridStory from "../stories/cf-grid-story.tsx";
 import VignetteRecipeStory from "../stories/vignette-recipe-story.tsx";
 import VignetteFinanceStory from "../stories/vignette-finance-story.tsx";
+import VignetteMobileAppStory from "../stories/vignette-mobile-app-story.tsx";
 import ToastStory from "../stories/cf-toast-story.tsx";
 
 interface StoryRendererInput {
@@ -172,6 +173,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return VignetteRecipeStory({});
         case "vignette-finance":
           return VignetteFinanceStory({});
+        case "vignette-mobile-app":
+          return VignetteMobileAppStory({});
         case "toast":
           return ToastStory({});
         default:
