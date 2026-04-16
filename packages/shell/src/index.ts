@@ -7,6 +7,10 @@ import "./views/index.ts";
 import { App, AppElement, AppUpdateEvent, Navigation } from "../shared/mod.ts";
 import "./globals.ts";
 
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js");
+}
+
 console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
 console.log(`COMMIT_SHA=${COMMIT_SHA}`);

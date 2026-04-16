@@ -15,7 +15,7 @@ export class XQuickJumpView extends BaseView {
       top: 0;
       left: 0;
       width: 100vw;
-      height: 100vh;
+      height: 100dvh;
       display: none;
       align-items: center;
       justify-content: center;
