@@ -195,6 +195,43 @@ describe("push-triggered filtering", () => {
     ]);
   });
 
+  it("should not broaden current-known writes to structural parent paths", async () => {
+    const root = runtime.getCell<Record<string, unknown>>(
+      space,
+      "mw-structural-parent-root",
+      undefined,
+      tx,
+    );
+    root.set({ internal: {} });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const child = root.key("internal").key("__#0");
+    const declaredWrite = child.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        child.withTx(actionTx).set({ result: "ready" });
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [declaredWrite],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([declaredWrite]);
+  });
+
   it("should track filter stats", async () => {
     runtime.scheduler.resetFilterStats();
 

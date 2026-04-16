@@ -1805,8 +1805,11 @@ export class Scheduler {
     const shallowReads = sortAndCompactPaths(log.shallowReads, false);
     const ignoredSchedulingWrites =
       (action as Partial<TelemetryAnnotations>).ignoredSchedulingWrites ?? [];
-    const writes = sortAndCompactPaths(
-      filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
+    const writes = this.pruneStructuralAncestorWrites(
+      sortAndCompactPaths(
+        filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
+        false,
+      ),
     );
     const potentialWrites = sortAndCompactPaths(
       filterIgnoredAddresses(log.potentialWrites, ignoredSchedulingWrites),
@@ -1929,6 +1932,25 @@ export class Scheduler {
     }
 
     return { reads, shallowReads, log: schedulingLog };
+  }
+
+  private pruneStructuralAncestorWrites(
+    writes: IMemorySpaceAddress[],
+  ): IMemorySpaceAddress[] {
+    // Transaction reactivity logs include ancestor paths when a child write
+    // changes shallow structure. For scheduling writes, the descendant path is
+    // precise enough; keeping the ancestor would make unrelated shallow root
+    // readers depend on this action.
+    return writes.filter((write) =>
+      !writes.some((other) =>
+        other !== write &&
+        other.space === write.space &&
+        other.id === write.id &&
+        other.type === write.type &&
+        write.path.length < other.path.length &&
+        arraysOverlap(write.path, other.path)
+      )
+    );
   }
 
   private addTriggerPaths(
