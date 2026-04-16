@@ -87,13 +87,19 @@ function releaseHasher(hasher: IHasher) {
  * Gets and initializes the unique one-shot hasher instance.
  */
 function getOneShotHasher(): IHasher {
-  if (!moduleIsUsable) {
-    throw new Error("Cannot use `sha256-wasm` in this environment.");
-  }
-
   const result = theOneShotHasher[0];
   result.init();
   return result;
+}
+
+/**
+ * Throws an error indicating that this module is not usable, if it is not in
+ * fact usable. Otherwise, does nothing.
+ */
+function assertUsable() {
+  if (!moduleIsUsable) {
+    throw new Error("Cannot use `sha256-wasm` in this environment.");
+  }
 }
 
 /**
@@ -175,6 +181,7 @@ export function sha256Wasm(payload: Uint8Array): Uint8Array {
  * Creates an incremental hasher.
  */
 export function createHasherWasm(): IncrementalHasher {
+  assertUsable();
   return canAcquireHasher()
     ? new WasmUpdatingHasher()
     : new WasmCollectingHasher();
@@ -188,5 +195,6 @@ export function createHasherWasm(): IncrementalHasher {
  * concurrency required by the test.)
  */
 export function createHasherWasmCollecting(): IncrementalHasher {
+  assertUsable();
   return new WasmCollectingHasher();
 }
