@@ -806,7 +806,7 @@ Useful for frosted-glass cards, modal backdrops, and overlay tints.
 --cf-z-layer-toast:   1100;
 ```
 
-Components like `cf-fab`, `cf-modal`, and `cf-toast-provider` use these internally. Reference them in custom overlays to maintain correct stacking.
+`cf-fab` uses `--cf-z-layer-fab` internally. `cf-modal` and `cf-toast-provider` use their own z-index values (`1000+` and `1100` respectively) but do not yet reference these tokens. Reference the tokens in custom overlays to maintain correct stacking.
 
 ---
 

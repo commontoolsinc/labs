@@ -29,9 +29,6 @@ export class CFChip extends BaseElement {
     css`
       :host {
         display: inline-block;
-        --cf-chip-background: ;
-        --cf-chip-color: ;
-        --cf-chip-border-color: ;
       }
 
       .chip {

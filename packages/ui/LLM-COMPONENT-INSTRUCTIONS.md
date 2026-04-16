@@ -266,7 +266,6 @@ Working references:
 - `label` - string, display text
 - `size` - "sm" | "md" | "lg" (default: "md")
 - `removable` - boolean (shows X button)
-- `disabled` - boolean
 
 **Events**:
 
