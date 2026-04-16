@@ -11,6 +11,7 @@ export interface HarnessConfig {
   model?: string;
   vmTarget?: string;
   skillsRoot?: string;
+  artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   trustSnapshot?: TrustSnapshot;
   sandbox?: HarnessSandboxConfig;
@@ -21,6 +22,7 @@ export interface ResolveHarnessConfigOptions {
   model?: string;
   vmTarget?: string;
   skillsRoot?: string;
+  artifactRoot?: string;
   cfcEnforcementMode?: CfcEnforcementMode;
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
@@ -76,6 +78,9 @@ export const resolveHarnessConfig = (
   ...(options.vmTarget !== undefined ? { vmTarget: options.vmTarget } : {}),
   ...(options.skillsRoot !== undefined
     ? { skillsRoot: options.skillsRoot }
+    : {}),
+  ...(options.artifactRoot !== undefined
+    ? { artifactRoot: options.artifactRoot }
     : {}),
   ...(options.trustSnapshot !== undefined
     ? { trustSnapshot: options.trustSnapshot }

@@ -13,6 +13,8 @@ export interface HarnessRunState {
   createdAt: string;
   updatedAt: string;
   cfcEnforcementMode: CfcEnforcementMode;
+  artifactRoot?: string;
+  transcriptPath?: string;
   toolOutputs: ToolResultRef[];
 }
 
@@ -20,6 +22,8 @@ export interface CreateHarnessRunStateOptions {
   runId?: string;
   status?: HarnessRunStatus;
   cfcEnforcementMode: CfcEnforcementMode;
+  artifactRoot?: string;
+  transcriptPath?: string;
   now?: string;
 }
 
@@ -33,6 +37,12 @@ export const createHarnessRunState = (
     createdAt: now,
     updatedAt: now,
     cfcEnforcementMode: options.cfcEnforcementMode,
+    ...(options.artifactRoot !== undefined
+      ? { artifactRoot: options.artifactRoot }
+      : {}),
+    ...(options.transcriptPath !== undefined
+      ? { transcriptPath: options.transcriptPath }
+      : {}),
     toolOutputs: [],
   };
 };
@@ -55,4 +65,14 @@ export const appendHarnessToolOutput = (
   ...state,
   updatedAt: now,
   toolOutputs: [...state.toolOutputs, output],
+});
+
+export const setHarnessTranscriptPath = (
+  state: HarnessRunState,
+  transcriptPath: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  transcriptPath,
+  updatedAt: now,
 });

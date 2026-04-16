@@ -69,3 +69,10 @@ Deno.test("resolveHarnessConfig preserves explicit sandbox config", () => {
   });
   assertEquals(config.sandbox, sandbox);
 });
+
+Deno.test("resolveHarnessConfig preserves explicit artifact root config", () => {
+  const config = resolveHarnessConfig({
+    artifactRoot: "/tmp/cf-harness-artifacts",
+  });
+  assertEquals(config.artifactRoot, "/tmp/cf-harness-artifacts");
+});

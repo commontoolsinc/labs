@@ -1,7 +1,7 @@
 {
   "name": "@commonfabric/cf-harness",
   "tasks": {
-    "test": "ENV=test deno test test",
+    "test": "ENV=test deno test --allow-read --allow-write test",
     "test:integration": "CF_HARNESS_INTEGRATION=1 deno test -A integration"
   },
   "exports": {
@@ -9,6 +9,7 @@
     "./config": "./src/config.ts",
     "./engine": "./src/engine.ts",
     "./prompt-loop": "./src/prompt-loop.ts",
+    "./artifacts": "./src/artifacts.ts",
     "./gateway/openai-client": "./src/gateway/openai-client.ts",
     "./contracts/prompt-slot": "./src/contracts/prompt-slot.ts",
     "./contracts/observation": "./src/contracts/observation.ts",
