@@ -779,6 +779,7 @@ const CFC_XATTR_FIELDS = [
   "entries",
   "derivedSlots",
   "callable",
+  "symlink",
 ] as const;
 
 type CfcXattrField = typeof CFC_XATTR_FIELDS[number];

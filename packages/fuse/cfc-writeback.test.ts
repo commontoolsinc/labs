@@ -1186,6 +1186,30 @@ Deno.test("writeback xattrs accept trusted prepare/finalize names only", () => {
     true,
   );
   assertEquals(store.getPrepared(fileIno, "write"), undefined);
+
+  const { parentIno, ref: parentRef } = makeAnnotatedTree();
+  assertEquals(
+    store.setPreparedXattr(
+      parentIno,
+      CFC_WRITEBACK_PREPARE_XATTR,
+      prepareJson("create", parentRef, { name: "fresh" }),
+    ).ok,
+    true,
+  );
+  assertExists(store.getPrepared(parentIno, "create", "fresh"));
+  assertEquals(
+    store.setFinalizeXattr(
+      parentIno,
+      CFC_WRITEBACK_FINALIZE_XATTR,
+      JSON.stringify({
+        version: 1,
+        operation: "create",
+        committedGeneration: "generation-2",
+      }),
+    ).ok,
+    true,
+  );
+  assertEquals(store.getPrepared(parentIno, "create", "fresh"), undefined);
 });
 
 Deno.test("writeback recovery store persists crash-point states", async () => {

@@ -898,8 +898,16 @@ export class CfcWritebackStore {
     }
     const parsed = parseFinalizedWriteback(value);
     if (!parsed) return { ok: false, reason: "invalid finalize metadata" };
-    this.markFinalizedPendingCleanup(ino, parsed.operation);
-    this.deletePrepared(ino, parsed.operation);
+    const names = this.preparedNamesForOperation(ino, parsed.operation);
+    if (names.length === 0) {
+      this.markFinalizedPendingCleanup(ino, parsed.operation);
+      this.deletePrepared(ino, parsed.operation);
+    } else {
+      for (const preparedName of names) {
+        this.markFinalizedPendingCleanup(ino, parsed.operation, preparedName);
+        this.deletePrepared(ino, parsed.operation, preparedName);
+      }
+    }
     return { ok: true, finalized: parsed };
   }
 
@@ -1111,6 +1119,19 @@ export class CfcWritebackStore {
     name?: string,
   ): CfcWritebackRecoveryRecord | undefined {
     return this.records.get(this.key(ino, operation, name));
+  }
+
+  private preparedNamesForOperation(
+    ino: bigint,
+    operation: CfcWritebackOperation,
+  ): Array<string | undefined> {
+    const prefix = `${ino}:${operation}:`;
+    return [...this.prepared.keys()]
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => {
+        const name = key.slice(prefix.length);
+        return name === "" ? undefined : name;
+      });
   }
 
   private recordMalformed(ino: bigint, name: string, reason: string): void {

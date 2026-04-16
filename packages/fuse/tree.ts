@@ -10,6 +10,24 @@ import type { FsNode } from "./types.ts";
 const ROOT_INO = 1n;
 const encoder = new TextEncoder();
 
+function cfcEntryNameDigest(name: string): string {
+  let hash = 0x811c9dc5;
+  for (const byte of encoder.encode(name)) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fnv1a32:${hash.toString(16).padStart(8, "0")}`;
+}
+
+function cfcEntryKindForNode(
+  node: FsNode,
+): CfcDirectoryEntryAnnotation["kind"] {
+  if (node.kind === "dir") return "dir";
+  if (node.kind === "symlink") return "symlink";
+  if (node.kind === "callable") return "callable";
+  return "file";
+}
+
 export class FsTree {
   inodes: Map<bigint, FsNode> = new Map();
   parents: Map<bigint, bigint> = new Map();
@@ -205,6 +223,17 @@ export class FsTree {
     };
   }
 
+  private getCfcEntryAnnotation(
+    parentIno: bigint,
+    name: string,
+  ): CfcDirectoryEntryAnnotation | undefined {
+    const parent = this.inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) {
+      return undefined;
+    }
+    return parent.cfc.entries.entries.find((entry) => entry.name === name);
+  }
+
   getChildren(ino: bigint): [string, bigint][] {
     const node = this.inodes.get(ino);
     if (!node || node.kind !== "dir") return [];
@@ -286,6 +315,7 @@ export class FsTree {
     if (!newParent || newParent.kind !== "dir") {
       throw new Error(`New parent ${newParentIno} is not a directory`);
     }
+    const movedCfcEntry = this.getCfcEntryAnnotation(oldParentIno, oldName);
 
     // If target exists, remove it first
     const existingIno = newParent.children.get(newName);
@@ -299,6 +329,19 @@ export class FsTree {
     this.removeCfcEntryAnnotation(oldParentIno, oldName);
     newParent.children.set(newName, childIno);
     this.parents.set(childIno, newParentIno);
+    const child = this.inodes.get(childIno);
+    const childAnnotation = this.getCfcAnnotation(childIno);
+    if (movedCfcEntry && child) {
+      this.setCfcEntryAnnotation(newParentIno, newName, {
+        ...movedCfcEntry,
+        name: newName,
+        nameDigest: cfcEntryNameDigest(newName),
+        childRef: childAnnotation?.ref ?? movedCfcEntry.childRef,
+        kind: cfcEntryKindForNode(child),
+        metadataLabels: childAnnotation?.metadataLabels ??
+          movedCfcEntry.metadataLabels,
+      });
+    }
 
     // Update path tracking for moved node and all descendants
     this.retrackSubtree(childIno, newParentIno, newName);

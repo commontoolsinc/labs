@@ -37,10 +37,10 @@ available through the current cell API, FUSE emits a fail-closed label
 containing `CommonFabricFuseProjectionMetadataIncomplete`. It does not silently
 downgrade missing labels to public.
 
-For CFC-enabled mounts, local writes, creates, renames, symlinks, truncates, and
-metadata mutations are rejected for now. The existing non-CFC behavior is
-unchanged. This avoids optimistic write exposure before the runner value and
-label metadata can be committed together.
+For CFC-enabled mounts, observe mode allows local writes, creates, renames,
+symlinks, truncates, and metadata mutations while recording diagnostics.
+Enforce-* modes require the prepare/finalize flow before those operations
+proceed. The existing non-CFC behavior is unchanged.
 
 Derived slot metadata is emitted as an explicit empty `no-trusted-derived-slots`
 structure. Digest-looking names therefore remain ordinary names unless a future

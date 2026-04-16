@@ -315,6 +315,9 @@ export async function main(argv: string[] = Deno.args) {
 
   function recordCfcDiagnostics(messages: string[]): void {
     for (const message of messages) {
+      if (cfcDiagnostics.length >= 200) {
+        cfcDiagnostics.splice(0, cfcDiagnostics.length - 100);
+      }
       cfcDiagnostics.push(message);
       console.warn(`[FUSE:CFC] ${message}`);
     }
@@ -347,6 +350,34 @@ export async function main(argv: string[] = Deno.args) {
       applyPreparedExistingWrite(tree, ino, authorization.prepared);
       cfcWritebacks.markMutationApplied(ino, operation);
     }
+    return true;
+  }
+
+  function authorizeHandleCfcWrite(
+    fh: bigint,
+    handle: NonNullable<ReturnType<typeof handles.get>>,
+    operation: CfcExistingWritebackOperation,
+  ): boolean {
+    if (handles.hasCfcAuthorization(fh, operation)) return true;
+    const node = tree.getNode(handle.ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: handle.cfcAuthorizationAnnotation ?? node?.cfc,
+      prepared: cfcWritebacks.getPrepared(handle.ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedExistingWrite(tree, handle.ino, authorization.prepared);
+      cfcWritebacks.markMutationApplied(handle.ino, operation);
+    }
+    handles.authorizeCfcOperation(fh, operation);
     return true;
   }
 
@@ -817,6 +848,8 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       let writeTarget: HandleWriteTarget | undefined;
+      const cfcAuthorizedOperations: CfcExistingWritebackOperation[] = [];
+      const cfcAuthorizationAnnotation = node.cfc;
       if (isWriting && bridge) {
         const sourceWritePath = bridge.resolveSourceWritePath(inode);
         if (sourceWritePath) {
@@ -842,12 +875,13 @@ export async function main(argv: string[] = Deno.args) {
           fuse.symbols.fuse_reply_err(req, EACCES);
           return;
         }
+        cfcAuthorizedOperations.push(operation);
       }
       const fh = handles.open(
         inode,
         flags,
         truncate ? new Uint8Array(0) : content,
-        { writeTarget },
+        { writeTarget, cfcAuthorizedOperations, cfcAuthorizationAnnotation },
       );
       if (truncate) {
         handles.markTruncated(fh);
@@ -1065,6 +1099,31 @@ export async function main(argv: string[] = Deno.args) {
       handle.truncatePending ? "truncate" : "write";
 
     const callableNode = tree.getNode(handle.ino);
+    const cfcExistingWriteOperations = new Set<CfcExistingWritebackOperation>([
+      existingWriteOperation,
+    ]);
+    if (
+      existingWriteOperation === "write" &&
+      handle.cfcAuthorizedOperations.has("truncate")
+    ) {
+      cfcExistingWriteOperations.add("truncate");
+    }
+    const markExistingReady = () => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markReadyForExactRecomputation(handle.ino, operation);
+      }
+    };
+    const markExistingFinalized = () => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markFinalizedPendingCleanup(handle.ino, operation);
+        cfcWritebacks.deletePrepared(handle.ino, operation);
+      }
+    };
+    const markExistingFailed = (reason: string) => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markRunnerCommitFailed(handle.ino, operation, reason);
+      }
+    };
     try {
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
@@ -1116,11 +1175,7 @@ export async function main(argv: string[] = Deno.args) {
           meta = await piece.getPatternMeta();
         } catch (e) {
           console.error(`[source] Failed to get pattern meta: ${e}`);
-          cfcWritebacks.markRunnerCommitFailed(
-            handle.ino,
-            existingWriteOperation,
-            String(e),
-          );
+          markExistingFailed(String(e));
           return EACCES;
         }
 
@@ -1141,11 +1196,7 @@ export async function main(argv: string[] = Deno.args) {
           console.error(
             `[source] No program or src in pattern meta for ${relPath}`,
           );
-          cfcWritebacks.markRunnerCommitFailed(
-            handle.ino,
-            existingWriteOperation,
-            "no source program metadata",
-          );
+          markExistingFailed("no source program metadata");
           return EACCES;
         }
 
@@ -1166,11 +1217,7 @@ export async function main(argv: string[] = Deno.args) {
               baseFiles.map((f) => f.name).join(", ")
             }]`,
           );
-          cfcWritebacks.markRunnerCommitFailed(
-            handle.ino,
-            existingWriteOperation,
-            `source file not found: ${relPath}`,
-          );
+          markExistingFailed(`source file not found: ${relPath}`);
           return EACCES;
         }
 
@@ -1185,16 +1232,9 @@ export async function main(argv: string[] = Deno.args) {
           if (errorLogIno !== undefined) {
             tree.updateFile(errorLogIno, "");
           }
-          cfcWritebacks.markReadyForExactRecomputation(
-            handle.ino,
-            existingWriteOperation,
-          );
+          markExistingReady();
           await bridge.finalizeSourceWritePath(writeTarget.target);
-          cfcWritebacks.markFinalizedPendingCleanup(
-            handle.ino,
-            existingWriteOperation,
-          );
-          cfcWritebacks.deletePrepared(handle.ino, existingWriteOperation);
+          markExistingFinalized();
           if (handle.version === flushVersion) {
             handle.dirty = false;
             handle.truncatePending = false;
@@ -1208,11 +1248,7 @@ export async function main(argv: string[] = Deno.args) {
             tree.updateFile(errorLogIno, errorMsg);
           }
           console.error(`[source] Compile error in ${relPath}: ${errorMsg}`);
-          cfcWritebacks.markRunnerCommitFailed(
-            handle.ino,
-            existingWriteOperation,
-            errorMsg,
-          );
+          markExistingFailed(errorMsg);
           return EACCES;
         }
       }
@@ -1235,16 +1271,9 @@ export async function main(argv: string[] = Deno.args) {
       if (writePath.fsProjection) {
         const ok = await bridge.writeFsFile(writePath, text);
         if (!ok) return EINVAL;
-        cfcWritebacks.markReadyForExactRecomputation(
-          handle.ino,
-          existingWriteOperation,
-        );
+        markExistingReady();
         await bridge.finalizeWritePath(writePath);
-        cfcWritebacks.markFinalizedPendingCleanup(
-          handle.ino,
-          existingWriteOperation,
-        );
-        cfcWritebacks.deletePrepared(handle.ino, existingWriteOperation);
+        markExistingFinalized();
         if (handle.version === flushVersion) {
           handle.dirty = false;
           handle.truncatePending = false;
@@ -1293,16 +1322,9 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       await bridge.writeValue(writePath, value);
-      cfcWritebacks.markReadyForExactRecomputation(
-        handle.ino,
-        existingWriteOperation,
-      );
+      markExistingReady();
       await bridge.finalizeWritePath(writePath);
-      cfcWritebacks.markFinalizedPendingCleanup(
-        handle.ino,
-        existingWriteOperation,
-      );
-      cfcWritebacks.deletePrepared(handle.ino, existingWriteOperation);
+      markExistingFinalized();
       if (handle.version === flushVersion) {
         handle.dirty = false;
         handle.truncatePending = false;
@@ -1347,11 +1369,7 @@ export async function main(argv: string[] = Deno.args) {
         );
       }
 
-      cfcWritebacks.markRunnerCommitFailed(
-        handle.ino,
-        existingWriteOperation,
-        msg,
-      );
+      markExistingFailed(msg);
       return EIO;
     } finally {
       handle.flushing = false;
@@ -1425,6 +1443,11 @@ export async function main(argv: string[] = Deno.args) {
       if (bufPtr) {
         const view = new Deno.UnsafePointerView(bufPtr);
         view.copyInto(data);
+      }
+
+      if (!authorizeHandleCfcWrite(fh, handle, "write")) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
       }
 
       handles.write(fh, data, off);
@@ -1581,8 +1604,7 @@ export async function main(argv: string[] = Deno.args) {
       );
       if (
         metadataAuthorization?.allowed &&
-        metadataAuthorization.prepared &&
-        !sizeChange
+        metadataAuthorization.prepared
       ) {
         finalizeMetadataCfcMutation(inode, metadataAuthorization.prepared);
       }

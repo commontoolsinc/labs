@@ -113,6 +113,7 @@ Deno.test("CFC annotations use stable refs independent of transient inodes", () 
   );
   const firstTextIno = inoAt(firstTree, ["result", "items", "0", "text"]);
   const firstRef = firstTree.getCfcAnnotation(firstTextIno)?.ref;
+  assertExists(firstRef);
 
   const secondTree = new FsTree();
   secondTree.addFile(secondTree.rootIno, "unrelated", "x", "string");
@@ -131,6 +132,7 @@ Deno.test("CFC annotations use stable refs independent of transient inodes", () 
   );
   const secondTextIno = inoAt(secondTree, ["result", "items", "0", "text"]);
   const secondRef = secondTree.getCfcAnnotation(secondTextIno)?.ref;
+  assertExists(secondRef);
 
   assert(firstTextIno !== secondTextIno);
   assertEquals(firstRef, secondRef);
@@ -553,6 +555,30 @@ Deno.test("CFC golden xattr contract covers namespaces, value formats, and optio
   ) as { projection?: string; generation?: string };
   assertEquals(symlinkRef.projection, "symlink");
   assertEquals(symlinkRef.generation, generation);
+  const symlink = annotationJson(
+    tree,
+    linkIno,
+    `${CFC_TRUSTED_XATTR_PREFIX}symlink`,
+    "trusted",
+  ) as {
+    target?: string;
+    linkTextLabel?: unknown;
+    targetIdentityLabel?: unknown;
+  };
+  assertEquals(symlink.target, "../../../entities/of:target");
+  assertEquals(symlink.linkTextLabel, LINK_LABEL);
+  assertEquals(
+    (symlink.targetIdentityLabel as { confidentiality?: unknown[] })
+      .confidentiality,
+    [
+      {
+        type: "https://commonfabric.org/cfc/atom/Resource",
+        class: "CommonFabricFuseSymlinkTarget",
+        subject: "did:web:commonfabric.org#runtime",
+        scope: { target: "../../../entities/of:target" },
+      },
+    ],
+  );
 
   const callable = annotationJson(
     tree,
