@@ -50,7 +50,7 @@
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 125px;
-  height: 100vh;
+  height: 100dvh;
   width: 100vw;
 }
 
@@ -68,6 +68,7 @@ body {
   );
   background-size: var(--dot-spacing) var(--dot-spacing);
   color: var(--font-color);
+  overscroll-behavior: none;
 }
 
 /* Responsive padding */
