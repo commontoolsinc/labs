@@ -133,5 +133,6 @@ The integration suite requires a working local Docker + `runsc-cfc` environment.
 ## Related Docs
 
 - [IMPLEMENTATION_PLAN.md](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
+- [LOOM_MIGRATION_NOTES.md](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
 - [runner README](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/runner/README.md)
 - [specs Chapter 18](/Users/gideonwald/coding/cf-pf-codex-1/specs/cfc/18-runtime-implementation-profiles.md)

@@ -27,6 +27,15 @@ The current intended v1 shape is:
 - long-running unattended tasks supported
 - Loom as the first practical rollout target
 
+Current Loom migration judgment:
+
+- background/non-interactive Loom work is the cleaner first migration target
+- interactive Loom chat should be treated as a separate transport problem
+
+See also:
+
+- [LOOM_MIGRATION_NOTES.md](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
+
 ## Design Principles
 
 ### 1. CFC-shaped from day one
@@ -183,7 +192,23 @@ The stage gateway caveat is important:
 
 The next implementation step is not fully fixed yet. The main candidates are:
 
-### Option 1: Debug/operator path without direct-command binding
+### Option 1: First Loom background integration contract
+
+Define the first narrow product-facing replacement for Loom's current background
+`codex exec` usage.
+
+Why:
+
+- it is the clearest real migration target
+- it fits the current `cf-harness` shape much better than interactive chat
+- it will force the right input/output/artifact contract decisions
+
+Tradeoff:
+
+- it may require some Loom-specific adapter work before more abstract harness
+  cleanup
+
+### Option 2: Debug/operator path without direct-command binding
 
 Add a deliberate way to run the prompt loop without the default CLI
 direct-command binding.
@@ -197,7 +222,7 @@ Tradeoff:
 
 - useful for operator experiments, but not the most product-facing work
 
-### Option 2: Runner-aware CFC feedback integration
+### Option 3: Runner-aware CFC feedback integration
 
 Start consuming real `runner`-side CFC signals instead of relying only on local
 harness heuristics.
@@ -213,8 +238,13 @@ Tradeoff:
 - likely needs shared contract refinement across harness, `runner`, and the
   sandbox side
 
-My current recommendation is Option 2 after the gateway situation is stable.
-Option 1 is still a useful short-term debug affordance if the team wants it.
+My current recommendation is:
+
+1. Loom background integration contract
+2. runner-aware CFC feedback expansion beyond the initial `write_file` seam
+
+The operator/debug surface remains useful, but it is no longer the primary
+near-term product milestone.
 
 ## Open Questions
 
