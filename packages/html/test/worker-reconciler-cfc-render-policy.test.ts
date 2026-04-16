@@ -223,6 +223,33 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       }
     }
 
+    class DeferredInitialPropsCell extends MockPropsCell {
+      private ready = false;
+      private propsSubscribers = new Set<(value: unknown) => void>();
+
+      override sink(callback: (value: unknown) => void) {
+        this.propsSubscribers.add(callback);
+        if (this.ready) {
+          callback(this.value);
+        }
+        return () => this.propsSubscribers.delete(callback);
+      }
+
+      override getRawUntyped() {
+        if (!this.ready) {
+          throw new Error("props not loaded yet");
+        }
+        return super.getRawUntyped();
+      }
+
+      flushInitial() {
+        this.ready = true;
+        for (const subscriber of this.propsSubscribers) {
+          subscriber(this.value);
+        }
+      }
+    }
+
     class MockPropCell extends MockCell {
       constructor(private parentCell: MockPropsCell, private propKey: string) {
         super((parentCell.value as Record<string, unknown>)?.[propKey]);
@@ -724,6 +751,51 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             renderedText.includes("Content hidden by policy"),
             false,
           );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "blocks materialized children when first reactive policy props arrive after mount",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const propsCell = new DeferredInitialPropsCell({
+          maxConfidentiality: [],
+          $value: confidential.getAsLink({ includeSchema: true }),
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: propsCell as never,
+          children: [{
+            type: "vnode",
+            name: "div",
+            props: { id: "delayed-reactive-policy-secret" },
+            children: ["Sensitive diagnosis: migraine"],
+          }],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          propsCell.flushInitial();
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+          assertEquals(collector.getOpsOfType("remove-node").length > 0, true);
         } finally {
           cancel();
         }

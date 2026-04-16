@@ -1471,13 +1471,14 @@ export class WorkerReconciler {
   ): Cancel {
     const [cancel, addCancel] = useCancelGroup();
     let hasSeenInitialProps = false;
-    const refreshPolicyAfterPropsUpdate = (
-      resolvedProps?: WorkerProps | null,
-    ) => {
-      if (hasSeenInitialProps) {
-        this.refreshBoundaryPolicyFromProps(ctx, state, resolvedProps);
+    const refreshPolicyAfterPropsUpdate = () => {
+      const childrenAlreadyBound = state.children.size > 0 ||
+        state.childrenState !== undefined ||
+        state.childOrder.length > 0;
+      if (hasSeenInitialProps || childrenAlreadyBound) {
+        this.refreshBoundaryPolicyFromProps(ctx, state, propsCell);
       } else {
-        this.refreshInitialBoundaryPolicyFromProps(state, resolvedProps);
+        this.refreshInitialBoundaryPolicyFromProps(state, propsCell);
       }
       hasSeenInitialProps = true;
     };
@@ -1501,7 +1502,7 @@ export class WorkerReconciler {
         if (cellPropsSub) {
           state.propSubscriptions.set(CELL_PROPS_KEY, cellPropsSub);
         }
-        refreshPolicyAfterPropsUpdate(undefined);
+        refreshPolicyAfterPropsUpdate();
         return;
       }
 
@@ -1676,7 +1677,7 @@ export class WorkerReconciler {
           });
         }
       }
-      refreshPolicyAfterPropsUpdate(props as WorkerProps);
+      refreshPolicyAfterPropsUpdate();
     });
 
     addCancel(sinkCancel);
@@ -1691,7 +1692,7 @@ export class WorkerReconciler {
   private refreshBoundaryPolicyFromProps(
     ctx: ReconcileContext,
     state: NodeState,
-    props: WorkerProps | null | undefined,
+    props: WorkerVNode["props"],
   ): void {
     if (
       state.tagName !== CFC_RENDER_BOUNDARY_TAG &&
@@ -1742,7 +1743,7 @@ export class WorkerReconciler {
 
   private refreshInitialBoundaryPolicyFromProps(
     state: NodeState,
-    props: WorkerProps | null | undefined,
+    props: WorkerVNode["props"],
   ): void {
     if (
       state.tagName !== CFC_RENDER_BOUNDARY_TAG &&
