@@ -69,7 +69,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
 
   const entries = computed(() => {
     const result: SummaryIndexEntry[] = [];
-    for (const piece of mentionable ?? []) {
+    for (const piece of (Array.isArray(mentionable) ? mentionable : [])) {
       if (!piece) continue;
       const value = piece.get();
       const summary = extractSummary(value);

@@ -45,6 +45,8 @@ export class CFCard extends BaseElement {
         --cf-theme-color-text-muted,
         hsl(0, 0%, 45%)
       );
+      --cf-card-background: var(--cf-card-color-surface, hsl(0, 0%, 100%));
+      --cf-card-backdrop-blur: 0px;
 
       display: block;
       box-sizing: border-box;
@@ -59,7 +61,9 @@ export class CFCard extends BaseElement {
     .card {
       border-radius: var(--cf-card-border-radius, 0.5rem);
       border: 1px solid var(--cf-card-color-border, hsl(0, 0%, 89%));
-      background-color: var(--cf-card-color-surface, hsl(0, 0%, 100%));
+      background: var(--cf-card-background);
+      backdrop-filter: blur(var(--cf-card-backdrop-blur));
+      -webkit-backdrop-filter: blur(var(--cf-card-backdrop-blur));
       color: var(--cf-card-color-text, hsl(0, 0%, 9%));
       overflow: hidden;
       transition: all var(--cf-card-animation-duration, 150ms)
@@ -71,7 +75,7 @@ export class CFCard extends BaseElement {
       }
 
       .card[tabindex="0"]:hover {
-        background-color: var(--cf-card-color-hover-surface, hsl(0, 0%, 96%));
+        background: var(--cf-card-color-hover-surface, hsl(0, 0%, 96%));
         transform: translateY(-1px);
         box-shadow:
           0 4px 6px -1px rgba(0, 0, 0, 0.1),

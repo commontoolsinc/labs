@@ -2832,7 +2832,9 @@ interface CFThemeDef {
   colors: CFThemeColors;
 }
 
-type CFThemeInput = Partial<CFThemeDef> & Record<string, unknown>;
+type CFThemeInput =
+  & Partial<Omit<CFThemeDef, "colors"> & { colors: Partial<CFThemeColors> }>
+  & Record<string, unknown>;
 
 type CFEvent<T> = {
   detail: T;
@@ -4086,6 +4088,11 @@ interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
     | "primary"
     | "accent"
     | CellLike<"default" | "primary" | "accent">;
+  "size"?:
+    | "sm"
+    | "md"
+    | "lg"
+    | CellLike<"sm" | "md" | "lg">;
   "removable"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;

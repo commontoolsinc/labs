@@ -207,6 +207,68 @@ Useful styling hooks include:
 - `--cf-card-color-hover-surface`
 - `--cf-card-border-radius`
 
+### Gradient and frosted-glass backgrounds
+
+Use `--cf-card-background` to apply a gradient or tinted background. Use `--cf-card-backdrop-blur` for a frosted-glass effect. Both default to the theme surface color and 0px blur, so existing usage is unaffected.
+
+```tsx
+// Gradient tint
+<cf-card style="--cf-card-background: linear-gradient(145deg, rgba(255,255,255,0.52), #ece9ff);">
+  <p>Tinted card</p>
+</cf-card>
+
+// Frosted glass (requires a background behind the card)
+<cf-card style="--cf-card-background: rgba(255,255,255,0.45); --cf-card-backdrop-blur: 8px;">
+  <p>Frosted card</p>
+</cf-card>
+
+// Combined: gradient + blur
+<cf-card style="--cf-card-background: linear-gradient(145deg, rgba(255,255,255,0.52), #ece9ff); --cf-card-backdrop-blur: 8px;">
+  <p>Gradient frosted card</p>
+</cf-card>
+```
+
+CSS custom properties:
+
+- `--cf-card-background` — card background (default: `var(--cf-card-color-surface)`). Accepts any CSS `background` value including gradients.
+- `--cf-card-backdrop-blur` — backdrop blur radius (default: `0px`). Use values like `8px` or `var(--cf-backdrop-blur-md)` for frosted-glass.
+
+---
+
+## cf-chip
+
+Compact label/tag element. Use for status indicators, categories, action pills, and filter chips.
+
+```tsx
+// Basic usage
+<cf-chip label="Draft" />
+
+// Sizes
+<cf-chip label="Small" size="sm" />
+<cf-chip label="Medium" size="md" />  {/* default */}
+<cf-chip label="Large" size="lg" />
+
+// Color overrides (per-instance)
+<cf-chip label="Review" size="sm"
+  style="--cf-chip-background: linear-gradient(135deg, #5f89ff, #4d77fb); --cf-chip-color: white;" />
+
+// Removable chip
+<cf-chip label="Tag" removable oncf-remove={() => tags.remove(tag)} />
+```
+
+Attributes:
+
+- `label` — display text (string)
+- `size` — `"sm" | "md" | "lg"` (default `"md"`)
+- `removable` — boolean, shows an X button
+- `disabled` — boolean
+
+CSS custom properties for per-instance color overrides:
+
+- `--cf-chip-background` — chip background (default: theme chip surface)
+- `--cf-chip-color` — chip text color (default: theme chip text)
+- `--cf-chip-border-color` — chip border color (default: theme chip border)
+
 ---
 
 ## cf-render
@@ -705,6 +767,46 @@ SVG charting components. Compose mark elements inside a `cf-chart` container.
 - **Data auto-detection:** Number arrays auto-index. String x-values use band scale. Date/ISO strings use time scale.
 - **Responsive width:** Chart fills its container width. Use CSS to control.
 - **Crosshair:** Enabled by default. Shows nearest data point on hover.
+
+---
+
+## Design Tokens
+
+The following CSS custom properties are defined globally (in `variables.ts`) and available throughout your patterns via `cf-theme` or direct `style` attributes.
+
+### Backdrop blur
+
+```css
+--cf-backdrop-blur-sm: 4px;
+--cf-backdrop-blur-md: 8px;
+--cf-backdrop-blur-lg: 16px;
+--cf-backdrop-blur-xl: 24px;
+```
+
+Use with `--cf-card-backdrop-blur` or any `backdrop-filter` CSS.
+
+### Translucent surfaces
+
+```css
+--cf-surface-translucent: rgba(255, 255, 255, 0.72);
+--cf-surface-translucent-strong: rgba(255, 255, 255, 0.88);
+--cf-overlay-dim: rgba(0, 0, 0, 0.4);
+```
+
+Useful for frosted-glass cards, modal backdrops, and overlay tints.
+
+### Semantic z-index layers
+
+```css
+--cf-z-layer-sticky:  10;
+--cf-z-layer-fixed:   500;
+--cf-z-layer-fab:     900;
+--cf-z-layer-sheet:   950;
+--cf-z-layer-overlay: 1000;
+--cf-z-layer-toast:   1100;
+```
+
+`cf-fab` uses `--cf-z-layer-fab` internally. `cf-modal` and `cf-toast-provider` use their own z-index values (`1000+` and `1100` respectively) but do not yet reference these tokens. Reference the tokens in custom overlays to maintain correct stacking.
 
 ---
 
