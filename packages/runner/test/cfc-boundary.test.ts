@@ -548,6 +548,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         seed,
       );
       cell.set({ secret: "seed" });
+      runtime.prepareTxForCommit(seed);
       expect((await seed.commit()).ok).toBeDefined();
 
       const tx = runtime.readTx();
@@ -2519,6 +2520,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         resultCell,
       );
 
+      runtime.prepareTxForCommit(tx);
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
     } finally {

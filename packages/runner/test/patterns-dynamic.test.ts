@@ -80,8 +80,16 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     } = commonfabric);
   });
 
+  async function commitTx() {
+    if (tx.status().status !== "ready") {
+      return { ok: undefined, error: undefined };
+    }
+    runtime.prepareTxForCommit(tx);
+    return await tx.commit();
+  }
+
   afterEach(async () => {
-    await tx.commit();
+    await commitTx();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -260,7 +268,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
         { values: [4, 5] },
       ],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
 
@@ -314,7 +322,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, doubleArray, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -326,7 +334,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Insert 99 at index 1: [1, 2, 3] → [1, 99, 2, 3]
     result.withTx(tx).key("values").set([1, 99, 2, 3]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -385,7 +393,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, doubleArray, {
       values: [cellA, cellB, cellC],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -400,7 +408,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellX.withTx(tx).set(99);
 
     result.withTx(tx).key("values").set([cellA, cellX, cellB, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -455,7 +463,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, doubleArray, {
       values: [cellA, cellB, cellA],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -498,7 +506,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, mapPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -507,7 +515,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Set list to undefined — should clean up and produce empty output
     result.withTx(tx).key("values").set(undefined as any);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -516,7 +524,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Restore list — runs must re-execute (old runs were stopped)
     const runsBeforeRestore = runCount;
     result.withTx(tx).key("values").set([4, 5]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -553,7 +561,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [1, 2, 3, 4, 5],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("evens").get()).toEqual([2, 4]);
@@ -611,7 +619,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [cellA, cellB, cellC],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -620,7 +628,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Flip B from negative to positive
     cellB.withTx(tx).set(7);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -684,7 +692,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [cellA, cellB, cellC],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -702,7 +710,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellX.withTx(tx).set(99);
 
     result.withTx(tx).key("values").set([cellA, cellX, cellB, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -715,7 +723,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Remove B: [A, X, B, C] → [A, X, C]
     const runsBeforeRemoval = predRunCount;
     result.withTx(tx).key("values").set([cellA, cellX, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -762,7 +770,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [cellA, cellB, cellA],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -797,7 +805,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("evens").get()).toEqual([]);
@@ -837,7 +845,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -846,7 +854,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Set list to undefined — should clean up and produce empty output
     result.withTx(tx).key("values").set(undefined as any);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -855,7 +863,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Restore list — predicates must re-run (old runs were stopped)
     const runsBeforeRestore = predRunCount;
     result.withTx(tx).key("values").set([4, 5]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -900,7 +908,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: sparseInput,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     // Only 2 predicate runs (hole skipped), both positive
@@ -937,7 +945,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("flat").get()).toEqual([1, 10, 2, 20, 3, 30]);
@@ -988,7 +996,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [cellA, cellB],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -997,7 +1005,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Flip B to positive
     cellB.withTx(tx).set(3);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1057,7 +1065,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [cellA, cellB, cellC],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1075,7 +1083,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellX.withTx(tx).set(99);
 
     result.withTx(tx).key("values").set([cellA, cellX, cellB, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1088,7 +1096,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Remove B: [A, X, B, C] → [A, X, C]
     const runsBeforeRemoval = runCount;
     result.withTx(tx).key("values").set([cellA, cellX, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1129,7 +1137,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [1, 2, 3, 4],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     // Odd numbers contribute nothing
@@ -1167,7 +1175,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("flat").get()).toEqual([1, 20, 21, 3]);
@@ -1207,7 +1215,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: sparseInput,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     // Only 2 pattern runs (hole skipped)
@@ -1246,7 +1254,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1255,7 +1263,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Set list to undefined — should clean up and produce empty output
     result.withTx(tx).key("values").set(undefined as any);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1264,7 +1272,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Restore list — patterns must re-run (old runs were stopped)
     const runsBeforeRestore = runCount;
     result.withTx(tx).key("values").set([4, 5]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1305,7 +1313,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, outerPattern, {
       values: [1, 2, 3, 4, 5],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("evens").get()).toEqual([2, 4]);
@@ -1344,7 +1352,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, outerPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("flat").get()).toEqual([1, 10, 2, 20, 3, 30]);

@@ -58,7 +58,6 @@ import {
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import {
   type CfcEnforcementMode,
-  DEFAULT_CFC_ENFORCEMENT_MODE,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
@@ -183,7 +182,7 @@ export interface RuntimeOptions {
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
-  /** Rollout mode for commit-boundary CFC enforcement. */
+  /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
@@ -399,7 +398,7 @@ export class Runtime {
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
-      DEFAULT_CFC_ENFORCEMENT_MODE;
+      "enforce-explicit";
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
