@@ -200,6 +200,7 @@ export const modalStyles = css`
       align-items: center;
       padding: 8px 0 4px;
       flex-shrink: 0;
+      background: var(--cf-modal-color-surface, #fafafa);
     }
 
     :host([presentation="sheet"][grabber]) .grabber::after {
@@ -254,51 +255,6 @@ export const modalStyles = css`
       :host([presentation="sheet"][size="md"]) .dialog,
       :host([presentation="sheet"][size="lg"]) .dialog {
         width: 100%;
-      }
-
-      /* ===== Mobile Bottom Sheet Transformation ===== */
-      @media (max-width: 480px) {
-        .container {
-          align-items: flex-end;
-          padding: 0;
-        }
-
-        .dialog {
-          width: 100%;
-          max-height: 85vh;
-          border-radius: var(--_border-radius) var(--_border-radius) 0 0;
-
-          /* Mobile: slide up animation instead of scale */
-          transform: translateY(100%);
-          opacity: 1;
-        }
-
-        :host([open]) .dialog {
-          transform: translateY(0);
-        }
-
-        /* Drag handle indicator for sheet */
-        .dialog::before {
-          content: "";
-          display: block;
-          width: 36px;
-          height: 4px;
-          background: var(--cf-modal-color-border, #e5e7eb);
-          border-radius: 2px;
-          margin: 8px auto 0;
-        }
-
-        /* Adjust header for sheet layout */
-        .header {
-          padding-top: 8px;
-        }
-
-        /* Full width for size variants on mobile */
-        :host([size="sm"]) .dialog,
-        :host([size="md"]) .dialog,
-        :host([size="lg"]) .dialog {
-          width: 100%;
-        }
       }
 
       /* ===== Reduced Motion ===== */
