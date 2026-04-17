@@ -28,6 +28,7 @@ export class XPieceList extends LitElement {
 
     button {
       font-family: inherit;
+      color: inherit;
     }
 
     .piece-item {
@@ -42,7 +43,7 @@ export class XPieceList extends LitElement {
       font-weight: 400;
       font-size: 0.8125rem;
       line-height: 1.25rem;
-      color: var(--gray-300, #8a909b);
+      color: var(--shell-text-muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -52,7 +53,7 @@ export class XPieceList extends LitElement {
     }
 
     .piece-item:hover {
-      background: rgba(0, 0, 0, 0.03);
+      background: var(--shell-surface-hover);
       color: inherit;
     }
 
@@ -73,7 +74,7 @@ export class XPieceList extends LitElement {
       font-weight: 500;
       font-size: 0.6875rem;
       line-height: 1rem;
-      color: var(--gray-300, #8a909b);
+      color: var(--shell-text-muted);
       padding: 0.375rem 1rem;
     }
   `;

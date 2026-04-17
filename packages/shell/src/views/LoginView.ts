@@ -60,7 +60,7 @@ export class XLoginView extends BaseView {
       width: 100%;
       max-width: 600px;
       padding: 2rem;
-      background: white;
+      background: var(--shell-surface);
       border: var(--border-width, 2px) solid var(--border-color, #000);
     }
 
@@ -88,8 +88,9 @@ export class XLoginView extends BaseView {
       margin-bottom: 0.5rem;
       font-family: var(--font-primary);
       font-size: 1rem;
+      color: var(--font-color);
       border: var(--border-width, 2px) solid var(--border-color, #000);
-      background: white;
+      background: var(--shell-surface);
       box-sizing: border-box;
     }
 

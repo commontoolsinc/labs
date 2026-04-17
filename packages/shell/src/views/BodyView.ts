@@ -44,7 +44,7 @@ export class XBodyView extends BaseView {
 
     @media (max-width: 768px) {
       .content {
-        padding: 0;
+        padding: 1rem;
       }
     }
 

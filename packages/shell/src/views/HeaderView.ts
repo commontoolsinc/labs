@@ -20,7 +20,9 @@ import {
   iconLink,
   iconLogOut,
   iconStar,
+  iconThemeToggle,
 } from "../components/icons.ts";
+import { getEffectiveTheme, toggleTheme } from "../lib/theme-preference.ts";
 
 type ConnectionStatus =
   | "connecting"
@@ -36,15 +38,18 @@ export class XHeaderView extends BaseView {
       display: block;
       width: 100%;
       height: auto;
-      color: var(--gray-800, #2c3138);
+      color: var(--font-color);
     }
 
-    *, *::before, *::after {
+    *,
+    *::before,
+    *::after {
       box-sizing: inherit;
     }
 
     button {
       font-family: inherit;
+      color: inherit;
     }
 
     svg {
@@ -60,7 +65,13 @@ export class XHeaderView extends BaseView {
       position: sticky;
       top: 0;
       z-index: 3;
-      background-color: var(--header-bg-color, white);
+      background-color: var(--shell-surface);
+    }
+
+    @media (max-width: 768px) {
+      .header {
+        padding: 1rem;
+      }
     }
 
     .header-start {
@@ -83,7 +94,7 @@ export class XHeaderView extends BaseView {
     }
 
     .nav-picker:hover {
-      background: rgba(0, 0, 0, 0.04);
+      background: var(--shell-surface-hover);
     }
 
     .nav-picker-container {
@@ -122,7 +133,7 @@ export class XHeaderView extends BaseView {
       font-weight: 500;
       font-size: 0.75rem;
       line-height: 1rem;
-      color: var(--gray-300, #8a909b);
+      color: var(--shell-text-muted);
       white-space: nowrap;
       cursor: pointer;
       text-decoration: none;
@@ -133,7 +144,7 @@ export class XHeaderView extends BaseView {
     }
 
     .header-breadcrumbs .header-separator {
-      color: var(--gray-300, #8a909b);
+      color: var(--shell-text-muted);
       font-size: 0.75rem;
     }
 
@@ -157,13 +168,13 @@ export class XHeaderView extends BaseView {
     }
 
     .header-piece-trigger:hover {
-      background: rgba(0, 0, 0, 0.04);
+      background: var(--shell-surface-hover);
     }
 
     .header-piece-chevron {
       width: 0.625rem;
       height: 0.625rem;
-      color: var(--gray-300, #8a909b);
+      color: var(--shell-text-muted);
       display: flex;
       align-items: center;
       transition: transform 0.15s ease;
@@ -180,7 +191,7 @@ export class XHeaderView extends BaseView {
       margin-top: 0.25rem;
       min-width: 15rem;
       max-width: 20rem;
-      background: white;
+      background: var(--shell-surface);
       border-radius: 8px;
       box-shadow:
         0px 4px 16px 0px rgba(0, 0, 0, 0.08),
@@ -210,7 +221,7 @@ export class XHeaderView extends BaseView {
     }
 
     .menu-panel {
-      background: white;
+      background: var(--shell-surface);
       display: flex;
       flex-direction: column;
       box-shadow:
@@ -254,7 +265,7 @@ export class XHeaderView extends BaseView {
     /* Mobile: clip-path reveal */
     @media (max-width: 768px) {
       .menu-backdrop {
-        background: rgba(13, 18, 24, 0.5);
+        background: var(--shell-overlay-bg);
         opacity: 0;
         transition: opacity 0.25s ease;
       }
@@ -306,7 +317,7 @@ export class XHeaderView extends BaseView {
     }
 
     .menu-close:hover {
-      background: rgba(0, 0, 0, 0.04);
+      background: var(--shell-surface-hover);
     }
 
     .menu-close-icon {
@@ -336,7 +347,7 @@ export class XHeaderView extends BaseView {
     .breadcrumb-icon {
       width: 0.75rem;
       height: 0.75rem;
-      color: var(--gray-300, #8a909b);
+      color: var(--shell-text-muted);
       flex-shrink: 0;
       display: flex;
       align-items: center;
@@ -346,7 +357,7 @@ export class XHeaderView extends BaseView {
       font-weight: 500;
       font-size: 0.6875rem;
       line-height: 1rem;
-      color: var(--gray-300, #8a909b);
+      color: var(--shell-text-muted);
       letter-spacing: -0.22px;
       white-space: nowrap;
       margin-left: 0.375rem;
@@ -355,7 +366,7 @@ export class XHeaderView extends BaseView {
     .breadcrumb-chevron {
       width: 0.75rem;
       height: 0.75rem;
-      color: var(--gray-300, #8a909b);
+      color: var(--shell-text-muted);
       opacity: 0.5;
       flex-shrink: 0;
       display: flex;
@@ -377,7 +388,7 @@ export class XHeaderView extends BaseView {
     }
 
     .piece-title-row:hover {
-      background: rgba(0, 0, 0, 0.03);
+      background: var(--shell-surface-hover);
     }
 
     .piece-title-text {
@@ -426,7 +437,7 @@ export class XHeaderView extends BaseView {
     }
 
     .menu-item:hover {
-      background: rgba(0, 0, 0, 0.03);
+      background: var(--shell-surface-hover);
     }
 
     .menu-item-icon {
@@ -459,7 +470,7 @@ export class XHeaderView extends BaseView {
     .divider-line {
       height: 1px;
       width: 100%;
-      background: var(--layer-2-divider, #e1e3e8);
+      background: var(--shell-divider);
     }
   `;
 
@@ -511,13 +522,13 @@ export class XHeaderView extends BaseView {
   private _setupFavoritesSubscription(): void {
     this._cleanupFavoritesSubscription();
     if (!this.rt) return;
-    this._unsubscribeFavorites = this.rt.favorites().subscribeFavorites(
-      (favorites) => {
+    this._unsubscribeFavorites = this.rt
+      .favorites()
+      .subscribeFavorites((favorites) => {
         this._serverFavorites = favorites;
         this._localIsFavorite = undefined;
         this.requestUpdate();
-      },
-    );
+      });
   }
 
   /** Unsubscribe from favorites when component disconnects or runtime changes. */
@@ -681,6 +692,15 @@ export class XHeaderView extends BaseView {
     this.menuOpen = false;
   }
 
+  /** Toggle between light and dark mode. */
+  private handleThemeToggle(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleTheme();
+    this.requestUpdate();
+    this.menuOpen = false;
+  }
+
   /** Navigate to the current space root when the breadcrumb is clicked. */
   private _handleSpaceClick(e: Event) {
     e.preventDefault();
@@ -840,11 +860,9 @@ export class XHeaderView extends BaseView {
       if (currentlyFavorite) {
         await this.rt.favorites().removeFavorite(this.pieceId);
       } else {
-        await this.rt.favorites().addFavorite(
-          this.pieceId,
-          undefined,
-          this.rt.spaceName(),
-        );
+        await this.rt
+          .favorites()
+          .addFavorite(this.pieceId, undefined, this.rt.spaceName());
       }
     } catch (err) {
       console.error("[HeaderView] Error toggling favorite:", err);
@@ -886,10 +904,13 @@ export class XHeaderView extends BaseView {
           <div class="header-breadcrumbs">
             ${this._hasSpace
               ? html`
-                <a class="header-space" href="${this.spaceName
-                  ? `/${this.spaceName}`
-                  : `/${this.spaceDid ?? ""}`}" @click="${this
-                  ._handleSpaceClick}">${this._spaceDisplayName}</a>
+                <a
+                  class="header-space"
+                  href="${this.spaceName
+                    ? `/${this.spaceName}`
+                    : `/${this.spaceDid ?? ""}`}"
+                  @click="${this._handleSpaceClick}"
+                >${this._spaceDisplayName}</a>
                 ${this.pieceTitle
                   ? html`
                     <span class="header-separator">/</span>
@@ -901,10 +922,12 @@ export class XHeaderView extends BaseView {
                         aria-expanded="${this.headerPieceDropdownOpen}"
                       >
                         ${this.pieceTitle}
-                        <span class="header-piece-chevron ${this
-                            .headerPieceDropdownOpen
-                          ? "expanded"
-                          : ""}">
+                        <span
+                          class="header-piece-chevron ${this
+                              .headerPieceDropdownOpen
+                            ? "expanded"
+                            : ""}"
+                        >
                           ${iconChevronDown()}
                         </span>
                       </button>
@@ -914,7 +937,8 @@ export class XHeaderView extends BaseView {
                             <x-piece-list
                               .pieces="${this._pieces.value ?? []}"
                               .activePieceId="${this.pieceId}"
-                              @piece-selected="${this.handlePieceSelected}"
+                              @piece-selected="${this
+                                .handlePieceSelected}"
                             ></x-piece-list>
                           </div>
                         `
@@ -932,8 +956,11 @@ export class XHeaderView extends BaseView {
         <div class="menu-backdrop" @click="${this.handleBackdropClick}"></div>
         <div class="menu-panel" role="menu">
           <div class="menu-inner">
-            <button class="menu-close" @click="${this
-              .handleCloseMenu}" aria-label="Close menu">
+            <button
+              class="menu-close"
+              @click="${this.handleCloseMenu}"
+              aria-label="Close menu"
+            >
               <span class="menu-close-icon">${iconClose()}</span>
             </button>
             <div class="menu-title">
@@ -957,9 +984,11 @@ export class XHeaderView extends BaseView {
                 <span class="piece-title-text">
                   ${this.pieceTitle || "Untitled"}
                 </span>
-                <span class="piece-title-chevron ${this.pieceListExpanded
-                  ? "expanded"
-                  : ""}">
+                <span
+                  class="piece-title-chevron ${this.pieceListExpanded
+                    ? "expanded"
+                    : ""}"
+                >
                   ${iconChevronDown()}
                 </span>
               </button>
@@ -975,8 +1004,11 @@ export class XHeaderView extends BaseView {
             </div>
 
             <div class="menu-rows">
-              <button class="menu-item" role="menuitem" @click="${this
-                .handleNavigateUp}">
+              <button
+                class="menu-item"
+                role="menuitem"
+                @click="${this.handleNavigateUp}"
+              >
                 <span class="menu-item-icon">${iconArrowLeft()}</span>
                 <span class="menu-item-label">${this._navigateUpLabel}</span>
               </button>
@@ -985,11 +1017,12 @@ export class XHeaderView extends BaseView {
 
               ${this.pieceId
                 ? html`
-                  <button class="menu-item" role="menuitem" @click="${this
-                    .handleToggleFavorite}">
-                    <span class="menu-item-icon">${iconStar(
-                      isFavorite,
-                    )}</span>
+                  <button
+                    class="menu-item"
+                    role="menuitem"
+                    @click="${this.handleToggleFavorite}"
+                  >
+                    <span class="menu-item-icon">${iconStar(isFavorite)}</span>
                     <span class="menu-item-label">${isFavorite
                       ? "Remove from Favorites"
                       : "Add to Favorites"}</span>
@@ -997,22 +1030,44 @@ export class XHeaderView extends BaseView {
                 `
                 : nothing}
 
-              <button class="menu-item" role="menuitem" @click="${this
-                .handleCopyLink}">
+              <button
+                class="menu-item"
+                role="menuitem"
+                @click="${this.handleCopyLink}"
+              >
                 <span class="menu-item-icon">${iconLink()}</span>
                 <span class="menu-item-label">Copy link</span>
               </button>
 
-              <button class="menu-item" role="menuitem" @click="${this
-                .handleDebuggerToggleClick}">
+              <button
+                class="menu-item"
+                role="menuitem"
+                @click="${this.handleDebuggerToggleClick}"
+              >
                 <span class="menu-item-icon">${iconBug()}</span>
                 <span class="menu-item-label">Toggle debug mode</span>
               </button>
 
+              <button
+                class="menu-item"
+                role="menuitem"
+                @click="${this.handleThemeToggle}"
+              >
+                <span class="menu-item-icon">${iconThemeToggle(
+                  getEffectiveTheme() === "dark",
+                )}</span>
+                <span class="menu-item-label">${getEffectiveTheme() === "dark"
+                  ? "Switch to light mode"
+                  : "Switch to dark mode"}</span>
+              </button>
+
               <div class="divider"><div class="divider-line"></div></div>
 
-              <button class="menu-item" role="menuitem" @click="${this
-                .handleAuthClick}">
+              <button
+                class="menu-item"
+                role="menuitem"
+                @click="${this.handleAuthClick}"
+              >
                 <span class="menu-item-icon">${iconLogOut()}</span>
                 <span class="menu-item-label">Sign out</span>
               </button>
