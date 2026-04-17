@@ -7,7 +7,7 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 import { LRUCache } from "@commonfabric/utils/cache";
-import { toUnpaddedBase64url} from "@commonfabric/utils/base64url";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { sha256 } from "@commonfabric/content-hash";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
@@ -68,7 +68,8 @@ function computeHashableString(value: unknown): string {
         const keys = Object.keys(value).sort();
         return "{" +
           keys.map((k) =>
-            k + ":" + computeHashableString((value as Record<string, unknown>)[k])
+            k + ":" +
+            computeHashableString((value as Record<string, unknown>)[k])
           ).join(",") +
           "}";
       }
