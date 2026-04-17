@@ -234,6 +234,16 @@ export interface IReadable<T> {
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
+export type MetaField =
+  | "pattern"
+  | "argument"
+  | "internal";
+
+export interface IMetaCell {
+  getMetaRaw(metaField: MetaField): FabricValue;
+  setMetaRaw(metaField: MetaField, value: FabricValue): void;
+}
+
 /**
  * Writable cells can update their value.
  */
@@ -893,6 +903,7 @@ export interface ICell<T>
     IEquatable,
     IKeyable<T, AsCell>,
     IDerivable<T>,
+    IMetaCell,
     IResolvable<T, Cell<T>> {}
 
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}

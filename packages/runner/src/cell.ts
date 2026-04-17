@@ -87,7 +87,6 @@ import {
   isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
-  parseLink,
   type SanitizeSchemaForLinksOptions,
 } from "./link-utils.ts";
 import type {
@@ -105,8 +104,7 @@ import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { PatternMeta, patternMetaSchema } from "./pattern-manager.ts";
-import { getSigilLink } from "./runner-utils.ts";
+import { MetaField } from "@commonfabric/api";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -1466,38 +1464,19 @@ export class CellImpl<T extends FabricValue>
     return !!this.readOnlyReason;
   }
 
-  // We attach a pattern cell to a result cell
-  getPatternCell(): Cell<PatternMeta> | undefined {
+  getMetaRaw(metaField: MetaField): FabricValue | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    const patternCellLinkObj = this.runtime.readTx(this.tx).readOrThrow(
-      { ...this.link, path: ["pattern"] },
-    ) as string | undefined;
-    const patternCellId = parseLink(patternCellLinkObj, this.link)?.id;
-    if (!patternCellId) return undefined;
-    return createCell(this.runtime, {
-      space: this.link.space,
-      path: [],
-      id: patternCellId,
-      type: "application/json",
-      schema: patternMetaSchema,
-    }, this.tx) as Cell<any>;
+    const metaAddr = { ...this.link, path: [metaField] };
+    return this.runtime.readTx(this.tx).readOrThrow(metaAddr);
   }
 
-  // We attach a pattern cell to a result cell
-  setPatternCell(patternCell: Cell<PatternMeta>): void {
-    if (!this.tx) throw new Error("Transaction required for setPatternCell");
-
+  setMetaRaw(metaField: MetaField, value: FabricValue): void {
+    if (!this.tx) throw new Error("Transaction required for setMetaRaw");
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
     if (!this.synced) this.sync();
-
-    if (patternCell.path.length > 0) {
-      throw new Error("Pattern cell must have empty path for now");
-    }
-    this.tx.writeOrThrow(
-      { ...this.link, path: ["pattern"] },
-      getSigilLink(patternCell.sourceURI),
-    );
+    const metaAddr = { ...this.link, path: [metaField] };
+    this.tx.writeOrThrow(metaAddr, value as FabricValue);
   }
 
   /**

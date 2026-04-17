@@ -73,6 +73,7 @@ describe("ensurePieceRunning", () => {
     // Set up the result cell to point to the process cell
     resultCell.set({ value: 1 });
     resultCell.setSourceCell(processCell);
+    resultCell.setMetaRaw("argument", { value: 1 });
 
     // Process cell has no pattern
     processCell.set({
@@ -122,6 +123,8 @@ describe("ensurePieceRunning", () => {
 
     resultCell.set({ value: 1 });
     resultCell.setSourceCell(processCell);
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", { value: 1 });
 
     // Process cell has a pattern but no resultRef
     processCell.set({
@@ -199,6 +202,9 @@ describe("ensurePieceRunning", () => {
       },
     });
     resultCell.setSourceCell(processCell);
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", { value: 5 });
+    resultCell.setMetaRaw("internal", {});
 
     processCell.set({
       pattern: getSigilLink(patternId),
@@ -265,6 +271,9 @@ describe("ensurePieceRunning", () => {
 
     resultCell.set({});
     resultCell.setSourceCell(processCell);
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", {});
+    resultCell.setMetaRaw("internal", {});
 
     processCell.set({
       pattern: getSigilLink(patternId),
@@ -338,6 +347,7 @@ describe("ensurePieceRunning", () => {
 
     resultCell.set({});
     resultCell.setSourceCell(processCell);
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
 
     processCell.set({
       pattern: getSigilLink(patternId),
@@ -498,6 +508,7 @@ describe("queueEvent with auto-start", () => {
       },
     });
     resultCell.setSourceCell(processCell);
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
 
     // Set up process cell - internal.events must be set to $stream: true
     // (both in pattern.initial and directly on the cell)
@@ -651,6 +662,7 @@ describe("queueEvent with auto-start", () => {
       },
     });
     resultCell.setSourceCell(processCell);
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
 
     // Set up process cell - internal.events must be set to $stream: true
     // (both in pattern.initial and directly on the cell)

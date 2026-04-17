@@ -482,6 +482,8 @@ export class Runner {
 
     if (previousPatternId === patternId) {
       this.updateProcessArgument(tx, processCell, argument);
+      const argumentValue = fabricFromNativeValue(argument);
+      resultCell.withTx(tx).setMetaRaw("argument", argumentValue);
       return { resultCell, needsStart: false };
     }
 
@@ -572,6 +574,7 @@ export class Runner {
       nextArgument = mergeObjects<T>(argument as any, defaults);
     }
 
+    const patternCellLink = getSigilLink(patternId);
     processCell.withTx(tx).asSchema(processCellSetupSchema(pattern))
       .setRawUntyped(fabricFromNativeValue({
         ...processCell.getRaw({ meta: ignoreReadForScheduling }),
@@ -585,8 +588,11 @@ export class Runner {
             base: processCell,
           }),
         internal,
-        pattern: getSigilLink(patternId),
+        pattern: patternCellLink,
       }, false));
+
+    // Set the pattern in the resultCell as well -- we'll remove the process cell later.
+    resultCell.withTx(tx).setMetaRaw("pattern", patternCellLink);
 
     if (nextArgument) {
       this.updateProcessArgument(tx, processCell, nextArgument);

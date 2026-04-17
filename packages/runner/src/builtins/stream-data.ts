@@ -6,6 +6,7 @@ import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { setPatternCell } from "../result-utils.ts";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -73,6 +74,11 @@ export function streamData(
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
+      // Link the new result cells to the pattern cell too
+      const patternCellPtr = parentCell.key("pattern");
+      setPatternCell(pending, patternCellPtr);
+      setPatternCell(result, patternCellPtr);
+      setPatternCell(error, patternCellPtr);
 
       // Since we'll only write into the docs above, we only have to call this once
       // here, instead of in the action.

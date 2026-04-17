@@ -1242,11 +1242,13 @@ describe("Cell commit callbacks", () => {
       // 1. Create the target cell (no schema initially)
       const targetCell = runtime.getCell(space, "target-cell", undefined, tx);
 
-      // 2. Create the pattern cell
-      const patternCell = runtime.getCell(space, "pattern-cell", undefined, tx);
+      // 2. Create the process cell
+      const processCell = runtime.getCell(space, "process-cell", undefined, tx);
 
       // 3. Set patternCell as the source of targetCell
-      targetCell.setSourceCell(patternCell);
+      targetCell.setSourceCell(processCell);
+      // we would normally set the pattern cell on the result cell, but
+      // this is just a partial example, and we don't actually have a pattern
 
       // 4. Create a link to targetCell that includes the desired schema
       const schemaWeWant: JSONSchema = {
@@ -1260,7 +1262,7 @@ describe("Cell commit callbacks", () => {
         .getAsLink({ includeSchema: true });
 
       // 5. Set patternCell's resultRef to point to targetCell using the link with schema
-      patternCell.set({ resultRef: linkWithSchema });
+      processCell.set({ resultRef: linkWithSchema });
 
       // 6. Verify asSchemaFromLinks picks up the schema from the resultRef link
       const schemaCell = targetCell.asSchemaFromLinks();
@@ -1270,13 +1272,15 @@ describe("Cell commit callbacks", () => {
 
     it("should recover callable child schemas from linked result metadata", () => {
       const resultCell = runtime.getCell(space, "linked-result", undefined, tx);
-      const patternCell = runtime.getCell(
+      const processCell = runtime.getCell(
         space,
         "linked-pattern",
         undefined,
         tx,
       );
-      resultCell.setSourceCell(patternCell);
+      resultCell.setSourceCell(processCell);
+      // we don't bother setting the pattern cell on the result cell, sicne
+      // this is just a partial example, and we have no pattern cell.
 
       const toolSchema: JSONSchema = {
         type: "object",
@@ -1308,7 +1312,7 @@ describe("Cell commit callbacks", () => {
       const linkWithSchema = resultCell
         .asSchema(resultSchema)
         .getAsLink({ includeSchema: true });
-      patternCell.set({ resultRef: linkWithSchema });
+      processCell.set({ resultRef: linkWithSchema });
 
       const searchCell = resultCell.key("search");
       expect(searchCell.schema).toBeUndefined();

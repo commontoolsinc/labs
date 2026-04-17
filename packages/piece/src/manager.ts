@@ -737,6 +737,26 @@ export class PieceManager {
   async getArgument<T = unknown>(
     piece: Cell<unknown | T>,
   ): Promise<Cell<T>> {
+    // Currently, piece is a Result Cell, and we'll grab the source to get to
+    // the Process Cell, then follow that to get to the argument value. With
+    // the new model, we should be able to get the argument directly from the
+    // Result Cell through getMetaRaw.
+    // With this approach, we aren't using the argumentSchema from the pattern
+    // but that should have been written into the Result Cell's argument link.
+    // @FIXME(@ubik2) - this works if argument is a direct link, but it will
+    // generally not be set up this way.
+    const argumentValue = piece.getMetaRaw("argument");
+    const pieceLink = piece.getAsNormalizedFullLink();
+    const argumentLink = parseLink(argumentValue, pieceLink);
+    if (argumentLink === undefined) {
+      return await this.getLegacyArgument(piece);
+    }
+    return this.runtime.getCellFromLink(argumentLink);
+  }
+
+  async getLegacyArgument<T = unknown>(
+    piece: Cell<unknown | T>,
+  ): Promise<Cell<T>> {
     const source = piece.getSourceCell(processLinkSchema);
     if (!source) throw new Error("piece missing source cell");
     const patternId = getPatternIdFromSourceCell(source);

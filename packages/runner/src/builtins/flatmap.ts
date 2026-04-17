@@ -17,6 +17,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { setPatternCell } from "../result-utils.ts";
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -77,6 +78,8 @@ export function flatMap(
       );
       result.send([]);
       result.setSourceCell(parentCell);
+      // Link the new result cells to the pattern cell too
+      setPatternCell(result, parentCell.key("pattern"));
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
@@ -147,6 +150,8 @@ export function flatMap(
           { doNotUpdateOnPatternChange: true },
         );
         resultCell.getSourceCell()!.setSourceCell(parentCell);
+        // Link the new result cells to the pattern cell too
+        setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
       }
