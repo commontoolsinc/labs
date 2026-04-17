@@ -25,6 +25,7 @@ import type {
   HarnessAssistantTranscriptMessage,
   HarnessToolCall,
   HarnessToolTranscriptMessage,
+  HarnessTranscriptEvent,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
@@ -44,6 +45,7 @@ export interface CreateHarnessPromptLoopOptions
   apiKeySource?: string;
   fetchFn?: typeof fetch;
   maxModelTurns?: number;
+  allowedToolIds?: readonly BuiltinToolId[];
 }
 
 export interface RunHarnessPromptOptions {
@@ -52,6 +54,9 @@ export interface RunHarnessPromptOptions {
   maxModelTurns?: number;
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
+  onTranscriptEvent?: (
+    event: HarnessTranscriptEvent,
+  ) => void | Promise<void>;
 }
 
 export interface RunHarnessTranscriptOptions {
@@ -59,6 +64,9 @@ export interface RunHarnessTranscriptOptions {
   maxModelTurns?: number;
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
+  onTranscriptEvent?: (
+    event: HarnessTranscriptEvent,
+  ) => void | Promise<void>;
 }
 
 export interface HarnessPromptLoopResult {
@@ -119,8 +127,13 @@ const toOpenAIChatMessage = (
   }
 };
 
-const toOpenAITools = (): OpenAIChatCompletionTool[] =>
-  BUILTIN_TOOLS.map((tool) => ({
+const toOpenAITools = (
+  allowedToolIds?: ReadonlySet<BuiltinToolId>,
+): OpenAIChatCompletionTool[] =>
+  BUILTIN_TOOLS.filter((tool) =>
+    allowedToolIds === undefined ||
+    allowedToolIds.has(tool.descriptor.toolId)
+  ).map((tool) => ({
     type: "function",
     function: {
       name: tool.descriptor.toolId,
@@ -262,6 +275,7 @@ export class CfHarnessPromptLoop {
   readonly engine: CfHarnessEngine;
   readonly gatewayClient: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
+  readonly #allowedToolIds?: ReadonlySet<BuiltinToolId>;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -274,6 +288,9 @@ export class CfHarnessPromptLoop {
         fetchFn: options.fetchFn,
       });
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
+    this.#allowedToolIds = options.allowedToolIds === undefined
+      ? undefined
+      : new Set(options.allowedToolIds);
   }
 
   async runPrompt(
@@ -289,6 +306,7 @@ export class CfHarnessPromptLoop {
       model: options.model,
       maxModelTurns: options.maxModelTurns,
       promptSlotBinding: options.promptSlotBinding,
+      onTranscriptEvent: options.onTranscriptEvent,
     });
   }
 
@@ -308,6 +326,9 @@ export class CfHarnessPromptLoop {
     this.engine.setRunStatus("running");
     await this.engine.persistRunState();
     await this.engine.persistTranscript(transcript);
+    for (const message of transcript) {
+      await options.onTranscriptEvent?.({ message, transcript });
+    }
     try {
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;
@@ -317,6 +338,10 @@ export class CfHarnessPromptLoop {
         const assistantMessage = createAssistantTranscriptMessage(response);
         transcript.push(assistantMessage);
         await this.engine.persistTranscript(transcript);
+        await options.onTranscriptEvent?.({
+          message: assistantMessage,
+          transcript,
+        });
         const toolCalls = assistantMessage.toolCalls ?? [];
         if (toolCalls.length === 0) {
           this.engine.setRunStatus("completed");
@@ -330,10 +355,16 @@ export class CfHarnessPromptLoop {
           };
         }
         for (const toolCall of toolCalls) {
-          transcript.push(
-            await this.#invokeToolCall(toolCall, options.promptSlotBinding),
+          const toolMessage = await this.#invokeToolCall(
+            toolCall,
+            options.promptSlotBinding,
           );
+          transcript.push(toolMessage);
           await this.engine.persistTranscript(transcript);
+          await options.onTranscriptEvent?.({
+            message: toolMessage,
+            transcript,
+          });
         }
       }
     } catch (error) {
@@ -357,7 +388,7 @@ export class CfHarnessPromptLoop {
     return {
       model,
       messages: transcript.map(toOpenAIChatMessage),
-      tools: toOpenAITools(),
+      tools: toOpenAITools(this.#allowedToolIds),
       tool_choice: "auto",
     };
   }
@@ -376,6 +407,28 @@ export class CfHarnessPromptLoop {
       throw new Error(
         `unknown builtin tool requested: ${toolCall.function.name}`,
       );
+    }
+    if (
+      this.#allowedToolIds !== undefined &&
+      !this.#allowedToolIds.has(toolCall.function.name)
+    ) {
+      const denial = makeObservationDenied("not-authorized", {
+        detail: `${toolCall.function.name} is not allowed in this run`,
+      });
+      await this.engine.recordPolicyEvent({
+        severity: "denied",
+        mode: this.engine.getRunState().cfcEnforcementMode,
+        toolId: toolCall.function.name,
+        toolCallId: toolCall.id,
+        detail: denial.detail ?? `${toolCall.function.name} is not allowed`,
+        observationDenied: denial,
+      });
+      return {
+        role: "tool",
+        toolCallId: toolCall.id,
+        toolName: toolCall.function.name,
+        content: JSON.stringify(denial),
+      };
     }
     const input = parseToolArguments(toolCall);
     const decision = evaluateToolPolicy(

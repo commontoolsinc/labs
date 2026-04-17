@@ -168,6 +168,44 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   );
 });
 
+Deno.test("CfHarnessPromptLoop only advertises allowed tools when a tool allowlist is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-allowed-tools",
+      model: "gpt-5.4",
+    }),
+    fetchFn: async (_input, init) => {
+      fetchCalls.push(init ?? {});
+      return new Response(
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "No tool call needed.",
+            },
+          }],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    request.tools.map((tool) => tool.function.name),
+    ["read_file"],
+  );
+});
+
 Deno.test("CfHarnessPromptLoop completes a direct assistant response without tool calls", async () => {
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -514,6 +552,97 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
         reason: "not-authorized",
         detail:
           "write_file requires direct-command authorization in enforce-explicit",
+      }),
+    },
+  );
+});
+
+Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlist", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-tool-allowlist-denied",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+      now: (() => {
+        const timestamps = [
+          "2026-04-16T23:20:00.000Z",
+          "2026-04-16T23:20:01.000Z",
+          "2026-04-16T23:20:02.000Z",
+          "2026-04-16T23:20:03.000Z",
+        ];
+        return () => timestamps.shift() ?? "2026-04-16T23:20:04.000Z";
+      })(),
+    }),
+    fetchFn: async (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-bash-denied",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "pwd" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "bash was not available in this run.",
+            },
+          }],
+        };
+      return new Response(JSON.stringify(payload), { status: 200 });
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run pwd.",
+  });
+
+  assertEquals(
+    result.finalAssistantText,
+    "bash was not available in this run.",
+  );
+  assertEquals(result.runState.toolOutputs, []);
+  assertEquals(result.runState.policyEvents, [{
+    type: "cf-harness.policy-event",
+    severity: "denied",
+    mode: "disabled",
+    toolId: "bash",
+    toolCallId: "call-bash-denied",
+    detail: "bash is not allowed in this run",
+    observationDenied: {
+      type: "cf-harness.observation-denied",
+      reason: "not-authorized",
+      detail: "bash is not allowed in this run",
+    },
+    at: "2026-04-16T23:20:02.000Z",
+  }]);
+  assertEquals(
+    result.transcript.at(-2),
+    {
+      role: "tool",
+      toolCallId: "call-bash-denied",
+      toolName: "bash",
+      content: JSON.stringify({
+        type: "cf-harness.observation-denied",
+        reason: "not-authorized",
+        detail: "bash is not allowed in this run",
       }),
     },
   );

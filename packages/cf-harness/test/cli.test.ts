@@ -2,9 +2,12 @@ import { assertEquals } from "@std/assert";
 import {
   buildCfHarnessOperatorSystemPrompt,
   type CfHarnessCliIO,
+  createCfHarnessBatchResult,
   formatCfHarnessCliResult,
   formatCfHarnessCliUsage,
+  formatCfHarnessTranscriptEvent,
   parseCfHarnessCliArgs,
+  resolveCfHarnessCliSystemPrompt,
   runCfHarnessCli,
 } from "../src/cli.ts";
 import type {
@@ -45,6 +48,8 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.prompt, "Summarize this workspace");
   assertEquals(parsed.model, "gpt-5.4");
   assertEquals(parsed.gatewayAuthMode, "bearer");
+  assertEquals(parsed.outputMode, "operator");
+  assertEquals(parsed.streamEvents, false);
   assertEquals(parsed.promptSlotRole, "direct-command");
   assertEquals(parsed.artifactRoot, "/tmp/project/.cf-harness-artifacts");
   assertEquals(parsed.maxModelTurns, 8);
@@ -94,6 +99,61 @@ Deno.test("parseCfHarnessCliArgs supports gateway auth mode override", async () 
     throw new Error("expected config result");
   }
   assertEquals(parsed.gatewayAuthMode, "none");
+});
+
+Deno.test("parseCfHarnessCliArgs supports batch output mode override", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--output-mode", "batch"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.outputMode, "batch");
+});
+
+Deno.test("parseCfHarnessCliArgs supports stream-events flag", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--stream-events"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.streamEvents, true);
+});
+
+Deno.test("parseCfHarnessCliArgs supports allowed tools and result json path", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "read_file",
+      "--allow-tool",
+      "bash",
+      "--result-json-path",
+      "results/output.json",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.allowedToolIds, ["read_file", "bash"]);
+  assertEquals(parsed.resultJsonPath, "/tmp/project/results/output.json");
 });
 
 Deno.test("parseCfHarnessCliArgs resolves focus-root relative to workspace", async () => {
@@ -361,6 +421,263 @@ Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async
   assertEquals(stdout.length, 1);
 });
 
+Deno.test("runCfHarnessCli can stream transcript events as they happen", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Inspect the workspace",
+      "--stream-events",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: async (options) => {
+          await options.onTranscriptEvent?.({
+            message: { role: "user", content: "Inspect the workspace" },
+            transcript: [{ role: "user", content: "Inspect the workspace" }],
+          });
+          await options.onTranscriptEvent?.({
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{
+                id: "call-1",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: '{"path":"README.md"}',
+                },
+              }],
+            },
+            transcript: [],
+          });
+          await options.onTranscriptEvent?.({
+            message: {
+              role: "tool",
+              toolCallId: "call-1",
+              toolName: "read_file",
+              content: '{"outputId":"read-1","content":"hello"}',
+            },
+            transcript: [],
+          });
+          await options.onTranscriptEvent?.({
+            message: { role: "assistant", content: "Inspection complete." },
+            transcript: [],
+          });
+          return {
+            model: "gpt-5.4",
+            finalAssistantText: "Inspection complete.",
+            transcript: [
+              { role: "user", content: "Inspect the workspace" },
+              { role: "assistant", content: "Inspection complete." },
+            ],
+            modelTurns: 1,
+            runState: {
+              runId: "run-cli-stream",
+              status: "completed",
+              createdAt: "2026-04-16T22:40:00.000Z",
+              updatedAt: "2026-04-16T22:40:01.000Z",
+              cfcEnforcementMode: "disabled",
+              policyEvents: [],
+              toolOutputs: [],
+            },
+          } satisfies HarnessPromptLoopResult;
+        },
+        runTranscript: async () => {
+          throw new Error("unexpected resume path");
+        },
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  assertEquals(stdout, [
+    "user: Inspect the workspace\n",
+    'assistant -> tools: read_file(path="README.md")\n',
+    "tool read_file: outputId=read-1\n",
+    "assistant: Inspection complete.\n",
+    formatCfHarnessCliResult({
+      model: "gpt-5.4",
+      finalAssistantText: "Inspection complete.",
+      transcript: [
+        { role: "user", content: "Inspect the workspace" },
+        { role: "assistant", content: "Inspection complete." },
+      ],
+      modelTurns: 1,
+      runState: {
+        runId: "run-cli-stream",
+        status: "completed",
+        createdAt: "2026-04-16T22:40:00.000Z",
+        updatedAt: "2026-04-16T22:40:01.000Z",
+        cfcEnforcementMode: "disabled",
+        policyEvents: [],
+        toolOutputs: [],
+      },
+    }),
+  ]);
+});
+
+Deno.test("runCfHarnessCli uses plain stdout and no operator guidance in batch mode", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Execute the batch task",
+      "--output-mode",
+      "batch",
+      "--system-prompt",
+      "You are a Loom batch worker.",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: async (options) => {
+          runPromptOptions = options;
+          return {
+            model: "gpt-5.4",
+            finalAssistantText: "Batch result.",
+            transcript: [
+              { role: "user", content: "Execute the batch task" },
+              { role: "assistant", content: "Batch result." },
+            ],
+            modelTurns: 1,
+            runState: {
+              runId: "run-cli-batch",
+              status: "completed",
+              createdAt: "2026-04-16T22:10:00.000Z",
+              updatedAt: "2026-04-16T22:10:01.000Z",
+              cfcEnforcementMode: "disabled",
+              policyEvents: [],
+              toolOutputs: [],
+            },
+          } satisfies HarnessPromptLoopResult;
+        },
+        runTranscript: async () => {
+          throw new Error("unexpected resume path");
+        },
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(runPromptOptions?.systemPrompt, "You are a Loom batch worker.");
+  assertEquals(stdout, ["Batch result.\n"]);
+  assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli writes a structured batch result sidecar when requested", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const writes: Array<{ path: string; text: string }> = [];
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Execute the batch task",
+      "--output-mode",
+      "batch",
+      "--gateway-auth-mode",
+      "none",
+      "--result-json-path",
+      "/tmp/project/out/result.json",
+    ],
+    {
+      io,
+      env: {},
+      writeTextFile: async (path, text) => {
+        writes.push({ path, text });
+      },
+      createPromptLoop: () => ({
+        runPrompt: async () =>
+          ({
+            model: "gpt-5.4",
+            finalAssistantText: "Batch result.",
+            transcript: [
+              { role: "user", content: "Execute the batch task" },
+              { role: "assistant", content: "Batch result." },
+            ],
+            modelTurns: 2,
+            runState: {
+              runId: "run-cli-batch-json",
+              status: "completed",
+              createdAt: "2026-04-16T23:10:00.000Z",
+              updatedAt: "2026-04-16T23:10:02.000Z",
+              cfcEnforcementMode: "observe",
+              artifactRoot:
+                "/tmp/project/.cf-harness-artifacts/run-cli-batch-json",
+              transcriptPath:
+                "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/transcript.json",
+              policyEvents: [{
+                type: "cf-harness.policy-event",
+                severity: "denied",
+                mode: "observe",
+                toolId: "write_file",
+                detail:
+                  "write_file requires direct-command authorization in enforce-explicit",
+                at: "2026-04-16T23:10:01.000Z",
+              }],
+              toolOutputs: [],
+            },
+          }) satisfies HarnessPromptLoopResult,
+        runTranscript: async () => {
+          throw new Error("unexpected resume path");
+        },
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stdout, ["Batch result.\n"]);
+  assertEquals(stderr, []);
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].path, "/tmp/project/out/result.json");
+  assertEquals(
+    JSON.parse(writes[0].text),
+    createCfHarnessBatchResult({
+      model: "gpt-5.4",
+      finalAssistantText: "Batch result.",
+      transcript: [
+        { role: "user", content: "Execute the batch task" },
+        { role: "assistant", content: "Batch result." },
+      ],
+      modelTurns: 2,
+      runState: {
+        runId: "run-cli-batch-json",
+        status: "completed",
+        createdAt: "2026-04-16T23:10:00.000Z",
+        updatedAt: "2026-04-16T23:10:02.000Z",
+        cfcEnforcementMode: "observe",
+        artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli-batch-json",
+        transcriptPath:
+          "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/transcript.json",
+        policyEvents: [{
+          type: "cf-harness.policy-event",
+          severity: "denied",
+          mode: "observe",
+          toolId: "write_file",
+          detail:
+            "write_file requires direct-command authorization in enforce-explicit",
+          at: "2026-04-16T23:10:01.000Z",
+        }],
+        toolOutputs: [],
+      },
+    }, JSON.parse(writes[0].text).duration_ms),
+  );
+});
+
 Deno.test("buildCfHarnessOperatorSystemPrompt appends user instructions after guardrails", () => {
   assertEquals(
     buildCfHarnessOperatorSystemPrompt({
@@ -379,6 +696,66 @@ Deno.test("buildCfHarnessOperatorSystemPrompt appends user instructions after gu
       "Additional instructions:",
       "Use bash and read_file only. Do not modify files.",
     ].join("\n"),
+  );
+});
+
+Deno.test("resolveCfHarnessCliSystemPrompt bypasses operator guidance in batch mode", () => {
+  assertEquals(
+    resolveCfHarnessCliSystemPrompt({
+      workspace: "/tmp/project",
+      focusRoot: "/tmp/project/packages/cf-harness",
+      systemPrompt: "You are a Loom batch worker.",
+      outputMode: "batch",
+    }),
+    "You are a Loom batch worker.",
+  );
+});
+
+Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool results", () => {
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-1",
+          type: "function",
+          function: { name: "bash", arguments: '{"command":"ls"}' },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: bash(command="ls")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-2",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: '{"path":"/workspace/README.md"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: read_file(path="/workspace/README.md")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "tool",
+        toolCallId: "call-1",
+        toolName: "bash",
+        content: '{"detail":"write blocked"}',
+      },
+      transcript: [],
+    }),
+    "tool bash: write blocked\n",
   );
 });
 
@@ -609,5 +986,26 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       "- warning bash: bash would require direct-command authorization in enforce modes",
       "",
     ].join("\n"),
+  );
+});
+
+Deno.test("formatCfHarnessCliResult returns plain final text in batch mode", () => {
+  assertEquals(
+    formatCfHarnessCliResult({
+      model: "gpt-5.4",
+      finalAssistantText: "Batch result.",
+      transcript: [],
+      modelTurns: 1,
+      runState: {
+        runId: "run-batch",
+        status: "completed",
+        createdAt: "2026-04-16T22:30:00.000Z",
+        updatedAt: "2026-04-16T22:30:01.000Z",
+        cfcEnforcementMode: "disabled",
+        policyEvents: [],
+        toolOutputs: [],
+      },
+    }, "batch"),
+    "Batch result.\n",
   );
 });

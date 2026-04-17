@@ -38,3 +38,8 @@ export type HarnessTranscriptMessage =
   | HarnessUserTranscriptMessage
   | HarnessAssistantTranscriptMessage
   | HarnessToolTranscriptMessage;
+
+export interface HarnessTranscriptEvent {
+  message: HarnessTranscriptMessage;
+  transcript: readonly HarnessTranscriptMessage[];
+}
