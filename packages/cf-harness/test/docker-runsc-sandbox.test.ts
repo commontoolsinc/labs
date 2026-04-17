@@ -14,9 +14,9 @@ class FakeProcessRunner implements ProcessRunner {
 
   constructor(private readonly result: ProcessRunResult) {}
 
-  async run(request: ProcessRunRequest): Promise<ProcessRunResult> {
+  run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.requests.push(request);
-    return this.result;
+    return Promise.resolve(this.result);
   }
 }
 

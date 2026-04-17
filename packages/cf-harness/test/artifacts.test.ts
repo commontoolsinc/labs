@@ -30,13 +30,15 @@ class FakeSandboxRuntime implements SandboxRuntime {
     return "/workspace";
   }
 
-  async run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
-    return { stdout: "", stderr: "", exitCode: 0 };
+  run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
   }
 
-  async runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
+  runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.shellRequests.push(request);
-    return this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 };
+    return Promise.resolve(
+      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
   }
 }
 
@@ -138,7 +140,7 @@ Deno.test({
             return () => timestamps.shift() ?? "2026-04-15T21:10:07.000Z";
           })(),
         }),
-        fetchFn: async (_input, init) => {
+        fetchFn: (_input, init) => {
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
@@ -171,7 +173,9 @@ Deno.test({
                 },
               }],
             };
-          return new Response(JSON.stringify(payload), { status: 200 });
+          return Promise.resolve(
+            new Response(JSON.stringify(payload), { status: 200 }),
+          );
         },
       });
 

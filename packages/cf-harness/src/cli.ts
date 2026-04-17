@@ -596,7 +596,7 @@ export const runCfHarnessCli = async (
       subject: parsed.resumeRun ?? parsed.workspace,
     });
     const onTranscriptEvent = parsed.streamEvents
-      ? async (event: HarnessTranscriptEvent) => {
+      ? (event: HarnessTranscriptEvent) => {
         const formatted = formatCfHarnessTranscriptEvent(event);
         if (formatted !== undefined) {
           io.stdout(formatted);

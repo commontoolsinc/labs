@@ -12,7 +12,6 @@ import {
   type OpenAIChatCompletionRequest,
   type OpenAIChatCompletionResponse,
   type OpenAIChatCompletionTool,
-  type OpenAIChatCompletionToolCall,
   type OpenAIChatMessageContent,
   OpenAICompatibleGatewayClient,
 } from "./gateway/openai-client.ts";

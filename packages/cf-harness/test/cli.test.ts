@@ -70,9 +70,9 @@ Deno.test("parseCfHarnessCliArgs supports prompt files and mode overrides", asyn
     ],
     {
       env: {},
-      readTextFile: async (path) => {
+      readTextFile: (path) => {
         assertEquals(path, "/tmp/prompt.txt");
-        return "Prompt from file.";
+        return Promise.resolve("Prompt from file.");
       },
     },
   );
@@ -279,33 +279,34 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
       createPromptLoop: (options) => {
         createdOptions = options as Record<string, unknown>;
         return {
-          runPrompt: async (options) => {
+          runPrompt: (options) => {
             runPromptOptions = options;
-            return ({
-              model: "gpt-5.4",
-              finalAssistantText: "Inspection complete.",
-              transcript: [
-                { role: "user", content: "Inspect the workspace" },
-                { role: "assistant", content: "Inspection complete." },
-              ],
-              modelTurns: 1,
-              runState: {
-                runId: "run-cli",
-                status: "completed",
-                createdAt: "2026-04-15T22:00:00.000Z",
-                updatedAt: "2026-04-15T22:00:01.000Z",
-                cfcEnforcementMode: "disabled",
-                artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
-                transcriptPath:
-                  "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
-                policyEvents: [],
-                toolOutputs: [],
-              },
-            }) satisfies HarnessPromptLoopResult;
+            return Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "Inspection complete.",
+                transcript: [
+                  { role: "user", content: "Inspect the workspace" },
+                  { role: "assistant", content: "Inspection complete." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-cli",
+                  status: "completed",
+                  createdAt: "2026-04-15T22:00:00.000Z",
+                  updatedAt: "2026-04-15T22:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
+                  transcriptPath:
+                    "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            );
           },
-          runTranscript: async () => {
-            throw new Error("unexpected resume path");
-          },
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
         };
       },
     },
@@ -383,34 +384,35 @@ Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async
       io,
       env: { CF_HARNESS_API_KEY: "test-key" },
       createPromptLoop: () => ({
-        runPrompt: async (options) => {
+        runPrompt: (options) => {
           runPromptOptions = options;
-          return {
-            model: "gpt-5.4",
-            finalAssistantText: "Inspection complete.",
-            transcript: [
-              { role: "user", content: "Inspect the workspace" },
-              { role: "assistant", content: "Inspection complete." },
-            ],
-            modelTurns: 1,
-            runState: {
-              runId: "run-cli-context",
-              status: "completed",
-              createdAt: "2026-04-16T21:10:00.000Z",
-              updatedAt: "2026-04-16T21:10:01.000Z",
-              cfcEnforcementMode: "disabled",
-              artifactRoot:
-                "/tmp/project/.cf-harness-artifacts/run-cli-context",
-              transcriptPath:
-                "/tmp/project/.cf-harness-artifacts/run-cli-context/transcript.json",
-              policyEvents: [],
-              toolOutputs: [],
-            },
-          } satisfies HarnessPromptLoopResult;
+          return Promise.resolve(
+            {
+              model: "gpt-5.4",
+              finalAssistantText: "Inspection complete.",
+              transcript: [
+                { role: "user", content: "Inspect the workspace" },
+                { role: "assistant", content: "Inspection complete." },
+              ],
+              modelTurns: 1,
+              runState: {
+                runId: "run-cli-context",
+                status: "completed",
+                createdAt: "2026-04-16T21:10:00.000Z",
+                updatedAt: "2026-04-16T21:10:01.000Z",
+                cfcEnforcementMode: "disabled",
+                artifactRoot:
+                  "/tmp/project/.cf-harness-artifacts/run-cli-context",
+                transcriptPath:
+                  "/tmp/project/.cf-harness-artifacts/run-cli-context/transcript.json",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            } satisfies HarnessPromptLoopResult,
+          );
         },
-        runTranscript: async () => {
-          throw new Error("unexpected resume path");
-        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
       }),
     },
   );
@@ -489,9 +491,8 @@ Deno.test("runCfHarnessCli can stream transcript events as they happen", async (
             },
           } satisfies HarnessPromptLoopResult;
         },
-        runTranscript: async () => {
-          throw new Error("unexpected resume path");
-        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
       }),
     },
   );
@@ -544,30 +545,31 @@ Deno.test("runCfHarnessCli uses plain stdout and no operator guidance in batch m
       io,
       env: {},
       createPromptLoop: () => ({
-        runPrompt: async (options) => {
+        runPrompt: (options) => {
           runPromptOptions = options;
-          return {
-            model: "gpt-5.4",
-            finalAssistantText: "Batch result.",
-            transcript: [
-              { role: "user", content: "Execute the batch task" },
-              { role: "assistant", content: "Batch result." },
-            ],
-            modelTurns: 1,
-            runState: {
-              runId: "run-cli-batch",
-              status: "completed",
-              createdAt: "2026-04-16T22:10:00.000Z",
-              updatedAt: "2026-04-16T22:10:01.000Z",
-              cfcEnforcementMode: "disabled",
-              policyEvents: [],
-              toolOutputs: [],
-            },
-          } satisfies HarnessPromptLoopResult;
+          return Promise.resolve(
+            {
+              model: "gpt-5.4",
+              finalAssistantText: "Batch result.",
+              transcript: [
+                { role: "user", content: "Execute the batch task" },
+                { role: "assistant", content: "Batch result." },
+              ],
+              modelTurns: 1,
+              runState: {
+                runId: "run-cli-batch",
+                status: "completed",
+                createdAt: "2026-04-16T22:10:00.000Z",
+                updatedAt: "2026-04-16T22:10:01.000Z",
+                cfcEnforcementMode: "disabled",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            } satisfies HarnessPromptLoopResult,
+          );
         },
-        runTranscript: async () => {
-          throw new Error("unexpected resume path");
-        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
       }),
     },
   );
@@ -597,44 +599,46 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
     {
       io,
       env: {},
-      writeTextFile: async (path, text) => {
+      writeTextFile: (path, text) => {
         writes.push({ path, text });
+        return Promise.resolve();
       },
       createPromptLoop: () => ({
-        runPrompt: async () =>
-          ({
-            model: "gpt-5.4",
-            finalAssistantText: "Batch result.",
-            transcript: [
-              { role: "user", content: "Execute the batch task" },
-              { role: "assistant", content: "Batch result." },
-            ],
-            modelTurns: 2,
-            runState: {
-              runId: "run-cli-batch-json",
-              status: "completed",
-              createdAt: "2026-04-16T23:10:00.000Z",
-              updatedAt: "2026-04-16T23:10:02.000Z",
-              cfcEnforcementMode: "observe",
-              artifactRoot:
-                "/tmp/project/.cf-harness-artifacts/run-cli-batch-json",
-              transcriptPath:
-                "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/transcript.json",
-              policyEvents: [{
-                type: "cf-harness.policy-event",
-                severity: "denied",
-                mode: "observe",
-                toolId: "write_file",
-                detail:
-                  "write_file requires direct-command authorization in enforce-explicit",
-                at: "2026-04-16T23:10:01.000Z",
-              }],
-              toolOutputs: [],
-            },
-          }) satisfies HarnessPromptLoopResult,
-        runTranscript: async () => {
-          throw new Error("unexpected resume path");
-        },
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Batch result.",
+              transcript: [
+                { role: "user", content: "Execute the batch task" },
+                { role: "assistant", content: "Batch result." },
+              ],
+              modelTurns: 2,
+              runState: {
+                runId: "run-cli-batch-json",
+                status: "completed",
+                createdAt: "2026-04-16T23:10:00.000Z",
+                updatedAt: "2026-04-16T23:10:02.000Z",
+                cfcEnforcementMode: "observe",
+                artifactRoot:
+                  "/tmp/project/.cf-harness-artifacts/run-cli-batch-json",
+                transcriptPath:
+                  "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/transcript.json",
+                policyEvents: [{
+                  type: "cf-harness.policy-event",
+                  severity: "denied",
+                  mode: "observe",
+                  toolId: "write_file",
+                  detail:
+                    "write_file requires direct-command authorization in enforce-explicit",
+                  at: "2026-04-16T23:10:01.000Z",
+                }],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
       }),
     },
   );
@@ -801,28 +805,29 @@ Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", asyn
       createPromptLoop: (options) => {
         createdOptions = options as Record<string, unknown>;
         return {
-          runPrompt: async () =>
-            ({
-              model: "gpt-5.4",
-              finalAssistantText: "No auth path.",
-              transcript: [
-                { role: "user", content: "hello" },
-                { role: "assistant", content: "No auth path." },
-              ],
-              modelTurns: 1,
-              runState: {
-                runId: "run-no-auth",
-                status: "completed",
-                createdAt: "2026-04-16T00:00:00.000Z",
-                updatedAt: "2026-04-16T00:00:01.000Z",
-                cfcEnforcementMode: "disabled",
-                policyEvents: [],
-                toolOutputs: [],
-              },
-            }) satisfies HarnessPromptLoopResult,
-          runTranscript: async () => {
-            throw new Error("unexpected resume path");
-          },
+          runPrompt: () =>
+            Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "No auth path.",
+                transcript: [
+                  { role: "user", content: "hello" },
+                  { role: "assistant", content: "No auth path." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-no-auth",
+                  status: "completed",
+                  createdAt: "2026-04-16T00:00:00.000Z",
+                  updatedAt: "2026-04-16T00:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            ),
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
         };
       },
     },
@@ -861,12 +866,12 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
     {
       io,
       env: { CF_HARNESS_API_KEY: "test-key" },
-      readRunArtifacts: async (path) => {
+      readRunArtifacts: (path) => {
         assertEquals(
           path,
           "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
         );
-        return {
+        return Promise.resolve({
           runRoot: "/tmp/project/.cf-harness-artifacts/run-1",
           runStatePath:
             "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
@@ -888,35 +893,35 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
           transcript: [
             { role: "user", content: "Continue." },
           ],
-        };
+        });
       },
       createPromptLoop: () => ({
-        runPrompt: async () => {
-          throw new Error("unexpected prompt path");
-        },
-        runTranscript: async ({ transcript, model }) =>
-          ({
-            model: model ?? "gpt-5.4",
-            finalAssistantText: "Resumed.",
-            transcript: [
-              ...transcript,
-              { role: "assistant", content: "Resumed." },
-            ],
-            modelTurns: 1,
-            runState: {
-              runId: "run-1",
-              status: "completed",
-              createdAt: "2026-04-15T22:10:00.000Z",
-              updatedAt: "2026-04-15T22:10:02.000Z",
-              cfcEnforcementMode: "disabled",
-              model: "gpt-5.4",
-              artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
-              transcriptPath:
-                "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
-              policyEvents: [],
-              toolOutputs: [],
-            },
-          }) satisfies HarnessPromptLoopResult,
+        runPrompt: () => Promise.reject(new Error("unexpected prompt path")),
+        runTranscript: ({ transcript, model }) =>
+          Promise.resolve(
+            ({
+              model: model ?? "gpt-5.4",
+              finalAssistantText: "Resumed.",
+              transcript: [
+                ...transcript,
+                { role: "assistant", content: "Resumed." },
+              ],
+              modelTurns: 1,
+              runState: {
+                runId: "run-1",
+                status: "completed",
+                createdAt: "2026-04-15T22:10:00.000Z",
+                updatedAt: "2026-04-15T22:10:02.000Z",
+                cfcEnforcementMode: "disabled",
+                model: "gpt-5.4",
+                artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+                transcriptPath:
+                  "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
       }),
     },
   );

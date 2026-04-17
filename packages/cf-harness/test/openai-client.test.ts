@@ -21,9 +21,11 @@ Deno.test("OpenAICompatibleGatewayClient forwards requests through the injected 
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "test-key",
-    fetchFn: async (input, init) => {
+    fetchFn: (input, init) => {
       calls.push({ input, init });
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
     },
   });
 
@@ -50,9 +52,11 @@ Deno.test("OpenAICompatibleGatewayClient omits authorization headers in no-auth 
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     authMode: "none",
-    fetchFn: async (input, init) => {
+    fetchFn: (input, init) => {
       calls.push({ input, init });
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
     },
   });
 
@@ -68,15 +72,17 @@ Deno.test("OpenAICompatibleGatewayClient parses successful chat completion JSON 
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "test-key",
-    fetchFn: async () =>
-      new Response(
-        JSON.stringify({
-          choices: [{
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-          }],
-        }),
-        { status: 200 },
+    fetchFn: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "ok" },
+            }],
+          }),
+          { status: 200 },
+        ),
       ),
   });
 
@@ -92,11 +98,13 @@ Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with re
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "test-key",
-    fetchFn: async () =>
-      new Response("bad request", {
-        status: 400,
-        statusText: "Bad Request",
-      }),
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("bad request", {
+          status: 400,
+          statusText: "Bad Request",
+        }),
+      ),
   });
 
   await assertRejects(
@@ -113,10 +121,12 @@ Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with re
 Deno.test("OpenAICompatibleGatewayClient fails clearly when no API key is configured", async () => {
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
-    fetchFn: async () =>
-      new Response("should not be called", {
-        status: 500,
-      }),
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("should not be called", {
+          status: 500,
+        }),
+      ),
   });
 
   await assertRejects(
@@ -135,10 +145,12 @@ Deno.test("OpenAICompatibleGatewayClient fails clearly on placeholder API keys",
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "...",
     apiKeySource: "CF_HARNESS_API_KEY",
-    fetchFn: async () =>
-      new Response("should not be called", {
-        status: 500,
-      }),
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("should not be called", {
+          status: 500,
+        }),
+      ),
   });
 
   await assertRejects(
@@ -157,11 +169,13 @@ Deno.test("OpenAICompatibleGatewayClient surfaces 401s with API key source conte
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "test-key",
     apiKeySource: "CF_HARNESS_API_KEY",
-    fetchFn: async () =>
-      new Response("organization rejected", {
-        status: 401,
-        statusText: "Unauthorized",
-      }),
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("organization rejected", {
+          status: 401,
+          statusText: "Unauthorized",
+        }),
+      ),
   });
 
   await assertRejects(
@@ -179,11 +193,13 @@ Deno.test("OpenAICompatibleGatewayClient surfaces 401s in no-auth mode without i
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     authMode: "none",
-    fetchFn: async () =>
-      new Response("organization rejected", {
-        status: 401,
-        statusText: "Unauthorized",
-      }),
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("organization rejected", {
+          status: 401,
+          statusText: "Unauthorized",
+        }),
+      ),
   });
 
   await assertRejects(

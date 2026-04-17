@@ -26,16 +26,18 @@ class FakeSandboxRuntime implements SandboxRuntime {
     return "/workspace";
   }
 
-  async run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
-    return { stdout: "", stderr: "", exitCode: 0 };
+  run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
   }
 
-  async runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
+  runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.shellRequests.push(request);
     if (this.shellError) {
-      throw this.shellError;
+      return Promise.reject(this.shellError);
     }
-    return this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 };
+    return Promise.resolve(
+      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
   }
 }
 
@@ -61,7 +63,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
         return () => timestamps.shift() ?? "2026-04-15T20:00:06.000Z";
       })(),
     }),
-    fetchFn: async (_input, init) => {
+    fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
       const payload = fetchCalls.length === 1
         ? {
@@ -90,7 +92,9 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
             },
           }],
         };
-      return new Response(JSON.stringify(payload), { status: 200 });
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
     },
   });
 
@@ -178,19 +182,21 @@ Deno.test("CfHarnessPromptLoop only advertises allowed tools when a tool allowli
       runId: "run-allowed-tools",
       model: "gpt-5.4",
     }),
-    fetchFn: async (_input, init) => {
+    fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
-      return new Response(
-        JSON.stringify({
-          choices: [{
-            index: 0,
-            message: {
-              role: "assistant",
-              content: "No tool call needed.",
-            },
-          }],
-        }),
-        { status: 200 },
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "No tool call needed.",
+              },
+            }],
+          }),
+          { status: 200 },
+        ),
       );
     },
   });
@@ -222,18 +228,20 @@ Deno.test("CfHarnessPromptLoop completes a direct assistant response without too
         return () => timestamps.shift() ?? "2026-04-15T20:10:03.000Z";
       })(),
     }),
-    fetchFn: async () =>
-      new Response(
-        JSON.stringify({
-          choices: [{
-            index: 0,
-            message: {
-              role: "assistant",
-              content: "No tool call needed.",
-            },
-          }],
-        }),
-        { status: 200 },
+    fetchFn: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "No tool call needed.",
+              },
+            }],
+          }),
+          { status: 200 },
+        ),
       ),
   });
 
@@ -258,26 +266,28 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
       model: "gpt-5.4",
     }),
     maxModelTurns: 1,
-    fetchFn: async () =>
-      new Response(
-        JSON.stringify({
-          choices: [{
-            index: 0,
-            message: {
-              role: "assistant",
-              content: "",
-              tool_calls: [{
-                id: "call-1",
-                type: "function",
-                function: {
-                  name: "read_file",
-                  arguments: JSON.stringify({ path: "notes/todo.txt" }),
-                },
-              }],
-            },
-          }],
-        }),
-        { status: 200 },
+    fetchFn: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-1",
+                  type: "function",
+                  function: {
+                    name: "read_file",
+                    arguments: JSON.stringify({ path: "notes/todo.txt" }),
+                  },
+                }],
+              },
+            }],
+          }),
+          { status: 200 },
+        ),
       ),
   });
 
@@ -299,19 +309,21 @@ Deno.test("CfHarnessPromptLoop can resume from a persisted transcript", async ()
       runId: "run-resume",
       model: "gpt-5.4",
     }),
-    fetchFn: async (_input, init) => {
+    fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
-      return new Response(
-        JSON.stringify({
-          choices: [{
-            index: 0,
-            message: {
-              role: "assistant",
-              content: "Resumed summary.",
-            },
-          }],
-        }),
-        { status: 200 },
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Resumed summary.",
+              },
+            }],
+          }),
+          { status: 200 },
+        ),
       );
     },
   });
@@ -390,7 +402,7 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
         return () => timestamps.shift() ?? "2026-04-15T22:30:06.000Z";
       })(),
     }),
-    fetchFn: async (_input, init) => {
+    fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
       const payload = fetchCalls.length === 1
         ? {
@@ -419,7 +431,9 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
             },
           }],
         };
-      return new Response(JSON.stringify(payload), { status: 200 });
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
     },
   });
 
@@ -478,7 +492,7 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
         return () => timestamps.shift() ?? "2026-04-15T22:40:04.000Z";
       })(),
     }),
-    fetchFn: async (_input, init) => {
+    fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
       const payload = fetchCalls.length === 1
         ? {
@@ -512,7 +526,9 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
             },
           }],
         };
-      return new Response(JSON.stringify(payload), { status: 200 });
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
     },
   });
 
@@ -577,7 +593,7 @@ Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlis
         return () => timestamps.shift() ?? "2026-04-16T23:20:04.000Z";
       })(),
     }),
-    fetchFn: async (_input, init) => {
+    fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
       const payload = fetchCalls.length === 1
         ? {
@@ -606,7 +622,9 @@ Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlis
             },
           }],
         };
-      return new Response(JSON.stringify(payload), { status: 200 });
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
     },
   });
 

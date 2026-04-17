@@ -25,16 +25,18 @@ class FakeSandboxRuntime implements SandboxRuntime {
     return "/workspace";
   }
 
-  async run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
-    return { stdout: "", stderr: "", exitCode: 0 };
+  run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
   }
 
-  async runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
+  runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.shellRequests.push(request);
     if (this.shellError) {
-      throw this.shellError;
+      return Promise.reject(this.shellError);
     }
-    return this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 };
+    return Promise.resolve(
+      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
   }
 }
 

@@ -33,18 +33,12 @@ import {
 import { dirname } from "@std/path";
 import type { ProcessRunner } from "./sandbox/process-runner.ts";
 import type { HarnessSandboxConfig, SandboxRuntime } from "./sandbox/types.ts";
+import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
-  bashTool,
-  type BashToolInput,
-  type BashToolOutput,
-} from "./tools/bash.ts";
-import {
-  readFileTool,
   type ReadFileToolInput,
   type ReadFileToolOutput,
 } from "./tools/read-file.ts";
 import {
-  writeFileTool,
   type WriteFileToolInput,
   type WriteFileToolOutput,
 } from "./tools/write-file.ts";
