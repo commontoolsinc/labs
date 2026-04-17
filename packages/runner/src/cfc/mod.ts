@@ -30,6 +30,13 @@ export {
   recordSinkRequestPolicyInput,
   verifySinkRequestRelease,
 } from "./sink-request.ts";
+export type {
+  HarnessPromptSlotLike,
+  HarnessPromptSlotRole,
+  HarnessWriteFileAuthorizationDecision,
+  HarnessWriteFileAuthorizationRequest,
+} from "./harness-write-policy.ts";
+export { evaluateHarnessWriteFileAuthorization } from "./harness-write-policy.ts";
 export {
   INITIAL_SINK_INVENTORY,
   INITIAL_SINK_ROLLOUT_GATE,

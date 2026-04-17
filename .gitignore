@@ -17,6 +17,7 @@ dist/
 # Current and legacy local CLI state
 .cf/
 .ct/
+.cf-harness-artifacts/
 claude-research.key
 *.key
 .passphrase
