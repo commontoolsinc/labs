@@ -368,8 +368,12 @@ export class CfHarnessPromptLoop {
       }
     } catch (error) {
       this.engine.setRunStatus("failed");
-      await this.engine.persistRunState();
-      await this.engine.persistTranscript(transcript);
+      try {
+        await this.engine.persistRunState();
+        await this.engine.persistTranscript(transcript);
+      } catch {
+        // Preserve the original model/tool failure when cleanup persistence also fails.
+      }
       throw error;
     }
     this.engine.setRunStatus("failed");

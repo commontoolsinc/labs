@@ -113,8 +113,11 @@ const parsePositiveInteger = (
   if (input === undefined) {
     return DEFAULT_MAX_MODEL_TURNS;
   }
-  const parsed = Number.parseInt(input, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!/^\d+$/.test(input)) {
+    throw new Error(`${flagName} must be a positive integer`);
+  }
+  const parsed = Number(input);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new Error(`${flagName} must be a positive integer`);
   }
   return parsed;

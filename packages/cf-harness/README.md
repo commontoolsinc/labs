@@ -56,25 +56,24 @@ What is not done yet:
 
 ## Package Layout
 
-- [src/config.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/config.ts)
+- [src/config.ts](src/config.ts)
   - harness config, CFC mode resolution, gateway auth mode
-- [src/engine.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/engine.ts)
+- [src/engine.ts](src/engine.ts)
   - core execution engine, run state, tool execution
-- [src/prompt-loop.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/prompt-loop.ts)
+- [src/prompt-loop.ts](src/prompt-loop.ts)
   - bounded prompt/tool loop
-- [src/cli.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/cli.ts)
+- [src/cli.ts](src/cli.ts)
   - package-local operator CLI
-- [src/artifacts.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/artifacts.ts)
+- [src/artifacts.ts](src/artifacts.ts)
   - persisted run state, transcript, and tool output storage
-- [src/contracts/](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/contracts)
+- [src/contracts/](src/contracts/)
   - prompt-slot, observation, policy, transcript, and tool-result contracts
-- [integration/](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/integration)
+- [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
 
 ## Commands
 
-From
-[packages/cf-harness](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness):
+From [packages/cf-harness](.):
 
 - `deno task help`
 - `deno task run -- ...`
@@ -86,9 +85,9 @@ From
 Standard bearer-auth mode:
 
 ```bash
-cd /Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness
+cd packages/cf-harness
 CF_HARNESS_API_KEY=... deno task run -- \
-  --workspace /Users/gideonwald/coding/cf-pf-codex-1/labs \
+  --workspace ../.. \
   --prompt "Summarize the cf-harness package structure." \
   --print-transcript
 ```
@@ -96,9 +95,9 @@ CF_HARNESS_API_KEY=... deno task run -- \
 No-auth gateway mode:
 
 ```bash
-cd /Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness
+cd packages/cf-harness
 deno task run -- \
-  --workspace /Users/gideonwald/coding/cf-pf-codex-1/labs \
+  --workspace ../.. \
   --gateway-auth-mode none \
   --prompt "Summarize the cf-harness package structure." \
   --print-transcript
@@ -117,14 +116,14 @@ Current caveat:
 Unit/package tests:
 
 ```bash
-cd /Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness
+cd packages/cf-harness
 deno task test
 ```
 
 Environment-gated integration tests:
 
 ```bash
-cd /Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness
+cd packages/cf-harness
 deno task test:integration
 ```
 
@@ -132,7 +131,7 @@ The integration suite requires a working local Docker + `runsc-cfc` environment.
 
 ## Related Docs
 
-- [IMPLEMENTATION_PLAN.md](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
-- [LOOM_MIGRATION_NOTES.md](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
-- [runner README](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/runner/README.md)
-- [specs Chapter 18](/Users/gideonwald/coding/cf-pf-codex-1/specs/cfc/18-runtime-implementation-profiles.md)
+- [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
+- [LOOM_MIGRATION_NOTES.md](docs/LOOM_MIGRATION_NOTES.md)
+- [runner README](../runner/README.md)
+- `specs/cfc/18-runtime-implementation-profiles.md` in the sibling `specs` repo

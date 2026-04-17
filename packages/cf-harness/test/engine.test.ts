@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type {
@@ -136,5 +137,58 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
     cfcEnforcementMode: "observe",
     policyEvents: [],
     toolOutputs: [],
+  });
+});
+
+Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState: {
+      runId: "run-clone",
+      status: "completed",
+      createdAt: "2026-04-17T20:10:00.000Z",
+      updatedAt: "2026-04-17T20:10:01.000Z",
+      cfcEnforcementMode: "observe",
+      policyEvents: [createHarnessPolicyEvent({
+        severity: "warning",
+        mode: "observe",
+        toolId: "bash",
+        detail: "warning detail",
+        at: "2026-04-17T20:10:01.000Z",
+      })],
+      toolOutputs: [{
+        type: "cf-harness.tool-result-ref",
+        outputId: createToolOutputId("run-clone", "bash", 1),
+        toolId: "bash",
+        runId: "run-clone",
+        artifactPath: "/tmp/original.json",
+      }],
+    },
+  });
+
+  const snapshot = engine.getRunState();
+  snapshot.policyEvents[0].detail = "mutated";
+  snapshot.toolOutputs[0].artifactPath = "/tmp/mutated.json";
+
+  assertEquals(engine.getRunState(), {
+    runId: "run-clone",
+    status: "completed",
+    createdAt: "2026-04-17T20:10:00.000Z",
+    updatedAt: "2026-04-17T20:10:01.000Z",
+    cfcEnforcementMode: "observe",
+    policyEvents: [createHarnessPolicyEvent({
+      severity: "warning",
+      mode: "observe",
+      toolId: "bash",
+      detail: "warning detail",
+      at: "2026-04-17T20:10:01.000Z",
+    })],
+    toolOutputs: [{
+      type: "cf-harness.tool-result-ref",
+      outputId: createToolOutputId("run-clone", "bash", 1),
+      toolId: "bash",
+      runId: "run-clone",
+      artifactPath: "/tmp/original.json",
+    }],
   });
 });

@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
@@ -115,6 +115,22 @@ Deno.test("read_file tool resolves relative paths into the sandbox workspace", a
       args: ["/workspace/notes/todo.txt", "32"],
     },
   });
+});
+
+Deno.test("read_file tool rejects non-integer maxBytes", async () => {
+  const sandbox = new FakeSandboxRuntime();
+
+  await assertRejects(
+    () =>
+      readFileTool.invoke(createContext(sandbox), {
+        path: "notes/todo.txt",
+        maxBytes: 1.5,
+      }),
+    Error,
+    "read_file maxBytes must be a non-negative integer",
+  );
+
+  assertEquals(sandbox.calls, []);
 });
 
 Deno.test("write_file tool supports append mode and passes content over stdin", async () => {

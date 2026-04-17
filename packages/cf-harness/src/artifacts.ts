@@ -1,5 +1,12 @@
 import { ensureDir } from "@std/fs";
-import { basename, dirname, join } from "@std/path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
@@ -7,6 +14,39 @@ import type { ToolOutputId } from "./contracts/tool-result.ts";
 
 const sanitizeArtifactName = (input: string): string =>
   input.replace(/[^A-Za-z0-9._-]+/g, "_");
+
+const RUN_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+const assertValidRunId = (runId: string): string => {
+  if (!RUN_ID_PATTERN.test(runId) || runId === "." || runId === "..") {
+    throw new Error(
+      "runId must be a simple path segment containing only letters, numbers, dots, underscores, or hyphens",
+    );
+  }
+  return runId;
+};
+
+const isPathWithinRoot = (path: string, root: string): boolean => {
+  const relativePath = relative(root, path);
+  return relativePath === "" ||
+    (!relativePath.startsWith("..") && relativePath !== ".." &&
+      !isAbsolute(relativePath));
+};
+
+const resolveTranscriptPathWithinRunRoot = (
+  runRoot: string,
+  transcriptPath: string | undefined,
+  fallbackPath: string,
+): string => {
+  if (transcriptPath === undefined) {
+    return fallbackPath;
+  }
+  const resolvedRunRoot = resolve(runRoot);
+  const resolvedTranscriptPath = resolve(transcriptPath);
+  return isPathWithinRoot(resolvedTranscriptPath, resolvedRunRoot)
+    ? resolvedTranscriptPath
+    : fallbackPath;
+};
 
 const writeJsonFile = async (path: string, value: unknown): Promise<void> => {
   await Deno.writeTextFile(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -36,8 +76,8 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
   readonly runRoot: string;
 
   constructor(options: FileSystemHarnessArtifactStoreOptions) {
-    this.artifactRoot = options.artifactRoot;
-    this.runRoot = join(options.artifactRoot, options.runId);
+    this.artifactRoot = resolve(options.artifactRoot);
+    this.runRoot = join(this.artifactRoot, assertValidRunId(options.runId));
   }
 
   async persistRunState(state: HarnessRunState): Promise<string> {
@@ -132,7 +172,11 @@ export const readHarnessRunArtifacts = async (
 ): Promise<HarnessRunArtifacts> => {
   const paths = resolveHarnessRunPaths(input);
   const runState = await readHarnessRunState(paths.runStatePath);
-  const transcriptPath = runState.transcriptPath ?? paths.transcriptPath;
+  const transcriptPath = resolveTranscriptPathWithinRunRoot(
+    paths.runRoot,
+    runState.transcriptPath,
+    paths.transcriptPath,
+  );
   let transcript: HarnessTranscriptMessage[] | undefined;
   try {
     transcript = await readHarnessTranscript(transcriptPath);

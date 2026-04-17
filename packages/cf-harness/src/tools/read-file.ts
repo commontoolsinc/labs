@@ -25,7 +25,7 @@ export const readFileToolDescriptor: HarnessToolDescriptor = {
     properties: {
       path: { type: "string" },
       encoding: { type: "string", enum: ["utf-8"] },
-      maxBytes: { type: "number", minimum: 0 },
+      maxBytes: { type: "integer", minimum: 0 },
     },
     required: ["path"],
     additionalProperties: false,
@@ -49,6 +49,12 @@ export const readFileTool: HarnessToolDefinition<
 > = {
   descriptor: readFileToolDescriptor,
   async invoke(context, input) {
+    if (
+      input.maxBytes !== undefined &&
+      (!Number.isSafeInteger(input.maxBytes) || input.maxBytes < 0)
+    ) {
+      throw new Error("read_file maxBytes must be a non-negative integer");
+    }
     const resolvedPath = context.sandbox.resolvePath(input.path);
     const result = await context.sandbox.runShell({
       command: [

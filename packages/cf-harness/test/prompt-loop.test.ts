@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import type {
@@ -38,6 +39,28 @@ class FakeSandboxRuntime implements SandboxRuntime {
     return Promise.resolve(
       this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
+  }
+}
+
+class FailingArtifactStore implements HarnessArtifactStore {
+  readonly artifactRoot = "/tmp/cf-harness-artifacts";
+  readonly runRoot = "/tmp/cf-harness-artifacts/run-error";
+  runStatePersistCount = 0;
+
+  persistRunState(): Promise<string> {
+    this.runStatePersistCount += 1;
+    if (this.runStatePersistCount >= 3) {
+      return Promise.reject(new Error("persist boom"));
+    }
+    return Promise.resolve(`${this.runRoot}/run-state.json`);
+  }
+
+  persistTranscript(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/transcript.json`);
+  }
+
+  persistToolOutput(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/tool-output.json`);
   }
 }
 
@@ -298,6 +321,28 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
   );
   assertEquals(loop.engine.getRunState().status, "failed");
   assertEquals(loop.engine.getRunState().policyEvents, []);
+});
+
+Deno.test("CfHarnessPromptLoop preserves the original error when failure persistence also fails", async () => {
+  const artifactStore = new FailingArtifactStore();
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      artifactStore,
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-persist-error",
+      model: "gpt-5.4",
+    }),
+    fetchFn: () => Promise.reject(new Error("gateway boom")),
+  });
+
+  await assertRejects(
+    () => loop.runPrompt({ prompt: "Fail in the gateway." }),
+    Error,
+    "gateway boom",
+  );
+  assertEquals(artifactStore.runStatePersistCount, 3);
+  assertEquals(loop.engine.getRunState().status, "failed");
 });
 
 Deno.test("CfHarnessPromptLoop can resume from a persisted transcript", async () => {

@@ -22,7 +22,7 @@ transport problem.
 
 Loom shells out to the Codex CLI for non-interactive work through:
 
-- [/Users/gideonwald/coding/common-fabric/loom/.ops/lib/provider_batch.py](/Users/gideonwald/coding/common-fabric/loom/.ops/lib/provider_batch.py)
+- `loom/.ops/lib/provider_batch.py` in the Loom repo
 
 Key functions:
 
@@ -40,8 +40,8 @@ This path is already semantically close to a `cf-harness` CLI or batch runner:
 Loom does not use one-shot CLI execution for interactive chat. It runs Codex
 app-server and talks to it over JSON-RPC through:
 
-- [/Users/gideonwald/coding/common-fabric/loom/.ops/lib/codex_app_server.py](/Users/gideonwald/coding/common-fabric/loom/.ops/lib/codex_app_server.py)
-- [/Users/gideonwald/coding/common-fabric/loom/.ops/scripts/fabric-local.py](/Users/gideonwald/coding/common-fabric/loom/.ops/scripts/fabric-local.py)
+- `loom/.ops/lib/codex_app_server.py` in the Loom repo
+- `loom/.ops/scripts/fabric-local.py` in the Loom repo
 
 Important functions:
 

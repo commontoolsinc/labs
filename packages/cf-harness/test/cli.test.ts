@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import {
   buildCfHarnessOperatorSystemPrompt,
   type CfHarnessCliIO,
@@ -84,6 +84,21 @@ Deno.test("parseCfHarnessCliArgs supports prompt files and mode overrides", asyn
   assertEquals(parsed.gatewayAuthMode, "bearer");
   assertEquals(parsed.cfcEnforcementModeOverride, "observe");
   assertEquals(parsed.maxModelTurns, 5);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects malformed max-model-turns values", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--max-model-turns", "2.5"],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--max-model-turns must be a positive integer",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs supports gateway auth mode override", async () => {

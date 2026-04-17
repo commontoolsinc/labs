@@ -1,6 +1,8 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
+  createFileSystemHarnessArtifactStore,
+  readHarnessRunArtifacts,
   readHarnessRunState,
   readHarnessTranscript,
 } from "../src/artifacts.ts";
@@ -197,6 +199,67 @@ Deno.test({
       assertEquals(persistedState.transcriptPath, transcriptPath);
       assertEquals(persistedState.artifactRoot, runRoot);
       assertEquals(persistedState.policyEvents, []);
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test("createFileSystemHarnessArtifactStore rejects path-traversal run ids", () => {
+  assertThrows(
+    () =>
+      createFileSystemHarnessArtifactStore({
+        artifactRoot: "/tmp/cf-harness-artifacts",
+        runId: "../escape",
+      }),
+    Error,
+    "runId must be a simple path segment",
+  );
+});
+
+Deno.test({
+  name: "readHarnessRunArtifacts confines transcript loading to the run root",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-read-artifacts-",
+    });
+    try {
+      const runRoot = join(artifactRoot, "run-1");
+      const runStatePath = join(runRoot, "run-state.json");
+      const defaultTranscriptPath = join(runRoot, "transcript.json");
+      const outsideTranscriptPath = join(artifactRoot, "outside.json");
+
+      await Deno.mkdir(runRoot, { recursive: true });
+      await Deno.writeTextFile(
+        runStatePath,
+        JSON.stringify({
+          runId: "run-1",
+          status: "completed",
+          createdAt: "2026-04-17T20:00:00.000Z",
+          updatedAt: "2026-04-17T20:00:01.000Z",
+          cfcEnforcementMode: "observe",
+          transcriptPath: outsideTranscriptPath,
+          policyEvents: [],
+          toolOutputs: [],
+        }),
+      );
+      await Deno.writeTextFile(
+        defaultTranscriptPath,
+        JSON.stringify([{ role: "assistant", content: "inside transcript" }]),
+      );
+      await Deno.writeTextFile(
+        outsideTranscriptPath,
+        JSON.stringify([{ role: "assistant", content: "outside transcript" }]),
+      );
+
+      const artifacts = await readHarnessRunArtifacts(runRoot);
+
+      assertEquals(artifacts.transcriptPath, defaultTranscriptPath);
+      assertEquals(artifacts.transcript, [{
+        role: "assistant",
+        content: "inside transcript",
+      }]);
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }

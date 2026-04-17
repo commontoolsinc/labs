@@ -34,7 +34,7 @@ Current Loom migration judgment:
 
 See also:
 
-- [LOOM_MIGRATION_NOTES.md](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
+- [LOOM_MIGRATION_NOTES.md](LOOM_MIGRATION_NOTES.md)
 
 ## Design Principles
 
@@ -80,16 +80,14 @@ The package already includes:
 
 ### Stage A: Package skeleton and contracts
 
-- package scaffold under
-  [packages/cf-harness](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness)
-- package exports and tasks in
-  [deno.json](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/deno.json)
+- package scaffold under [packages/cf-harness](..)
+- package exports and tasks in [deno.json](../deno.json)
 - initial contract surfaces:
-  - [prompt-slot.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/contracts/prompt-slot.ts)
-  - [observation.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/contracts/observation.ts)
-  - [policy.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/contracts/policy.ts)
-  - [transcript.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/contracts/transcript.ts)
-  - [tool-result.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/contracts/tool-result.ts)
+  - [prompt-slot.ts](../src/contracts/prompt-slot.ts)
+  - [observation.ts](../src/contracts/observation.ts)
+  - [policy.ts](../src/contracts/policy.ts)
+  - [transcript.ts](../src/contracts/transcript.ts)
+  - [tool-result.ts](../src/contracts/tool-result.ts)
 
 Why this was done first:
 
@@ -97,12 +95,9 @@ Why this was done first:
 
 ### Stage B: Execution core
 
-- sandbox adapter in
-  [src/sandbox](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/sandbox)
-- engine in
-  [engine.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/engine.ts)
-- built-in tool implementations in
-  [src/tools](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/tools)
+- sandbox adapter in [src/sandbox](../src/sandbox)
+- engine in [engine.ts](../src/engine.ts)
+- built-in tool implementations in [src/tools](../src/tools)
 
 Why:
 
@@ -111,10 +106,9 @@ Why:
 
 ### Stage C: Prompt/tool loop
 
-- bounded prompt loop in
-  [prompt-loop.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/prompt-loop.ts)
+- bounded prompt loop in [prompt-loop.ts](../src/prompt-loop.ts)
 - OpenAI-compatible client in
-  [openai-client.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/gateway/openai-client.ts)
+  [openai-client.ts](../src/gateway/openai-client.ts)
 
 Why:
 
@@ -123,10 +117,8 @@ Why:
 
 ### Stage D: Persistence and resumability
 
-- artifact store in
-  [artifacts.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/artifacts.ts)
-- run-state tracking in
-  [run-state.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/run-state.ts)
+- artifact store in [artifacts.ts](../src/artifacts.ts)
+- run-state tracking in [run-state.ts](../src/run-state.ts)
 - transcript-based resume support in the prompt loop and CLI
 
 Why:
@@ -136,10 +128,8 @@ Why:
 
 ### Stage E: Operator CLI
 
-- package-local CLI in
-  [cli.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/cli.ts)
-- entrypoint in
-  [main.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/main.ts)
+- package-local CLI in [cli.ts](../src/cli.ts)
+- entrypoint in [main.ts](../src/main.ts)
 
 Why:
 
@@ -286,14 +276,14 @@ right choice so far, but it is not the end state.
 
 For a new engineer or agent:
 
-1. [README.md](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/README.md)
-2. [config.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/config.ts)
-3. [engine.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/engine.ts)
-4. [prompt-loop.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/prompt-loop.ts)
-5. [cli.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/src/cli.ts)
-6. [integration/engine.integration.test.ts](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/cf-harness/integration/engine.integration.test.ts)
+1. [README.md](../README.md)
+2. [config.ts](../src/config.ts)
+3. [engine.ts](../src/engine.ts)
+4. [prompt-loop.ts](../src/prompt-loop.ts)
+5. [cli.ts](../src/cli.ts)
+6. [integration/engine.integration.test.ts](../integration/engine.integration.test.ts)
 
 For the broader architectural context:
 
-- [runner README](/Users/gideonwald/coding/cf-pf-codex-1/labs/packages/runner/README.md)
-- [specs Chapter 18](/Users/gideonwald/coding/cf-pf-codex-1/specs/cfc/18-runtime-implementation-profiles.md)
+- [runner README](../../runner/README.md)
+- `specs/cfc/18-runtime-implementation-profiles.md` in the sibling `specs` repo

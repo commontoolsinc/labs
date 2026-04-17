@@ -150,11 +150,7 @@ export class CfHarnessEngine {
   }
 
   getRunState(): HarnessRunState {
-    return {
-      ...this.#runState,
-      policyEvents: [...this.#runState.policyEvents],
-      toolOutputs: [...this.#runState.toolOutputs],
-    };
+    return structuredClone(this.#runState);
   }
 
   setRunStatus(status: HarnessRunState["status"]): HarnessRunState {
