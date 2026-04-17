@@ -10,8 +10,14 @@ interface MobileAppDemoOutput {
 const IOS_HOME_THEME = {
   borderRadius: "18px",
   colors: {
-    surface: "rgba(255, 255, 255, 0.72)",
-    surfaceHover: "rgba(255, 255, 255, 0.88)",
+    surface: {
+      light: "rgba(255, 255, 255, 0.72)",
+      dark: "rgba(255, 255, 255, 0.08)",
+    },
+    surfaceHover: {
+      light: "rgba(255, 255, 255, 0.88)",
+      dark: "rgba(255, 255, 255, 0.14)",
+    },
   },
 };
 
@@ -222,7 +228,7 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                           {(home.tasks ?? [])
                             .filter((t: TaskItem) => t.section === section)
                             .map((task: TaskItem) => (
-                              <cf-card style="--cf-card-background: rgba(255,255,255,0.52);">
+                              <cf-card style="--cf-card-background: var(--cf-theme-color-surface);">
                                 <cf-hstack align="start" justify="between">
                                   <cf-vstack
                                     gap="1"
@@ -261,7 +267,7 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                       <cf-hscroll fadeEdges>
                         <cf-hstack gap="3" style="padding-bottom: 4px;">
                           {(home.shortcuts ?? []).map((sc: ShortcutItem) => (
-                            <cf-card style="--cf-card-background: rgba(255,255,255,0.48); --cf-card-backdrop-blur: 8px; min-width: 88px; width: 88px;">
+                            <cf-card style="--cf-card-background: var(--cf-theme-color-surface); --cf-card-backdrop-blur: 8px; min-width: 88px; width: 88px;">
                               <cf-vstack
                                 gap="1"
                                 align="center"
@@ -299,9 +305,9 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                           artifact: ArtifactItem,
                         ) => (
                           <div
-                            style={`background: linear-gradient(145deg, rgba(255,255,255,0.52), ${artifact.tint}); height: 120px; border-radius: var(--cf-theme-border-radius, 0.5rem); border: 1px solid var(--cf-theme-color-border, rgba(67,75,97,0.10)); display: flex; align-items: flex-end; padding: 12px;`}
+                            style={`background: linear-gradient(145deg, var(--cf-theme-color-surface), ${artifact.tint}); height: 120px; border-radius: var(--cf-theme-border-radius, 0.5rem); border: 1px solid var(--cf-theme-color-border, rgba(67,75,97,0.10)); display: flex; align-items: flex-end; padding: 12px;`}
                           >
-                            <cf-label style="font-size: 0.72rem; font-weight: 600; color: rgba(69, 75, 93, 0.72); letter-spacing: -0.01em;">
+                            <cf-label style="font-size: 0.72rem; font-weight: 600; color: var(--cf-theme-color-text-muted); letter-spacing: -0.01em;">
                               {artifact.title}
                             </cf-label>
                           </div>

@@ -102,7 +102,12 @@ const BASE_SPACING = {
  */
 export function resolveColorScheme(scheme: ColorScheme): "light" | "dark" {
   if (scheme === "auto") {
-    // Check system preference
+    // Check for explicit user override via data-theme attribute on <html>
+    if (typeof document !== "undefined") {
+      const dataTheme = document.documentElement.getAttribute("data-theme");
+      if (dataTheme === "light" || dataTheme === "dark") return dataTheme;
+    }
+    // Fall back to system preference
     if (typeof globalThis !== "undefined" && globalThis.matchMedia) {
       return globalThis.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
@@ -162,7 +167,7 @@ export const defaultTheme: CFTheme = {
   fontSize: "1rem",
   borderRadius: "0.5rem",
   density: "comfortable",
-  colorScheme: "light",
+  colorScheme: "auto",
   animationSpeed: "normal",
   colors: {
     primary: {

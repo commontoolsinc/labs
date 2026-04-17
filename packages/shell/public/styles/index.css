@@ -24,6 +24,7 @@
 
 /* CSS Custom Properties */
 :root {
+  color-scheme: light dark;
   --font-primary: "JetBrainsMono", monospace;
   --font-color: #000;
   --bg-primary: #f3f3f3;
@@ -36,6 +37,14 @@
   --padding-desktop: 15px;
   --padding-mobile: 5px;
 
+  /* Shell component tokens */
+  --shell-surface: white;
+  --shell-surface-hover: rgba(0, 0, 0, 0.04);
+  --shell-text-muted: #8a909b;
+  --shell-divider: #e1e3e8;
+  --shell-highlight: #f0f4ff;
+  --shell-overlay-bg: rgba(13, 18, 24, 0.5);
+
   /* Font settings */
   font-family: var(--font-primary);
   line-height: 1.5;
@@ -44,6 +53,42 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Dark mode: from system preference (when no explicit user override) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --font-color: #e2e8f0;
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --border-color: #475569;
+    --dot-color: #1e293b;
+
+    /* Shell component tokens */
+    --shell-surface: #1e293b;
+    --shell-surface-hover: rgba(255, 255, 255, 0.06);
+    --shell-text-muted: #94a3b8;
+    --shell-divider: #334155;
+    --shell-highlight: #1e293b;
+    --shell-overlay-bg: rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* Dark mode: from explicit user preference */
+:root[data-theme="dark"] {
+  --font-color: #e2e8f0;
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --border-color: #475569;
+  --dot-color: #1e293b;
+
+  /* Shell component tokens */
+  --shell-surface: #1e293b;
+  --shell-surface-hover: rgba(255, 255, 255, 0.06);
+  --shell-text-muted: #94a3b8;
+  --shell-divider: #334155;
+  --shell-highlight: #1e293b;
+  --shell-overlay-bg: rgba(0, 0, 0, 0.6);
 }
 
 /* HTML and Body */
