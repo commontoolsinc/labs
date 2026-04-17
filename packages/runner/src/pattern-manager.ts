@@ -521,7 +521,7 @@ export class PatternManager {
       throw new Error(`Pattern ${patternId} has no stored source`);
     }
 
-    const source = patternMeta.program!
+    const source = patternMeta.program!;
     const pattern = await this.compilePattern(source);
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
