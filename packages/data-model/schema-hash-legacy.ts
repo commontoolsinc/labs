@@ -7,7 +7,10 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 import { LRUCache } from "@commonfabric/utils/cache";
-import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
 import { sha256 } from "@commonfabric/content-hash";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
@@ -135,10 +138,14 @@ function computeOrFindHash(value: unknown): string {
   }
 }
 
-/** Wrap a stableStringify result as a FabricHash with algorithm tag "legacy". */
+/** Wrap a hash result as a `FabricHash` with algorithm tag "legacy". */
 function makeLegacyFabricHash(s: string): FabricHash {
-  const bytes = textEncoder.encode(s);
-  return new FabricHash(bytes, "legacy");
+  // Note: Because the inner code produces a base64url-encoded string, we have
+  // to undo it here. This arrangement is inefficient for this function, but
+  // it's actually the non-`FabricHash` functions that are more performance-
+  // sensitive.
+  const hashBytes = fromBase64url(s);
+  return new FabricHash(hashBytes, "legacy");
 }
 
 /** Legacy hash of a JSONSchema, returned as a string. */
