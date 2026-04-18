@@ -3,6 +3,7 @@ import { TYPE } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import { type NormalizedFullLink, parseLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
+import { syncSourceCellChain } from "./source-cell.ts";
 
 const logger = getLogger("ensure-piece-running", {
   enabled: false,
@@ -41,27 +42,14 @@ export async function ensurePieceRunning(
 
     try {
       // Get the cell at the event link location
-      let currentCell: Cell<any> | undefined = runtime.getCellFromLink(
+      const rootCell: Cell<any> = runtime.getCellFromLink(
         // We'll find the piece information at the root of what could be the
         // process cell already, hence remove the path:
         { ...cellLink, path: [] },
         undefined,
         tx,
       );
-      await currentCell.sync();
-
-      // Traverse up the source cell chain
-      // This follows links from derived cells back to the process cell
-      let sourceCell = currentCell.getSourceCell();
-      while (sourceCell) {
-        await sourceCell.sync();
-        logger.debug("ensure-piece", () => [
-          `Following source cell from ${currentCell?.getAsNormalizedFullLink().id} to ${sourceCell?.getAsNormalizedFullLink().id}`,
-        ]);
-        currentCell = sourceCell;
-        sourceCell = currentCell.getSourceCell();
-      }
-      await currentCell.sync();
+      const currentCell = await syncSourceCellChain(rootCell) ?? rootCell;
 
       // currentCell is now the process cell (or the original cell if no sources)
       // Check if it has a resultRef and a TYPE (indicating it's a process cell)
