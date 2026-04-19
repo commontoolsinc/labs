@@ -435,8 +435,8 @@ function isLeafValue(value: unknown): boolean {
     typeof value !== "object" || isSigilLinkValue(value);
 }
 
-function nodeEntryKind(
-  node: AnnotatableNode,
+export function cfcDirectoryEntryKind(
+  node: Pick<AnnotatableNode, "kind">,
 ): CfcDirectoryEntryAnnotation["kind"] {
   if (node.kind === "dir") return "dir";
   if (node.kind === "symlink") return "symlink";
@@ -468,7 +468,7 @@ function defaultMetadataLabels(contentLabel?: CfcLabel): CfcMetadataLabels {
   };
 }
 
-function nameDigest(name: string): string {
+export function cfcDirectoryEntryNameDigest(name: string): string {
   // FNV-1a is used only as a deterministic placeholder for parent-local entry
   // keys in this first slice. It is explicitly not trusted-derived-name
   // evidence; derivedSlots remains empty unless a trusted source provides it.
@@ -728,9 +728,9 @@ export class CfcProjectionAnnotator {
     const defaultEntryLabel = this.labelAt(labelPath);
     this.tree.setCfcEntryAnnotation(parentIno, name, {
       name,
-      nameDigest: nameDigest(name),
+      nameDigest: cfcDirectoryEntryNameDigest(name),
       childRef: child.cfc.ref,
-      kind: nodeEntryKind(child),
+      kind: cfcDirectoryEntryKind(child),
       nameLabel: options.nameLabel ?? defaultEntryLabel,
       existenceLabel: options.existenceLabel ?? defaultEntryLabel,
       metadataLabels: child.cfc.metadataLabels,

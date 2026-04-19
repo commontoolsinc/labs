@@ -1,32 +1,16 @@
 // tree.ts — In-memory filesystem tree with inode management
 
 import type { CallableKind } from "./callables.ts";
-import type {
-  CfcDirectoryEntryAnnotation,
-  CfcNodeAnnotation,
+import {
+  type CfcDirectoryEntryAnnotation,
+  cfcDirectoryEntryKind,
+  cfcDirectoryEntryNameDigest,
+  type CfcNodeAnnotation,
 } from "./annotations.ts";
 import type { FsNode } from "./types.ts";
 
 const ROOT_INO = 1n;
 const encoder = new TextEncoder();
-
-function cfcEntryNameDigest(name: string): string {
-  let hash = 0x811c9dc5;
-  for (const byte of encoder.encode(name)) {
-    hash ^= byte;
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return `fnv1a32:${hash.toString(16).padStart(8, "0")}`;
-}
-
-function cfcEntryKindForNode(
-  node: FsNode,
-): CfcDirectoryEntryAnnotation["kind"] {
-  if (node.kind === "dir") return "dir";
-  if (node.kind === "symlink") return "symlink";
-  if (node.kind === "callable") return "callable";
-  return "file";
-}
 
 export class FsTree {
   inodes: Map<bigint, FsNode> = new Map();
@@ -335,9 +319,9 @@ export class FsTree {
       this.setCfcEntryAnnotation(newParentIno, newName, {
         ...movedCfcEntry,
         name: newName,
-        nameDigest: cfcEntryNameDigest(newName),
+        nameDigest: cfcDirectoryEntryNameDigest(newName),
         childRef: childAnnotation?.ref ?? movedCfcEntry.childRef,
-        kind: cfcEntryKindForNode(child),
+        kind: cfcDirectoryEntryKind(child),
         metadataLabels: childAnnotation?.metadataLabels ??
           movedCfcEntry.metadataLabels,
       });
