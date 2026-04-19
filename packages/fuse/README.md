@@ -239,13 +239,14 @@ provided, FUSE uses the runner default (`disabled` today). `observe` and both
 enforcing modes publish annotations automatically. `--cfc-annotations` still
 forces annotation output for local debugging even when the mode is `disabled`.
 
-By default the local mount exposes the compatibility namespace
-`user.commonfabric.cfc.*`. Use `--cfc-xattr-namespace=trusted|compat|both` to
-select the returned spelling. `trusted.cfc.*` is the enforcement namespace;
-`user.commonfabric.cfc.*` is for local compatibility/debugging and must not be
-trusted as sandbox enforcement input. `trusted.cfc.generation` is returned as a
-raw UTF-8 string. Other CFC annotation values are canonical JSON with sorted
-object keys.
+By default the local mount exposes both the protected namespace `trusted.cfc.*`
+and the compatibility namespace `user.commonfabric.cfc.*`. Use
+`--cfc-xattr-namespace=trusted|compat|both` to select the returned spelling;
+unknown namespace values are rejected. `trusted.cfc.*` is the enforcement
+namespace; `user.commonfabric.cfc.*` is for local compatibility/debugging and
+must not be trusted as sandbox enforcement input. `trusted.cfc.generation` is
+returned as a raw UTF-8 string. Other CFC annotation values are canonical JSON
+with sorted object keys.
 
 Prepared writeback is scaffolded for existing-file writes, `create`/`mkdir`,
 `unlink`/`rmdir`, same-cell `rename`, Common Fabric sigil symlink creation, and
@@ -261,8 +262,9 @@ Prepared/fail-closed writeback records are persisted outside the mount so a
 daemon restart or subtree rebuild can reconcile them without exposing lower
 labels. Use `--cfc-writeback-state=<path>` to choose the recovery file;
 otherwise CFC modes use a mountpoint-derived file under
-`${TMPDIR:-/tmp}/commonfabric-fuse/`. The mount `.status` file includes a `cfc`
-section with writeback phase counts and recent diagnostics.
+`$CF_CFC_WRITEBACK_STATE_DIR`, `$XDG_STATE_HOME/commonfabric-fuse`, or
+`~/.cache/commonfabric-fuse`, in that order. The mount `.status` file includes a
+`cfc` section with writeback phase counts and recent diagnostics.
 
 Arbitrary symlink targets and callable-send writeback are still out of scope for
 CFC enforcing modes and are rejected there. gVisor remains responsible for

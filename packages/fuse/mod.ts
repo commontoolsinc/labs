@@ -106,19 +106,35 @@ type HandleWriteTarget =
   | { kind: "value"; target: WritePath }
   | { kind: "source"; target: SourceWritePath };
 
-function parseCfcXattrNamespace(value: string): CfcXattrNamespace {
+export const DEFAULT_CFC_XATTR_NAMESPACE: CfcXattrNamespace = "both";
+
+export function parseCfcXattrNamespace(
+  value: string,
+): CfcXattrNamespace | undefined {
   if (value === "trusted" || value === "compat" || value === "both") {
     return value;
   }
-  console.warn(
-    `[FUSE] Unknown --cfc-xattr-namespace=${value}; using compat namespace`,
-  );
-  return "compat";
+  return undefined;
 }
 
-function defaultCfcWritebackStatePath(mountpoint: string): string {
-  const stateDir = Deno.env.get("CF_CFC_WRITEBACK_STATE_DIR") ??
-    `${Deno.env.get("TMPDIR") ?? "/tmp"}/commonfabric-fuse`;
+type EnvReader = Pick<typeof Deno.env, "get">;
+
+function envValue(env: EnvReader, name: string): string | undefined {
+  const value = env.get(name);
+  return value && value.trim() !== "" ? value : undefined;
+}
+
+export function defaultCfcWritebackStatePath(
+  mountpoint: string,
+  env: EnvReader = Deno.env,
+): string {
+  const explicitStateDir = envValue(env, "CF_CFC_WRITEBACK_STATE_DIR");
+  const xdgStateHome = envValue(env, "XDG_STATE_HOME");
+  const home = envValue(env, "HOME");
+  const stateDir = explicitStateDir ??
+    (xdgStateHome
+      ? `${xdgStateHome}/commonfabric-fuse`
+      : `${home ?? "."}/.cache/commonfabric-fuse`);
   const safeMount = encodeURIComponent(mountpoint)
     .replace(/[^A-Za-z0-9_.-]/g, "_")
     .slice(0, 120) || "mount";
@@ -153,7 +169,7 @@ export async function main(argv: string[] = Deno.args) {
       identity: Deno.env.get("CF_IDENTITY") ?? "",
       "exec-cli": "",
       "log-file": "",
-      "cfc-xattr-namespace": "compat",
+      "cfc-xattr-namespace": DEFAULT_CFC_XATTR_NAMESPACE,
       "cfc-mode": "",
       "cfc-writeback-state": "",
       debug: false,
@@ -199,8 +215,16 @@ export async function main(argv: string[] = Deno.args) {
   });
   const cfcWritebackXattrs = Boolean(args["cfc-writeback-xattrs"]);
   const cfcXattrNamespace = parseCfcXattrNamespace(
-    String(args["cfc-xattr-namespace"] ?? "compat"),
+    String(args["cfc-xattr-namespace"] ?? DEFAULT_CFC_XATTR_NAMESPACE),
   );
+  if (!cfcXattrNamespace) {
+    console.error(
+      `[FUSE] Unknown --cfc-xattr-namespace=${
+        args["cfc-xattr-namespace"]
+      }; expected trusted, compat, or both`,
+    );
+    Deno.exit(1);
+  }
 
   const mountpoint = args._[0] as string;
   if (!mountpoint) {

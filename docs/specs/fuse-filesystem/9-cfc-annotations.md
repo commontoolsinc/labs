@@ -7,9 +7,10 @@ mounting with `--cfc-annotations`.
 ## Emitted Metadata
 
 Annotated nodes carry an internal `CfcNodeAnnotation` and can be exposed through
-xattr-compatible names. The local default is the compatibility namespace
+xattr-compatible names. The local default exposes both `trusted.cfc.*` and
 `user.commonfabric.cfc.*`; `--cfc-xattr-namespace=trusted|compat|both` selects
-the exported spelling. The logical protected vocabulary is:
+the exported spelling. Unknown namespace values are rejected. The logical
+protected vocabulary is:
 
 - `trusted.cfc.ref`
 - `trusted.cfc.generation`
@@ -19,6 +20,7 @@ the exported spelling. The logical protected vocabulary is:
 - `trusted.cfc.entries`
 - `trusted.cfc.derivedSlots`
 - `trusted.cfc.callable`
+- `trusted.cfc.symlink`
 
 Refs are canonical logical projection refs, not FUSE inodes or mount paths. They
 include the space DID, entity ID when available, `pieces` / `entities`, `input`
