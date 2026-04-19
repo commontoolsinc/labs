@@ -105,11 +105,13 @@ deno task run -- \
 
 Current caveat:
 
-- the stage gateway at
+- the default gateway target is still the stage endpoint at
   [https://llm.stage.commontools.dev/](https://llm.stage.commontools.dev/)
-  currently answers `GET /v1/models` but fails `POST /v1/chat/completions` even
-  in no-auth mode; that is currently treated as a gateway-side issue rather than
-  a `cf-harness` request-shape issue
+- gateway auth defaults remain an ergonomics question:
+  - standalone `cf-harness` still defaults to `bearer`
+  - Loom's `cf-harness` adapter defaults to `none`
+- confirm the intended gateway/auth mode for the environment you are testing
+  against
 
 ## Testing
 

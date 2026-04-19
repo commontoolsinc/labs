@@ -171,12 +171,13 @@ At the current checkpoint, the package has:
 - a local commit checkpoint on `codex/cf-harness-skeleton`:
   - `9208ac17a` `Add cf-harness policy and gateway controls`
 
-The stage gateway caveat is important:
+The earlier stage gateway caveat has been resolved, but one auth-defaulting
+question remains important:
 
-- unauthenticated `GET /v1/models` works
-- unauthenticated `POST /v1/chat/completions` currently fails
-- current evidence points to a gateway-side issue on chat completions rather
-  than a `cf-harness` request-shape bug
+- standalone `cf-harness` still defaults to `bearer`
+- Loom's `cf-harness` adapter defaults to `none`
+- that split is intentional for now, but it means operator behavior differs
+  between the package CLI and the Loom batch adapter
 
 ## What Comes Next
 
