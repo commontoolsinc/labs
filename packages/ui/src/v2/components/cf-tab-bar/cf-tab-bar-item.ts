@@ -8,6 +8,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} value - Unique identifier for this item
  * @attr {string} label - Text label rendered below the icon
+ * @attr {boolean} show-label - Whether to show the label (default: true). Set to false for icon-only items.
  * @attr {boolean} disabled - Prevents selection and keyboard navigation
  * @prop {boolean} selected - Set by parent bar when this item is active
  *
@@ -20,6 +21,7 @@ export class CFTabBarItem extends BaseElement {
   static override properties = {
     value: { type: String, reflect: true },
     label: { type: String, reflect: true },
+    showLabel: { type: Boolean, reflect: true, attribute: "show-label" },
     disabled: { type: Boolean, reflect: true },
     selected: { type: Boolean },
   };
@@ -99,6 +101,7 @@ export class CFTabBarItem extends BaseElement {
 
     declare value: string;
     declare label: string;
+    declare showLabel: boolean;
     declare disabled: boolean;
     declare selected: boolean;
 
@@ -108,6 +111,7 @@ export class CFTabBarItem extends BaseElement {
       super();
       this.value = "";
       this.label = "";
+      this.showLabel = true;
       this.disabled = false;
       this.selected = false;
     }
@@ -146,9 +150,13 @@ export class CFTabBarItem extends BaseElement {
           <div class="icon" part="icon" aria-hidden="true">
             <slot name="icon"></slot>
           </div>
-          <div class="label" part="label">
-            <slot>${this.label}</slot>
-          </div>
+          ${this.showLabel
+            ? html`
+              <div class="label" part="label">
+                <slot>${this.label}</slot>
+              </div>
+            `
+            : ""}
         </button>
       `;
     }
