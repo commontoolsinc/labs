@@ -4,6 +4,7 @@ import {
   hashSchemaItem,
   internedPairKey,
   internSchema,
+  internSchemaHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -3251,8 +3252,8 @@ export function mergeAnyOfBranchSchemas(
   // Interning each input stabilizes its identity so downstream callers
   // hit the hash-cache fast path; `||` separates outer from branches,
   // `|` separates branches.
-  const key = `${internSchema(outerSchema, true).hashString}||` +
-    branches.map((b) => internSchema(b, true).hashString).join("|");
+  const key = `${internSchemaHashString(outerSchema)}||` +
+    branches.map(internSchemaHashString).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3336,7 +3337,7 @@ function _mergeAnyOfBranchSchemasUncached(
     // identities for any downstream caller that re-hashes them.
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(internSchema(s, true).hashString, s);
+      uniqueHashes.set(internSchemaHashString(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema

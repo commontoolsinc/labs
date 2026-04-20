@@ -333,8 +333,20 @@ export function isInternedSchema(schema: JSONSchema): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Interned cache-key helper
+// Interned cache-key helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Interns (and thus deep-freezes) the given schema, returning its hash
+ * string. Equivalent to `internSchema(schema, true).hashString`, but names
+ * the operation and avoids the non-obvious `true` (`wantSchemaAndHash`)
+ * argument at call sites. Intended for building stable cache-key strings
+ * that also benefit from `internSchema`'s identity-stable WeakMap
+ * fast-path on repeat lookups.
+ */
+export function internSchemaHashString(schema: JSONSchema): string {
+  return internSchema(schema, true).hashString;
+}
 
 /**
  * Returns a cache-key string for an ordered pair of schemas, each interned
@@ -351,7 +363,5 @@ export function isInternedSchema(schema: JSONSchema): boolean {
  * for the motivating regression.
  */
 export function internedPairKey(a: JSONSchema, b: JSONSchema): string {
-  return `${internSchema(a, true).hashString}|${
-    internSchema(b, true).hashString
-  }`;
+  return `${internSchemaHashString(a)}|${internSchemaHashString(b)}`;
 }
