@@ -60,11 +60,17 @@ export class CFListItem extends BaseElement {
         display: block;
       }
 
+      .row {
+        display: flex;
+        align-items: center;
+      }
+
       .item {
         display: flex;
         align-items: center;
         gap: var(--cf-list-item-gap, 0.75rem);
-        width: 100%;
+        flex: 1;
+        min-width: 0;
         padding: var(--cf-list-item-padding, 0.5rem);
         border: none;
         border-radius: var(
@@ -219,46 +225,48 @@ export class CFListItem extends BaseElement {
 
   override render() {
     return html`
-      <button
-        type="button"
-        class="${classMap({ item: true })}"
-        ?disabled="${this.disabled}"
-        part="item"
-        @click="${this._handleClick}"
-      >
-        <div class="icon ${this._hasIcon ? "" : "empty"}" part="icon">
+      <div class="row" part="row">
+        <button
+          type="button"
+          class="${classMap({ item: true })}"
+          ?disabled="${this.disabled}"
+          part="item"
+          @click="${this._handleClick}"
+        >
+          <div class="icon ${this._hasIcon ? "" : "empty"}" part="icon">
+            <slot
+              name="icon"
+              @slotchange="${this._handleIconSlotChange}"
+            ></slot>
+          </div>
+          <div class="content" part="content">
+            <div class="label" part="label">
+              <slot>${this.label}</slot>
+            </div>
+            <div
+              class="description ${this.description || this._hasDescription
+                ? ""
+                : "empty"}"
+              part="description"
+            >
+              <slot
+                name="description"
+                @slotchange="${this._handleDescriptionSlotChange}"
+              >${this.description}</slot>
+            </div>
+          </div>
+          ${this.expandable
+            ? html`
+              <span class="chevron" part="chevron" aria-hidden="true">›</span>
+            `
+            : ""}
+        </button>
+        <div class="action ${this._hasAction ? "" : "empty"}" part="action">
           <slot
-            name="icon"
-            @slotchange="${this._handleIconSlotChange}"
+            name="action"
+            @slotchange="${this._handleActionSlotChange}"
           ></slot>
         </div>
-        <div class="content" part="content">
-          <div class="label" part="label">
-            <slot>${this.label}</slot>
-          </div>
-          <div
-            class="description ${this.description || this._hasDescription
-              ? ""
-              : "empty"}"
-            part="description"
-          >
-            <slot
-              name="description"
-              @slotchange="${this._handleDescriptionSlotChange}"
-            >${this.description}</slot>
-          </div>
-        </div>
-        ${this.expandable
-          ? html`
-            <span class="chevron" part="chevron" aria-hidden="true">›</span>
-          `
-          : ""}
-      </button>
-      <div class="action ${this._hasAction ? "" : "empty"}" part="action">
-        <slot
-          name="action"
-          @slotchange="${this._handleActionSlotChange}"
-        ></slot>
       </div>
       ${this.expandable
         ? html`
