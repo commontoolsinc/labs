@@ -10,6 +10,7 @@ import {
   findInternedSchema,
   hashSchema,
   hashSchemaItem,
+  hashSchemaItemAsFabricHash,
   internedPairKey,
   internSchema,
   internSchemaAsHashString,
@@ -82,6 +83,59 @@ describe("schema-hash dispatch", () => {
           const a = hashSchemaItem("foo");
           const b = hashSchemaItem("bar");
           assertNotEquals(a, b);
+        });
+      });
+
+      describe("hashSchemaItemAsFabricHash()", () => {
+        it("returns a `FabricHash`", () => {
+          const result = hashSchemaItemAsFabricHash("hello");
+          assert(result instanceof FabricHash);
+        });
+
+        it("uses the algorithm tag appropriate for the current mode", () => {
+          const expectedTag = modernHashConfig ? "fid1" : "legacy";
+          assertStrictEquals(
+            hashSchemaItemAsFabricHash(42).tag,
+            expectedTag,
+          );
+        });
+
+        it("is deterministic (same input → same hash)", () => {
+          const a = hashSchemaItemAsFabricHash(42);
+          const b = hashSchemaItemAsFabricHash(42);
+          assertStrictEquals(a.toString(), b.toString());
+        });
+
+        it("produces different hashes for different values", () => {
+          const a = hashSchemaItemAsFabricHash("foo");
+          const b = hashSchemaItemAsFabricHash("bar");
+          assertNotEquals(a.toString(), b.toString());
+        });
+
+        it("handles primitive, array, and object inputs", () => {
+          assert(hashSchemaItemAsFabricHash(null) instanceof FabricHash);
+          assert(hashSchemaItemAsFabricHash(true) instanceof FabricHash);
+          assert(hashSchemaItemAsFabricHash([1, 2, 3]) instanceof FabricHash);
+          assert(
+            hashSchemaItemAsFabricHash({ a: 1, b: "two" }) instanceof
+              FabricHash,
+          );
+        });
+
+        it("is key-order independent for object inputs", () => {
+          const a = hashSchemaItemAsFabricHash({ type: "object", title: "A" });
+          const b = hashSchemaItemAsFabricHash({ title: "A", type: "object" });
+          assertStrictEquals(a.toString(), b.toString());
+        });
+
+        it("agrees with the hash stored by `internSchema()`", () => {
+          const schema = toDeepFrozenSchema({
+            type: "object",
+            properties: { x: { type: "number" } },
+          }) as JSONSchemaObj;
+          const internedHash = internSchema(schema, true).hash;
+          const directHash = hashSchemaItemAsFabricHash(schema);
+          assertStrictEquals(internedHash.toString(), directHash.toString());
         });
       });
 
