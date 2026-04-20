@@ -13,9 +13,6 @@
  *
  * Follows the same inline-flag-test dispatch pattern used by
  * `fabric-value.ts`.
- *
- * DO NOT MERGE! This comment makes this PR not the same as `main`. Just to
- * force a diff and a build.
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
