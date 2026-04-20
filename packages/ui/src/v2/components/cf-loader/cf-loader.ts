@@ -24,7 +24,6 @@
 
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { type ComponentSize } from "../theme-context.ts";
 
 /** @deprecated Use ComponentSize instead */
 export type LoaderSize = "sm" | "md" | "lg";

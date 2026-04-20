@@ -2,7 +2,6 @@ import { html, PropertyValues, unsafeCSS } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { toggleStyles } from "./styles.ts";
-import { type ComponentSize } from "../theme-context.ts";
 
 /** @deprecated Use ComponentSize instead */
 export type ToggleSize = "sm" | "md" | "lg";
