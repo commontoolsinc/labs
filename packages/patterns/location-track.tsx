@@ -240,7 +240,7 @@ export const LocationTrackModule = pattern<
             hasPoints,
             <cf-button
               variant="ghost"
-              size="sm"
+              size="s"
               onClick={clearLocations({ locations })}
               style={{
                 fontSize: "12px",

@@ -1697,7 +1697,7 @@ export default pattern<PatternInput, PatternOutput>(
                                 marginTop: "4px",
                               }}
                             >
-                              <cf-loader size="sm" />
+                              <cf-loader size="s" />
                               <span>Analyzing...</span>
                             </div>
 

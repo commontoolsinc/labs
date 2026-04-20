@@ -188,7 +188,7 @@ export default pattern<Record<string, never>>((_) => {
                       {(ann?.status === "open" ||
                         ann?.status === "in-progress") && (
                         <cf-button
-                          size="sm"
+                          size="s"
                           onClick={resolveAnnotation({ status: ann.status! })}
                         >
                           Resolve
@@ -197,7 +197,7 @@ export default pattern<Record<string, never>>((_) => {
                       {(ann?.status === "open" ||
                         ann?.status === "in-progress") && (
                         <cf-button
-                          size="sm"
+                          size="s"
                           variant="secondary"
                           onClick={dismissAnnotation({ status: ann.status! })}
                         >
@@ -207,7 +207,7 @@ export default pattern<Record<string, never>>((_) => {
                       {(ann?.status === "resolved" ||
                         ann?.status === "dismissed") && (
                         <cf-button
-                          size="sm"
+                          size="s"
                           variant="secondary"
                           onClick={reopenAnnotation({ status: ann.status! })}
                         >

@@ -318,7 +318,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
         <cf-modal
           $open={modalOpen}
           dismissable
-          size="md"
+          size="m"
           oncf-modal-close={action(() => {
             modalOpen.set(false);
             editing.set({ editing: null });

@@ -186,7 +186,7 @@ export default pattern<VignetteRecipeStoryInput, VignetteRecipeStoryOutput>(
                           </span>
                         </cf-hstack>
                         <div style={{ flex: "1" }} />
-                        <cf-button variant="default" size="sm">
+                        <cf-button variant="default" size="s">
                           View Recipe
                         </cf-button>
                       </cf-hstack>

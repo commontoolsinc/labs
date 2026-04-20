@@ -598,7 +598,7 @@ Extract:
                     gap: "12px",
                   }}
                 >
-                  <cf-loader size="sm" />
+                  <cf-loader size="s" />
                   <span>
                     Analyzing emails... {completedCount}/{emailCount} complete
                   </span>

@@ -436,7 +436,7 @@ const Event = pattern<Input, Output>(
             {backlinks.map((piece) => (
               <cf-button
                 variant="ghost"
-                size="sm"
+                size="s"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >

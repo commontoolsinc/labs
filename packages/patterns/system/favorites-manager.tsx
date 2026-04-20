@@ -54,7 +54,7 @@ export default pattern<Record<string, never>>((_) => {
                 <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
                 <cf-button
                   variant="destructive"
-                  size="sm"
+                  size="s"
                   onClick={onRemoveFavorite({
                     favorites: favorites!,
                     item: item.cell,

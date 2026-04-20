@@ -765,7 +765,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           gap: "8px",
                         }}
                       >
-                        <cf-loader size="sm" show-elapsed></cf-loader>
+                        <cf-loader size="s" show-elapsed></cf-loader>
                         Fetching...
                       </span>,
                       "Fetch Calendar Events",

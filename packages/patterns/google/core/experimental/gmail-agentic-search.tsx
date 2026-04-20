@@ -1601,7 +1601,7 @@ When you're done searching, STOP calling tools and produce your final structured
                   ? (
                     <cf-button
                       onClick={() => navigateTo(piece)}
-                      size="sm"
+                      size="s"
                       variant="secondary"
                     >
                       Re-authenticate Gmail
@@ -1610,7 +1610,7 @@ When you're done searching, STOP calling tools and produce your final structured
                   : (
                     <cf-button
                       onClick={createGoogleAuth}
-                      size="sm"
+                      size="s"
                       variant="secondary"
                     >
                       Connect Gmail
@@ -1650,7 +1650,7 @@ When you're done searching, STOP calling tools and produce your final structured
                     ? (
                       <cf-button
                         onClick={() => navigateTo(piece)}
-                        size="sm"
+                        size="s"
                         variant="secondary"
                       >
                         Re-authenticate Gmail
@@ -1742,7 +1742,7 @@ When you're done searching, STOP calling tools and produce your final structured
           isAuthenticated,
           <cf-button
             onClick={boundStartScan}
-            size="lg"
+            size="l"
             style="width: 100%;"
             disabled={derive(
               [isScanning, hasAgentGoal],
@@ -1768,7 +1768,7 @@ When you're done searching, STOP calling tools and produce your final structured
           <cf-button
             onClick={boundStopScan}
             variant="secondary"
-            size="lg"
+            size="l"
             style="width: 100%; margin-top: 8px;"
           >
             ⏹ Stop Scan
@@ -1868,7 +1868,7 @@ When you're done searching, STOP calling tools and produce your final structured
                                 gap: "8px",
                               }}
                             >
-                              <cf-loader size="sm"></cf-loader>
+                              <cf-loader size="s"></cf-loader>
                               Analyzing emails...
                             </div>
                           </div>
@@ -1978,7 +1978,7 @@ When you're done searching, STOP calling tools and produce your final structured
                 </div>
                 <cf-button
                   onClick={boundCompleteScan}
-                  size="lg"
+                  size="l"
                   style="width: 100%; margin-top: 12px;"
                 >
                   ✓ Done
@@ -2257,7 +2257,7 @@ When you're done searching, STOP calling tools and produce your final structured
                                   pendingSubmissions,
                                 })}
                                 variant="ghost"
-                                size="sm"
+                                size="s"
                                 style="color: #3b82f6; font-size: 11px;"
                               >
                                 Share
@@ -2270,7 +2270,7 @@ When you're done searching, STOP calling tools and produce your final structured
                                 pendingSubmissions,
                               })}
                               variant="ghost"
-                              size="sm"
+                              size="s"
                               style="color: #dc2626; font-size: 12px;"
                             >
                               ×
@@ -2726,7 +2726,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                   }
                                 }}
                                 variant="ghost"
-                                size="sm"
+                                size="s"
                                 style="color: #64748b;"
                               >
                                 Keep Private
@@ -2753,7 +2753,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 variant={submission.userApproved
                                   ? "secondary"
                                   : "default"}
-                                size="sm"
+                                size="s"
                                 disabled={submission.userApproved}
                               >
                                 {submission.userApproved
@@ -2895,7 +2895,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                       <cf-button
                                         onClick={createSearchRegistry}
                                         variant="secondary"
-                                        size="sm"
+                                        size="s"
                                       >
                                         Create Registry
                                       </cf-button>

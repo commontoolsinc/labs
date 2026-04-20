@@ -1632,7 +1632,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                               color: "#f59e0b",
                             }}
                           >
-                            <cf-loader size="sm" />
+                            <cf-loader size="s" />
                             <span>Analyzing...</span>
                           </div>
 

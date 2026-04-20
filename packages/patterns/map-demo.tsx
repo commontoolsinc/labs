@@ -443,7 +443,7 @@ export default pattern<Input, Output>(
                     <cf-heading level={5}>Areas of Interest</cf-heading>
                     <cf-button
                       variant="secondary"
-                      size="sm"
+                      size="s"
                       onClick={addAreaHandler({
                         areas: areasOfInterest,
                         center,

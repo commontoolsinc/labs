@@ -2274,7 +2274,7 @@ Each suggestion should have:
                       </cf-vstack>,
                       // Still loading
                       <cf-hstack gap="2" align="center">
-                        <cf-loader size="sm" />
+                        <cf-loader size="s" />
                         <span style="font-weight: 500;">Classifying...</span>
                       </cf-hstack>,
                     )}
@@ -2628,7 +2628,7 @@ Each suggestion should have:
                         </span>
                         <cf-button
                           variant="secondary"
-                          size="sm"
+                          size="s"
                           onClick={undoAutoClassificationHandler({
                             autoItem,
                             examples,
@@ -2843,7 +2843,7 @@ Each suggestion should have:
                               <cf-hstack gap="2" style="margin-top: 0.5rem;">
                                 <cf-button
                                   variant="secondary"
-                                  size="sm"
+                                  size="s"
                                   disabled={computed(() =>
                                     currentItem.get() !== null
                                   )}
@@ -2858,7 +2858,7 @@ Each suggestion should have:
                                 </cf-button>
                                 <cf-button
                                   variant="ghost"
-                                  size="sm"
+                                  size="s"
                                   onClick={removeExampleHandler({
                                     example,
                                     examples,

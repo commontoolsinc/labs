@@ -1035,7 +1035,7 @@ IMPORTANT:
                       />
                     </div>
                     <cf-button
-                      size="sm"
+                      size="s"
                       variant="ghost"
                       onClick={removeSpaceHandler({ name: space.name, spaces })}
                     >

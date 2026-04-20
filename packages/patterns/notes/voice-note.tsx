@@ -156,7 +156,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                           </div>
                           <cf-button
                             variant="ghost"
-                            size="sm"
+                            size="s"
                             onClick={handleDeleteNote({
                               noteId: note.id,
                               notes,

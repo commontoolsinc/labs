@@ -83,7 +83,7 @@ export default pattern<Input, Input>(({ userInput }) => {
           {ifElse(
             idea.pending,
             <span>
-              <cf-loader size="sm" /> Generating...
+              <cf-loader size="s" /> Generating...
             </span>,
             ifElse(
               idea.error,

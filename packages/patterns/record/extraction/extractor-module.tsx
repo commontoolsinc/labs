@@ -2632,7 +2632,7 @@ export const ExtractorModule = pattern<
                         color: "#6b7280",
                       }}
                     >
-                      <cf-loader size="sm" />
+                      <cf-loader size="s" />
                       <span>Running OCR on photos...</span>
                     </div>,
                     null,
@@ -2713,7 +2713,7 @@ export const ExtractorModule = pattern<
                 padding: "24px",
               }}
             >
-              <cf-loader size="sm" show-elapsed />
+              <cf-loader size="s" show-elapsed />
               <span style={{ color: "#92400e" }}>
                 {extractingProgressIcon} {extractingProgressMessage}
               </span>
@@ -3081,7 +3081,7 @@ export const ExtractorModule = pattern<
                         color: "#6b7280",
                       }}
                     >
-                      <cf-loader size="sm" />
+                      <cf-loader size="s" />
                       <span>Generating cleanup preview...</span>
                     </div>,
                     <div>

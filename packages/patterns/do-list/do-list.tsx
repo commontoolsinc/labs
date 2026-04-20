@@ -304,7 +304,7 @@ const DoItemCard = pattern<
                   <cf-cell-link $cell={att} />
                   <cf-button
                     variant="ghost"
-                    size="sm"
+                    size="s"
                     style="font-size: 0.7rem; padding: 0 2px;"
                     onClick={removeAttachment({ item, attachment: att, items })}
                   >
@@ -413,7 +413,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
         <cf-hstack justify="end" style="padding: 0 0.5rem;">
           <cf-button
             variant="ghost"
-            size="sm"
+            size="s"
             style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
             onClick={() => archiveCompleted.send({})}
           >
@@ -471,7 +471,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                   <cf-hstack justify="end">
                     <cf-button
                       variant="ghost"
-                      size="sm"
+                      size="s"
                       style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
                       onClick={() => archiveCompleted.send({})}
                     >

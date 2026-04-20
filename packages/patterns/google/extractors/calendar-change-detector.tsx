@@ -493,7 +493,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     color: "#2563eb",
                   }}
                 >
-                  <cf-loader size="sm" />
+                  <cf-loader size="s" />
                   <span>{computed(() => pendingCount)} analyzing...</span>
                 </div>
                 <span style={{ color: "#059669" }}>
@@ -1062,7 +1062,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                               marginTop: "4px",
                             }}
                           >
-                            <cf-loader size="sm" />
+                            <cf-loader size="s" />
                             <span>Analyzing...</span>
                           </div>
 

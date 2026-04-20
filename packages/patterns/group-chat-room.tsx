@@ -780,7 +780,7 @@ export default pattern<RoomInput, RoomOutput>(
                         showPreview={false}
                         buttonText=""
                         variant="ghost"
-                        size="sm"
+                        size="s"
                         style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;"
                       />
                     </div>
@@ -805,7 +805,7 @@ export default pattern<RoomInput, RoomOutput>(
                       showPreview={false}
                       buttonText="📎"
                       variant="ghost"
-                      size="sm"
+                      size="s"
                     />
 
                     {/* Pending avatar preview */}

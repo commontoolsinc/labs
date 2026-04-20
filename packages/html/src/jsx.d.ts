@@ -3218,7 +3218,7 @@ interface CFToolbarAttributes<T> extends CFHTMLAttributes<T> {
 interface CFTableAttributes<T> extends CFHTMLAttributes<T> {
   "striped"?: boolean;
   "bordered"?: boolean;
-  "size"?: "sm" | "md" | "lg";
+  "size"?: "xs" | "s" | "m" | "l" | "xl" | "sm" | "md" | "lg";
   "sticky-header"?: boolean;
   "full-width"?: boolean;
   "hover"?: boolean;
@@ -3424,7 +3424,7 @@ interface CFButtonAttributes<T> extends CFHTMLAttributes<T> {
     | "ghost"
     | "link"
     | "pill";
-  "size"?: "default" | "sm" | "lg" | "icon";
+  "size"?: "xs" | "s" | "m" | "l" | "xl" | "icon" | "default" | "sm" | "lg";
   "disabled"?: boolean;
   "outline"?: boolean;
   "type"?: "button" | "submit" | "reset";
@@ -3440,7 +3440,17 @@ interface CFCopyButtonAttributes<T> extends CFHTMLAttributes<T> {
     | "ghost"
     | "link"
     | "pill";
-  "size"?: "default" | "sm" | "lg" | "icon" | "md";
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "icon"
+    | "default"
+    | "sm"
+    | "md"
+    | "lg";
   "disabled"?: boolean;
   "feedback-duration"?: number;
   "icon-only"?: boolean;
@@ -3464,7 +3474,17 @@ interface CFFileDownloadAttributes<T> extends CFHTMLAttributes<T> {
     | "ghost"
     | "link"
     | "pill";
-  "size"?: "default" | "sm" | "lg" | "icon" | "md";
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "icon"
+    | "default"
+    | "sm"
+    | "md"
+    | "lg";
   "disabled"?: boolean;
   "feedback-duration"?: number;
   "feedbackDuration"?: number;
@@ -3558,7 +3578,7 @@ interface CFDropZoneAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFLoaderAttributes<T> extends CFHTMLAttributes<T> {
-  "size"?: "sm" | "md" | "lg";
+  "size"?: "xs" | "s" | "m" | "l" | "xl" | "sm" | "md" | "lg";
   "show-elapsed"?: boolean;
   "show-stop"?: boolean;
   /** Fired when stop button is clicked */
@@ -3603,6 +3623,16 @@ interface CFModalProviderAttributes<T> extends CFHTMLAttributes<T> {}
 interface CFChevronButtonAttributes<T> extends CFHTMLAttributes<T> {
   "expanded"?: boolean;
   "loading"?: boolean;
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "sm"
+    | "md"
+    | "lg"
+    | CellLike<string>;
   "oncf-toggle"?: EventHandler<void>;
 }
 
@@ -3642,7 +3672,8 @@ interface CFInputAttributes<T> extends CFHTMLAttributes<T> {
   "maxlength"?: string;
   "minlength"?: string;
   "inputmode"?: string;
-  "size"?: number;
+  "size"?: "xs" | "s" | "m" | "l" | "xl" | CellLike<string>;
+  "char-size"?: number;
   "multiple"?: boolean;
   "accept"?: string;
   "list"?: string;
@@ -3668,6 +3699,7 @@ interface CFTextAreaAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<string | undefined>;
   "value"?: CellLike<string> | string;
   "placeholder"?: string;
+  "size"?: "xs" | "s" | "m" | "l" | "xl" | CellLike<string>;
   "disabled"?: boolean;
   "readonly"?: boolean;
   "error"?: boolean;
@@ -3811,7 +3843,8 @@ interface CFSelectAttributes<T> extends CFHTMLAttributes<T> {
   "multiple"?: boolean;
   "disabled"?: boolean;
   "required"?: boolean;
-  "size"?: number;
+  "size"?: "xs" | "s" | "m" | "l" | "xl" | CellLike<string>;
+  "visible-rows"?: number;
   "name"?: string;
   "placeholder"?: string;
   "oncf-change"?: EventHandler<
@@ -4035,7 +4068,16 @@ interface CFToggleAttributes<T> extends CFHTMLAttributes<T> {
   "$pressed"?: CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
   "variant"?: "default" | "outline" | CellLike<"default" | "outline">;
-  "size"?: "default" | "sm" | "lg" | CellLike<"default" | "sm" | "lg">;
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "default"
+    | "sm"
+    | "lg"
+    | CellLike<"xs" | "s" | "m" | "l" | "xl" | "default" | "sm" | "lg">;
   "oncf-change"?: EventHandler<{ pressed: boolean }>;
 }
 
@@ -4086,6 +4128,7 @@ interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
     | "destructive"
     | "outline"
     | CellLike<"default" | "secondary" | "destructive" | "outline">;
+  "size"?: "xs" | "s" | "m" | "l" | "xl" | CellLike<string>;
   "removable"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
 }
@@ -4098,10 +4141,15 @@ interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
     | "accent"
     | CellLike<"default" | "primary" | "accent">;
   "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
     | "sm"
     | "md"
     | "lg"
-    | CellLike<"sm" | "md" | "lg">;
+    | CellLike<"xs" | "s" | "m" | "l" | "xl" | "sm" | "md" | "lg">;
   "removable"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
