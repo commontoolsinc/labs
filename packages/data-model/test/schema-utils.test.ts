@@ -620,7 +620,7 @@ describe("schemaWithProperties", () => {
 
       it("does not freeze `overrides`", () => {
         const overrides = { type: "boolean" };
-        const result = schemaWithProperties(truish, overrides);
+        schemaWithProperties(truish, overrides);
         assert(!Object.isFrozen(overrides));
       });
     });
