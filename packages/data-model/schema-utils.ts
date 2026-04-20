@@ -140,10 +140,6 @@ export function schemaWithProperties(
   schema: JSONSchema | undefined,
   overrides: JSONSchema,
 ): JSONSchema {
-  if (schema === undefined) {
-    schema = true;
-  }
-
   // Deals with `boolean`s values for either of the arguements. In both cases, a
   // `false` means the result is `false`, and a "truish" (`true` per se or
   // `undefined`) means that the result is the _other_ argument. Since these
@@ -175,7 +171,7 @@ export function schemaWithProperties(
     }
   };
 
-  const handledSchema = handleBooleanArgument(schema, overrides);
+  const handledSchema = handleBooleanArgument(schema ?? true, overrides);
   if (handledSchema !== undefined) {
     return handledSchema;
   }
