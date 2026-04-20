@@ -231,6 +231,45 @@ Environment variables `CF_API_URL` and `CF_IDENTITY` are also supported.
 Handlers remain writable through the mounted `.handler` file. Both mounted
 `.handler` and `.tool` files can be executed directly or via `cf exec`.
 
+### CFC Annotations
+
+`cf fuse mount --cfc-mode=<mode>` selects the FUSE-side CFC guardrail mode:
+`disabled`, `observe`, `enforce-explicit`, or `enforce-strict`. When no mode is
+provided, FUSE uses the runner default (`disabled` today). `observe` and both
+enforcing modes publish annotations automatically. `--cfc-annotations` still
+forces annotation output for local debugging even when the mode is `disabled`.
+
+By default the local mount exposes both the protected namespace `trusted.cfc.*`
+and the compatibility namespace `user.commonfabric.cfc.*`. Use
+`--cfc-xattr-namespace=trusted|compat|both` to select the returned spelling;
+unknown namespace values are rejected. `trusted.cfc.*` is the enforcement
+namespace; `user.commonfabric.cfc.*` is for local compatibility/debugging and
+must not be trusted as sandbox enforcement input. `trusted.cfc.generation` is
+returned as a raw UTF-8 string. Other CFC annotation values are canonical JSON
+with sorted object keys.
+
+Prepared writeback is scaffolded for existing-file writes, `create`/`mkdir`,
+`unlink`/`rmdir`, same-cell `rename`, Common Fabric sigil symlink creation, and
+metadata-only `setattr` attempts such as chmod/chown/timestamp updates. In
+`observe`, missing prepare metadata is logged and writes continue. In
+`enforce-explicit`, annotated targets and annotated parent directories require
+trusted prepare metadata. In `enforce-strict`, projected writes fail closed when
+annotations or prepare metadata are missing, malformed, or stale. Direct
+pre-gVisor testing can enable the temporary xattr prepare/finalize path with
+`--cfc-writeback-xattrs`; this accepts only `trusted.cfc.writeback.prepare` and
+`trusted.cfc.writeback.finalize` and is not a sandbox trust boundary.
+Prepared/fail-closed writeback records are persisted outside the mount so a
+daemon restart or subtree rebuild can reconcile them without exposing lower
+labels. Use `--cfc-writeback-state=<path>` to choose the recovery file;
+otherwise CFC modes use a mountpoint-derived file under
+`$CF_CFC_WRITEBACK_STATE_DIR`, `$XDG_STATE_HOME/commonfabric-fuse`, or
+`~/.cache/commonfabric-fuse`, in that order. The mount `.status` file includes a
+`cfc` section with writeback phase counts and recent diagnostics.
+
+Arbitrary symlink targets and callable-send writeback are still out of scope for
+CFC enforcing modes and are rejected there. gVisor remains responsible for
+sandbox-visible enforcement.
+
 ## Architecture
 
 Single Deno process using FFI to libfuse. FUSE callbacks are registered via

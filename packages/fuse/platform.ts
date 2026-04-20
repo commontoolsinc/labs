@@ -166,6 +166,17 @@ export interface FusePlatform {
     ) => void,
   ): AnyCallback;
 
+  createSetxattrCallback(
+    handler: (
+      req: Deno.PointerValue,
+      ino: bigint,
+      namePtr: Deno.PointerValue,
+      valuePtr: Deno.PointerValue,
+      size: bigint,
+      flags: number,
+    ) => void,
+  ): AnyCallback;
+
   createRenameCallback(
     handler: (
       req: Deno.PointerValue,
@@ -219,8 +230,53 @@ export const O_RDONLY = 0x0000;
 export const O_WRONLY = 0x0001;
 export const O_RDWR = 0x0002;
 
-// setattr to_set flags
+// setattr to_set flags.
+// Values match fuse_lowlevel.h for libfuse 2.x and 3.x. Some names are
+// platform/version-specific aliases for the same bit; keep all names explicit
+// so CFC guardrails can distinguish caller intent without bypassing unknowns.
+export const FUSE_SET_ATTR_MODE = 1 << 0;
+export const FUSE_SET_ATTR_UID = 1 << 1;
+export const FUSE_SET_ATTR_GID = 1 << 2;
 export const FUSE_SET_ATTR_SIZE = 1 << 3;
+export const FUSE_SET_ATTR_ATIME = 1 << 4;
+export const FUSE_SET_ATTR_MTIME = 1 << 5;
+export const FUSE_SET_ATTR_ATIME_NOW = 1 << 7;
+export const FUSE_SET_ATTR_MTIME_NOW = 1 << 8;
+export const FUSE_SET_ATTR_FORCE = 1 << 9;
+export const FUSE_SET_ATTR_CTIME = 1 << 10;
+export const FUSE_SET_ATTR_KILL_SUID = 1 << 11;
+export const FUSE_SET_ATTR_KILL_SGID = 1 << 12;
+export const FUSE_SET_ATTR_FILE = 1 << 13;
+export const FUSE_SET_ATTR_KILL_PRIV = 1 << 14;
+export const FUSE_SET_ATTR_OPEN = 1 << 15;
+export const FUSE_SET_ATTR_TIMES_SET = 1 << 16;
+export const FUSE_SET_ATTR_TOUCH = 1 << 17;
+export const FUSE_SET_ATTR_CRTIME = 1 << 28;
+export const FUSE_SET_ATTR_BTIME = 1 << 28;
+export const FUSE_SET_ATTR_CHGTIME = 1 << 29;
+export const FUSE_SET_ATTR_BKUPTIME = 1 << 30;
+export const FUSE_SET_ATTR_FLAGS = 0x80000000;
+
+export const FUSE_SET_ATTR_METADATA_KNOWN_MASK = FUSE_SET_ATTR_MODE |
+  FUSE_SET_ATTR_UID |
+  FUSE_SET_ATTR_GID |
+  FUSE_SET_ATTR_ATIME |
+  FUSE_SET_ATTR_MTIME |
+  FUSE_SET_ATTR_ATIME_NOW |
+  FUSE_SET_ATTR_MTIME_NOW |
+  FUSE_SET_ATTR_FORCE |
+  FUSE_SET_ATTR_CTIME |
+  FUSE_SET_ATTR_KILL_SUID |
+  FUSE_SET_ATTR_KILL_SGID |
+  FUSE_SET_ATTR_FILE |
+  FUSE_SET_ATTR_KILL_PRIV |
+  FUSE_SET_ATTR_OPEN |
+  FUSE_SET_ATTR_TIMES_SET |
+  FUSE_SET_ATTR_TOUCH |
+  FUSE_SET_ATTR_CRTIME |
+  FUSE_SET_ATTR_CHGTIME |
+  FUSE_SET_ATTR_BKUPTIME |
+  FUSE_SET_ATTR_FLAGS;
 
 // File mode constants
 export const S_IFDIR = 0o40000;

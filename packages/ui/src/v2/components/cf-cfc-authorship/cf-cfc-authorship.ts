@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import type { CfcLabelView } from "@commonfabric/runtime-client";
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 export type CfcAuthorshipState = "verified" | "unverified" | "unknown";
 
@@ -199,6 +199,12 @@ const initialsForName = (name: string | undefined): string => {
  * @prop {unknown} author - Claimed author id/object, or a `$author`-bound claim cell.
  * @prop {unknown} authorName - Optional untrusted display fallback.
  * @prop {unknown} avatar - Optional avatar image URL shown only when verified.
+ * @prop {boolean} verifyTextIntegrity - Require visible descendant text to
+ *   match the authorship claim.
+ * @prop {boolean} allowLiteralText - Allow literal descendant text under text
+ *   integrity verification.
+ * @prop {"ok"|"blocked"} textIntegrityState - Renderer-reported descendant text
+ *   integrity state.
  * @attr {string} kind - Integrity object kind; defaults to `authored-by`.
  */
 export class CFCFCAuthorship extends BaseElement {
@@ -304,12 +310,28 @@ export class CFCFCAuthorship extends BaseElement {
     authorName: { attribute: false },
     avatar: { attribute: false },
     kind: { type: String },
+    verifyTextIntegrity: {
+      type: Boolean,
+      attribute: "verify-text-integrity",
+    },
+    allowLiteralText: {
+      type: Boolean,
+      attribute: "allow-literal-text",
+    },
+    textIntegrityState: {
+      type: String,
+      attribute: "text-integrity-state",
+      reflect: true,
+    },
   };
 
   declare cfcLabel: CfcLabelView | undefined;
   declare authorName: unknown;
   declare avatar: unknown;
   declare kind: string | undefined;
+  declare verifyTextIntegrity: boolean;
+  declare allowLiteralText: boolean;
+  declare textIntegrityState: "ok" | "blocked";
 
   private _labelRequestId = 0;
   private _authorRequestId = 0;
@@ -327,6 +349,9 @@ export class CFCFCAuthorship extends BaseElement {
     this.authorName = undefined;
     this.avatar = undefined;
     this.kind = DEFAULT_AUTHORSHIP_KIND;
+    this.verifyTextIntegrity = false;
+    this.allowLiteralText = false;
+    this.textIntegrityState = "ok";
   }
 
   get value(): unknown {
@@ -352,11 +377,19 @@ export class CFCFCAuthorship extends BaseElement {
   }
 
   get authorshipState(): CfcAuthorshipState {
-    return authorshipStateForLabel(
+    const labelState = authorshipStateForLabel(
       this.cfcLabel,
       this.authorClaim,
       this.kind ?? DEFAULT_AUTHORSHIP_KIND,
     );
+    if (
+      labelState === "verified" &&
+      this.verifyTextIntegrity &&
+      this.textIntegrityState === "blocked"
+    ) {
+      return "unverified";
+    }
+    return labelState;
   }
 
   get authorClaim(): unknown {
@@ -535,6 +568,7 @@ export class CFCFCAuthorship extends BaseElement {
         class="authorship ${state}"
         part="root"
         data-cfc-authorship-state="${state}"
+        data-cfc-text-integrity-state="${this.textIntegrityState}"
       >
         <div class="badge" part="badge">
           ${this.renderAvatar(state)}

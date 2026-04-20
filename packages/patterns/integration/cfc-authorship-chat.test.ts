@@ -79,7 +79,16 @@ async function waitForAuthorshipStates(
           host.state === state &&
           (state === "verified"
             ? host.hasTrustedAvatar
-            : !host.hasTrustedAvatar)
+            : !host.hasTrustedAvatar) &&
+          (surface === "verified"
+            ? host.textIntegrityState === "ok" &&
+              host.renderedText.includes("signed off")
+            : host.textIntegrityState === "blocked" &&
+              host.renderedText.includes(
+                "Content hidden by integrity policy",
+              )) &&
+          !host.lightText.includes("Project chat") &&
+          !host.lightText.includes("Imported ticket thread")
         )
       );
     }, { timeout: 15_000 });
@@ -98,7 +107,10 @@ type AuthorshipProbe = {
   hosts: Array<{
     surface: string | null;
     state: string | undefined;
+    textIntegrityState: string | undefined;
     shadowText: string;
+    lightText: string;
+    renderedText: string;
     hasTrustedAvatar: boolean;
   }>;
 };
@@ -116,15 +128,32 @@ async function readAuthorshipProbe(page: Page): Promise<AuthorshipProbe> {
       }
     }
 
+    function deepText(root: ParentNode): string {
+      let text = root instanceof Element || root instanceof ShadowRoot
+        ? root.textContent ?? ""
+        : "";
+      for (const element of root.querySelectorAll("*")) {
+        if (element.shadowRoot) {
+          text += ` ${deepText(element.shadowRoot)}`;
+        }
+      }
+      return text;
+    }
+
     const elements: Element[] = [];
     collect(document, elements);
     const hosts = elements.map((element) => {
-      const state = (element as unknown as { authorshipState?: string })
-        .authorshipState;
+      const typedElement = element as unknown as {
+        authorshipState?: string;
+        textIntegrityState?: string;
+      };
       return {
         surface: element.getAttribute("data-authorship-surface"),
-        state,
+        state: typedElement.authorshipState,
+        textIntegrityState: typedElement.textIntegrityState,
         shadowText: element.shadowRoot?.textContent ?? "",
+        lightText: element.textContent ?? "",
+        renderedText: deepText(element),
         hasTrustedAvatar:
           element.shadowRoot?.querySelector("[data-cfc-authorship-avatar]") !==
             null,

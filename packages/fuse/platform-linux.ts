@@ -252,6 +252,40 @@ const linuxPlatform: FusePlatform = {
     );
   },
 
+  createSetxattrCallback(
+    handler: (
+      req: Deno.PointerValue,
+      ino: bigint,
+      namePtr: Deno.PointerValue,
+      valuePtr: Deno.PointerValue,
+      size: bigint,
+      flags: number,
+    ) => void,
+  ) {
+    return new Deno.UnsafeCallback(
+      {
+        parameters: ["pointer", "u64", "pointer", "pointer", "usize", "i32"],
+        result: "void",
+      } as const,
+      (
+        req: Deno.PointerValue,
+        ino: number | bigint,
+        namePtr: Deno.PointerValue,
+        valuePtr: Deno.PointerValue,
+        size: number | bigint,
+        flags: number,
+      ) =>
+        handler(
+          req,
+          BigInt(ino),
+          namePtr,
+          valuePtr,
+          BigInt(size),
+          flags,
+        ),
+    );
+  },
+
   // Linux v3 rename: extra `flags` parameter (uint32_t)
   createRenameCallback(
     handler: (

@@ -19,6 +19,7 @@
     "./packages/ts-transformers",
     "./packages/test-support",
     "./packages/schema-generator",
+    "./packages/cf-harness",
     "./packages/llm",
     "./packages/memory",
     "./packages/patterns",

@@ -131,22 +131,65 @@ export function cloneSchemaMutable(
  * `schema` is interned, then the result of this function will also be interned.
  *
  * - `undefined` and `true` ("accept everything") are treated as an interned
- *   `{}` before applying overrides.
- * - `false` ("reject everything") short-circuits: no overrides can make a
- *   "never" schema accept anything, so `false` is returned as-is.
+ *   `{}`.
+ * - `false` ("reject everything"), whether in `schema` or `overrides`, results
+ *   in a `false` result. That is, adding properties to a "never" schema still
+ *   results in "never," and adding "never" to any schema makes it a "never."
  */
 export function schemaWithProperties(
   schema: JSONSchema | undefined,
-  overrides: JSONSchemaObj,
+  overrides: JSONSchema,
 ): JSONSchema {
-  if (schema === false) return false;
+  // Deals with `boolean`s values for either of the arguements. In both cases, a
+  // `false` means the result is `false`, and a "truish" (`true` per se or
+  // `undefined`) means that the result is the _other_ argument. Since these
+  // (non-object) values count as interned schemas, "intern contagion" applies,
+  // so if handled the result is always an interned instance.
+  const handleBooleanArgument = (
+    schemaToCheck: JSONSchema,
+    otherSchema: JSONSchema,
+  ) => {
+    switch (schemaToCheck) {
+      case false: {
+        return false;
+      }
 
-  const base = (schema === undefined || schema === true)
-    ? emptySchemaObject()
-    : schema;
-  const result = { ...base, ...overrides };
+      case true:
+      case undefined: {
+        if (typeof otherSchema === "boolean") {
+          return otherSchema;
+        }
 
-  return isInternedSchema(base)
+        return isDeepFrozen(otherSchema)
+          ? internSchema(otherSchema)
+          : internSchema({ ...otherSchema });
+      }
+
+      default: {
+        return undefined;
+      }
+    }
+  };
+
+  const handledSchema = handleBooleanArgument(schema ?? true, overrides);
+  if (handledSchema !== undefined) {
+    return handledSchema;
+  }
+
+  // At this point, `schema` is an `object`s (but the type system can't figure
+  // that out.)
+  const schemaObj = schema as JSONSchemaObj;
+
+  const handledOverrides = handleBooleanArgument(overrides, schemaObj);
+  if (handledOverrides !== undefined) {
+    return handledOverrides;
+  }
+
+  // Similar to above, for `overrides`.
+  const overridesObj = overrides as JSONSchemaObj;
+
+  const result = { ...schemaObj, ...overridesObj };
+  return isInternedSchema(schemaObj)
     ? internSchema(result)
     : toDeepFrozenSchema(result, true);
 }

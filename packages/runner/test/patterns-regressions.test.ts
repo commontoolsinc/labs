@@ -46,10 +46,16 @@ describe("Pattern Runner - Regressions", () => {
     bindBuilder();
   });
 
-  afterEach(async () => {
-    if (tx?.status().status === "ready") {
-      await tx.commit();
+  async function commitTx() {
+    if (tx.status().status !== "ready") {
+      return { ok: undefined, error: undefined };
     }
+    runtime.prepareTxForCommit(tx);
+    return await tx.commit();
+  }
+
+  afterEach(async () => {
+    await commitTx();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -97,7 +103,7 @@ describe("Pattern Runner - Regressions", () => {
         { name: "C", visible: true },
       ],
     }, resultCell);
-    await tx.commit();
+    await commitTx();
 
     await result.pull();
 
@@ -113,7 +119,7 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
     const currentItems = result.withTx(tx).key("items").get();
     result.withTx(tx).key("items").set(currentItems.slice(0, 2)); // Keep first 2
-    tx.commit();
+    await commitTx();
 
     await result.pull();
 
@@ -127,7 +133,7 @@ describe("Pattern Runner - Regressions", () => {
   });
 
   it("keeps Notebook NAME current after createNote once pulled in v2", async () => {
-    await tx.commit();
+    await commitTx();
     await runtime.dispose();
     await storageManager.close();
     storageManager = StorageManager.emulate({
@@ -190,7 +196,7 @@ describe("Pattern Runner - Regressions", () => {
       title: "Test Notebook",
       notes: [],
     }, resultCell);
-    await tx.commit();
+    await commitTx();
 
     await runtime.idle();
     await storageManager.synced();
@@ -214,7 +220,7 @@ describe("Pattern Runner - Regressions", () => {
   });
 
   it("clears locally prepared results when a run transaction fails to commit in v2", async () => {
-    await tx.commit();
+    await commitTx();
     await runtime.dispose();
     await storageManager.close();
 
@@ -252,7 +258,7 @@ describe("Pattern Runner - Regressions", () => {
         },
       });
 
-    const result = await tx.commit();
+    const result = await commitTx();
     expect(result.error?.name).toBe("ConflictError");
     expect(runner.locallyPreparedResults.has(key)).toBe(false);
 
@@ -261,7 +267,7 @@ describe("Pattern Runner - Regressions", () => {
   });
 
   it("normalizes nested toJSON values before raw runner writes in v2", async () => {
-    await tx.commit();
+    await commitTx();
     await runtime.dispose();
     await storageManager.close();
 
@@ -316,7 +322,7 @@ describe("Pattern Runner - Regressions", () => {
     );
 
     const result = runtime.run(tx, rawValuePattern, {}, resultCell);
-    await tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toMatchObject({
