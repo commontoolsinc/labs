@@ -28,7 +28,10 @@ export default pattern<ListItemStoryInput, ListItemStoryOutput>(() => {
         <cf-list-item label="Profile"></cf-list-item>
         <cf-list-item label="Disabled Item" disabled></cf-list-item>
 
-        <cf-heading level={5} style={{ marginTop: "16px", marginBottom: "8px" }}>
+        <cf-heading
+          level={5}
+          style={{ marginTop: "16px", marginBottom: "8px" }}
+        >
           With Icons
         </cf-heading>
         <cf-list-item label="Home">
@@ -41,7 +44,10 @@ export default pattern<ListItemStoryInput, ListItemStoryOutput>(() => {
           <span slot="icon">🔔</span>
         </cf-list-item>
 
-        <cf-heading level={5} style={{ marginTop: "16px", marginBottom: "8px" }}>
+        <cf-heading
+          level={5}
+          style={{ marginTop: "16px", marginBottom: "8px" }}
+        >
           With Actions
         </cf-heading>
         <cf-list-item label="New Project">
@@ -53,7 +59,10 @@ export default pattern<ListItemStoryInput, ListItemStoryOutput>(() => {
           <cf-badge slot="action">3</cf-badge>
         </cf-list-item>
 
-        <cf-heading level={5} style={{ marginTop: "16px", marginBottom: "8px" }}>
+        <cf-heading
+          level={5}
+          style={{ marginTop: "16px", marginBottom: "8px" }}
+        >
           Expandable
         </cf-heading>
         <cf-list-item label="Project Alpha" expandable>

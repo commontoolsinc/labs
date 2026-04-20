@@ -2887,6 +2887,7 @@ interface CFModalElement extends CFHTMLElement {}
 interface CFModalProviderElement extends CFHTMLElement {}
 interface CFChevronButtonElement extends CFHTMLElement {}
 interface CFCardElement extends CFHTMLElement {}
+interface CFListItemElement extends CFHTMLElement {}
 interface CFCalendarElement extends CFHTMLElement {}
 interface CFQuestionElement extends CFHTMLElement {}
 interface CFAlertElement extends CFHTMLElement {}
@@ -3376,6 +3377,14 @@ interface CFToastProviderAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFCardAttributes<T> extends CFHTMLAttributes<T> {
   "clickable"?: boolean;
+}
+
+interface CFListItemAttributes<T> extends CFHTMLAttributes<T> {
+  "label"?: string;
+  "description"?: string;
+  "expandable"?: boolean;
+  "expanded"?: boolean;
+  "disabled"?: boolean;
 }
 
 interface CFRouterAttributes<T> extends CFHTMLAttributes<T> {
@@ -4852,6 +4861,10 @@ declare global {
       "cf-card": CFDOM.DetailedHTMLProps<
         CFCardAttributes<CFCardElement>,
         CFCardElement
+      >;
+      "cf-list-item": CFDOM.DetailedHTMLProps<
+        CFListItemAttributes<CFListItemElement>,
+        CFListItemElement
       >;
       "cf-router": CFDOM.DetailedHTMLProps<
         CFRouterAttributes<CFRouterElement>,
