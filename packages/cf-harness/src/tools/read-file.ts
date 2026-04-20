@@ -55,7 +55,7 @@ export const readFileTool: HarnessToolDefinition<
     ) {
       throw new Error("read_file maxBytes must be a non-negative integer");
     }
-    const resolvedPath = context.sandbox.resolvePath(input.path);
+    const resolvedPath = context.resolvePath(input.path);
     const result = await context.sandbox.runShell({
       command: [
         "set -eu",
