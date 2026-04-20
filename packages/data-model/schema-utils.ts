@@ -139,12 +139,23 @@ export function schemaWithProperties(
   schema: JSONSchema | undefined,
   overrides: JSONSchemaObj,
 ): JSONSchema {
-  // Deal with `boolean`s and `undefined` values for the base `schema`. Since
-  // these count as interned schemas, "intern contagion" applies.
   switch (typeof schema) {
-    case "boolean": {
-      // Since `true` counts as an interned schema, "intern contagion" applies.
-      return schema ? internSchema(overrides) : false;
+    case "boolean":
+    case "undefined": {
+      // Deal with `boolean`s and `undefined` values for the base `schema`.
+      // Since these count as interned schemas, "intern contagion" applies.
+      if (schema === false) {
+        return false;
+      } else {
+        // `schema` is (effectively) `true`, so we return the interned reference
+        // to `overrides`. If `overrides` is already deep-frozen (which also
+        // means possibly already interned) we can call `internSchema()` on it
+        // directly. But if it's _not_ deep-frozen, then per function contract
+        // we have to do a shallow clone.
+        return isDeepFrozen(overrides)
+          ? internSchema(overrides)
+          : internSchema({ ...overrides });
+      }
     }
 
     case "undefined": {
