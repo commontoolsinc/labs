@@ -207,11 +207,11 @@ export const defaultTheme: CFTheme = {
       dark: "#e4e6ea",
     },
     background: {
-      light: "#ffffff",
+      light: "#f2f3f6",
       dark: "#16181d",
     },
     surface: {
-      light: "#f2f3f6",
+      light: "#ffffff",
       dark: "#1e2127",
     },
     surfaceHover: {
