@@ -143,17 +143,21 @@ export function schemaWithProperties(
   // these count as interned schemas, "intern contagion" applies.
   switch (typeof schema) {
     case "boolean": {
-      // Since `true` counts as an interned schemas, "intern contagion" applies.
+      // Since `true` counts as an interned schema, "intern contagion" applies.
       return schema ? internSchema(overrides) : false;
     }
 
     case "undefined": {
-      // Since `undefined` counts as an interned schemas, "intern contagion"
+      // Since `undefined` counts as an interned schema, "intern contagion"
       // applies.
       return internSchema(overrides);
     }
 
     case "object": {
+      if (schema === null) {
+        throw new Error("`null` is not a valid schema.");
+      }
+
       const result = { ...schema, ...overrides };
       return isInternedSchema(schema)
         ? internSchema(result)
