@@ -23,7 +23,7 @@ describe("CFCopyButton", () => {
     const element = new CFCopyButton();
     expect(element.text).toBe("");
     expect(element.variant).toBe("secondary");
-    expect(element.size).toBe("default");
+    expect(element.size).toBe("m");
     expect(element.disabled).toBe(false);
     expect(element.feedbackDuration).toBe(2000);
     expect(element.iconOnly).toBe(false);

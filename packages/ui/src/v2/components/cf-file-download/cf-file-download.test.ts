@@ -135,7 +135,7 @@ describe("CFFileDownload", () => {
       expect(element.mimeType).toBe("application/octet-stream");
       expect(element.base64).toBe(false);
       expect(element.variant).toBe("secondary");
-      expect(element.size).toBe("default");
+      expect(element.size).toBe("m");
       expect(element.disabled).toBe(false);
       expect(element.feedbackDuration).toBe(2000);
       expect(element.iconOnly).toBe(false);
