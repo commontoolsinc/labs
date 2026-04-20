@@ -18,14 +18,16 @@
  * <cf-loader showElapsed showStop @cf-stop=${handleCancel}></cf-loader>
  *
  * <!-- Small inline spinner -->
- * <span>Loading <cf-loader size="sm"></cf-loader></span>
+ * <span>Loading <cf-loader size="s"></cf-loader></span>
  * ```
  */
 
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import { type ComponentSize } from "../theme-context.ts";
 
-export type LoaderSize = "sm" | "md" | "lg";
+/** @deprecated Use ComponentSize instead */
+export type LoaderSize = ComponentSize;
 
 /**
  * CFLoader displays a spinning loading indicator.
@@ -33,7 +35,7 @@ export type LoaderSize = "sm" | "md" | "lg";
  * @tag cf-loader
  * @extends BaseElement
  *
- * @property {LoaderSize} size - Size variant: "sm" (12px), "md" (24px), "lg" (48px)
+ * @property {ComponentSize} size - Size variant: "s" (16px), "m" (24px), "l" (40px) (default: "m")
  * @property {boolean} showElapsed - Whether to display elapsed time
  * @property {boolean} showStop - Whether to display stop button
  *
@@ -83,21 +85,21 @@ export class CFLoader extends BaseElement {
       animation: spin 0.8s linear infinite;
     }
 
-    /* Size variants: sm=12px, md=24px, lg=48px */
-    :host([size="sm"]) .spinner {
-      width: 12px;
-      height: 12px;
+    /* Size variants using coordinated scale */
+    :host([size="s"]) .spinner {
+      width: var(--cf-size-s-icon-sm, 12px);
+      height: var(--cf-size-s-icon-sm, 12px);
     }
 
-    :host([size="md"]) .spinner,
+    :host([size="m"]) .spinner,
     :host(:not([size])) .spinner {
-      width: 24px;
-      height: 24px;
+      width: var(--cf-size-m-icon-lg, 24px);
+      height: var(--cf-size-m-icon-lg, 24px);
     }
 
-    :host([size="lg"]) .spinner {
-      width: 48px;
-      height: 48px;
+    :host([size="l"]) .spinner {
+      width: var(--cf-size-xl-height, 48px);
+      height: var(--cf-size-xl-height, 48px);
     }
 
     .track {
@@ -171,7 +173,7 @@ export class CFLoader extends BaseElement {
     showStop: { type: Boolean, attribute: "show-stop" },
   };
 
-  declare size: LoaderSize;
+  declare size: ComponentSize;
   declare showElapsed: boolean;
   declare showStop: boolean;
 
@@ -181,7 +183,7 @@ export class CFLoader extends BaseElement {
 
   constructor() {
     super();
-    this.size = "md";
+    this.size = "m";
     this.showElapsed = false;
     this.showStop = false;
   }

@@ -1,6 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { type ComponentSize } from "../theme-context.ts";
 
 /**
  * A minimal chevron button that rotates between up/down states
@@ -9,7 +10,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {boolean} expanded - Whether the chevron is in expanded (down) state
  * @attr {boolean} loading - Whether to show loading animation instead of chevron
- * @attr {string} size - Size variant: "sm" | "md" | "lg" (default: "md")
+ * @attr {string} size - Size variant: ComponentSize (default: "m")
  *
  * @fires cf-toggle - Fired when button is clicked
  *
@@ -66,25 +67,29 @@ export class CFChevronButton extends BaseElement {
       }
 
       /* Size variants */
-      :host([size="sm"]) .chevron-button {
-        padding: 4px 0;
+      :host([size="s"]) .chevron-button {
+        padding: var(--cf-size-s-padding-v, 4px) 0;
       }
 
-      :host([size="lg"]) .chevron-button {
-        padding: 8px 0;
+      :host([size="l"]) .chevron-button {
+        padding: var(--cf-size-l-padding-v, 8px) 0;
       }
 
       svg {
-        width: var(--chevron-size, 24px);
-        height: var(--chevron-size, 24px);
+        width: var(--chevron-size, var(--cf-size-m-icon-lg, 24px));
+        height: var(--chevron-size, var(--cf-size-m-icon-lg, 24px));
       }
 
-      :host([size="sm"]) svg {
-        --chevron-size: 20px;
+      :host([size="s"]) svg {
+        --chevron-size: var(--cf-size-s-icon-lg, 16px);
       }
 
-      :host([size="lg"]) svg {
-        --chevron-size: 28px;
+      :host([size="l"]) svg {
+        --chevron-size: var(--cf-size-l-icon-lg, 24px);
+      }
+
+      :host([size="xl"]) svg {
+        --chevron-size: var(--cf-size-xl-icon-lg, 28px);
       }
 
       /* Loading animation - scrolling sine wave */
@@ -124,7 +129,7 @@ export class CFChevronButton extends BaseElement {
   accessor loading = false;
 
   @property({ type: String, reflect: true })
-  accessor size: "sm" | "md" | "lg" = "md";
+  accessor size: ComponentSize = "m";
 
   constructor() {
     super();

@@ -17,12 +17,44 @@ export const inputStyles = `
     --muted-foreground: #64748b;
     --placeholder: #94a3b8;
     
-    /* Input dimensions */
-    --input-height: 2.5rem;
-    --input-padding-x: 0.75rem;
-    --input-padding-y: 0.5rem;
-    --input-font-size: 0.875rem;
-    --input-border-radius: 0.375rem;
+    /* Input dimensions — default size M */
+    --input-height: var(--cf-size-m-height, 32px);
+    --input-padding-x: var(--cf-size-m-padding-h, 8px);
+    --input-padding-y: var(--cf-size-m-padding-v, 8px);
+    --input-font-size: var(--cf-size-m-font-size, 12px);
+    --input-border-radius: var(--cf-size-m-radius, 8px);
+  }
+
+  :host([size="xs"]) {
+    --input-height: var(--cf-size-xs-height, 16px);
+    --input-padding-x: var(--cf-size-xs-padding-h, 4px);
+    --input-padding-y: var(--cf-size-xs-padding-v, 2px);
+    --input-font-size: var(--cf-size-xs-font-size, 9px);
+    --input-border-radius: var(--cf-size-xs-radius, 4px);
+  }
+
+  :host([size="s"]) {
+    --input-height: var(--cf-size-s-height, 24px);
+    --input-padding-x: var(--cf-size-s-padding-h, 6px);
+    --input-padding-y: var(--cf-size-s-padding-v, 4px);
+    --input-font-size: var(--cf-size-s-font-size, 11px);
+    --input-border-radius: var(--cf-size-s-radius, 5px);
+  }
+
+  :host([size="l"]) {
+    --input-height: var(--cf-size-l-height, 40px);
+    --input-padding-x: var(--cf-size-l-padding-h, 12px);
+    --input-padding-y: var(--cf-size-l-padding-v, 8px);
+    --input-font-size: var(--cf-size-l-font-size, 16px);
+    --input-border-radius: var(--cf-size-l-radius, 9px);
+  }
+
+  :host([size="xl"]) {
+    --input-height: var(--cf-size-xl-height, 48px);
+    --input-padding-x: var(--cf-size-xl-padding-h, 16px);
+    --input-padding-y: var(--cf-size-xl-padding-v, 12px);
+    --input-font-size: var(--cf-size-xl-font-size, 18px);
+    --input-border-radius: var(--cf-size-xl-radius, 10px);
   }
 
   input {

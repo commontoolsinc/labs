@@ -15,8 +15,8 @@ import { BaseElement } from "../../core/base-element.ts";
  *     Common types: "text/plain", "text/html"
  * @attr {string} variant - Button style variant (default: "secondary")
  *   Options: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill"
- * @attr {string} size - Button size (default: "default")
- *   Options: "default" | "sm" | "lg" | "icon" | "md"
+ * @attr {string} size - Button size (default: "m")
+ *   Options: "xs" | "s" | "m" | "l" | "xl" | "icon"
  * @attr {boolean} disabled - Disable the button
  * @attr {number} feedback-duration - Success feedback duration in ms (default: 2000)
  * @attr {boolean} icon-only - Only show icon, no text (default: false)
@@ -39,7 +39,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * <cf-copy-button
  *   text="data"
  *   variant="ghost"
- *   size="sm"
+ *   size="s"
  * >📋 Copy List</cf-copy-button>
  *
  * // Rich text with HTML (pastes as formatted text in rich editors)
@@ -92,7 +92,7 @@ export class CFCopyButton extends BaseElement {
     | "ghost"
     | "link"
     | "pill";
-  declare size?: "default" | "sm" | "lg" | "icon" | "md";
+  declare size?: "xs" | "s" | "m" | "l" | "xl" | "icon";
   declare disabled: boolean;
   declare feedbackDuration: number;
   declare iconOnly: boolean;
@@ -104,7 +104,7 @@ export class CFCopyButton extends BaseElement {
     super();
     this.text = "";
     this.variant = "secondary";
-    this.size = "default";
+    this.size = "m";
     this.disabled = false;
     this.feedbackDuration = 2000;
     this.iconOnly = false;
@@ -177,7 +177,7 @@ export class CFCopyButton extends BaseElement {
     return html`
       <cf-button
         variant="${this.variant || "secondary"}"
-        size="${this.size || "default"}"
+        size="${this.size || "m"}"
         ?disabled="${this.disabled}"
         @click="${this._handleClick}"
         title="${title}"

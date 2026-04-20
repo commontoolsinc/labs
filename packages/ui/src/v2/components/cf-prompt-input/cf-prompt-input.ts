@@ -192,7 +192,7 @@ export class CFPromptInput extends BaseElement {
           }
 
           /* Size variants */
-          :host([size="sm"]) {
+          :host([size="s"]) {
             --cf-prompt-input-padding: var(
               --cf-theme-spacing-normal,
               var(--cf-spacing-2, 0.5rem)
@@ -200,7 +200,7 @@ export class CFPromptInput extends BaseElement {
             --cf-prompt-input-min-height: 2rem;
           }
 
-          :host([size="lg"]) {
+          :host([size="l"]) {
             --cf-prompt-input-padding: var(
               --cf-theme-spacing-loose,
               var(--cf-spacing-4, 1rem)
@@ -703,10 +703,10 @@ export class CFPromptInput extends BaseElement {
                           <cf-button
                             id="cf-prompt-input-stop-button"
                             variant="secondary"
-                            size="${this.size === "sm"
-                              ? "sm"
-                              : this.size === "lg"
-                              ? "lg"
+                            size="${this.size === "s"
+                              ? "s"
+                              : this.size === "l"
+                              ? "l"
                               : "md"}"
                             ?disabled="${this.disabled}"
                             @click="${this._handleStop}"
@@ -719,10 +719,10 @@ export class CFPromptInput extends BaseElement {
                           <cf-button
                             id="cf-prompt-input-send-button"
                             variant="primary"
-                            size="${this.size === "sm"
-                              ? "sm"
-                              : this.size === "lg"
-                              ? "lg"
+                            size="${this.size === "s"
+                              ? "s"
+                              : this.size === "l"
+                              ? "l"
                               : "md"}"
                             ?disabled="${this.disabled || !this.value?.trim()}"
                             @click="${this._handleSend}"

@@ -10,6 +10,45 @@ export const selectStyles = `
   :host {
     display: inline-block;
     width: 100%;
+
+    /* Sizing scale defaults (size="m") */
+    --select-height: var(--cf-size-m-height, 32px);
+    --select-padding-x: var(--cf-size-m-padding-h, 8px);
+    --select-padding-y: var(--cf-size-m-padding-v, 8px);
+    --select-font-size: var(--cf-size-m-font-size, 12px);
+    --select-border-radius: var(--cf-size-m-radius, 8px);
+  }
+
+  :host([size="xs"]) {
+    --select-height: var(--cf-size-xs-height, 16px);
+    --select-padding-x: var(--cf-size-xs-padding-h, 4px);
+    --select-padding-y: var(--cf-size-xs-padding-v, 2px);
+    --select-font-size: var(--cf-size-xs-font-size, 9px);
+    --select-border-radius: var(--cf-size-xs-radius, 4px);
+  }
+
+  :host([size="s"]) {
+    --select-height: var(--cf-size-s-height, 24px);
+    --select-padding-x: var(--cf-size-s-padding-h, 6px);
+    --select-padding-y: var(--cf-size-s-padding-v, 4px);
+    --select-font-size: var(--cf-size-s-font-size, 11px);
+    --select-border-radius: var(--cf-size-s-radius, 5px);
+  }
+
+  :host([size="l"]) {
+    --select-height: var(--cf-size-l-height, 40px);
+    --select-padding-x: var(--cf-size-l-padding-h, 12px);
+    --select-padding-y: var(--cf-size-l-padding-v, 8px);
+    --select-font-size: var(--cf-size-l-font-size, 16px);
+    --select-border-radius: var(--cf-size-l-radius, 9px);
+  }
+
+  :host([size="xl"]) {
+    --select-height: var(--cf-size-xl-height, 48px);
+    --select-padding-x: var(--cf-size-xl-padding-h, 16px);
+    --select-padding-y: var(--cf-size-xl-padding-v, 12px);
+    --select-font-size: var(--cf-size-xl-font-size, 18px);
+    --select-border-radius: var(--cf-size-xl-radius, 10px);
   }
 
   *,
@@ -20,13 +59,14 @@ export const selectStyles = `
 
   select {
     width: 100%;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.875rem;
+    height: var(--select-height);
+    padding: var(--select-padding-y) var(--select-padding-x);
+    font-size: var(--select-font-size);
     line-height: 1.25rem;
     color: var(--cf-theme-color-text, #111827);
     background-color: var(--cf-theme-color-background, #ffffff);
     border: 1px solid var(--cf-theme-color-border, #e5e7eb);
-    border-radius: var(--cf-theme-border-radius, 0.375rem);
+    border-radius: var(--select-border-radius);
     transition: all var(--cf-theme-animation-duration, 150ms)
       var(--cf-transition-timing-ease);
     font-family: var(--cf-theme-font-family, inherit);

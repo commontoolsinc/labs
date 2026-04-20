@@ -150,7 +150,7 @@ export class CFSecretViewer extends BaseElement {
           <div class="actions">
             <cf-button
               variant="ghost"
-              size="sm"
+              size="s"
               @click="${this._toggleReveal}"
             >
               ${this._revealed ? "Hide" : "Reveal"}
@@ -158,7 +158,7 @@ export class CFSecretViewer extends BaseElement {
             <cf-copy-button
               .text="${this.value}"
               variant="ghost"
-              size="sm"
+              size="s"
               icon-only
             ></cf-copy-button>
           </div>

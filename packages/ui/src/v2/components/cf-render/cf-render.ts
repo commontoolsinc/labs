@@ -144,7 +144,7 @@ export class CFRender extends BaseElement {
       ${!this._hasRendered
         ? html`
           <div class="loading-spinner">
-            <cf-loader size="lg"></cf-loader>
+            <cf-loader size="l"></cf-loader>
           </div>
         `
         : null}

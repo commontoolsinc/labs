@@ -7,6 +7,7 @@ import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
+  type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
@@ -74,6 +75,7 @@ export class CFTextarea extends BaseElement {
     autoResize: { type: Boolean, attribute: "auto-resize" },
     timingStrategy: { type: String, attribute: "timing-strategy" },
     timingDelay: { type: Number, attribute: "timing-delay" },
+    size: { type: String, reflect: true },
   };
   declare placeholder: string;
   declare value: CellHandle<string> | string;
@@ -94,6 +96,7 @@ export class CFTextarea extends BaseElement {
   declare autoResize: boolean;
   declare timingStrategy: TimingStrategy;
   declare timingDelay: number;
+  declare size: ComponentSize;
 
   static override styles = css`
     :host {
@@ -119,16 +122,48 @@ export class CFTextarea extends BaseElement {
       --muted-foreground: var(--cf-textarea-color-text-muted, #64748b);
       --placeholder: var(--cf-textarea-color-placeholder, #94a3b8);
 
-      /* Textarea dimensions */
-      --textarea-padding-x: 0.75rem;
-      --textarea-padding-y: 0.5rem;
-      --textarea-font-size: 0.875rem;
-      --textarea-line-height: 1.25rem;
-      --textarea-border-radius: var(--cf-textarea-border-radius, 0.375rem);
+      /* Textarea dimensions — default size M */
+      --textarea-padding-x: var(--cf-size-m-padding-h, 8px);
+      --textarea-padding-y: var(--cf-size-m-padding-v, 8px);
+      --textarea-font-size: var(--cf-size-m-font-size, 12px);
+      --textarea-line-height: var(--cf-size-m-line-height, 16px);
+      --textarea-border-radius: var(--cf-size-m-radius, 8px);
       --textarea-min-height: 5rem;
 
       display: block;
       width: 100%;
+    }
+
+    :host([size="xs"]) {
+      --textarea-padding-x: var(--cf-size-xs-padding-h, 4px);
+      --textarea-padding-y: var(--cf-size-xs-padding-v, 2px);
+      --textarea-font-size: var(--cf-size-xs-font-size, 9px);
+      --textarea-line-height: var(--cf-size-xs-line-height, 12px);
+      --textarea-border-radius: var(--cf-size-xs-radius, 4px);
+    }
+
+    :host([size="s"]) {
+      --textarea-padding-x: var(--cf-size-s-padding-h, 6px);
+      --textarea-padding-y: var(--cf-size-s-padding-v, 4px);
+      --textarea-font-size: var(--cf-size-s-font-size, 11px);
+      --textarea-line-height: var(--cf-size-s-line-height, 16px);
+      --textarea-border-radius: var(--cf-size-s-radius, 5px);
+    }
+
+    :host([size="l"]) {
+      --textarea-padding-x: var(--cf-size-l-padding-h, 12px);
+      --textarea-padding-y: var(--cf-size-l-padding-v, 8px);
+      --textarea-font-size: var(--cf-size-l-font-size, 16px);
+      --textarea-line-height: var(--cf-size-l-line-height, 20px);
+      --textarea-border-radius: var(--cf-size-l-radius, 9px);
+    }
+
+    :host([size="xl"]) {
+      --textarea-padding-x: var(--cf-size-xl-padding-h, 16px);
+      --textarea-padding-y: var(--cf-size-xl-padding-v, 12px);
+      --textarea-font-size: var(--cf-size-xl-font-size, 18px);
+      --textarea-line-height: var(--cf-size-xl-line-height, 24px);
+      --textarea-border-radius: var(--cf-size-xl-radius, 10px);
     }
 
     textarea {
@@ -332,6 +367,7 @@ export class CFTextarea extends BaseElement {
           this.autoResize = false;
           this.timingStrategy = "debounce";
           this.timingDelay = 300;
+          this.size = "m";
         }
 
         private getValue(): string {

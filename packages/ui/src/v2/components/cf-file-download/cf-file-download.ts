@@ -69,8 +69,8 @@ const MIME_EXTENSIONS: Record<string, string> = {
  * @attr {boolean} base64 - If true, decode data as base64 before downloading (default: false)
  * @attr {string} variant - Button style variant (default: "secondary")
  *   Options: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill"
- * @attr {string} size - Button size (default: "default")
- *   Options: "default" | "sm" | "lg" | "icon" | "md"
+ * @attr {string} size - Button size (default: "m")
+ *   Options: "xs" | "s" | "m" | "l" | "xl" | "icon"
  * @attr {boolean} disabled - Disable the button
  * @attr {number} feedback-duration - Success feedback duration in ms (default: 2000)
  * @attr {boolean} icon-only - Only show icon, no text (default: false)
@@ -250,7 +250,7 @@ export class CFFileDownload extends BaseElement {
     | "ghost"
     | "link"
     | "pill";
-  declare size?: "default" | "sm" | "lg" | "icon" | "md";
+  declare size?: "xs" | "s" | "m" | "l" | "xl" | "icon";
   declare disabled: boolean;
   declare feedbackDuration: number;
   declare iconOnly: boolean;
@@ -313,7 +313,7 @@ export class CFFileDownload extends BaseElement {
     this.mimeType = "application/octet-stream";
     this.base64 = false;
     this.variant = "secondary";
-    this.size = "default";
+    this.size = "m";
     this.disabled = false;
     this.feedbackDuration = 2000;
     this.iconOnly = false;
@@ -798,7 +798,7 @@ export class CFFileDownload extends BaseElement {
         : null}
       <cf-button
         variant="${this.variant || "secondary"}"
-        size="${this.size || "default"}"
+        size="${this.size || "m"}"
         ?disabled="${this.disabled || !hasData || this._downloading}"
         @click="${this._handleClick}"
         title="${title}"

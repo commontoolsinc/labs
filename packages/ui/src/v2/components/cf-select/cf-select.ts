@@ -7,6 +7,7 @@ import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
+  type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
@@ -18,12 +19,13 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  *
  * @element cf-select
  *
- * @attr {boolean} disabled   – Whether the select is disabled
- * @attr {boolean} multiple   – Enable multiple selection
- * @attr {boolean} required   – Whether the field is required
- * @attr {number}  size       – Number of visible options (native size attribute)
- * @attr {string}  name       – Name used when participating in a form
- * @attr {string}  placeholder – Placeholder text rendered as a disabled option
+ * @attr {boolean} disabled     – Whether the select is disabled
+ * @attr {boolean} multiple     – Enable multiple selection
+ * @attr {boolean} required     – Whether the field is required
+ * @attr {string}  size         – Component size variant: "xs" | "s" | "m" | "l" | "xl" (default: "m")
+ * @attr {number}  visible-rows – Number of visible options (native HTML size attribute)
+ * @attr {string}  name         – Name used when participating in a form
+ * @attr {string}  placeholder  – Placeholder text rendered as a disabled option
  *
  * @prop {Array<SelectItem | undefined>} items – Data used to generate options
  * @prop {CellHandle<unknown>|CellHandle<unknown[]>|unknown|unknown[]} value – Selected value(s) - supports both Cell and plain values
@@ -78,24 +80,61 @@ export class CFSelect extends BaseElement {
         --cf-select-animation-duration: var(--cf-theme-animation-duration, 150ms);
         --cf-select-font-family: var(--cf-theme-font-family, inherit);
 
+        /* Sizing scale defaults (size="m") */
+        --select-height: var(--cf-size-m-height, 32px);
+        --select-padding-x: var(--cf-size-m-padding-h, 8px);
+        --select-padding-y: var(--cf-size-m-padding-v, 8px);
+        --select-font-size: var(--cf-size-m-font-size, 12px);
+        --select-border-radius: var(--cf-size-m-radius, 8px);
+
         display: inline-block;
         width: 100%;
         box-sizing: border-box;
       }
 
+      :host([size="xs"]) {
+        --select-height: var(--cf-size-xs-height, 16px);
+        --select-padding-x: var(--cf-size-xs-padding-h, 4px);
+        --select-padding-y: var(--cf-size-xs-padding-v, 2px);
+        --select-font-size: var(--cf-size-xs-font-size, 9px);
+        --select-border-radius: var(--cf-size-xs-radius, 4px);
+      }
+
+      :host([size="s"]) {
+        --select-height: var(--cf-size-s-height, 24px);
+        --select-padding-x: var(--cf-size-s-padding-h, 6px);
+        --select-padding-y: var(--cf-size-s-padding-v, 4px);
+        --select-font-size: var(--cf-size-s-font-size, 11px);
+        --select-border-radius: var(--cf-size-s-radius, 5px);
+      }
+
+      :host([size="l"]) {
+        --select-height: var(--cf-size-l-height, 40px);
+        --select-padding-x: var(--cf-size-l-padding-h, 12px);
+        --select-padding-y: var(--cf-size-l-padding-v, 8px);
+        --select-font-size: var(--cf-size-l-font-size, 16px);
+        --select-border-radius: var(--cf-size-l-radius, 9px);
+      }
+
+      :host([size="xl"]) {
+        --select-height: var(--cf-size-xl-height, 48px);
+        --select-padding-x: var(--cf-size-xl-padding-h, 16px);
+        --select-padding-y: var(--cf-size-xl-padding-v, 12px);
+        --select-font-size: var(--cf-size-xl-font-size, 18px);
+        --select-border-radius: var(--cf-size-xl-radius, 10px);
+      }
+
       select {
         display: block;
         width: 100%;
-        padding: 0.5rem 0.75rem;
-        font-size: 0.875rem;
+        height: var(--select-height);
+        padding: var(--select-padding-y) var(--select-padding-x);
+        font-size: var(--select-font-size);
         line-height: 1.25rem;
         color: var(--cf-select-color-text, #111827);
         background-color: var(--cf-select-color-background, #ffffff);
         border: 1px solid var(--cf-select-color-border, #e5e7eb);
-        border-radius: var(
-          --cf-select-border-radius,
-          var(--cf-border-radius-md, 0.375rem)
-        );
+        border-radius: var(--select-border-radius);
         transition: all var(--cf-select-animation-duration, 150ms)
           var(--cf-transition-timing-ease);
         font-family: var(--cf-select-font-family, inherit);
@@ -173,7 +212,8 @@ export class CFSelect extends BaseElement {
     disabled: { type: Boolean, reflect: true },
     multiple: { type: Boolean, reflect: true },
     required: { type: Boolean, reflect: true },
-    size: { type: Number },
+    size: { type: String, reflect: true },
+    visibleRows: { type: Number, attribute: "visible-rows" },
     name: { type: String },
     placeholder: { type: String },
 
@@ -185,7 +225,8 @@ export class CFSelect extends BaseElement {
   declare disabled: boolean;
   declare multiple: boolean;
   declare required: boolean;
-  declare size: number;
+  declare size: ComponentSize;
+  declare visibleRows: number;
   declare name: string;
   declare placeholder: string;
   declare items: Array<SelectItem | undefined> | undefined;
@@ -200,7 +241,8 @@ export class CFSelect extends BaseElement {
     this.disabled = false;
     this.multiple = false;
     this.required = false;
-    this.size = 0;
+    this.size = "m";
+    this.visibleRows = 0;
     this.name = "";
     this.placeholder = "";
     this.items = [];
@@ -267,7 +309,7 @@ export class CFSelect extends BaseElement {
         ?multiple="${this.multiple}"
         ?required="${this.required}"
         size="${ifDefined(
-          this.multiple && this.size ? this.size : undefined,
+          this.multiple && this.visibleRows ? this.visibleRows : undefined,
         )}"
         name="${ifDefined(this.name || undefined)}"
         @change="${this._onChange}"

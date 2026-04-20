@@ -103,11 +103,11 @@ export const progressStyles = `
   }
 
   /* Size variants via CSS custom properties */
-  :host([size="sm"]) {
+  :host([size="s"]) {
     --progress-height: 0.25rem;
   }
 
-  :host([size="lg"]) {
+  :host([size="l"]) {
     --progress-height: 0.75rem;
   }
 
