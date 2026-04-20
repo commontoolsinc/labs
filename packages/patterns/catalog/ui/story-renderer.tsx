@@ -53,6 +53,7 @@ import VignetteRecipeStory from "../stories/vignette-recipe-story.tsx";
 import VignetteFinanceStory from "../stories/vignette-finance-story.tsx";
 import VignetteMobileAppStory from "../stories/vignette-mobile-app-story.tsx";
 import ToastStory from "../stories/cf-toast-story.tsx";
+import StyleTokensStory from "../stories/style-tokens-story.tsx";
 
 interface StoryRendererInput {
   selected: string;
@@ -180,6 +181,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return VignetteMobileAppStory({});
         case "toast":
           return ToastStory({});
+        case "style-tokens":
+          return StyleTokensStory({});
         default:
           return null;
       }

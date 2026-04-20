@@ -28,7 +28,10 @@ interface CatalogInput {
     | Default<[
       {
         name: "Overview";
-        items: [{ id: "kitchen-sink"; label: "Kitchen Sink" }];
+        items: [
+          { id: "kitchen-sink"; label: "Kitchen Sink" },
+          { id: "style-tokens"; label: "Style Tokens" },
+        ];
       },
       {
         name: "Inputs";
