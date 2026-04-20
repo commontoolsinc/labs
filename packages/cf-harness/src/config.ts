@@ -10,6 +10,7 @@ export type HarnessGatewayAuthMode = "bearer" | "none";
 export interface HarnessConfig {
   gatewayBaseUrl: string;
   gatewayAuthMode: HarnessGatewayAuthMode;
+  cwd?: string;
   model?: string;
   vmTarget?: string;
   skillsRoot?: string;
@@ -23,6 +24,7 @@ export interface ResolveHarnessConfigOptions {
   gatewayBaseUrl?: string;
   gatewayAuthMode?: HarnessGatewayAuthMode;
   gatewayAuthModeOverride?: string | HarnessGatewayAuthMode;
+  cwd?: string;
   model?: string;
   vmTarget?: string;
   skillsRoot?: string;
@@ -108,6 +110,7 @@ export const resolveHarnessConfig = (
     options.gatewayBaseUrl ?? DEFAULT_GATEWAY_BASE_URL,
   ),
   gatewayAuthMode: resolveGatewayAuthMode(options),
+  ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
   ...(options.model !== undefined ? { model: options.model } : {}),
   ...(options.vmTarget !== undefined ? { vmTarget: options.vmTarget } : {}),
   ...(options.skillsRoot !== undefined

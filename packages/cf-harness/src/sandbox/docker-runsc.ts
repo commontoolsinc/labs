@@ -16,6 +16,20 @@ export const DEFAULT_WORKSPACE_MOUNT_PATH = "/workspace";
 export const DEFAULT_SANDBOX_SHELL = "/bin/sh";
 export const DEFAULT_DOCKER_NETWORK_MODE = "none" as const;
 
+const normalizeWorkspacePath = (path: string): string => {
+  const normalized = normalize(path);
+  return normalized.length > 1 && normalized.endsWith("/")
+    ? normalized.slice(0, -1)
+    : normalized;
+};
+
+const isWithinRoot = (root: string, path: string): boolean => {
+  const normalizedRoot = normalizeWorkspacePath(root);
+  const normalizedPath = normalizeWorkspacePath(path);
+  return normalizedPath === normalizedRoot ||
+    normalizedPath.startsWith(`${normalizedRoot}/`);
+};
+
 export const resolveDockerRunscSandboxConfig = (
   options: ResolveDockerRunscSandboxConfigOptions,
 ): DockerRunscSandboxConfig => ({
@@ -40,14 +54,21 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
   ) {}
 
   defaultWorkingDirectory(): string {
-    return this.config.workspaceMountPath;
+    return normalizeWorkspacePath(this.config.workspaceMountPath);
   }
 
-  resolvePath(path: string): string {
-    if (isAbsolute(path)) {
-      return normalize(path);
+  isPathWithinWorkspace(path: string): boolean {
+    return isWithinRoot(this.config.workspaceMountPath, path);
+  }
+
+  resolvePath(path: string, cwd?: string): string {
+    const normalized = isAbsolute(path)
+      ? normalize(path)
+      : normalize(join(cwd ?? this.defaultWorkingDirectory(), path));
+    if (!this.isPathWithinWorkspace(normalized)) {
+      throw new Error(`path escapes workspace root: ${path}`);
     }
-    return normalize(join(this.config.workspaceMountPath, path));
+    return normalized;
   }
 
   run(request: SandboxCommandRequest): Promise<SandboxCommandResult> {

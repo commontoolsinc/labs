@@ -14,6 +14,7 @@ export interface HarnessRunState {
   createdAt: string;
   updatedAt: string;
   cfcEnforcementMode: CfcEnforcementMode;
+  currentDir: string;
   model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
@@ -25,6 +26,7 @@ export interface CreateHarnessRunStateOptions {
   runId?: string;
   status?: HarnessRunStatus;
   cfcEnforcementMode: CfcEnforcementMode;
+  currentDir: string;
   model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
@@ -41,6 +43,7 @@ export const createHarnessRunState = (
     createdAt: now,
     updatedAt: now,
     cfcEnforcementMode: options.cfcEnforcementMode,
+    currentDir: options.currentDir,
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
@@ -81,6 +84,16 @@ export const appendHarnessPolicyEvent = (
   ...state,
   updatedAt: now,
   policyEvents: [...state.policyEvents, event],
+});
+
+export const setHarnessRunCurrentDir = (
+  state: HarnessRunState,
+  currentDir: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  currentDir,
+  updatedAt: now,
 });
 
 export const setHarnessTranscriptPath = (

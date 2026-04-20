@@ -7,6 +7,9 @@ export interface HarnessToolContext {
   runId: string;
   cfcEnforcementMode: CfcEnforcementMode;
   sandbox: SandboxRuntime;
+  currentDir: string;
+  resolvePath(path: string): string;
+  setCurrentDir(path: string): void;
   nextOutputId(toolId: string): ToolOutputId;
 }
 

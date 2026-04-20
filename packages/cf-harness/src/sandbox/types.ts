@@ -50,7 +50,8 @@ export interface SandboxCommandResult {
 
 export interface SandboxRuntime {
   readonly kind: HarnessSandboxKind;
-  resolvePath(path: string): string;
+  resolvePath(path: string, cwd?: string): string;
+  isPathWithinWorkspace(path: string): boolean;
   defaultWorkingDirectory(): string;
   run(request: SandboxCommandRequest): Promise<SandboxCommandResult>;
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult>;
