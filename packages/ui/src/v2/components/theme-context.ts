@@ -91,6 +91,8 @@ export interface CFTheme {
     textOnColorSecondary: ColorToken;
     /** Text on inverse surfaces */
     textOnInverse: ColorToken;
+    /** Pressed text color */
+    textPressed: ColorToken;
   };
 }
 
@@ -305,6 +307,10 @@ export const defaultTheme: CFTheme = {
     textOnInverse: {
       light: "#ffffff",
       dark: "#16181d",
+    },
+    textPressed: {
+      light: "#16181d",
+      dark: "#ffffff",
     },
   },
 };
@@ -554,6 +560,7 @@ export function applyThemeToElement(
       "surface-inverse": theme.colors.surfaceInverse,
       "text-on-color-secondary": theme.colors.textOnColorSecondary,
       "text-on-inverse": theme.colors.textOnInverse,
+      "text-pressed": theme.colors.textPressed,
     };
 
     Object.entries(colorMap).forEach(([key, token]) => {
