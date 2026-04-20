@@ -144,9 +144,7 @@ export function schemaWithProperties(
   switch (typeof schema) {
     case "boolean": {
       // Since `true` counts as an interned schemas, "intern contagion" applies.
-      return schema
-        ? internSchema(overrides)
-        : false;
+      return schema ? internSchema(overrides) : false;
     }
 
     case "undefined": {
