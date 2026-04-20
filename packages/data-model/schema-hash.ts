@@ -322,7 +322,8 @@ export function findInternedSchema(
 /**
  * Indicates whether or not the given `schema` is already interned. This returns
  * `false` even if there is already a schema in the intern cache that is
- * equivalent to the given one.
+ * equivalent to the given one, unless `schema` is in fact the one that is in
+ * the cache.
  */
 export function isInternedSchema(schema: JSONSchema): boolean {
   if (typeof schema === "boolean") {
