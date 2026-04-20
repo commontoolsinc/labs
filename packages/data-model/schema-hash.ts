@@ -334,3 +334,40 @@ export function isInternedSchema(schema: JSONSchema): boolean {
 
   return schemaToSah.has(schema);
 }
+
+// ---------------------------------------------------------------------------
+// Interned cache-key helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a stable cache-key string for a schema, interning the schema (and
+ * thus deep-freezing it) if it's an object. Boolean schemas map to sentinel
+ * strings (`"T"`, `"F"`) that cannot overlap with any object-schema hash
+ * string (which is base64url-encoded and always longer than one character).
+ *
+ * Intended for building cache keys at sites that would otherwise compute
+ * `hashSchema(schema).toString()`. The interning step lets subsequent calls
+ * with the same (now-interned) object identity hit `internSchema`'s WeakMap
+ * in O(1) rather than re-hashing. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1 for
+ * the motivating regression.
+ */
+export function internSchemaKey(schema: JSONSchema): string {
+  if (typeof schema === "boolean") return schema ? "T" : "F";
+  return internSchema(schema, true).hashString;
+}
+
+/**
+ * Returns a cache-key string for an ordered pair of schemas, each interned
+ * via `internSchemaKey`. Equivalent to
+ * `${internSchemaKey(a)}|${internSchemaKey(b)}`. The `|` delimiter cannot
+ * appear in a base64url hash string and is distinct from the boolean
+ * sentinels, so the pair is unambiguously decodable (though callers only
+ * need it as an opaque key).
+ *
+ * Used at the handful of `traverse.ts` sites that key an intern cache on a
+ * merge operation's two input schemas.
+ */
+export function internedPairKey(a: JSONSchema, b: JSONSchema): string {
+  return `${internSchemaKey(a)}|${internSchemaKey(b)}`;
+}

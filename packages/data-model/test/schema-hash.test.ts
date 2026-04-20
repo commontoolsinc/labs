@@ -10,7 +10,9 @@ import {
   findInternedSchema,
   hashSchema,
   hashSchemaItem,
+  internedPairKey,
   internSchema,
+  internSchemaKey,
   isInternedSchema,
   resetSchemaHashConfig,
   setSchemaHashConfig,
@@ -312,6 +314,105 @@ describe("schema-hash dispatch", () => {
             });
           });
         }
+      });
+
+      describe("internSchemaKey()", () => {
+        it('returns `"T"` for the `true` schema', () => {
+          assertStrictEquals(internSchemaKey(true), "T");
+        });
+
+        it('returns `"F"` for the `false` schema', () => {
+          assertStrictEquals(internSchemaKey(false), "F");
+        });
+
+        it("returns the interned schema's `hashString` for objects", () => {
+          const schema: JSONSchema = { type: "number" };
+          const sah = internSchema(schema, true);
+          assertStrictEquals(internSchemaKey(schema), sah.hashString);
+        });
+
+        it("produces structurally-equal hash strings for equal objects", () => {
+          const a: JSONSchema = {
+            type: "object",
+            properties: { x: { type: "string" } },
+          };
+          const b: JSONSchema = {
+            type: "object",
+            properties: { x: { type: "string" } },
+          };
+          assertStrictEquals(internSchemaKey(a), internSchemaKey(b));
+        });
+
+        it("produces different strings for different schemas", () => {
+          assertNotEquals(
+            internSchemaKey({ type: "number" }),
+            internSchemaKey({ type: "string" }),
+          );
+          assertNotEquals(internSchemaKey(true), internSchemaKey(false));
+          assertNotEquals(
+            internSchemaKey(true),
+            internSchemaKey({ type: "number" }),
+          );
+        });
+
+        it("interns the input schema as a side effect", () => {
+          const schema: JSONSchemaObj = { type: "number" };
+          assertStrictEquals(isInternedSchema(schema), false);
+          internSchemaKey(schema);
+          assertStrictEquals(isInternedSchema(schema), true);
+          assert(isDeepFrozen(schema));
+        });
+
+        it("is idempotent on already-interned schemas", () => {
+          const schema: JSONSchema = { type: "number" };
+          const first = internSchemaKey(schema);
+          const second = internSchemaKey(schema);
+          assertStrictEquals(first, second);
+        });
+      });
+
+      describe("internedPairKey()", () => {
+        it("composes `internSchemaKey` for two objects with `|`", () => {
+          const a: JSONSchema = { type: "number" };
+          const b: JSONSchema = { type: "string" };
+          assertStrictEquals(
+            internedPairKey(a, b),
+            `${internSchemaKey(a)}|${internSchemaKey(b)}`,
+          );
+        });
+
+        it("handles boolean schemas on either side", () => {
+          const obj: JSONSchema = { type: "number" };
+          assertStrictEquals(
+            internedPairKey(true, obj),
+            `T|${internSchemaKey(obj)}`,
+          );
+          assertStrictEquals(
+            internedPairKey(obj, false),
+            `${internSchemaKey(obj)}|F`,
+          );
+          assertStrictEquals(internedPairKey(true, false), "T|F");
+        });
+
+        it("is order-sensitive", () => {
+          const a: JSONSchema = { type: "number" };
+          const b: JSONSchema = { type: "string" };
+          assertNotEquals(internedPairKey(a, b), internedPairKey(b, a));
+        });
+
+        it("matches for structurally-equal inputs", () => {
+          const a1: JSONSchema = {
+            type: "object",
+            properties: { x: { type: "string" } },
+          };
+          const a2: JSONSchema = {
+            type: "object",
+            properties: { x: { type: "string" } },
+          };
+          const b1: JSONSchema = { type: "array", items: { type: "number" } };
+          const b2: JSONSchema = { type: "array", items: { type: "number" } };
+          assertStrictEquals(internedPairKey(a1, b1), internedPairKey(a2, b2));
+        });
       });
     });
   }
