@@ -158,12 +158,6 @@ export function schemaWithProperties(
       }
     }
 
-    case "undefined": {
-      // Since `undefined` counts as an interned schema, "intern contagion"
-      // applies.
-      return internSchema(overrides);
-    }
-
     case "object": {
       if (schema === null) {
         throw new Error("`null` is not a valid schema.");
