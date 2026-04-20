@@ -176,18 +176,20 @@ export function schemaWithProperties(
     return handledSchema;
   }
 
-  const handledOverrides = handleBooleanArgument(overrides, schema);
+  // At this point, `schema` is an `object`s (but the type system can't figure
+  // that out.)
+  const schemaObj = schema as JSONSchemaObj;
+
+  const handledOverrides = handleBooleanArgument(overrides, schemaObj);
   if (handledOverrides !== undefined) {
     return handledOverrides;
   }
 
-  // At this point, both `schema` and `overrides` are `object`s (but the type
-  // system can't figure that out.)
-  const schemaObj = schema as JSONSchemaObj;
+  // Similar to above, for `overrides`.
   const overridesObj = overrides as JSONSchemaObj;
 
   const result = { ...schemaObj, ...overridesObj };
-  return isInternedSchema(schema)
+  return isInternedSchema(schemaObj)
     ? internSchema(result)
     : toDeepFrozenSchema(result, true);
 }
