@@ -360,7 +360,12 @@ describe("schema-hash dispatch", () => {
         });
 
         it("interns the input schema as a side effect", () => {
-          const schema: JSONSchemaObj = { type: "number" };
+          // Content-unique key guarantees no prior interning has seen this
+          // exact schema, so `isInternedSchema` reflects what THIS call did.
+          const schema: JSONSchemaObj = {
+            type: "number",
+            title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
+          };
           assertStrictEquals(isInternedSchema(schema), false);
           internSchemaHashString(schema);
           assertStrictEquals(isInternedSchema(schema), true);
@@ -424,8 +429,18 @@ describe("schema-hash dispatch", () => {
         });
 
         it("interns both inputs as a side effect", () => {
-          const a: JSONSchemaObj = { type: "number" };
-          const b: JSONSchemaObj = { type: "string" };
+          // Content-unique keys guarantee no prior interning has seen
+          // these exact schemas, so `isInternedSchema` reflects what
+          // THIS call did.
+          const stamp = `${Date.now()}-${Math.random()}`;
+          const a: JSONSchemaObj = {
+            type: "number",
+            title: `schemaHashTestAt${stamp}-a`,
+          };
+          const b: JSONSchemaObj = {
+            type: "string",
+            title: `schemaHashTestAt${stamp}-b`,
+          };
           assertStrictEquals(isInternedSchema(a), false);
           assertStrictEquals(isInternedSchema(b), false);
           internedPairKey(a, b);
