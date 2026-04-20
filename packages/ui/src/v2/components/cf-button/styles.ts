@@ -154,9 +154,37 @@ export const styles = css`
   }
 
   :host([size="icon"]) .button {
-    height: var(--cf-size-m-height, 2rem);
-    width: var(--cf-size-m-height, 2rem);
+    height: var(--cf-button-icon-size, var(--cf-size-m-height, 2rem));
+    width: var(--cf-button-icon-size, var(--cf-size-m-height, 2rem));
     padding: 0;
+  }
+
+  /* Backward compatibility for old size names */
+  :host([size="default"]) .button {
+    height: var(--cf-size-m-height, 2rem);
+    border-radius: var(--cf-size-m-radius, 8px);
+    padding: var(--cf-size-m-padding-v, 8px) var(--cf-size-m-padding-h, 8px);
+    font-size: var(--cf-size-m-font-size, 0.75rem);
+    line-height: var(--cf-size-m-line-height, 1rem);
+    gap: var(--cf-size-m-spacing, 8px);
+  }
+
+  :host([size="sm"]) .button {
+    height: var(--cf-size-s-height, 24px);
+    border-radius: var(--cf-size-s-radius, 5px);
+    padding: var(--cf-size-s-padding-v, 4px) var(--cf-size-s-padding-h, 6px);
+    font-size: var(--cf-size-s-font-size, 11px);
+    line-height: var(--cf-size-s-line-height, 16px);
+    gap: var(--cf-size-s-spacing, 4px);
+  }
+
+  :host([size="lg"]) .button {
+    height: var(--cf-size-l-height, 40px);
+    border-radius: var(--cf-size-l-radius, 9px);
+    padding: var(--cf-size-l-padding-v, 8px) var(--cf-size-l-padding-h, 12px);
+    font-size: var(--cf-size-l-font-size, 16px);
+    line-height: var(--cf-size-l-line-height, 20px);
+    gap: var(--cf-size-l-spacing, 12px);
   }
 
   /* Variant styles */
@@ -264,8 +292,8 @@ export const styles = css`
   }
 
   :host([size="icon"]) .button.ghost {
-    width: var(--cf-size-m-height, 2rem);
-    height: var(--cf-size-m-height, 2rem);
+    width: var(--cf-button-icon-size, var(--cf-size-m-height, 2rem));
+    height: var(--cf-button-icon-size, var(--cf-size-m-height, 2rem));
     border-radius: var(
       --cf-button-border-radius,
       var(--cf-border-radius-sm, 0.25rem)

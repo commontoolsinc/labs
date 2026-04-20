@@ -60,6 +60,12 @@ export const toggleStyles = `
   }
 
   /* Size variants */
+  .size-xs {
+    height: var(--cf-size-xs-height, 16px);
+    padding: 0 var(--cf-size-xs-padding-h, 4px);
+    font-size: var(--cf-size-xs-font-size, 9px);
+  }
+
   .size-s {
     height: var(--cf-toggle-height-s);
     padding: 0 var(--cf-toggle-padding-x-s);
@@ -67,6 +73,31 @@ export const toggleStyles = `
   }
 
   .size-l {
+    height: var(--cf-toggle-height-l);
+    padding: 0 var(--cf-toggle-padding-x-l);
+    font-size: var(--cf-toggle-font-size-l);
+  }
+
+  .size-xl {
+    height: var(--cf-size-xl-height, 48px);
+    padding: 0 var(--cf-size-xl-padding-h, 16px);
+    font-size: var(--cf-size-xl-font-size, 18px);
+  }
+
+  /* Backward compatibility for old size names */
+  .size-default {
+    height: var(--cf-toggle-height);
+    padding: 0 var(--cf-toggle-padding-x);
+    font-size: var(--cf-toggle-font-size);
+  }
+
+  .size-sm {
+    height: var(--cf-toggle-height-s);
+    padding: 0 var(--cf-toggle-padding-x-s);
+    font-size: var(--cf-toggle-font-size-s);
+  }
+
+  .size-lg {
     height: var(--cf-toggle-height-l);
     padding: 0 var(--cf-toggle-padding-x-l);
     font-size: var(--cf-toggle-font-size-l);

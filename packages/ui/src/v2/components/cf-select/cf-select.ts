@@ -127,10 +127,11 @@ export class CFSelect extends BaseElement {
       select {
         display: block;
         width: 100%;
-        height: var(--select-height);
         padding: var(--select-padding-y) var(--select-padding-x);
+        /* Ensure right padding is wide enough to avoid text overlapping the dropdown arrow */
+        padding-right: max(var(--select-padding-x), 24px);
         font-size: var(--select-font-size);
-        line-height: 1.25rem;
+        line-height: normal;
         color: var(--cf-select-color-text, #111827);
         background-color: var(--cf-select-color-background, #ffffff);
         border: 1px solid var(--cf-select-color-border, #e5e7eb);
@@ -144,6 +145,12 @@ export class CFSelect extends BaseElement {
         background-repeat: no-repeat;
         background-position: right 0.75rem center;
         background-size: 12px 8px;
+      }
+
+      /* Only constrain height for single-select without a size attribute;
+        multi-select with visible-rows needs to expand freely */
+      select:not([multiple]):not([size]) {
+        height: var(--select-height);
       }
 
       /* Disabled */

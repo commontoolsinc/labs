@@ -67,6 +67,10 @@ export class CFChevronButton extends BaseElement {
       }
 
       /* Size variants */
+      :host([size="xs"]) .chevron-button {
+        padding: var(--cf-size-xs-padding-v, 2px) 0;
+      }
+
       :host([size="s"]) .chevron-button {
         padding: var(--cf-size-s-padding-v, 4px) 0;
       }
@@ -75,9 +79,17 @@ export class CFChevronButton extends BaseElement {
         padding: var(--cf-size-l-padding-v, 8px) 0;
       }
 
+      :host([size="xl"]) .chevron-button {
+        padding: var(--cf-size-xl-padding-v, 12px) 0;
+      }
+
       svg {
         width: var(--chevron-size, var(--cf-size-m-icon-lg, 24px));
         height: var(--chevron-size, var(--cf-size-m-icon-lg, 24px));
+      }
+
+      :host([size="xs"]) svg {
+        --chevron-size: var(--cf-size-xs-icon-lg, 12px);
       }
 
       :host([size="s"]) svg {
@@ -90,6 +102,31 @@ export class CFChevronButton extends BaseElement {
 
       :host([size="xl"]) svg {
         --chevron-size: var(--cf-size-xl-icon-lg, 28px);
+      }
+
+      /* Backward compatibility for old size names */
+      :host([size="sm"]) .chevron-button {
+        padding: var(--cf-size-s-padding-v, 4px) 0;
+      }
+
+      :host([size="md"]) .chevron-button {
+        padding: 0;
+      }
+
+      :host([size="lg"]) .chevron-button {
+        padding: var(--cf-size-l-padding-v, 8px) 0;
+      }
+
+      :host([size="sm"]) svg {
+        --chevron-size: var(--cf-size-s-icon-lg, 16px);
+      }
+
+      :host([size="md"]) svg {
+        --chevron-size: var(--cf-size-m-icon-lg, 24px);
+      }
+
+      :host([size="lg"]) svg {
+        --chevron-size: var(--cf-size-l-icon-lg, 24px);
       }
 
       /* Loading animation - scrolling sine wave */

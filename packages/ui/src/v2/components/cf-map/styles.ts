@@ -783,7 +783,7 @@ export const styles = css`
 
     /* Close button theming */
     .leaflet-container a.leaflet-popup-close-button {
-      color: var(--cf-colors-gray-500, #94979e);
+      color: var(--cf-colors-gray-500, #5b5f65);
       width: 28px;
       height: 28px;
       font-size: 18px;

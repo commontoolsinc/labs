@@ -102,6 +102,22 @@ export class CFLoader extends BaseElement {
       height: var(--cf-size-xl-height, 48px);
     }
 
+    /* Backward compatibility for old size names */
+    :host([size="sm"]) .spinner {
+      width: var(--cf-size-s-icon-sm, 12px);
+      height: var(--cf-size-s-icon-sm, 12px);
+    }
+
+    :host([size="md"]) .spinner {
+      width: var(--cf-size-m-icon-lg, 24px);
+      height: var(--cf-size-m-icon-lg, 24px);
+    }
+
+    :host([size="lg"]) .spinner {
+      width: var(--cf-size-xl-height, 48px);
+      height: var(--cf-size-xl-height, 48px);
+    }
+
     .track {
       stroke: var(--cf-loader-color-track, #e0e0e0);
     }
