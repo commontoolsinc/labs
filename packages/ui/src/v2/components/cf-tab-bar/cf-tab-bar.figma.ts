@@ -41,12 +41,12 @@ export const figmaMapping = {
       // on the matching child automatically — never set it in markup directly.
       // To change the selected tab, update the `value` prop on cf-tab-bar.
       "Show Label": {
-        codeProp: "show-label",
+        codeProp: "hide-label",
         values: {
-          true: true,
-          false: false,
+          true: false,
+          false: true,
         },
-        note: 'Defaults to true; set show-label="false" for icon-only items',
+        note: "Inverted: Figma 'Show Label: false' → code hide-label attribute",
       },
       symbol: {
         codeProp: 'slot="icon"',

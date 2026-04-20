@@ -5,7 +5,7 @@
  * @see https://www.figma.com/design/LPebgX2vf5Axd6yuo4umBE/CF.design--WIP-?node-id=484:22605
  *
  * cf-card is a surface container with optional title, body, and action areas.
- * It supports clickable and selected states.
+ * It supports a clickable state for interactive cards.
  */
 export const figmaMapping = {
   figmaUrl:
@@ -14,13 +14,12 @@ export const figmaMapping = {
 
   props: {
     clickable: { codeProp: "clickable", type: "boolean" },
-    selected: { codeProp: "selected", type: "boolean" },
   },
 
   slots: {
-    title: 'slot="title" — card heading',
+    header: 'slot="header" — card heading',
     default: "default slot — card body content",
-    actions: 'slot="actions" — footer action area',
+    footer: 'slot="footer" — footer action area',
   },
 
   // Sub-component mappings for tags used within cards
@@ -57,8 +56,8 @@ export const figmaMapping = {
   unmapped: [],
 
   example: `<cf-card>
-  <span slot="title">Card Title</span>
+  <span slot="header">Card Title</span>
   <p>Card body content goes here.</p>
-  <cf-button slot="actions" variant="primary">Action</cf-button>
+  <cf-button slot="footer" variant="primary">Action</cf-button>
 </cf-card>`,
 };

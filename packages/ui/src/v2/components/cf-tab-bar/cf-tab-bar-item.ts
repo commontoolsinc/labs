@@ -8,7 +8,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} value - Unique identifier for this item
  * @attr {string} label - Text label rendered below the icon
- * @attr {boolean} show-label - Whether to show the label (default: true). Set to false for icon-only items.
+ * @attr {boolean} hide-label - Hide the text label for icon-only items (default: false).
  * @attr {boolean} disabled - Prevents selection and keyboard navigation
  * @prop {boolean} selected - Set by parent bar when this item is active
  *
@@ -21,7 +21,7 @@ export class CFTabBarItem extends BaseElement {
   static override properties = {
     value: { type: String, reflect: true },
     label: { type: String, reflect: true },
-    showLabel: { type: Boolean, reflect: true, attribute: "show-label" },
+    hideLabel: { type: Boolean, reflect: true, attribute: "hide-label" },
     disabled: { type: Boolean, reflect: true },
     selected: { type: Boolean },
   };
@@ -101,7 +101,7 @@ export class CFTabBarItem extends BaseElement {
 
     declare value: string;
     declare label: string;
-    declare showLabel: boolean;
+    declare hideLabel: boolean;
     declare disabled: boolean;
     declare selected: boolean;
 
@@ -111,7 +111,7 @@ export class CFTabBarItem extends BaseElement {
       super();
       this.value = "";
       this.label = "";
-      this.showLabel = true;
+      this.hideLabel = false;
       this.disabled = false;
       this.selected = false;
     }
@@ -145,19 +145,17 @@ export class CFTabBarItem extends BaseElement {
           ?disabled="${this.disabled}"
           part="item"
           data-selected="${this.selected}"
-          aria-label="${this.showLabel ? "" : this.label}"
+          aria-label="${this.hideLabel ? this.label : ""}"
           @click="${this._handleClick}"
         >
           <div class="icon" part="icon" aria-hidden="true">
             <slot name="icon"></slot>
           </div>
-          ${this.showLabel
-            ? html`
-              <div class="label" part="label">
-                <slot>${this.label}</slot>
-              </div>
-            `
-            : ""}
+          ${this.hideLabel ? "" : html`
+            <div class="label" part="label">
+              <slot>${this.label}</slot>
+            </div>
+          `}
         </button>
       `;
     }
