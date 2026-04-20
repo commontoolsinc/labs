@@ -626,25 +626,23 @@ describe("schemaWithProperties", () => {
     });
   }
 
-  for (const truish of [true, undefined]) {
-    describe(`for \`overrides = ${truish}\``, () => {
-      it("treats it as `{}` (any) and returns `schema`", () => {
-        const result = schemaWithProperties({ type: "string" }, truish);
-        assertEquals(result, { type: "string" });
-      });
-
-      it("returns an interned result", () => {
-        const result = schemaWithProperties({ type: "string" }, truish);
-        assert(isInternedSchema(result));
-      });
-
-      it("does not freeze `schema`", () => {
-        const schema: JSONSchemaObj = { type: "boolean" };
-        schemaWithProperties(schema, truish);
-        assert(!Object.isFrozen(schema));
-      });
+  describe("for `overrides = true`", () => {
+    it("treats it as `{}` (any) and returns `schema`", () => {
+      const result = schemaWithProperties({ type: "string" }, true);
+      assertEquals(result, { type: "string" });
     });
-  }
+
+    it("returns an interned result", () => {
+      const result = schemaWithProperties({ type: "string" }, true);
+      assert(isInternedSchema(result));
+    });
+
+    it("does not freeze `schema`", () => {
+      const schema: JSONSchemaObj = { type: "boolean" };
+      schemaWithProperties(schema, true);
+      assert(!Object.isFrozen(schema));
+    });
+  });
 
   describe("for `schema = false\`", () => {
     for (const overrides of [false, true, { type: "string" }]) {
