@@ -12,7 +12,7 @@ import {
   hashSchemaItem,
   internedPairKey,
   internSchema,
-  internSchemaHashString,
+  internSchemaToHashString,
   isInternedSchema,
   resetSchemaHashConfig,
   setSchemaHashConfig,
@@ -316,21 +316,21 @@ describe("schema-hash dispatch", () => {
         }
       });
 
-      describe("internSchemaHashString()", () => {
+      describe("internSchemaToHashString()", () => {
         it("returns the interned schema's hashString for an object", () => {
           const schema: JSONSchema = { type: "number" };
           const sah = internSchema(schema, true);
-          assertStrictEquals(internSchemaHashString(schema), sah.hashString);
+          assertStrictEquals(internSchemaToHashString(schema), sah.hashString);
         });
 
         it("returns the boolean schema's prefab hashString for `true`", () => {
           const expected = internSchema(true, true).hashString;
-          assertStrictEquals(internSchemaHashString(true), expected);
+          assertStrictEquals(internSchemaToHashString(true), expected);
         });
 
         it("returns the boolean schema's prefab hashString for `false`", () => {
           const expected = internSchema(false, true).hashString;
-          assertStrictEquals(internSchemaHashString(false), expected);
+          assertStrictEquals(internSchemaToHashString(false), expected);
         });
 
         it("produces matching strings for structurally-equal objects", () => {
@@ -343,19 +343,19 @@ describe("schema-hash dispatch", () => {
             properties: { x: { type: "string" } },
           };
           assertStrictEquals(
-            internSchemaHashString(a),
-            internSchemaHashString(b),
+            internSchemaToHashString(a),
+            internSchemaToHashString(b),
           );
         });
 
         it("produces different strings for different schemas", () => {
           assertNotEquals(
-            internSchemaHashString({ type: "number" }),
-            internSchemaHashString({ type: "string" }),
+            internSchemaToHashString({ type: "number" }),
+            internSchemaToHashString({ type: "string" }),
           );
           assertNotEquals(
-            internSchemaHashString(true),
-            internSchemaHashString(false),
+            internSchemaToHashString(true),
+            internSchemaToHashString(false),
           );
         });
 
@@ -367,15 +367,15 @@ describe("schema-hash dispatch", () => {
             title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
           };
           assertStrictEquals(isInternedSchema(schema), false);
-          internSchemaHashString(schema);
+          internSchemaToHashString(schema);
           assertStrictEquals(isInternedSchema(schema), true);
           assert(isDeepFrozen(schema));
         });
 
         it("is idempotent on already-interned schemas", () => {
           const schema: JSONSchema = { type: "number" };
-          const first = internSchemaHashString(schema);
-          const second = internSchemaHashString(schema);
+          const first = internSchemaToHashString(schema);
+          const second = internSchemaToHashString(schema);
           assertStrictEquals(first, second);
         });
       });

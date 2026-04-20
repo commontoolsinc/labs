@@ -345,7 +345,7 @@ export function isInternedSchema(schema: JSONSchema): boolean {
  * that also benefit from `internSchema`'s identity-stable WeakMap
  * fast-path on repeat lookups.
  */
-export function internSchemaHashString(schema: JSONSchema): string {
+export function internSchemaToHashString(schema: JSONSchema): string {
   return internSchema(schema, true).hashString;
 }
 
@@ -364,5 +364,5 @@ export function internSchemaHashString(schema: JSONSchema): string {
  * for the motivating regression.
  */
 export function internedPairKey(a: JSONSchema, b: JSONSchema): string {
-  return `${internSchemaHashString(a)}|${internSchemaHashString(b)}`;
+  return `${internSchemaToHashString(a)}|${internSchemaToHashString(b)}`;
 }
