@@ -213,6 +213,27 @@ Deno.test("parseCfHarnessCliArgs resolves an initial cwd within the workspace", 
   assertEquals(parsed.cwd, "/workspace/.ops");
 });
 
+Deno.test("parseCfHarnessCliArgs rejects an initial cwd outside the workspace", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          "/tmp/project",
+          "--cwd",
+          "..",
+          "--prompt",
+          "hi",
+        ],
+        {
+          env: {},
+        },
+      ),
+    Error,
+    "--cwd must stay within the workspace",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs supports prompt-slot-role override", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--prompt-slot-role", "context"],

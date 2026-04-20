@@ -138,3 +138,22 @@ Deno.test("DockerRunscSandboxRuntime resolvePath rejects paths outside the works
     "path escapes workspace root",
   );
 });
+
+Deno.test("DockerRunscSandboxRuntime accepts workspace paths when the mount path has a trailing slash", () => {
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      workspaceMountPath: "/workspace/",
+    }),
+  );
+
+  assertEquals(runtime.defaultWorkingDirectory(), "/workspace");
+  assertEquals(
+    runtime.resolvePath("notes/todo.txt"),
+    "/workspace/notes/todo.txt",
+  );
+  assertEquals(
+    runtime.isPathWithinWorkspace("/workspace/notes/todo.txt"),
+    true,
+  );
+});

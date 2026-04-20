@@ -393,7 +393,8 @@ const toWorkspaceSandboxPath = (
   const relativePath = relative(workspaceHostPath, hostPath);
   if (
     relativePath === ".." ||
-    relativePath.startsWith("../")
+    relativePath.startsWith("../") ||
+    relativePath.startsWith("..\\")
   ) {
     if (options.strict) {
       throw new Error(
