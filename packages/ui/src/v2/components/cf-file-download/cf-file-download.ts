@@ -202,9 +202,9 @@ export class CFFileDownload extends BaseElement {
         padding: 4px 8px;
         background: var(
           --cf-theme-color-text,
-          var(--cf-colors-gray-900, rgba(0, 0, 0, 0.8))
+          var(--cf-colors-gray-900, #16181d)
         );
-        color: var(--cf-theme-color-background, var(--cf-colors-gray-50, white));
+        color: var(--cf-theme-color-background, var(--cf-colors-gray-50, #ffffff));
         font-size: 12px;
         border-radius: 4px;
         white-space: nowrap;

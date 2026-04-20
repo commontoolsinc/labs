@@ -131,14 +131,14 @@ export class CFToolsChip extends BaseElement {
         padding: 0.25rem 0.625rem;
         background: var(
           --cf-theme-color-surface,
-          var(--cf-colors-gray-100, #f5f5f5)
+          var(--cf-colors-gray-100, #f2f3f6)
         );
         color: var(
           --cf-theme-color-text,
-          var(--cf-colors-gray-900, #212121)
+          var(--cf-colors-gray-900, #16181d)
         );
         border: 1px solid
-          var(--cf-theme-color-border, var(--cf-colors-gray-300, #e0e0e0));
+          var(--cf-theme-color-border, var(--cf-colors-gray-300, #d5d7dd));
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-full, 9999px)
@@ -156,7 +156,7 @@ export class CFToolsChip extends BaseElement {
         .chip:hover {
           background: var(
             --cf-theme-color-surface-hover,
-            var(--cf-colors-gray-200, #eeeeee)
+            var(--cf-colors-gray-200, #eceef1)
           );
         }
 
@@ -167,7 +167,7 @@ export class CFToolsChip extends BaseElement {
           border-radius: 50%;
           background: var(
             --cf-theme-color-accent,
-            var(--cf-colors-primary-500, #2196f3)
+            var(--cf-colors-primary-500, #4979fa)
           );
         }
 
@@ -186,14 +186,14 @@ export class CFToolsChip extends BaseElement {
           overflow: auto;
           background: var(
             --cf-theme-color-surface,
-            var(--cf-colors-gray-50, #fafafa)
+            var(--cf-colors-gray-50, #ffffff)
           );
           color: var(
             --cf-theme-color-text,
-            var(--cf-colors-gray-900, #212121)
+            var(--cf-colors-gray-900, #16181d)
           );
           border: 1px solid
-            var(--cf-theme-color-border, var(--cf-colors-gray-300, #e0e0e0));
+            var(--cf-theme-color-border, var(--cf-colors-gray-300, #d5d7dd));
           border-radius: var(
             --cf-theme-border-radius,
             var(--cf-border-radius-lg, 0.5rem)
@@ -227,7 +227,7 @@ export class CFToolsChip extends BaseElement {
             gap: 0.5rem;
             padding: 0.25rem 0.25rem 0.5rem 0.25rem;
             border-bottom: 1px solid
-              var(--cf-theme-color-border, var(--cf-colors-gray-300, #e0e0e0));
+              var(--cf-theme-color-border, var(--cf-colors-gray-300, #d5d7dd));
             margin-bottom: 0.5rem;
           }
 

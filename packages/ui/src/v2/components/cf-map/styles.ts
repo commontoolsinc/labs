@@ -705,10 +705,10 @@ export const styles = css`
 
       /* Default color values if not provided */
       --background: #ffffff;
-      --foreground: var(--cf-colors-gray-900, #0f172a);
-      --border: var(--cf-colors-gray-300, #e2e8f0);
-      --primary: var(--cf-colors-primary-500, #3b82f6);
-      --ring: var(--cf-colors-primary-500, #3b82f6);
+      --foreground: var(--cf-colors-gray-900, #16181d);
+      --border: var(--cf-colors-gray-300, #d5d7dd);
+      --primary: var(--cf-colors-primary-500, #4979fa);
+      --ring: var(--cf-colors-primary-500, #4979fa);
     }
 
     .map-container {
@@ -724,7 +724,7 @@ export const styles = css`
     .map-container .leaflet-container {
       width: 100%;
       height: 100%;
-      background: var(--cf-colors-gray-100, #f8fafc);
+      background: var(--cf-colors-gray-100, #f2f3f6);
       font-family: var(--cf-font-family, inherit);
     }
 
@@ -776,14 +776,14 @@ export const styles = css`
     }
 
     .popup-description {
-      color: var(--cf-colors-gray-600, #64748b);
+      color: var(--cf-colors-gray-600, #5b5f65);
       font-size: var(--cf-font-size-sm, 0.875rem);
       margin: 0;
     }
 
     /* Close button theming */
     .leaflet-container a.leaflet-popup-close-button {
-      color: var(--cf-colors-gray-500, #64748b);
+      color: var(--cf-colors-gray-500, #94979e);
       width: 28px;
       height: 28px;
       font-size: 18px;
@@ -798,7 +798,7 @@ export const styles = css`
       .leaflet-container a.leaflet-popup-close-button:hover,
       .leaflet-container a.leaflet-popup-close-button:focus {
         color: var(--foreground, #0f172a);
-        background: var(--cf-colors-gray-100, #f8fafc);
+        background: var(--cf-colors-gray-100, #f2f3f6);
       }
 
       /* Control theming */
@@ -820,7 +820,7 @@ export const styles = css`
         }
 
         .leaflet-bar a:hover {
-          background-color: var(--cf-colors-gray-100, #f8fafc);
+          background-color: var(--cf-colors-gray-100, #f2f3f6);
         }
 
         .leaflet-bar a:first-child {
@@ -836,7 +836,7 @@ export const styles = css`
         /* Attribution theming */
         .leaflet-container .leaflet-control-attribution {
           background: var(--background, rgba(255, 255, 255, 0.9));
-          color: var(--cf-colors-gray-600, #64748b);
+          color: var(--cf-colors-gray-600, #5b5f65);
           font-size: var(--cf-font-size-xs, 0.75rem);
           border-top: 1px solid var(--border, #e2e8f0);
         }

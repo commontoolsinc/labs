@@ -20,7 +20,7 @@ export const styles = css`
     --cf-button-icon-padding: 0;
     --cf-button-color-primary: var(
       --cf-theme-color-primary,
-      var(--cf-colors-primary-500, #3b82f6)
+      var(--cf-colors-primary-500, #4979fa)
     );
     --cf-button-color-primary-foreground: var(
       --cf-theme-color-primary-foreground,
@@ -28,11 +28,11 @@ export const styles = css`
     );
     --cf-button-color-secondary: var(
       --cf-theme-color-secondary,
-      var(--cf-colors-gray-100, #f3f4f6)
+      var(--cf-colors-gray-100, #f2f3f6)
     );
     --cf-button-color-secondary-foreground: var(
       --cf-theme-color-secondary-foreground,
-      var(--cf-colors-gray-900, #111827)
+      var(--cf-colors-gray-900, #16181d)
     );
     --cf-button-color-error: var(
       --cf-theme-color-error,
@@ -44,23 +44,23 @@ export const styles = css`
     );
     --cf-button-color-border: var(
       --cf-theme-color-border,
-      var(--cf-colors-gray-300, #d1d5db)
+      var(--cf-colors-gray-300, #d5d7dd)
     );
     --cf-button-color-surface: var(
       --cf-theme-color-surface,
-      var(--cf-colors-gray-50, #f9fafb)
+      var(--cf-colors-gray-50, #ffffff)
     );
     --cf-button-color-surface-hover: var(
       --cf-theme-color-surface-hover,
-      var(--cf-colors-gray-200, #e5e7eb)
+      var(--cf-colors-gray-200, #eceef1)
     );
     --cf-button-color-text: var(
       --cf-theme-color-text,
-      var(--cf-colors-gray-900, #111827)
+      var(--cf-colors-gray-900, #16181d)
     );
     --cf-button-color-text-muted: var(
       --cf-theme-color-text-muted,
-      var(--cf-colors-gray-500, #6b7280)
+      var(--cf-colors-gray-500, #94979e)
     );
 
     display: inline-block;
@@ -104,7 +104,7 @@ export const styles = css`
 
   .button:focus-visible {
     outline: 2px solid
-      var(--cf-button-color-primary, var(--cf-colors-primary-500, #3b82f6));
+      var(--cf-button-color-primary, var(--cf-colors-primary-500, #4979fa));
     outline-offset: 2px;
   }
 
@@ -153,7 +153,7 @@ export const styles = css`
     .button.primary {
       background-color: var(
         --cf-button-color-primary,
-        var(--cf-colors-primary-500, #3b82f6)
+        var(--cf-colors-primary-500, #4979fa)
       );
       color: var(
         --cf-button-color-primary-foreground,
@@ -161,7 +161,7 @@ export const styles = css`
       );
       border-color: var(
         --cf-button-color-primary,
-        var(--cf-colors-primary-500, #3b82f6)
+        var(--cf-colors-primary-500, #4979fa)
       );
     }
 
@@ -196,49 +196,49 @@ export const styles = css`
     .button.outline {
       border-color: var(
         --cf-button-color-border,
-        var(--cf-colors-gray-300, #d1d5db)
+        var(--cf-colors-gray-300, #d5d7dd)
       );
       background-color: transparent;
-      color: var(--cf-button-color-text, var(--cf-colors-gray-900, #111827));
+      color: var(--cf-button-color-text, var(--cf-colors-gray-900, #16181d));
     }
 
     .button.outline:hover:not(:disabled) {
       background-color: var(
         --cf-button-color-surface,
-        var(--cf-colors-gray-50, #f9fafb)
+        var(--cf-colors-gray-50, #ffffff)
       );
     }
 
     .button.secondary {
       background-color: var(
         --cf-button-color-secondary,
-        var(--cf-colors-gray-100, #f3f4f6)
+        var(--cf-colors-gray-100, #f2f3f6)
       );
       color: var(
         --cf-button-color-secondary-foreground,
-        var(--cf-colors-gray-900, #111827)
+        var(--cf-colors-gray-900, #16181d)
       );
       border-color: var(
         --cf-button-color-secondary,
-        var(--cf-colors-gray-100, #f3f4f6)
+        var(--cf-colors-gray-100, #f2f3f6)
       );
     }
 
     .button.secondary:hover:not(:disabled) {
       background-color: var(
         --cf-button-color-surface-hover,
-        var(--cf-colors-gray-200, #e5e7eb)
+        var(--cf-colors-gray-200, #eceef1)
       );
       border-color: var(
         --cf-button-color-surface-hover,
-        var(--cf-colors-gray-200, #e5e7eb)
+        var(--cf-colors-gray-200, #eceef1)
       );
     }
 
     .button.ghost {
       color: var(
         --cf-button-color-text-muted,
-        var(--cf-colors-gray-500, #6b7280)
+        var(--cf-colors-gray-500, #94979e)
       );
       background-color: transparent;
       border: none;
@@ -246,10 +246,10 @@ export const styles = css`
     }
 
     .button.ghost:hover:not(:disabled) {
-      color: var(--cf-button-color-text, var(--cf-colors-gray-700, #374151));
+      color: var(--cf-button-color-text, var(--cf-colors-gray-700, #404349));
       background-color: var(
         --cf-button-color-surface-hover,
-        var(--cf-colors-gray-100, #f3f4f6)
+        var(--cf-colors-gray-100, #f2f3f6)
       );
     }
 
@@ -265,7 +265,7 @@ export const styles = css`
     .button.link {
       color: var(
         --cf-button-color-primary,
-        var(--cf-colors-primary-500, #3b82f6)
+        var(--cf-colors-primary-500, #4979fa)
       );
       text-underline-offset: 4px;
     }
@@ -277,11 +277,11 @@ export const styles = css`
     .button.pill {
       background: var(
         --cf-button-color-surface,
-        var(--cf-colors-gray-100, #f3f4f6)
+        var(--cf-colors-gray-100, #f2f3f6)
       );
-      color: var(--cf-button-color-text, var(--cf-colors-gray-900, #111827));
+      color: var(--cf-button-color-text, var(--cf-colors-gray-900, #16181d));
       border: 1px solid
-        var(--cf-button-color-border, var(--cf-colors-gray-300, #d1d5db));
+        var(--cf-button-color-border, var(--cf-colors-gray-300, #d5d7dd));
       border-radius: var(
         --cf-button-border-radius-full,
         var(--cf-radius-full, 9999px)
@@ -295,7 +295,7 @@ export const styles = css`
     .button.pill:hover:not(:disabled) {
       background: var(
         --cf-button-color-surface-hover,
-        var(--cf-colors-gray-200, #e5e7eb)
+        var(--cf-colors-gray-200, #eceef1)
       );
     }
   `;

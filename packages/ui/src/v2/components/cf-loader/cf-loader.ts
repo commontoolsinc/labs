@@ -48,19 +48,19 @@ export class CFLoader extends BaseElement {
     :host {
       --cf-loader-color-track: var(
         --cf-theme-color-border,
-        var(--cf-colors-gray-300, #e0e0e0)
+        var(--cf-colors-gray-300, #d5d7dd)
       );
       --cf-loader-color-arc: var(
         --cf-theme-color-primary,
-        var(--cf-colors-primary-500, #000)
+        var(--cf-colors-primary-500, #4979fa)
       );
       --cf-loader-color-text: var(
         --cf-theme-color-text-muted,
-        var(--cf-colors-gray-600, #666)
+        var(--cf-colors-gray-600, #5b5f65)
       );
       --cf-loader-color-surface: var(
         --cf-theme-color-surface,
-        var(--cf-colors-gray-100, #f0f0f0)
+        var(--cf-colors-gray-100, #f2f3f6)
       );
       --cf-loader-color-error: var(
         --cf-theme-color-error,

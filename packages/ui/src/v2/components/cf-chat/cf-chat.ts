@@ -112,9 +112,9 @@ export class CFChat extends BaseElement {
       .pending-bubble {
         background-color: var(
           --cf-theme-surface,
-          var(--cf-color-gray-100, #f3f4f6)
+          var(--cf-color-gray-100, #f2f3f6)
         );
-        color: var(--cf-theme-text-muted, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-text-muted, var(--cf-color-gray-900, #16181d));
         padding: var(--cf-theme-padding-bubble, var(--cf-spacing-3, 0.75rem))
           var(--cf-theme-padding-bubble-horizontal, var(--cf-spacing-4, 1rem));
         border-radius: var(
@@ -122,7 +122,7 @@ export class CFChat extends BaseElement {
           var(--cf-border-radius-lg, 0.5rem)
         );
         border: 1px solid
-          var(--cf-theme-border-muted, var(--cf-color-gray-200, #e5e7eb));
+          var(--cf-theme-border-muted, var(--cf-color-gray-200, #eceef1));
         max-width: 70%;
         display: flex;
         align-items: center;
@@ -139,7 +139,7 @@ export class CFChat extends BaseElement {
         height: 8px;
         background-color: var(
           --cf-theme-text-muted,
-          var(--cf-color-gray-400, #9ca3af)
+          var(--cf-color-gray-400, #b3b6bc)
         );
         border-radius: 50%;
         animation: typingBounce 1.4s infinite ease-in-out;
