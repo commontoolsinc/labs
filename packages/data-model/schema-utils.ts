@@ -139,16 +139,33 @@ export function schemaWithProperties(
   schema: JSONSchema | undefined,
   overrides: JSONSchemaObj,
 ): JSONSchema {
-  if (schema === false) return false;
+  // Deal with `boolean`s and `undefined` values for the base `schema`. Since
+  // these count as interned schemas, "intern contagion" applies.
+  switch (typeof schema) {
+    case "boolean": {
+      // Since `true` counts as an interned schemas, "intern contagion" applies.
+      return schema
+        ? internSchema(overrides)
+        : false;
+    }
 
-  const base = (schema === undefined || schema === true)
-    ? emptySchemaObject()
-    : schema;
-  const result = { ...base, ...overrides };
+    case "undefined": {
+      // Since `undefined` counts as an interned schemas, "intern contagion"
+      // applies.
+      return internSchema(overrides);
+    }
 
-  return isInternedSchema(base)
-    ? internSchema(result)
-    : toDeepFrozenSchema(result, true);
+    case "object": {
+      const result = { ...schema, ...overrides };
+      return isInternedSchema(schema)
+        ? internSchema(result)
+        : toDeepFrozenSchema(result, true);
+    }
+
+    default: {
+      throw new Error(`Unrecognized schema value type: ${typeof schema}`);
+    }
+  }
 }
 
 /**
