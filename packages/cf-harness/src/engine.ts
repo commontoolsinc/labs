@@ -12,6 +12,7 @@ import {
   appendHarnessToolOutput,
   createHarnessRunState,
   type HarnessRunState,
+  setHarnessRunCurrentDir,
   setHarnessRunStatus,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
@@ -110,6 +111,25 @@ const createSandboxRuntime = (
   }
 };
 
+const resolveInitialCurrentDir = (
+  sandbox: SandboxRuntime,
+  config: HarnessConfig,
+  runState?: HarnessRunState,
+): string => {
+  if (runState !== undefined) {
+    if (runState.currentDir === undefined) {
+      throw new Error(
+        "run state is missing currentDir; older cf-harness runs cannot be resumed",
+      );
+    }
+    return runState.currentDir;
+  }
+  if (config.cwd !== undefined) {
+    return sandbox.resolvePath(config.cwd);
+  }
+  return sandbox.defaultWorkingDirectory();
+};
+
 export class CfHarnessEngine {
   readonly config: HarnessConfig;
   readonly sandbox: SandboxRuntime;
@@ -138,10 +158,16 @@ export class CfHarnessEngine {
           runId,
         })
         : undefined);
+    const currentDir = resolveInitialCurrentDir(
+      this.sandbox,
+      this.config,
+      options.runState,
+    );
     this.#runState = options.runState ??
       createHarnessRunState({
         runId,
         cfcEnforcementMode: this.config.cfcEnforcementMode,
+        currentDir,
         model: this.config.model,
         artifactRoot: this.artifactStore?.runRoot,
         now: this.#now(),
@@ -250,7 +276,21 @@ export class CfHarnessEngine {
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+      currentDir: this.#runState.currentDir,
       sandbox: this.sandbox,
+      resolvePath: (path: string) =>
+        this.sandbox.resolvePath(path, this.#runState.currentDir),
+      setCurrentDir: (path: string) => {
+        const resolved = this.sandbox.resolvePath(
+          path,
+          this.#runState.currentDir,
+        );
+        this.#runState = setHarnessRunCurrentDir(
+          this.#runState,
+          resolved,
+          this.#now(),
+        );
+      },
       nextOutputId: (toolId: string) => {
         this.#outputSequence += 1;
         return `${this.#runState.runId}:${toolId}:${this.#outputSequence}` as ToolOutputId;

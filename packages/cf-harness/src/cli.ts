@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { dirname, join, resolve } from "@std/path";
+import { dirname, join, relative, resolve } from "@std/path";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
@@ -36,6 +36,7 @@ export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
 
 export interface CfHarnessCliConfig {
   workspace: string;
+  cwd?: string;
   focusRoot?: string;
   allowedToolIds?: readonly BuiltinToolId[];
   outputMode: CfHarnessCliOutputMode;
@@ -82,6 +83,7 @@ const usage = `Usage: deno run -A src/main.ts [options] [prompt text]
 
 Options:
   --workspace <path>            Workspace host path (defaults to current directory)
+  --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
   --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | write_file)
   --output-mode <mode>          operator | batch (default: operator)
@@ -218,6 +220,7 @@ export const parseCfHarnessCliArgs = async (
   const args = parseArgs([...normalizedArgv], {
     string: [
       "workspace",
+      "cwd",
       "focus-root",
       "allow-tool",
       "output-mode",
@@ -252,6 +255,12 @@ export const parseCfHarnessCliArgs = async (
   const workspace = resolve(
     typeof args.workspace === "string" ? args.workspace : cwd,
   );
+  const initialCwd = typeof args.cwd === "string"
+    ? toWorkspaceSandboxPath(workspace, resolve(workspace, args.cwd), {
+      strict: true,
+      errorPrefix: "--cwd",
+    })
+    : undefined;
   const focusRoot = typeof args["focus-root"] === "string"
     ? resolve(workspace, args["focus-root"])
     : undefined;
@@ -336,6 +345,7 @@ export const parseCfHarnessCliArgs = async (
     : undefined;
   return {
     workspace,
+    ...(initialCwd !== undefined ? { cwd: initialCwd } : {}),
     ...(focusRoot !== undefined ? { focusRoot } : {}),
     ...(allowedToolIds !== undefined ? { allowedToolIds } : {}),
     outputMode: outputMode ?? "operator",
@@ -375,16 +385,21 @@ export const formatCfHarnessCliUsage = (): string => usage;
 const toWorkspaceSandboxPath = (
   workspaceHostPath: string,
   hostPath?: string,
+  options: { strict?: boolean; errorPrefix?: string } = {},
 ): string => {
   if (hostPath === undefined) {
     return "/workspace";
   }
-  const relativePath = hostPath.startsWith(`${workspaceHostPath}/`)
-    ? hostPath.slice(workspaceHostPath.length + 1)
-    : hostPath === workspaceHostPath
-    ? ""
-    : undefined;
-  if (relativePath === undefined) {
+  const relativePath = relative(workspaceHostPath, hostPath);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith("../")
+  ) {
+    if (options.strict) {
+      throw new Error(
+        `${options.errorPrefix ?? "path"} must stay within the workspace`,
+      );
+    }
     return "/workspace";
   }
   return relativePath.length > 0 ? `/workspace/${relativePath}` : "/workspace";
@@ -617,6 +632,7 @@ export const runCfHarnessCli = async (
           model: parsed.model ?? artifacts.runState.model,
           gatewayBaseUrl: parsed.gatewayBaseUrl,
           gatewayAuthMode: parsed.gatewayAuthMode,
+          ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
           cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         }),
         apiKey: parsed.apiKey,
@@ -645,6 +661,7 @@ export const runCfHarnessCli = async (
         model: parsed.model,
         gatewayBaseUrl: parsed.gatewayBaseUrl,
         gatewayAuthMode: parsed.gatewayAuthMode,
+        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,

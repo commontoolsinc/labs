@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
@@ -95,7 +95,7 @@ Deno.test("DockerRunscSandboxRuntime runShell uses the configured shell and reso
 
   await runtime.runShell({
     command: "pwd",
-    cwd: "/tmp/demo",
+    cwd: "/workspace/demo",
     args: ["arg-1", "arg-2"],
   });
 
@@ -111,7 +111,7 @@ Deno.test("DockerRunscSandboxRuntime runShell uses the configured shell and reso
       "--mount",
       "type=bind,src=/host/project,dst=/workspace",
       "-w",
-      "/tmp/demo",
+      "/workspace/demo",
       "alpine:3.20",
       "/bin/sh",
       "-lc",
@@ -123,4 +123,18 @@ Deno.test("DockerRunscSandboxRuntime runShell uses the configured shell and reso
     stdinText: undefined,
     timeoutMs: undefined,
   });
+});
+
+Deno.test("DockerRunscSandboxRuntime resolvePath rejects paths outside the workspace", () => {
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+    }),
+  );
+
+  assertThrows(
+    () => runtime.resolvePath("../../escape", "/workspace/demo"),
+    Error,
+    "path escapes workspace root",
+  );
 });

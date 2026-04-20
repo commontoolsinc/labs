@@ -192,6 +192,27 @@ Deno.test("parseCfHarnessCliArgs resolves focus-root relative to workspace", asy
   assertEquals(parsed.focusRoot, "/tmp/project/packages/cf-harness");
 });
 
+Deno.test("parseCfHarnessCliArgs resolves an initial cwd within the workspace", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--cwd",
+      ".ops",
+      "--prompt",
+      "hi",
+    ],
+    {
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.cwd, "/workspace/.ops");
+});
+
 Deno.test("parseCfHarnessCliArgs supports prompt-slot-role override", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--prompt-slot-role", "context"],
@@ -311,6 +332,7 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
                   createdAt: "2026-04-15T22:00:00.000Z",
                   updatedAt: "2026-04-15T22:00:01.000Z",
                   cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
                   artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
                   transcriptPath:
                     "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
@@ -361,6 +383,7 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
           createdAt: "2026-04-15T22:00:00.000Z",
           updatedAt: "2026-04-15T22:00:01.000Z",
           cfcEnforcementMode: "disabled",
+          currentDir: "/workspace",
           artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
           transcriptPath:
             "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
@@ -416,6 +439,7 @@ Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async
                 createdAt: "2026-04-16T21:10:00.000Z",
                 updatedAt: "2026-04-16T21:10:01.000Z",
                 cfcEnforcementMode: "disabled",
+                currentDir: "/workspace",
                 artifactRoot:
                   "/tmp/project/.cf-harness-artifacts/run-cli-context",
                 transcriptPath:
@@ -501,6 +525,7 @@ Deno.test("runCfHarnessCli can stream transcript events as they happen", async (
               createdAt: "2026-04-16T22:40:00.000Z",
               updatedAt: "2026-04-16T22:40:01.000Z",
               cfcEnforcementMode: "disabled",
+              currentDir: "/workspace",
               policyEvents: [],
               toolOutputs: [],
             },
@@ -533,6 +558,7 @@ Deno.test("runCfHarnessCli can stream transcript events as they happen", async (
         createdAt: "2026-04-16T22:40:00.000Z",
         updatedAt: "2026-04-16T22:40:01.000Z",
         cfcEnforcementMode: "disabled",
+        currentDir: "/workspace",
         policyEvents: [],
         toolOutputs: [],
       },
@@ -577,6 +603,7 @@ Deno.test("runCfHarnessCli uses plain stdout and no operator guidance in batch m
                 createdAt: "2026-04-16T22:10:00.000Z",
                 updatedAt: "2026-04-16T22:10:01.000Z",
                 cfcEnforcementMode: "disabled",
+                currentDir: "/workspace",
                 policyEvents: [],
                 toolOutputs: [],
               },
@@ -635,6 +662,7 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
                 createdAt: "2026-04-16T23:10:00.000Z",
                 updatedAt: "2026-04-16T23:10:02.000Z",
                 cfcEnforcementMode: "observe",
+                currentDir: "/workspace",
                 artifactRoot:
                   "/tmp/project/.cf-harness-artifacts/run-cli-batch-json",
                 transcriptPath:
@@ -679,6 +707,7 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
         createdAt: "2026-04-16T23:10:00.000Z",
         updatedAt: "2026-04-16T23:10:02.000Z",
         cfcEnforcementMode: "observe",
+        currentDir: "/workspace",
         artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli-batch-json",
         transcriptPath:
           "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/transcript.json",
@@ -836,6 +865,7 @@ Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", asyn
                   createdAt: "2026-04-16T00:00:00.000Z",
                   updatedAt: "2026-04-16T00:00:01.000Z",
                   cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
                   policyEvents: [],
                   toolOutputs: [],
                 },
@@ -866,6 +896,7 @@ Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", asyn
         createdAt: "2026-04-16T00:00:00.000Z",
         updatedAt: "2026-04-16T00:00:01.000Z",
         cfcEnforcementMode: "disabled",
+        currentDir: "/workspace",
         policyEvents: [],
         toolOutputs: [],
       },
@@ -898,6 +929,7 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
             createdAt: "2026-04-15T22:10:00.000Z",
             updatedAt: "2026-04-15T22:10:01.000Z",
             cfcEnforcementMode: "disabled",
+            currentDir: "/workspace",
             model: "gpt-5.4",
             artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
             transcriptPath:
@@ -928,6 +960,7 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
                 createdAt: "2026-04-15T22:10:00.000Z",
                 updatedAt: "2026-04-15T22:10:02.000Z",
                 cfcEnforcementMode: "disabled",
+                currentDir: "/workspace",
                 model: "gpt-5.4",
                 artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
                 transcriptPath:
@@ -957,6 +990,7 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
         createdAt: "2026-04-15T22:10:00.000Z",
         updatedAt: "2026-04-15T22:10:02.000Z",
         cfcEnforcementMode: "disabled",
+        currentDir: "/workspace",
         model: "gpt-5.4",
         artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
         transcriptPath:
@@ -981,6 +1015,7 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       createdAt: "2026-04-15T22:20:00.000Z",
       updatedAt: "2026-04-15T22:20:01.000Z",
       cfcEnforcementMode: "observe",
+      currentDir: "/workspace",
       policyEvents: [{
         type: "cf-harness.policy-event",
         severity: "warning",
@@ -1022,6 +1057,7 @@ Deno.test("formatCfHarnessCliResult returns plain final text in batch mode", () 
         createdAt: "2026-04-16T22:30:00.000Z",
         updatedAt: "2026-04-16T22:30:01.000Z",
         cfcEnforcementMode: "disabled",
+        currentDir: "/workspace",
         policyEvents: [],
         toolOutputs: [],
       },
