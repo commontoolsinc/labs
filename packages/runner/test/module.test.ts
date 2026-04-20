@@ -206,6 +206,46 @@ describe("module", () => {
       });
     });
 
+    it("serializes array stream causes as one stable internal path segment", () => {
+      const clickHandler = handler(
+        false,
+        false,
+        (_event: unknown, _state: unknown) => {},
+      );
+
+      const clickPattern = pattern(() => {
+        const click = clickHandler({} as never).for(
+          { stream: ["__patternResult", "click"] },
+          true,
+        );
+        return { click };
+      });
+
+      const streamKey = 'stream:["__patternResult","click"]';
+      expect(clickPattern.result).toEqual({
+        click: {
+          $alias: {
+            path: ["internal", streamKey],
+            schema: true,
+          },
+        },
+      });
+      expect(clickPattern.initial).toEqual({
+        internal: {
+          [streamKey]: { $stream: true },
+        },
+      });
+      const handlerInputs = clickPattern.nodes[0].inputs as {
+        $event: unknown;
+      };
+      expect(handlerInputs.$event).toEqual({
+        $alias: {
+          path: ["internal", streamKey],
+          schema: true,
+        },
+      });
+    });
+
     it("serializes array causes as stable internal path segments", () => {
       const arrayCausePattern = pattern(() => {
         const value = new CellImpl<number>(

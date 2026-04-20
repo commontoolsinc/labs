@@ -122,6 +122,38 @@ const processCellSetupSchema = (pattern: Pattern): JSONSchema => ({
   required: [TYPE] as const,
 });
 
+function restoreStreamMarkers(
+  target: FabricValue,
+  source: FabricValue,
+): boolean {
+  if (!isRecord(target) || !isRecord(source)) return false;
+
+  let restored = false;
+  for (const [key, value] of Object.entries(source)) {
+    if (isStreamValue(value)) {
+      target[key] = cellAwareDeepCopy(value);
+      restored = true;
+      continue;
+    }
+
+    if (!isRecord(value)) continue;
+
+    const targetValue = target[key];
+    const nextTarget = isRecord(targetValue)
+      ? targetValue
+      : Array.isArray(value)
+      ? []
+      : {};
+
+    if (restoreStreamMarkers(nextTarget as FabricValue, value as FabricValue)) {
+      target[key] = nextTarget;
+      restored = true;
+    }
+  }
+
+  return restored;
+}
+
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -549,18 +581,20 @@ export class Runner {
       meta: ignoreReadForScheduling,
       frozen: false,
     });
+    const initialInternal = cellAwareDeepCopy(
+      isRecord(pattern.initial) && isRecord(pattern.initial.internal)
+        ? pattern.initial.internal
+        : {},
+    );
     const internal = Object.assign(
       {},
       cellAwareDeepCopy(
         (defaults as unknown as { internal: FabricValue })?.internal,
       ),
-      cellAwareDeepCopy(
-        isRecord(pattern.initial) && isRecord(pattern.initial.internal)
-          ? pattern.initial.internal
-          : {},
-      ),
+      initialInternal,
       isRecord(previousInternal) ? previousInternal : {},
     ) as FabricValue;
+    restoreStreamMarkers(internal, initialInternal);
 
     let nextArgument = argument;
     if (

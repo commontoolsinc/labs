@@ -87,6 +87,82 @@ describe("Pattern Runner - Handlers", () => {
     expect(value).toMatchObject({ counter: { value: 3 } });
   });
 
+  it("restores nested stream markers when rerunning with previous internal state", async () => {
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incPattern = pattern<{ counter: { value: number } }>(
+      ({ counter }) => {
+        const stream = incHandler({ counter }).for(
+          { stream: "increment" },
+          true,
+        );
+        return { counter, stream };
+      },
+    );
+    const streamPath = ["internal", "group", "stream:increment"];
+    const streamAlias = () => ({
+      $alias: { path: [...streamPath], schema: true },
+    });
+    (incPattern.result as any).stream = streamAlias();
+    const handlerNode = incPattern.nodes.find((node) =>
+      typeof node.inputs === "object" &&
+      node.inputs !== null &&
+      "$event" in node.inputs
+    );
+    expect(handlerNode).toBeDefined();
+    (handlerNode!.inputs as any).$event = streamAlias();
+    (incPattern.initial as any).internal = {
+      group: {
+        "stream:increment": { $stream: true },
+        stableState: "initial",
+      },
+    };
+
+    const resultCell = runtime.getCell<
+      { counter: { value: number }; stream: any }
+    >(space, "restores nested stream markers", undefined, tx);
+    const result = runtime.run(tx, incPattern, {
+      counter: { value: 0 },
+    }, resultCell);
+    await tx.commit();
+    await result.pull();
+
+    tx = runtime.edit();
+    runtime.runner.stop(resultCell);
+    const processCell = result.withTx(tx).getSourceCell();
+    expect(processCell).toBeDefined();
+    processCell!.key("internal").key("group").setRawUntyped({
+      stableState: "preserved",
+    });
+    await tx.commit();
+
+    tx = runtime.edit();
+    expect(() =>
+      runtime.run(tx, incPattern, {
+        counter: { value: 0 },
+      }, resultCell.withTx(tx))
+    ).not.toThrow();
+    await tx.commit();
+
+    tx = runtime.edit();
+    const restoredGroup = resultCell.withTx(tx).getSourceCell()!
+      .key("internal")
+      .key("group")
+      .getRawUntyped();
+    expect(restoredGroup).toEqual({
+      "stream:increment": { $stream: true },
+      stableState: "preserved",
+    });
+  });
+
   it("defers handler registration for retryable setup transactions until commit", async () => {
     const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
 
