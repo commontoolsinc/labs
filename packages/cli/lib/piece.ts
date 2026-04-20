@@ -457,6 +457,7 @@ async function tryResolveLivePieceToolCallable(
     tx,
   );
   manager.runtime.run(tx, pattern, input, liveResult);
+  manager.runtime.prepareTxForCommit?.(tx);
   await tx.commit();
   await manager.runtime.idle();
 

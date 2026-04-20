@@ -9,6 +9,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} label - Chip label text to display
  * @attr {string} variant - Visual variant: "default" | "primary" | "accent" (default: "default")
+ * @attr {string} size - Size variant: "sm" | "md" | "lg" (default: "md")
  * @attr {boolean} removable - Whether to show remove button (default: false)
  * @attr {boolean} interactive - Whether chip is clickable (default: false)
  *
@@ -36,15 +37,18 @@ export class CFChip extends BaseElement {
         gap: 0.375rem;
         padding: 0.25rem 0.625rem;
         background: var(
-          --cf-theme-color-surface,
-          var(--cf-color-gray-100, #f5f5f5)
+          --cf-chip-background,
+          var(--cf-theme-color-surface, var(--cf-color-gray-100, #f5f5f5))
         );
         color: var(
-          --cf-theme-color-text,
-          var(--cf-color-gray-900, #212121)
+          --cf-chip-color,
+          var(--cf-theme-color-text, var(--cf-color-gray-900, #212121))
         );
         border: 1px solid
-          var(--cf-theme-color-border, var(--cf-color-gray-300, #e0e0e0));
+          var(
+            --cf-chip-border-color,
+            var(--cf-theme-color-border, var(--cf-color-gray-300, #e0e0e0))
+          );
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-full, 9999px)
@@ -100,6 +104,19 @@ export class CFChip extends BaseElement {
           );
         }
 
+        /* Size variants */
+        :host([size="sm"]) .chip {
+          padding: 0.125rem 0.375rem;
+          font-size: 0.6875rem;
+        }
+
+        /* md is the default — no override needed */
+
+        :host([size="lg"]) .chip {
+          padding: 0.375rem 0.875rem;
+          font-size: 0.9375rem;
+        }
+
         .chip-icon {
           display: flex;
           align-items: center;
@@ -149,6 +166,9 @@ export class CFChip extends BaseElement {
 
     @property({ type: Boolean })
     accessor interactive = false;
+
+    @property({ type: String, reflect: true })
+    accessor size: "sm" | "md" | "lg" = "md";
 
     private _handleRemove(e: Event): void {
       e.stopPropagation();

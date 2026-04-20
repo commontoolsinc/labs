@@ -24,7 +24,7 @@ export class XAppView extends BaseView {
       display: flex;
       flex-direction: column;
       height: 100%;
-      background-color: white;
+      background-color: var(--shell-surface);
     }
 
     .content-area {
@@ -32,7 +32,7 @@ export class XAppView extends BaseView {
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      background-color: white;
+      background-color: var(--shell-surface);
       min-height: 0; /* Important for flex children */
       isolation: isolate; /* Contain pattern z-indexes */
     }

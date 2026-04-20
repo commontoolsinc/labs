@@ -15,6 +15,36 @@ import {
   type WritePath,
 } from "./cell-bridge.ts";
 import {
+  type CfcXattrNamespace,
+  getCfcXattrValue,
+  listCfcXattrNames,
+} from "./annotations.ts";
+import {
+  applyPreparedCreate,
+  applyPreparedExistingWrite,
+  applyPreparedMetadataMutation,
+  applyPreparedParent,
+  applyPreparedSymlink,
+  authorizeCreateWriteback,
+  authorizeExistingWriteback,
+  authorizeMetadataWriteback,
+  authorizeNamespaceMutationWriteback,
+  authorizeSymlinkWriteback,
+  CFC_WRITEBACK_FINALIZE_XATTR,
+  CFC_WRITEBACK_PREPARE_XATTR,
+  type CfcEnforcementMode,
+  type CfcExistingWritebackOperation,
+  type CfcMetadataLabelKey,
+  type CfcNamespaceMutationWritebackOperation,
+  type CfcPreparedWriteback,
+  CfcWritebackStore,
+  isCfcEnforcing,
+  metadataFieldsForSetattrFlags,
+  parseCfcMode,
+  resolveCfcMode,
+  shouldEnableCfcAnnotations,
+} from "./cfc-writeback.ts";
+import {
   DIR_MODE,
   EACCES,
   EINVAL,
@@ -76,10 +106,62 @@ type HandleWriteTarget =
   | { kind: "value"; target: WritePath }
   | { kind: "source"; target: SourceWritePath };
 
+export const DEFAULT_CFC_XATTR_NAMESPACE: CfcXattrNamespace = "both";
+
+export function parseCfcXattrNamespace(
+  value: string,
+): CfcXattrNamespace | undefined {
+  if (value === "trusted" || value === "compat" || value === "both") {
+    return value;
+  }
+  return undefined;
+}
+
+type EnvReader = Pick<typeof Deno.env, "get">;
+
+function envValue(env: EnvReader, name: string): string | undefined {
+  const value = env.get(name);
+  return value && value.trim() !== "" ? value : undefined;
+}
+
+export function defaultCfcWritebackStatePath(
+  mountpoint: string,
+  env: EnvReader = Deno.env,
+): string {
+  const explicitStateDir = envValue(env, "CF_CFC_WRITEBACK_STATE_DIR");
+  const xdgStateHome = envValue(env, "XDG_STATE_HOME");
+  const home = envValue(env, "HOME");
+  const stateDir = explicitStateDir ??
+    (xdgStateHome
+      ? `${xdgStateHome}/commonfabric-fuse`
+      : `${home ?? "."}/.cache/commonfabric-fuse`);
+  const safeMount = encodeURIComponent(mountpoint)
+    .replace(/[^A-Za-z0-9_.-]/g, "_")
+    .slice(0, 120) || "mount";
+  return `${stateDir}/cfc-writeback-${safeMount}.json`;
+}
+
+function readBuffer(ptr: Deno.PointerValue, size: bigint): Uint8Array {
+  const length = Number(size);
+  const data = new Uint8Array(length);
+  if (!ptr || length === 0) return data;
+  new Deno.UnsafePointerView(ptr).copyInto(data);
+  return data;
+}
+
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
-    string: ["api-url", "space", "identity", "exec-cli", "log-file"],
-    boolean: ["debug"],
+    string: [
+      "api-url",
+      "space",
+      "identity",
+      "exec-cli",
+      "log-file",
+      "cfc-xattr-namespace",
+      "cfc-mode",
+      "cfc-writeback-state",
+    ],
+    boolean: ["debug", "cfc-annotations", "cfc-writeback-xattrs"],
     collect: ["space"],
     default: {
       "api-url": Deno.env.get("CF_API_URL") ?? "",
@@ -87,7 +169,12 @@ export async function main(argv: string[] = Deno.args) {
       identity: Deno.env.get("CF_IDENTITY") ?? "",
       "exec-cli": "",
       "log-file": "",
+      "cfc-xattr-namespace": DEFAULT_CFC_XATTR_NAMESPACE,
+      "cfc-mode": "",
+      "cfc-writeback-state": "",
       debug: false,
+      "cfc-annotations": false,
+      "cfc-writeback-xattrs": false,
     },
   });
 
@@ -112,6 +199,32 @@ export async function main(argv: string[] = Deno.args) {
   }
 
   const debug = args.debug;
+  const requestedCfcMode = String(args["cfc-mode"] ?? "");
+  if (requestedCfcMode && !parseCfcMode(requestedCfcMode)) {
+    console.warn(
+      `[FUSE] Unknown --cfc-mode=${requestedCfcMode}; using runner default`,
+    );
+  }
+  const cfcMode: CfcEnforcementMode = resolveCfcMode({
+    cliMode: requestedCfcMode || undefined,
+    envMode: Deno.env.get("CF_CFC_MODE") ?? undefined,
+  });
+  const cfcAnnotationsEnabled = shouldEnableCfcAnnotations({
+    annotationsRequested: Boolean(args["cfc-annotations"]),
+    mode: cfcMode,
+  });
+  const cfcWritebackXattrs = Boolean(args["cfc-writeback-xattrs"]);
+  const cfcXattrNamespace = parseCfcXattrNamespace(
+    String(args["cfc-xattr-namespace"] ?? DEFAULT_CFC_XATTR_NAMESPACE),
+  );
+  if (!cfcXattrNamespace) {
+    console.error(
+      `[FUSE] Unknown --cfc-xattr-namespace=${
+        args["cfc-xattr-namespace"]
+      }; expected trusted, compat, or both`,
+    );
+    Deno.exit(1);
+  }
 
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
@@ -120,6 +233,17 @@ export async function main(argv: string[] = Deno.args) {
     );
     Deno.exit(1);
   }
+  const requestedCfcWritebackState = String(args["cfc-writeback-state"] ?? "");
+  const cfcWritebackStatePath = requestedCfcWritebackState ||
+    (cfcWritebackXattrs || cfcMode !== "disabled"
+      ? defaultCfcWritebackStatePath(mountpoint)
+      : undefined);
+  let bridge: CellBridge | null = null;
+  const cfcWritebacks = new CfcWritebackStore({
+    storagePath: cfcWritebackStatePath,
+    onChange: () => bridge?.refreshStatus(),
+  });
+  const cfcDiagnostics: string[] = [];
 
   // Ensure mountpoint exists
   try {
@@ -149,7 +273,6 @@ export async function main(argv: string[] = Deno.args) {
   const tree = new FsTree();
   const mountOwnership = getMountOwnership();
 
-  let bridge: CellBridge | null = null;
   const scheduledFlushes = new WeakMap<
     HandleState,
     ReturnType<typeof setTimeout>
@@ -158,7 +281,19 @@ export async function main(argv: string[] = Deno.args) {
   // Populate tree
   const apiUrl = args["api-url"];
   if (apiUrl) {
-    bridge = new CellBridge(tree, args["exec-cli"] || "");
+    bridge = new CellBridge(tree, args["exec-cli"] || "", {
+      cfcAnnotations: cfcAnnotationsEnabled,
+      statusProvider: () => ({
+        cfc: {
+          mode: cfcMode,
+          annotations: cfcAnnotationsEnabled,
+          writebackXattrs: cfcWritebackXattrs,
+          writeback: cfcWritebacks.status(),
+          diagnostics: cfcDiagnostics.slice(-50),
+        },
+      }),
+      onCfcProjectionRebuilt: reconcileCfcWritebacks,
+    });
     bridge.init({
       apiUrl,
       identity: args.identity || "",
@@ -172,6 +307,7 @@ export async function main(argv: string[] = Deno.args) {
       : ["home"];
     for (const spaceName of spaces) {
       await bridge.connectSpace(spaceName);
+      reconcileCfcWritebacks();
       console.log(`Connected space: ${spaceName}`);
     }
   } else {
@@ -199,6 +335,313 @@ export async function main(argv: string[] = Deno.args) {
       ),
       ownership: mountOwnership,
     });
+  }
+
+  function recordCfcDiagnostics(messages: string[]): void {
+    for (const message of messages) {
+      if (cfcDiagnostics.length >= 200) {
+        cfcDiagnostics.splice(0, cfcDiagnostics.length - 100);
+      }
+      cfcDiagnostics.push(message);
+      console.warn(`[FUSE:CFC] ${message}`);
+    }
+  }
+
+  function reconcileCfcWritebacks(): void {
+    const result = cfcWritebacks.reconcileTree(tree);
+    recordCfcDiagnostics(result.diagnostics);
+  }
+
+  function authorizeExistingCfcWrite(
+    ino: bigint,
+    operation: CfcExistingWritebackOperation,
+  ): boolean {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedExistingWrite(tree, ino, authorization.prepared);
+      cfcWritebacks.markMutationApplied(ino, operation);
+    }
+    return true;
+  }
+
+  function authorizeHandleCfcWrite(
+    fh: bigint,
+    handle: NonNullable<ReturnType<typeof handles.get>>,
+    operation: CfcExistingWritebackOperation,
+  ): boolean {
+    if (handles.hasCfcAuthorization(fh, operation)) return true;
+    const node = tree.getNode(handle.ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: handle.cfcAuthorizationAnnotation ?? node?.cfc,
+      prepared: cfcWritebacks.getPrepared(handle.ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedExistingWrite(tree, handle.ino, authorization.prepared);
+      cfcWritebacks.markMutationApplied(handle.ino, operation);
+    }
+    handles.authorizeCfcOperation(fh, operation);
+    return true;
+  }
+
+  function getExistingCfcWriteAuthorization(
+    ino: bigint,
+    operation: CfcExistingWritebackOperation,
+  ): ReturnType<typeof authorizeExistingWriteback> {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+    }
+    return authorization;
+  }
+
+  function authorizeMetadataCfcWrite(
+    ino: bigint,
+    requestedFields: CfcMetadataLabelKey[],
+  ): ReturnType<typeof authorizeMetadataWriteback> {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeMetadataWriteback({
+      mode: cfcMode,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, "setattr-metadata"),
+      requestedFields,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied setattr-metadata: ${authorization.reason}`,
+      );
+    }
+    return authorization;
+  }
+
+  function finalizeMetadataCfcMutation(
+    ino: bigint,
+    prepared: CfcPreparedWriteback | undefined,
+  ): void {
+    if (!prepared || !bridge) return;
+    const writePath = bridge.resolveWritePath(ino);
+    if (writePath) {
+      cfcWritebacks.markReadyForExactRecomputation(ino, "setattr-metadata");
+      bridge.finalizeWritePath(writePath).then(() => {
+        cfcWritebacks.markFinalizedPendingCleanup(ino, "setattr-metadata");
+        cfcWritebacks.deletePrepared(ino, "setattr-metadata");
+      }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(
+          ino,
+          "setattr-metadata",
+          String(e),
+        );
+        console.error(`[fuse] metadata finalize error: ${e}`);
+      });
+      return;
+    }
+    const sourceWritePath = bridge.resolveSourceWritePath(ino);
+    if (sourceWritePath) {
+      cfcWritebacks.markReadyForExactRecomputation(ino, "setattr-metadata");
+      bridge.finalizeSourceWritePath(sourceWritePath).then(() => {
+        cfcWritebacks.markFinalizedPendingCleanup(ino, "setattr-metadata");
+        cfcWritebacks.deletePrepared(ino, "setattr-metadata");
+      }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(
+          ino,
+          "setattr-metadata",
+          String(e),
+        );
+        console.error(`[fuse] metadata source finalize error: ${e}`);
+      });
+    }
+  }
+
+  function authorizeCreateCfcWrite(
+    parentIno: bigint,
+    operation: "create" | "mkdir",
+    name: string,
+  ): boolean {
+    const parent = tree.getNode(parentIno);
+    const diagnostics: string[] = [];
+    const authorization = authorizeCreateWriteback({
+      mode: cfcMode,
+      operation,
+      parentAnnotation: parent?.cfc,
+      prepared: cfcWritebacks.getPrepared(parentIno, operation, name),
+      name,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied ${operation} ${name}: ${authorization.reason}`,
+      );
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedParent(tree, parentIno, authorization.prepared);
+    }
+    return true;
+  }
+
+  function authorizeNamespaceCfcWrite(
+    parentIno: bigint,
+    operation: CfcNamespaceMutationWritebackOperation,
+    name: string,
+    options: {
+      prepared?: CfcPreparedWriteback;
+      pairedName?: string;
+      allowPairedRenamePrepare?: boolean;
+    } = {},
+  ): ReturnType<typeof authorizeNamespaceMutationWriteback> {
+    const parent = tree.getNode(parentIno);
+    const diagnostics: string[] = [];
+    const authorization = authorizeNamespaceMutationWriteback({
+      mode: cfcMode,
+      operation,
+      parentAnnotation: parent?.cfc,
+      prepared: options.prepared ??
+        cfcWritebacks.getPrepared(parentIno, operation, name),
+      name,
+      pairedName: options.pairedName,
+      allowPairedRenamePrepare: options.allowPairedRenamePrepare,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied ${operation} ${name}: ${authorization.reason}`,
+      );
+    }
+    return authorization;
+  }
+
+  function applyNamespacePreparation(
+    parentIno: bigint,
+    authorization: ReturnType<typeof authorizeNamespaceMutationWriteback>,
+  ): void {
+    if (authorization.allowed && authorization.prepared) {
+      applyPreparedParent(tree, parentIno, authorization.prepared);
+    }
+  }
+
+  function authorizeRenameCfcWrite(
+    oldParent: bigint,
+    oldName: string,
+    newParent: bigint,
+    newName: string,
+  ):
+    | {
+      allowed: true;
+      source: Extract<
+        ReturnType<typeof authorizeNamespaceMutationWriteback>,
+        { allowed: true }
+      >;
+      destination: Extract<
+        ReturnType<typeof authorizeNamespaceMutationWriteback>,
+        { allowed: true }
+      >;
+    }
+    | { allowed: false } {
+    const sameParent = oldParent === newParent;
+    const directSource = cfcWritebacks.getPrepared(
+      oldParent,
+      "rename-source",
+      oldName,
+    );
+    const directDestination = cfcWritebacks.getPrepared(
+      newParent,
+      "rename-destination",
+      newName,
+    );
+    const sourcePrepared = directSource ??
+      (sameParent ? directDestination : undefined);
+    const destinationPrepared = directDestination ??
+      (sameParent ? directSource : undefined);
+
+    const source = authorizeNamespaceCfcWrite(
+      oldParent,
+      "rename-source",
+      oldName,
+      {
+        prepared: sourcePrepared,
+        pairedName: newName,
+        allowPairedRenamePrepare: sameParent,
+      },
+    );
+    const destination = authorizeNamespaceCfcWrite(
+      newParent,
+      "rename-destination",
+      newName,
+      {
+        prepared: destinationPrepared,
+        pairedName: oldName,
+        allowPairedRenamePrepare: sameParent,
+      },
+    );
+    if (!source.allowed || !destination.allowed) {
+      return { allowed: false };
+    }
+    return { allowed: true, source, destination };
+  }
+
+  function authorizeSymlinkCfcWrite(
+    parentIno: bigint,
+    name: string,
+    targetText: string,
+    options: {
+      targetIdentity?: unknown;
+      allowDeferredTargetIdentity?: boolean;
+    } = {},
+  ): ReturnType<typeof authorizeSymlinkWriteback> {
+    const parent = tree.getNode(parentIno);
+    const diagnostics: string[] = [];
+    const authorization = authorizeSymlinkWriteback({
+      mode: cfcMode,
+      parentAnnotation: parent?.cfc,
+      prepared: cfcWritebacks.getPrepared(parentIno, "symlink", name),
+      name,
+      targetText,
+      targetIdentity: options.targetIdentity,
+      allowDeferredTargetIdentity: options.allowDeferredTargetIdentity,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied symlink ${name}: ${authorization.reason}`,
+      );
+    }
+    return authorization;
   }
 
   function replyEntry(
@@ -397,6 +840,10 @@ export async function main(argv: string[] = Deno.args) {
 
         let writeTarget: HandleWriteTarget | undefined;
         if (node.callableKind === "handler" && isWriting) {
+          if (isCfcEnforcing(cfcMode)) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
           const handlerTarget = bridge?.resolveHandlerTarget(inode);
           if (!handlerTarget) {
             fuse.symbols.fuse_reply_err(req, EACCES);
@@ -425,6 +872,8 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       let writeTarget: HandleWriteTarget | undefined;
+      const cfcAuthorizedOperations: CfcExistingWritebackOperation[] = [];
+      const cfcAuthorizationAnnotation = node.cfc;
       if (isWriting && bridge) {
         const sourceWritePath = bridge.resolveSourceWritePath(inode);
         if (sourceWritePath) {
@@ -442,11 +891,21 @@ export async function main(argv: string[] = Deno.args) {
       // Get current content for the handle buffer
       const content = node.kind === "file" ? node.content : new Uint8Array(0);
       const truncate = (flags & O_TRUNC) !== 0;
+      if (isWriting) {
+        const operation: CfcExistingWritebackOperation = truncate
+          ? "truncate"
+          : "write";
+        if (!authorizeExistingCfcWrite(inode, operation)) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        cfcAuthorizedOperations.push(operation);
+      }
       const fh = handles.open(
         inode,
         flags,
         truncate ? new Uint8Array(0) : content,
-        { writeTarget },
+        { writeTarget, cfcAuthorizedOperations, cfcAuthorizationAnnotation },
       );
       if (truncate) {
         handles.markTruncated(fh);
@@ -660,8 +1119,35 @@ export async function main(argv: string[] = Deno.args) {
     const flushVersion = handle.version;
     const buffer = handle.buffer.slice();
     const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+    const existingWriteOperation: CfcExistingWritebackOperation =
+      handle.truncatePending ? "truncate" : "write";
 
     const callableNode = tree.getNode(handle.ino);
+    const cfcExistingWriteOperations = new Set<CfcExistingWritebackOperation>([
+      existingWriteOperation,
+    ]);
+    if (
+      existingWriteOperation === "write" &&
+      handle.cfcAuthorizedOperations.has("truncate")
+    ) {
+      cfcExistingWriteOperations.add("truncate");
+    }
+    const markExistingReady = () => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markReadyForExactRecomputation(handle.ino, operation);
+      }
+    };
+    const markExistingFinalized = () => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markFinalizedPendingCleanup(handle.ino, operation);
+        cfcWritebacks.deletePrepared(handle.ino, operation);
+      }
+    };
+    const markExistingFailed = (reason: string) => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markRunnerCommitFailed(handle.ino, operation, reason);
+      }
+    };
     try {
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
@@ -713,6 +1199,7 @@ export async function main(argv: string[] = Deno.args) {
           meta = await piece.getPatternMeta();
         } catch (e) {
           console.error(`[source] Failed to get pattern meta: ${e}`);
+          markExistingFailed(String(e));
           return EACCES;
         }
 
@@ -733,6 +1220,7 @@ export async function main(argv: string[] = Deno.args) {
           console.error(
             `[source] No program or src in pattern meta for ${relPath}`,
           );
+          markExistingFailed("no source program metadata");
           return EACCES;
         }
 
@@ -753,6 +1241,7 @@ export async function main(argv: string[] = Deno.args) {
               baseFiles.map((f) => f.name).join(", ")
             }]`,
           );
+          markExistingFailed(`source file not found: ${relPath}`);
           return EACCES;
         }
 
@@ -767,6 +1256,9 @@ export async function main(argv: string[] = Deno.args) {
           if (errorLogIno !== undefined) {
             tree.updateFile(errorLogIno, "");
           }
+          markExistingReady();
+          await bridge.finalizeSourceWritePath(writeTarget.target);
+          markExistingFinalized();
           if (handle.version === flushVersion) {
             handle.dirty = false;
             handle.truncatePending = false;
@@ -780,6 +1272,7 @@ export async function main(argv: string[] = Deno.args) {
             tree.updateFile(errorLogIno, errorMsg);
           }
           console.error(`[source] Compile error in ${relPath}: ${errorMsg}`);
+          markExistingFailed(errorMsg);
           return EACCES;
         }
       }
@@ -802,7 +1295,9 @@ export async function main(argv: string[] = Deno.args) {
       if (writePath.fsProjection) {
         const ok = await bridge.writeFsFile(writePath, text);
         if (!ok) return EINVAL;
-        bridge.invalidateWritePath(writePath);
+        markExistingReady();
+        await bridge.finalizeWritePath(writePath);
+        markExistingFinalized();
         if (handle.version === flushVersion) {
           handle.dirty = false;
           handle.truncatePending = false;
@@ -851,7 +1346,9 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       await bridge.writeValue(writePath, value);
-      bridge.invalidateWritePath(writePath);
+      markExistingReady();
+      await bridge.finalizeWritePath(writePath);
+      markExistingFinalized();
       if (handle.version === flushVersion) {
         handle.dirty = false;
         handle.truncatePending = false;
@@ -896,6 +1393,7 @@ export async function main(argv: string[] = Deno.args) {
         );
       }
 
+      markExistingFailed(msg);
       return EIO;
     } finally {
       handle.flushing = false;
@@ -971,6 +1469,11 @@ export async function main(argv: string[] = Deno.args) {
         view.copyInto(data);
       }
 
+      if (!authorizeHandleCfcWrite(fh, handle, "write")) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
       handles.write(fh, data, off);
       fuse.symbols.fuse_reply_write(req, BigInt(sz));
     },
@@ -1039,9 +1542,62 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
       }
+      const sizeChange = (toSet & FUSE_SET_ATTR_SIZE) !== 0;
+      const metadataFlags = toSet & ~FUSE_SET_ATTR_SIZE;
+      const metadataChange = metadataFlags !== 0;
+      const metadataFields = metadataChange
+        ? metadataFieldsForSetattrFlags(metadataFlags)
+        : [];
+
+      let truncateAuthorization = undefined as
+        | ReturnType<typeof authorizeExistingWriteback>
+        | undefined;
+      let metadataAuthorization = undefined as
+        | ReturnType<typeof authorizeMetadataWriteback>
+        | undefined;
+
+      if (sizeChange) {
+        truncateAuthorization = getExistingCfcWriteAuthorization(
+          inode,
+          "truncate",
+        );
+        if (!truncateAuthorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+      if (metadataChange) {
+        metadataAuthorization = authorizeMetadataCfcWrite(
+          inode,
+          metadataFields,
+        );
+        if (!metadataAuthorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
+      if (truncateAuthorization?.allowed && truncateAuthorization.prepared) {
+        applyPreparedExistingWrite(tree, inode, truncateAuthorization.prepared);
+        cfcWritebacks.markMutationApplied(inode, "truncate");
+      }
+      if (metadataAuthorization?.allowed && metadataAuthorization.prepared) {
+        applyPreparedMetadataMutation(
+          tree,
+          inode,
+          metadataAuthorization.prepared,
+          metadataFields,
+        );
+        cfcWritebacks.markMutationApplied(
+          inode,
+          "setattr-metadata",
+          undefined,
+          { requestedFields: metadataFields },
+        );
+      }
 
       // Handle truncate / size change
-      if (toSet & FUSE_SET_ATTR_SIZE) {
+      if (sizeChange) {
         // Read new size from attr struct
         const attrView = new Deno.UnsafePointerView(_attrPtr!);
         const newSize = Number(attrView.getBigInt64(STAT_ST_SIZE_OFFSET));
@@ -1070,6 +1626,12 @@ export async function main(argv: string[] = Deno.args) {
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
         1.0,
       );
+      if (
+        metadataAuthorization?.allowed &&
+        metadataAuthorization.prepared
+      ) {
+        finalizeMetadataCfcMutation(inode, metadataAuthorization.prepared);
+      }
     },
   );
   callbacks.push(setattrCb);
@@ -1143,6 +1705,12 @@ export async function main(argv: string[] = Deno.args) {
           attrValue = encoder.encode(jsonType);
         }
       }
+      if (!attrValue) {
+        attrValue = getCfcXattrValue(tree, ino, attrName, {
+          enabled: cfcAnnotationsEnabled,
+          namespace: cfcXattrNamespace,
+        });
+      }
 
       if (!attrValue) {
         fuse.symbols.fuse_reply_err(req, ENODATA);
@@ -1178,16 +1746,27 @@ export async function main(argv: string[] = Deno.args) {
       ino: number | bigint,
       size: number | bigint,
     ) => {
-      const node = tree.getNode(BigInt(ino));
+      const inode = BigInt(ino);
+      const node = tree.getNode(inode);
+      const xattrNames: string[] = [];
 
-      // Build null-separated list of xattr names
       const jsonType = node?.kind === "file"
         ? node.jsonType
         : node?.kind === "dir"
         ? node.jsonType
         : undefined;
+      if (jsonType) {
+        xattrNames.push("user.json.type");
+      }
 
-      if (!jsonType) {
+      xattrNames.push(
+        ...listCfcXattrNames(tree, inode, {
+          enabled: cfcAnnotationsEnabled,
+          namespace: cfcXattrNamespace,
+        }),
+      );
+
+      if (xattrNames.length === 0) {
         // No xattrs — empty list
         const sz = Number(size);
         if (sz === 0) {
@@ -1198,8 +1777,7 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
-      // "user.json.type\0"
-      const listBuf = encoder.encode("user.json.type\0");
+      const listBuf = encoder.encode(`${xattrNames.join("\0")}\0`);
       const sz = Number(size);
 
       if (sz === 0) {
@@ -1216,6 +1794,72 @@ export async function main(argv: string[] = Deno.args) {
     },
   );
   callbacks.push(listxattrCb);
+
+  const setxattrCb = platform.createSetxattrCallback(
+    (
+      req: Deno.PointerValue,
+      ino: bigint,
+      namePtr: Deno.PointerValue,
+      valuePtr: Deno.PointerValue,
+      size: bigint,
+      _flags: number,
+    ) => {
+      logOp("setxattr", ino.toString());
+      if (!cfcWritebackXattrs) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      const name = readCString(namePtr);
+      const value = new TextDecoder().decode(readBuffer(valuePtr, size));
+      let result:
+        | ReturnType<CfcWritebackStore["setPreparedXattr"]>
+        | ReturnType<CfcWritebackStore["setFinalizeXattr"]>;
+      if (name === CFC_WRITEBACK_PREPARE_XATTR) {
+        result = cfcWritebacks.setPreparedXattr(ino, name, value);
+      } else if (name === CFC_WRITEBACK_FINALIZE_XATTR) {
+        result = cfcWritebacks.setFinalizeXattr(ino, name, value);
+      } else {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (!result.ok) {
+        console.warn(`[FUSE:CFC] rejected ${name}: ${result.reason}`);
+        bridge?.refreshStatus();
+        fuse.symbols.fuse_reply_err(req, EINVAL);
+        return;
+      }
+      bridge?.refreshStatus();
+      fuse.symbols.fuse_reply_err(req, 0);
+    },
+  );
+  callbacks.push(setxattrCb);
+
+  const removexattrCb = new Deno.UnsafeCallback(
+    { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
+    (
+      req: Deno.PointerValue,
+      ino: number | bigint,
+      namePtr: Deno.PointerValue,
+    ) => {
+      logOp("removexattr", ino.toString());
+      if (!cfcWritebackXattrs) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      const name = readCString(namePtr);
+      if (
+        name !== CFC_WRITEBACK_PREPARE_XATTR &&
+        name !== CFC_WRITEBACK_FINALIZE_XATTR
+      ) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      cfcWritebacks.deleteAllForIno(BigInt(ino));
+      bridge?.refreshStatus();
+      fuse.symbols.fuse_reply_err(req, 0);
+    },
+  );
+  callbacks.push(removexattrCb);
 
   // create(req, parent_ino, name_ptr, mode, fi_ptr)
   const createCb = new Deno.UnsafeCallback(
@@ -1251,9 +1895,18 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (!authorizeCreateCfcWrite(parent, "create", name)) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
-      // Optimistic: create file node and reply immediately, then write to cell.
-      const ino = tree.addFile(parent, name, "", "string");
+      const prepared = cfcWritebacks.getPrepared(parent, "create", name);
+      const ino = prepared
+        ? applyPreparedCreate(tree, parent, name, "file", prepared)
+        : tree.addFile(parent, name, "", "string");
+      if (prepared) {
+        cfcWritebacks.markMutationApplied(parent, "create", name);
+      }
       const fh = handles.open(
         ino,
         O_RDWR,
@@ -1293,9 +1946,13 @@ export async function main(argv: string[] = Deno.args) {
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         "",
-      ).then(() => {
-        bridge.invalidateWritePath(parentPath);
+      ).then(async () => {
+        cfcWritebacks.markReadyForExactRecomputation(parent, "create", name);
+        await bridge.finalizeWritePath(parentPath);
+        cfcWritebacks.markFinalizedPendingCleanup(parent, "create", name);
+        cfcWritebacks.deletePrepared(parent, "create", name);
       }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(parent, "create", String(e), name);
         console.error(`[fuse] create write error: ${e}`);
       });
     },
@@ -1328,9 +1985,18 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (!authorizeCreateCfcWrite(parent, "mkdir", name)) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
-      // Optimistic: create dir and reply immediately, then write to cell.
-      const ino = tree.addDir(parent, name, "object");
+      const prepared = cfcWritebacks.getPrepared(parent, "mkdir", name);
+      const ino = prepared
+        ? applyPreparedCreate(tree, parent, name, "dir", prepared)
+        : tree.addDir(parent, name, "object");
+      if (prepared) {
+        cfcWritebacks.markMutationApplied(parent, "mkdir", name);
+      }
       const node = tree.getNode(ino);
       replyEntry(req, ino, node);
 
@@ -1339,9 +2005,13 @@ export async function main(argv: string[] = Deno.args) {
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         {},
-      ).then(() => {
-        bridge.invalidateWritePath(parentPath);
+      ).then(async () => {
+        cfcWritebacks.markReadyForExactRecomputation(parent, "mkdir", name);
+        await bridge.finalizeWritePath(parentPath);
+        cfcWritebacks.markFinalizedPendingCleanup(parent, "mkdir", name);
+        cfcWritebacks.deletePrepared(parent, "mkdir", name);
       }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(parent, "mkdir", String(e), name);
         console.error(`[fuse] mkdir write error: ${e}`);
       });
     },
@@ -1364,6 +2034,24 @@ export async function main(argv: string[] = Deno.args) {
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
+
+      let parentPath = null as ReturnType<CellBridge["resolveWritePath"]>;
+      let authorization = undefined as
+        | ReturnType<typeof authorizeNamespaceMutationWriteback>
+        | undefined;
+      if (isCfcEnforcing(cfcMode)) {
+        parentPath = bridge.resolveWritePath(parent);
+        if (!parentPath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        authorization = authorizeNamespaceCfcWrite(parent, "unlink", name);
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
       const childIno = tree.lookup(parent, name);
       if (childIno === undefined) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -1376,10 +2064,26 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
+      parentPath ??= bridge.resolveWritePath(parent);
+      if (!parentPath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      authorization ??= authorizeNamespaceCfcWrite(parent, "unlink", name);
+      if (!authorization.allowed) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
       // For array parents: read parent array, splice, write back
       const parentNode = tree.getNode(parent);
       const isArrayParent = parentNode?.kind === "dir" &&
         parentNode.jsonType === "array";
+
+      applyNamespacePreparation(parent, authorization);
+      if (authorization.prepared) {
+        cfcWritebacks.markMutationApplied(parent, "unlink", name);
+      }
 
       // Optimistic: remove from tree and reply immediately
       tree.removeChild(parent, name);
@@ -1397,8 +2101,6 @@ export async function main(argv: string[] = Deno.args) {
       // since we already did them above)
       (async () => {
         if (isArrayParent) {
-          const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -1407,12 +2109,21 @@ export async function main(argv: string[] = Deno.args) {
             if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
               currentValue.splice(idx, 1);
               await bridge!.writeValue(parentPath, currentValue);
-              bridge!.invalidateWritePath(parentPath);
+              cfcWritebacks.markReadyForExactRecomputation(
+                parent,
+                "unlink",
+                name,
+              );
+              await bridge!.finalizeWritePath(parentPath);
+              cfcWritebacks.markFinalizedPendingCleanup(
+                parent,
+                "unlink",
+                name,
+              );
+              cfcWritebacks.deletePrepared(parent, "unlink", name);
             }
           }
         } else {
-          const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -1423,10 +2134,22 @@ export async function main(argv: string[] = Deno.args) {
             const obj = { ...(currentValue as Record<string, unknown>) };
             delete obj[name];
             await bridge!.writeValue(parentPath, obj);
-            bridge!.invalidateWritePath(parentPath);
+            cfcWritebacks.markReadyForExactRecomputation(
+              parent,
+              "unlink",
+              name,
+            );
+            await bridge!.finalizeWritePath(parentPath);
+            cfcWritebacks.markFinalizedPendingCleanup(
+              parent,
+              "unlink",
+              name,
+            );
+            cfcWritebacks.deletePrepared(parent, "unlink", name);
           }
         }
       })().catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(parent, "unlink", String(e), name);
         console.error(`[fuse] unlink write error: ${e}`);
       });
     },
@@ -1449,6 +2172,24 @@ export async function main(argv: string[] = Deno.args) {
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
+
+      let parentPath = null as ReturnType<CellBridge["resolveWritePath"]>;
+      let authorization = undefined as
+        | ReturnType<typeof authorizeNamespaceMutationWriteback>
+        | undefined;
+      if (isCfcEnforcing(cfcMode)) {
+        parentPath = bridge.resolveWritePath(parent);
+        if (!parentPath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        authorization = authorizeNamespaceCfcWrite(parent, "rmdir", name);
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
       const childIno = tree.lookup(parent, name);
       if (childIno === undefined) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -1467,10 +2208,26 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
+      parentPath ??= bridge.resolveWritePath(parent);
+      if (!parentPath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      authorization ??= authorizeNamespaceCfcWrite(parent, "rmdir", name);
+      if (!authorization.allowed) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
       // Same removal logic as unlink but for a directory
       const parentNode = tree.getNode(parent);
       const isArrayParent = parentNode?.kind === "dir" &&
         parentNode.jsonType === "array";
+
+      applyNamespacePreparation(parent, authorization);
+      if (authorization.prepared) {
+        cfcWritebacks.markMutationApplied(parent, "rmdir", name);
+      }
 
       // Optimistic: remove from tree and reply immediately
       tree.removeChild(parent, name);
@@ -1481,8 +2238,6 @@ export async function main(argv: string[] = Deno.args) {
       // Fire-and-forget the cell write
       (async () => {
         if (isArrayParent) {
-          const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -1491,12 +2246,21 @@ export async function main(argv: string[] = Deno.args) {
             if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
               currentValue.splice(idx, 1);
               await bridge!.writeValue(parentPath, currentValue);
-              bridge!.invalidateWritePath(parentPath);
+              cfcWritebacks.markReadyForExactRecomputation(
+                parent,
+                "rmdir",
+                name,
+              );
+              await bridge!.finalizeWritePath(parentPath);
+              cfcWritebacks.markFinalizedPendingCleanup(
+                parent,
+                "rmdir",
+                name,
+              );
+              cfcWritebacks.deletePrepared(parent, "rmdir", name);
             }
           }
         } else {
-          const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -1507,10 +2271,22 @@ export async function main(argv: string[] = Deno.args) {
             const obj = { ...(currentValue as Record<string, unknown>) };
             delete obj[name];
             await bridge!.writeValue(parentPath, obj);
-            bridge!.invalidateWritePath(parentPath);
+            cfcWritebacks.markReadyForExactRecomputation(
+              parent,
+              "rmdir",
+              name,
+            );
+            await bridge!.finalizeWritePath(parentPath);
+            cfcWritebacks.markFinalizedPendingCleanup(
+              parent,
+              "rmdir",
+              name,
+            );
+            cfcWritebacks.deletePrepared(parent, "rmdir", name);
           }
         }
       })().catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(parent, "rmdir", String(e), name);
         console.error(`[fuse] rmdir write error: ${e}`);
       });
     },
@@ -1537,6 +2313,36 @@ export async function main(argv: string[] = Deno.args) {
       const newParent = newParentIno;
       const newName = readCString(newNamePtr);
 
+      let oldParentWritePath = null as ReturnType<
+        CellBridge["resolveWritePath"]
+      >;
+      let newParentPath = null as ReturnType<CellBridge["resolveWritePath"]>;
+      let renameAuthorization = undefined as
+        | ReturnType<typeof authorizeRenameCfcWrite>
+        | undefined;
+      if (isCfcEnforcing(cfcMode)) {
+        oldParentWritePath = bridge.resolveWritePath(oldParent);
+        if (!oldParentWritePath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        newParentPath = bridge.resolveWritePath(newParent);
+        if (!newParentPath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        renameAuthorization = authorizeRenameCfcWrite(
+          oldParent,
+          oldName,
+          newParent,
+          newName,
+        );
+        if (!renameAuthorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
       const childIno = tree.lookup(oldParent, oldName);
       if (childIno === undefined) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -1549,8 +2355,7 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
-      // Check new parent is in the same cell
-      const newParentPath = bridge.resolveWritePath(newParent);
+      newParentPath ??= bridge.resolveWritePath(newParent);
       if (!newParentPath) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1562,6 +2367,22 @@ export async function main(argv: string[] = Deno.args) {
         oldWritePath.cell !== newParentPath.cell
       ) {
         fuse.symbols.fuse_reply_err(req, EXDEV);
+        return;
+      }
+
+      oldParentWritePath ??= bridge.resolveWritePath(oldParent);
+      if (!oldParentWritePath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      renameAuthorization ??= authorizeRenameCfcWrite(
+        oldParent,
+        oldName,
+        newParent,
+        newName,
+      );
+      if (!renameAuthorization.allowed) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
 
@@ -1577,34 +2398,102 @@ export async function main(argv: string[] = Deno.args) {
           { ...newParentPath, jsonPath: destPath },
           value,
         );
-        bridge!.invalidateWritePath(newParentPath);
 
         // Delete old path: read parent, delete key, write back
-        const oldParentWritePath = bridge!.resolveWritePath(oldParent);
-        if (oldParentWritePath) {
-          const parentValue = await oldWritePath.piece[oldWritePath.cell].get(
-            oldParentWritePath.jsonPath.length > 0
-              ? oldParentWritePath.jsonPath
-              : undefined,
-          );
-          if (
-            parentValue && typeof parentValue === "object" &&
-            !Array.isArray(parentValue)
-          ) {
-            const obj = { ...(parentValue as Record<string, unknown>) };
-            delete obj[oldName];
-            await bridge!.writeValue(oldParentWritePath, obj);
-            bridge!.invalidateWritePath(oldParentWritePath);
-          } else if (Array.isArray(parentValue)) {
-            const idx = Number(oldName);
-            if (!isNaN(idx)) {
-              parentValue.splice(idx, 1);
-              await bridge!.writeValue(oldParentWritePath, parentValue);
-              bridge!.invalidateWritePath(oldParentWritePath);
-            }
+        const parentValue = await oldWritePath.piece[oldWritePath.cell].get(
+          oldParentWritePath.jsonPath.length > 0
+            ? oldParentWritePath.jsonPath
+            : undefined,
+        );
+        if (
+          parentValue && typeof parentValue === "object" &&
+          !Array.isArray(parentValue)
+        ) {
+          const obj = { ...(parentValue as Record<string, unknown>) };
+          delete obj[oldName];
+          await bridge!.writeValue(oldParentWritePath, obj);
+        } else if (Array.isArray(parentValue)) {
+          const idx = Number(oldName);
+          if (!isNaN(idx)) {
+            parentValue.splice(idx, 1);
+            await bridge!.writeValue(oldParentWritePath, parentValue);
           }
         }
+
+        if (oldParent === newParent) {
+          cfcWritebacks.markReadyForExactRecomputation(
+            oldParent,
+            "rename-source",
+            oldName,
+          );
+          cfcWritebacks.markReadyForExactRecomputation(
+            newParent,
+            "rename-destination",
+            newName,
+          );
+          await bridge!.finalizeWritePath(oldParentWritePath);
+        } else {
+          cfcWritebacks.markReadyForExactRecomputation(
+            oldParent,
+            "rename-source",
+            oldName,
+          );
+          cfcWritebacks.markReadyForExactRecomputation(
+            newParent,
+            "rename-destination",
+            newName,
+          );
+          await bridge!.finalizeWritePath(newParentPath);
+          await bridge!.finalizeWritePath(oldParentWritePath);
+        }
+        cfcWritebacks.markFinalizedPendingCleanup(
+          oldParent,
+          "rename-source",
+          oldName,
+        );
+        cfcWritebacks.markFinalizedPendingCleanup(
+          newParent,
+          "rename-destination",
+          newName,
+        );
+        cfcWritebacks.deletePrepared(oldParent, "rename-source", oldName);
+        cfcWritebacks.deletePrepared(
+          newParent,
+          "rename-destination",
+          newName,
+        );
       };
+
+      applyNamespacePreparation(oldParent, renameAuthorization.source);
+      if (renameAuthorization.source.prepared) {
+        cfcWritebacks.markMutationApplied(
+          oldParent,
+          "rename-source",
+          oldName,
+        );
+      }
+      if (newParent !== oldParent) {
+        applyNamespacePreparation(newParent, renameAuthorization.destination);
+        if (renameAuthorization.destination.prepared) {
+          cfcWritebacks.markMutationApplied(
+            newParent,
+            "rename-destination",
+            newName,
+          );
+        }
+      } else if (
+        renameAuthorization.destination.prepared !==
+          renameAuthorization.source.prepared
+      ) {
+        applyNamespacePreparation(newParent, renameAuthorization.destination);
+        if (renameAuthorization.destination.prepared) {
+          cfcWritebacks.markMutationApplied(
+            newParent,
+            "rename-destination",
+            newName,
+          );
+        }
+      }
 
       // Optimistic: rename in tree and reply immediately
       tree.rename(oldParent, oldName, newParent, newName);
@@ -1612,6 +2501,18 @@ export async function main(argv: string[] = Deno.args) {
 
       // Fire-and-forget the cell writes
       doRename().catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(
+          oldParent,
+          "rename-source",
+          String(e),
+          oldName,
+        );
+        cfcWritebacks.markRunnerCommitFailed(
+          newParent,
+          "rename-destination",
+          String(e),
+          newName,
+        );
         console.error(`[fuse] rename write error: ${e}`);
       });
     },
@@ -1645,11 +2546,37 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
+      let authorization = undefined as
+        | ReturnType<typeof authorizeSymlinkWriteback>
+        | undefined;
+      if (cfcMode !== "disabled") {
+        authorization = authorizeSymlinkCfcWrite(parent, name, target, {
+          allowDeferredTargetIdentity: true,
+        });
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
       // Parse target into sigil link components
       const sigil = bridge.parseSymlinkTarget(parent, target);
       if (!sigil) {
         fuse.symbols.fuse_reply_err(req, EINVAL);
         return;
+      }
+
+      const needsTargetIdentityValidation = authorization?.allowed &&
+        authorization.prepared?.target.targetText === undefined &&
+        authorization.prepared?.target.targetIdentity !== undefined;
+      if (needsTargetIdentityValidation) {
+        authorization = authorizeSymlinkCfcWrite(parent, name, target, {
+          targetIdentity: sigil,
+        });
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
       }
 
       // Construct sigil link value and write to cell
@@ -1661,14 +2588,43 @@ export async function main(argv: string[] = Deno.args) {
 
       // Optimistic: add to tree and reply immediately, then write to cell.
       // The subscription rebuild will eventually replace this node.
-      const ino = tree.addSymlink(parent, name, target);
+      const prepared = authorization?.allowed
+        ? authorization.prepared
+        : undefined;
+      const ino = prepared
+        ? applyPreparedSymlink(tree, parent, name, target, prepared)
+        : tree.addSymlink(parent, name, target);
+      if (prepared) {
+        cfcWritebacks.markMutationApplied(parent, "symlink", name);
+      }
       const node = tree.getNode(ino);
       replyEntry(req, ino, node);
 
       // Fire-and-forget write to cell
-      bridge.writeValue(writePath, sigilValue).then(() => {
-        bridge.invalidateWritePath(parentPath);
+      bridge.writeValue(writePath, sigilValue).then(async () => {
+        if (prepared) {
+          cfcWritebacks.markReadyForExactRecomputation(
+            parent,
+            "symlink",
+            name,
+          );
+        }
+        if (cfcAnnotationsEnabled) {
+          await bridge.finalizeWritePath(parentPath);
+        } else {
+          bridge.invalidateWritePath(parentPath);
+        }
+        if (prepared) {
+          cfcWritebacks.markFinalizedPendingCleanup(parent, "symlink", name);
+          cfcWritebacks.deletePrepared(parent, "symlink", name);
+        }
       }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(
+          parent,
+          "symlink",
+          String(e),
+          name,
+        );
         console.error(`[fuse] symlink write error: ${e}`);
       });
     },
@@ -1706,8 +2662,14 @@ export async function main(argv: string[] = Deno.args) {
   setOp(OPS_OFFSETS.opendir, opendirCb);
   setOp(OPS_OFFSETS.readdir, readdirCb);
   setOp(OPS_OFFSETS.releasedir, releasedirCb);
+  if (cfcWritebackXattrs) {
+    setOp(OPS_OFFSETS.setxattr, setxattrCb);
+  }
   setOp(OPS_OFFSETS.getxattr, getxattrCb);
   setOp(OPS_OFFSETS.listxattr, listxattrCb);
+  if (cfcWritebackXattrs) {
+    setOp(OPS_OFFSETS.removexattr, removexattrCb);
+  }
   setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---

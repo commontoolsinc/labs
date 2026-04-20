@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
   clickTrustedActionAndWaitForText,
+  waitForRuntimeIdle,
   waitForText,
   waitForTextAbsent,
 } from "./cfc-browser-helpers.ts";
@@ -61,6 +62,7 @@ describe("cfc render policy demo integration test", () => {
       },
       identity,
     });
+    await waitForRuntimeIdle(page);
 
     await waitForText(page, "#raw-health-attempt", "Content hidden by policy");
     await waitForText(

@@ -116,7 +116,7 @@ export class XOmniLayout extends LitElement {
 
     .fab {
       position: fixed;
-      bottom: 4px;
+      bottom: calc(4px + env(safe-area-inset-bottom, 0px));
       left: 50%;
       transform: translateX(-50%);
       z-index: 1000;

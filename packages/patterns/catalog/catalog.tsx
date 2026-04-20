@@ -57,6 +57,7 @@ interface CatalogInput {
         items: [
           { id: "card"; label: "Card" },
           { id: "modal"; label: "Modal" },
+          { id: "tab-bar"; label: "Tab Bar" },
           { id: "toolbar"; label: "Toolbar" },
           { id: "vstack"; label: "VStack" },
           { id: "hstack"; label: "HStack" },
@@ -89,6 +90,7 @@ interface CatalogInput {
           { id: "loader"; label: "Loader" },
           { id: "skeleton"; label: "Skeleton" },
           { id: "alert"; label: "Alert" },
+          { id: "toast"; label: "Toast" },
         ];
       },
       {
@@ -110,6 +112,7 @@ interface CatalogInput {
           { id: "note"; label: "Note" },
           { id: "vignette-recipe"; label: "Vignette: Recipe" },
           { id: "vignette-finance"; label: "Vignette: Finance" },
+          { id: "vignette-mobile-app"; label: "Vignette: Mobile App" },
         ];
       },
     ]>;
@@ -161,9 +164,15 @@ export default pattern<CatalogInput, CatalogOutput>(
   ({ selectedStory, categories }) => {
     const selected = computed(() => selectedStory.get());
     const story = StoryRenderer({ selected });
+    const sidebarOpen = Writable.of(true);
 
     const handleSelect = action(({ id }: { id: string }) => {
       selectedStory.set(id);
+      sidebarOpen.set(false);
+    });
+
+    const toggleSidebar = action(() => {
+      sidebarOpen.set(!sidebarOpen.get());
     });
 
     return {
@@ -171,11 +180,33 @@ export default pattern<CatalogInput, CatalogOutput>(
       [UI]: (
         <cf-screen>
           <div style={styles.root}>
-            <Sidebar
-              selected={selected}
-              categories={categories}
-              onSelect={handleSelect}
-            />
+            {sidebarOpen.get()
+              ? (
+                <Sidebar
+                  selected={selected}
+                  categories={categories}
+                  onSelect={handleSelect}
+                  onCollapse={toggleSidebar}
+                />
+              )
+              : (
+                <div
+                  style={{
+                    flexShrink: "0",
+                    borderRight: "1px solid #e6e9ed",
+                    backgroundColor: "#f6f7f9",
+                    padding: "12px",
+                  }}
+                >
+                  <cf-button
+                    variant="ghost"
+                    onClick={toggleSidebar}
+                    style="font-size: 18px; padding: 2px 6px;"
+                  >
+                    &#9776;
+                  </cf-button>
+                </div>
+              )}
 
             {/* Main content area */}
             <main style={styles.main}>

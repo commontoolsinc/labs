@@ -20,6 +20,10 @@ import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
 import { provide } from "@lit/context";
+import {
+  getThemePreference,
+  type ThemePreference,
+} from "../lib/theme-preference.ts";
 
 type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
   rt?: RuntimeClient;
@@ -58,6 +62,9 @@ export class XRootView extends BaseView {
 
   @state()
   accessor app = createDefaultAppState();
+
+  @state()
+  private accessor _themePreference: ThemePreference = getThemePreference();
 
   @property()
   accessor keyStore: KeyStore | undefined = undefined;
@@ -164,10 +171,18 @@ export class XRootView extends BaseView {
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener(SHELL_COMMAND, this.onCommand);
+    document.addEventListener(
+      "theme-preference-changed",
+      this._onThemeChanged,
+    );
   }
 
   override disconnectedCallback(): void {
     this.removeEventListener(SHELL_COMMAND, this.onCommand);
+    document.removeEventListener(
+      "theme-preference-changed",
+      this._onThemeChanged,
+    );
     super.disconnectedCallback();
   }
 
@@ -197,6 +212,10 @@ export class XRootView extends BaseView {
       this._rt.run([current]);
     }
   }
+
+  private _onThemeChanged = (e: Event) => {
+    this._themePreference = (e as CustomEvent).detail;
+  };
 
   onCommand = (e: Event) => {
     const { detail: command } = e as CustomEvent;
@@ -237,11 +256,13 @@ export class XRootView extends BaseView {
 
   override render() {
     return html`
-      <x-app-view
-        .app="${this.app}"
-        .keyStore="${this.keyStore}"
-        .rt="${this._rt.value}"
-      ></x-app-view>
+      <cf-theme .theme="${{ colorScheme: this._themePreference }}">
+        <x-app-view
+          .app="${this.app}"
+          .keyStore="${this.keyStore}"
+          .rt="${this._rt.value}"
+        ></x-app-view>
+      </cf-theme>
     `;
   }
 }

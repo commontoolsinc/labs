@@ -50,6 +50,7 @@ import {
   type CfcEnforcementMode,
   type CfcTxState,
   type ConsumedRead,
+  DEFAULT_CFC_ENFORCEMENT_MODE,
   type ImplementationIdentity,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
@@ -86,7 +87,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private readOnlySource?: string;
   private cfcState: CfcTxState = {
     relevant: false,
-    enforcementMode: "disabled",
+    enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
     prepare: { status: "unprepared" },
     writePolicyInputs: [],
     outbox: [],

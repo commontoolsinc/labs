@@ -55,6 +55,15 @@ piece issues.
 - Ensure Output type includes action as Stream<void>
 - Use .send() not .get() to trigger
 
+**Browser UI stays stale after a write:**
+
+- Do not assume a documented primitive like `.push()` is broken just because
+  tests/CLI and browser behavior diverge
+- First inspect the actual cell values in browser/runtime tools to confirm
+  whether state changed
+- If state changed but the UI did not, isolate the rendering/reactivity issue
+  with a minimal repro before rewriting the mutation style
+
 **computed() wrapping JSX — conditional rendering broken:**
 
 - Inside `computed()` body, ternaries are plain JS (Writable objects always
@@ -93,6 +102,13 @@ agent-browser eval "(async () => {
 # Check for action schema mismatches (handlers doing nothing)
 agent-browser eval "JSON.stringify(commonfabric.getLoggerFlagsBreakdown())"
 ```
+
+When tests or CLI calls succeed but browser-visible UI stays stale:
+
+- inspect the live piece state first
+- confirm whether the handler actually wrote the expected value
+- only then decide whether the bug is in mutation semantics, rendering, or
+  browser harness behavior
 
 **In browser console** (for interactive debugging):
 

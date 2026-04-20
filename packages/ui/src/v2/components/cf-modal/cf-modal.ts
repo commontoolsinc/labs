@@ -86,6 +86,18 @@ export class CFModal extends BaseElement {
   @property({ type: String })
   accessor label: string | undefined = undefined;
 
+  /** Controls layout and animation: centered dialog vs. bottom sheet */
+  @property({ type: String, reflect: true })
+  accessor presentation: "dialog" | "sheet" = "dialog";
+
+  /** Show the drag-handle indicator (only visible in sheet mode) */
+  @property({ type: Boolean, reflect: true })
+  accessor grabber = false;
+
+  /** Sheet snap height: content-sized, half-screen, or near-full-screen */
+  @property({ type: String, reflect: true })
+  accessor detent: "auto" | "half" | "full" = "auto";
+
   /** Modal manager from context (optional - works standalone too) */
   @consume({ context: modalContext, subscribe: false })
   private accessor _manager: ModalManager | undefined = undefined;
@@ -122,6 +134,9 @@ export class CFModal extends BaseElement {
     this.dismissable = true;
     this.size = "md";
     this.preventScroll = true;
+    this.presentation = "dialog";
+    this.grabber = false;
+    this.detent = "auto";
   }
 
   /**
@@ -429,6 +444,7 @@ export class CFModal extends BaseElement {
           aria-modal="true"
           aria-label="${this.label || nothing}"
         >
+          <div class="grabber" part="grabber" aria-hidden="true"></div>
           <div
             class="header ${this._headerHasContent ? "" : "empty"}"
             part="header"

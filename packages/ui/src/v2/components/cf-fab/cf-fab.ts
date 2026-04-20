@@ -67,12 +67,12 @@ export class CFFab extends BaseElement {
           background var(--cf-theme-animation-duration, 300ms) ease,
           backdrop-filter var(--cf-theme-animation-duration, 300ms) ease,
           -webkit-backdrop-filter var(--cf-theme-animation-duration, 300ms) ease;
-        z-index: 998;
+        z-index: calc(var(--cf-z-layer-fab, 900) - 1);
       }
 
       .backdrop.active {
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
+        backdrop-filter: blur(var(--cf-backdrop-blur-md, 8px));
+        -webkit-backdrop-filter: blur(var(--cf-backdrop-blur-md, 8px));
         pointer-events: auto;
       }
 
@@ -155,7 +155,7 @@ export class CFFab extends BaseElement {
       /* FAB container - positioned by host */
       .fab-container {
         position: fixed;
-        z-index: 999;
+        z-index: var(--cf-z-layer-fab, 900);
       }
 
       /* Position variants */
