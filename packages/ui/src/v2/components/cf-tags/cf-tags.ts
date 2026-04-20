@@ -51,7 +51,7 @@ export class CFTags extends BaseElement {
       --destructive: #ef4444;
       --destructive-foreground: #ffffff;
 
-      --tags-gap: 0.5rem;
+      --tags-gap: var(--cf-size-m-spacing, 8px);
       --tag-padding: 0.25rem 0.75rem;
       --tag-border-radius: 9999px;
       --tag-font-size: 0.875rem;
@@ -62,13 +62,13 @@ export class CFTags extends BaseElement {
       flex-wrap: wrap;
       gap: var(--tags-gap);
       align-items: center;
-      min-height: 2rem;
+      min-height: var(--cf-size-m-height, 32px);
     }
 
     .tag {
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
+      gap: var(--cf-size-s-spacing, 4px);
       padding: var(--tag-padding);
       background-color: var(--muted);
       border: 1px solid var(--border);
@@ -111,13 +111,13 @@ export class CFTags extends BaseElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 1rem;
-      height: 1rem;
+      width: var(--cf-size-xs-height, 16px);
+      height: var(--cf-size-xs-height, 16px);
       border-radius: 50%;
       background-color: var(--destructive);
       color: var(--destructive-foreground);
       cursor: pointer;
-      font-size: 0.75rem;
+      font-size: var(--cf-size-m-font-size, 12px);
       line-height: 1;
       transition: opacity 0.2s;
       opacity: 0;
@@ -134,7 +134,7 @@ export class CFTags extends BaseElement {
     .add-tag {
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
+      gap: var(--cf-size-s-spacing, 4px);
       padding: var(--tag-padding);
       background-color: transparent;
       border: 1px dashed var(--border);

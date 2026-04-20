@@ -56,27 +56,35 @@ export class CFTable extends BaseElement {
     }
 
     /* Size variants */
+    :host([size="s"]) table,
     :host([size="sm"]) table {
       font-size: 0.75rem;
     }
 
+    :host([size="s"]) ::slotted(th),
+    :host([size="s"]) ::slotted(td),
     :host([size="sm"]) ::slotted(th),
     :host([size="sm"]) ::slotted(td) {
-      padding: 0.25rem 0.5rem;
+      padding: var(--cf-size-s-padding-v, 4px) var(--cf-size-m-padding-h, 8px);
     }
 
+    :host([size="m"]) ::slotted(th),
+    :host([size="m"]) ::slotted(td),
     :host([size="md"]) ::slotted(th),
     :host([size="md"]) ::slotted(td) {
-      padding: 0.5rem 0.75rem;
+      padding: var(--cf-size-m-padding-v, 8px) var(--cf-size-l-padding-h, 12px);
     }
 
+    :host([size="l"]) table,
     :host([size="lg"]) table {
       font-size: 1rem;
     }
 
+    :host([size="l"]) ::slotted(th),
+    :host([size="l"]) ::slotted(td),
     :host([size="lg"]) ::slotted(th),
     :host([size="lg"]) ::slotted(td) {
-      padding: 0.75rem 1rem;
+      padding: var(--cf-size-l-spacing, 12px) var(--cf-size-xl-spacing, 16px);
     }
 
     /* Base cell styles */
@@ -125,7 +133,7 @@ export class CFTable extends BaseElement {
 
     /* Caption styling */
     ::slotted(caption) {
-      padding: 0.5rem 0.75rem;
+      padding: var(--cf-size-m-padding-v, 8px) var(--cf-size-l-padding-h, 12px);
       color: var(--muted-foreground, #64748b);
       text-align: left;
     }
@@ -184,7 +192,7 @@ export class CFTable extends BaseElement {
   declare striped: boolean;
   declare hover: boolean;
   declare bordered: boolean;
-  declare size: "sm" | "md" | "lg";
+  declare size: "s" | "m" | "l" | "sm" | "md" | "lg";
   declare stickyHeader: boolean;
   declare fullWidth: boolean;
 
@@ -193,7 +201,7 @@ export class CFTable extends BaseElement {
     this.striped = false;
     this.hover = false;
     this.bordered = false;
-    this.size = "md";
+    this.size = "m";
     this.stickyHeader = false;
     this.fullWidth = false;
   }

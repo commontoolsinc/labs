@@ -29,9 +29,9 @@ export const alertStyles = `
     position: relative;
     display: flex;
     width: 100%;
-    border-radius: 0.5rem;
+    border-radius: var(--cf-size-m-radius, 8px);
     border: 1px solid;
-    padding: 1rem;
+    padding: var(--cf-size-xl-spacing, 16px);
     gap: 0.75rem;
     font-family: inherit;
     transition: all var(--cf-theme-animation-duration, 150ms)
@@ -42,7 +42,7 @@ export const alertStyles = `
   .alert-icon {
     flex-shrink: 0;
     width: 1rem;
-    height: 1rem;
+    height: var(--cf-size-xs-height, 16px);
   }
 
   .alert-icon:empty {
@@ -94,10 +94,10 @@ export const alertStyles = `
     opacity: 0.7;
     transition: opacity var(--cf-theme-animation-duration, 150ms)
       var(--cf-transition-timing-ease);
-    border-radius: 0.25rem;
-    padding: 0.25rem;
-    width: 1.5rem;
-    height: 1.5rem;
+    border-radius: var(--cf-size-xs-radius, 4px);
+    padding: var(--cf-size-s-spacing, 4px);
+    width: var(--cf-size-s-height, 24px);
+    height: var(--cf-size-s-height, 24px);
   }
 
   .dismiss-button:hover {
@@ -112,7 +112,7 @@ export const alertStyles = `
 
   .dismiss-button svg {
     width: 1rem;
-    height: 1rem;
+    height: var(--cf-size-xs-height, 16px);
   }
 
   /* Default variant */
@@ -213,7 +213,7 @@ export const alertStyles = `
 
   ::slotted([slot="icon"]) {
     width: 1rem;
-    height: 1rem;
+    height: var(--cf-size-xs-height, 16px);
   }
 
   /* Adjust padding when dismissible */

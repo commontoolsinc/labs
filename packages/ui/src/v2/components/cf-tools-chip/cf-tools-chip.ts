@@ -203,7 +203,7 @@ export class CFToolsChip extends BaseElement {
             0 4px 6px -1px rgba(0, 0, 0, 0.1),
             0 2px 4px -1px rgba(0, 0, 0, 0.06)
           );
-          padding: 0.5rem;
+          padding: var(--cf-size-m-spacing, 8px);
           z-index: 50;
           opacity: 0;
           transform: translateY(-4px);
@@ -224,11 +224,11 @@ export class CFToolsChip extends BaseElement {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 0.5rem;
-            padding: 0.25rem 0.25rem 0.5rem 0.25rem;
+            gap: var(--cf-size-m-spacing, 8px);
+            padding: 0.25rem 0.25rem var(--cf-size-m-spacing, 8px) 0.25rem;
             border-bottom: 1px solid
               var(--cf-theme-color-border, var(--cf-colors-gray-300, #d5d7dd));
-            margin-bottom: 0.5rem;
+            margin-bottom: var(--cf-size-m-spacing, 8px);
           }
 
           .panel-title {
@@ -238,13 +238,13 @@ export class CFToolsChip extends BaseElement {
 
           .tool-list {
             display: grid;
-            gap: 0.5rem;
+            gap: var(--cf-size-m-spacing, 8px);
           }
 
           .tool-item {
             display: grid;
-            gap: 0.25rem;
-            padding: 0.375rem 0.5rem;
+            gap: var(--cf-size-s-spacing, 4px);
+            padding: var(--cf-size-s-padding-v, 4px) var(--cf-size-m-padding-h, 8px);
             border-radius: var(
               --cf-theme-border-radius,
               var(--cf-border-radius-md, 0.375rem)
@@ -258,7 +258,7 @@ export class CFToolsChip extends BaseElement {
           }
 
           .tool-desc {
-            font-size: 0.75rem;
+            font-size: var(--cf-size-m-font-size, 12px);
             color: var(--cf-theme-color-text-muted, #6b7280);
           }
 
@@ -590,24 +590,24 @@ export class CFToolsChip extends BaseElement {
             border-radius: var(--cf-theme-border-radius, 0.5rem);
             box-shadow: var(--cf-shadow-md, 0 4px 6px -1px rgba(0,0,0,.1),
               0 2px 4px -1px rgba(0,0,0,.06));
-            padding: 0.5rem;
+            padding: var(--cf-size-m-spacing, 8px);
             pointer-events: auto;
           }
           .panel:focus {
             outline: none;
           }
           .panel-header { display: flex; align-items: center;
-            justify-content: space-between; gap: .5rem; padding: .25rem .25rem
-            .5rem .25rem; border-bottom: 1px solid var(--cf-theme-color-border,
-            #e5e7eb); margin-bottom: .5rem; }
+            justify-content: space-between; gap: var(--cf-size-m-spacing, 8px); padding: .25rem .25rem
+            var(--cf-size-m-spacing, 8px) .25rem; border-bottom: 1px solid var(--cf-theme-color-border,
+            #e5e7eb); margin-bottom: var(--cf-size-m-spacing, 8px); }
           .panel-title { font-size: .875rem; font-weight: 600; }
           .count { color: var(--cf-theme-color-text-muted, #6b7280);
             font-variant-numeric: tabular-nums; }
-          .tool-list { display: grid; gap: .5rem; }
-          .tool-item { display: grid; gap: .25rem; padding: .375rem .5rem;
+          .tool-list { display: grid; gap: var(--cf-size-m-spacing, 8px); }
+          .tool-item { display: grid; gap: var(--cf-size-s-spacing, 4px); padding: var(--cf-size-s-padding-v, 4px) var(--cf-size-m-padding-h, 8px);
             border-radius: var(--cf-theme-border-radius, .375rem); }
           .tool-name { font-size: .8125rem; font-weight: 600; }
-          .tool-desc { font-size: .75rem;
+          .tool-desc { font-size: var(--cf-size-m-font-size, 12px);
             color: var(--cf-theme-color-text-muted, #6b7280); }
           .schema { font-family: var(--cf-theme-mono-font-family, monospace);
             font-size: .72rem; color: var(--cf-theme-color-text-muted, #6b7280);

@@ -33,10 +33,10 @@ export class CFVGroup extends BaseElement {
 
     /* Gap sizes */
     .gap-sm {
-      gap: 0.5rem;
+      gap: var(--cf-size-m-spacing, 8px);
     }
     .gap-md {
-      gap: 1rem;
+      gap: var(--cf-size-xl-spacing, 16px);
     }
     .gap-lg {
       gap: 1.5rem;

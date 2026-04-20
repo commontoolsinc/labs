@@ -12,7 +12,7 @@ export const collapsibleStyles = `
     width: 100%;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--cf-size-m-spacing, 8px);
     cursor: pointer;
   }
 

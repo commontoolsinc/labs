@@ -18,8 +18,8 @@ export const inputOTPStyles = `
     /* OTP input dimensions */
     --otp-input-size: 2.75rem;
     --otp-input-font-size: 1.25rem;
-    --otp-input-gap: 0.5rem;
-    --otp-input-border-radius: 0.375rem;
+    --otp-input-gap: var(--cf-size-m-spacing, 8px);
+    --otp-input-border-radius: var(--cf-size-s-radius, 5px);
     --otp-separator-margin: 0.25rem;
   }
 
@@ -129,7 +129,7 @@ export const inputOTPStyles = `
     :host {
       --otp-input-size: 2.5rem;
       --otp-input-font-size: 1.125rem;
-      --otp-input-gap: 0.375rem;
+      --otp-input-gap: var(--cf-size-s-spacing, 4px);
     }
   }
 
@@ -137,7 +137,7 @@ export const inputOTPStyles = `
     :host {
       --otp-input-size: 2.25rem;
       --otp-input-font-size: 1rem;
-      --otp-input-gap: 0.25rem;
+      --otp-input-gap: var(--cf-size-s-spacing, 4px);
     }
   }
 
