@@ -324,7 +324,7 @@ export class MapSetStringToPathSelectors extends MapSet<
     super(
       hashValues
         ? (v) => {
-          if (v.schema !== undefined) internSchema(v.schema, true);
+          if (v.schema !== undefined) internSchema(v.schema);
           Object.freeze(v.path);
           Object.freeze(v);
           return hashSchemaItem(v);
