@@ -7,6 +7,7 @@ import {
 } from "@std/assert";
 import type {
   FabricValue,
+  JSONSchema,
   JSONSchemaObj,
   JSONSchemaTypes,
 } from "@commonfabric/api";
