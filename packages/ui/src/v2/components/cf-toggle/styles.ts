@@ -66,13 +66,13 @@ export const toggleStyles = `
     font-size: var(--cf-size-xs-font-size, 9px);
   }
 
-  .size-smm {
+  .size-sm {
     height: var(--cf-toggle-height-sm);
     padding: 0 var(--cf-toggle-padding-x-sm);
     font-size: var(--cf-toggle-font-size-sm);
   }
 
-  .size-lgg {
+  .size-lg {
     height: var(--cf-toggle-height-lg);
     padding: 0 var(--cf-toggle-padding-x-lg);
     font-size: var(--cf-toggle-font-size-lg);

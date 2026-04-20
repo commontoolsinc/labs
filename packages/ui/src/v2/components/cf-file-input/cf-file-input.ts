@@ -139,13 +139,13 @@ export class CFFileInput extends BaseElement {
         display: block;
       }
 
-      .preview-item.size-smm img,
-      .preview-item.size-smm .file-preview {
+      .preview-item.size-sm img,
+      .preview-item.size-sm .file-preview {
         height: 80px;
       }
 
-      .preview-item.size-lgg img,
-      .preview-item.size-lgg .file-preview {
+      .preview-item.size-lg img,
+      .preview-item.size-lg .file-preview {
         height: 160px;
       }
 

@@ -22,7 +22,7 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  * @attr {boolean} disabled     – Whether the select is disabled
  * @attr {boolean} multiple     – Enable multiple selection
  * @attr {boolean} required     – Whether the field is required
- * @attr {string}  size         – Component size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "m")
+ * @attr {string}  size         – Component size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "md")
  * @attr {number}  visible-rows – Number of visible options (native HTML size attribute)
  * @attr {string}  name         – Name used when participating in a form
  * @attr {string}  placeholder  – Placeholder text rendered as a disabled option

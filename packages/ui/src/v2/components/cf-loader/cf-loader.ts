@@ -27,7 +27,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { type ComponentSize } from "../theme-context.ts";
 
 /** @deprecated Use ComponentSize instead */
-export type LoaderSize = ComponentSize;
+export type LoaderSize = "sm" | "md" | "lg";
 
 /**
  * CFLoader displays a spinning loading indicator.
@@ -35,7 +35,7 @@ export type LoaderSize = ComponentSize;
  * @tag cf-loader
  * @extends BaseElement
  *
- * @property {ComponentSize} size - Size variant: "s" (16px), "m" (24px), "l" (40px) (default: "m")
+ * @property {ComponentSize} size - Size variant: "sm" (16px), "md" (24px), "lg" (40px) (default: "md")
  * @property {boolean} showElapsed - Whether to display elapsed time
  * @property {boolean} showStop - Whether to display stop button
  *
@@ -173,7 +173,7 @@ export class CFLoader extends BaseElement {
     showStop: { type: Boolean, attribute: "show-stop" },
   };
 
-  declare size: ComponentSize;
+  declare size: "sm" | "md" | "lg";
   declare showElapsed: boolean;
   declare showStop: boolean;
 

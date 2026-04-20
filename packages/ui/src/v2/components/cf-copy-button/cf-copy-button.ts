@@ -15,7 +15,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *     Common types: "text/plain", "text/html"
  * @attr {string} variant - Button style variant (default: "secondary")
  *   Options: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill"
- * @attr {string} size - Button size (default: "m")
+ * @attr {string} size - Button size (default: "md")
  *   Options: "xs" | "sm" | "md" | "lg" | "xl" | "icon"
  * @attr {boolean} disabled - Disable the button
  * @attr {number} feedback-duration - Success feedback duration in ms (default: 2000)

@@ -35,7 +35,7 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  * @attr {string} validationPattern - Predefined pattern: "email" | "url" | "tel-us" | "tel-intl" | "credit-card" | "zip-us" | "alphanumeric" | "letters" | "numbers"
  * @attr {string} autocomplete - Autocomplete hint
  * @attr {string} inputmode - Virtual keyboard mode: "none" | "text" | "decimal" | "numeric" | "tel" | "search" | "email" | "url"
- * @attr {string} size - Component size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "m")
+ * @attr {string} size - Component size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "md")
  * @attr {number} charSize - Width of input in characters (native HTML size attribute)
  * @attr {boolean} multiple - Allow multiple files (file input only)
  * @attr {string} accept - File types to accept (file input only)

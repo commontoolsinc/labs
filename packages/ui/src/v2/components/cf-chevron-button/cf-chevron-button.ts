@@ -10,7 +10,7 @@ import { type ComponentSize } from "../theme-context.ts";
  *
  * @attr {boolean} expanded - Whether the chevron is in expanded (down) state
  * @attr {boolean} loading - Whether to show loading animation instead of chevron
- * @attr {string} size - Size variant: ComponentSize (default: "m")
+ * @attr {string} size - Size variant: ComponentSize (default: "md")
  *
  * @fires cf-toggle - Fired when button is clicked
  *

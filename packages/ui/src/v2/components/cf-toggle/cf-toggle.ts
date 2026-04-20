@@ -5,7 +5,7 @@ import { toggleStyles } from "./styles.ts";
 import { type ComponentSize } from "../theme-context.ts";
 
 /** @deprecated Use ComponentSize instead */
-export type ToggleSize = ComponentSize;
+export type ToggleSize = "sm" | "md" | "lg";
 
 /**
  * CFToggle - Toggle button that can be pressed/unpressed with multiple variants and sizes
@@ -15,7 +15,7 @@ export type ToggleSize = ComponentSize;
  * @attr {boolean} pressed - Whether the toggle is pressed
  * @attr {boolean} disabled - Whether the toggle is disabled
  * @attr {string} variant - Visual style variant: "default" | "outline"
- * @attr {string} size - Toggle size: ComponentSize (default: "m")
+ * @attr {string} size - Toggle size: "sm" | "md" | "lg" (default: "md")
  * @attr {string} value - Value attribute for use in toggle groups
  *
  * @slot - Default slot for toggle content
@@ -40,7 +40,7 @@ export class CFToggle extends BaseElement {
   declare pressed: boolean;
   declare disabled: boolean;
   declare variant: ToggleVariant;
-  declare size: ComponentSize;
+  declare size: "sm" | "md" | "lg";
   declare ariaLabel: string;
 
   private _buttonElement: HTMLButtonElement | null = null;
