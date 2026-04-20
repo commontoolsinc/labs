@@ -306,13 +306,31 @@ export class MapSet<K, V> {
  * `SchemaPathSelector` values — the common case throughout traverse/query
  * code. When `hashValues` is `true`, uses `hashSchemaItem` from the
  * schema-hash dispatch layer as the hash function.
+ *
+ * Before hashing, the selector is interned-and-frozen in place: `v.schema`
+ * (if present) is interned via `internSchema`, and `v.path` and `v` are
+ * frozen. This satisfies the `isDeepFrozen` guard in `hashOfModernInternal`,
+ * so repeat hashes of the same selector reference hit the WeakMap cache,
+ * and interning `v.schema` additionally stabilizes that inner identity for
+ * any downstream caller that re-hashes it. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §4
+ * Phase 2 "DEFEAT-8" for the motivating analysis.
  */
 export class MapSetStringToPathSelectors extends MapSet<
   string,
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? (v) => hashSchemaItem(v).toString() : undefined);
+    super(
+      hashValues
+        ? (v) => {
+          if (v.schema !== undefined) internSchema(v.schema, true);
+          Object.freeze(v.path);
+          Object.freeze(v);
+          return hashSchemaItem(v).toString();
+        }
+        : undefined,
+    );
   }
 }
 
