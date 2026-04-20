@@ -12,7 +12,6 @@ import {
   hashSchemaItem,
   internedPairKey,
   internSchema,
-  internSchemaKey,
   isInternedSchema,
   resetSchemaHashConfig,
   setSchemaHashConfig,
@@ -316,84 +315,31 @@ describe("schema-hash dispatch", () => {
         }
       });
 
-      describe("internSchemaKey()", () => {
-        it('returns `"<schema:true>"` for the `true` schema', () => {
-          assertStrictEquals(internSchemaKey(true), "<schema:true>");
-        });
-
-        it('returns `"<schema:false>"` for the `false` schema', () => {
-          assertStrictEquals(internSchemaKey(false), "<schema:false>");
-        });
-
-        it("returns the interned schema's `hashString` for objects", () => {
-          const schema: JSONSchema = { type: "number" };
-          const sah = internSchema(schema, true);
-          assertStrictEquals(internSchemaKey(schema), sah.hashString);
-        });
-
-        it("produces structurally-equal hash strings for equal objects", () => {
-          const a: JSONSchema = {
-            type: "object",
-            properties: { x: { type: "string" } },
-          };
-          const b: JSONSchema = {
-            type: "object",
-            properties: { x: { type: "string" } },
-          };
-          assertStrictEquals(internSchemaKey(a), internSchemaKey(b));
-        });
-
-        it("produces different strings for different schemas", () => {
-          assertNotEquals(
-            internSchemaKey({ type: "number" }),
-            internSchemaKey({ type: "string" }),
-          );
-          assertNotEquals(internSchemaKey(true), internSchemaKey(false));
-          assertNotEquals(
-            internSchemaKey(true),
-            internSchemaKey({ type: "number" }),
-          );
-        });
-
-        it("interns the input schema as a side effect", () => {
-          const schema: JSONSchemaObj = { type: "number" };
-          assertStrictEquals(isInternedSchema(schema), false);
-          internSchemaKey(schema);
-          assertStrictEquals(isInternedSchema(schema), true);
-          assert(isDeepFrozen(schema));
-        });
-
-        it("is idempotent on already-interned schemas", () => {
-          const schema: JSONSchema = { type: "number" };
-          const first = internSchemaKey(schema);
-          const second = internSchemaKey(schema);
-          assertStrictEquals(first, second);
-        });
-      });
-
       describe("internedPairKey()", () => {
-        it("composes `internSchemaKey` for two objects with `|`", () => {
+        it("composes the two interned `hashString`s with `|`", () => {
           const a: JSONSchema = { type: "number" };
           const b: JSONSchema = { type: "string" };
-          assertStrictEquals(
-            internedPairKey(a, b),
-            `${internSchemaKey(a)}|${internSchemaKey(b)}`,
-          );
+          const aHash = internSchema(a, true).hashString;
+          const bHash = internSchema(b, true).hashString;
+          assertStrictEquals(internedPairKey(a, b), `${aHash}|${bHash}`);
         });
 
         it("handles boolean schemas on either side", () => {
           const obj: JSONSchema = { type: "number" };
+          const objHash = internSchema(obj, true).hashString;
+          const trueHash = internSchema(true, true).hashString;
+          const falseHash = internSchema(false, true).hashString;
           assertStrictEquals(
             internedPairKey(true, obj),
-            `<schema:true>|${internSchemaKey(obj)}`,
+            `${trueHash}|${objHash}`,
           );
           assertStrictEquals(
             internedPairKey(obj, false),
-            `${internSchemaKey(obj)}|<schema:false>`,
+            `${objHash}|${falseHash}`,
           );
           assertStrictEquals(
             internedPairKey(true, false),
-            "<schema:true>|<schema:false>",
+            `${trueHash}|${falseHash}`,
           );
         });
 
@@ -415,6 +361,18 @@ describe("schema-hash dispatch", () => {
           const b1: JSONSchema = { type: "array", items: { type: "number" } };
           const b2: JSONSchema = { type: "array", items: { type: "number" } };
           assertStrictEquals(internedPairKey(a1, b1), internedPairKey(a2, b2));
+        });
+
+        it("interns both inputs as a side effect", () => {
+          const a: JSONSchemaObj = { type: "number" };
+          const b: JSONSchemaObj = { type: "string" };
+          assertStrictEquals(isInternedSchema(a), false);
+          assertStrictEquals(isInternedSchema(b), false);
+          internedPairKey(a, b);
+          assertStrictEquals(isInternedSchema(a), true);
+          assertStrictEquals(isInternedSchema(b), true);
+          assert(isDeepFrozen(a));
+          assert(isDeepFrozen(b));
         });
       });
     });

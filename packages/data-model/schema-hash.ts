@@ -336,41 +336,25 @@ export function isInternedSchema(schema: JSONSchema): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Interned cache-key helpers
+// Interned cache-key helper
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a stable cache-key string for a schema, interning the schema (and
- * thus deep-freezing it) if it's an object. Boolean schemas map to sentinel
- * strings (`"<schema:true>"`, `"<schema:false>"`) that cannot overlap with
- * any object-schema hash string (hash strings are base64url, so `<`, `>`,
- * and `:` never appear in them).
- *
- * Intended for building cache keys at sites that would otherwise compute
- * `hashSchema(schema).toString()`. The interning step lets subsequent calls
- * with the same (now-interned) object identity hit `internSchema`'s WeakMap
- * in O(1) rather than re-hashing. See
- * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1 for
- * the motivating regression.
- */
-export function internSchemaKey(schema: JSONSchema): string {
-  if (typeof schema === "boolean") {
-    return schema ? "<schema:true>" : "<schema:false>";
-  }
-  return internSchema(schema, true).hashString;
-}
-
-/**
  * Returns a cache-key string for an ordered pair of schemas, each interned
- * via `internSchemaKey`. Equivalent to
- * `${internSchemaKey(a)}|${internSchemaKey(b)}`. The `|` delimiter cannot
- * appear in a base64url hash string and is distinct from the boolean
- * sentinels, so the pair is unambiguously decodable (though callers only
- * need it as an opaque key).
+ * (and thus deep-frozen) via `internSchema`. The `|` delimiter is outside
+ * the base64url alphabet used by hash strings, so the two halves cannot
+ * merge ambiguously.
  *
- * Used at the handful of `traverse.ts` sites that key an intern cache on a
- * merge operation's two input schemas.
+ * Used at the `traverse.ts` sites that key an intern cache on a merge
+ * operation's two input schemas. Interning the inputs stabilizes their
+ * identities in `internSchema`'s WeakMap, so subsequent calls with the
+ * same object references hit the hash-cache fast path in O(1) rather
+ * than re-hashing. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1
+ * for the motivating regression.
  */
 export function internedPairKey(a: JSONSchema, b: JSONSchema): string {
-  return `${internSchemaKey(a)}|${internSchemaKey(b)}`;
+  return `${internSchema(a, true).hashString}|${
+    internSchema(b, true).hashString
+  }`;
 }

@@ -4,7 +4,6 @@ import {
   hashSchemaItem,
   internedPairKey,
   internSchema,
-  internSchemaKey,
 } from "@commonfabric/data-model/schema-hash";
 import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -111,9 +110,9 @@ const _hashCache = new WeakMap<object, string>();
 // Schema operation intern caches: memoize merge/combine results so
 // structurally-identical operations return the same object identity.
 // The cached value is run through `internSchema`, which deep-freezes and
-// dedups structurally-equal results — so downstream `hashSchema` /
-// `internSchemaKey` calls on the cached output hit `internSchema`'s
-// WeakMap in O(1) instead of re-walking the schema tree.
+// dedups structurally-equal results — so downstream `hashSchema` calls
+// on the cached output hit `internSchema`'s WeakMap in O(1) instead of
+// re-walking the schema tree.
 // Capped to prevent unbounded growth in long-running servers.
 const INTERN_CACHE_MAX = 10_000;
 const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
@@ -3249,9 +3248,11 @@ export function mergeAnyOfBranchSchemas(
   if (branches.length < 2) return null;
 
   // Inline 1+N intern-based key: outer schema, then each branch.
-  // `||` separates outer from branches; `|` separates branches.
-  const key = `${internSchemaKey(outerSchema)}||` +
-    branches.map(internSchemaKey).join("|");
+  // Interning each input stabilizes its identity so downstream callers
+  // hit the hash-cache fast path; `||` separates outer from branches,
+  // `|` separates branches.
+  const key = `${internSchema(outerSchema, true).hashString}||` +
+    branches.map((b) => internSchema(b, true).hashString).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3335,7 +3336,7 @@ function _mergeAnyOfBranchSchemasUncached(
     // identities for any downstream caller that re-hashes them.
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(internSchemaKey(s), s);
+      uniqueHashes.set(internSchema(s, true).hashString, s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema
