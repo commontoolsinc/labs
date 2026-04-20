@@ -1,5 +1,5 @@
 // cell-bridge.test.ts — Integration tests for CellBridge using fake piece objects
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertNotEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
   CellBridge,
@@ -7,6 +7,11 @@ import {
   type SpaceState,
   type WritePath,
 } from "./cell-bridge.ts";
+import {
+  CFC_COMPAT_XATTR_PREFIX,
+  CFC_FAIL_CLOSED_ATOM_CLASS,
+  listCfcXattrNames,
+} from "./annotations.ts";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -280,6 +285,445 @@ Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without ea
   );
   assertEquals(tree.getChildren(inputIno!).length, 0);
   assertEquals(tree.getChildren(resultIno!).length, 0);
+});
+
+Deno.test("CellBridge CFC annotations attach to hydrated JSON projections and fail closed without runner labels", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    cfcAnnotations: true,
+    projectionGeneration: "test-generation",
+  });
+  const state = buildTestSpace(bridge, "home", []);
+
+  const piece = {
+    id: "of:entity-cfc",
+    name: () => "Annotated Fixture",
+    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({ title: "secret" }, undefined)),
+      get: () => Promise.resolve({ title: "secret" }),
+    },
+  };
+
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Annotated Fixture", "home");
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
+  const titleIno = tree.lookup(resultIno!, "title");
+  assertEquals(titleIno !== undefined, true);
+
+  const annotation = tree.getCfcAnnotation(titleIno!);
+  assertEquals(annotation?.ref, {
+    type: "common-fabric-fuse-ref-v1",
+    space: state.did,
+    entity: "of:entity-cfc",
+    rootKind: "pieces",
+    cell: "result",
+    path: ["title"],
+    projection: "value",
+    generation: "test-generation",
+  });
+  assertEquals(
+    JSON.stringify(annotation?.contentLabel).includes(
+      CFC_FAIL_CLOSED_ATOM_CLASS,
+    ),
+    true,
+  );
+  assertEquals(
+    listCfcXattrNames(tree, titleIno!, {
+      enabled: true,
+      namespace: "compat",
+    }).includes(`${CFC_COMPAT_XATTR_PREFIX}ref`),
+    true,
+  );
+});
+
+Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    cfcAnnotations: true,
+  });
+  const state = buildTestSpace(bridge, "home", []);
+
+  const makeResultCell = (title: string): FakeCell => {
+    const searchToolCell = makeCell(
+      {
+        pattern: {
+          argumentSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+          },
+        },
+        extraParams: { title },
+      },
+      undefined,
+    );
+    return makeCell(
+      {
+        title,
+        search: searchToolCell.get(),
+      },
+      {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          search: { type: "object" },
+        },
+      },
+      { search: searchToolCell },
+    );
+  };
+
+  const initialResultCell = makeResultCell("one");
+  const piece = {
+    id: "of:entity-derived-generation",
+    name: () => "Derived Generation",
+    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(initialResultCell),
+      get: () => Promise.resolve(initialResultCell.get()),
+    },
+  };
+
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Derived Generation", "home");
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
+  const titleIno = tree.lookup(resultIno!, "title");
+  const resultJsonIno = tree.lookup(pieceIno, "result.json");
+  const callableIno = tree.lookup(resultIno!, "search.tool");
+  assertEquals(titleIno !== undefined, true);
+  assertEquals(resultJsonIno !== undefined, true);
+  assertEquals(callableIno !== undefined, true);
+
+  const titleAnnotation = tree.getCfcAnnotation(titleIno!);
+  const resultJsonAnnotation = tree.getCfcAnnotation(resultJsonIno!);
+  const callableAnnotation = tree.getCfcAnnotation(callableIno!);
+  assertEquals(titleAnnotation?.generation.startsWith("sha256:"), true);
+  assertNotEquals(titleAnnotation?.generation, "unavailable");
+  assertEquals(titleAnnotation?.ref.generation, titleAnnotation?.generation);
+  assertEquals(resultJsonAnnotation?.generation, titleAnnotation?.generation);
+  assertEquals(callableAnnotation?.generation, titleAnnotation?.generation);
+  assertEquals(
+    callableAnnotation?.callable?.descriptor.generation,
+    titleAnnotation?.generation,
+  );
+
+  const rebuiltResultCell = makeResultCell("two");
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: rebuiltResultCell,
+      newValue: rebuiltResultCell.get(),
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Derived Generation",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+
+  const rebuiltResultIno = tree.lookup(pieceIno, "result");
+  const rebuiltTitleIno = tree.lookup(rebuiltResultIno!, "title");
+  const rebuiltAnnotation = tree.getCfcAnnotation(rebuiltTitleIno!);
+  assertNotEquals(rebuiltAnnotation?.generation, titleAnnotation?.generation);
+  assertEquals(
+    rebuiltAnnotation?.ref.generation,
+    rebuiltAnnotation?.generation,
+  );
+});
+
+Deno.test("CellBridge finalizes CFC annotations after committed writeback", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    cfcAnnotations: true,
+  });
+  const state = buildTestSpace(bridge, "home", []);
+
+  let resultValue: Record<string, unknown> = { title: "one" };
+  const resultCell: FakeCell = {
+    schema: {
+      type: "object",
+      properties: { title: { type: "string" } },
+    },
+    get: () => resultValue,
+    getRaw: () => resultValue,
+    asSchemaFromLinks() {
+      return this;
+    },
+    key(segment: string) {
+      return makeCell(resultValue[segment], undefined);
+    },
+    sink: () => () => {},
+  };
+  const piece = {
+    id: "of:entity-finalize-generation",
+    name: () => "Finalize Generation",
+    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: () => Promise.resolve(resultValue),
+      set: (value: unknown, path?: (string | number)[]) => {
+        if (path?.length === 1 && typeof path[0] === "string") {
+          resultValue = { ...resultValue, [path[0]]: value };
+        } else if (
+          typeof value === "object" && value !== null && !Array.isArray(value)
+        ) {
+          resultValue = value as Record<string, unknown>;
+        }
+        return Promise.resolve();
+      },
+    },
+  };
+
+  state.pieceControllers.set(
+    "Finalize Generation",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Finalize Generation", "home");
+  state.pieceMap.set("Finalize Generation", piece.id);
+  state.pieceInos.set("Finalize Generation", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+  const initialResultIno = tree.lookup(pieceIno, "result")!;
+  const initialTitleIno = tree.lookup(initialResultIno, "title")!;
+  const initialGeneration = tree.getCfcAnnotation(initialTitleIno)?.generation;
+
+  const titleWritePath: WritePath = {
+    spaceName: "home",
+    pieceName: "Finalize Generation",
+    cell: "result",
+    jsonPath: ["title"],
+    isJsonFile: false,
+    piece: piece as unknown as WritePath["piece"],
+  };
+  await bridge.writeValue(titleWritePath, "two");
+  await bridge.finalizeWritePath(titleWritePath);
+
+  const updatedResultIno = tree.lookup(pieceIno, "result")!;
+  const updatedTitleIno = tree.lookup(updatedResultIno, "title")!;
+  assertEquals(getFileContent(tree, updatedResultIno, "title"), "two");
+  assertNotEquals(
+    tree.getCfcAnnotation(updatedTitleIno)?.generation,
+    initialGeneration,
+  );
+  assertEquals(
+    tree.getCfcAnnotation(updatedTitleIno)?.ref.generation,
+    tree.getCfcAnnotation(updatedTitleIno)?.generation,
+  );
+
+  const parentWritePath: WritePath = {
+    ...titleWritePath,
+    jsonPath: [],
+    isJsonFile: true,
+  };
+  await bridge.writeValue(
+    { ...parentWritePath, jsonPath: ["created"] },
+    "child",
+  );
+  await bridge.finalizeWritePath(parentWritePath);
+
+  const finalResultIno = tree.lookup(pieceIno, "result")!;
+  const childIno = tree.lookup(finalResultIno, "created");
+  assertEquals(childIno !== undefined, true);
+  assertEquals(
+    tree.getCfcAnnotation(childIno!)?.ref.projection,
+    "value",
+  );
+});
+
+Deno.test("CellBridge finalizes CFC annotations after namespace mutation writeback", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    cfcAnnotations: true,
+  });
+  const state = buildTestSpace(bridge, "home", []);
+
+  let resultValue: Record<string, unknown> = {
+    file: "remove",
+    dir: { child: "x" },
+    from: { old: "move" },
+    to: { stay: true },
+  };
+  const getAtPath = (path?: (string | number)[]) => {
+    let current: unknown = resultValue;
+    for (const segment of path ?? []) {
+      if (
+        typeof current !== "object" || current === null ||
+        Array.isArray(current)
+      ) {
+        return undefined;
+      }
+      current = (current as Record<string, unknown>)[String(segment)];
+    }
+    return current;
+  };
+  const setAtPath = (value: unknown, path?: (string | number)[]) => {
+    if (!path || path.length === 0) {
+      resultValue = value as Record<string, unknown>;
+      return;
+    }
+    const next = { ...resultValue };
+    let current: Record<string, unknown> = next;
+    for (const segment of path.slice(0, -1)) {
+      const key = String(segment);
+      const child = current[key];
+      const cloned = typeof child === "object" && child !== null &&
+          !Array.isArray(child)
+        ? { ...(child as Record<string, unknown>) }
+        : {};
+      current[key] = cloned;
+      current = cloned;
+    }
+    current[String(path[path.length - 1])] = value;
+    resultValue = next;
+  };
+  const resultCell: FakeCell = {
+    schema: { type: "object" },
+    get: () => resultValue,
+    getRaw: () => resultValue,
+    asSchemaFromLinks() {
+      return this;
+    },
+    key(segment: string) {
+      return makeCell(resultValue[segment], undefined);
+    },
+    sink: () => () => {},
+  };
+  const piece = {
+    id: "of:entity-finalize-namespace",
+    name: () => "Finalize Namespace",
+    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: (path?: (string | number)[]) => Promise.resolve(getAtPath(path)),
+      set: (value: unknown, path?: (string | number)[]) => {
+        setAtPath(value, path);
+        return Promise.resolve();
+      },
+    },
+  };
+
+  state.pieceControllers.set(
+    "Finalize Namespace",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Finalize Namespace", "home");
+  state.pieceMap.set("Finalize Namespace", piece.id);
+  state.pieceInos.set("Finalize Namespace", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+  const rootPath: WritePath = {
+    spaceName: "home",
+    pieceName: "Finalize Namespace",
+    cell: "result",
+    jsonPath: [],
+    isJsonFile: true,
+    piece: piece as unknown as WritePath["piece"],
+  };
+
+  let resultIno = tree.lookup(pieceIno, "result")!;
+  const initialRootGeneration = tree.getCfcAnnotation(resultIno)?.generation;
+  await bridge.writeValue(rootPath, {
+    dir: { child: "x" },
+    from: { old: "move" },
+    to: { stay: true },
+  });
+  await bridge.finalizeWritePath(rootPath);
+  resultIno = tree.lookup(pieceIno, "result")!;
+  assertEquals(tree.lookup(resultIno, "file"), undefined);
+  assertNotEquals(
+    tree.getCfcAnnotation(resultIno)?.generation,
+    initialRootGeneration,
+  );
+
+  const afterUnlinkGeneration = tree.getCfcAnnotation(resultIno)?.generation;
+  await bridge.writeValue(rootPath, {
+    from: { old: "move" },
+    to: { stay: true },
+  });
+  await bridge.finalizeWritePath(rootPath);
+  resultIno = tree.lookup(pieceIno, "result")!;
+  assertEquals(tree.lookup(resultIno, "dir"), undefined);
+  assertNotEquals(
+    tree.getCfcAnnotation(resultIno)?.generation,
+    afterUnlinkGeneration,
+  );
+
+  const fromIno = tree.lookup(resultIno, "from")!;
+  const toIno = tree.lookup(resultIno, "to")!;
+  const fromGeneration = tree.getCfcAnnotation(fromIno)?.generation;
+  const toGeneration = tree.getCfcAnnotation(toIno)?.generation;
+  const toPath: WritePath = {
+    ...rootPath,
+    jsonPath: ["to", "new"],
+    isJsonFile: false,
+  };
+  const fromPath: WritePath = {
+    ...rootPath,
+    jsonPath: ["from"],
+    isJsonFile: true,
+  };
+  await bridge.writeValue(toPath, "move");
+  await bridge.writeValue(fromPath, {});
+  await bridge.finalizeWritePath(toPath);
+  await bridge.finalizeWritePath(fromPath);
+
+  resultIno = tree.lookup(pieceIno, "result")!;
+  const updatedFromIno = tree.lookup(resultIno, "from")!;
+  const updatedToIno = tree.lookup(resultIno, "to")!;
+  assertEquals(tree.lookup(updatedFromIno, "old"), undefined);
+  assertEquals(getFileContent(tree, updatedToIno, "new"), "move");
+  assertNotEquals(
+    tree.getCfcAnnotation(updatedFromIno)?.generation,
+    fromGeneration,
+  );
+  assertNotEquals(
+    tree.getCfcAnnotation(updatedToIno)?.generation,
+    toGeneration,
+  );
+
+  const beforeSymlinkGeneration = tree.getCfcAnnotation(resultIno)?.generation;
+  await bridge.writeValue(
+    { ...rootPath, jsonPath: ["link"], isJsonFile: false },
+    { "/": { "link@1": { path: ["to", "new"] } } },
+  );
+  await bridge.finalizeWritePath(rootPath);
+  resultIno = tree.lookup(pieceIno, "result")!;
+  const linkIno = tree.lookup(resultIno, "link")!;
+  assertEquals(tree.getNode(linkIno)?.kind, "symlink");
+  assertEquals(tree.getCfcAnnotation(linkIno)?.ref.projection, "symlink");
+  assertNotEquals(
+    tree.getCfcAnnotation(resultIno)?.generation,
+    beforeSymlinkGeneration,
+  );
 });
 
 Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", async () => {
@@ -1460,7 +1904,19 @@ Deno.test({
   sanitizeOps: false,
   fn: async () => {
     const tree = new FsTree();
-    const bridge = new CellBridge(tree, "/tmp/cf-exec");
+    let cfcReconciliations = 0;
+    const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+      statusProvider: () => ({
+        cfc: {
+          writeback: {
+            counts: { "mutation-applied": cfcReconciliations },
+          },
+        },
+      }),
+      onCfcProjectionRebuilt: () => {
+        cfcReconciliations++;
+      },
+    });
     bridge.init({
       apiUrl: "http://localhost:8000",
       identity: "/tmp/test-identity.pem",
@@ -1506,6 +1962,11 @@ Deno.test({
     assertEquals(status.rebuilds.pending, 0);
     assertEquals(status.rebuilds.completed >= 1, true);
     assertEquals(status.rebuilds.errors, 0);
+    assertEquals(cfcReconciliations >= 1, true);
+    assertEquals(
+      status.cfc.writeback.counts["mutation-applied"],
+      cfcReconciliations,
+    );
 
     // Cancel subscriptions to avoid timer leaks
     const subs = state.pieceSubs.get("Status-Piece");

@@ -1,6 +1,12 @@
 // tree.ts — In-memory filesystem tree with inode management
 
 import type { CallableKind } from "./callables.ts";
+import {
+  type CfcDirectoryEntryAnnotation,
+  cfcDirectoryEntryKind,
+  cfcDirectoryEntryNameDigest,
+  type CfcNodeAnnotation,
+} from "./annotations.ts";
 import type { FsNode } from "./types.ts";
 
 const ROOT_INO = 1n;
@@ -54,6 +60,7 @@ export class FsTree {
     for (const [name, childIno] of parent.children) {
       if (childIno === ino) {
         parent.children.delete(name);
+        this.removeCfcEntryAnnotation(parentIno, name);
         break;
       }
     }
@@ -158,6 +165,59 @@ export class FsTree {
     return this.inodes.get(ino);
   }
 
+  setCfcAnnotation(ino: bigint, annotation: CfcNodeAnnotation): void {
+    const node = this.inodes.get(ino);
+    if (!node) {
+      throw new Error(`Inode ${ino} does not exist`);
+    }
+    node.cfc = annotation;
+  }
+
+  getCfcAnnotation(ino: bigint): CfcNodeAnnotation | undefined {
+    return this.inodes.get(ino)?.cfc;
+  }
+
+  setCfcEntryAnnotation(
+    parentIno: bigint,
+    name: string,
+    entry: CfcDirectoryEntryAnnotation,
+  ): void {
+    const parent = this.inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) return;
+    const entries = parent.cfc.entries.entries.filter((candidate) =>
+      candidate.name !== name
+    );
+    entries.push(entry);
+    parent.cfc.entries = {
+      version: 1,
+      entries: entries.sort((left, right) =>
+        left.nameDigest.localeCompare(right.nameDigest)
+      ),
+    };
+  }
+
+  private removeCfcEntryAnnotation(parentIno: bigint, name: string): void {
+    const parent = this.inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) return;
+    parent.cfc.entries = {
+      version: 1,
+      entries: parent.cfc.entries.entries.filter((entry) =>
+        entry.name !== name
+      ),
+    };
+  }
+
+  private getCfcEntryAnnotation(
+    parentIno: bigint,
+    name: string,
+  ): CfcDirectoryEntryAnnotation | undefined {
+    const parent = this.inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) {
+      return undefined;
+    }
+    return parent.cfc.entries.entries.find((entry) => entry.name === name);
+  }
+
   getChildren(ino: bigint): [string, bigint][] {
     const node = this.inodes.get(ino);
     if (!node || node.kind !== "dir") return [];
@@ -195,6 +255,7 @@ export class FsTree {
     // Don't use clear() since it also removes from parent — do it manually
     this.clearSubtree(childIno);
     parent.children.delete(name);
+    this.removeCfcEntryAnnotation(parentIno, name);
     return childIno;
   }
 
@@ -238,17 +299,33 @@ export class FsTree {
     if (!newParent || newParent.kind !== "dir") {
       throw new Error(`New parent ${newParentIno} is not a directory`);
     }
+    const movedCfcEntry = this.getCfcEntryAnnotation(oldParentIno, oldName);
 
     // If target exists, remove it first
     const existingIno = newParent.children.get(newName);
     if (existingIno !== undefined) {
       this.clearSubtree(existingIno);
+      this.removeCfcEntryAnnotation(newParentIno, newName);
     }
 
     // Move the child
     oldParent.children.delete(oldName);
+    this.removeCfcEntryAnnotation(oldParentIno, oldName);
     newParent.children.set(newName, childIno);
     this.parents.set(childIno, newParentIno);
+    const child = this.inodes.get(childIno);
+    const childAnnotation = this.getCfcAnnotation(childIno);
+    if (movedCfcEntry && child) {
+      this.setCfcEntryAnnotation(newParentIno, newName, {
+        ...movedCfcEntry,
+        name: newName,
+        nameDigest: cfcDirectoryEntryNameDigest(newName),
+        childRef: childAnnotation?.ref ?? movedCfcEntry.childRef,
+        kind: cfcDirectoryEntryKind(child),
+        metadataLabels: childAnnotation?.metadataLabels ??
+          movedCfcEntry.metadataLabels,
+      });
+    }
 
     // Update path tracking for moved node and all descendants
     this.retrackSubtree(childIno, newParentIno, newName);

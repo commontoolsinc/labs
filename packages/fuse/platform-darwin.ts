@@ -238,6 +238,49 @@ const darwinPlatform: FusePlatform = {
     );
   },
 
+  createSetxattrCallback(
+    handler: (
+      req: Deno.PointerValue,
+      ino: bigint,
+      namePtr: Deno.PointerValue,
+      valuePtr: Deno.PointerValue,
+      size: bigint,
+      flags: number,
+    ) => void,
+  ) {
+    return new Deno.UnsafeCallback(
+      {
+        parameters: [
+          "pointer",
+          "u64",
+          "pointer",
+          "pointer",
+          "usize",
+          "i32",
+          "u32",
+        ],
+        result: "void",
+      } as const,
+      (
+        req: Deno.PointerValue,
+        ino: number | bigint,
+        namePtr: Deno.PointerValue,
+        valuePtr: Deno.PointerValue,
+        size: number | bigint,
+        flags: number,
+        _position: number,
+      ) =>
+        handler(
+          req,
+          BigInt(ino),
+          namePtr,
+          valuePtr,
+          BigInt(size),
+          flags,
+        ),
+    );
+  },
+
   // macOS rename: no flags parameter
   createRenameCallback(
     handler: (

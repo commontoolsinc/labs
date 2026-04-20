@@ -316,7 +316,10 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     const symbol = checker.getSymbolAtLocation(unwrapped.typeName);
-    const aliasDeclaration = symbol?.declarations?.find((
+    const resolvedSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
+      ? checker.getAliasedSymbol(symbol)
+      : symbol;
+    const aliasDeclaration = resolvedSymbol?.declarations?.find((
       declaration,
     ): declaration is ts.TypeAliasDeclaration =>
       ts.isTypeAliasDeclaration(declaration)
@@ -325,12 +328,21 @@ export class UnionFormatter implements TypeFormatter {
       return undefined;
     }
 
-    const aliasName = aliasDeclaration.name.text;
-    if (visited.has(aliasName)) {
-      throw new Error(`Circular type alias detected: ${aliasName}`);
+    const aliasKey = this.getTypeAliasDeclarationKey(aliasDeclaration);
+    if (visited.has(aliasKey)) {
+      throw new Error(
+        `Circular type alias detected: ${aliasDeclaration.name.text}`,
+      );
     }
-    visited.add(aliasName);
+    visited.add(aliasKey);
     return this.getUnionTypeNode(aliasDeclaration.type, checker, visited);
+  }
+
+  private getTypeAliasDeclarationKey(
+    declaration: ts.TypeAliasDeclaration,
+  ): string {
+    const sourceFile = declaration.getSourceFile();
+    return `${sourceFile.fileName}:${declaration.pos}:${declaration.end}`;
   }
 
   private getDefaultUnionEntry(

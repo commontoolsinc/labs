@@ -25,7 +25,7 @@ const config: Config = {
   publicDir: "public",
   watchDir: "src",
   redirectToIndex:
-    /^\/(?!((assets|scripts|styles|static|fonts)\/.*|build-manifest\.json))/,
+    /^\/(?!((assets|scripts|styles|static|fonts)\/.*|build-manifest\.json|manifest\.webmanifest|sw\.js))/,
   staticDirs: [
     { from: "../static/assets", to: "/static" },
   ],

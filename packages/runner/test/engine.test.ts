@@ -659,6 +659,158 @@ ${FACTORY_SHADOW_GUARDS}
     );
   });
 
+  it("wraps default-exported call-result wrappers in __cf_data", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { action, lift, navigateTo, pattern, type NodeFactory, type Opaque } from "commonfabric";',
+            "function makeWrapper<T, R>(Child: NodeFactory<T, R>) {",
+            "  return pattern(() => {",
+            "    const go = action(() => {",
+            '      return navigateTo(Child({ value: "x" } as Opaque<T>));',
+            "    });",
+            "    return { go };",
+            "  });",
+            "}",
+            "const Child = lift<{ value: string }, { value: string }>(",
+            "  ({ value }) => ({ value }),",
+            ");",
+            "function ChildManager(input: Opaque<{}>) {",
+            "  return makeWrapper(Child)(input);",
+            "}",
+            "export default ChildManager;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__cf_data(ChildManager)");
+
+    await expect(engine.evaluate(id, jsScript, program.files)).rejects.toThrow(
+      "Unsupported value type 'function'",
+    );
+  });
+
+  it("wraps nested and branched default-exported call-result wrappers", async () => {
+    const bodyVariants = [
+      [
+        "  return true",
+        "    ? makeWrapper(Child)(input as Opaque<{ value: string }>)",
+        "    : null;",
+      ],
+      [
+        "  return {",
+        "    child: makeWrapper(Child)(input as Opaque<{ value: string }>),",
+        "  };",
+      ],
+    ];
+
+    for (const body of bodyVariants) {
+      const program: RuntimeProgram = {
+        main: "/main.ts",
+        files: [
+          {
+            name: "/main.ts",
+            contents: [
+              'import { action, lift, navigateTo, pattern, type NodeFactory, type Opaque } from "commonfabric";',
+              "function makeWrapper<T, R>(Child: NodeFactory<T, R>) {",
+              "  return pattern(() => {",
+              "    const go = action(() => {",
+              '      return navigateTo(Child({ value: "x" } as Opaque<T>));',
+              "    });",
+              "    return { go };",
+              "  });",
+              "}",
+              "const Child = lift<{ value: string }, { value: string }>(",
+              "  ({ value }) => ({ value }),",
+              ");",
+              "function ChildManager(input: Opaque<{}>) {",
+              ...body,
+              "}",
+              "export default ChildManager;",
+            ].join("\n"),
+          },
+        ],
+      };
+
+      const { jsScript, id } = await engine.compile(program);
+      expect(jsScript.js).toContain("__cf_data(ChildManager)");
+
+      await expect(
+        engine.evaluate(id, jsScript, program.files),
+      ).rejects.toThrow(
+        "Unsupported value type 'function'",
+      );
+    }
+  });
+
+  it("rejects default-exported trusted runtime helper references", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "export default pattern;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow(
+      "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
+    );
+  });
+
+  it("rejects default-exported aliases of trusted runtime helpers", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "const rawPattern = pattern;",
+            "export default rawPattern;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow(
+      "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
+    );
+  });
+
+  it("allows default-exported functions that call plain local helpers", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "function double(value: number) {",
+            "  return value * 2;",
+            "}",
+            "export default function run() {",
+            "  return double(21);",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default()).toBe(42);
+  });
+
   it("compiles default export calls that evaluate to primitive snapshots through __cf_data", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",

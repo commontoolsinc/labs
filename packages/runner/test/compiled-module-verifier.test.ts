@@ -77,6 +77,39 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("rejects default exports of trusted runtime helper references", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = commonfabric_1.pattern;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
+    );
+  });
+
+  it("rejects default exports of trusted runtime helper aliases", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const rawPattern = commonfabric_1.pattern;
+    exports.default = rawPattern;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
+    );
+  });
+
   it("accepts verified top-level function references for compiled trusted builders", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -211,6 +244,22 @@ ${bindingHelper}
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
       "Reserved wrapper binding",
+    );
+  });
+
+  it("rejects default exports of wrapper-local require", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = require;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
     );
   });
 

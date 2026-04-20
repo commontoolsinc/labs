@@ -1,5 +1,7 @@
 // handles.ts — File handle tracking for write support
 
+import type { CfcNodeAnnotation } from "./annotations.ts";
+import type { CfcExistingWritebackOperation } from "./cfc-writeback.ts";
 import { O_RDWR, O_WRONLY } from "./platform.ts";
 
 export interface HandleState {
@@ -11,6 +13,8 @@ export interface HandleState {
   truncatePending: boolean;
   version: number;
   writeTarget?: unknown;
+  cfcAuthorizedOperations: Set<CfcExistingWritebackOperation>;
+  cfcAuthorizationAnnotation?: CfcNodeAnnotation;
 }
 
 export function handleHasPendingChanges(
@@ -37,7 +41,11 @@ export class HandleMap {
     ino: bigint,
     flags: number,
     content?: Uint8Array,
-    options?: { writeTarget?: unknown },
+    options?: {
+      writeTarget?: unknown;
+      cfcAuthorizedOperations?: CfcExistingWritebackOperation[];
+      cfcAuthorizationAnnotation?: CfcNodeAnnotation;
+    },
   ): bigint {
     const fh = this.nextFh++;
     const isWritable = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
@@ -50,6 +58,8 @@ export class HandleMap {
       truncatePending: false,
       version: 0,
       writeTarget: options?.writeTarget,
+      cfcAuthorizedOperations: new Set(options?.cfcAuthorizedOperations ?? []),
+      cfcAuthorizationAnnotation: options?.cfcAuthorizationAnnotation,
     });
     return fh;
   }
@@ -64,6 +74,24 @@ export class HandleMap {
       this.handles.delete(fh);
     }
     return state;
+  }
+
+  hasCfcAuthorization(
+    fh: bigint,
+    operation: CfcExistingWritebackOperation,
+  ): boolean {
+    return this.handles.get(fh)?.cfcAuthorizedOperations.has(operation) ??
+      false;
+  }
+
+  authorizeCfcOperation(
+    fh: bigint,
+    operation: CfcExistingWritebackOperation,
+  ): boolean {
+    const state = this.handles.get(fh);
+    if (!state) return false;
+    state.cfcAuthorizedOperations.add(operation);
+    return true;
   }
 
   /** Write data into the handle's buffer at offset, extending if needed. */

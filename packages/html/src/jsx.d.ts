@@ -2832,7 +2832,9 @@ interface CFThemeDef {
   colors: CFThemeColors;
 }
 
-type CFThemeInput = Partial<CFThemeDef> & Record<string, unknown>;
+type CFThemeInput =
+  & Partial<Omit<CFThemeDef, "colors"> & { colors: Partial<CFThemeColors> }>
+  & Record<string, unknown>;
 
 type CFEvent<T> = {
   detail: T;
@@ -2941,6 +2943,8 @@ interface CFTabsElement extends CFHTMLElement {}
 interface CFTabElement extends CFHTMLElement {}
 interface CFTabListElement extends CFHTMLElement {}
 interface CFTabPanelElement extends CFHTMLElement {}
+interface CFTabBarElement extends CFHTMLElement {}
+interface CFTabBarItemElement extends CFHTMLElement {}
 
 // Accordion components
 interface CFAccordionElement extends CFHTMLElement {}
@@ -2979,6 +2983,10 @@ interface CFResizableHandleElement extends CFHTMLElement {}
 interface CFHScrollElement extends CFHTMLElement {}
 interface CFScrollAreaElement extends CFHTMLElement {}
 interface CFToolCallElement extends CFHTMLElement {}
+
+// Toast components
+type CFToastElement = HTMLElement;
+type CFToastProviderElement = HTMLElement;
 
 interface CFDraggableAttributes<T> extends CFHTMLAttributes<T> {
   "key"?: number;
@@ -3346,6 +3354,26 @@ interface CFAlertAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-dismiss"?: EventHandler<{}>;
 }
 
+interface CFToastAttributes<T> extends CFHTMLAttributes<T> {
+  "variant"?: "default" | "success" | "error" | "warning";
+  "duration"?: number;
+  "dismissable"?: boolean;
+  "open"?: boolean;
+  "oncf-toast-dismiss"?: EventHandler<{ reason: string }>;
+  "oncf-toast-action"?: EventHandler<{}>;
+}
+
+interface CFToastProviderAttributes<T> extends CFHTMLAttributes<T> {
+  "position"?:
+    | "top"
+    | "bottom"
+    | "top-left"
+    | "top-right"
+    | "bottom-left"
+    | "bottom-right";
+  "max"?: number;
+}
+
 interface CFCardAttributes<T> extends CFHTMLAttributes<T> {
   "clickable"?: boolean;
 }
@@ -3488,6 +3516,10 @@ interface CFCFCAuthorshipAttributes<T> extends CFHTMLAttributes<T> {
   "authorName"?: unknown;
   "avatar"?: unknown;
   "kind"?: string;
+  "verifyTextIntegrity"?: boolean;
+  "allowLiteralText"?: boolean;
+  "requiredTextIntegrity"?: unknown | readonly unknown[];
+  "textIntegrityState"?: "ok" | "blocked";
 }
 
 interface CFCFCRenderBoundaryAttributes<T> extends CFHTMLAttributes<T> {
@@ -3550,6 +3582,9 @@ interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "$open"?: CellLike<boolean> | boolean;
   "dismissable"?: boolean;
   "size"?: "sm" | "md" | "lg" | "full";
+  "presentation"?: "dialog" | "sheet";
+  "grabber"?: boolean;
+  "detent"?: "auto" | "half" | "full";
   "prevent-scroll"?: boolean;
   "label"?: string;
   "oncf-modal-open"?: EventHandler<void>;
@@ -3927,6 +3962,21 @@ interface CFTabPanelAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: string; // Panel identifier (plain string, no cell binding needed)
 }
 
+// Tab bar component attributes
+interface CFTabBarAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<string> | string; // Bidirectional cell binding
+  "value"?: string; // Plain string value (use $value for cells)
+  "position"?: "bottom" | "top";
+  "variant"?: "default" | "inset";
+  "oncf-change"?: EventHandler<{ value: string; oldValue: string }>;
+}
+
+interface CFTabBarItemAttributes<T> extends CFHTMLAttributes<T> {
+  "value"?: string;
+  "label"?: string;
+  "disabled"?: boolean;
+}
+
 // Accordion component attributes
 interface CFAccordionAttributes<T> extends CFHTMLAttributes<T> {
   "type"?: "single" | "multiple" | CellLike<"single" | "multiple">;
@@ -4042,6 +4092,11 @@ interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
     | "primary"
     | "accent"
     | CellLike<"default" | "primary" | "accent">;
+  "size"?:
+    | "sm"
+    | "md"
+    | "lg"
+    | CellLike<"sm" | "md" | "lg">;
   "removable"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
@@ -4980,6 +5035,14 @@ declare global {
         CFTabPanelAttributes<CFTabPanelElement>,
         CFTabPanelElement
       >;
+      "cf-tab-bar": CFDOM.DetailedHTMLProps<
+        CFTabBarAttributes<CFTabBarElement>,
+        CFTabBarElement
+      >;
+      "cf-tab-bar-item": CFDOM.DetailedHTMLProps<
+        CFTabBarItemAttributes<CFTabBarItemElement>,
+        CFTabBarItemElement
+      >;
 
       // Accordion components
       "cf-accordion": CFDOM.DetailedHTMLProps<
@@ -5123,6 +5186,16 @@ declare global {
       "cf-dot-mark": CFDOM.DetailedHTMLProps<
         CFDotMarkAttributes<CFDotMarkElement>,
         CFDotMarkElement
+      >;
+
+      // Toast components
+      "cf-toast": CFDOM.DetailedHTMLProps<
+        CFToastAttributes<CFToastElement>,
+        CFToastElement
+      >;
+      "cf-toast-provider": CFDOM.DetailedHTMLProps<
+        CFToastProviderAttributes<CFToastProviderElement>,
+        CFToastProviderElement
       >;
     }
   }

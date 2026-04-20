@@ -6,7 +6,7 @@ library.
 
 ## Component Library Overview
 
-The Common Fabric UI library provides 39 secure web components that follow the
+The Common Fabric UI library provides 40 secure web components that follow the
 shadcn/ui design system. All components:
 
 - Use custom element tags prefixed with `cf-`
@@ -219,13 +219,29 @@ Working references:
 
 - `header` - Card header content
 - `content` - Main card content
-- `footer` - Card footer content **Example**:
+- `footer` - Card footer content
+
+**CSS custom properties**:
+
+- `--cf-card-background` - Card background, default inherits from surface color.
+  Accepts any CSS `background` value including gradients.
+- `--cf-card-backdrop-blur` - Backdrop blur radius, default `0px`. Set to a blur
+  value (e.g. `8px`) for a frosted-glass effect.
+
+**Example**:
 
 ```html
 <cf-card>
   <h3 slot="header">Card Title</h3>
   <p slot="content">Card content goes here</p>
   <cf-button slot="footer">Action</cf-button>
+</cf-card>
+
+<!-- Gradient tinted card -->
+<cf-card
+  style="--cf-card-background: linear-gradient(145deg, rgba(255, 255, 255, 0.52), #ece9ff); --cf-card-backdrop-blur: 8px"
+>
+  <p slot="content">Frosted glass card</p>
 </cf-card>
 ```
 
@@ -240,6 +256,47 @@ Working references:
 
 ```html
 <cf-badge variant="secondary" removable>Status</cf-badge>
+```
+
+### 13b. cf-chip
+
+**Purpose**: Compact label / tag / action pill **Tag**: `<cf-chip>`
+**Attributes**:
+
+- `label` - string, display text
+- `size` - "sm" | "md" | "lg" (default: "md")
+- `removable` - boolean (shows X button)
+
+**Events**:
+
+- `cf-remove` - Fired when X button clicked (if removable)
+
+**CSS custom properties** (per-instance color overrides):
+
+- `--cf-chip-background` - chip background color or gradient
+- `--cf-chip-color` - chip text color
+- `--cf-chip-border-color` - chip border color
+
+**Example**:
+
+```html
+<!-- Basic chip -->
+<cf-chip label="Draft"></cf-chip>
+
+<!-- Size variants -->
+<cf-chip label="Small" size="sm"></cf-chip>
+<cf-chip label="Large" size="lg"></cf-chip>
+
+<!-- Color override via CSS custom properties -->
+<cf-chip
+  label="Review"
+  size="sm"
+  style="--cf-chip-background: linear-gradient(135deg, #5f89ff, #4d77fb); --cf-chip-color: white"
+>
+</cf-chip>
+
+<!-- Removable -->
+<cf-chip label="Tag" removable></cf-chip>
 ```
 
 ### 14. cf-alert
@@ -518,7 +575,39 @@ Same as cf-hstack **Example**:
 - `scrollToX(x, smooth)` - Scroll to position
 - `scrollByX(x, smooth)` - Scroll by amount
 
-### 37. cf-vscroll
+### 37. cf-screen
+
+**Purpose**: Full-height app layout with pinned header/footer and auto-scrolling
+main area **Tag**: `<cf-screen>`
+
+**Slots**:
+
+- `header` — Fixed content at the top
+- (default) — Main content area; stretches to fill height, scrolls automatically
+  when content overflows
+- `footer` — Fixed content at the bottom
+
+**Usage notes**:
+
+- Content in the default slot scrolls automatically — no need for `cf-vscroll`
+  unless you need snap-to-bottom (chat), fade-edges, or styled scrollbar
+- Do NOT nest `cf-screen` inside another `cf-screen`
+
+**Example**:
+
+```html
+<cf-screen>
+  <cf-heading slot="header" level="2">Title</cf-heading>
+  <cf-vstack gap="4" padding="4">
+    <!-- content scrolls if it overflows -->
+  </cf-vstack>
+  <cf-hstack slot="footer" gap="2" padding="4">
+    <cf-button>Action</cf-button>
+  </cf-hstack>
+</cf-screen>
+```
+
+### 38. cf-vscroll
 
 **Purpose**: Vertical scroll container **Tag**: `<cf-vscroll>` **Attributes**:
 
@@ -531,7 +620,11 @@ Same as cf-hstack **Example**:
 - `scrollToY(y, smooth)` - Scroll to position
 - `scrollByY(y, smooth)` - Scroll by amount
 
-### 38. cf-grid
+**Note**: `cf-vscroll` is only needed inside `cf-screen` when you need
+snap-to-bottom, fade-edges, or styled scrollbar. `cf-screen` scrolls
+automatically on its own.
+
+### 39. cf-grid
 
 **Purpose**: CSS Grid container **Tag**: `<cf-grid>` **Attributes**:
 
@@ -554,7 +647,7 @@ Same as cf-hstack **Example**:
 </cf-grid>
 ```
 
-### 39. cf-table
+### 40. cf-table
 
 **Purpose**: Semantic HTML table **Tag**: `<cf-table>` **Attributes**:
 
@@ -661,6 +754,102 @@ document.querySelector("cf-form").addEventListener("cf-submit", (e) => {
   e.preventDefault();
   console.log("Form data:", e.detail.formData);
 });
+```
+
+### cf-modal (Sheet Presentation)
+
+**Purpose**: Modal dialog with optional bottom-sheet presentation **Tag**:
+`<cf-modal>` **Attributes** (in addition to existing open, dismissable, size,
+label):
+
+- `presentation` - "dialog" | "sheet" (default: "dialog")
+- `grabber` - boolean, decorative drag-handle indicator (sheet mode only)
+- `detent` - "auto" | "half" | "full" (sheet max height, sheet mode only)
+
+**Example**:
+
+```html
+<cf-modal open presentation="sheet" grabber detent="half" dismissable>
+  <span slot="header">Options</span>
+  <p>Sheet slides up from the bottom.</p>
+</cf-modal>
+```
+
+### cf-tab-bar / cf-tab-bar-item
+
+**Purpose**: Fixed-position app navigation bar (distinct from cf-tabs) **Tags**:
+`<cf-tab-bar>`, `<cf-tab-bar-item>`
+
+**cf-tab-bar Attributes**:
+
+- `value` / `$value` - selected item value (Cell or string)
+- `position` - "bottom" | "top" (default: "bottom")
+- `variant` - "default" | "inset" (default: "default")
+
+**cf-tab-bar-item Attributes**:
+
+- `value` - unique identifier string
+- `label` - text label below icon
+- `disabled` - boolean
+
+**Slots**:
+
+- Default slot: `cf-tab-bar-item` elements
+- `action` slot: optional primary action button (FAB)
+- `icon` slot (on item): icon content above label
+
+**Events**:
+
+- `cf-change` - detail: `{ value, oldValue }`
+
+**Example**:
+
+```html
+<cf-tab-bar value="home" variant="inset">
+  <cf-tab-bar-item value="home" label="Home">
+    <span slot="icon">🏠</span>
+  </cf-tab-bar-item>
+  <cf-tab-bar-item value="search" label="Search">
+    <span slot="icon">🔍</span>
+  </cf-tab-bar-item>
+  <cf-button slot="action" variant="primary">＋</cf-button>
+</cf-tab-bar>
+```
+
+### cf-toast / cf-toast-provider
+
+**Purpose**: Floating ephemeral notification messages **Tags**:
+`<cf-toast-provider>`, `<cf-toast>`
+
+**cf-toast-provider Attributes**:
+
+- `position` - "top" | "bottom" | "top-left" | "top-right" | "bottom-left" |
+  "bottom-right" (default: "bottom")
+- `max` - number, max visible toasts (default: 3)
+
+**cf-toast Attributes**:
+
+- `variant` - "default" | "success" | "error" | "warning"
+- `duration` - number, auto-dismiss ms (default: 5000, 0 = persistent)
+- `dismissable` - boolean, show X button
+- `open` - boolean, visibility
+
+**cf-toast Slots**: Default (message), `action`, `icon`
+
+**Events**:
+
+- `cf-toast-dismiss` - detail: `{ reason: "timeout" | "user" }`
+- `cf-toast-action` - detail: `{}`
+
+**Example**:
+
+```html
+<cf-toast-provider position="bottom">
+  <cf-toast open variant="success" duration="4000">
+    Changes saved.
+    <button slot="action">View</button>
+  </cf-toast>
+</cf-toast-provider>
 ```
 
 ## Styling Components

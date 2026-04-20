@@ -13,9 +13,6 @@
  *
  * Follows the same inline-flag-test dispatch pattern used by
  * `fabric-value.ts`.
- *
- * DO NOT MERGE! This comment makes this PR not the same as `main`. Just to
- * force a diff and a build.
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
@@ -333,4 +330,38 @@ export function isInternedSchema(schema: JSONSchema): boolean {
   }
 
   return schemaToSah.has(schema);
+}
+
+// ---------------------------------------------------------------------------
+// Interned cache-key helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Interns (and thus deep-freezes) the given schema, returning its hash
+ * string. Equivalent to `internSchema(schema, true).hashString`, but names
+ * the operation and avoids the non-obvious `true` (`wantSchemaAndHash`)
+ * argument at call sites. Intended for building stable cache-key strings
+ * that also benefit from `internSchema`'s identity-stable WeakMap
+ * fast-path on repeat lookups.
+ */
+export function internSchemaHashString(schema: JSONSchema): string {
+  return internSchema(schema, true).hashString;
+}
+
+/**
+ * Returns a cache-key string for an ordered pair of schemas, each interned
+ * (and thus deep-frozen) via `internSchema`. The `|` delimiter is outside
+ * the base64url alphabet used by hash strings, so the two halves cannot
+ * merge ambiguously.
+ *
+ * Used at the `traverse.ts` sites that key an intern cache on a merge
+ * operation's two input schemas. Interning the inputs stabilizes their
+ * identities in `internSchema`'s WeakMap, so subsequent calls with the
+ * same object references hit the hash-cache fast path in O(1) rather
+ * than re-hashing. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1
+ * for the motivating regression.
+ */
+export function internedPairKey(a: JSONSchema, b: JSONSchema): string {
+  return `${internSchemaHashString(a)}|${internSchemaHashString(b)}`;
 }

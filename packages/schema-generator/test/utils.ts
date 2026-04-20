@@ -47,6 +47,18 @@ async function getTypeScriptEnvironmentTypes(): Promise<
   return typeLibsCache;
 }
 
+function getLibSourceText(
+  name: string,
+  typeLibs: Record<string, string>,
+): string | undefined {
+  if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+    return typeLibs.es2023;
+  }
+
+  const libName = name.toLowerCase().replace(".d.ts", "");
+  return typeLibs[libName];
+}
+
 export async function createTestProgram(
   code: string,
 ): Promise<
@@ -140,11 +152,110 @@ export async function createTestProgram(
   };
 }
 
+export async function createTestProgramFromFiles(
+  files: Record<string, string>,
+  entryFile: string,
+): Promise<
+  { program: ts.Program; checker: ts.TypeChecker; sourceFile: ts.SourceFile }
+> {
+  const normalizePath = (path: string) =>
+    path.startsWith("/") ? path : `/${path}`;
+  const normalizedEntry = normalizePath(entryFile);
+  const filesWithPrelude: Record<string, string> = {};
+  for (const [path, code] of Object.entries(files)) {
+    filesWithPrelude[normalizePath(path)] = `${CELL_BRAND_PRELUDE}\n${code}`;
+  }
+
+  const typeLibs = await getTypeScriptEnvironmentTypes();
+
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2023,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    allowImportingTsExtensions: true,
+    noEmit: true,
+    lib: ["ES2023", "DOM", "JSX"],
+    strict: true,
+    strictNullChecks: true,
+  };
+
+  const compilerHost: ts.CompilerHost = {
+    getSourceFile: (name) => {
+      const normalizedName = normalizePath(name);
+      const sourceText = filesWithPrelude[normalizedName] ??
+        getLibSourceText(name, typeLibs);
+      return sourceText === undefined ? undefined : ts.createSourceFile(
+        name,
+        sourceText,
+        compilerOptions.target!,
+        true,
+      );
+    },
+    writeFile: () => {},
+    getCurrentDirectory: () => "/",
+    getDirectories: () => [],
+    fileExists: (name) =>
+      filesWithPrelude[normalizePath(name)] !== undefined ||
+      getLibSourceText(name, typeLibs) !== undefined,
+    readFile: (name) =>
+      filesWithPrelude[normalizePath(name)] ?? getLibSourceText(name, typeLibs),
+    getCanonicalFileName: (f) => f,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    getDefaultLibFileName: () => "lib.d.ts",
+  };
+
+  const program = ts.createProgram(
+    Object.keys(filesWithPrelude),
+    compilerOptions,
+    compilerHost,
+  );
+  const sourceFile = program.getSourceFile(normalizedEntry);
+  if (!sourceFile) {
+    throw new Error(`Entry file ${entryFile} not found in test program`);
+  }
+
+  return {
+    program,
+    checker: program.getTypeChecker(),
+    sourceFile,
+  };
+}
+
 export async function getTypeFromCode(
   code: string,
   typeName: string,
 ): Promise<{ type: ts.Type; checker: ts.TypeChecker; typeNode?: ts.TypeNode }> {
   const { checker, sourceFile } = await createTestProgram(code);
+
+  let foundType: ts.Type | undefined;
+  let foundTypeNode: ts.TypeNode | undefined;
+
+  ts.forEachChild(sourceFile, (node) => {
+    if (ts.isInterfaceDeclaration(node) && node.name.text === typeName) {
+      const symbol = checker.getSymbolAtLocation(node.name);
+      if (symbol) foundType = checker.getDeclaredTypeOfSymbol(symbol);
+    } else if (ts.isTypeAliasDeclaration(node) && node.name.text === typeName) {
+      foundType = checker.getTypeFromTypeNode(node.type);
+      foundTypeNode = node.type;
+    }
+  });
+
+  if (!foundType) throw new Error(`Type ${typeName} not found in code`);
+  return foundTypeNode
+    ? { type: foundType, checker, typeNode: foundTypeNode }
+    : { type: foundType, checker };
+}
+
+export async function getTypeFromFiles(
+  files: Record<string, string>,
+  entryFile: string,
+  typeName: string,
+): Promise<{ type: ts.Type; checker: ts.TypeChecker; typeNode?: ts.TypeNode }> {
+  const { checker, sourceFile } = await createTestProgramFromFiles(
+    files,
+    entryFile,
+  );
 
   let foundType: ts.Type | undefined;
   let foundTypeNode: ts.TypeNode | undefined;

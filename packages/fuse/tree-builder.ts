@@ -6,6 +6,7 @@ import {
   isStreamValue,
   transformCallableValues,
 } from "./callables.ts";
+import type { CfcJsonAnnotationContext } from "./annotations.ts";
 import { FsTree } from "./tree.ts";
 
 /**
@@ -148,6 +149,7 @@ export interface BuildJsonTreeOpts {
   seen?: WeakSet<object>;
   resolveLink?: (value: unknown, depth: number) => string | null;
   depth?: number;
+  annotation?: CfcJsonAnnotationContext;
 }
 
 const ASYNC_BUILD_BATCH_SIZE = 200;
@@ -158,6 +160,7 @@ interface BuildJsonTreeTask {
   value: unknown;
   seen?: WeakSet<object>;
   depth: number;
+  annotation?: CfcJsonAnnotationContext;
   onBuilt?: (ino: bigint) => void;
 }
 
@@ -166,24 +169,36 @@ function buildJsonLeaf(
   parentIno: bigint,
   name: string,
   value: unknown,
+  annotation?: CfcJsonAnnotationContext,
 ): bigint {
+  let ino: bigint;
   if (value === null || value === undefined) {
-    return tree.addFile(parentIno, name, "", "null");
+    ino = tree.addFile(parentIno, name, "", "null");
+    annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+    return ino;
   }
 
   if (typeof value === "boolean") {
-    return tree.addFile(parentIno, name, String(value), "boolean");
+    ino = tree.addFile(parentIno, name, String(value), "boolean");
+    annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+    return ino;
   }
 
   if (typeof value === "number") {
-    return tree.addFile(parentIno, name, String(value), "number");
+    ino = tree.addFile(parentIno, name, String(value), "number");
+    annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+    return ino;
   }
 
   if (typeof value === "string") {
-    return tree.addFile(parentIno, name, value, "string");
+    ino = tree.addFile(parentIno, name, value, "string");
+    annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+    return ino;
   }
 
-  return tree.addFile(parentIno, name, String(value), "string");
+  ino = tree.addFile(parentIno, name, String(value), "string");
+  annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+  return ino;
 }
 
 async function yieldToEventLoop(): Promise<void> {
@@ -214,18 +229,29 @@ export function buildJsonTree(
   depth?: number,
   skipEntry?: (value: unknown) => boolean,
   classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
+  annotation?: CfcJsonAnnotationContext,
 ): bigint {
   const d = depth ?? 0;
 
   if (value === null || value === undefined) {
-    return tree.addFile(parentIno, name, "", "null");
+    const ino = tree.addFile(parentIno, name, "", "null");
+    annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+    annotation?.annotator.annotateEntry(parentIno, name, ino, {
+      labelPath: annotation.path,
+    });
+    return ino;
   }
 
   // Detect circular references
   if (typeof value === "object") {
     if (!seen) seen = new WeakSet();
     if (seen.has(value as object)) {
-      return tree.addFile(parentIno, name, "[Circular]", "string");
+      const ino = tree.addFile(parentIno, name, "[Circular]", "string");
+      annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+      annotation?.annotator.annotateEntry(parentIno, name, ino, {
+        labelPath: annotation.path,
+      });
+      return ino;
     }
     seen.add(value as object);
   }
@@ -234,7 +260,12 @@ export function buildJsonTree(
   if (isSigilLink(value) && resolveLink) {
     const target = resolveLink(value, d);
     if (target) {
-      return tree.addSymlink(parentIno, name, target);
+      const ino = tree.addSymlink(parentIno, name, target);
+      annotation?.annotator.annotateJsonSymlink(ino, annotation.path, target);
+      annotation?.annotator.annotateEntry(parentIno, name, ino, {
+        labelPath: annotation.path,
+      });
+      return ino;
     }
     // Fall through to normal object handling if link can't be resolved
   }
@@ -242,45 +273,76 @@ export function buildJsonTree(
   const type = typeof value;
 
   if (type === "boolean") {
-    return tree.addFile(
+    const ino = tree.addFile(
       parentIno,
       name,
       String(value),
       "boolean",
     );
+    annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+    annotation?.annotator.annotateEntry(parentIno, name, ino, {
+      labelPath: annotation.path,
+    });
+    return ino;
   }
 
   if (type === "number") {
-    return tree.addFile(
+    const ino = tree.addFile(
       parentIno,
       name,
       String(value),
       "number",
     );
+    annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+    annotation?.annotator.annotateEntry(parentIno, name, ino, {
+      labelPath: annotation.path,
+    });
+    return ino;
   }
 
   if (type === "string") {
-    return tree.addFile(
+    const ino = tree.addFile(
       parentIno,
       name,
       value as string,
       "string",
     );
+    annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+    annotation?.annotator.annotateEntry(parentIno, name, ino, {
+      labelPath: annotation.path,
+    });
+    return ino;
   }
 
   if (Array.isArray(value)) {
     const dirIno = tree.addDir(parentIno, name, "array");
+    annotation?.annotator.annotateJsonDirectory(dirIno, annotation.path, value);
+    annotation?.annotator.annotateEntry(parentIno, name, dirIno, {
+      labelPath: annotation.path,
+    });
 
     // Add .json sibling for the whole array
-    tree.addFile(
+    const jsonIno = tree.addFile(
       parentIno,
       `${name}.json`,
       safeStringify(value),
       "array",
     );
+    annotation?.annotator.annotateJsonAggregate(
+      jsonIno,
+      annotation.path,
+      value,
+    );
+    annotation?.annotator.annotateEntry(parentIno, `${name}.json`, jsonIno, {
+      labelPath: annotation.path,
+    });
 
     // Recurse for each element
     for (let i = 0; i < value.length; i++) {
+      const childAnnotation = annotation?.annotator.childContext(
+        annotation,
+        i,
+      );
       buildJsonTree(
         tree,
         dirIno,
@@ -291,6 +353,7 @@ export function buildJsonTree(
         d + 1,
         skipEntry,
         classifyCallableEntry,
+        childAnnotation,
       );
     }
 
@@ -300,6 +363,10 @@ export function buildJsonTree(
   if (type === "object") {
     const obj = value as Record<string, unknown>;
     const dirIno = tree.addDir(parentIno, name, "object");
+    annotation?.annotator.annotateJsonDirectory(dirIno, annotation.path, value);
+    annotation?.annotator.annotateEntry(parentIno, name, dirIno, {
+      labelPath: annotation.path,
+    });
 
     // Add .json sibling, replacing stream/handler values with handler sigils
     const jsonValue = d === 0
@@ -310,17 +377,29 @@ export function buildJsonTree(
         )
         : transformStreamValues(value)
       : value;
-    tree.addFile(
+    const jsonIno = tree.addFile(
       parentIno,
       `${name}.json`,
       safeStringify(jsonValue),
       "object",
     );
+    annotation?.annotator.annotateJsonAggregate(
+      jsonIno,
+      annotation.path,
+      jsonValue,
+    );
+    annotation?.annotator.annotateEntry(parentIno, `${name}.json`, jsonIno, {
+      labelPath: annotation.path,
+    });
 
     // Recurse for each key, skipping stream/handler values (handler files created separately)
     for (const [key, val] of Object.entries(obj)) {
       if (isStreamValue(val) || isHandlerCell(val)) continue;
       if (skipEntry?.(val)) continue;
+      const childAnnotation = annotation?.annotator.childContext(
+        annotation,
+        key,
+      );
       buildJsonTree(
         tree,
         dirIno,
@@ -331,6 +410,7 @@ export function buildJsonTree(
         d + 1,
         skipEntry,
         classifyCallableEntry,
+        childAnnotation,
       );
     }
 
@@ -338,12 +418,17 @@ export function buildJsonTree(
   }
 
   // Fallback: stringify anything else
-  return tree.addFile(
+  const ino = tree.addFile(
     parentIno,
     name,
     String(value),
     "string",
   );
+  annotation?.annotator.annotateJsonScalar(ino, annotation.path, value);
+  annotation?.annotator.annotateEntry(parentIno, name, ino, {
+    labelPath: annotation.path,
+  });
+  return ino;
 }
 
 export async function buildJsonTreeAsync(
@@ -356,6 +441,7 @@ export async function buildJsonTreeAsync(
   depth?: number,
   skipEntry?: (value: unknown) => boolean,
   classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
+  annotation?: CfcJsonAnnotationContext,
 ): Promise<bigint> {
   const queue: BuildJsonTreeTask[] = [{
     parentIno,
@@ -363,6 +449,7 @@ export async function buildJsonTreeAsync(
     value,
     seen,
     depth: depth ?? 0,
+    annotation,
   }];
   let nextIndex = 0;
   let processed = 0;
@@ -380,7 +467,13 @@ export async function buildJsonTreeAsync(
     let builtIno: bigint | undefined;
 
     if (candidate === null || candidate === undefined) {
-      builtIno = buildJsonLeaf(tree, task.parentIno, task.name, candidate);
+      builtIno = buildJsonLeaf(
+        tree,
+        task.parentIno,
+        task.name,
+        candidate,
+        task.annotation,
+      );
     } else if (typeof candidate === "object") {
       const objectValue = candidate as object;
       const taskSeen = task.seen ?? new WeakSet<object>();
@@ -391,6 +484,11 @@ export async function buildJsonTreeAsync(
           "[Circular]",
           "string",
         );
+        task.annotation?.annotator.annotateJsonScalar(
+          builtIno,
+          task.annotation.path,
+          candidate,
+        );
       } else {
         taskSeen.add(objectValue);
 
@@ -398,17 +496,38 @@ export async function buildJsonTreeAsync(
           const target = resolveLink(candidate, d);
           if (target) {
             builtIno = tree.addSymlink(task.parentIno, task.name, target);
+            task.annotation?.annotator.annotateJsonSymlink(
+              builtIno,
+              task.annotation.path,
+              target,
+            );
           }
         }
 
         if (builtIno === undefined) {
           if (Array.isArray(candidate)) {
             builtIno = tree.addDir(task.parentIno, task.name, "array");
-            tree.addFile(
+            task.annotation?.annotator.annotateJsonDirectory(
+              builtIno,
+              task.annotation.path,
+              candidate,
+            );
+            const jsonIno = tree.addFile(
               task.parentIno,
               `${task.name}.json`,
               safeStringify(candidate),
               "array",
+            );
+            task.annotation?.annotator.annotateJsonAggregate(
+              jsonIno,
+              task.annotation.path,
+              candidate,
+            );
+            task.annotation?.annotator.annotateEntry(
+              task.parentIno,
+              `${task.name}.json`,
+              jsonIno,
+              { labelPath: task.annotation.path },
             );
 
             for (let i = 0; i < candidate.length; i++) {
@@ -418,21 +537,41 @@ export async function buildJsonTreeAsync(
                 value: candidate[i],
                 seen: taskSeen,
                 depth: d + 1,
+                annotation: task.annotation?.annotator.childContext(
+                  task.annotation,
+                  i,
+                ),
               });
             }
           } else {
             const obj = candidate as Record<string, unknown>;
             builtIno = tree.addDir(task.parentIno, task.name, "object");
+            task.annotation?.annotator.annotateJsonDirectory(
+              builtIno,
+              task.annotation.path,
+              candidate,
+            );
             const jsonValue = d === 0
               ? classifyCallableEntry
                 ? transformCallableValues(candidate, classifyCallableEntry)
                 : transformStreamValues(candidate)
               : candidate;
-            tree.addFile(
+            const jsonIno = tree.addFile(
               task.parentIno,
               `${task.name}.json`,
               safeStringify(jsonValue),
               "object",
+            );
+            task.annotation?.annotator.annotateJsonAggregate(
+              jsonIno,
+              task.annotation.path,
+              jsonValue,
+            );
+            task.annotation?.annotator.annotateEntry(
+              task.parentIno,
+              `${task.name}.json`,
+              jsonIno,
+              { labelPath: task.annotation.path },
             );
 
             for (const [key, val] of Object.entries(obj)) {
@@ -444,15 +583,31 @@ export async function buildJsonTreeAsync(
                 value: val,
                 seen: taskSeen,
                 depth: d + 1,
+                annotation: task.annotation?.annotator.childContext(
+                  task.annotation,
+                  key,
+                ),
               });
             }
           }
         }
       }
     } else {
-      builtIno = buildJsonLeaf(tree, task.parentIno, task.name, candidate);
+      builtIno = buildJsonLeaf(
+        tree,
+        task.parentIno,
+        task.name,
+        candidate,
+        task.annotation,
+      );
     }
 
+    task.annotation?.annotator.annotateEntry(
+      task.parentIno,
+      task.name,
+      builtIno!,
+      { labelPath: task.annotation.path },
+    );
     task.onBuilt?.(builtIno!);
     processed++;
     if (processed % ASYNC_BUILD_BATCH_SIZE === 0) {

@@ -15,7 +15,8 @@ export class XButtonElement extends LitElement {
       width: 100%;
       padding: 0.75rem 1rem;
       font-family: var(--font-primary);
-      background-color: white;
+      color: var(--font-color);
+      background-color: var(--shell-surface);
       border: var(--border-width, 2px) solid var(--border-color, #000);
       cursor: pointer;
       transition: all 0.1s ease-in-out;
@@ -32,12 +33,12 @@ export class XButtonElement extends LitElement {
     }
 
     button[x-variant="primary"] {
-      background-color: black;
-      color: white;
+      background-color: var(--font-color);
+      color: var(--shell-surface);
     }
 
     button[x-variant="primary"]:hover:not(:disabled) {
-      background-color: #333;
+      background-color: var(--shell-text-muted);
     }
 
     button[x-size="small"] {

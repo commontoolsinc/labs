@@ -34,6 +34,7 @@ import LoaderStory from "../stories/cf-loader-story.tsx";
 import SkeletonStory from "../stories/cf-skeleton-story.tsx";
 import CollapsibleStory from "../stories/cf-collapsible-story.tsx";
 import TabListStory from "../stories/cf-tab-list-story.tsx";
+import TabBarStory from "../stories/cf-tab-bar-story.tsx";
 import TabsStory from "../stories/cf-tabs-story.tsx";
 import ChartStory from "../stories/cf-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
@@ -49,6 +50,8 @@ import TagsStory from "../stories/cf-tags-story.tsx";
 import GridStory from "../stories/cf-grid-story.tsx";
 import VignetteRecipeStory from "../stories/vignette-recipe-story.tsx";
 import VignetteFinanceStory from "../stories/vignette-finance-story.tsx";
+import VignetteMobileAppStory from "../stories/vignette-mobile-app-story.tsx";
+import ToastStory from "../stories/cf-toast-story.tsx";
 
 interface StoryRendererInput {
   selected: string;
@@ -57,7 +60,7 @@ interface StoryRendererInput {
 interface StoryRendererOutput {
   [NAME]: string;
   [UI]: VNode;
-  controls: VNode;
+  controls?: VNode;
 }
 
 type CatalogStory = {
@@ -138,6 +141,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return CollapsibleStory({});
         case "tab-list":
           return TabListStory({});
+        case "tab-bar":
+          return TabBarStory({});
         case "tabs":
           return TabsStory({});
         case "chart":
@@ -168,6 +173,10 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return VignetteRecipeStory({});
         case "vignette-finance":
           return VignetteFinanceStory({});
+        case "vignette-mobile-app":
+          return VignetteMobileAppStory({});
+        case "toast":
+          return ToastStory({});
         default:
           return null;
       }
@@ -176,7 +185,7 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
     return {
       [NAME]: "StoryRenderer",
       [UI]: <>{story}</>,
-      controls: <>{story?.controls ?? null}</>,
+      controls: story?.controls,
     };
   },
 );

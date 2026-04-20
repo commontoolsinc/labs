@@ -42,6 +42,12 @@ export class XBodyView extends BaseView {
       box-sizing: border-box;
     }
 
+    @media (max-width: 768px) {
+      .content {
+        padding: 1rem;
+      }
+    }
+
     x-omni-layout {
       flex: 1;
     }
@@ -142,10 +148,7 @@ export class XBodyView extends BaseView {
 
   private _subPages = new Task(this, {
     task: async ([activePattern, spaceRootPattern]) => {
-      const [
-        sidebarUI,
-        fabUI,
-      ] = await Promise.all([
+      const [sidebarUI, fabUI] = await Promise.all([
         getSubPageCell(
           activePattern?.cell() as CellHandle<SubPages> | undefined,
           "sidebarUI",

@@ -39,8 +39,16 @@ describe("Pattern Runner - Core", () => {
     } = commonfabric);
   });
 
+  async function commitTx() {
+    if (tx.status().status !== "ready") {
+      return { ok: undefined, error: undefined };
+    }
+    runtime.prepareTxForCommit(tx);
+    return await tx.commit();
+  }
+
   afterEach(async () => {
-    await tx.commit();
+    await commitTx();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -62,7 +70,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, simplePattern, {
       value: 5,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toMatchObject({ result: 10 });
@@ -95,7 +103,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, outerPattern, {
       value: 4,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toEqual({ result: 17 });
@@ -129,7 +137,7 @@ describe("Pattern Runner - Core", () => {
       {},
       resultCell1,
     );
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     const value1 = await result1.pull();
@@ -144,7 +152,7 @@ describe("Pattern Runner - Core", () => {
     const result2 = runtime.run(tx, patternWithDefaults, {
       a: 20,
     }, resultCell2);
-    tx.commit();
+    await commitTx();
 
     const value2 = await result2.pull();
     expect(value2).toMatchObject({ sum: 30 });
@@ -184,7 +192,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, multipliedArray, {
       values: [{ x: 1 }, { x: 2 }, { x: 3 }],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toMatchObjectIgnoringSymbols({
@@ -214,7 +222,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, doubleArray, {
       values: undefined,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toMatchObjectIgnoringSymbols({ doubled: [] });
@@ -248,7 +256,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, doubleArray, {
       values: sparseInput,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     const doubled = (value as any).doubled;

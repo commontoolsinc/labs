@@ -160,7 +160,7 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
 
   // Build resolved entries with backlinks materialized as plain arrays
   const entries = computed(() => {
-    const items = mentionable ?? [];
+    const items = Array.isArray(mentionable) ? mentionable : [];
     const result: Entry[] = [];
     for (const piece of items) {
       if (!piece) continue;

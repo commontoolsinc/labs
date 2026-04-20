@@ -102,7 +102,12 @@ const BASE_SPACING = {
  */
 export function resolveColorScheme(scheme: ColorScheme): "light" | "dark" {
   if (scheme === "auto") {
-    // Check system preference
+    // Check for explicit user override via data-theme attribute on <html>
+    if (typeof document !== "undefined") {
+      const dataTheme = document.documentElement.getAttribute("data-theme");
+      if (dataTheme === "light" || dataTheme === "dark") return dataTheme;
+    }
+    // Fall back to system preference
     if (typeof globalThis !== "undefined" && globalThis.matchMedia) {
       return globalThis.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
@@ -162,84 +167,84 @@ export const defaultTheme: CFTheme = {
   fontSize: "1rem",
   borderRadius: "0.5rem",
   density: "comfortable",
-  colorScheme: "light",
+  colorScheme: "auto",
   animationSpeed: "normal",
   colors: {
     primary: {
-      light: "#3b82f6",
-      dark: "#60a5fa",
+      light: "#4f7dff",
+      dark: "#6b93ff",
     },
     primaryForeground: {
       light: "#ffffff",
-      dark: "#1e3a8a",
+      dark: "#1a2a5c",
     },
     secondary: {
-      light: "#6b7280",
-      dark: "#9ca3af",
+      light: "#d8dded",
+      dark: "#3d4463",
     },
     secondaryForeground: {
-      light: "#ffffff",
-      dark: "#374151",
+      light: "#3a4568",
+      dark: "#d8dded",
     },
     background: {
       light: "#ffffff",
-      dark: "#0f172a",
+      dark: "#0f1219",
     },
     surface: {
-      light: "#f1f5f9",
-      dark: "#1e293b",
+      light: "#eef1f8",
+      dark: "#1c2030",
     },
     surfaceHover: {
-      light: "#e2e8f0",
-      dark: "#334155",
+      light: "#e4e8f2",
+      dark: "#282d3e",
     },
     text: {
-      light: "#111827",
-      dark: "#f1f5f9",
+      light: "#313a5d",
+      dark: "#e4e7f0",
     },
     textMuted: {
-      light: "#6b7280",
-      dark: "#94a3b8",
+      light: "#8e94a8",
+      dark: "#8e94a8",
     },
     border: {
-      light: "#e5e7eb",
-      dark: "#475569",
+      light: "rgba(67, 75, 97, 0.10)",
+      dark: "rgba(200, 210, 230, 0.12)",
     },
     borderMuted: {
-      light: "#f3f4f6",
-      dark: "#334155",
+      light: "rgba(67, 75, 97, 0.06)",
+      dark: "rgba(200, 210, 230, 0.06)",
     },
     success: {
-      light: "#16a34a",
-      dark: "#22c55e",
+      light: "#21c17b",
+      dark: "#34d399",
     },
     successForeground: {
       light: "#ffffff",
-      dark: "#14532d",
+      dark: "#064e3b",
     },
     error: {
-      light: "#dc2626",
-      dark: "#ef4444",
+      light: "#ff6f52",
+      dark: "#ff8a72",
     },
     errorForeground: {
       light: "#ffffff",
-      dark: "#7f1d1d",
+      dark: "#451a03",
     },
     warning: {
-      light: "#d97706",
-      dark: "#f59e0b",
+      light: "#e5a126",
+      dark: "#f0b944",
     },
     warningForeground: {
       light: "#ffffff",
       dark: "#451a03",
     },
     accent: {
-      light: "#8b5cf6",
-      dark: "#a78bfa",
+      light: "#ff6f52",
+      dark: "#ff8a72",
     },
     accentForeground: {
       light: "#ffffff",
-      dark: "#4c1d95",
+      dark: "#451a03",
     },
   },
 };
@@ -444,6 +449,7 @@ export function applyThemeToElement(
   // Typography and base properties
   if (includeTypography) {
     element.style.setProperty("--cf-theme-font-family", theme.fontFamily);
+    element.style.setProperty("font-family", theme.fontFamily);
     element.style.setProperty(
       "--cf-theme-mono-font-family",
       theme.monoFontFamily,

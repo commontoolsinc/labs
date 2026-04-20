@@ -38,8 +38,16 @@ describe("Pattern Runner - Reduce", () => {
     } = commonfabric);
   });
 
+  async function commitTx() {
+    if (tx.status().status !== "ready") {
+      return { ok: undefined, error: undefined };
+    }
+    runtime.prepareTxForCommit(tx);
+    return await tx.commit();
+  }
+
   afterEach(async () => {
-    await tx.commit();
+    await commitTx();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -68,7 +76,7 @@ describe("Pattern Runner - Reduce", () => {
     const result = runtime.run(tx, sumPattern, {
       values: [1, 2, 3, 4, 5],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect((value as any).total).toBe(15);
@@ -104,7 +112,7 @@ describe("Pattern Runner - Reduce", () => {
     );
 
     const result = runtime.run(tx, sumPattern, inputCell, resultCell);
-    tx.commit();
+    await commitTx();
 
     let value = await result.pull();
     expect((value as any).total).toBe(6);
@@ -112,7 +120,7 @@ describe("Pattern Runner - Reduce", () => {
     // Update input
     tx = runtime.edit();
     inputCell.withTx(tx).set({ values: [10, 20, 30] });
-    tx.commit();
+    await commitTx();
 
     value = await result.pull();
     expect((value as any).total).toBe(60);
@@ -142,7 +150,7 @@ describe("Pattern Runner - Reduce", () => {
     const result = runtime.run(tx, countPattern, {
       values: [10, 20, 30, 40],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect((value as any).count).toBe(4);
@@ -172,7 +180,7 @@ describe("Pattern Runner - Reduce", () => {
     const result = runtime.run(tx, sumPattern, {
       values: [],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect((value as any).total).toBe(0);
@@ -202,7 +210,7 @@ describe("Pattern Runner - Reduce", () => {
     const result = runtime.run(tx, sumPositivePattern, {
       values: [1, -2, 3, -4, 5],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect((value as any).total).toBe(9); // 1 + 3 + 5
@@ -233,7 +241,7 @@ describe("Pattern Runner - Reduce", () => {
     const result = runtime.run(tx, sumDoubledPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect((value as any).total).toBe(12); // 1*2 + 2*2 + 3*2

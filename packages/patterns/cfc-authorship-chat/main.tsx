@@ -26,13 +26,6 @@ type AuthoredMessageWithIntegrity<
   { integrity: readonly [AuthorshipIntegrity<IntegrityAuthor>] }
 >;
 
-type AuthoredBlockProps = {
-  title: string;
-  summary: string;
-  message: Writable<AuthoredMessage<string>>;
-  surface: string;
-};
-
 type AuthorshipChatOutput = {
   [NAME]: string;
   [UI]: unknown;
@@ -40,34 +33,6 @@ type AuthorshipChatOutput = {
   forgedClaim: string;
   unsignedState: string;
 };
-
-function AuthoredBlock(
-  { title, summary, message, surface }: AuthoredBlockProps,
-) {
-  return (
-    <cf-card data-authorship-card={surface}>
-      <cf-vstack slot="content" gap="2">
-        <cf-heading level={3}>{title}</cf-heading>
-        <cf-label>{summary}</cf-label>
-        <cf-cfc-authorship
-          data-authorship-surface={surface}
-          $value={message}
-          author={message.key("sender")}
-          avatar={message.key("sender").key("avatar")}
-        >
-          <div className="authorship-content-block">
-            <cf-label>{message.key("channel")}</cf-label>
-            <cf-chat-message
-              role="assistant"
-              name={message.key("sender").key("name")}
-              content={message.key("body")}
-            />
-          </div>
-        </cf-cfc-authorship>
-      </cf-vstack>
-    </cf-card>
-  );
-}
 
 export default pattern<unknown, AuthorshipChatOutput>(() => {
   const verifiedMessage: Writable<
@@ -122,12 +87,24 @@ export default pattern<unknown, AuthorshipChatOutput>(() => {
   const verifiedAuthor = computed(() =>
     verifiedMessage.key("sender").key("name").get()
   );
+  const verifiedRequiredTextIntegrity = computed(() => ({
+    kind: "authored-by",
+    subject: verifiedMessage.key("sender").key("id").get(),
+  } satisfies AuthorshipIntegrity<string>));
   const forgedClaim = computed(() =>
     forgedMessage.key("sender").key("name").get()
   );
+  const forgedRequiredTextIntegrity = computed(() => ({
+    kind: "authored-by",
+    subject: forgedMessage.key("sender").key("id").get(),
+  } satisfies AuthorshipIntegrity<string>));
   const unsignedState = computed(() =>
     unsignedMessage.key("sender").key("name").get()
   );
+  const unsignedRequiredTextIntegrity = computed(() => ({
+    kind: "authored-by",
+    subject: unsignedMessage.key("sender").key("id").get(),
+  } satisfies AuthorshipIntegrity<string>));
 
   return {
     [NAME]: "CFC authorship chat demo",
@@ -147,27 +124,92 @@ export default pattern<unknown, AuthorshipChatOutput>(() => {
               </cf-label>
             </cf-vstack>
           </cf-card>
-          {AuthoredBlock({
-            title: "Matching content and author claim",
-            summary:
-              "The rendered block claims Alice, and the whole message object carries authored-by Alice integrity.",
-            surface: "verified",
-            message: verifiedMessage,
-          })}
-          {AuthoredBlock({
-            title: "Forged author claim",
-            summary:
-              "The rendered block claims Bob, but the message object only carries authored-by Alice integrity.",
-            surface: "forged",
-            message: forgedMessage,
-          })}
-          {AuthoredBlock({
-            title: "Unsigned imported content",
-            summary:
-              "The content has no authorship integrity label, so the trusted avatar is withheld.",
-            surface: "unsigned",
-            message: unsignedMessage,
-          })}
+          <cf-card data-authorship-card="verified">
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={3}>
+                Matching content and author claim
+              </cf-heading>
+              <cf-label>
+                The rendered block claims Alice, and the whole message object
+                carries authored-by Alice integrity.
+              </cf-label>
+              <cf-label>{verifiedMessage.key("channel")}</cf-label>
+              <cf-cfc-authorship
+                data-authorship-surface="verified"
+                $value={verifiedMessage}
+                author={verifiedMessage.key("sender")}
+                avatar={verifiedMessage.key("sender").key("avatar")}
+                verifyTextIntegrity
+                allowLiteralText={false}
+                requiredTextIntegrity={verifiedRequiredTextIntegrity}
+              >
+                <div className="authorship-content-block">
+                  <div className="authorship-message">
+                    <strong>
+                      {verifiedMessage.key("sender").key("name")}
+                    </strong>
+                    <p>{verifiedMessage.key("body")}</p>
+                  </div>
+                </div>
+              </cf-cfc-authorship>
+            </cf-vstack>
+          </cf-card>
+          <cf-card data-authorship-card="forged">
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={3}>Forged author claim</cf-heading>
+              <cf-label>
+                The rendered block claims Bob, but the message object only
+                carries authored-by Alice integrity.
+              </cf-label>
+              <cf-label>{forgedMessage.key("channel")}</cf-label>
+              <cf-cfc-authorship
+                data-authorship-surface="forged"
+                $value={forgedMessage}
+                author={forgedMessage.key("sender")}
+                avatar={forgedMessage.key("sender").key("avatar")}
+                verifyTextIntegrity
+                allowLiteralText={false}
+                requiredTextIntegrity={forgedRequiredTextIntegrity}
+              >
+                <div className="authorship-content-block">
+                  <div className="authorship-message">
+                    <strong>
+                      {forgedMessage.key("sender").key("name")}
+                    </strong>
+                    <p>{forgedMessage.key("body")}</p>
+                  </div>
+                </div>
+              </cf-cfc-authorship>
+            </cf-vstack>
+          </cf-card>
+          <cf-card data-authorship-card="unsigned">
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={3}>Unsigned imported content</cf-heading>
+              <cf-label>
+                The content has no authorship integrity label, so the trusted
+                avatar is withheld.
+              </cf-label>
+              <cf-label>{unsignedMessage.key("channel")}</cf-label>
+              <cf-cfc-authorship
+                data-authorship-surface="unsigned"
+                $value={unsignedMessage}
+                author={unsignedMessage.key("sender")}
+                avatar={unsignedMessage.key("sender").key("avatar")}
+                verifyTextIntegrity
+                allowLiteralText={false}
+                requiredTextIntegrity={unsignedRequiredTextIntegrity}
+              >
+                <div className="authorship-content-block">
+                  <div className="authorship-message">
+                    <strong>
+                      {unsignedMessage.key("sender").key("name")}
+                    </strong>
+                    <p>{unsignedMessage.key("body")}</p>
+                  </div>
+                </div>
+              </cf-cfc-authorship>
+            </cf-vstack>
+          </cf-card>
         </cf-vstack>
       </cf-screen>
     ),
