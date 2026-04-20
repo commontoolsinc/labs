@@ -327,7 +327,7 @@ export class MapSetStringToPathSelectors extends MapSet<
           if (v.schema !== undefined) internSchema(v.schema, true);
           Object.freeze(v.path);
           Object.freeze(v);
-          return hashSchemaItem(v).toString();
+          return hashSchemaItem(v);
         }
         : undefined,
     );
@@ -407,7 +407,7 @@ export class CompoundCycleTracker<
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = hashSchemaItem(extraKey).toString();
+    const hash = hashSchemaItem(extraKey);
     if (existing.has(hash)) {
       return null;
     }
@@ -431,7 +431,7 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = hashSchemaItem(extraKey).toString();
+    const hash = hashSchemaItem(extraKey);
     return existing.get(hash);
   }
 }
@@ -2143,7 +2143,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (this.traverseCells) {
         const memo = this.activeMemo;
         const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
-          hashSchema(schema).toString();
+          hashSchema(schema);
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
           this.schemaMemoHits++;
