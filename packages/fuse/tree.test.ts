@@ -1,5 +1,6 @@
 // tree.test.ts — Unit tests for FsTree
 import { assertEquals } from "@std/assert";
+import { CfcProjectionAnnotator } from "./annotations.ts";
 import { FsTree } from "./tree.ts";
 
 const decoder = new TextDecoder();
@@ -50,6 +51,39 @@ Deno.test("rename within same parent", () => {
   assertEquals(tree.lookup(tree.rootIno, "original"), undefined);
   assertEquals(tree.lookup(tree.rootIno, "renamed"), ino);
   assertEquals(tree.getPath(ino), "/renamed");
+});
+
+Deno.test("rename carries CFC directory entry annotation to the new name", () => {
+  const tree = new FsTree();
+  const annotator = new CfcProjectionAnnotator(tree, {
+    space: "did:key:zSpace",
+    entity: "of:piece",
+    rootKind: "pieces",
+    cell: "result",
+    generation: "generation-1",
+    labelView: {
+      version: 1,
+      entries: [{
+        path: ["title"],
+        label: { confidentiality: [{ type: "test-label", value: "secret" }] },
+      }],
+    },
+  });
+  const parentIno = tree.addDir(tree.rootIno, "result", "object");
+  annotator.annotateJsonDirectory(parentIno, [], { title: "old" });
+  const childIno = tree.addFile(parentIno, "title", "old", "string");
+  annotator.annotateJsonScalar(childIno, ["title"], "old");
+  annotator.annotateEntry(parentIno, "title", childIno, {
+    labelPath: ["title"],
+  });
+
+  tree.rename(parentIno, "title", parentIno, "renamed");
+
+  const entries = tree.getCfcAnnotation(parentIno)?.entries?.entries;
+  assertEquals(entries?.map((entry) => entry.name), ["renamed"]);
+  assertEquals(entries?.[0].kind, "file");
+  assertEquals(entries?.[0].childRef, tree.getCfcAnnotation(childIno)?.ref);
+  assertEquals(entries?.[0].nameDigest.startsWith("fnv1a32:"), true);
 });
 
 Deno.test("rename across parents updates paths transitively", () => {

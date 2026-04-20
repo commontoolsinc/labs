@@ -50,3 +50,21 @@ Deno.test("HandleMap stores stable write targets on open handles", () => {
 
   assertEquals(handles.get(fh)?.writeTarget, writeTarget);
 });
+
+Deno.test("HandleMap tracks CFC truncate and write authorization separately", () => {
+  const handles = new HandleMap();
+  const fh = handles.open(
+    1n,
+    O_RDWR,
+    encoder.encode("hello"),
+    { cfcAuthorizedOperations: ["truncate"] },
+  );
+
+  assertEquals(handles.hasCfcAuthorization(fh, "truncate"), true);
+  assertEquals(handles.hasCfcAuthorization(fh, "write"), false);
+
+  handles.authorizeCfcOperation(fh, "write");
+
+  assertEquals(handles.hasCfcAuthorization(fh, "truncate"), true);
+  assertEquals(handles.hasCfcAuthorization(fh, "write"), true);
+});

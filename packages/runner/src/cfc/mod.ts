@@ -16,6 +16,7 @@ export type {
   TrustSnapshot,
   WritePolicyInput,
 } from "./types.ts";
+export { DEFAULT_CFC_ENFORCEMENT_MODE } from "./types.ts";
 export {
   canonicalizeCfcMetadata,
   canonicalizeLogicalPath,

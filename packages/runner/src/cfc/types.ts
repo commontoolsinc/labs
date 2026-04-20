@@ -11,6 +11,8 @@ export type CfcEnforcementMode =
   | "enforce-explicit"
   | "enforce-strict";
 
+export const DEFAULT_CFC_ENFORCEMENT_MODE: CfcEnforcementMode = "disabled";
+
 export type IFCLabel = {
   confidentiality?: unknown[];
   integrity?: unknown[];
