@@ -1,4 +1,4 @@
-import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchemaHashString } from "@commonfabric/data-model/schema-hash";
 import {
   type EntitySnapshot,
   type GraphQuery,
@@ -93,7 +93,7 @@ const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
     root.selector.path,
     root.selector.schema === undefined
       ? ""
-      : hashSchema(internSchema(root.selector.schema)).toString(),
+      : internSchemaHashString(root.selector.schema),
   ]);
 
 const watchQueryIdentity = (watch: WatchSpec): string =>
