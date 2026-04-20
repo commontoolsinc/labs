@@ -39,16 +39,25 @@ export class CFChip extends BaseElement {
         padding: var(--cf-size-sm-padding-v) var(--cf-size-sm-padding-h);
         background: var(
           --cf-chip-background,
-          var(--cf-theme-color-surface, var(--cf-color-gray-100, #f5f5f5))
+          var(
+            --cf-theme-color-surface,
+            var(--cf-colors-gray-100, #f2f3f6)
+          )
         );
         color: var(
           --cf-chip-color,
-          var(--cf-theme-color-text, var(--cf-color-gray-900, #212121))
+          var(
+            --cf-theme-color-text,
+            var(--cf-colors-gray-900, #16181d)
+          )
         );
         border: 1px solid
           var(
             --cf-chip-border-color,
-            var(--cf-theme-color-border, var(--cf-color-gray-300, #e0e0e0))
+            var(
+              --cf-theme-color-border,
+              var(--cf-colors-gray-300, #d5d7dd)
+            )
           );
         border-radius: var(
           --cf-theme-border-radius,
@@ -99,39 +108,61 @@ export class CFChip extends BaseElement {
         .chip.interactive:hover {
           background: var(
             --cf-theme-color-surface-hover,
-            var(--cf-color-gray-200, #eeeeee)
+            var(--cf-colors-gray-200, #eceef1)
           );
         }
 
         /* Variant: primary (blue - for mentions) */
         .chip.primary {
           background: var(
-            --cf-theme-color-primary-surface,
-            var(--cf-color-blue-50, #eff6ff)
+            --cf-chip-primary-background,
+            color-mix(
+              in srgb,
+              var(
+                --cf-theme-color-primary,
+                var(--cf-colors-primary-500, #4979fa)
+              ) 12%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
           );
           border-color: var(
-            --cf-theme-color-primary,
-            var(--cf-color-blue-200, #bfdbfe)
+            --cf-chip-primary-border-color,
+            color-mix(
+              in srgb,
+              var(
+                --cf-theme-color-primary,
+                var(--cf-colors-primary-500, #4979fa)
+              ) 28%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
           );
           color: var(
-            --cf-theme-color-primary,
-            var(--cf-color-blue-700, #1d4ed8)
+            --cf-chip-primary-color,
+            var(--cf-theme-color-primary, var(--cf-colors-primary-700, #376bf9))
           );
         }
 
         /* Variant: accent (purple - for clipboard) */
         .chip.accent {
           background: var(
-            --cf-theme-color-accent-surface,
-            var(--cf-color-purple-50, #faf5ff)
+            --cf-chip-accent-background,
+            color-mix(
+              in srgb,
+              var(--cf-theme-color-accent, var(--cf-colors-purple, #8952fd)) 12%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
           );
           border-color: var(
-            --cf-theme-color-accent,
-            var(--cf-color-purple-200, #e9d5ff)
+            --cf-chip-accent-border-color,
+            color-mix(
+              in srgb,
+              var(--cf-theme-color-accent, var(--cf-colors-purple, #8952fd)) 28%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
           );
           color: var(
-            --cf-theme-color-accent,
-            var(--cf-color-purple-700, #7c3aed)
+            --cf-chip-accent-color,
+            var(--cf-theme-color-accent, var(--cf-colors-purple, #8952fd))
           );
         }
 
