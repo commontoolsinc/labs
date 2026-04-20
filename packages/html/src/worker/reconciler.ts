@@ -58,7 +58,13 @@ import {
 /** Sentinel key in propSubscriptions for the Cell<Props> subscription itself. */
 const CELL_PROPS_KEY = "__cellProps__";
 const CFC_RENDER_BOUNDARY_TAG = "cf-cfc-render-boundary";
+const CFC_AUTHORSHIP_TAG = "cf-cfc-authorship";
 const CFC_BLOCKED_PLACEHOLDER_TAG = "cf-cfc-blocked";
+const CFC_TEXT_INTEGRITY_PLACEHOLDER = "Content hidden by integrity policy";
+const TEXT_INTEGRITY_PROP_SINKS: ReadonlyMap<string, ReadonlySet<string>> =
+  new Map([
+    ["cf-chat-message", new Set(["name", "content"])],
+  ]);
 const DEFAULT_RENDER_POLICY: RenderPolicy = {
   declassifyConfidentiality: [],
 };
@@ -341,35 +347,70 @@ export class WorkerReconciler {
   private childRenderPolicyForNode(
     node: WorkerVNode,
     parentPolicy: RenderPolicy,
+    nodeId: number,
   ): RenderPolicy {
-    if (node.name !== CFC_RENDER_BOUNDARY_TAG) {
-      return parentPolicy;
+    let policy = parentPolicy;
+
+    if (node.name === CFC_RENDER_BOUNDARY_TAG) {
+      const props = this.propsForRenderPolicy(node);
+      const localMax = this.normalizeAtomBound(
+        this.staticPropAsAtomList(props, "maxConfidentiality") ??
+          this.staticPropAsAtomList(props, "data-cfc-max-confidentiality"),
+      );
+      const declassifyConfidentiality = this.staticPropAsAtomList(
+        props,
+        "declassifyConfidentiality",
+      ) ??
+        this.staticPropAsAtomList(
+          props,
+          "data-cfc-declassify-confidentiality",
+        ) ??
+        [];
+
+      policy = {
+        maxConfidentiality: this.narrowMaxConfidentiality(
+          parentPolicy.maxConfidentiality,
+          localMax,
+        ),
+        declassifyConfidentiality: [
+          ...parentPolicy.declassifyConfidentiality,
+          ...declassifyConfidentiality,
+        ],
+        textIntegrity: parentPolicy.textIntegrity,
+      };
     }
 
-    const props = this.propsForRenderPolicy(node);
-    const localMax = this.normalizeAtomBound(
-      this.staticPropAsAtomList(props, "maxConfidentiality") ??
-        this.staticPropAsAtomList(props, "data-cfc-max-confidentiality"),
-    );
-    const declassifyConfidentiality = this.staticPropAsAtomList(
-      props,
-      "declassifyConfidentiality",
-    ) ??
-      this.staticPropAsAtomList(
-        props,
-        "data-cfc-declassify-confidentiality",
-      ) ??
-      [];
+    if (node.name !== CFC_AUTHORSHIP_TAG) {
+      return policy;
+    }
+
+    const verifyTextIntegrity = this.nodePropAsBoolean(node, [
+      "verifyTextIntegrity",
+      "verify-text-integrity",
+      "data-cfc-verify-text-integrity",
+    ]) ?? false;
+    if (!verifyTextIntegrity) {
+      return policy;
+    }
+
+    const allowLiteralText = this.nodePropAsBoolean(node, [
+      "allowLiteralText",
+      "allow-literal-text",
+      "data-cfc-allow-literal-text",
+    ]) ?? false;
+    const requiredIntegrity = this.nodePropAsAtomList(node, [
+      "requiredTextIntegrity",
+      "requiredIntegrity",
+      "data-cfc-required-text-integrity",
+    ]) ?? [];
 
     return {
-      maxConfidentiality: this.narrowMaxConfidentiality(
-        parentPolicy.maxConfidentiality,
-        localMax,
-      ),
-      declassifyConfidentiality: [
-        ...parentPolicy.declassifyConfidentiality,
-        ...declassifyConfidentiality,
-      ],
+      ...policy,
+      textIntegrity: {
+        requiredIntegrity,
+        allowLiteralText,
+        boundaryNodeId: nodeId,
+      },
     };
   }
 
@@ -408,6 +449,76 @@ export class WorkerReconciler {
       return value;
     }
     return [value];
+  }
+
+  private nodePropForRenderPolicy(
+    node: WorkerVNode,
+    key: string,
+  ): unknown {
+    const props = this.propsForRenderPolicy(node);
+    if (!props || typeof props !== "object" || !(key in props)) {
+      return undefined;
+    }
+    const value = props[key];
+    if (!isCell(node.props)) {
+      return value;
+    }
+    try {
+      return this.resolveCellPropsBindingTarget(
+        node.props as Cell<WorkerProps>,
+        key,
+        value,
+      );
+    } catch {
+      return value;
+    }
+  }
+
+  private nodePropAsBoolean(
+    node: WorkerVNode,
+    keys: readonly string[],
+  ): boolean | undefined {
+    for (const key of keys) {
+      const rawValue = this.nodePropForRenderPolicy(node, key);
+      if (typeof rawValue === "function") {
+        continue;
+      }
+      const value = isCell(rawValue)
+        ? this.readCellPolicyValue(rawValue as Cell<unknown>)
+        : rawValue;
+      if (typeof value === "boolean") {
+        return value;
+      }
+      if (typeof value === "string") {
+        if (value === "" || value.toLowerCase() === "true") {
+          return true;
+        }
+        if (value.toLowerCase() === "false") {
+          return false;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private nodePropAsAtomList(
+    node: WorkerVNode,
+    keys: readonly string[],
+  ): readonly unknown[] | undefined {
+    for (const key of keys) {
+      const value = this.nodePropForRenderPolicy(node, key);
+      if (typeof value === "function") {
+        continue;
+      }
+      const resolved = isCell(value)
+        ? this.readCellPolicyValue(value as Cell<unknown>)
+        : value;
+      if (resolved === undefined) {
+        continue;
+      }
+      return Array.isArray(resolved) ? resolved : [resolved];
+    }
+    return undefined;
   }
 
   private staticCellProp(
@@ -482,15 +593,25 @@ export class WorkerReconciler {
     return this.staticCellProp(node.props, "$value");
   }
 
-  private blockedPlaceholderVNode(): WorkerVNode {
+  private blockedPlaceholderVNode(
+    reason: "policy" | "integrity" = "policy",
+  ): WorkerVNode {
+    const integrityBlocked = reason === "integrity";
     return {
       type: "vnode",
       name: CFC_BLOCKED_PLACEHOLDER_TAG,
       props: {
         "data-cfc-blocked": "true",
-        title: "CFC render policy blocked this content",
+        "data-cfc-blocked-reason": reason,
+        title: integrityBlocked
+          ? "CFC text integrity policy blocked this content"
+          : "CFC render policy blocked this content",
       },
-      children: ["Content hidden by policy"],
+      children: [
+        integrityBlocked
+          ? CFC_TEXT_INTEGRITY_PLACEHOLDER
+          : "Content hidden by policy",
+      ],
     };
   }
 
@@ -534,7 +655,25 @@ export class WorkerReconciler {
       this.atomListsEqual(
         left.declassifyConfidentiality,
         right.declassifyConfidentiality,
-      );
+      ) &&
+      this.textIntegrityPolicyEquals(left, right);
+  }
+
+  private textIntegrityPolicyEquals(
+    left: RenderPolicy,
+    right: RenderPolicy,
+  ): boolean {
+    const leftPolicy = left.textIntegrity;
+    const rightPolicy = right.textIntegrity;
+    if (leftPolicy === undefined || rightPolicy === undefined) {
+      return leftPolicy === rightPolicy;
+    }
+    return this.atomListsEqual(
+      leftPolicy.requiredIntegrity,
+      rightPolicy.requiredIntegrity,
+    ) &&
+      leftPolicy.allowLiteralText === rightPolicy.allowLiteralText &&
+      leftPolicy.boundaryNodeId === rightPolicy.boundaryNodeId;
   }
 
   private atomListsEqual(
@@ -627,6 +766,233 @@ export class WorkerReconciler {
     return max.some((allowed) => deepEqual(allowed, atom));
   }
 
+  private refreshTextIntegrityBoundary(
+    ctx: ReconcileContext,
+    state: NodeState,
+  ): void {
+    if (
+      state.tagName !== CFC_AUTHORSHIP_TAG ||
+      state.sourceProps === undefined ||
+      state.sourceChildren === undefined ||
+      state.children.size === 0
+    ) {
+      return;
+    }
+
+    this.refreshBoundaryPolicyFromProps(ctx, state, state.sourceProps);
+  }
+
+  private isTextIntegrityPolicyProp(key: string): boolean {
+    return key === "requiredTextIntegrity" ||
+      key === "requiredIntegrity" ||
+      key === "data-cfc-required-text-integrity" ||
+      key === "verifyTextIntegrity" ||
+      key === "verify-text-integrity" ||
+      key === "data-cfc-verify-text-integrity" ||
+      key === "allowLiteralText" ||
+      key === "allow-literal-text" ||
+      key === "data-cfc-allow-literal-text";
+  }
+
+  private initializeTextIntegrityBoundary(
+    policy: RenderPolicy,
+    nodeId: number,
+  ): void {
+    if (policy.textIntegrity?.boundaryNodeId !== nodeId) {
+      return;
+    }
+    this.queueOps([{
+      op: "set-prop",
+      nodeId,
+      key: "textIntegrityState",
+      value: "ok",
+    }]);
+  }
+
+  private resetTextIntegrityBoundary(
+    state: NodeState,
+    policy: RenderPolicy,
+  ): void {
+    if (state.tagName !== CFC_AUTHORSHIP_TAG) {
+      return;
+    }
+    if (
+      policy.textIntegrity !== undefined &&
+      policy.textIntegrity.boundaryNodeId !== state.nodeId
+    ) {
+      return;
+    }
+    this.queueOps([{
+      op: "set-prop",
+      nodeId: state.nodeId,
+      key: "textIntegrityState",
+      value: "ok",
+    }]);
+  }
+
+  private markTextIntegrityBlocked(policy: RenderPolicy): void {
+    const boundaryNodeId = policy.textIntegrity?.boundaryNodeId;
+    if (boundaryNodeId === undefined) {
+      return;
+    }
+    this.queueOps([{
+      op: "set-prop",
+      nodeId: boundaryNodeId,
+      key: "textIntegrityState",
+      value: "blocked",
+    }]);
+  }
+
+  private canRenderCellTextUnderPolicy(
+    cell: Cell<unknown>,
+    policy: RenderPolicy,
+  ): boolean {
+    const textIntegrity = policy.textIntegrity;
+    if (textIntegrity === undefined) {
+      return true;
+    }
+    if (textIntegrity.requiredIntegrity.length === 0) {
+      return false;
+    }
+
+    let labelView: CfcLabelView | undefined;
+    try {
+      labelView = cfcLabelViewForCell(cell);
+    } catch {
+      return false;
+    }
+    if (labelView === undefined) {
+      return false;
+    }
+
+    const integrity = this.integrityLabels(labelView);
+    return textIntegrity.requiredIntegrity.every((required) =>
+      integrity.some((atom) => deepEqual(atom, required))
+    );
+  }
+
+  private integrityLabels(labelView: CfcLabelView): readonly unknown[] {
+    return ContextualFlowControl.uniqueAtoms(
+      labelView.entries.flatMap((entry) => [
+        ...(entry.label.integrity ?? []),
+      ]),
+    );
+  }
+
+  private readCellValue(cell: Cell<unknown>): unknown {
+    const readableCell = cell as Cell<unknown> & {
+      get?: (options?: { traverseCells?: boolean }) => unknown;
+      getRawUntyped?: (options?: { frozen?: false }) => unknown;
+    };
+    try {
+      if (typeof readableCell.get === "function") {
+        return readableCell.get({ traverseCells: true });
+      }
+    } catch {
+      // Fall back to the raw read below.
+    }
+    try {
+      return readableCell.getRawUntyped?.({ frozen: false });
+    } catch {
+      return undefined;
+    }
+  }
+
+  private readCellPolicyValue(cell: Cell<unknown>): unknown {
+    const readableCell = cell as Cell<unknown> & {
+      get?: (options?: { traverseCells?: boolean }) => unknown;
+      getRawUntyped?: (options?: { frozen?: false }) => unknown;
+    };
+    try {
+      return readableCell.getRawUntyped?.({ frozen: false });
+    } catch {
+      // Fall back to the schema-shaped read below.
+    }
+    try {
+      if (typeof readableCell.get === "function") {
+        return readableCell.get({ traverseCells: true });
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  private shouldBlockLiteralText(
+    value: unknown,
+    policy: RenderPolicy,
+  ): boolean {
+    const textIntegrity = policy.textIntegrity;
+    if (textIntegrity === undefined || textIntegrity.allowLiteralText) {
+      return false;
+    }
+    return this.hasVisibleTextValue(value);
+  }
+
+  private shouldBlockTextFromCell(
+    value: unknown,
+    cell: Cell<unknown>,
+    policy: RenderPolicy,
+  ): boolean {
+    if (policy.textIntegrity === undefined) {
+      return false;
+    }
+    if (isWorkerVNode(value) || this.isRenderableObject(value)) {
+      return false;
+    }
+    if (!this.hasVisibleTextValue(value)) return false;
+    return !this.canRenderCellTextUnderPolicy(cell, policy);
+  }
+
+  private isRenderableObject(value: unknown): boolean {
+    return value !== null && typeof value === "object" && UI in value;
+  }
+
+  private hasVisibleTextValue(value: unknown): boolean {
+    if (value === null || value === undefined || value === false) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.length > 0;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return true;
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return typeof value === "object";
+  }
+
+  private isTextIntegrityProp(state: NodeState, key: string): boolean {
+    return TEXT_INTEGRITY_PROP_SINKS.get(state.tagName)?.has(key) ?? false;
+  }
+
+  private transformPropValueForState(
+    state: NodeState,
+    key: string,
+    value: unknown,
+    sourceCell?: Cell<unknown>,
+    // deno-lint-ignore no-explicit-any
+  ): any {
+    if (
+      this.isTextIntegrityProp(state, key) &&
+      (sourceCell
+        ? this.shouldBlockTextFromCell(value, sourceCell, state.renderPolicy)
+        : this.shouldBlockLiteralText(value, state.renderPolicy))
+    ) {
+      this.markTextIntegrityBlocked(state.renderPolicy);
+      this.queueOps([{
+        op: "set-prop",
+        nodeId: state.nodeId,
+        key: "data-cfc-blocked-props",
+        value: key,
+      }]);
+      return CFC_TEXT_INTEGRITY_PLACEHOLDER;
+    }
+    return this.transformPropValue(key, value);
+  }
+
   /**
    * Create a wrapper state for reactive roots.
    */
@@ -705,7 +1071,11 @@ export class WorkerReconciler {
     if (oldState && oldTagName && newTagName && oldTagName === newTagName) {
       const sanitized = this.sanitizeNode(newVNode!);
       if (sanitized) {
-        const childPolicy = this.childRenderPolicyForNode(sanitized, policy);
+        const childPolicy = this.childRenderPolicyForNode(
+          sanitized,
+          policy,
+          oldState.nodeId,
+        );
         const policyChildren = this.childrenForRenderPolicy(
           sanitized,
           childPolicy,
@@ -723,11 +1093,19 @@ export class WorkerReconciler {
         oldState.childRenderPolicy = childPolicy;
         oldState.childrenBlockedByPolicy = policyChildren.blocked;
         oldState.sourceChildren = sanitized.children;
+        oldState.sourceProps = sanitized.props;
         // Update props in place with proper diffing
         this.updatePropsInPlace(ctx, oldState, sanitized.props);
 
         // Update children in place with proper diffing
         if (policyChildren.children !== undefined) {
+          const childrenSame = this.areChildrenSame(
+            oldState,
+            policyChildren.children,
+          );
+          if (!childrenSame || policyChanged) {
+            this.resetTextIntegrityBoundary(oldState, childPolicy);
+          }
           this.updateChildrenInPlace(
             ctx,
             oldState,
@@ -857,13 +1235,21 @@ export class WorkerReconciler {
             "prop-update",
             () => ({ nodeId: state.nodeId, key, value: resolvedValue }),
           );
-          const propValue = this.transformPropValue(key, resolvedValue);
+          const propValue = this.transformPropValueForState(
+            state,
+            key,
+            resolvedValue,
+            value as Cell<unknown>,
+          );
           this.queueOps([{
             op: "set-prop",
             nodeId: state.nodeId,
             key,
             value: propValue,
           }]);
+          if (this.isTextIntegrityPolicyProp(key)) {
+            this.refreshTextIntegrityBoundary(ctx, state);
+          }
         });
         state.propSubscriptions.set(key, {
           cell: value as Cell<unknown>,
@@ -874,7 +1260,7 @@ export class WorkerReconciler {
         if (existingState) {
           existingState.cancel();
         }
-        const propValue = this.transformPropValue(key, value);
+        const propValue = this.transformPropValueForState(state, key, value);
         this.queueOps([{
           op: "set-prop",
           nodeId: state.nodeId,
@@ -1112,8 +1498,13 @@ export class WorkerReconciler {
     const [cancel, addCancel] = useCancelGroup();
     let hasSeenInitialProps = false;
     const refreshPolicyAfterPropsUpdate = () => {
-      if (hasSeenInitialProps) {
-        this.refreshBoundaryPolicyFromCellProps(ctx, state, propsCell);
+      const childrenAlreadyBound = state.children.size > 0 ||
+        state.childrenState !== undefined ||
+        state.childOrder.length > 0;
+      if (hasSeenInitialProps || childrenAlreadyBound) {
+        this.refreshBoundaryPolicyFromProps(ctx, state, propsCell);
+      } else {
+        this.refreshInitialBoundaryPolicyFromProps(state, propsCell);
       }
       hasSeenInitialProps = true;
     };
@@ -1263,7 +1654,12 @@ export class WorkerReconciler {
           // Schema `true` = accept everything → enables deep traversal of this prop
           const propKeyCell = propsCell.key(key).asSchema(true);
           const propSinkCancel = propKeyCell.sink((deepValue: unknown) => {
-            const propValue = this.transformPropValue(key, deepValue);
+            const propValue = this.transformPropValueForState(
+              state,
+              key,
+              deepValue,
+              this.resolveTextPropSourceCell(state, propsCell, key, value),
+            );
             this.queueOps([{
               op: "set-prop",
               nodeId: state.nodeId,
@@ -1288,7 +1684,12 @@ export class WorkerReconciler {
           // Skip if value hasn't changed
           if (existingState && existingState.currentValue === value) continue;
 
-          const propValue = this.transformPropValue(key, value);
+          const propValue = this.transformPropValueForState(
+            state,
+            key,
+            value,
+            this.resolveTextPropSourceCell(state, propsCell, key, value),
+          );
           this.queueOps([{
             op: "set-prop",
             nodeId: state.nodeId,
@@ -1314,27 +1715,31 @@ export class WorkerReconciler {
     return cancel;
   }
 
-  private refreshBoundaryPolicyFromCellProps(
+  private refreshBoundaryPolicyFromProps(
     ctx: ReconcileContext,
     state: NodeState,
-    propsCell: Cell<WorkerProps>,
+    props: WorkerVNode["props"],
   ): void {
     if (
-      state.tagName !== CFC_RENDER_BOUNDARY_TAG ||
-      state.sourceChildren === undefined
+      state.tagName !== CFC_RENDER_BOUNDARY_TAG &&
+      state.tagName !== CFC_AUTHORSHIP_TAG
     ) {
+      return;
+    }
+    if (state.sourceChildren === undefined) {
       return;
     }
 
     const node: WorkerVNode = {
       type: "vnode",
       name: state.tagName,
-      props: propsCell,
+      props,
       children: state.sourceChildren,
     };
     const childPolicy = this.childRenderPolicyForNode(
       node,
       state.renderPolicy,
+      state.nodeId,
     );
     const policyChildren = this.childrenForRenderPolicy(node, childPolicy);
     const policyChanged = !this.renderPolicyEquals(
@@ -1342,6 +1747,7 @@ export class WorkerReconciler {
       childPolicy,
     ) || state.childrenBlockedByPolicy !== policyChildren.blocked;
 
+    state.sourceProps = props;
     state.childRenderPolicy = childPolicy;
     state.childrenBlockedByPolicy = policyChildren.blocked;
     if (policyChildren.children === undefined) {
@@ -1350,6 +1756,7 @@ export class WorkerReconciler {
 
     const childrenSame = this.areChildrenSame(state, policyChildren.children);
     if (!childrenSame || policyChanged) {
+      this.resetTextIntegrityBoundary(state, childPolicy);
       this.updateChildrenInPlace(
         ctx,
         state,
@@ -1361,14 +1768,64 @@ export class WorkerReconciler {
     }
   }
 
+  private refreshInitialBoundaryPolicyFromProps(
+    state: NodeState,
+    props: WorkerVNode["props"],
+  ): void {
+    if (
+      state.tagName !== CFC_RENDER_BOUNDARY_TAG &&
+      state.tagName !== CFC_AUTHORSHIP_TAG
+    ) {
+      return;
+    }
+    if (state.sourceChildren === undefined) {
+      return;
+    }
+
+    const node: WorkerVNode = {
+      type: "vnode",
+      name: state.tagName,
+      props,
+      children: state.sourceChildren,
+    };
+    const childPolicy = this.childRenderPolicyForNode(
+      node,
+      state.renderPolicy,
+      state.nodeId,
+    );
+    const policyChildren = this.childrenForRenderPolicy(node, childPolicy);
+
+    state.sourceProps = props;
+    state.childRenderPolicy = childPolicy;
+    state.childrenBlockedByPolicy = policyChildren.blocked;
+    this.initializeTextIntegrityBoundary(childPolicy, state.nodeId);
+  }
+
+  private resolveTextPropSourceCell(
+    state: NodeState,
+    propsCell: Cell<WorkerProps>,
+    key: string,
+    value: unknown,
+  ): Cell<unknown> | undefined {
+    if (!this.isTextIntegrityProp(state, key)) {
+      return undefined;
+    }
+    try {
+      return this.resolveCellPropsBindingTarget(propsCell, key, value);
+    } catch {
+      try {
+        return propsCell.key(key).asSchema(true) as Cell<unknown>;
+      } catch {
+        return undefined;
+      }
+    }
+  }
+
   private resolveCellPropsBindingTarget(
     propsCell: Cell<WorkerProps>,
     key: string,
     value: unknown,
   ): Cell<unknown> {
-    if (isCell(value)) {
-      return value as Cell<unknown>;
-    }
     const propCell = propsCell.key(key).asSchema(true);
     const rawValue = this.readRawBindingPropValue(propsCell, propCell, key);
     let base:
@@ -1384,6 +1841,9 @@ export class WorkerReconciler {
       : parseLink(rawValue) ?? parseLink(value);
     if (link?.id && link.space && link.type) {
       return propsCell.runtime.getCellFromLink(link);
+    }
+    if (isCell(value)) {
+      return value as Cell<unknown>;
     }
     return propCell.resolveAsCell();
   }
@@ -1598,7 +2058,11 @@ export class WorkerReconciler {
     // Create element
     const nodeId = ctx.nextNodeId();
     this.queueOps([{ op: "create-element", nodeId, tagName: sanitized.name }]);
-    const childPolicy = this.childRenderPolicyForNode(sanitized, policy);
+    const childPolicy = this.childRenderPolicyForNode(
+      sanitized,
+      policy,
+      nodeId,
+    );
     const policyChildren = this.childrenForRenderPolicy(
       sanitized,
       childPolicy,
@@ -1617,20 +2081,28 @@ export class WorkerReconciler {
       childRenderPolicy: childPolicy,
       childrenBlockedByPolicy: policyChildren.blocked,
       sourceChildren: sanitized.children,
+      sourceProps: sanitized.props,
     };
+    this.initializeTextIntegrityBoundary(childPolicy, nodeId);
 
-    // Bind props
+    // Bind props. Cell<Props> can synchronously resolve boundary policy props;
+    // bind children from the current state policy after props are bound.
     addCancel(this.bindProps(ctx, state, sanitized.props));
 
     // Bind children
-    if (policyChildren.children !== undefined) {
+    const activePolicyChildren = this.childrenForRenderPolicy(
+      sanitized,
+      state.childRenderPolicy,
+    );
+    state.childrenBlockedByPolicy = activePolicyChildren.blocked;
+    if (activePolicyChildren.children !== undefined) {
       addCancel(
         this.bindChildren(
           ctx,
           state,
-          policyChildren.children,
+          activePolicyChildren.children,
           visited,
-          childPolicy,
+          state.childRenderPolicy,
         ),
       );
     }
@@ -1674,19 +2146,35 @@ export class WorkerReconciler {
   private createBlockedPlaceholder(
     ctx: ReconcileContext,
     policy: RenderPolicy,
+    reason: "policy" | "integrity" = "policy",
   ): NodeState {
     const nodeId = ctx.nextNodeId();
     const textId = ctx.nextNodeId();
+    const integrityBlocked = reason === "integrity";
+    const text = integrityBlocked
+      ? CFC_TEXT_INTEGRITY_PLACEHOLDER
+      : "Content hidden by policy";
+    if (integrityBlocked) {
+      this.markTextIntegrityBlocked(policy);
+    }
     this.queueOps([
       { op: "create-element", nodeId, tagName: CFC_BLOCKED_PLACEHOLDER_TAG },
       { op: "set-prop", nodeId, key: "data-cfc-blocked", value: "true" },
       {
         op: "set-prop",
         nodeId,
-        key: "title",
-        value: "CFC render policy blocked this content",
+        key: "data-cfc-blocked-reason",
+        value: reason,
       },
-      { op: "create-text", nodeId: textId, text: "Content hidden by policy" },
+      {
+        op: "set-prop",
+        nodeId,
+        key: "title",
+        value: integrityBlocked
+          ? "CFC text integrity policy blocked this content"
+          : "CFC render policy blocked this content",
+      },
+      { op: "create-text", nodeId: textId, text },
       {
         op: "insert-child",
         parentId: nodeId,
@@ -1705,7 +2193,7 @@ export class WorkerReconciler {
           nodeId: textId,
           isText: true,
           cancel: () => {},
-          currentValue: "Content hidden by policy",
+          currentValue: text,
         },
       ]]),
       propSubscriptions: new Map(),
@@ -1724,7 +2212,12 @@ export class WorkerReconciler {
     ctx: ReconcileContext,
     text: string,
     policy: RenderPolicy = DEFAULT_RENDER_POLICY,
+    options?: { trustedText?: boolean },
   ): NodeState {
+    if (!options?.trustedText && this.shouldBlockLiteralText(text, policy)) {
+      return this.createBlockedPlaceholder(ctx, policy, "integrity");
+    }
+
     const nodeId = ctx.nextNodeId();
     this.queueOps([{ op: "create-text", nodeId, text }]);
 
@@ -1948,13 +2441,21 @@ export class WorkerReconciler {
       } else if (isCell(value)) {
         // Reactive prop value
         const sinkCancel = (value as Cell<unknown>).sink((resolvedValue) => {
-          const propValue = this.transformPropValue(key, resolvedValue);
+          const propValue = this.transformPropValueForState(
+            state,
+            key,
+            resolvedValue,
+            value as Cell<unknown>,
+          );
           this.queueOps([{
             op: "set-prop",
             nodeId: state.nodeId,
             key,
             value: propValue,
           }]);
+          if (this.isTextIntegrityPolicyProp(key)) {
+            this.refreshTextIntegrityBoundary(ctx, state);
+          }
         });
         addCancel(sinkCancel);
         state.propSubscriptions.set(key, {
@@ -1963,7 +2464,7 @@ export class WorkerReconciler {
         });
       } else {
         // Static prop value
-        const propValue = this.transformPropValue(key, value);
+        const propValue = this.transformPropValueForState(state, key, value);
         this.queueOps([{
           op: "set-prop",
           nodeId: state.nodeId,
@@ -2324,6 +2825,43 @@ export class WorkerReconciler {
           return;
         }
 
+        if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
+          if (!isInitialRender) {
+            if (currentCancel) {
+              currentCancel();
+              currentCancel = undefined;
+            }
+            this.cleanupNodeHandlers(childState);
+            this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
+          }
+
+          childState.nodeId = -1;
+          childState.elementState = undefined;
+          childState.isText = false;
+
+          const blockedState = this.createBlockedPlaceholder(
+            ctx,
+            policy,
+            "integrity",
+          );
+          childState.nodeId = blockedState.nodeId;
+          childState.elementState = blockedState;
+          childState.isText = false;
+          currentCancel = blockedState.cancel;
+
+          const beforeId = this.findNextSiblingId(
+            parentState.children,
+            childKey,
+          );
+          this.queueOps([{
+            op: "insert-child",
+            parentId: parentState.nodeId,
+            childId: blockedState.nodeId,
+            beforeId,
+          }]);
+          return;
+        }
+
         // Try to update in place if not initial render
         if (
           !isInitialRender &&
@@ -2357,6 +2895,7 @@ export class WorkerReconciler {
                 const childPolicy = this.childRenderPolicyForNode(
                   sanitized,
                   policy,
+                  childState.elementState.nodeId,
                 );
                 const policyChildren = this.childrenForRenderPolicy(
                   sanitized,
@@ -2373,6 +2912,7 @@ export class WorkerReconciler {
                 childState.elementState.childrenBlockedByPolicy =
                   policyChildren.blocked;
                 childState.elementState.sourceChildren = sanitized.children;
+                childState.elementState.sourceProps = sanitized.props;
                 // Same tag - update props in place
                 this.updatePropsInPlace(
                   ctx,
@@ -2388,6 +2928,10 @@ export class WorkerReconciler {
                     policyChildren.children,
                   );
                   if (!childrenSame || policyChanged) {
+                    this.resetTextIntegrityBoundary(
+                      childState.elementState,
+                      childPolicy,
+                    );
                     this.updateChildrenInPlace(
                       ctx,
                       childState.elementState,
@@ -2435,13 +2979,29 @@ export class WorkerReconciler {
           return;
         }
 
-        // Render new content
-        const newState = this.renderChildContent(
-          ctx,
-          resolvedChild,
-          new Set(visited),
-          policy,
-        );
+        // Render new content. Primitive text from a Cell has already passed
+        // source-cell text integrity verification above, so do not reclassify
+        // it as an untrusted literal.
+        const newState = this.hasVisibleTextValue(resolvedChild) &&
+            (typeof resolvedChild === "string" ||
+              typeof resolvedChild === "number" ||
+              typeof resolvedChild === "boolean")
+          ? {
+            nodeId: this.createTextNode(
+              ctx,
+              this.stringifyText(resolvedChild),
+              policy,
+              { trustedText: true },
+            ).nodeId,
+            isText: true,
+            cancel: () => {},
+          }
+          : this.renderChildContent(
+            ctx,
+            resolvedChild,
+            new Set(visited),
+            policy,
+          );
         if (newState) {
           childState.nodeId = newState.nodeId;
           childState.elementState = newState.elementState;
@@ -2561,13 +3121,13 @@ export class WorkerReconciler {
 
     // Handle primitive values (text nodes)
     const text = this.stringifyText(child);
-    const nodeId = ctx.nextNodeId();
-    this.queueOps([{ op: "create-text", nodeId, text }]);
+    const state = this.createTextNode(ctx, text, policy);
 
     return {
-      nodeId,
-      isText: true,
-      cancel: () => {},
+      nodeId: state.nodeId,
+      isText: state.tagName === "#text",
+      cancel: state.cancel,
+      elementState: state.tagName === "#text" ? undefined : state,
     };
   }
 
