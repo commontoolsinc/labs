@@ -1245,6 +1245,140 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "strict text integrity recomputes reactive required integrity before refreshing children",
+      async () => {
+        const tx = runtime.edit();
+        const requiredIntegrity = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-refresh-required-integrity",
+          undefined,
+          tx,
+        );
+        requiredIntegrity.set(signedReleaseAtom);
+        runtime.prepareTxForCommit(tx);
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const liveRequiredIntegrity = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-refresh-required-integrity",
+        );
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: liveRequiredIntegrity as never,
+          },
+          children: [verifiedText as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          const updateTx = runtime.edit();
+          liveRequiredIntegrity.withTx(updateTx).set(otherReleaseAtom);
+          runtime.prepareTxForCommit(updateTx);
+          const updateResult = await updateTx.commit();
+          assertEquals(updateResult.ok !== undefined, true);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            true,
+          );
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            true,
+          );
+
+          collector.clear();
+          const relaxTx = runtime.edit();
+          liveRequiredIntegrity.withTx(relaxTx).set(signedReleaseAtom);
+          runtime.prepareTxForCommit(relaxTx);
+          const relaxResult = await relaxTx.commit();
+          assertEquals(relaxResult.ok !== undefined, true);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const relaxedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(relaxedText.includes("Verified release note"), true);
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "ok"
+            ),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict text integrity does not reset blocked state when children are reused",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: otherReleaseAtom,
+            "data-render": "initial",
+          },
+          children: [verifiedText as never],
+        });
+
+        const cancel = reconciler.mount(rootCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            true,
+          );
+          collector.clear();
+
+          rootCell.set({
+            type: "vnode",
+            name: "cf-cfc-authorship",
+            props: {
+              verifyTextIntegrity: true,
+              requiredTextIntegrity: otherReleaseAtom,
+              "data-render": "reused",
+            },
+            children: [verifiedText as never],
+          });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "ok"
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "strict text integrity blocks mismatched visible name props",
       async () => {
         const collector = createOpsCollector();

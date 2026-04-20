@@ -156,6 +156,9 @@ export interface NodeState {
 
   /** Original authored children, before any render-policy placeholder rewrite. */
   sourceChildren?: WorkerVNode["children"];
+
+  /** Original authored props, used to recompute child render policy. */
+  sourceProps?: WorkerVNode["props"];
 }
 
 /**

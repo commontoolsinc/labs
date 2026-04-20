@@ -88,7 +88,11 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   );
   const argument = scenario.argument ?? {};
   const result = runtime.run(tx, patternFactory, argument, resultCell);
-  tx.commit();
+  runtime.prepareTxForCommit(tx);
+  const commitResult = await tx.commit();
+  if (commitResult.error) {
+    throw commitResult.error;
+  }
 
   // Sink to keep the result reactive, track cancel function for cleanup
   const cancelSink = result.sink(() => {});

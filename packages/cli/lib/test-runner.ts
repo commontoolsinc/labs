@@ -35,6 +35,7 @@ import type {
   SettleStats,
   Stream,
 } from "@commonfabric/runner";
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { OpaqueRef } from "@commonfabric/api";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -191,6 +192,8 @@ export interface TestRunnerOptions {
   statsActionLimit?: number;
   /** Override scheduler mode for the test runtime. */
   schedulerMode?: "default" | "push" | "pull";
+  /** Override CFC enforcement mode for the test runtime. */
+  cfcEnforcementMode?: CfcEnforcementMode;
   /** Print storage-related logger timings and counts after each test file. */
   storageStats?: boolean;
   /** Limit for storage timing/count tables when storageStats is enabled. */
@@ -833,6 +836,10 @@ export async function runTestPattern(
       new Runtime({
         storageManager,
         memoryVersion: options.memoryVersion,
+        // Pattern-native tests invoke returned action streams directly rather
+        // than through the trusted renderer event path. Keep CFC visible while
+        // avoiding false failures for tests that intentionally bypass the UI.
+        cfcEnforcementMode: options.cfcEnforcementMode ?? "observe",
         experimental: experimentalOptionsFromEnv(),
         apiUrl: new URL(import.meta.url),
         errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],

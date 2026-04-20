@@ -772,28 +772,26 @@ export class WorkerReconciler {
   ): void {
     if (
       state.tagName !== CFC_AUTHORSHIP_TAG ||
-      state.childRenderPolicy.textIntegrity?.boundaryNodeId !== state.nodeId ||
+      state.sourceProps === undefined ||
       state.sourceChildren === undefined ||
       state.children.size === 0
     ) {
       return;
     }
 
-    this.initializeTextIntegrityBoundary(state.childRenderPolicy, state.nodeId);
-    this.updateChildrenInPlace(
-      ctx,
-      state,
-      state.sourceChildren,
-      new Set(),
-      state.childRenderPolicy,
-      true,
-    );
+    this.refreshBoundaryPolicyFromProps(ctx, state, state.sourceProps);
   }
 
   private isTextIntegrityPolicyProp(key: string): boolean {
     return key === "requiredTextIntegrity" ||
       key === "requiredIntegrity" ||
-      key === "data-cfc-required-text-integrity";
+      key === "data-cfc-required-text-integrity" ||
+      key === "verifyTextIntegrity" ||
+      key === "verify-text-integrity" ||
+      key === "data-cfc-verify-text-integrity" ||
+      key === "allowLiteralText" ||
+      key === "allow-literal-text" ||
+      key === "data-cfc-allow-literal-text";
   }
 
   private initializeTextIntegrityBoundary(
@@ -806,6 +804,27 @@ export class WorkerReconciler {
     this.queueOps([{
       op: "set-prop",
       nodeId,
+      key: "textIntegrityState",
+      value: "ok",
+    }]);
+  }
+
+  private resetTextIntegrityBoundary(
+    state: NodeState,
+    policy: RenderPolicy,
+  ): void {
+    if (state.tagName !== CFC_AUTHORSHIP_TAG) {
+      return;
+    }
+    if (
+      policy.textIntegrity !== undefined &&
+      policy.textIntegrity.boundaryNodeId !== state.nodeId
+    ) {
+      return;
+    }
+    this.queueOps([{
+      op: "set-prop",
+      nodeId: state.nodeId,
       key: "textIntegrityState",
       value: "ok",
     }]);
@@ -1074,12 +1093,19 @@ export class WorkerReconciler {
         oldState.childRenderPolicy = childPolicy;
         oldState.childrenBlockedByPolicy = policyChildren.blocked;
         oldState.sourceChildren = sanitized.children;
-        this.initializeTextIntegrityBoundary(childPolicy, oldState.nodeId);
+        oldState.sourceProps = sanitized.props;
         // Update props in place with proper diffing
         this.updatePropsInPlace(ctx, oldState, sanitized.props);
 
         // Update children in place with proper diffing
         if (policyChildren.children !== undefined) {
+          const childrenSame = this.areChildrenSame(
+            oldState,
+            policyChildren.children,
+          );
+          if (!childrenSame || policyChanged) {
+            this.resetTextIntegrityBoundary(oldState, childPolicy);
+          }
           this.updateChildrenInPlace(
             ctx,
             oldState,
@@ -1721,15 +1747,16 @@ export class WorkerReconciler {
       childPolicy,
     ) || state.childrenBlockedByPolicy !== policyChildren.blocked;
 
+    state.sourceProps = props;
     state.childRenderPolicy = childPolicy;
     state.childrenBlockedByPolicy = policyChildren.blocked;
-    this.initializeTextIntegrityBoundary(childPolicy, state.nodeId);
     if (policyChildren.children === undefined) {
       return;
     }
 
     const childrenSame = this.areChildrenSame(state, policyChildren.children);
     if (!childrenSame || policyChanged) {
+      this.resetTextIntegrityBoundary(state, childPolicy);
       this.updateChildrenInPlace(
         ctx,
         state,
@@ -1768,6 +1795,7 @@ export class WorkerReconciler {
     );
     const policyChildren = this.childrenForRenderPolicy(node, childPolicy);
 
+    state.sourceProps = props;
     state.childRenderPolicy = childPolicy;
     state.childrenBlockedByPolicy = policyChildren.blocked;
     this.initializeTextIntegrityBoundary(childPolicy, state.nodeId);
@@ -2053,6 +2081,7 @@ export class WorkerReconciler {
       childRenderPolicy: childPolicy,
       childrenBlockedByPolicy: policyChildren.blocked,
       sourceChildren: sanitized.children,
+      sourceProps: sanitized.props,
     };
     this.initializeTextIntegrityBoundary(childPolicy, nodeId);
 
@@ -2883,6 +2912,7 @@ export class WorkerReconciler {
                 childState.elementState.childrenBlockedByPolicy =
                   policyChildren.blocked;
                 childState.elementState.sourceChildren = sanitized.children;
+                childState.elementState.sourceProps = sanitized.props;
                 // Same tag - update props in place
                 this.updatePropsInPlace(
                   ctx,
@@ -2898,6 +2928,10 @@ export class WorkerReconciler {
                     policyChildren.children,
                   );
                   if (!childrenSame || policyChanged) {
+                    this.resetTextIntegrityBoundary(
+                      childState.elementState,
+                      childPolicy,
+                    );
                     this.updateChildrenInPlace(
                       ctx,
                       childState.elementState,

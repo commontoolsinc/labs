@@ -56,10 +56,7 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import {
-  type CfcEnforcementMode,
-  type TrustSnapshot,
-} from "./cfc/mod.ts";
+import { type CfcEnforcementMode, type TrustSnapshot } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
