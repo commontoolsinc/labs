@@ -71,7 +71,7 @@ const selectorIdentity = (selector: SchemaPathSelector): string =>
     path: selector.path,
     schemaHash: selector.schema === undefined
       ? ""
-      : hashSchema(selector.schema).toString(),
+      : hashSchema(selector.schema),
   });
 
 export const watchIdForEntry = (
