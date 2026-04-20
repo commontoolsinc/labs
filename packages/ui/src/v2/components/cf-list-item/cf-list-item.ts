@@ -248,18 +248,18 @@ export class CFListItem extends BaseElement {
             >${this.description}</slot>
           </div>
         </div>
-        <div class="action ${this._hasAction ? "" : "empty"}" part="action">
-          <slot
-            name="action"
-            @slotchange="${this._handleActionSlotChange}"
-          ></slot>
-        </div>
         ${this.expandable
           ? html`
             <span class="chevron" part="chevron" aria-hidden="true">›</span>
           `
           : ""}
       </button>
+      <div class="action ${this._hasAction ? "" : "empty"}" part="action">
+        <slot
+          name="action"
+          @slotchange="${this._handleActionSlotChange}"
+        ></slot>
+      </div>
       ${this.expandable
         ? html`
           <div

@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, nothing } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
@@ -145,7 +145,7 @@ export class CFTabBarItem extends BaseElement {
           ?disabled="${this.disabled}"
           part="item"
           data-selected="${this.selected}"
-          aria-label="${this.hideLabel ? this.label : ""}"
+          aria-label="${this.hideLabel ? this.label : nothing}"
           @click="${this._handleClick}"
         >
           <div class="icon" part="icon" aria-hidden="true">

@@ -3673,7 +3673,7 @@ interface CFInputAttributes<T> extends CFHTMLAttributes<T> {
   "minlength"?: string;
   "inputmode"?: string;
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
-  "char-size"?: number;
+  "length"?: number;
   "multiple"?: boolean;
   "accept"?: string;
   "list"?: string;

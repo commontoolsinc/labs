@@ -36,7 +36,7 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  * @attr {string} autocomplete - Autocomplete hint
  * @attr {string} inputmode - Virtual keyboard mode: "none" | "text" | "decimal" | "numeric" | "tel" | "search" | "email" | "url"
  * @attr {string} size - Component size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "md")
- * @attr {number} charSize - Width of input in characters (native HTML size attribute)
+ * @attr {number} length - Width of input in characters
  * @attr {boolean} multiple - Allow multiple files (file input only)
  * @attr {string} accept - File types to accept (file input only)
  * @attr {string} list - ID of datalist element for suggestions
@@ -374,7 +374,7 @@ export class CFInput extends BaseElement {
         minlength: { type: String },
         inputmode: { type: String },
         size: { type: String, reflect: true },
-        charSize: { type: Number, attribute: "char-size" },
+        length: { type: Number, attribute: "length" },
         multiple: { type: Boolean },
         accept: { type: String },
         list: { type: String },
@@ -403,7 +403,7 @@ export class CFInput extends BaseElement {
       declare minlength: string;
       declare inputmode: InputMode;
       declare size: ComponentSize;
-      declare charSize: number;
+      declare length: number;
       declare multiple: boolean;
       declare accept: string;
       declare list: string;
@@ -459,7 +459,7 @@ export class CFInput extends BaseElement {
         this.minlength = "";
         this.inputmode = "text";
         this.size = "md";
-        this.charSize = 0;
+        this.length = 0;
         this.multiple = false;
         this.accept = "";
         this.list = "";
@@ -643,7 +643,7 @@ export class CFInput extends BaseElement {
             maxlength="${ifDefined(this.maxlength || undefined)}"
             minlength="${ifDefined(this.minlength || undefined)}"
             inputmode="${ifDefined(inputMode || undefined)}"
-            size="${ifDefined(this.charSize || undefined)}"
+            size="${ifDefined(this.length || undefined)}"
             ?multiple="${this.multiple && this.type === "file"}"
             accept="${ifDefined(
               this.accept && this.type === "file" ? this.accept : undefined,
