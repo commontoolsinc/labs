@@ -645,7 +645,7 @@ describe("schemaWithProperties", () => {
   });
 
   describe("for `schema = false\`", () => {
-    for (const overrides of [false, true, { type: "string" }]) {
+    for (const overrides of [false, true, { type: "string" } as JSONSchema]) {
       const label = (typeof overrides === "boolean")
         ? `\`overrides = ${overrides}\``
         : "`overrides` of type `object`";
@@ -657,7 +657,7 @@ describe("schemaWithProperties", () => {
   });
 
   describe("for `overrides = false\`", () => {
-    for (const schema of [false, true, { type: "string" }]) {
+    for (const schema of [false, true, { type: "string" } as JSONSchema]) {
       const label = (typeof schema === "boolean")
         ? `\`schema = ${schema}\``
         : "`schema` of type `object`";
