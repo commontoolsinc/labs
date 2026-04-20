@@ -1,7 +1,9 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { normalize } from "@std/path/posix";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
 import type {
   SandboxCommandRequest,
   SandboxCommandResult,
@@ -18,8 +20,12 @@ class FakeSandboxRuntime implements SandboxRuntime {
     private readonly shellError?: Error,
   ) {}
 
-  resolvePath(path: string): string {
-    return path.startsWith("/") ? path : `/workspace/${path}`;
+  resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
+    return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
+  }
+
+  isPathWithinWorkspace(path: string): boolean {
+    return path === "/workspace" || path.startsWith("/workspace/");
   }
 
   defaultWorkingDirectory(): string {
@@ -55,6 +61,7 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     createdAt: "2026-04-15T19:00:00.000Z",
     updatedAt: "2026-04-15T19:00:00.000Z",
     cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
     policyEvents: [],
     toolOutputs: [],
   });
@@ -104,6 +111,7 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
     createdAt: "2026-04-15T19:00:00.000Z",
     updatedAt: "2026-04-15T19:00:05.000Z",
     cfcEnforcementMode: "observe",
+    currentDir: "/workspace",
     policyEvents: [],
     toolOutputs: [first.resultRef, second.resultRef],
   });
@@ -135,6 +143,7 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
     createdAt: "2026-04-15T19:10:00.000Z",
     updatedAt: "2026-04-15T19:10:02.000Z",
     cfcEnforcementMode: "observe",
+    currentDir: "/workspace",
     policyEvents: [],
     toolOutputs: [],
   });
@@ -149,6 +158,7 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
       createdAt: "2026-04-17T20:10:00.000Z",
       updatedAt: "2026-04-17T20:10:01.000Z",
       cfcEnforcementMode: "observe",
+      currentDir: "/workspace",
       policyEvents: [createHarnessPolicyEvent({
         severity: "warning",
         mode: "observe",
@@ -176,6 +186,7 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
     createdAt: "2026-04-17T20:10:00.000Z",
     updatedAt: "2026-04-17T20:10:01.000Z",
     cfcEnforcementMode: "observe",
+    currentDir: "/workspace",
     policyEvents: [createHarnessPolicyEvent({
       severity: "warning",
       mode: "observe",
@@ -191,4 +202,24 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
       artifactPath: "/tmp/original.json",
     }],
   });
+});
+
+Deno.test("CfHarnessEngine rejects legacy run state snapshots without currentDir", () => {
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: {
+          runId: "run-legacy",
+          status: "completed",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:01.000Z",
+          cfcEnforcementMode: "observe",
+          policyEvents: [],
+          toolOutputs: [],
+        } as unknown as HarnessRunState,
+      }),
+    Error,
+    "older cf-harness runs cannot be resumed",
+  );
 });

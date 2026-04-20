@@ -633,12 +633,18 @@ describe("schemaWithProperties", () => {
       assertEquals(result, { type: "string" });
     });
 
-    it("returns an interned result", () => {
-      const result = schemaWithProperties({ type: "string" }, true);
+    it("returns an interned result given an interned `schema`", () => {
+      const schema = internSchema({ type: "string" });
+      const result = schemaWithProperties(schema, true);
       assert(isInternedSchema(result));
     });
 
-    it("does not freeze `schema`", () => {
+    it("returns an uninterned result given an uninterned `schema`", () => {
+      const result = schemaWithProperties({ type: "string" }, true);
+      assert(!isInternedSchema(result));
+    });
+
+    it("does not freeze a mutable `schema`", () => {
       const schema: JSONSchemaObj = { type: "boolean" };
       schemaWithProperties(schema, true);
       assert(!Object.isFrozen(schema));

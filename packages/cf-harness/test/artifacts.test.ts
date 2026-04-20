@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
+import { normalize } from "@std/path/posix";
 import {
   createFileSystemHarnessArtifactStore,
   readHarnessRunArtifacts,
@@ -24,8 +25,12 @@ class FakeSandboxRuntime implements SandboxRuntime {
     private readonly shellResults: SandboxCommandResult[] = [],
   ) {}
 
-  resolvePath(path: string): string {
-    return path.startsWith("/") ? path : `/workspace/${path}`;
+  resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
+    return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
+  }
+
+  isPathWithinWorkspace(path: string): boolean {
+    return path === "/workspace" || path.startsWith("/workspace/");
   }
 
   defaultWorkingDirectory(): string {
@@ -93,6 +98,7 @@ Deno.test({
           stdout: "hello\n",
           stderr: "",
           exitCode: 0,
+          cwd: "/workspace",
         },
       );
       assertEquals(persistedState, {
@@ -101,6 +107,7 @@ Deno.test({
         createdAt: "2026-04-15T21:00:00.000Z",
         updatedAt: "2026-04-15T21:00:03.000Z",
         cfcEnforcementMode: "observe",
+        currentDir: "/workspace",
         artifactRoot: runRoot,
         policyEvents: [],
         toolOutputs: [result.resultRef],
