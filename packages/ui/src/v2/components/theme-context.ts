@@ -16,7 +16,7 @@ export type ColorToken = string | {
 /**
  * Standard component size tokens (Figma coordinated sizing scale)
  */
-export type ComponentSize = "xs" | "s" | "m" | "l" | "xl";
+export type ComponentSize = "xs" | "sm" | "md" | "lg" | "xl";
 
 /**
  * Coordinated sizing scale from Figma design system.
@@ -36,7 +36,7 @@ export const SIZING_SCALE = {
     fontSize: 9,
     lineHeight: 12,
   },
-  s: {
+  sm: {
     height: 24,
     radius: 5,
     iconLg: 16,
@@ -48,7 +48,7 @@ export const SIZING_SCALE = {
     fontSize: 11,
     lineHeight: 16,
   },
-  m: {
+  md: {
     height: 32,
     radius: 8,
     iconLg: 20,
@@ -60,7 +60,7 @@ export const SIZING_SCALE = {
     fontSize: 12,
     lineHeight: 16,
   },
-  l: {
+  lg: {
     height: 40,
     radius: 9,
     iconLg: 24,

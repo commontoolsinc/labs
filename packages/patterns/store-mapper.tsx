@@ -1095,7 +1095,7 @@ export default pattern<Input, Output>(
                           Front:
                         </span>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-front"
                           disabled={derive(
@@ -1110,7 +1110,7 @@ export default pattern<Input, Output>(
                           Left
                         </cf-button>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-front"
                           disabled={derive(
@@ -1125,7 +1125,7 @@ export default pattern<Input, Output>(
                           Center
                         </cf-button>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-front"
                           disabled={derive(
@@ -1161,7 +1161,7 @@ export default pattern<Input, Output>(
                           Back:
                         </span>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-back"
                           disabled={derive(
@@ -1176,7 +1176,7 @@ export default pattern<Input, Output>(
                           Left
                         </cf-button>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-back"
                           disabled={derive(
@@ -1191,7 +1191,7 @@ export default pattern<Input, Output>(
                           Center
                         </cf-button>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-back"
                           disabled={derive(
@@ -1227,7 +1227,7 @@ export default pattern<Input, Output>(
                           Left:
                         </span>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-left"
                           disabled={derive(
@@ -1242,7 +1242,7 @@ export default pattern<Input, Output>(
                           Front
                         </cf-button>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-left"
                           disabled={derive(
@@ -1257,7 +1257,7 @@ export default pattern<Input, Output>(
                           Center
                         </cf-button>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-left"
                           disabled={derive(
@@ -1293,7 +1293,7 @@ export default pattern<Input, Output>(
                           Right:
                         </span>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-right"
                           disabled={derive(
@@ -1308,7 +1308,7 @@ export default pattern<Input, Output>(
                           Front
                         </cf-button>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-right"
                           disabled={derive(
@@ -1323,7 +1323,7 @@ export default pattern<Input, Output>(
                           Center
                         </cf-button>
                         <cf-button
-                          size="s"
+                          size="sm"
                           variant="outline"
                           className="wall-btn-right"
                           disabled={derive(
@@ -1375,7 +1375,7 @@ export default pattern<Input, Output>(
                               >
                                 🚪 {entrance.position}
                                 <cf-button
-                                  size="s"
+                                  size="sm"
                                   variant="ghost"
                                   onClick={removeEntrance({
                                     entrances,
@@ -1546,7 +1546,7 @@ export default pattern<Input, Output>(
                                 📷 {extraction.photoName}
                               </span>
                               <cf-button
-                                size="s"
+                                size="sm"
                                 variant="ghost"
                                 onClick={hidePhoto({
                                   hiddenPhotoIds,
@@ -1625,7 +1625,7 @@ export default pattern<Input, Output>(
                                       {/* Batch add button */}
                                       {newCount > 0 && (
                                         <cf-button
-                                          size="s"
+                                          size="sm"
                                           variant="primary"
                                           onClick={addAllExtractedAisles({
                                             aisles,
@@ -1682,7 +1682,7 @@ export default pattern<Input, Output>(
                                               {exists
                                                 ? (
                                                   <cf-button
-                                                    size="s"
+                                                    size="sm"
                                                     variant="secondary"
                                                     onClick={mergeExtractedAisle(
                                                       {
@@ -1697,7 +1697,7 @@ export default pattern<Input, Output>(
                                                 )
                                                 : (
                                                   <cf-button
-                                                    size="s"
+                                                    size="sm"
                                                     variant="primary"
                                                     onClick={addExtractedAisle(
                                                       {
@@ -1792,7 +1792,7 @@ export default pattern<Input, Output>(
                               Front:
                             </span>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1808,7 +1808,7 @@ export default pattern<Input, Output>(
                               Left
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1824,7 +1824,7 @@ export default pattern<Input, Output>(
                               Center
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1860,7 +1860,7 @@ export default pattern<Input, Output>(
                               Back:
                             </span>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1876,7 +1876,7 @@ export default pattern<Input, Output>(
                               Left
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1892,7 +1892,7 @@ export default pattern<Input, Output>(
                               Center
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1928,7 +1928,7 @@ export default pattern<Input, Output>(
                               Left:
                             </span>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1944,7 +1944,7 @@ export default pattern<Input, Output>(
                               Front
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1960,7 +1960,7 @@ export default pattern<Input, Output>(
                               Center
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -1996,7 +1996,7 @@ export default pattern<Input, Output>(
                               Right:
                             </span>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -2012,7 +2012,7 @@ export default pattern<Input, Output>(
                               Front
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -2028,7 +2028,7 @@ export default pattern<Input, Output>(
                               Center
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -2064,7 +2064,7 @@ export default pattern<Input, Output>(
                               Other:
                             </span>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>
@@ -2081,7 +2081,7 @@ export default pattern<Input, Output>(
                               Normal Aisle
                             </cf-button>
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant={derive(
                                 dept.location,
                                 (l) =>

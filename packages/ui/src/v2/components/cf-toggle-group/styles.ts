@@ -17,8 +17,8 @@ export const toggleGroupStyles = `
     justify-content: flex-start;
     gap: var(--cf-toggle-group-gap);
     background-color: var(--cf-toggle-group-color-background);
-    border-radius: var(--cf-size-s-radius, 5px);
-    padding: var(--cf-size-s-spacing, 4px);
+    border-radius: var(--cf-size-sm-radius, 5px);
+    padding: var(--cf-size-sm-spacing, 4px);
   }
 
   /* Direct children styling */
@@ -39,13 +39,13 @@ export const toggleGroupStyles = `
   }
 
   :host([variant="connected"]) ::slotted(cf-toggle:first-child) {
-    border-top-left-radius: var(--cf-size-s-radius, 5px);
-    border-bottom-left-radius: var(--cf-size-s-radius, 5px);
+    border-top-left-radius: var(--cf-size-sm-radius, 5px);
+    border-bottom-left-radius: var(--cf-size-sm-radius, 5px);
   }
 
   :host([variant="connected"]) ::slotted(cf-toggle:last-child) {
-    border-top-right-radius: var(--cf-size-s-radius, 5px);
-    border-bottom-right-radius: var(--cf-size-s-radius, 5px);
+    border-top-right-radius: var(--cf-size-sm-radius, 5px);
+    border-bottom-right-radius: var(--cf-size-sm-radius, 5px);
     border-right: none;
   }
 
@@ -71,15 +71,15 @@ export const toggleGroupStyles = `
   }
 
   :host([orientation="vertical"][variant="connected"]) ::slotted(cf-toggle:first-child) {
-    border-top-left-radius: var(--cf-size-s-radius, 5px);
-    border-top-right-radius: var(--cf-size-s-radius, 5px);
+    border-top-left-radius: var(--cf-size-sm-radius, 5px);
+    border-top-right-radius: var(--cf-size-sm-radius, 5px);
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
   }
 
   :host([orientation="vertical"][variant="connected"]) ::slotted(cf-toggle:last-child) {
-    border-bottom-left-radius: var(--cf-size-s-radius, 5px);
-    border-bottom-right-radius: var(--cf-size-s-radius, 5px);
+    border-bottom-left-radius: var(--cf-size-sm-radius, 5px);
+    border-bottom-right-radius: var(--cf-size-sm-radius, 5px);
     border-top-left-radius: 0;
     border-top-right-radius: 0;
     border-bottom: none;

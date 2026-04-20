@@ -423,21 +423,21 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             </span>
             <cf-button
               variant={viewMode.get() === "quick" ? "primary" : "secondary"}
-              size="s"
+              size="sm"
               onClick={() => viewMode.set("quick")}
             >
               Quick
             </cf-button>
             <cf-button
               variant={viewMode.get() === "sorted" ? "primary" : "secondary"}
-              size="s"
+              size="sm"
               onClick={() => viewMode.set("sorted")}
             >
               📍 Sorted
             </cf-button>
             <cf-button
               variant="secondary"
-              size="s"
+              size="sm"
               onClick={openStoreMapper({})}
             >
               🗺️ Store

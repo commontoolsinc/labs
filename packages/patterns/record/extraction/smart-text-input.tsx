@@ -451,7 +451,7 @@ export const SmartTextInput = pattern<
         buttonText="📄 Upload Text File"
         showPreview={false}
         variant="ghost"
-        size="s"
+        size="sm"
         oncf-change={handleFileUpload({
           previewText,
           previewSource,
@@ -472,7 +472,7 @@ export const SmartTextInput = pattern<
         maxSizeBytes={maxImageSizeBytes}
         buttonText="📷 Add Photo"
         variant="ghost"
-        size="s"
+        size="sm"
         oncf-change={handleImageChange({
           previewText,
           fileError,
@@ -497,7 +497,7 @@ export const SmartTextInput = pattern<
             gap: "8px",
           }}
         >
-          <cf-loader size="s" />
+          <cf-loader size="sm" />
           <span style={{ color: "#6b7280", fontSize: "13px" }}>
             Extracting text from image...
           </span>

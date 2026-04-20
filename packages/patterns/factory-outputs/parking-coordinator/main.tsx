@@ -967,7 +967,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 variant={computed(() =>
                   adminMode.get() ? "primary" : "secondary"
                 )}
-                size="s"
+                size="sm"
                 onClick={() => toggleAdminMode.send()}
               >
                 {computed(() => `Admin: ${adminMode.get() ? "ON" : "OFF"}`)}
@@ -1039,7 +1039,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             ? (
                               <cf-button
                                 variant="secondary"
-                                size="s"
+                                size="sm"
                                 onClick={() =>
                                   cancelRequest.send({
                                     requestId: stripReq.id,
@@ -1054,7 +1054,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             ? (
                               <cf-button
                                 variant="ghost"
-                                size="s"
+                                size="sm"
                                 onClick={() =>
                                   openGridOverride.send({
                                     spotNumber: stripSpotNumber,
@@ -1261,7 +1261,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-hstack gap="1">
                                     <cf-button
                                       variant="primary"
-                                      size="s"
+                                      size="sm"
                                       onClick={() =>
                                         adminOverride.send({
                                           spotNumber: gridSpotNumber,
@@ -1273,7 +1273,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     </cf-button>
                                     <cf-button
                                       variant="ghost"
-                                      size="s"
+                                      size="sm"
                                       onClick={() => cancelOverride.send()}
                                     >
                                       ×
@@ -1301,7 +1301,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     ? (
                                       <cf-button
                                         variant="ghost"
-                                        size="s"
+                                        size="sm"
                                         style="padding: 0; font-size: 0.625rem; line-height: 1; min-height: unset; color: var(--cf-color-red-500);"
                                         onClick={() =>
                                           cancelRequest.send({
@@ -1336,7 +1336,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     ? (
                                       <cf-button
                                         variant="ghost"
-                                        size="s"
+                                        size="sm"
                                         style="font-size: 0.625rem; opacity: 0.6; padding: 0;"
                                         onClick={() =>
                                           openGridOverride.send({
@@ -1368,7 +1368,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         <cf-heading level={6}>People</cf-heading>
                         <cf-button
                           variant="primary"
-                          size="s"
+                          size="sm"
                           onClick={() => toggleAddPersonForm.send()}
                         >
                           + Add Person
@@ -1512,7 +1512,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-hstack gap="2">
                                     <cf-button
                                       variant="primary"
-                                      size="s"
+                                      size="sm"
                                       onClick={() =>
                                         saveEditPerson.send({
                                           originalName: personName,
@@ -1522,7 +1522,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     </cf-button>
                                     <cf-button
                                       variant="secondary"
-                                      size="s"
+                                      size="sm"
                                       onClick={() => cancelEditPerson.send()}
                                     >
                                       Cancel
@@ -1565,7 +1565,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     <cf-hstack gap="1" align="center">
                                       <cf-button
                                         variant="ghost"
-                                        size="s"
+                                        size="sm"
                                         disabled={isFirst}
                                         onClick={() =>
                                           movePersonUp.send({
@@ -1576,7 +1576,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       </cf-button>
                                       <cf-button
                                         variant="ghost"
-                                        size="s"
+                                        size="sm"
                                         disabled={isLast}
                                         onClick={() =>
                                           movePersonDown.send({
@@ -1587,7 +1587,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       </cf-button>
                                       <cf-button
                                         variant="ghost"
-                                        size="s"
+                                        size="sm"
                                         onClick={() =>
                                           startEditPerson.send({
                                             name: personName,
@@ -1597,7 +1597,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       </cf-button>
                                       <cf-button
                                         variant="ghost"
-                                        size="s"
+                                        size="sm"
                                         onClick={() =>
                                           initiateRemovePerson.send({
                                             name: personName,
@@ -1630,7 +1630,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           <cf-hstack gap="2">
                                             <cf-button
                                               variant="primary"
-                                              size="s"
+                                              size="sm"
                                               onClick={() =>
                                                 removePerson.send({
                                                   name: personName,
@@ -1640,7 +1640,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             </cf-button>
                                             <cf-button
                                               variant="ghost"
-                                              size="s"
+                                              size="sm"
                                               onClick={() =>
                                                 cancelRemovePerson.send()}
                                             >
@@ -1753,7 +1753,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               <cf-hstack gap="2">
                                 <cf-button
                                   variant="primary"
-                                  size="s"
+                                  size="sm"
                                   disabled={addPersonDisabled}
                                   onClick={() => submitAddPerson.send()}
                                 >
@@ -1761,7 +1761,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 </cf-button>
                                 <cf-button
                                   variant="ghost"
-                                  size="s"
+                                  size="sm"
                                   onClick={() => toggleAddPersonForm.send()}
                                 >
                                   Cancel
@@ -1779,7 +1779,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         <cf-heading level={6}>Parking Spots</cf-heading>
                         <cf-button
                           variant="primary"
-                          size="s"
+                          size="sm"
                           onClick={() => toggleAddSpotForm.send()}
                         >
                           + Add Spot
@@ -1851,7 +1851,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-hstack gap="2">
                                     <cf-button
                                       variant="primary"
-                                      size="s"
+                                      size="sm"
                                       onClick={() =>
                                         saveEditSpot.send({
                                           originalNumber: spotNum2,
@@ -1861,7 +1861,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     </cf-button>
                                     <cf-button
                                       variant="secondary"
-                                      size="s"
+                                      size="sm"
                                       onClick={() => cancelEditSpot.send()}
                                     >
                                       Cancel
@@ -1920,7 +1920,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     <cf-hstack gap="1">
                                       <cf-button
                                         variant="ghost"
-                                        size="s"
+                                        size="sm"
                                         onClick={() =>
                                           startEditSpot.send({
                                             spotNumber: spotNum2,
@@ -1930,7 +1930,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       </cf-button>
                                       <cf-button
                                         variant="ghost"
-                                        size="s"
+                                        size="sm"
                                         onClick={() =>
                                           initiateRemoveSpot.send({
                                             spotNumber: spotNum2,
@@ -1952,7 +1952,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           <cf-hstack gap="2">
                                             <cf-button
                                               variant="primary"
-                                              size="s"
+                                              size="sm"
                                               onClick={() =>
                                                 removeSpot.send({
                                                   spotNumber: spotNum2,
@@ -1962,7 +1962,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             </cf-button>
                                             <cf-button
                                               variant="ghost"
-                                              size="s"
+                                              size="sm"
                                               onClick={() =>
                                                 cancelRemoveSpot.send()}
                                             >
@@ -2028,7 +2028,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               <cf-hstack gap="2">
                                 <cf-button
                                   variant="primary"
-                                  size="s"
+                                  size="sm"
                                   disabled={addSpotDisabled}
                                   onClick={() => submitAddSpot.send()}
                                 >
@@ -2036,7 +2036,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 </cf-button>
                                 <cf-button
                                   variant="ghost"
-                                  size="s"
+                                  size="sm"
                                   onClick={() => toggleAddSpotForm.send()}
                                 >
                                   Cancel

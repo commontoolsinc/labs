@@ -11,12 +11,12 @@ export const selectStyles = `
     display: inline-block;
     width: 100%;
 
-    /* Sizing scale defaults (size="m") */
-    --select-height: var(--cf-size-m-height, 32px);
-    --select-padding-x: var(--cf-size-m-padding-h, 8px);
-    --select-padding-y: var(--cf-size-m-padding-v, 8px);
-    --select-font-size: var(--cf-size-m-font-size, 12px);
-    --select-border-radius: var(--cf-size-m-radius, 8px);
+    /* Sizing scale defaults (size="md") */
+    --select-height: var(--cf-size-md-height, 32px);
+    --select-padding-x: var(--cf-size-md-padding-h, 8px);
+    --select-padding-y: var(--cf-size-md-padding-v, 8px);
+    --select-font-size: var(--cf-size-md-font-size, 12px);
+    --select-border-radius: var(--cf-size-md-radius, 8px);
   }
 
   :host([size="xs"]) {
@@ -27,20 +27,20 @@ export const selectStyles = `
     --select-border-radius: var(--cf-size-xs-radius, 4px);
   }
 
-  :host([size="s"]) {
-    --select-height: var(--cf-size-s-height, 24px);
-    --select-padding-x: var(--cf-size-s-padding-h, 6px);
-    --select-padding-y: var(--cf-size-s-padding-v, 4px);
-    --select-font-size: var(--cf-size-s-font-size, 11px);
-    --select-border-radius: var(--cf-size-s-radius, 5px);
+  :host([size="sm"]) {
+    --select-height: var(--cf-size-sm-height, 24px);
+    --select-padding-x: var(--cf-size-sm-padding-h, 6px);
+    --select-padding-y: var(--cf-size-sm-padding-v, 4px);
+    --select-font-size: var(--cf-size-sm-font-size, 11px);
+    --select-border-radius: var(--cf-size-sm-radius, 5px);
   }
 
-  :host([size="l"]) {
-    --select-height: var(--cf-size-l-height, 40px);
-    --select-padding-x: var(--cf-size-l-padding-h, 12px);
-    --select-padding-y: var(--cf-size-l-padding-v, 8px);
-    --select-font-size: var(--cf-size-l-font-size, 16px);
-    --select-border-radius: var(--cf-size-l-radius, 9px);
+  :host([size="lg"]) {
+    --select-height: var(--cf-size-lg-height, 40px);
+    --select-padding-x: var(--cf-size-lg-padding-h, 12px);
+    --select-padding-y: var(--cf-size-lg-padding-v, 8px);
+    --select-font-size: var(--cf-size-lg-font-size, 16px);
+    --select-border-radius: var(--cf-size-lg-radius, 9px);
   }
 
   :host([size="xl"]) {

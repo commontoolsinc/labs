@@ -105,7 +105,7 @@ export const figmaMapping = {
     "tag.category": {
       element: "cf-chip",
       note: "Category label pill",
-      example: `<cf-chip label="Category" size="s"></cf-chip>`,
+      example: `<cf-chip label="Category" size="sm"></cf-chip>`,
     },
   },
 };

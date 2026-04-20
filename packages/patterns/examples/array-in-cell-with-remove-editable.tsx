@@ -64,7 +64,7 @@ export default pattern<InputSchema>(({ title, items }) => {
             >
               <cf-button
                 variant="destructive"
-                size="s"
+                size="sm"
                 onClick={removeItem({ items, item })}
               >
                 Remove

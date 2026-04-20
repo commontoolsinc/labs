@@ -42,7 +42,7 @@ export class CFTile extends BaseElement {
       --accent-foreground: #ffffff;
 
       --tile-padding: var(--cf-size-xl-spacing, 16px);
-      --tile-border-radius: var(--cf-size-m-radius, 8px);
+      --tile-border-radius: var(--cf-size-md-radius, 8px);
       --tile-border: 1px solid var(--border);
       --tile-shadow:
         0 1px 3px 0 rgb(0 0 0 / 0.1),
@@ -94,7 +94,7 @@ export class CFTile extends BaseElement {
       .tile-content {
         display: flex;
         flex-direction: column;
-        gap: var(--cf-size-m-spacing, 8px);
+        gap: var(--cf-size-md-spacing, 8px);
       }
 
       .summary-details {

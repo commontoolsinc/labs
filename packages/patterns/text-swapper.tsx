@@ -162,7 +162,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
         </div>
 
         {/* Edit Modal */}
-        <cf-modal $open={showModal} dismissable size="s" label="Edit Text">
+        <cf-modal $open={showModal} dismissable size="sm" label="Edit Text">
           <span slot="header">
             Edit {editingSide.get() === "left" ? "Left" : "Right"} Text
           </span>

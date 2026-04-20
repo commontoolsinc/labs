@@ -114,15 +114,15 @@ export const skeletonStyles = `
   }
 
   /* Responsive sizing helpers */
-  :host([size="s"]) .skeleton.variant-default {
+  :host([size="sm"]) .skeleton.variant-default {
     height: 1rem;
   }
 
-  :host([size="m"]) .skeleton.variant-default {
+  :host([size="md"]) .skeleton.variant-default {
     height: 1.25rem;
   }
 
-  :host([size="l"]) .skeleton.variant-default {
+  :host([size="lg"]) .skeleton.variant-default {
     height: 1.5rem;
   }
 
@@ -131,17 +131,17 @@ export const skeletonStyles = `
   }
 
   /* Circular size variants */
-  :host([size="s"]) .skeleton.variant-circular {
+  :host([size="sm"]) .skeleton.variant-circular {
     width: 2rem;
     height: 2rem;
   }
 
-  :host([size="m"]) .skeleton.variant-circular {
+  :host([size="md"]) .skeleton.variant-circular {
     width: 2.5rem;
     height: 2.5rem;
   }
 
-  :host([size="l"]) .skeleton.variant-circular {
+  :host([size="lg"]) .skeleton.variant-circular {
     width: 3rem;
     height: 3rem;
   }

@@ -344,7 +344,7 @@ export class CFChatMessage extends BaseElement {
             <cf-copy-button
               text="${textContent}"
               variant="ghost"
-              size="s"
+              size="sm"
               icon-only
             ></cf-copy-button>
           `

@@ -556,7 +556,7 @@ const ChatNote = pattern<Input, Output>(
               {/* Generate button - shown when not generating */}
               <cf-button
                 variant="primary"
-                size="s"
+                size="sm"
                 onClick={handleGenerate({
                   content,
                   llmSystem,
@@ -586,7 +586,7 @@ const ChatNote = pattern<Input, Output>(
                 <cf-loader show-elapsed style={{ flexShrink: 0 }} />
                 <cf-button
                   variant="secondary"
-                  size="s"
+                  size="sm"
                   onClick={handleCancelGeneration({
                     isGenerating,
                     llmMessages,

@@ -437,7 +437,7 @@ ${notesXml}
                       </h3>
                       <cf-button
                         variant="ghost"
-                        size="s"
+                        size="sm"
                         onClick={triggerRollup({
                           addMessage: rollupAddMessage,
                         })}

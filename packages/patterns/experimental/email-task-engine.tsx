@@ -741,7 +741,7 @@ Respond with the most appropriate action.`;
                   gap: "8px",
                 }}
               >
-                <cf-loader size="s" />
+                <cf-loader size="sm" />
                 <span style={{ color: "#2563eb" }}>
                   Analyzing {pendingCount} tasks...
                 </span>
@@ -986,7 +986,7 @@ Respond with the most appropriate action.`;
                             borderRadius: "6px",
                           }}
                         >
-                          <cf-loader size="s" />
+                          <cf-loader size="sm" />
                           <span style={{ fontSize: "13px", color: "#6b7280" }}>
                             Analyzing...
                           </span>

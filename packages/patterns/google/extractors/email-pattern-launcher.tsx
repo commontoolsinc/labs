@@ -406,7 +406,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   borderRadius: "8px",
                 }}
               >
-                <cf-loader size="s" />
+                <cf-loader size="sm" />
                 <span>Loading pattern registry...</span>
               </div>
             )}
@@ -514,7 +514,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             borderRadius: "8px",
                           }}
                         >
-                          <cf-loader size="s" />
+                          <cf-loader size="sm" />
                           <span>Loading pattern...</span>
                         </div>
                       )}

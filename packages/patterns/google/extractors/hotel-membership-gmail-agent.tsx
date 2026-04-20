@@ -614,7 +614,7 @@ Report memberships as you find them. Don't wait until the end.`,
                   <div style={{ display: "flex", gap: "8px" }}>
                     <cf-button
                       onClick={startFullScan}
-                      size="l"
+                      size="lg"
                       style="flex: 1;"
                       disabled={buttonsDisabled}
                     >
@@ -623,7 +623,7 @@ Report memberships as you find them. Don't wait until the end.`,
                     <cf-button
                       onClick={startRecentScan}
                       variant="secondary"
-                      size="l"
+                      size="lg"
                       style="flex: 1;"
                       disabled={buttonsDisabled}
                     >
@@ -650,7 +650,7 @@ Report memberships as you find them. Don't wait until the end.`,
                 <cf-button
                   onClick={searcher.stopScan}
                   variant="secondary"
-                  size="l"
+                  size="lg"
                   style="width: 100%;"
                 >
                   ⏹ Stop Scan

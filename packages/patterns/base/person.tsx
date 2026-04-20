@@ -551,7 +551,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                           />
                           <cf-button
                             variant="ghost"
-                            size="s"
+                            size="sm"
                             onClick={removeAddress({ person, index: i })}
                           >
                             ×
@@ -599,7 +599,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                   ))}
                   <cf-button
                     variant="ghost"
-                    size="s"
+                    size="sm"
                     onClick={addAddress({ person })}
                   >
                     + Add Address
@@ -636,7 +636,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                       />
                       <cf-button
                         variant="ghost"
-                        size="s"
+                        size="sm"
                         onClick={removeSocialProfile({ person, index: i })}
                       >
                         ×
@@ -645,7 +645,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                   ))}
                   <cf-button
                     variant="ghost"
-                    size="s"
+                    size="sm"
                     onClick={addSocialProfile({ person })}
                   >
                     + Add Profile
@@ -733,7 +733,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                 >
                   <cf-button
                     variant="ghost"
-                    size="s"
+                    size="sm"
                     onClick={togglePicker({ showPicker })}
                     style={{ fontSize: "12px", color: "#6b7280" }}
                   >

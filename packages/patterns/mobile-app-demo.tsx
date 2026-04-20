@@ -243,7 +243,7 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                                   </cf-vstack>
                                   <cf-chip
                                     label={task.actionLabel}
-                                    size="s"
+                                    size="sm"
                                     style={chipStyle(task.actionTone)}
                                   />
                                 </cf-hstack>

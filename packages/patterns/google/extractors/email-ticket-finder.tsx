@@ -1032,7 +1032,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                               marginTop: "4px",
                             }}
                           >
-                            <cf-loader size="s" />
+                            <cf-loader size="sm" />
                             <span>Analyzing...</span>
                           </div>
 

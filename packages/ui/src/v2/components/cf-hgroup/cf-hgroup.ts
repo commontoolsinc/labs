@@ -34,7 +34,7 @@ export class CFHGroup extends BaseElement {
 
     /* Gap sizes */
     .gap-sm {
-      gap: var(--cf-size-m-spacing, 8px);
+      gap: var(--cf-size-md-spacing, 8px);
     }
     .gap-md {
       gap: var(--cf-size-xl-spacing, 16px);

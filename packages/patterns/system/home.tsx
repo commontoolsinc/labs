@@ -170,7 +170,7 @@ export default pattern((_) => {
                       />
                     </div>
                     <cf-button
-                      size="s"
+                      size="sm"
                       variant="ghost"
                       onClick={removeSpaceHandler({ name: space.name, spaces })}
                     >

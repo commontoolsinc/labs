@@ -510,7 +510,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                               "text/html": n.htmlContent,
                             }))}
                             variant="outline"
-                            size="s"
+                            size="sm"
                           />
 
                           {/* Mark as Done button */}

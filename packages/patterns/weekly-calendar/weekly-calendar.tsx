@@ -591,7 +591,7 @@ const WeeklyCalendar = pattern<Input, Output>(
             <cf-modal
               $open={showNewEventPrompt}
               dismissable
-              size="s"
+              size="sm"
               label="New Event"
             >
               <span slot="header">New Event</span>
@@ -726,7 +726,7 @@ const WeeklyCalendar = pattern<Input, Output>(
             <cf-modal
               $open={showEditModal}
               dismissable
-              size="s"
+              size="sm"
               label="Edit Event"
             >
               <span slot="header">Edit Event</span>
@@ -1261,7 +1261,7 @@ const WeeklyCalendar = pattern<Input, Output>(
             {backlinks.map((piece) => (
               <cf-button
                 variant="ghost"
-                size="s"
+                size="sm"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >

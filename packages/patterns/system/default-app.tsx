@@ -338,7 +338,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                         </td>
                         <td>
                           <cf-button
-                            size="s"
+                            size="sm"
                             variant="ghost"
                             onClick={removePiece({ piece, allPieces })}
                           >

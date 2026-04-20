@@ -50,7 +50,7 @@ export class CFToggle extends BaseElement {
     this.pressed = false;
     this.disabled = false;
     this.variant = "default";
-    this.size = "m";
+    this.size = "md";
     this.ariaLabel = "";
   }
 

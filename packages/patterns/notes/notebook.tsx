@@ -1061,7 +1061,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       }}
                     >
                       <cf-button
-                        size="s"
+                        size="sm"
                         variant="ghost"
                         title="New Note"
                         onClick={showNewNoteModalAction}
@@ -1073,7 +1073,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                         </span>
                       </cf-button>
                       <cf-button
-                        size="s"
+                        size="sm"
                         variant="ghost"
                         title="New Notebook"
                         onClick={showNewNotebookModalAction}
@@ -1199,7 +1199,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                             }}
                           >
                             <cf-button
-                              size="s"
+                              size="sm"
                               variant="ghost"
                               onClick={removeFromNotebook({ note, notes })}
                             >
@@ -1287,14 +1287,14 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     })}
                   />
                   <cf-button
-                    size="s"
+                    size="sm"
                     variant="ghost"
                     onClick={doDuplicateSelectedNotes}
                   >
                     Duplicate
                   </cf-button>
                   <cf-button
-                    size="s"
+                    size="sm"
                     variant="ghost"
                     onClick={deleteSelectedNotes({
                       notes,
@@ -1317,7 +1317,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           <cf-modal
             $open={showNewNotebookPrompt}
             dismissable
-            size="s"
+            size="sm"
             label="New Notebook"
           >
             <span slot="header">New Notebook</span>
@@ -1357,7 +1357,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           <cf-modal
             $open={showNewNotePrompt}
             dismissable
-            size="s"
+            size="sm"
             label="New Note"
           >
             <span slot="header">New Note</span>
@@ -1395,7 +1395,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           <cf-modal
             $open={showNewNestedNotebookPrompt}
             dismissable
-            size="s"
+            size="sm"
             label="New Notebook"
           >
             <span slot="header">New Notebook</span>
@@ -1453,7 +1453,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             {backlinks.map((piece) => (
               <cf-button
                 variant="ghost"
-                size="s"
+                size="sm"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >

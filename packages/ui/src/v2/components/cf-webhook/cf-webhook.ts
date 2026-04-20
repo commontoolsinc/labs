@@ -218,7 +218,7 @@ export class CFWebhook extends BaseElement {
           <span class="name">${this.name}</span>
           <cf-button
             variant="ghost"
-            size="s"
+            size="sm"
             @click="${this._handleDelete}"
             ?disabled="${this._isLoading}"
           >

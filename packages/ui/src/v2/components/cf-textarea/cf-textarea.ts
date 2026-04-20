@@ -122,12 +122,12 @@ export class CFTextarea extends BaseElement {
       --muted-foreground: var(--cf-textarea-color-text-muted, #64748b);
       --placeholder: var(--cf-textarea-color-placeholder, #94a3b8);
 
-      /* Textarea dimensions — default size M */
-      --textarea-padding-x: var(--cf-size-m-padding-h, 8px);
-      --textarea-padding-y: var(--cf-size-m-padding-v, 8px);
-      --textarea-font-size: var(--cf-size-m-font-size, 12px);
-      --textarea-line-height: var(--cf-size-m-line-height, 16px);
-      --textarea-border-radius: var(--cf-size-m-radius, 8px);
+      /* Textarea dimensions — default size md */
+      --textarea-padding-x: var(--cf-size-md-padding-h, 8px);
+      --textarea-padding-y: var(--cf-size-md-padding-v, 8px);
+      --textarea-font-size: var(--cf-size-md-font-size, 12px);
+      --textarea-line-height: var(--cf-size-md-line-height, 16px);
+      --textarea-border-radius: var(--cf-size-md-radius, 8px);
       --textarea-min-height: 5rem;
 
       display: block;
@@ -142,20 +142,20 @@ export class CFTextarea extends BaseElement {
       --textarea-border-radius: var(--cf-size-xs-radius, 4px);
     }
 
-    :host([size="s"]) {
-      --textarea-padding-x: var(--cf-size-s-padding-h, 6px);
-      --textarea-padding-y: var(--cf-size-s-padding-v, 4px);
-      --textarea-font-size: var(--cf-size-s-font-size, 11px);
-      --textarea-line-height: var(--cf-size-s-line-height, 16px);
-      --textarea-border-radius: var(--cf-size-s-radius, 5px);
+    :host([size="sm"]) {
+      --textarea-padding-x: var(--cf-size-sm-padding-h, 6px);
+      --textarea-padding-y: var(--cf-size-sm-padding-v, 4px);
+      --textarea-font-size: var(--cf-size-sm-font-size, 11px);
+      --textarea-line-height: var(--cf-size-sm-line-height, 16px);
+      --textarea-border-radius: var(--cf-size-sm-radius, 5px);
     }
 
-    :host([size="l"]) {
-      --textarea-padding-x: var(--cf-size-l-padding-h, 12px);
-      --textarea-padding-y: var(--cf-size-l-padding-v, 8px);
-      --textarea-font-size: var(--cf-size-l-font-size, 16px);
-      --textarea-line-height: var(--cf-size-l-line-height, 20px);
-      --textarea-border-radius: var(--cf-size-l-radius, 9px);
+    :host([size="lg"]) {
+      --textarea-padding-x: var(--cf-size-lg-padding-h, 12px);
+      --textarea-padding-y: var(--cf-size-lg-padding-v, 8px);
+      --textarea-font-size: var(--cf-size-lg-font-size, 16px);
+      --textarea-line-height: var(--cf-size-lg-line-height, 20px);
+      --textarea-border-radius: var(--cf-size-lg-radius, 9px);
     }
 
     :host([size="xl"]) {
@@ -367,7 +367,7 @@ export class CFTextarea extends BaseElement {
           this.autoResize = false;
           this.timingStrategy = "debounce";
           this.timingDelay = 300;
-          this.size = "m";
+          this.size = "md";
         }
 
         private getValue(): string {

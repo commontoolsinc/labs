@@ -677,7 +677,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                             color: "#2563eb",
                           }}
                         >
-                          <cf-loader size="s" />
+                          <cf-loader size="sm" />
                           {pendingCount} analyzing...
                         </span>
                       )}
@@ -1137,7 +1137,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                                 gap: "8px",
                               }}
                             >
-                              <cf-loader size="s" />
+                              <cf-loader size="sm" />
                               <span style={{ color: "#6b7280" }}>
                                 Analyzing...
                               </span>

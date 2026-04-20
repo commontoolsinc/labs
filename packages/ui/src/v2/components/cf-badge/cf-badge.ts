@@ -8,7 +8,7 @@ import type { ComponentSize } from "../theme-context.ts";
  * @element cf-badge
  *
  * @attr {string} variant - Visual style variant: "default" | "secondary" | "destructive" | "outline"
- * @attr {string} size - Size variant: "xs" | "s" | "m" | "l" | "xl" (default: "s")
+ * @attr {string} size - Size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "sm")
  * @attr {boolean} removable - Shows an X button to remove the badge
  *
  * @slot - Default slot for badge text
@@ -65,11 +65,11 @@ export class CFBadge extends BaseElement {
     .badge {
       display: inline-flex;
       align-items: center;
-      gap: var(--cf-size-s-spacing);
-      padding: var(--cf-size-s-padding-v) var(--cf-size-s-padding-h);
-      font-size: var(--cf-size-s-font-size);
+      gap: var(--cf-size-sm-spacing);
+      padding: var(--cf-size-sm-padding-v) var(--cf-size-sm-padding-h);
+      font-size: var(--cf-size-sm-font-size);
       font-weight: 600;
-      line-height: var(--cf-size-s-line-height);
+      line-height: var(--cf-size-sm-line-height);
       border-radius: 9999px;
       border: 1px solid transparent;
       transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -82,20 +82,20 @@ export class CFBadge extends BaseElement {
       gap: var(--cf-size-xs-spacing);
     }
 
-    /* s is default — no override needed */
+    /* sm is default — no override needed */
 
-    :host([size="m"]) .badge {
-      padding: var(--cf-size-m-padding-v) var(--cf-size-m-padding-h);
-      font-size: var(--cf-size-m-font-size);
-      line-height: var(--cf-size-m-line-height);
-      gap: var(--cf-size-m-spacing);
+    :host([size="md"]) .badge {
+      padding: var(--cf-size-md-padding-v) var(--cf-size-md-padding-h);
+      font-size: var(--cf-size-md-font-size);
+      line-height: var(--cf-size-md-line-height);
+      gap: var(--cf-size-md-spacing);
     }
 
-    :host([size="l"]) .badge {
-      padding: var(--cf-size-l-padding-v) var(--cf-size-l-padding-h);
-      font-size: var(--cf-size-l-font-size);
-      line-height: var(--cf-size-l-line-height);
-      gap: var(--cf-size-l-spacing);
+    :host([size="lg"]) .badge {
+      padding: var(--cf-size-lg-padding-v) var(--cf-size-lg-padding-h);
+      font-size: var(--cf-size-lg-font-size);
+      line-height: var(--cf-size-lg-line-height);
+      gap: var(--cf-size-lg-spacing);
     }
 
     :host([size="xl"]) .badge {
@@ -132,8 +132,8 @@ export class CFBadge extends BaseElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: var(--cf-size-s-icon-sm);
-      height: var(--cf-size-s-icon-sm);
+      width: var(--cf-size-sm-icon-sm);
+      height: var(--cf-size-sm-icon-sm);
       padding: 0;
       margin: 0;
       margin-left: 0.125rem;
@@ -165,13 +165,13 @@ export class CFBadge extends BaseElement {
       width: var(--cf-size-xs-icon-sm);
       height: var(--cf-size-xs-icon-sm);
     }
-    :host([size="m"]) .close-button {
-      width: var(--cf-size-m-icon-sm);
-      height: var(--cf-size-m-icon-sm);
+    :host([size="md"]) .close-button {
+      width: var(--cf-size-md-icon-sm);
+      height: var(--cf-size-md-icon-sm);
     }
-    :host([size="l"]) .close-button {
-      width: var(--cf-size-l-icon-sm);
-      height: var(--cf-size-l-icon-sm);
+    :host([size="lg"]) .close-button {
+      width: var(--cf-size-lg-icon-sm);
+      height: var(--cf-size-lg-icon-sm);
     }
     :host([size="xl"]) .close-button {
       width: var(--cf-size-xl-icon-sm);
@@ -193,7 +193,7 @@ export class CFBadge extends BaseElement {
     super();
     this.variant = "default";
     this.removable = false;
-    this.size = "s";
+    this.size = "sm";
   }
 
   override render() {

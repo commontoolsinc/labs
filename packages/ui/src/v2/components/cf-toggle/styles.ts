@@ -4,15 +4,15 @@
 
 export const toggleStyles = `
   :host {
-    --cf-toggle-height: var(--cf-size-m-height, 32px);
-    --cf-toggle-height-s: var(--cf-size-s-height, 24px);
-    --cf-toggle-height-l: var(--cf-size-l-height, 40px);
-    --cf-toggle-padding-x: var(--cf-size-m-padding-h, 8px);
-    --cf-toggle-padding-x-s: var(--cf-size-s-padding-h, 6px);
-    --cf-toggle-padding-x-l: var(--cf-size-l-padding-h, 12px);
-    --cf-toggle-font-size: var(--cf-size-m-font-size, 12px);
-    --cf-toggle-font-size-s: var(--cf-size-s-font-size, 11px);
-    --cf-toggle-font-size-l: var(--cf-size-l-font-size, 16px);
+    --cf-toggle-height: var(--cf-size-md-height, 32px);
+    --cf-toggle-height-sm: var(--cf-size-sm-height, 24px);
+    --cf-toggle-height-lg: var(--cf-size-lg-height, 40px);
+    --cf-toggle-padding-x: var(--cf-size-md-padding-h, 8px);
+    --cf-toggle-padding-x-sm: var(--cf-size-sm-padding-h, 6px);
+    --cf-toggle-padding-x-lg: var(--cf-size-lg-padding-h, 12px);
+    --cf-toggle-font-size: var(--cf-size-md-font-size, 12px);
+    --cf-toggle-font-size-sm: var(--cf-size-sm-font-size, 11px);
+    --cf-toggle-font-size-lg: var(--cf-size-lg-font-size, 16px);
 
     /* Default color values if not provided */
     --cf-toggle-color-background: var(--cf-theme-color-background, #ffffff);
@@ -66,16 +66,16 @@ export const toggleStyles = `
     font-size: var(--cf-size-xs-font-size, 9px);
   }
 
-  .size-s {
-    height: var(--cf-toggle-height-s);
-    padding: 0 var(--cf-toggle-padding-x-s);
-    font-size: var(--cf-toggle-font-size-s);
+  .size-smm {
+    height: var(--cf-toggle-height-sm);
+    padding: 0 var(--cf-toggle-padding-x-sm);
+    font-size: var(--cf-toggle-font-size-sm);
   }
 
-  .size-l {
-    height: var(--cf-toggle-height-l);
-    padding: 0 var(--cf-toggle-padding-x-l);
-    font-size: var(--cf-toggle-font-size-l);
+  .size-lgg {
+    height: var(--cf-toggle-height-lg);
+    padding: 0 var(--cf-toggle-padding-x-lg);
+    font-size: var(--cf-toggle-font-size-lg);
   }
 
   .size-xl {
@@ -84,24 +84,6 @@ export const toggleStyles = `
     font-size: var(--cf-size-xl-font-size, 18px);
   }
 
-  /* Backward compatibility for old size names */
-  .size-default {
-    height: var(--cf-toggle-height);
-    padding: 0 var(--cf-toggle-padding-x);
-    font-size: var(--cf-toggle-font-size);
-  }
-
-  .size-sm {
-    height: var(--cf-toggle-height-s);
-    padding: 0 var(--cf-toggle-padding-x-s);
-    font-size: var(--cf-toggle-font-size-s);
-  }
-
-  .size-lg {
-    height: var(--cf-toggle-height-l);
-    padding: 0 var(--cf-toggle-padding-x-l);
-    font-size: var(--cf-toggle-font-size-l);
-  }
 
   /* Default variant */
   .variant-default {

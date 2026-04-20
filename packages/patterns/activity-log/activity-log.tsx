@@ -121,7 +121,7 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
             style="padding: 0.75rem 1rem; align-items: center;"
           >
             <cf-label style="font-weight: 600; flex: 1;">Activity Log</cf-label>
-            <cf-button variant="ghost" size="s" onClick={clearLog}>
+            <cf-button variant="ghost" size="sm" onClick={clearLog}>
               Clear
             </cf-button>
           </cf-hstack>
@@ -132,7 +132,7 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
               <cf-hstack gap="1" style="flex-wrap: wrap;">
                 <cf-button
                   variant={filterAgent.get() === null ? "primary" : "ghost"}
-                  size="s"
+                  size="sm"
                   onClick={() => setFilter.send({ agent: null })}
                 >
                   All
@@ -140,7 +140,7 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
                 {agents.map((agent: string) => (
                   <cf-button
                     variant={filterAgent.get() === agent ? "primary" : "ghost"}
-                    size="s"
+                    size="sm"
                     onClick={() => setFilter.send({ agent })}
                   >
                     {agent}

@@ -161,7 +161,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
                   <cf-hstack justify="end">
                     <cf-button
                       variant="ghost"
-                      size="s"
+                      size="sm"
                       style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
                       onClick={() => archiveCompleted.send()}
                     >

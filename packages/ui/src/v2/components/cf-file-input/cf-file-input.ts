@@ -139,13 +139,13 @@ export class CFFileInput extends BaseElement {
         display: block;
       }
 
-      .preview-item.size-sm img,
-      .preview-item.size-sm .file-preview {
+      .preview-item.size-smm img,
+      .preview-item.size-smm .file-preview {
         height: 80px;
       }
 
-      .preview-item.size-lg img,
-      .preview-item.size-lg .file-preview {
+      .preview-item.size-lgg img,
+      .preview-item.size-lgg .file-preview {
         height: 160px;
       }
 
@@ -245,7 +245,7 @@ export class CFFileInput extends BaseElement {
   accessor variant: ButtonVariant = "outline";
 
   @property({ type: String })
-  accessor size: ButtonSize = "m";
+  accessor size: ButtonSize = "md";
 
   @property({ type: Boolean })
   accessor showPreview = true;

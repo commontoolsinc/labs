@@ -1313,7 +1313,7 @@ export default pattern<
                         gap: "8px",
                       }}
                     >
-                      <cf-loader size="s" show-elapsed></cf-loader>
+                      <cf-loader size="sm" show-elapsed></cf-loader>
                       Fetching...
                     </span>,
                     "Fetch Emails",

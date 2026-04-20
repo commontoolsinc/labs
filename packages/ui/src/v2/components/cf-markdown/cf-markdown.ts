@@ -464,7 +464,7 @@ export class CFMarkdown extends BaseElement {
             class="code-copy-button"
             text="${this._escapeForAttribute(decodedContent)}"
             variant="ghost"
-            size="s"
+            size="sm"
             icon-only
           ></cf-copy-button>
         </div>`;

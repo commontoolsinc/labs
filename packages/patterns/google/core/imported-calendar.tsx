@@ -565,7 +565,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
           <cf-modal
             $open={showNewEventPrompt}
             dismissable
-            size="s"
+            size="sm"
             label="New Event"
           >
             <span slot="header">New Event</span>
@@ -698,7 +698,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
           <cf-modal
             $open={showEditModal}
             dismissable
-            size="s"
+            size="sm"
             label="Edit Event"
           >
             <span slot="header">Edit Event</span>

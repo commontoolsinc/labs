@@ -2132,7 +2132,7 @@ const Record = pattern<RecordInput, RecordOutput>(
           <cf-modal
             $open={computed(() => editingNoteIndex.get() !== undefined)}
             dismissable
-            size="m"
+            size="md"
             oncf-modal-close={closeNoteEditor({
               editingNoteIndex,
               editingNoteText,
@@ -2197,7 +2197,7 @@ const Record = pattern<RecordInput, RecordOutput>(
           <cf-modal
             $open={computed(() => settingsModuleIndex.get() !== undefined)}
             dismissable
-            size="m"
+            size="md"
             oncf-modal-close={closeSettings({ settingsModuleIndex })}
           >
             <span slot="header">

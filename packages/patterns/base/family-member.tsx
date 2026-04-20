@@ -475,7 +475,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
                 >
                   <cf-button
                     variant="ghost"
-                    size="s"
+                    size="sm"
                     onClick={togglePicker({ showPicker })}
                     style={{ fontSize: "12px", color: "#6b7280" }}
                   >

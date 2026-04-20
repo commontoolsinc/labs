@@ -147,21 +147,21 @@ export class CFCFCLabel extends BaseElement {
 
     .label-view {
       display: grid;
-      gap: var(--cf-size-s-spacing, 4px);
+      gap: var(--cf-size-sm-spacing, 4px);
     }
 
     .entry {
       display: grid;
-      gap: var(--cf-size-s-spacing, 4px);
-      padding: var(--cf-size-m-spacing, 8px);
+      gap: var(--cf-size-sm-spacing, 4px);
+      padding: var(--cf-size-md-spacing, 8px);
       border: 1px solid var(--cf-theme-color-border, hsl(0, 0%, 86%));
-      border-radius: var(--cf-size-m-radius, 8px);
+      border-radius: var(--cf-size-md-radius, 8px);
       background: var(--cf-theme-color-surface, hsl(0, 0%, 98%));
     }
 
     .path {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: var(--cf-size-m-font-size, 12px);
+      font-size: var(--cf-size-md-font-size, 12px);
       color: var(--cf-theme-color-text-muted, hsl(0, 0%, 45%));
     }
 
@@ -169,7 +169,7 @@ export class CFCFCLabel extends BaseElement {
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
-      gap: var(--cf-size-s-spacing, 4px);
+      gap: var(--cf-size-sm-spacing, 4px);
     }
 
     .kind {
@@ -182,7 +182,7 @@ export class CFCFCLabel extends BaseElement {
       border-radius: 999px;
       background: var(--cf-theme-color-muted, hsl(0, 0%, 92%));
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: var(--cf-size-m-font-size, 12px);
+      font-size: var(--cf-size-md-font-size, 12px);
     }
 
     .empty {

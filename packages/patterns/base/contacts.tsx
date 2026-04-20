@@ -200,7 +200,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
               </cf-button>
               <cf-button
                 variant="ghost"
-                size="s"
+                size="sm"
                 onClick={addGroup({ groups })}
               >
                 + Group
@@ -253,7 +253,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
 
                       <cf-button
                         variant="ghost"
-                        size="s"
+                        size="sm"
                         onClick={removeContact({
                           contacts,
                           groups,
@@ -293,7 +293,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                   <cf-hstack style="padding: 8px 16px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end;">
                     <cf-button
                       variant="outline"
-                      size="s"
+                      size="sm"
                       onClick={openInNewView}
                     >
                       Open ↗

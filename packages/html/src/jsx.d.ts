@@ -3218,7 +3218,7 @@ interface CFToolbarAttributes<T> extends CFHTMLAttributes<T> {
 interface CFTableAttributes<T> extends CFHTMLAttributes<T> {
   "striped"?: boolean;
   "bordered"?: boolean;
-  "size"?: "xs" | "s" | "m" | "l" | "xl" | "sm" | "md" | "lg";
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | "sm" | "md" | "lg";
   "sticky-header"?: boolean;
   "full-width"?: boolean;
   "hover"?: boolean;
@@ -3424,7 +3424,7 @@ interface CFButtonAttributes<T> extends CFHTMLAttributes<T> {
     | "ghost"
     | "link"
     | "pill";
-  "size"?: "xs" | "s" | "m" | "l" | "xl" | "icon" | "default" | "sm" | "lg";
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | "icon" | "default" | "sm" | "lg";
   "disabled"?: boolean;
   "outline"?: boolean;
   "type"?: "button" | "submit" | "reset";
@@ -3578,7 +3578,7 @@ interface CFDropZoneAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFLoaderAttributes<T> extends CFHTMLAttributes<T> {
-  "size"?: "xs" | "s" | "m" | "l" | "xl" | "sm" | "md" | "lg";
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | "sm" | "md" | "lg";
   "show-elapsed"?: boolean;
   "show-stop"?: boolean;
   /** Fired when stop button is clicked */
@@ -3672,7 +3672,7 @@ interface CFInputAttributes<T> extends CFHTMLAttributes<T> {
   "maxlength"?: string;
   "minlength"?: string;
   "inputmode"?: string;
-  "size"?: "xs" | "s" | "m" | "l" | "xl" | CellLike<string>;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "char-size"?: number;
   "multiple"?: boolean;
   "accept"?: string;
@@ -3699,7 +3699,7 @@ interface CFTextAreaAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<string | undefined>;
   "value"?: CellLike<string> | string;
   "placeholder"?: string;
-  "size"?: "xs" | "s" | "m" | "l" | "xl" | CellLike<string>;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "disabled"?: boolean;
   "readonly"?: boolean;
   "error"?: boolean;
@@ -3843,7 +3843,7 @@ interface CFSelectAttributes<T> extends CFHTMLAttributes<T> {
   "multiple"?: boolean;
   "disabled"?: boolean;
   "required"?: boolean;
-  "size"?: "xs" | "s" | "m" | "l" | "xl" | CellLike<string>;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "visible-rows"?: number;
   "name"?: string;
   "placeholder"?: string;
@@ -4077,7 +4077,7 @@ interface CFToggleAttributes<T> extends CFHTMLAttributes<T> {
     | "default"
     | "sm"
     | "lg"
-    | CellLike<"xs" | "s" | "m" | "l" | "xl" | "default" | "sm" | "lg">;
+    | CellLike<"xs" | "sm" | "md" | "lg" | "xl" | "default" | "sm" | "lg">;
   "oncf-change"?: EventHandler<{ pressed: boolean }>;
 }
 
@@ -4128,7 +4128,7 @@ interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
     | "destructive"
     | "outline"
     | CellLike<"default" | "secondary" | "destructive" | "outline">;
-  "size"?: "xs" | "s" | "m" | "l" | "xl" | CellLike<string>;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "removable"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
 }
@@ -4149,7 +4149,7 @@ interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
     | "sm"
     | "md"
     | "lg"
-    | CellLike<"xs" | "s" | "m" | "l" | "xl" | "sm" | "md" | "lg">;
+    | CellLike<"xs" | "sm" | "md" | "lg" | "xl" | "sm" | "md" | "lg">;
   "removable"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;

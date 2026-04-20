@@ -17,12 +17,12 @@ export const inputStyles = `
     --muted-foreground: #64748b;
     --placeholder: #94a3b8;
     
-    /* Input dimensions — default size M */
-    --input-height: var(--cf-size-m-height, 32px);
-    --input-padding-x: var(--cf-size-m-padding-h, 8px);
-    --input-padding-y: var(--cf-size-m-padding-v, 8px);
-    --input-font-size: var(--cf-size-m-font-size, 12px);
-    --input-border-radius: var(--cf-size-m-radius, 8px);
+    /* Input dimensions — default size md */
+    --input-height: var(--cf-size-md-height, 32px);
+    --input-padding-x: var(--cf-size-md-padding-h, 8px);
+    --input-padding-y: var(--cf-size-md-padding-v, 8px);
+    --input-font-size: var(--cf-size-md-font-size, 12px);
+    --input-border-radius: var(--cf-size-md-radius, 8px);
   }
 
   :host([size="xs"]) {
@@ -33,20 +33,20 @@ export const inputStyles = `
     --input-border-radius: var(--cf-size-xs-radius, 4px);
   }
 
-  :host([size="s"]) {
-    --input-height: var(--cf-size-s-height, 24px);
-    --input-padding-x: var(--cf-size-s-padding-h, 6px);
-    --input-padding-y: var(--cf-size-s-padding-v, 4px);
-    --input-font-size: var(--cf-size-s-font-size, 11px);
-    --input-border-radius: var(--cf-size-s-radius, 5px);
+  :host([size="sm"]) {
+    --input-height: var(--cf-size-sm-height, 24px);
+    --input-padding-x: var(--cf-size-sm-padding-h, 6px);
+    --input-padding-y: var(--cf-size-sm-padding-v, 4px);
+    --input-font-size: var(--cf-size-sm-font-size, 11px);
+    --input-border-radius: var(--cf-size-sm-radius, 5px);
   }
 
-  :host([size="l"]) {
-    --input-height: var(--cf-size-l-height, 40px);
-    --input-padding-x: var(--cf-size-l-padding-h, 12px);
-    --input-padding-y: var(--cf-size-l-padding-v, 8px);
-    --input-font-size: var(--cf-size-l-font-size, 16px);
-    --input-border-radius: var(--cf-size-l-radius, 9px);
+  :host([size="lg"]) {
+    --input-height: var(--cf-size-lg-height, 40px);
+    --input-padding-x: var(--cf-size-lg-padding-h, 12px);
+    --input-padding-y: var(--cf-size-lg-padding-v, 8px);
+    --input-font-size: var(--cf-size-lg-font-size, 16px);
+    --input-border-radius: var(--cf-size-lg-radius, 9px);
   }
 
   :host([size="xl"]) {

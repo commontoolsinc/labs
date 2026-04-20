@@ -7,11 +7,11 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @element cf-vstack
  *
- * @attr {string} gap - Gap between items (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, xs, s, m, l, xl)
+ * @attr {string} gap - Gap between items (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, xs, sm, md, lg, xl)
  * @attr {string} align - Align items (start, center, end, stretch)
  * @attr {string} justify - Justify content (start, center, end, between, around, evenly)
  * @attr {boolean} reverse - Reverse the direction
- * @attr {string} padding - Padding around the stack (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, xs, s, m, l, xl)
+ * @attr {string} padding - Padding around the stack (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, xs, sm, md, lg, xl)
  *
  * @slot - Content to be stacked vertically
  *
@@ -105,14 +105,14 @@ export class CFVStack extends BaseElement {
     .gap-xs {
       gap: var(--cf-size-xs-spacing, 2px);
     }
-    .gap-s {
-      gap: var(--cf-size-s-spacing, 4px);
+    .gap-sm {
+      gap: var(--cf-size-sm-spacing, 4px);
     }
-    .gap-m {
-      gap: var(--cf-size-m-spacing, 8px);
+    .gap-md {
+      gap: var(--cf-size-md-spacing, 8px);
     }
-    .gap-l {
-      gap: var(--cf-size-l-spacing, 12px);
+    .gap-lg {
+      gap: var(--cf-size-lg-spacing, 12px);
     }
     .gap-xl {
       gap: var(--cf-size-xl-spacing, 16px);
@@ -200,14 +200,14 @@ export class CFVStack extends BaseElement {
     .p-xs {
       padding: var(--cf-size-xs-spacing, 2px);
     }
-    .p-s {
-      padding: var(--cf-size-s-spacing, 4px);
+    .p-sm {
+      padding: var(--cf-size-sm-spacing, 4px);
     }
-    .p-m {
-      padding: var(--cf-size-m-spacing, 8px);
+    .p-md {
+      padding: var(--cf-size-md-spacing, 8px);
     }
-    .p-l {
-      padding: var(--cf-size-l-spacing, 12px);
+    .p-lg {
+      padding: var(--cf-size-lg-spacing, 12px);
     }
     .p-xl {
       padding: var(--cf-size-xl-spacing, 16px);

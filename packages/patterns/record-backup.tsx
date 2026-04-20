@@ -747,7 +747,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                       <strong>{importResultTitle}</strong>
                       <p>{importResultMessage}</p>
                       <cf-button
-                        size="s"
+                        size="sm"
                         variant="ghost"
                         onClick={clearImportResult({ importResult })}
                       >

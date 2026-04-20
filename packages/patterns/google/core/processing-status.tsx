@@ -51,7 +51,7 @@ export default pattern<ProcessingStatusProps>(
               gap: "6px",
             }}
           >
-            <cf-loader size="s" />
+            <cf-loader size="sm" />
             <span style={{ fontSize: "11px", color: "#6b7280" }}>
               Loading...
             </span>

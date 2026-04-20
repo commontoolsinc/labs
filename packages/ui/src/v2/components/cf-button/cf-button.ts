@@ -18,7 +18,7 @@ import {
  * @element cf-button
  *
  * @attr {string} variant - Visual style variant: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link"
- * @attr {string} size - Button size: "xs" | "s" | "m" | "l" | "xl" | "icon"
+ * @attr {string} size - Button size: "xs" | "sm" | "md" | "lg" | "xl" | "icon"
  * @attr {boolean} disabled - Whether the button is disabled
  * @attr {string} type - Button type: "button" | "submit" | "reset"
  *
@@ -62,7 +62,7 @@ export class CFButton extends BaseElement {
   constructor() {
     super();
     this.variant = "primary";
-    this.size = "m";
+    this.size = "md";
     this.disabled = false;
     this.type = "button";
 

@@ -35,7 +35,7 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  * @attr {string} validationPattern - Predefined pattern: "email" | "url" | "tel-us" | "tel-intl" | "credit-card" | "zip-us" | "alphanumeric" | "letters" | "numbers"
  * @attr {string} autocomplete - Autocomplete hint
  * @attr {string} inputmode - Virtual keyboard mode: "none" | "text" | "decimal" | "numeric" | "tel" | "search" | "email" | "url"
- * @attr {string} size - Component size variant: "xs" | "s" | "m" | "l" | "xl" (default: "m")
+ * @attr {string} size - Component size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "m")
  * @attr {number} charSize - Width of input in characters (native HTML size attribute)
  * @attr {boolean} multiple - Allow multiple files (file input only)
  * @attr {string} accept - File types to accept (file input only)
@@ -145,12 +145,12 @@ export class CFInput extends BaseElement {
       --cf-input-animation-duration: var(--cf-theme-animation-duration, 150ms);
       --cf-input-font-family: var(--cf-theme-font-family, inherit);
 
-      /* Sizing scale defaults (size="m") */
-      --input-height: var(--cf-size-m-height, 32px);
-      --input-padding-x: var(--cf-size-m-padding-h, 8px);
-      --input-padding-y: var(--cf-size-m-padding-v, 8px);
-      --input-font-size: var(--cf-size-m-font-size, 12px);
-      --input-border-radius: var(--cf-size-m-radius, 8px);
+      /* Sizing scale defaults (size="md") */
+      --input-height: var(--cf-size-md-height, 32px);
+      --input-padding-x: var(--cf-size-md-padding-h, 8px);
+      --input-padding-y: var(--cf-size-md-padding-v, 8px);
+      --input-font-size: var(--cf-size-md-font-size, 12px);
+      --input-border-radius: var(--cf-size-md-radius, 8px);
 
       display: block;
       box-sizing: border-box;
@@ -164,20 +164,20 @@ export class CFInput extends BaseElement {
       --input-border-radius: var(--cf-size-xs-radius, 4px);
     }
 
-    :host([size="s"]) {
-      --input-height: var(--cf-size-s-height, 24px);
-      --input-padding-x: var(--cf-size-s-padding-h, 6px);
-      --input-padding-y: var(--cf-size-s-padding-v, 4px);
-      --input-font-size: var(--cf-size-s-font-size, 11px);
-      --input-border-radius: var(--cf-size-s-radius, 5px);
+    :host([size="sm"]) {
+      --input-height: var(--cf-size-sm-height, 24px);
+      --input-padding-x: var(--cf-size-sm-padding-h, 6px);
+      --input-padding-y: var(--cf-size-sm-padding-v, 4px);
+      --input-font-size: var(--cf-size-sm-font-size, 11px);
+      --input-border-radius: var(--cf-size-sm-radius, 5px);
     }
 
-    :host([size="l"]) {
-      --input-height: var(--cf-size-l-height, 40px);
-      --input-padding-x: var(--cf-size-l-padding-h, 12px);
-      --input-padding-y: var(--cf-size-l-padding-v, 8px);
-      --input-font-size: var(--cf-size-l-font-size, 16px);
-      --input-border-radius: var(--cf-size-l-radius, 9px);
+    :host([size="lg"]) {
+      --input-height: var(--cf-size-lg-height, 40px);
+      --input-padding-x: var(--cf-size-lg-padding-h, 12px);
+      --input-padding-y: var(--cf-size-lg-padding-v, 8px);
+      --input-font-size: var(--cf-size-lg-font-size, 16px);
+      --input-border-radius: var(--cf-size-lg-radius, 9px);
     }
 
     :host([size="xl"]) {
@@ -458,7 +458,7 @@ export class CFInput extends BaseElement {
         this.maxlength = "";
         this.minlength = "";
         this.inputmode = "text";
-        this.size = "m";
+        this.size = "md";
         this.charSize = 0;
         this.multiple = false;
         this.accept = "";

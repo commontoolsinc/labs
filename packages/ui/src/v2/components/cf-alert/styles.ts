@@ -29,7 +29,7 @@ export const alertStyles = `
     position: relative;
     display: flex;
     width: 100%;
-    border-radius: var(--cf-size-m-radius, 8px);
+    border-radius: var(--cf-size-md-radius, 8px);
     border: 1px solid;
     padding: var(--cf-size-xl-spacing, 16px);
     gap: 0.75rem;
@@ -95,9 +95,9 @@ export const alertStyles = `
     transition: opacity var(--cf-theme-animation-duration, 150ms)
       var(--cf-transition-timing-ease);
     border-radius: var(--cf-size-xs-radius, 4px);
-    padding: var(--cf-size-s-spacing, 4px);
-    width: var(--cf-size-s-height, 24px);
-    height: var(--cf-size-s-height, 24px);
+    padding: var(--cf-size-sm-spacing, 4px);
+    width: var(--cf-size-sm-height, 24px);
+    height: var(--cf-size-sm-height, 24px);
   }
 
   .dismiss-button:hover {

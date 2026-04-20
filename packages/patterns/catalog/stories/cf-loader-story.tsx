@@ -36,19 +36,19 @@ export default pattern<LoaderStoryInput, LoaderStoryOutput>(() => {
           </div>
           <div style={{ display: "flex", gap: "24px", alignItems: "center" }}>
             <cf-vstack gap="1" align="center">
-              <cf-loader size="s" show-elapsed={showElapsed} />
+              <cf-loader size="sm" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                 sm
               </span>
             </cf-vstack>
             <cf-vstack gap="1" align="center">
-              <cf-loader size="m" show-elapsed={showElapsed} />
+              <cf-loader size="md" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                 md
               </span>
             </cf-vstack>
             <cf-vstack gap="1" align="center">
-              <cf-loader size="l" show-elapsed={showElapsed} />
+              <cf-loader size="lg" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                 lg
               </span>

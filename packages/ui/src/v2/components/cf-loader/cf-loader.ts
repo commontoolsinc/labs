@@ -18,7 +18,7 @@
  * <cf-loader showElapsed showStop @cf-stop=${handleCancel}></cf-loader>
  *
  * <!-- Small inline spinner -->
- * <span>Loading <cf-loader size="s"></cf-loader></span>
+ * <span>Loading <cf-loader size="sm"></cf-loader></span>
  * ```
  */
 
@@ -86,31 +86,15 @@ export class CFLoader extends BaseElement {
     }
 
     /* Size variants using coordinated scale */
-    :host([size="s"]) .spinner {
-      width: var(--cf-size-s-icon-sm, 12px);
-      height: var(--cf-size-s-icon-sm, 12px);
-    }
-
-    :host([size="m"]) .spinner,
-    :host(:not([size])) .spinner {
-      width: var(--cf-size-m-icon-lg, 24px);
-      height: var(--cf-size-m-icon-lg, 24px);
-    }
-
-    :host([size="l"]) .spinner {
-      width: var(--cf-size-xl-height, 48px);
-      height: var(--cf-size-xl-height, 48px);
-    }
-
-    /* Backward compatibility for old size names */
     :host([size="sm"]) .spinner {
-      width: var(--cf-size-s-icon-sm, 12px);
-      height: var(--cf-size-s-icon-sm, 12px);
+      width: var(--cf-size-sm-icon-sm, 12px);
+      height: var(--cf-size-sm-icon-sm, 12px);
     }
 
-    :host([size="md"]) .spinner {
-      width: var(--cf-size-m-icon-lg, 24px);
-      height: var(--cf-size-m-icon-lg, 24px);
+    :host([size="md"]) .spinner,
+    :host(:not([size])) .spinner {
+      width: var(--cf-size-md-icon-lg, 24px);
+      height: var(--cf-size-md-icon-lg, 24px);
     }
 
     :host([size="lg"]) .spinner {
@@ -199,7 +183,7 @@ export class CFLoader extends BaseElement {
 
   constructor() {
     super();
-    this.size = "m";
+    this.size = "md";
     this.showElapsed = false;
     this.showStop = false;
   }
