@@ -131,48 +131,56 @@ export function cloneSchemaMutable(
  * `schema` is interned, then the result of this function will also be interned.
  *
  * - `undefined` and `true` ("accept everything") are treated as an interned
- *   `{}` before applying overrides.
- * - `false` ("reject everything") short-circuits: no overrides can make a
- *   "never" schema accept anything, so `false` is returned as-is.
+ *   `{}`.
+ * - `false` ("reject everything"), whether in `schema` or `overrides`, results
+ *   in a `false` result. That is, adding properties to a "never" schema still
+ *   results in "never," and adding "never" to any schema makes it a "never."
  */
 export function schemaWithProperties(
   schema: JSONSchema | undefined,
-  overrides: JSONSchemaObj,
+  overrides: JSONSchema,
 ): JSONSchema {
-  switch (typeof schema) {
-    case "boolean":
-    case "undefined": {
-      // Deal with `boolean`s and `undefined` values for the base `schema`.
-      // Since these count as interned schemas, "intern contagion" applies.
-      if (schema === false) {
+  // Deals with `boolean`s and `undefined` values for either of the arguements.
+  // In both cases, a `false` means the result is `false`, and a "truish"
+  // (`true` per se or `undefined`) means that the result is the _other_
+  // argument. Since these (non-object) values count as interned schemas,
+  // "intern contagion" applies, so if handled the result is always an interned
+  // instance.
+  const handleBooleanArgument = (schemaToCheck, otherSchema) => {
+    switch (schemaToCheck) {
+      case false: {
         return false;
-      } else {
-        // `schema` is (effectively) `true`, so we return the interned reference
-        // to `overrides`. If `overrides` is already deep-frozen (which also
-        // means possibly already interned) we can call `internSchema()` on it
-        // directly. But if it's _not_ deep-frozen, then per function contract
-        // we have to do a shallow clone.
-        return isDeepFrozen(overrides)
-          ? internSchema(overrides)
-          : internSchema({ ...overrides });
-      }
-    }
-
-    case "object": {
-      if (schema === null) {
-        throw new Error("`null` is not a valid schema.");
       }
 
-      const result = { ...schema, ...overrides };
-      return isInternedSchema(schema)
-        ? internSchema(result)
-        : toDeepFrozenSchema(result, true);
-    }
+      case true:
+      case undefined: {
+        return isDeepFrozen(otherSchema)
+          ? internSchema(otherSchema)
+          : internSchema({ ...otherSchema });
+      }
 
-    default: {
-      throw new Error(`Unrecognized schema value type: ${typeof schema}`);
+      default: {
+        return undefined;
+      }
     }
+  };
+
+  const handledSchema = handleBooleanArgument(schema, overrides);
+  if (handledSchema !== undefined) {
+    return handledSchema;
   }
+
+  const handledOverrides = handleBooleanArgument(overrides, schema);
+  if (handledOverrides !== undefined) {
+    return handledOverrides;
+  }
+
+  // At this point, both `schema` and `overrides` are `object`s.
+
+  const result = { ...schema, ...overrides };
+  return isInternedSchema(schema)
+    ? internSchema(result)
+    : toDeepFrozenSchema(result, true);
 }
 
 /**
