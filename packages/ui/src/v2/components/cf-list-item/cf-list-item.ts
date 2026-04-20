@@ -48,6 +48,7 @@ export class CFListItem extends BaseElement {
     expanded: { type: Boolean, reflect: true },
     disabled: { type: Boolean, reflect: true },
     _hasIcon: { state: true },
+    _hasDescription: { state: true },
     _hasAction: { state: true },
     _hasDetail: { state: true },
   };
@@ -199,6 +200,7 @@ export class CFListItem extends BaseElement {
   declare expanded: boolean;
   declare disabled: boolean;
   declare _hasIcon: boolean;
+  declare _hasDescription: boolean;
   declare _hasAction: boolean;
   declare _hasDetail: boolean;
 
@@ -210,6 +212,7 @@ export class CFListItem extends BaseElement {
     this.expanded = false;
     this.disabled = false;
     this._hasIcon = false;
+    this._hasDescription = false;
     this._hasAction = false;
     this._hasDetail = false;
   }
@@ -234,12 +237,15 @@ export class CFListItem extends BaseElement {
             <slot>${this.label}</slot>
           </div>
           <div
-            class="description ${this.description || this._hasDescriptionSlot()
+            class="description ${this.description || this._hasDescription
               ? ""
               : "empty"}"
             part="description"
           >
-            <slot name="description">${this.description}</slot>
+            <slot
+              name="description"
+              @slotchange="${this._handleDescriptionSlotChange}"
+            >${this.description}</slot>
           </div>
         </div>
         <div class="action ${this._hasAction ? "" : "empty"}" part="action">
@@ -281,16 +287,14 @@ export class CFListItem extends BaseElement {
     this.emit("cf-click", { label: this.label });
   };
 
-  private _hasDescriptionSlot(): boolean {
-    const slot = this.shadowRoot?.querySelector(
-      'slot[name="description"]',
-    ) as HTMLSlotElement | null;
-    return slot ? slot.assignedElements().length > 0 : false;
-  }
-
   private _handleIconSlotChange = (e: Event) => {
     const slot = e.target as HTMLSlotElement;
     this._hasIcon = slot.assignedElements().length > 0;
+  };
+
+  private _handleDescriptionSlotChange = (e: Event) => {
+    const slot = e.target as HTMLSlotElement;
+    this._hasDescription = slot.assignedElements().length > 0;
   };
 
   private _handleActionSlotChange = (e: Event) => {

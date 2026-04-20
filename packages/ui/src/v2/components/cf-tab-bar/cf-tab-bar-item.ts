@@ -145,6 +145,7 @@ export class CFTabBarItem extends BaseElement {
           ?disabled="${this.disabled}"
           part="item"
           data-selected="${this.selected}"
+          aria-label="${this.showLabel ? "" : this.label}"
           @click="${this._handleClick}"
         >
           <div class="icon" part="icon" aria-hidden="true">

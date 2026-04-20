@@ -145,7 +145,7 @@ Place the file at: `packages/ui/src/v2/components/cf-{name}/cf-{name}.figma.ts`
 
 ## Key files
 
-- Mapping files: `packages/ui/src/v2/components/*/\*.figma.ts`
+- Mapping files: `packages/ui/src/v2/components/**/*.figma.ts`
 - Component source: `packages/ui/src/v2/components/cf-*/cf-*.ts`
 - Component catalog: `packages/patterns/catalog/catalog.tsx`
 - UI component docs: `docs/common/components/COMPONENTS.md`

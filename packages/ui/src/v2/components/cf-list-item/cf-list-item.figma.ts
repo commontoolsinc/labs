@@ -41,7 +41,13 @@ export const figmaMapping = {
     "project.item (expandable row)": {
       props: {
         title: { codeProp: "label", type: "string" },
-        Expanded: { codeProp: "expanded", type: "boolean" },
+        // NOTE: expanded requires expandable to also be set for the expansion
+        // UI (chevron + detail slot) to render. Always pair them together.
+        Expanded: {
+          codeProp: "expanded",
+          type: "boolean",
+          staticProps: { expandable: true },
+        },
         State: {
           codeProp: "disabled",
           values: { Disabled: true },

@@ -36,11 +36,10 @@ export const figmaMapping = {
   items: {
     element: "cf-tab-bar-item",
     props: {
-      Selected: {
-        codeProp: "selected",
-        note:
-          "Auto-managed by parent cf-tab-bar via the value prop; don't set directly",
-      },
+      // NOTE: Selection is controlled by the parent cf-tab-bar[value] prop,
+      // not by a `selected` attribute on the item. cf-tab-bar sets `selected`
+      // on the matching child automatically — never set it in markup directly.
+      // To change the selected tab, update the `value` prop on cf-tab-bar.
       "Show Label": {
         codeProp: "show-label",
         values: {
