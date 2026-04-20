@@ -7,6 +7,7 @@ import type {
   JSONSchemaObj,
   JSONSchemaObjMutable,
   JSONSchemaTypes,
+  SchemaPathSelector,
 } from "@commonfabric/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { cloneIfNecessary } from "./fabric-value.ts";
@@ -274,6 +275,31 @@ export function emptySchemaObject() {
     const result = BASIC_SCHEMAS[key] = internSchema({}) as JSONSchemaObj;
     return result;
   }
+}
+
+/**
+ * Return the given `SchemaPathSelector` with its `schema` (if any) interned
+ * and with both its `path` array and the selector object itself deep-frozen
+ * in place. The input reference is returned — this function does not clone.
+ * Idempotent on repeat calls: `internPathSelector(internPathSelector(x)) ===
+ * internPathSelector(x)`.
+ *
+ * Exists so that callers who feed selectors into
+ * `MapSetStringToPathSelectors` (or any other cache keyed on
+ * `hashSchemaItem` of a selector) can hand in an already-interned,
+ * deep-frozen selector. That satisfies the `isDeepFrozen` guard in
+ * `hashOfModernInternal` and lets the modern-hash WeakMap cache retain
+ * its hash across repeat calls. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §4
+ * Phase 2 "DEFEAT-8" for the motivating analysis.
+ */
+export function internPathSelector(
+  selector: SchemaPathSelector,
+): SchemaPathSelector {
+  if (selector.schema !== undefined) internSchema(selector.schema);
+  Object.freeze(selector.path);
+  Object.freeze(selector);
+  return selector;
 }
 
 /**
