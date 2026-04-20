@@ -128,6 +128,62 @@ export const variablesCSS = `
   --cf-border-radius-3xl: 1.5rem;
   --cf-border-radius-full: 9999px;
 
+  /* Coordinated Sizing Scale (Figma) */
+  --cf-size-xs-height: 16px;
+  --cf-size-xs-radius: 4px;
+  --cf-size-xs-icon-lg: 12px;
+  --cf-size-xs-icon-md: 8px;
+  --cf-size-xs-icon-sm: 6px;
+  --cf-size-xs-spacing: 2px;
+  --cf-size-xs-padding-h: 4px;
+  --cf-size-xs-padding-v: 2px;
+  --cf-size-xs-font-size: 9px;
+  --cf-size-xs-line-height: 12px;
+
+  --cf-size-s-height: 24px;
+  --cf-size-s-radius: 5px;
+  --cf-size-s-icon-lg: 16px;
+  --cf-size-s-icon-md: 12px;
+  --cf-size-s-icon-sm: 10px;
+  --cf-size-s-spacing: 4px;
+  --cf-size-s-padding-h: 6px;
+  --cf-size-s-padding-v: 4px;
+  --cf-size-s-font-size: 11px;
+  --cf-size-s-line-height: 16px;
+
+  --cf-size-m-height: 32px;
+  --cf-size-m-radius: 8px;
+  --cf-size-m-icon-lg: 20px;
+  --cf-size-m-icon-md: 16px;
+  --cf-size-m-icon-sm: 12px;
+  --cf-size-m-spacing: 8px;
+  --cf-size-m-padding-h: 8px;
+  --cf-size-m-padding-v: 8px;
+  --cf-size-m-font-size: 12px;
+  --cf-size-m-line-height: 16px;
+
+  --cf-size-l-height: 40px;
+  --cf-size-l-radius: 9px;
+  --cf-size-l-icon-lg: 24px;
+  --cf-size-l-icon-md: 20px;
+  --cf-size-l-icon-sm: 16px;
+  --cf-size-l-spacing: 12px;
+  --cf-size-l-padding-h: 12px;
+  --cf-size-l-padding-v: 8px;
+  --cf-size-l-font-size: 16px;
+  --cf-size-l-line-height: 20px;
+
+  --cf-size-xl-height: 48px;
+  --cf-size-xl-radius: 10px;
+  --cf-size-xl-icon-lg: 28px;
+  --cf-size-xl-icon-md: 24px;
+  --cf-size-xl-icon-sm: 20px;
+  --cf-size-xl-spacing: 16px;
+  --cf-size-xl-padding-h: 16px;
+  --cf-size-xl-padding-v: 12px;
+  --cf-size-xl-font-size: 18px;
+  --cf-size-xl-line-height: 24px;
+
   /* Shadows */
   --cf-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --cf-shadow-base: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);

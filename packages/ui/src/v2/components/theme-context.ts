@@ -14,6 +14,79 @@ export type ColorToken = string | {
 };
 
 /**
+ * Standard component size tokens (Figma coordinated sizing scale)
+ */
+export type ComponentSize = "xs" | "s" | "m" | "l" | "xl";
+
+/**
+ * Coordinated sizing scale from Figma design system.
+ * Each size bundles height, radius, icon sizes, spacing, padding, and typography.
+ * These are structural constants, not theme-dependent.
+ */
+export const SIZING_SCALE = {
+  xs: {
+    height: 16,
+    radius: 4,
+    iconLg: 12,
+    iconMd: 8,
+    iconSm: 6,
+    spacing: 2,
+    paddingH: 4,
+    paddingV: 2,
+    fontSize: 9,
+    lineHeight: 12,
+  },
+  s: {
+    height: 24,
+    radius: 5,
+    iconLg: 16,
+    iconMd: 12,
+    iconSm: 10,
+    spacing: 4,
+    paddingH: 6,
+    paddingV: 4,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  m: {
+    height: 32,
+    radius: 8,
+    iconLg: 20,
+    iconMd: 16,
+    iconSm: 12,
+    spacing: 8,
+    paddingH: 8,
+    paddingV: 8,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  l: {
+    height: 40,
+    radius: 9,
+    iconLg: 24,
+    iconMd: 20,
+    iconSm: 16,
+    spacing: 12,
+    paddingH: 12,
+    paddingV: 8,
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  xl: {
+    height: 48,
+    radius: 10,
+    iconLg: 28,
+    iconMd: 24,
+    iconSm: 20,
+    spacing: 16,
+    paddingH: 16,
+    paddingV: 12,
+    fontSize: 18,
+    lineHeight: 24,
+  },
+} as const;
+
+/**
  * Comprehensive theme configuration for CF components
  */
 export interface CFTheme {

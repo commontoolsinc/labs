@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import type { ComponentSize } from "../theme-context.ts";
 
 /**
  * CFBadge - Status indicator or label with multiple visual variants
@@ -7,6 +8,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @element cf-badge
  *
  * @attr {string} variant - Visual style variant: "default" | "secondary" | "destructive" | "outline"
+ * @attr {string} size - Size variant: "xs" | "s" | "m" | "l" | "xl" (default: "s")
  * @attr {boolean} removable - Shows an X button to remove the badge
  *
  * @slot - Default slot for badge text
@@ -63,14 +65,44 @@ export class CFBadge extends BaseElement {
     .badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
-      padding: 0.125rem 0.625rem;
-      font-size: 0.75rem;
+      gap: var(--cf-size-s-spacing);
+      padding: var(--cf-size-s-padding-v) var(--cf-size-s-padding-h);
+      font-size: var(--cf-size-s-font-size);
       font-weight: 600;
-      line-height: 1;
+      line-height: var(--cf-size-s-line-height);
       border-radius: 9999px;
       border: 1px solid transparent;
       transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    :host([size="xs"]) .badge {
+      padding: var(--cf-size-xs-padding-v) var(--cf-size-xs-padding-h);
+      font-size: var(--cf-size-xs-font-size);
+      line-height: var(--cf-size-xs-line-height);
+      gap: var(--cf-size-xs-spacing);
+    }
+
+    /* s is default — no override needed */
+
+    :host([size="m"]) .badge {
+      padding: var(--cf-size-m-padding-v) var(--cf-size-m-padding-h);
+      font-size: var(--cf-size-m-font-size);
+      line-height: var(--cf-size-m-line-height);
+      gap: var(--cf-size-m-spacing);
+    }
+
+    :host([size="l"]) .badge {
+      padding: var(--cf-size-l-padding-v) var(--cf-size-l-padding-h);
+      font-size: var(--cf-size-l-font-size);
+      line-height: var(--cf-size-l-line-height);
+      gap: var(--cf-size-l-spacing);
+    }
+
+    :host([size="xl"]) .badge {
+      padding: var(--cf-size-xl-padding-v) var(--cf-size-xl-padding-h);
+      font-size: var(--cf-size-xl-font-size);
+      line-height: var(--cf-size-xl-line-height);
+      gap: var(--cf-size-xl-spacing);
     }
 
     /* Variant styles */
@@ -100,8 +132,8 @@ export class CFBadge extends BaseElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 14px;
-      height: 14px;
+      width: var(--cf-size-s-icon-sm);
+      height: var(--cf-size-s-icon-sm);
       padding: 0;
       margin: 0;
       margin-left: 0.125rem;
@@ -128,20 +160,40 @@ export class CFBadge extends BaseElement {
       width: 100%;
       height: 100%;
     }
+
+    :host([size="xs"]) .close-button {
+      width: var(--cf-size-xs-icon-sm);
+      height: var(--cf-size-xs-icon-sm);
+    }
+    :host([size="m"]) .close-button {
+      width: var(--cf-size-m-icon-sm);
+      height: var(--cf-size-m-icon-sm);
+    }
+    :host([size="l"]) .close-button {
+      width: var(--cf-size-l-icon-sm);
+      height: var(--cf-size-l-icon-sm);
+    }
+    :host([size="xl"]) .close-button {
+      width: var(--cf-size-xl-icon-sm);
+      height: var(--cf-size-xl-icon-sm);
+    }
   `;
 
   static override properties = {
     variant: { type: String },
     removable: { type: Boolean },
+    size: { type: String, reflect: true },
   };
 
   declare variant: BadgeVariant;
   declare removable: boolean;
+  declare size: ComponentSize;
 
   constructor() {
     super();
     this.variant = "default";
     this.removable = false;
+    this.size = "s";
   }
 
   override render() {

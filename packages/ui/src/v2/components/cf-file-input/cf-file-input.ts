@@ -245,7 +245,7 @@ export class CFFileInput extends BaseElement {
   accessor variant: ButtonVariant = "outline";
 
   @property({ type: String })
-  accessor size: ButtonSize = "default";
+  accessor size: ButtonSize = "m";
 
   @property({ type: Boolean })
   accessor showPreview = true;

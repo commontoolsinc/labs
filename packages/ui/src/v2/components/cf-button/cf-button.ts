@@ -8,6 +8,7 @@ import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
+  type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
 
@@ -17,7 +18,7 @@ import {
  * @element cf-button
  *
  * @attr {string} variant - Visual style variant: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link"
- * @attr {string} size - Button size: "default" | "sm" | "lg" | "icon"
+ * @attr {string} size - Button size: "xs" | "s" | "m" | "l" | "xl" | "icon"
  * @attr {boolean} disabled - Whether the button is disabled
  * @attr {string} type - Button type: "button" | "submit" | "reset"
  *
@@ -36,14 +37,14 @@ export type ButtonVariant =
   | "link"
   | "pill";
 
-export type ButtonSize = "default" | "sm" | "lg" | "icon";
+export type ButtonSize = ComponentSize | "icon";
 
 export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
 
   static override properties = {
     variant: { type: String },
-    size: { type: String },
+    size: { type: String, reflect: true },
     disabled: { type: Boolean, reflect: true },
     type: { type: String },
     theme: { type: Object, attribute: false },
@@ -61,7 +62,7 @@ export class CFButton extends BaseElement {
   constructor() {
     super();
     this.variant = "primary";
-    this.size = "default";
+    this.size = "m";
     this.disabled = false;
     this.type = "button";
 

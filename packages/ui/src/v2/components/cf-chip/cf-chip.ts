@@ -1,6 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
+import type { ComponentSize } from "../theme-context.ts";
 
 /**
  * CFChip - Reusable pill/chip component
@@ -9,7 +10,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} label - Chip label text to display
  * @attr {string} variant - Visual variant: "default" | "primary" | "accent" (default: "default")
- * @attr {string} size - Size variant: "sm" | "md" | "lg" (default: "md")
+ * @attr {string} size - Size variant: "xs" | "s" | "m" | "l" | "xl" (default: "s")
  * @attr {boolean} removable - Whether to show remove button (default: false)
  * @attr {boolean} interactive - Whether chip is clickable (default: false)
  *
@@ -34,8 +35,8 @@ export class CFChip extends BaseElement {
       .chip {
         display: inline-flex;
         align-items: center;
-        gap: 0.375rem;
-        padding: 0.25rem 0.625rem;
+        gap: var(--cf-size-s-spacing);
+        padding: var(--cf-size-s-padding-v) var(--cf-size-s-padding-h);
         background: var(
           --cf-chip-background,
           var(--cf-theme-color-surface, var(--cf-color-gray-100, #f5f5f5))
@@ -53,12 +54,42 @@ export class CFChip extends BaseElement {
           --cf-theme-border-radius,
           var(--cf-border-radius-full, 9999px)
         );
-        font-size: 0.8125rem;
-        line-height: 1;
+        font-size: var(--cf-size-s-font-size);
+        line-height: var(--cf-size-s-line-height);
         user-select: none;
         transition:
           background-color var(--cf-theme-animation-duration, 200ms) ease,
           border-color var(--cf-theme-animation-duration, 200ms) ease;
+        }
+
+        :host([size="xs"]) .chip {
+          padding: var(--cf-size-xs-padding-v) var(--cf-size-xs-padding-h);
+          font-size: var(--cf-size-xs-font-size);
+          line-height: var(--cf-size-xs-line-height);
+          gap: var(--cf-size-xs-spacing);
+        }
+
+        /* s is default — no override needed */
+
+        :host([size="m"]) .chip {
+          padding: var(--cf-size-m-padding-v) var(--cf-size-m-padding-h);
+          font-size: var(--cf-size-m-font-size);
+          line-height: var(--cf-size-m-line-height);
+          gap: var(--cf-size-m-spacing);
+        }
+
+        :host([size="l"]) .chip {
+          padding: var(--cf-size-l-padding-v) var(--cf-size-l-padding-h);
+          font-size: var(--cf-size-l-font-size);
+          line-height: var(--cf-size-l-line-height);
+          gap: var(--cf-size-l-spacing);
+        }
+
+        :host([size="xl"]) .chip {
+          padding: var(--cf-size-xl-padding-v) var(--cf-size-xl-padding-h);
+          font-size: var(--cf-size-xl-font-size);
+          line-height: var(--cf-size-xl-line-height);
+          gap: var(--cf-size-xl-spacing);
         }
 
         .chip.interactive {
@@ -102,19 +133,6 @@ export class CFChip extends BaseElement {
             --cf-theme-color-accent,
             var(--cf-color-purple-700, #7c3aed)
           );
-        }
-
-        /* Size variants */
-        :host([size="sm"]) .chip {
-          padding: 0.125rem 0.375rem;
-          font-size: 0.6875rem;
-        }
-
-        /* md is the default — no override needed */
-
-        :host([size="lg"]) .chip {
-          padding: 0.375rem 0.875rem;
-          font-size: 0.9375rem;
         }
 
         .chip-icon {
@@ -168,7 +186,7 @@ export class CFChip extends BaseElement {
     accessor interactive = false;
 
     @property({ type: String, reflect: true })
-    accessor size: "sm" | "md" | "lg" = "md";
+    accessor size: ComponentSize = "s";
 
     private _handleRemove(e: Event): void {
       e.stopPropagation();
