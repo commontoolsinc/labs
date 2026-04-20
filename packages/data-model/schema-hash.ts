@@ -342,8 +342,9 @@ export function isInternedSchema(schema: JSONSchema): boolean {
 /**
  * Returns a stable cache-key string for a schema, interning the schema (and
  * thus deep-freezing it) if it's an object. Boolean schemas map to sentinel
- * strings (`"T"`, `"F"`) that cannot overlap with any object-schema hash
- * string (which is base64url-encoded and always longer than one character).
+ * strings (`"<schema:true>"`, `"<schema:false>"`) that cannot overlap with
+ * any object-schema hash string (hash strings are base64url, so `<`, `>`,
+ * and `:` never appear in them).
  *
  * Intended for building cache keys at sites that would otherwise compute
  * `hashSchema(schema).toString()`. The interning step lets subsequent calls
@@ -353,7 +354,9 @@ export function isInternedSchema(schema: JSONSchema): boolean {
  * the motivating regression.
  */
 export function internSchemaKey(schema: JSONSchema): string {
-  if (typeof schema === "boolean") return schema ? "T" : "F";
+  if (typeof schema === "boolean") {
+    return schema ? "<schema:true>" : "<schema:false>";
+  }
   return internSchema(schema, true).hashString;
 }
 

@@ -317,12 +317,12 @@ describe("schema-hash dispatch", () => {
       });
 
       describe("internSchemaKey()", () => {
-        it('returns `"T"` for the `true` schema', () => {
-          assertStrictEquals(internSchemaKey(true), "T");
+        it('returns `"<schema:true>"` for the `true` schema', () => {
+          assertStrictEquals(internSchemaKey(true), "<schema:true>");
         });
 
-        it('returns `"F"` for the `false` schema', () => {
-          assertStrictEquals(internSchemaKey(false), "F");
+        it('returns `"<schema:false>"` for the `false` schema', () => {
+          assertStrictEquals(internSchemaKey(false), "<schema:false>");
         });
 
         it("returns the interned schema's `hashString` for objects", () => {
@@ -385,13 +385,16 @@ describe("schema-hash dispatch", () => {
           const obj: JSONSchema = { type: "number" };
           assertStrictEquals(
             internedPairKey(true, obj),
-            `T|${internSchemaKey(obj)}`,
+            `<schema:true>|${internSchemaKey(obj)}`,
           );
           assertStrictEquals(
             internedPairKey(obj, false),
-            `${internSchemaKey(obj)}|F`,
+            `${internSchemaKey(obj)}|<schema:false>`,
           );
-          assertStrictEquals(internedPairKey(true, false), "T|F");
+          assertStrictEquals(
+            internedPairKey(true, false),
+            "<schema:true>|<schema:false>",
+          );
         });
 
         it("is order-sensitive", () => {
