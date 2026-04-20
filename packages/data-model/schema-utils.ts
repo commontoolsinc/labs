@@ -131,22 +131,48 @@ export function cloneSchemaMutable(
  * `schema` is interned, then the result of this function will also be interned.
  *
  * - `undefined` and `true` ("accept everything") are treated as an interned
- *   `{}` before applying overrides.
- * - `false` ("reject everything") short-circuits: no overrides can make a
- *   "never" schema accept anything, so `false` is returned as-is.
+ *   `{}`.
+ * - `false` ("reject everything"), whether in `schema` or `overrides`, results
+ *   in a `false` result. That is, adding properties to a "never" schema still
+ *   results in "never," and adding "never" to any schema makes it a "never."
  */
 export function schemaWithProperties(
   schema: JSONSchema | undefined,
-  overrides: JSONSchemaObj,
+  overrides: JSONSchema,
 ): JSONSchema {
-  if (schema === false) return false;
+  schema ??= true;
 
-  const base = (schema === undefined || schema === true)
-    ? emptySchemaObject()
-    : schema;
-  const result = { ...base, ...overrides };
+  if (typeof schema === "boolean") {
+    if (schema === false) {
+      return false;
+    } else if (typeof overrides === "boolean") {
+      return overrides;
+    } else {
+      // Since `schema` is (definitionally) interned, "intern contagion"
+      // applies, and the result is to be interned. We need to "manually" call
+      // `toDeepFrozenSchema()` to ensure the value can become owned by the
+      // intern cache (because an un-frozen argument needs to remain untouched).
+      return internSchema(toDeepFrozenSchema(overrides));
+    }
+  }
 
-  return isInternedSchema(base)
+  // `schema` is an object.
+
+  if (typeof overrides === "boolean") {
+    if (overrides === false) {
+      return false;
+    } else {
+      // Note: This covers the "intern contagion" case, since
+      // `toDeepFrozenSchema()` returns the given schema if already deep-frozen,
+      // and interned schemas are definitionally deep-frozen.
+      return toDeepFrozenSchema(schema);
+    }
+  }
+
+  // Both `schema` and `overrides` are objects.
+
+  const result = { ...schema, ...overrides };
+  return isInternedSchema(schema)
     ? internSchema(result)
     : toDeepFrozenSchema(result, true);
 }

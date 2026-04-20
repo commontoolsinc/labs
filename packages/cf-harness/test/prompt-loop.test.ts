@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
@@ -19,8 +20,12 @@ class FakeSandboxRuntime implements SandboxRuntime {
     private readonly shellError?: Error,
   ) {}
 
-  resolvePath(path: string): string {
-    return path.startsWith("/") ? path : `/workspace/${path}`;
+  resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
+    return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
+  }
+
+  isPathWithinWorkspace(path: string): boolean {
+    return path === "/workspace" || path.startsWith("/workspace/");
   }
 
   defaultWorkingDirectory(): string {
@@ -507,6 +512,7 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
         stdout: "warned\n",
         stderr: "",
         exitCode: 0,
+        cwd: "/workspace",
       }),
       resultRef: {
         type: "cf-harness.tool-result-ref",

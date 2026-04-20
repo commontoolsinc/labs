@@ -3144,11 +3144,7 @@ function mergeSchemaOption(
   const key = internedPairKey(outerSchema, innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
-  const result = isRecord(innerSchema)
-    ? schemaWithProperties(outerSchema, innerSchema)
-    : innerSchema
-    ? outerSchema // innerSchema === true
-    : false; // innerSchema === false
+  const result = schemaWithProperties(outerSchema, innerSchema);
   return internSet(_mergeSchemaOptionCache, key, result as JSONSchema);
 }
 

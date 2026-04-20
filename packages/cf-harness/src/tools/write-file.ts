@@ -58,7 +58,7 @@ export const writeFileTool: HarnessToolDefinition<
 > = {
   descriptor: writeFileToolDescriptor,
   async invoke(context, input) {
-    const resolvedPath = context.sandbox.resolvePath(input.path);
+    const resolvedPath = context.resolvePath(input.path);
     const mode = input.mode ?? "replace";
     await context.sandbox.runShell({
       command: [
