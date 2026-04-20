@@ -2252,7 +2252,7 @@ export class StorageManager implements IStorageManager {
   ): Promise<Cell<T>> {
     // Build cache key: data URI + schema hash + path + space
     const pathStr = JSON.stringify(cell.path);
-    const schemaStr = schema ? hashSchema(schema).toString() : "";
+    const schemaStr = schema ? hashSchema(schema) : "";
     const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}`;
 
     const existing = _dataURISyncCache.get(cacheKey);

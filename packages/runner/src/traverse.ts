@@ -306,13 +306,31 @@ export class MapSet<K, V> {
  * `SchemaPathSelector` values — the common case throughout traverse/query
  * code. When `hashValues` is `true`, uses `hashSchemaItem` from the
  * schema-hash dispatch layer as the hash function.
+ *
+ * Before hashing, the selector is interned-and-frozen in place: `v.schema`
+ * (if present) is interned via `internSchema`, and `v.path` and `v` are
+ * frozen. This satisfies the `isDeepFrozen` guard in `hashOfModernInternal`,
+ * so repeat hashes of the same selector reference hit the WeakMap cache,
+ * and interning `v.schema` additionally stabilizes that inner identity for
+ * any downstream caller that re-hashes it. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §4
+ * Phase 2 "DEFEAT-8" for the motivating analysis.
  */
 export class MapSetStringToPathSelectors extends MapSet<
   string,
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? (v) => hashSchemaItem(v).toString() : undefined);
+    super(
+      hashValues
+        ? (v) => {
+          if (v.schema !== undefined) internSchema(v.schema);
+          Object.freeze(v.path);
+          Object.freeze(v);
+          return hashSchemaItem(v);
+        }
+        : undefined,
+    );
   }
 }
 
@@ -389,7 +407,7 @@ export class CompoundCycleTracker<
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = hashSchemaItem(extraKey).toString();
+    const hash = hashSchemaItem(extraKey);
     if (existing.has(hash)) {
       return null;
     }
@@ -413,7 +431,7 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = hashSchemaItem(extraKey).toString();
+    const hash = hashSchemaItem(extraKey);
     return existing.get(hash);
   }
 }
@@ -2125,7 +2143,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (this.traverseCells) {
         const memo = this.activeMemo;
         const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
-          hashSchema(schema).toString();
+          hashSchema(schema);
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
           this.schemaMemoHits++;
