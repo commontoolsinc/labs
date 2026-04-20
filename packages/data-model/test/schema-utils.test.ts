@@ -606,24 +606,32 @@ describe("schemaWithProperties", () => {
     assert(!("description" in withoutOverride));
   });
 
-  it("treats undefined as {} and applies overrides", () => {
-    const result = schemaWithProperties(undefined, { type: "string" });
-    assertEquals(result, { type: "string" });
-    assert(Object.isFrozen(result));
-  });
+  for (const truish of [true, undefined]) {
+    describe(`for \`schema = ${truish}\``, () => {
+      it("treats it as `{}` (any) and returns `overrides`", () => {
+        const result = schemaWithProperties(truish, { type: "string" });
+        assertEquals(result, { type: "string" });
+      });
 
-  it("treats boolean true as {} and applies overrides", () => {
-    const result = schemaWithProperties(true, { type: "string" });
-    assertEquals(result, { type: "string" });
-    assert(Object.isFrozen(result));
-  });
+      it("returns an interned result", () => {
+        const result = schemaWithProperties(truish, { type: "string" });
+        assert(isInternedSchema(result));
+      });
+
+      it("does not freeze `overrides`", () => {
+        const overrides = { type: "boolean" };
+        const result = schemaWithProperties(truish, overrides);
+        assert(!Object.isFrozen(overrides));
+      });
+    });
+  }
 
   it("returns false as-is regardless of overrides", () => {
     const result = schemaWithProperties(false, { type: "string" });
     assertStrictEquals(result, false);
   });
 
-  describe("intern contagion", () => {
+  describe("intern contagion of `object`s", () => {
     it("result is interned when base schema is interned", () => {
       const base = internSchema({ type: "object" });
       const result = schemaWithProperties(base, {
@@ -640,16 +648,6 @@ describe("schemaWithProperties", () => {
       assert(!isInternedSchema(result));
       // But it should still be frozen.
       assert(Object.isFrozen(result));
-    });
-
-    it("result is interned when base is undefined (treated as interned {})", () => {
-      const result = schemaWithProperties(undefined, { type: "string" });
-      assert(isInternedSchema(result));
-    });
-
-    it("result is interned when base is true (treated as interned {})", () => {
-      const result = schemaWithProperties(true, { type: "string" });
-      assert(isInternedSchema(result));
     });
   });
 });
