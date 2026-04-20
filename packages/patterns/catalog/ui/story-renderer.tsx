@@ -11,6 +11,7 @@ import SwitchStory from "../stories/cf-switch-story.tsx";
 import ToggleStory from "../stories/cf-toggle-story.tsx";
 import ToggleGroupStory from "../stories/cf-toggle-group-story.tsx";
 import CardStory from "../stories/cf-card-story.tsx";
+import ListItemStory from "../stories/cf-list-item-story.tsx";
 import ModalStory from "../stories/cf-modal-story.tsx";
 import ProgressStory from "../stories/cf-progress-story.tsx";
 import VStackStory from "../stories/cf-vstack-story.tsx";
@@ -95,6 +96,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ToggleGroupStory({});
         case "card":
           return CardStory({});
+        case "list-item":
+          return ListItemStory({});
         case "modal":
           return ModalStory({});
         case "progress":

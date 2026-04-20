@@ -56,6 +56,7 @@ interface CatalogInput {
         name: "Layout";
         items: [
           { id: "card"; label: "Card" },
+          { id: "list-item"; label: "List Item" },
           { id: "modal"; label: "Modal" },
           { id: "tab-bar"; label: "Tab Bar" },
           { id: "toolbar"; label: "Toolbar" },
