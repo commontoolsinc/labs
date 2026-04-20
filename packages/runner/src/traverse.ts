@@ -2,6 +2,9 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   hashSchemaItem,
+  internedPairKey,
+  internSchema,
+  internSchemaKey,
 } from "@commonfabric/data-model/schema-hash";
 import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -28,10 +31,7 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import {
-  schemaWithProperties,
-  toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,
@@ -110,8 +110,10 @@ const _hashCache = new WeakMap<object, string>();
 
 // Schema operation intern caches: memoize merge/combine results so
 // structurally-identical operations return the same object identity.
-// This ensures downstream hashSchema hits the WeakMap cache
-// (O(1) identity lookup) instead of re-walking the schema tree.
+// The cached value is run through `internSchema`, which deep-freezes and
+// dedups structurally-equal results — so downstream `hashSchema` /
+// `internSchemaKey` calls on the cached output hit `internSchema`'s
+// WeakMap in O(1) instead of re-walking the schema tree.
 // Capped to prevent unbounded growth in long-running servers.
 const INTERN_CACHE_MAX = 10_000;
 const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
@@ -126,7 +128,7 @@ function internSet(
 ): JSONSchema {
   if (cache.size >= INTERN_CACHE_MAX) cache.clear();
 
-  const result = toDeepFrozenSchema(value, true);
+  const result = internSchema(value);
   cache.set(key, result);
   return result;
 }
@@ -1435,8 +1437,7 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
-  const key = hashSchema(flagSchema).toString() + "|" +
-    hashSchema(schema).toString();
+  const key = internedPairKey(flagSchema, schema);
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
@@ -1484,8 +1485,7 @@ export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = hashSchema(parentSchema).toString() + "|" +
-    hashSchema(linkSchema).toString();
+  const key = internedPairKey(parentSchema, linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
@@ -3141,12 +3141,11 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  const key = hashSchema(outerSchema).toString() + "|" +
-    hashSchema(innerSchema).toString();
+  const key = internedPairKey(outerSchema, innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
   const result = isRecord(innerSchema)
-    ? { ...outerSchema, ...innerSchema }
+    ? schemaWithProperties(outerSchema, innerSchema)
     : innerSchema
     ? outerSchema // innerSchema === true
     : false; // innerSchema === false
@@ -3249,18 +3248,20 @@ export function mergeAnyOfBranchSchemas(
 ): JSONSchema | null {
   if (branches.length < 2) return null;
 
-  const key = hashSchema(outerSchema).toString() + "||" +
-    branches.map((b) => hashSchema(b).toString()).join("|");
+  // Inline 1+N intern-based key: outer schema, then each branch.
+  // `||` separates outer from branches; `|` separates branches.
+  const key = `${internSchemaKey(outerSchema)}||` +
+    branches.map(internSchemaKey).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
   const result = _mergeAnyOfBranchSchemasUncached(branches, outerSchema);
-  const frozen = result !== null ? toDeepFrozenSchema(result, true) : null;
+  const interned = result !== null ? internSchema(result) : null;
   if (_mergeAnyOfBranchCache.size >= INTERN_CACHE_MAX) {
     _mergeAnyOfBranchCache.clear();
   }
-  _mergeAnyOfBranchCache.set(key, frozen);
-  return frozen;
+  _mergeAnyOfBranchCache.set(key, interned);
+  return interned;
 }
 
 function _mergeAnyOfBranchSchemasUncached(
@@ -3329,10 +3330,12 @@ function _mergeAnyOfBranchSchemasUncached(
   // Build merged properties
   const mergedProperties: Record<string, JSONSchema> = {};
   for (const [propKey, schemas] of allProps) {
-    // Deduplicate schemas using hashSchema
+    // Deduplicate structurally-equal property schemas across branches by
+    // keying on the interned hash; interning also stabilizes these schema
+    // identities for any downstream caller that re-hashes them.
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(hashSchema(s).toString(), s);
+      uniqueHashes.set(internSchemaKey(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema
