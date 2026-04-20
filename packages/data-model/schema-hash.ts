@@ -92,12 +92,8 @@ export function hashSchemaItem(item: FabricValue): string {
     : hashSchemaItemLegacyAsString(item);
 }
 
-// ---------------------------------------------------------------------------
-// Internal: FabricHash-returning hash for intern cache use only
-// ---------------------------------------------------------------------------
-
 /** Hash a schema-related item as a FabricHash (for intern cache). */
-function _hashSchemaItemAsFabricHash(item: FabricValue): FabricHash {
+export function hashSchemaItemAsFabricHash(item: FabricValue): FabricHash {
   return modernSchemaHashEnabled
     ? hashSchemaItemModern(item)
     : hashSchemaItemLegacy(item);
@@ -140,8 +136,8 @@ let booleanSentinels = {
   false: Object.freeze({ cacheSentinel: false }) as JSONSchemaObj,
 };
 let booleanInterns = {
-  true: new SchemaAndHash(true, _hashSchemaItemAsFabricHash(true)),
-  false: new SchemaAndHash(false, _hashSchemaItemAsFabricHash(false)),
+  true: new SchemaAndHash(true, hashSchemaItemAsFabricHash(true)),
+  false: new SchemaAndHash(false, hashSchemaItemAsFabricHash(false)),
 };
 let schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
   const ref = hashToRef.get(hashStr);
@@ -184,8 +180,8 @@ function resetInternCache(): void {
     false: Object.freeze({ cacheSentinel: false }) as JSONSchemaObj,
   };
   booleanInterns = {
-    true: new SchemaAndHash(true, _hashSchemaItemAsFabricHash(true)),
-    false: new SchemaAndHash(false, _hashSchemaItemAsFabricHash(false)),
+    true: new SchemaAndHash(true, hashSchemaItemAsFabricHash(true)),
+    false: new SchemaAndHash(false, hashSchemaItemAsFabricHash(false)),
   };
   seedBooleanInterns();
 }
@@ -244,7 +240,7 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
   const frozen = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
   // Check the hash-keyed reverse map (structurally-equal but different object).
-  const hash = _hashSchemaItemAsFabricHash(frozen);
+  const hash = hashSchemaItemAsFabricHash(frozen);
   const hashStr = hash.toString();
 
   const ref = hashToRef.get(hashStr);
@@ -345,7 +341,7 @@ export function isInternedSchema(schema: JSONSchema): boolean {
  * that also benefit from `internSchema`'s identity-stable WeakMap
  * fast-path on repeat lookups.
  */
-export function internSchemaHashString(schema: JSONSchema): string {
+export function internSchemaAsHashString(schema: JSONSchema): string {
   return internSchema(schema, true).hashString;
 }
 
@@ -364,5 +360,5 @@ export function internSchemaHashString(schema: JSONSchema): string {
  * for the motivating regression.
  */
 export function internedPairKey(a: JSONSchema, b: JSONSchema): string {
-  return `${internSchemaHashString(a)}|${internSchemaHashString(b)}`;
+  return `${internSchemaAsHashString(a)}|${internSchemaAsHashString(b)}`;
 }
