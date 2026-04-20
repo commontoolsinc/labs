@@ -156,7 +156,9 @@ export default pattern<NoteMdInput, NoteMdOutput>(
               Linked from:
             </span>
             <cf-hstack gap="2" wrap>
-              {note?.backlinks?.map((piece) => (
+              {(note?.backlinks as MentionablePiece[] | undefined)?.map((
+                piece,
+              ) => (
                 <cf-chip
                   label={piece?.[NAME] ?? "Untitled"}
                   interactive
