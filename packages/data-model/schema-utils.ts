@@ -140,13 +140,19 @@ export function schemaWithProperties(
   schema: JSONSchema | undefined,
   overrides: JSONSchema,
 ): JSONSchema {
-  // Deals with `boolean`s and `undefined` values for either of the arguements.
-  // In both cases, a `false` means the result is `false`, and a "truish"
-  // (`true` per se or `undefined`) means that the result is the _other_
-  // argument. Since these (non-object) values count as interned schemas,
-  // "intern contagion" applies, so if handled the result is always an interned
-  // instance.
-  const handleBooleanArgument = (schemaToCheck, otherSchema) => {
+  if (schema === undefined) {
+    schema = true;
+  }
+
+  // Deals with `boolean`s values for either of the arguements. In both cases, a
+  // `false` means the result is `false`, and a "truish" (`true` per se or
+  // `undefined`) means that the result is the _other_ argument. Since these
+  // (non-object) values count as interned schemas, "intern contagion" applies,
+  // so if handled the result is always an interned instance.
+  const handleBooleanArgument = (
+    schemaToCheck: JSONSchema,
+    otherSchema: JSONSchema,
+  ) => {
     switch (schemaToCheck) {
       case false: {
         return false;
@@ -154,6 +160,10 @@ export function schemaWithProperties(
 
       case true:
       case undefined: {
+        if (typeof otherSchema === "boolean") {
+          return otherSchema;
+        }
+
         return isDeepFrozen(otherSchema)
           ? internSchema(otherSchema)
           : internSchema({ ...otherSchema });
@@ -175,9 +185,12 @@ export function schemaWithProperties(
     return handledOverrides;
   }
 
-  // At this point, both `schema` and `overrides` are `object`s.
+  // At this point, both `schema` and `overrides` are `object`s (but the type
+  // system can't figure that out.)
+  const schemaObj = schema as JSONSchemaObj;
+  const overridesObj = overrides as JSONSchemaObj;
 
-  const result = { ...schema, ...overrides };
+  const result = { ...schemaObj, ...overridesObj };
   return isInternedSchema(schema)
     ? internSchema(result)
     : toDeepFrozenSchema(result, true);
