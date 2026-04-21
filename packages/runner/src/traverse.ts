@@ -831,10 +831,13 @@ export abstract class BaseObjectTraverser {
         const link = parseLink(doc.value, doc.address);
         if (link.id !== undefined) {
           const targetKey = `${link.space}/${link.id}/${link.type}`;
-          alreadyTracked = this.schemaTracker.hasValue(targetKey, {
-            path: ["value", ...link.path],
-            schema: true,
-          });
+          alreadyTracked = this.schemaTracker.hasValue(
+            targetKey,
+            internPathSelector({
+              path: ["value", ...link.path],
+              schema: true,
+            }),
+          );
         }
         const [redirDoc, _redirSelector] = this.getDocAtPath(
           doc,
