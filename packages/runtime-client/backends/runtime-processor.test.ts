@@ -381,7 +381,7 @@ describe("RuntimeProcessor diagnosis helpers", () => {
 });
 
 describe("RuntimeProcessor CFC label IPC", () => {
-  it("returns a label view for a cell ref", () => {
+  it("returns a label view for a cell ref", async () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -410,16 +410,18 @@ describe("RuntimeProcessor CFC label IPC", () => {
             }),
           },
           getAsNormalizedFullLink: () => ref,
+          getSourceCell: () => undefined,
+          sync: () => Promise.resolve(),
         }),
       },
     } as unknown as RuntimeProcessor;
 
-    expect(
+    await expect(
       RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
         type: RequestType.CellGetCfcLabel,
         cell: ref,
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       cfcLabel: {
         version: 1,
         entries: [{
@@ -428,6 +430,81 @@ describe("RuntimeProcessor CFC label IPC", () => {
         }],
       },
     });
+  });
+
+  it("syncs a result cell before looking up CFC from its source", async () => {
+    const resultRef: CellRef = {
+      id: "of:cfc-label-result" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      type: "application/json",
+      path: [],
+    };
+    const sourceRef: CellRef = {
+      id: "of:cfc-label-source" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      type: "application/json",
+      path: [],
+    };
+    let resultSynced = false;
+    let sourceSynced = false;
+    const runtime = {
+      readTx: () => ({
+        readOrThrow: (address: { id: string }) =>
+          address.id === sourceRef.id
+            ? {
+              value: "process cell",
+              cfc: {
+                version: 1,
+                schemaHash: "test-schema",
+                labelMap: {
+                  version: 1,
+                  entries: [{
+                    path: [],
+                    label: { confidentiality: ["source-label"] },
+                  }],
+                },
+              },
+            }
+            : { value: "result cell" },
+      }),
+      getCellFromLink: () => resultCell,
+    };
+    const sourceCell = {
+      runtime,
+      getAsNormalizedFullLink: () => sourceRef,
+      getSourceCell: () => undefined,
+      sync: () => {
+        sourceSynced = true;
+        return Promise.resolve();
+      },
+    };
+    const resultCell = {
+      runtime,
+      getAsNormalizedFullLink: () => resultRef,
+      getSourceCell: () => resultSynced ? sourceCell : undefined,
+      sync: () => {
+        resultSynced = true;
+        return Promise.resolve();
+      },
+    };
+    const processor = { runtime } as unknown as RuntimeProcessor;
+
+    await expect(Promise.resolve(
+      RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
+        type: RequestType.CellGetCfcLabel,
+        cell: resultRef,
+      }),
+    )).resolves.toEqual({
+      cfcLabel: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: { confidentiality: ["source-label"] },
+        }],
+      },
+    });
+    expect(resultSynced).toBe(true);
+    expect(sourceSynced).toBe(true);
   });
 });
 

@@ -371,24 +371,32 @@ export class CycleTracker<K> {
 /**
  * Cycle tracker for more complex objects with multiple parts.
  *
- * This will not work correctly if the key is modified after being added.
+ * Identity check on `partialKey`, structural check on `extraKey` via
+ * the interned hash string of `extraKey`: the inner per-partialKey map
+ * is keyed on `internSchemaAsHashString(extraKey ?? true)`, so repeat
+ * calls with a structurally-equal schema re-lookup the same entry in
+ * O(1) without re-hashing — the intern cache's WeakMap returns the
+ * canonical hash string without invoking `hashSchemaItem` on
+ * already-interned inputs.
+ *
+ * An `undefined` `extraKey` is normalized to `true` (JSON Schema's
+ * "accept everything", which is exactly what `undefined` means at
+ * every current call site), so the intern call can always be made.
+ *
+ * This will not work correctly if the key is modified after being
+ * added.
  */
 export class CompoundCycleTracker<
   EqualKey,
-  ExtraKey extends FabricValue,
+  ExtraKey extends JSONSchema | undefined,
   Value = unknown,
 > {
-  // partialKey (identity) → Map<hash(extraKey), Value?>
+  // partialKey (identity) → Map<interned extraKey hashString, Value?>
   private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
     this.partial = new Map();
   }
 
-  /**
-   * Identity check on `partialKey`, hash-based check on `extraKey`.
-   * Uses `hashSchemaItem` (with WeakMap identity cache in legacy mode)
-   * so schema objects hash in O(1) amortized after the first call.
-   */
   include(
     partialKey: EqualKey,
     extraKey: ExtraKey,
@@ -400,7 +408,7 @@ export class CompoundCycleTracker<
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = hashSchemaItem(extraKey);
+    const hash = internSchemaAsHashString(extraKey ?? true);
     if (existing.has(hash)) {
       return null;
     }
@@ -424,7 +432,7 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = hashSchemaItem(extraKey);
+    const hash = internSchemaAsHashString(extraKey ?? true);
     return existing.get(hash);
   }
 }
