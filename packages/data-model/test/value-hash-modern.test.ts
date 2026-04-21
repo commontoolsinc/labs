@@ -18,7 +18,7 @@ const nodeCrypto = await import("node:crypto");
  * Compute the SHA-256 hash of a raw byte sequence (for verifying against
  * byte-level spec examples).
  */
-function sha256(bytes: number[]): Uint8Array {
+function sha256(bytes: number[] | Uint8Array): Uint8Array {
   // node:crypto digest() returns Buffer; normalize to plain Uint8Array so
   // expect comparisons against production code (which also normalizes)
   // work correctly.
@@ -406,6 +406,16 @@ describe("modernHash", () => {
     const typeTagUtf8 = enc.encode("Error@1"); // 7 bytes
     const stream: number[] = [0x12, typeTagUtf8.length, ...typeTagUtf8];
 
+    const pushShortString = (value: string) => {
+      const encoded = enc.encode(value);
+      stream.push(0x24, encoded.length, ...encoded);
+    };
+
+    const pushLongString = (value: string) => {
+      const hashed = sha256(enc.encode(value));
+      stream.push(0xf0, ...hashed);
+    };
+
     // Deconstructed state is an object with sorted keys.
     // FabricError.DECONSTRUCT() returns:
     //   { type: "Error", name: null, message: "test", stack: <string> }
@@ -413,40 +423,20 @@ describe("modernHash", () => {
     stream.push(0x11); // TAG_OBJECT
 
     // Key "message" + value "test"
-    const messageKey = enc.encode("message");
-    stream.push(0x24, messageKey.length, ...messageKey);
-    const messageVal = enc.encode("test");
-    stream.push(0x24, messageVal.length, ...messageVal);
+    pushShortString("message");
+    pushShortString("test");
 
     // Key "name" + value null (name === type for Error, so null)
-    const nameKey = enc.encode("name");
-    stream.push(0x24, nameKey.length, ...nameKey);
+    pushShortString("name");
     stream.push(0x20); // TAG_NULL
 
     // Key "stack" + value (the actual stack string)
-    const stackKey = enc.encode("stack");
-    stream.push(0x24, stackKey.length, ...stackKey);
-    const stackUtf8 = enc.encode(error.error.stack!);
-    // LEB128 encode the stack length
-    let stackLen = stackUtf8.length;
-    const stackLenBytes: number[] = [];
-    if (stackLen === 0) {
-      stackLenBytes.push(0);
-    } else {
-      while (stackLen > 0) {
-        let byte = stackLen & 0x7f;
-        stackLen >>>= 7;
-        if (stackLen > 0) byte |= 0x80;
-        stackLenBytes.push(byte);
-      }
-    }
-    stream.push(0x24, ...stackLenBytes, ...stackUtf8);
+    pushShortString("stack");
+    pushLongString(error.error.stack!);
 
     // Key "type" + value "Error"
-    const typeKey = enc.encode("type");
-    stream.push(0x24, typeKey.length, ...typeKey);
-    const typeVal = enc.encode("Error");
-    stream.push(0x24, typeVal.length, ...typeVal);
+    pushShortString("type");
+    pushShortString("Error");
 
     // TAG_END for the object
     stream.push(0x00);

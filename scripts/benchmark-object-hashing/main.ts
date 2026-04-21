@@ -1072,7 +1072,7 @@ async function main() {
       category: "vdom",
       name: "fullPage",
       data: testData.vdom.fullPageApp,
-      iterations: 50,
+      iterations: 100,
     },
   ];
 
