@@ -205,7 +205,7 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                       >
                         {home.heading}
                       </cf-heading>
-                      <cf-label style="font-size: 1.1rem; color: var(--cf-theme-color-text-muted, #8e94a8); letter-spacing: -0.02em;">
+                      <cf-label style="font-size: 1.1rem; color: var(--cf-theme-color-text-muted, #71747a); letter-spacing: -0.02em;">
                         {home.subtitle}
                       </cf-label>
                     </div>
@@ -216,10 +216,10 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                     ) => (
                       <cf-vstack gap="2">
                         <cf-hstack align="center" style="padding-bottom: 6px;">
-                          <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #8e94a8); letter-spacing: 0.01em;">
+                          <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #71747a); letter-spacing: 0.01em;">
                             {section}
                           </span>
-                          <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                          <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #71747a);">
                             ›
                           </span>
                         </cf-hstack>
@@ -237,7 +237,7 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                                     <span style="font-weight: 600; font-size: 0.9rem; line-height: 1.35; letter-spacing: -0.015em;">
                                       {task.title}
                                     </span>
-                                    <cf-label style="font-size: 0.75rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                                    <cf-label style="font-size: 0.75rem; color: var(--cf-theme-color-text-muted, #71747a);">
                                       {task.detail}
                                     </cf-label>
                                   </cf-vstack>
@@ -256,10 +256,10 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                     {/* Shortcuts */}
                     <cf-vstack gap="2">
                       <cf-hstack align="center" style="padding-bottom: 6px;">
-                        <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #8e94a8); letter-spacing: 0.01em;">
+                        <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #71747a); letter-spacing: 0.01em;">
                           Shortcuts
                         </span>
-                        <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                        <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #71747a);">
                           ›
                         </span>
                       </cf-hstack>
@@ -273,13 +273,13 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                                 align="center"
                                 style="padding: 4px 0; text-align: center;"
                               >
-                                <span style="font-size: 1.15rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                                <span style="font-size: 1.15rem; color: var(--cf-theme-color-text-muted, #71747a);">
                                   {sc.icon}
                                 </span>
-                                <span style="font-size: 0.76rem; font-weight: 600; color: var(--cf-theme-color-text, #313a5d); line-height: 1.15;">
+                                <span style="font-size: 0.76rem; font-weight: 600; color: var(--cf-theme-color-text, #34373c); line-height: 1.15;">
                                   {sc.title}
                                 </span>
-                                <span style="font-size: 0.72rem; color: var(--cf-theme-color-text-muted, #8e94a8); line-height: 1.15;">
+                                <span style="font-size: 0.72rem; color: var(--cf-theme-color-text-muted, #71747a); line-height: 1.15;">
                                   {sc.subtitle}
                                 </span>
                               </cf-vstack>
@@ -292,10 +292,10 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                     {/* Artifacts */}
                     <cf-vstack gap="2">
                       <cf-hstack align="center" style="padding-bottom: 6px;">
-                        <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #8e94a8); letter-spacing: 0.01em;">
+                        <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #71747a); letter-spacing: 0.01em;">
                           Recent artifacts
                         </span>
-                        <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #8e94a8);">
+                        <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #71747a);">
                           ›
                         </span>
                       </cf-hstack>
@@ -334,10 +334,10 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                       <cf-vstack gap="1">
                         <span style="font-weight: 600;">{item.title}</span>
                         <cf-hstack justify="between">
-                          <cf-label style="color: var(--cf-theme-color-text-muted, #8e94a8);">
+                          <cf-label style="color: var(--cf-theme-color-text-muted, #71747a);">
                             {item.detail}
                           </cf-label>
-                          <cf-label style="color: var(--cf-theme-color-text-muted, #8e94a8);">
+                          <cf-label style="color: var(--cf-theme-color-text-muted, #71747a);">
                             {item.meta}
                           </cf-label>
                         </cf-hstack>

@@ -1,6 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
+import type { ComponentSize } from "../theme-context.ts";
 
 /**
  * CFChip - Reusable pill/chip component
@@ -9,7 +10,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} label - Chip label text to display
  * @attr {string} variant - Visual variant: "default" | "primary" | "accent" (default: "default")
- * @attr {string} size - Size variant: "sm" | "md" | "lg" (default: "md")
+ * @attr {string} size - Size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "sm")
  * @attr {boolean} removable - Whether to show remove button (default: false)
  * @attr {boolean} interactive - Whether chip is clickable (default: false)
  *
@@ -34,31 +35,70 @@ export class CFChip extends BaseElement {
       .chip {
         display: inline-flex;
         align-items: center;
-        gap: 0.375rem;
-        padding: 0.25rem 0.625rem;
+        gap: var(--cf-size-sm-spacing);
+        padding: var(--cf-size-sm-padding-v) var(--cf-size-sm-padding-h);
         background: var(
           --cf-chip-background,
-          var(--cf-theme-color-surface, var(--cf-color-gray-100, #f5f5f5))
+          var(
+            --cf-theme-color-surface,
+            var(--cf-colors-gray-100, #f2f3f6)
+          )
         );
         color: var(
           --cf-chip-color,
-          var(--cf-theme-color-text, var(--cf-color-gray-900, #212121))
+          var(
+            --cf-theme-color-text,
+            var(--cf-colors-gray-900, #16181d)
+          )
         );
         border: 1px solid
           var(
             --cf-chip-border-color,
-            var(--cf-theme-color-border, var(--cf-color-gray-300, #e0e0e0))
+            var(
+              --cf-theme-color-border,
+              var(--cf-colors-gray-300, #d5d7dd)
+            )
           );
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-full, 9999px)
         );
-        font-size: 0.8125rem;
-        line-height: 1;
+        font-size: var(--cf-size-sm-font-size);
+        line-height: var(--cf-size-sm-line-height);
         user-select: none;
         transition:
           background-color var(--cf-theme-animation-duration, 200ms) ease,
           border-color var(--cf-theme-animation-duration, 200ms) ease;
+        }
+
+        :host([size="xs"]) .chip {
+          padding: var(--cf-size-xs-padding-v) var(--cf-size-xs-padding-h);
+          font-size: var(--cf-size-xs-font-size);
+          line-height: var(--cf-size-xs-line-height);
+          gap: var(--cf-size-xs-spacing);
+        }
+
+        /* sm is default — no override needed */
+
+        :host([size="md"]) .chip {
+          padding: var(--cf-size-md-padding-v) var(--cf-size-md-padding-h);
+          font-size: var(--cf-size-md-font-size);
+          line-height: var(--cf-size-md-line-height);
+          gap: var(--cf-size-md-spacing);
+        }
+
+        :host([size="lg"]) .chip {
+          padding: var(--cf-size-lg-padding-v) var(--cf-size-lg-padding-h);
+          font-size: var(--cf-size-lg-font-size);
+          line-height: var(--cf-size-lg-line-height);
+          gap: var(--cf-size-lg-spacing);
+        }
+
+        :host([size="xl"]) .chip {
+          padding: var(--cf-size-xl-padding-v) var(--cf-size-xl-padding-h);
+          font-size: var(--cf-size-xl-font-size);
+          line-height: var(--cf-size-xl-line-height);
+          gap: var(--cf-size-xl-spacing);
         }
 
         .chip.interactive {
@@ -68,53 +108,62 @@ export class CFChip extends BaseElement {
         .chip.interactive:hover {
           background: var(
             --cf-theme-color-surface-hover,
-            var(--cf-color-gray-200, #eeeeee)
+            var(--cf-colors-gray-200, #eceef1)
           );
         }
 
         /* Variant: primary (blue - for mentions) */
         .chip.primary {
           background: var(
-            --cf-theme-color-primary-surface,
-            var(--cf-color-blue-50, #eff6ff)
+            --cf-chip-primary-background,
+            color-mix(
+              in srgb,
+              var(
+                --cf-theme-color-primary,
+                var(--cf-colors-primary-500, #4979fa)
+              ) 12%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
           );
           border-color: var(
-            --cf-theme-color-primary,
-            var(--cf-color-blue-200, #bfdbfe)
+            --cf-chip-primary-border-color,
+            color-mix(
+              in srgb,
+              var(
+                --cf-theme-color-primary,
+                var(--cf-colors-primary-500, #4979fa)
+              ) 28%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
           );
           color: var(
-            --cf-theme-color-primary,
-            var(--cf-color-blue-700, #1d4ed8)
+            --cf-chip-primary-color,
+            var(--cf-theme-color-primary, var(--cf-colors-primary-700, #376bf9))
           );
         }
 
         /* Variant: accent (purple - for clipboard) */
         .chip.accent {
           background: var(
-            --cf-theme-color-accent-surface,
-            var(--cf-color-purple-50, #faf5ff)
+            --cf-chip-accent-background,
+            color-mix(
+              in srgb,
+              var(--cf-theme-color-accent, var(--cf-colors-purple, #8952fd)) 12%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
           );
           border-color: var(
-            --cf-theme-color-accent,
-            var(--cf-color-purple-200, #e9d5ff)
+            --cf-chip-accent-border-color,
+            color-mix(
+              in srgb,
+              var(--cf-theme-color-accent, var(--cf-colors-purple, #8952fd)) 28%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
           );
           color: var(
-            --cf-theme-color-accent,
-            var(--cf-color-purple-700, #7c3aed)
+            --cf-chip-accent-color,
+            var(--cf-theme-color-accent, var(--cf-colors-purple, #8952fd))
           );
-        }
-
-        /* Size variants */
-        :host([size="sm"]) .chip {
-          padding: 0.125rem 0.375rem;
-          font-size: 0.6875rem;
-        }
-
-        /* md is the default — no override needed */
-
-        :host([size="lg"]) .chip {
-          padding: 0.375rem 0.875rem;
-          font-size: 0.9375rem;
         }
 
         .chip-icon {
@@ -168,7 +217,7 @@ export class CFChip extends BaseElement {
     accessor interactive = false;
 
     @property({ type: String, reflect: true })
-    accessor size: "sm" | "md" | "lg" = "md";
+    accessor size: ComponentSize = "sm";
 
     private _handleRemove(e: Event): void {
       e.stopPropagation();

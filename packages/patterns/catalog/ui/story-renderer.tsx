@@ -11,6 +11,7 @@ import SwitchStory from "../stories/cf-switch-story.tsx";
 import ToggleStory from "../stories/cf-toggle-story.tsx";
 import ToggleGroupStory from "../stories/cf-toggle-group-story.tsx";
 import CardStory from "../stories/cf-card-story.tsx";
+import ListItemStory from "../stories/cf-list-item-story.tsx";
 import ModalStory from "../stories/cf-modal-story.tsx";
 import ProgressStory from "../stories/cf-progress-story.tsx";
 import VStackStory from "../stories/cf-vstack-story.tsx";
@@ -52,6 +53,7 @@ import VignetteRecipeStory from "../stories/vignette-recipe-story.tsx";
 import VignetteFinanceStory from "../stories/vignette-finance-story.tsx";
 import VignetteMobileAppStory from "../stories/vignette-mobile-app-story.tsx";
 import ToastStory from "../stories/cf-toast-story.tsx";
+import StyleTokensStory from "../stories/style-tokens-story.tsx";
 
 interface StoryRendererInput {
   selected: string;
@@ -95,6 +97,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ToggleGroupStory({});
         case "card":
           return CardStory({});
+        case "list-item":
+          return ListItemStory({});
         case "modal":
           return ModalStory({});
         case "progress":
@@ -177,6 +181,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return VignetteMobileAppStory({});
         case "toast":
           return ToastStory({});
+        case "style-tokens":
+          return StyleTokensStory({});
         default:
           return null;
       }

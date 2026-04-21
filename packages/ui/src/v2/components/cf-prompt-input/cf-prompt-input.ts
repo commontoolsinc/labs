@@ -98,7 +98,7 @@ export class CFPromptInput extends BaseElement {
           --cf-theme-color-background,
           var(--cf-background, #ffffff)
         );
-        --cf-prompt-input-min-height: 2.5rem;
+        --cf-prompt-input-min-height: var(--cf-size-lg-height, 40px);
         --cf-prompt-input-max-height: 12rem;
       }
 
@@ -178,7 +178,7 @@ export class CFPromptInput extends BaseElement {
           cf-button {
             white-space: nowrap;
             min-width: auto;
-            height: 2rem;
+            height: var(--cf-size-md-height, 32px);
             padding: 0 0.75rem;
           }
 
@@ -197,7 +197,7 @@ export class CFPromptInput extends BaseElement {
               --cf-theme-spacing-normal,
               var(--cf-spacing-2, 0.5rem)
             );
-            --cf-prompt-input-min-height: 2rem;
+            --cf-prompt-input-min-height: var(--cf-size-md-height, 32px);
           }
 
           :host([size="lg"]) {
@@ -205,7 +205,7 @@ export class CFPromptInput extends BaseElement {
               --cf-theme-spacing-loose,
               var(--cf-spacing-4, 1rem)
             );
-            --cf-prompt-input-min-height: 3rem;
+            --cf-prompt-input-min-height: var(--cf-size-xl-height, 48px);
           }
 
           /* Compact variant - minimal padding */
@@ -233,7 +233,7 @@ export class CFPromptInput extends BaseElement {
             align-items: center;
             justify-content: center;
             width: 1.5rem;
-            height: 1.5rem;
+            height: var(--cf-size-sm-height, 24px);
             border-radius: var(
               --cf-theme-border-radius,
               var(--cf-radius-sm, 0.25rem)
