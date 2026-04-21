@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, nothing } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
@@ -8,6 +8,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} value - Unique identifier for this item
  * @attr {string} label - Text label rendered below the icon
+ * @attr {boolean} hide-label - Hide the text label for icon-only items (default: false).
  * @attr {boolean} disabled - Prevents selection and keyboard navigation
  * @prop {boolean} selected - Set by parent bar when this item is active
  *
@@ -20,6 +21,7 @@ export class CFTabBarItem extends BaseElement {
   static override properties = {
     value: { type: String, reflect: true },
     label: { type: String, reflect: true },
+    hideLabel: { type: Boolean, reflect: true, attribute: "hide-label" },
     disabled: { type: Boolean, reflect: true },
     selected: { type: Boolean },
   };
@@ -99,6 +101,7 @@ export class CFTabBarItem extends BaseElement {
 
     declare value: string;
     declare label: string;
+    declare hideLabel: boolean;
     declare disabled: boolean;
     declare selected: boolean;
 
@@ -108,6 +111,7 @@ export class CFTabBarItem extends BaseElement {
       super();
       this.value = "";
       this.label = "";
+      this.hideLabel = false;
       this.disabled = false;
       this.selected = false;
     }
@@ -141,14 +145,17 @@ export class CFTabBarItem extends BaseElement {
           ?disabled="${this.disabled}"
           part="item"
           data-selected="${this.selected}"
+          aria-label="${this.hideLabel ? this.label : nothing}"
           @click="${this._handleClick}"
         >
           <div class="icon" part="icon" aria-hidden="true">
             <slot name="icon"></slot>
           </div>
-          <div class="label" part="label">
-            <slot>${this.label}</slot>
-          </div>
+          ${this.hideLabel ? "" : html`
+            <div class="label" part="label">
+              <slot>${this.label}</slot>
+            </div>
+          `}
         </button>
       `;
     }

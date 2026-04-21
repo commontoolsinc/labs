@@ -28,7 +28,11 @@ interface CatalogInput {
     | Default<[
       {
         name: "Overview";
-        items: [{ id: "kitchen-sink"; label: "Kitchen Sink" }];
+        items: [
+          { id: "kitchen-sink"; label: "Kitchen Sink" },
+          { id: "style-tokens"; label: "Style Tokens" },
+          { id: "theme-sampler"; label: "Theme Sampler" },
+        ];
       },
       {
         name: "Inputs";
@@ -56,6 +60,7 @@ interface CatalogInput {
         name: "Layout";
         items: [
           { id: "card"; label: "Card" },
+          { id: "list-item"; label: "List Item" },
           { id: "modal"; label: "Modal" },
           { id: "tab-bar"; label: "Tab Bar" },
           { id: "toolbar"; label: "Toolbar" },

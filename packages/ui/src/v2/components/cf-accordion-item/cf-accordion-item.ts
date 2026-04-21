@@ -48,7 +48,7 @@ export class CFAccordionItem extends BaseElement {
       align-items: center;
       justify-content: space-between;
       width: 100%;
-      padding: 1rem 0;
+      padding: var(--cf-size-xl-spacing, 16px) 0;
       font-size: 0.875rem;
       font-weight: 500;
       text-align: left;
@@ -111,7 +111,7 @@ export class CFAccordionItem extends BaseElement {
     }
 
     .content {
-      padding: 0 0 1rem 0;
+      padding: 0 0 var(--cf-size-xl-spacing, 16px) 0;
       font-size: 0.875rem;
       line-height: 1.5;
     }

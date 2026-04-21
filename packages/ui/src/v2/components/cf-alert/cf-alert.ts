@@ -78,9 +78,9 @@ export class CFAlert extends BaseElement {
     .alert {
       position: relative;
       display: flex;
-      border-radius: 0.5rem;
+      border-radius: var(--cf-size-md-radius, 8px);
       border: 1px solid;
-      padding: 1rem;
+      padding: var(--cf-size-xl-spacing, 16px);
       gap: 0.75rem;
       font-family: inherit;
       transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -90,7 +90,7 @@ export class CFAlert extends BaseElement {
     .alert-icon {
       flex-shrink: 0;
       width: 1rem;
-      height: 1rem;
+      height: var(--cf-size-xs-height, 16px);
     }
 
     .alert-icon:empty {
@@ -141,10 +141,10 @@ export class CFAlert extends BaseElement {
       cursor: pointer;
       opacity: 0.7;
       transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
-      border-radius: 0.25rem;
-      padding: 0.25rem;
-      width: 1.5rem;
-      height: 1.5rem;
+      border-radius: var(--cf-size-xs-radius, 4px);
+      padding: var(--cf-size-sm-spacing, 4px);
+      width: var(--cf-size-sm-height, 24px);
+      height: var(--cf-size-sm-height, 24px);
     }
 
     .dismiss-button:hover {
@@ -159,7 +159,7 @@ export class CFAlert extends BaseElement {
 
     .dismiss-button svg {
       width: 1rem;
-      height: 1rem;
+      height: var(--cf-size-xs-height, 16px);
     }
 
     /* Default variant */
@@ -260,7 +260,7 @@ export class CFAlert extends BaseElement {
 
     ::slotted([slot="icon"]) {
       width: 1rem;
-      height: 1rem;
+      height: var(--cf-size-xs-height, 16px);
     }
 
     /* Adjust padding when dismissible */

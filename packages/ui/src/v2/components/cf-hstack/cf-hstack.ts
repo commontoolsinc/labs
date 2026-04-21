@@ -7,12 +7,12 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @element cf-hstack
  *
- * @attr {string} gap - Gap between items (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24)
+ * @attr {string} gap - Gap between items (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, xs, sm, md, lg, xl)
  * @attr {string} align - Align items (start, center, end, stretch, baseline)
  * @attr {string} justify - Justify content (start, center, end, between, around, evenly)
  * @attr {boolean} wrap - Allow items to wrap
  * @attr {boolean} reverse - Reverse the direction
- * @attr {string} padding - Padding around the stack (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24)
+ * @attr {string} padding - Padding around the stack (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, xs, sm, md, lg, xl)
  *
  * @slot - Content to be stacked horizontally
  *
@@ -103,6 +103,21 @@ export class CFHStack extends BaseElement {
     .gap-24 {
       gap: var(--cf-hstack-gap-24);
     }
+    .gap-xs {
+      gap: var(--cf-size-xs-spacing, 2px);
+    }
+    .gap-sm {
+      gap: var(--cf-size-sm-spacing, 4px);
+    }
+    .gap-md {
+      gap: var(--cf-size-md-spacing, 8px);
+    }
+    .gap-lg {
+      gap: var(--cf-size-lg-spacing, 12px);
+    }
+    .gap-xl {
+      gap: var(--cf-size-xl-spacing, 16px);
+    }
 
     /* Alignment */
     .align-start {
@@ -190,6 +205,21 @@ export class CFHStack extends BaseElement {
     }
     .p-24 {
       padding: var(--cf-hstack-padding-24);
+    }
+    .p-xs {
+      padding: var(--cf-size-xs-spacing, 2px);
+    }
+    .p-sm {
+      padding: var(--cf-size-sm-spacing, 4px);
+    }
+    .p-md {
+      padding: var(--cf-size-md-spacing, 8px);
+    }
+    .p-lg {
+      padding: var(--cf-size-lg-spacing, 12px);
+    }
+    .p-xl {
+      padding: var(--cf-size-xl-spacing, 16px);
     }
 
     /* Direct children styling - allow flex children to shrink by default

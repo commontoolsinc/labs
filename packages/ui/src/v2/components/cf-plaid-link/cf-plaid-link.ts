@@ -408,7 +408,7 @@ export class CFPlaidLink extends BaseElement {
         );
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-white, #ffffff)
+          var(--cf-colors-white, #ffffff)
         );
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         max-width: 800px;
@@ -420,14 +420,13 @@ export class CFPlaidLink extends BaseElement {
 
       .connected-accounts h3 {
         margin: 0 0 var(--cf-theme-spacing-normal, 1rem);
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
         font-size: 1.25rem;
         font-weight: 600;
       }
 
       .bank-item {
-        border: 1px solid
-          var(--cf-theme-color-border, var(--cf-color-gray-300, #d1d5db));
+        border: 1px solid var(--cf-theme-color-border, #d1d5db);
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-md, 0.375rem)
@@ -436,7 +435,7 @@ export class CFPlaidLink extends BaseElement {
         margin-bottom: var(--cf-theme-spacing-normal, 1rem);
         background-color: var(
           --cf-theme-color-surface-hover,
-          var(--cf-color-gray-50, #f9fafb)
+          #f9fafb
         );
       }
 
@@ -449,7 +448,7 @@ export class CFPlaidLink extends BaseElement {
 
       .bank-header h4 {
         margin: 0;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
         font-size: 1.1rem;
         font-weight: 600;
       }
@@ -457,11 +456,11 @@ export class CFPlaidLink extends BaseElement {
       .remove-button {
         background-color: var(
           --cf-theme-color-error,
-          var(--cf-color-red-600, #dc2626)
+          var(--cf-colors-red-600, #dc2626)
         );
         color: var(
           --cf-theme-color-primary-foreground,
-          var(--cf-color-white, #ffffff)
+          var(--cf-colors-white, #ffffff)
         );
         border: none;
         padding: var(--cf-theme-spacing-tight, 0.375rem)
@@ -479,14 +478,14 @@ export class CFPlaidLink extends BaseElement {
       .remove-button:hover {
         background-color: var(
           --cf-theme-color-error,
-          var(--cf-color-red-700, #b91c1c)
+          var(--cf-colors-red-700, #b91c1c)
         );
       }
 
       .remove-button:disabled {
         background-color: var(
           --cf-theme-color-border,
-          var(--cf-color-gray-300, #d1d5db)
+          #d1d5db
         );
         cursor: not-allowed;
       }
@@ -500,10 +499,9 @@ export class CFPlaidLink extends BaseElement {
       .account {
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-white, #ffffff)
+          var(--cf-colors-white, #ffffff)
         );
-        border: 1px solid
-          var(--cf-theme-color-border, var(--cf-color-gray-200, #e5e7eb));
+        border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-md, 0.375rem)
@@ -520,13 +518,13 @@ export class CFPlaidLink extends BaseElement {
 
       .account-name {
         font-weight: 500;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
       }
 
       .account-mask {
         color: var(
           --cf-theme-color-text-muted,
-          var(--cf-color-gray-600, #6b7280)
+          #6b7280
         );
         font-size: 0.9rem;
       }
@@ -537,7 +535,7 @@ export class CFPlaidLink extends BaseElement {
         padding: 0.125rem var(--cf-theme-spacing-tight, 0.5rem);
         border-radius: var(
           --cf-theme-border-radius-full,
-          var(--cf-radius-full, 9999px)
+          var(--cf-border-radius-full, 9999px)
         );
         font-size: 0.8rem;
         text-transform: capitalize;
@@ -553,78 +551,77 @@ export class CFPlaidLink extends BaseElement {
       .balance-label {
         color: var(
           --cf-theme-color-text-muted,
-          var(--cf-color-gray-600, #6b7280)
+          #6b7280
         );
       }
 
       .balance-amount {
         font-weight: 500;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
       }
 
       .bank-footer {
         margin-top: var(--cf-theme-spacing-normal, 0.75rem);
         padding-top: var(--cf-theme-spacing-normal, 0.75rem);
-        border-top: 1px solid
-          var(--cf-theme-color-border, var(--cf-color-gray-200, #e5e7eb));
-        }
+        border-top: 1px solid var(--cf-theme-color-border, #e5e7eb);
+      }
 
-        .last-updated {
-          color: var(
-            --cf-theme-color-text-muted,
-            var(--cf-color-gray-600, #6b7280)
-          );
-          font-size: 0.85rem;
-        }
+      .last-updated {
+        color: var(
+          --cf-theme-color-text-muted,
+          #6b7280
+        );
+        font-size: 0.85rem;
+      }
 
-        .action-section {
-          display: flex;
-          flex-direction: column;
-          gap: var(--cf-theme-spacing-normal, 1rem);
-        }
+      .action-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--cf-theme-spacing-normal, 1rem);
+      }
 
-        .connect-button {
-          background-color: #1db954;
-          color: white;
-          border: none;
-          padding: var(--cf-theme-spacing-normal, 0.75rem)
-            var(--cf-theme-spacing-loose, 1.5rem);
-          border-radius: var(
-            --cf-theme-border-radius,
-            var(--cf-border-radius-md, 0.375rem)
-          );
-          cursor: pointer;
-          font-weight: 500;
-          font-size: 1rem;
-          font-family: var(--cf-theme-font-family, inherit);
-          transition: background-color var(--cf-theme-animation-duration, 0.2s) ease;
-        }
+      .connect-button {
+        background-color: #1db954;
+        color: white;
+        border: none;
+        padding: var(--cf-theme-spacing-normal, 0.75rem)
+          var(--cf-theme-spacing-loose, 1.5rem);
+        border-radius: var(
+          --cf-theme-border-radius,
+          var(--cf-border-radius-md, 0.375rem)
+        );
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 1rem;
+        font-family: var(--cf-theme-font-family, inherit);
+        transition: background-color var(--cf-theme-animation-duration, 0.2s) ease;
+      }
 
-        .connect-button:hover {
-          background-color: #1aa34a;
-        }
+      .connect-button:hover {
+        background-color: #1aa34a;
+      }
 
-        .connect-button:disabled {
-          background-color: var(
-            --cf-theme-color-border,
-            var(--cf-color-gray-300, #d1d5db)
-          );
-          cursor: not-allowed;
-        }
+      .connect-button:disabled {
+        background-color: var(
+          --cf-theme-color-border,
+          #d1d5db
+        );
+        cursor: not-allowed;
+      }
 
-        .status-message {
-          padding: var(--cf-theme-spacing-normal, 0.75rem);
-          border-radius: var(
-            --cf-theme-border-radius,
-            var(--cf-border-radius-md, 0.375rem)
-          );
-          background-color: #e8f5e9;
-          color: #2e7d32;
-          font-size: 0.9rem;
-          text-align: center;
-        }
-      `,
-    ];
-  }
+      .status-message {
+        padding: var(--cf-theme-spacing-normal, 0.75rem);
+        border-radius: var(
+          --cf-theme-border-radius,
+          var(--cf-border-radius-md, 0.375rem)
+        );
+        background-color: #e8f5e9;
+        color: #2e7d32;
+        font-size: 0.9rem;
+        text-align: center;
+      }
+    `,
+  ];
+}
 
-  globalThis.customElements.define("cf-plaid-link", CFPlaidLink);
+globalThis.customElements.define("cf-plaid-link", CFPlaidLink);

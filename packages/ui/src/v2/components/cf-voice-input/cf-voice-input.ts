@@ -134,10 +134,9 @@ export class CFVoiceInput extends BaseElement {
         border-radius: 50%;
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-gray-100, #f3f4f6)
+          #f3f4f6
         );
-        border: 2px solid
-          var(--cf-theme-color-border, var(--cf-color-gray-300, #d1d5db));
+        border: 2px solid var(--cf-theme-color-border, #d1d5db);
         cursor: pointer;
         transition: all 0.2s ease;
         font-size: 1.5rem;
@@ -149,7 +148,7 @@ export class CFVoiceInput extends BaseElement {
       .recording-button:hover:not(:disabled) {
         background-color: var(
           --cf-theme-color-surface-hover,
-          var(--cf-color-gray-200, #e5e7eb)
+          #e5e7eb
         );
         transform: scale(1.05);
       }
@@ -166,11 +165,11 @@ export class CFVoiceInput extends BaseElement {
       .recording-button.recording {
         background-color: var(
           --cf-theme-color-error,
-          var(--cf-color-red-500, #ef4444)
+          var(--cf-colors-red-500, #ef4444)
         );
         border-color: var(
           --cf-theme-color-error,
-          var(--cf-color-red-600, #dc2626)
+          var(--cf-colors-red-600, #dc2626)
         );
         animation: pulse 1.5s ease-in-out infinite;
       }
@@ -192,14 +191,14 @@ export class CFVoiceInput extends BaseElement {
         padding: var(--cf-theme-spacing-normal, 0.75rem);
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-gray-50, #f9fafb)
+          #f9fafb
         );
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-md, 0.375rem)
         );
         font-size: 0.875rem;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
       }
 
       .recording-indicator {
@@ -208,7 +207,7 @@ export class CFVoiceInput extends BaseElement {
         border-radius: 50%;
         background-color: var(
           --cf-theme-color-error,
-          var(--cf-color-red-500, #ef4444)
+          var(--cf-colors-red-500, #ef4444)
         );
         animation: pulse 1.5s ease-in-out infinite;
       }
@@ -225,25 +224,25 @@ export class CFVoiceInput extends BaseElement {
         padding: var(--cf-theme-spacing-normal, 0.75rem);
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-blue-50, #eff6ff)
+          var(--cf-colors-blue-50, #eff6ff)
         );
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-md, 0.375rem)
         );
         font-size: 0.875rem;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
       }
 
       .error {
         padding: var(--cf-theme-spacing-normal, 0.75rem);
         background-color: var(
           --cf-theme-color-error-surface,
-          var(--cf-color-red-50, #fef2f2)
+          var(--cf-colors-red-50, #fef2f2)
         );
         color: var(
           --cf-theme-color-error,
-          var(--cf-color-red-700, #b91c1c)
+          var(--cf-colors-red-700, #b91c1c)
         );
         border-radius: var(
           --cf-theme-border-radius,

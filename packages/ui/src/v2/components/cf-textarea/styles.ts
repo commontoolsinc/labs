@@ -17,13 +17,45 @@ export const textareaStyles = `
     --muted-foreground: var(--cf-theme-color-text-muted, #64748b);
     --placeholder: var(--cf-theme-color-text-muted, #94a3b8);
     
-    /* Textarea dimensions */
-    --textarea-padding-x: 0.75rem;
-    --textarea-padding-y: 0.5rem;
-    --textarea-font-size: 0.875rem;
-    --textarea-line-height: 1.25rem;
-    --textarea-border-radius: var(--cf-theme-border-radius, 0.375rem);
+    /* Textarea dimensions — default size md */
+    --textarea-padding-x: var(--cf-size-md-padding-h, 8px);
+    --textarea-padding-y: var(--cf-size-md-padding-v, 8px);
+    --textarea-font-size: var(--cf-size-md-font-size, 12px);
+    --textarea-line-height: var(--cf-size-md-line-height, 16px);
+    --textarea-border-radius: var(--cf-size-md-radius, 8px);
     --textarea-min-height: 5rem;
+  }
+
+  :host([size="xs"]) {
+    --textarea-padding-x: var(--cf-size-xs-padding-h, 4px);
+    --textarea-padding-y: var(--cf-size-xs-padding-v, 2px);
+    --textarea-font-size: var(--cf-size-xs-font-size, 9px);
+    --textarea-line-height: var(--cf-size-xs-line-height, 12px);
+    --textarea-border-radius: var(--cf-size-xs-radius, 4px);
+  }
+
+  :host([size="sm"]) {
+    --textarea-padding-x: var(--cf-size-sm-padding-h, 6px);
+    --textarea-padding-y: var(--cf-size-sm-padding-v, 4px);
+    --textarea-font-size: var(--cf-size-sm-font-size, 11px);
+    --textarea-line-height: var(--cf-size-sm-line-height, 16px);
+    --textarea-border-radius: var(--cf-size-sm-radius, 5px);
+  }
+
+  :host([size="lg"]) {
+    --textarea-padding-x: var(--cf-size-lg-padding-h, 12px);
+    --textarea-padding-y: var(--cf-size-lg-padding-v, 8px);
+    --textarea-font-size: var(--cf-size-lg-font-size, 16px);
+    --textarea-line-height: var(--cf-size-lg-line-height, 20px);
+    --textarea-border-radius: var(--cf-size-lg-radius, 9px);
+  }
+
+  :host([size="xl"]) {
+    --textarea-padding-x: var(--cf-size-xl-padding-h, 16px);
+    --textarea-padding-y: var(--cf-size-xl-padding-v, 12px);
+    --textarea-font-size: var(--cf-size-xl-font-size, 18px);
+    --textarea-line-height: var(--cf-size-xl-line-height, 24px);
+    --textarea-border-radius: var(--cf-size-xl-radius, 10px);
   }
 
   textarea {

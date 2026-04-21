@@ -7,6 +7,7 @@ import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
+  type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
@@ -34,7 +35,8 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  * @attr {string} validationPattern - Predefined pattern: "email" | "url" | "tel-us" | "tel-intl" | "credit-card" | "zip-us" | "alphanumeric" | "letters" | "numbers"
  * @attr {string} autocomplete - Autocomplete hint
  * @attr {string} inputmode - Virtual keyboard mode: "none" | "text" | "decimal" | "numeric" | "tel" | "search" | "email" | "url"
- * @attr {number} size - Width of input in characters
+ * @attr {string} size - Component size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "md")
+ * @attr {number} length - Width of input in characters
  * @attr {boolean} multiple - Allow multiple files (file input only)
  * @attr {string} accept - File types to accept (file input only)
  * @attr {string} list - ID of datalist element for suggestions
@@ -143,8 +145,47 @@ export class CFInput extends BaseElement {
       --cf-input-animation-duration: var(--cf-theme-animation-duration, 150ms);
       --cf-input-font-family: var(--cf-theme-font-family, inherit);
 
+      /* Sizing scale defaults (size="md") */
+      --input-height: var(--cf-size-md-height, 32px);
+      --input-padding-x: var(--cf-size-md-padding-h, 8px);
+      --input-padding-y: var(--cf-size-md-padding-v, 8px);
+      --input-font-size: var(--cf-size-md-font-size, 12px);
+      --input-border-radius: var(--cf-size-md-radius, 8px);
+
       display: block;
       box-sizing: border-box;
+    }
+
+    :host([size="xs"]) {
+      --input-height: var(--cf-size-xs-height, 16px);
+      --input-padding-x: var(--cf-size-xs-padding-h, 4px);
+      --input-padding-y: var(--cf-size-xs-padding-v, 2px);
+      --input-font-size: var(--cf-size-xs-font-size, 9px);
+      --input-border-radius: var(--cf-size-xs-radius, 4px);
+    }
+
+    :host([size="sm"]) {
+      --input-height: var(--cf-size-sm-height, 24px);
+      --input-padding-x: var(--cf-size-sm-padding-h, 6px);
+      --input-padding-y: var(--cf-size-sm-padding-v, 4px);
+      --input-font-size: var(--cf-size-sm-font-size, 11px);
+      --input-border-radius: var(--cf-size-sm-radius, 5px);
+    }
+
+    :host([size="lg"]) {
+      --input-height: var(--cf-size-lg-height, 40px);
+      --input-padding-x: var(--cf-size-lg-padding-h, 12px);
+      --input-padding-y: var(--cf-size-lg-padding-v, 8px);
+      --input-font-size: var(--cf-size-lg-font-size, 16px);
+      --input-border-radius: var(--cf-size-lg-radius, 9px);
+    }
+
+    :host([size="xl"]) {
+      --input-height: var(--cf-size-xl-height, 48px);
+      --input-padding-x: var(--cf-size-xl-padding-h, 16px);
+      --input-padding-y: var(--cf-size-xl-padding-v, 12px);
+      --input-font-size: var(--cf-size-xl-font-size, 18px);
+      --input-border-radius: var(--cf-size-xl-radius, 10px);
     }
 
     *,
@@ -156,16 +197,14 @@ export class CFInput extends BaseElement {
     input {
       display: block;
       width: 100%;
-      padding: 0.5rem 0.75rem;
-      font-size: 0.875rem;
+      height: var(--input-height);
+      padding: var(--input-padding-y) var(--input-padding-x);
+      font-size: var(--input-font-size);
       line-height: 1.25rem;
       color: var(--cf-input-color-text, #111827);
       background-color: var(--cf-input-color-background, #ffffff);
       border: 1px solid var(--cf-input-color-border, #e5e7eb);
-      border-radius: var(
-        --cf-input-border-radius,
-        var(--cf-border-radius-md, 0.375rem)
-      );
+      border-radius: var(--input-border-radius);
       transition: all var(--cf-input-animation-duration, 150ms)
         var(--cf-transition-timing-ease);
       font-family: var(--cf-input-font-family, inherit);
@@ -231,10 +270,7 @@ export class CFInput extends BaseElement {
         color: var(--cf-input-color-background, hsl(0, 0%, 100%));
         background-color: var(--cf-input-color-primary, hsl(212, 100%, 47%));
         border: none;
-        border-radius: var(
-          --cf-input-border-radius,
-          var(--cf-border-radius-sm, 0.25rem)
-        );
+        border-radius: var(--input-border-radius);
         cursor: pointer;
       }
 
@@ -337,7 +373,8 @@ export class CFInput extends BaseElement {
         maxlength: { type: String },
         minlength: { type: String },
         inputmode: { type: String },
-        size: { type: Number },
+        size: { type: String, reflect: true },
+        length: { type: Number, attribute: "length" },
         multiple: { type: Boolean },
         accept: { type: String },
         list: { type: String },
@@ -365,7 +402,8 @@ export class CFInput extends BaseElement {
       declare maxlength: string;
       declare minlength: string;
       declare inputmode: InputMode;
-      declare size: number;
+      declare size: ComponentSize;
+      declare length: number;
       declare multiple: boolean;
       declare accept: string;
       declare list: string;
@@ -420,7 +458,8 @@ export class CFInput extends BaseElement {
         this.maxlength = "";
         this.minlength = "";
         this.inputmode = "text";
-        this.size = 0;
+        this.size = "md";
+        this.length = 0;
         this.multiple = false;
         this.accept = "";
         this.list = "";
@@ -604,7 +643,7 @@ export class CFInput extends BaseElement {
             maxlength="${ifDefined(this.maxlength || undefined)}"
             minlength="${ifDefined(this.minlength || undefined)}"
             inputmode="${ifDefined(inputMode || undefined)}"
-            size="${ifDefined(this.size || undefined)}"
+            size="${ifDefined(this.length || undefined)}"
             ?multiple="${this.multiple && this.type === "file"}"
             accept="${ifDefined(
               this.accept && this.type === "file" ? this.accept : undefined,
