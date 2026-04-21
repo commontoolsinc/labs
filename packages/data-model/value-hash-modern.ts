@@ -125,15 +125,12 @@ function getStringRep(value: string) {
   let result;
 
   if (utf8Length <= MAX_DIRECT_STRING_LENGTH) {
-    const lengthBuf = encodeULEB128(utf8Length);
-    const lengthLength = lengthBuf.length;
-
     // Contents are: tag + utf8Length + utf8.
-    const totalLength = 1 + lengthLength + utf8Length;
+    const totalLength = 2 + utf8Length;
     result = new Uint8Array(totalLength);
     result[0] = TAG_STRING;
-    result.set(lengthBuf, 1); // After the tag.
-    result.set(utf8Buf, 1 + lengthLength); // After the length.
+    result[1] = utf8Length; // Always fits in a byte!
+    result.set(utf8Buf, 2); // After the tag and length.
   } else {
     const hashBuf = sha256(utf8Buf);
 
