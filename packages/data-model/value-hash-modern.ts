@@ -12,6 +12,7 @@
 import {
   createHasher,
   type IncrementalHasher,
+  sha256,
 } from "@commonfabric/content-hash";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
@@ -47,6 +48,9 @@ const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
 const TAG_CONTENT_HASH = 0x29;
+
+// Special for hashing:
+const TAG_STRING_HASH = 0xf0;
 
 // ---------------------------------------------------------------------------
 // Pre-allocated tag byte arrays (avoids per-call allocation)
@@ -86,6 +90,55 @@ const f64View = new DataView(f64Buf);
 const f64Bytes = new Uint8Array(f64Buf);
 
 /**
+ * Maximum encoded length of a string which is represented in just-encoded form.
+ * Longer strings are represented in a hash feed as the hash of the string (in
+ * Merkle-ish fashion).
+ */
+const MAX_DIRECT_STRING_LENGTH = 64;
+
+/** LRU cache for string representations. */
+const stringRepCache = new LRUCache<string, Uint8Array>({
+  capacity: 50_000,
+});
+
+/**
+ * Gets the bytes needed to represent the given string, either by computing it
+ * or retrieving a previously-computed result from the cache.
+ */
+function getStringRep(value: string) {
+  const cached = stringRepCache.get(value);
+  if (cached !== undefined) return cached;
+
+  const utf8Buf = encoder.encode(value);
+  const utf8Length = utf8Buf.length;
+
+  let result;
+
+  if (utf8Length <= MAX_DIRECT_STRING_LENGTH) {
+    const lengthBuf = encodeULEB128(utf8Length);
+    const lengthLength = lengthBuf.length;
+
+    // Contents are: tag + utf8Length + utf8.
+    const totalLength = 1 + lengthLength + utf8Length;
+    result = new Uint8Array(totalLength);
+    result[0] = TAG_STRING;
+    result.set(lengthBuf, 1); // After the tag.
+    result.set(utf8Buf, 1 + lengthLength); // After the length.
+  } else {
+    const hashBuf = sha256(utf8Buf);
+
+    // Contents are: tag + hash.
+    const totalLength = 1 + hashBuf.length;
+    result = new Uint8Array(totalLength);
+    result[0] = TAG_STRING_HASH;
+    result.set(hashBuf, 1); // After the tag.
+  }
+
+  stringRepCache.put(value, result);
+  return result;
+}
+
+/**
  * Updates an incremental hasher with a length value, using the standard
  * in-hash encoding for same.
  */
@@ -116,10 +169,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       break;
 
     case "string": {
-      hasher.update(TAG_STRING_BYTES);
-      const utf8 = encoder.encode(value);
-      feedLength(hasher, utf8.length);
-      hasher.update(utf8);
+      hasher.update(getStringRep(value));
       break;
     }
 
