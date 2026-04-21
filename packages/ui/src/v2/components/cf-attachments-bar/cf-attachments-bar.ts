@@ -50,7 +50,7 @@ export class CFAttachmentsBar extends BaseElement {
       .empty-state {
         color: var(
           --cf-theme-color-text-muted,
-          var(--cf-color-gray-400, #9ca3af)
+          #9ca3af
         );
         font-size: 0.8125rem;
       }

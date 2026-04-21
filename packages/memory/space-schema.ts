@@ -4,6 +4,7 @@ import {
   type JSONSchema,
 } from "@commonfabric/runner";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
@@ -330,10 +331,10 @@ export const selectSchema = <Space extends MemorySpace>(
       // These selectorEntry objects in SchemaQuery have their path relative
       // to the value, but our traversal wants them to be relative to the
       // fact.is, so adjust the paths.
-      const selector = {
+      const selector = internPathSelector({
         ...factSelector.value,
         path: ["value", ...factSelector.value.path],
-      };
+      });
       schemaTracker.add(docKey, selector);
 
       if (!getRevision(includedFacts, factSelector.of, factSelector.the)) {
@@ -411,7 +412,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     // If the fact doesn't exist, we still want to add it to the
     // schemaTracker, so we get updates when the fact is added.
     const factKey = `${address.space}/${address.id}/${address.type}`;
-    schemaTracker.add(factKey, schemaSelector);
+    schemaTracker.add(factKey, internPathSelector(schemaSelector));
     return schemaTracker;
   }
 
@@ -459,12 +460,13 @@ function loadFactsForDoc(
   // If this doc+schema pair is already tracked, we've already traversed its links
   // so we can skip the entire traversal (early termination optimization)
   const factKey = `${space}/${fact.address.id}/${fact.address.type}`;
-  if (schemaTracker.hasValue(factKey, selector)) {
+  const internedSelector = internPathSelector(selector);
+  if (schemaTracker.hasValue(factKey, internedSelector)) {
     return;
   }
 
   // Track this doc+schema pair and record it as newly discovered
-  schemaTracker.add(factKey, selector);
+  schemaTracker.add(factKey, internedSelector);
 
   if (isRecord(fact.value)) {
     const managedTx = new ManagedStorageTransaction(manager);

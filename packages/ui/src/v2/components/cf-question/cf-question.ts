@@ -35,8 +35,8 @@ export class CFQuestion extends BaseElement {
       }
 
       .question-card {
-        background: var(--cf-color-bg, white);
-        border: 1px solid var(--cf-color-border, #e5e5e7);
+        background: var(--cf-theme-color-surface, white);
+        border: 1px solid var(--cf-theme-color-border, #e5e5e7);
         border-radius: 12px;
         padding: 16px;
       }
@@ -44,7 +44,7 @@ export class CFQuestion extends BaseElement {
       .question-text {
         font-size: 15px;
         font-weight: 500;
-        color: var(--cf-color-text, #111827);
+        color: var(--cf-theme-color-text, #111827);
         margin: 0 0 12px 0;
       }
 
@@ -57,7 +57,7 @@ export class CFQuestion extends BaseElement {
 
       .option {
         padding: 8px 16px;
-        background: var(--cf-color-bg-secondary, #f3f4f6);
+        background: var(--cf-theme-color-surface-hover, #f3f4f6);
         border: 2px solid transparent;
         border-radius: 20px;
         font-size: 14px;
@@ -66,19 +66,19 @@ export class CFQuestion extends BaseElement {
       }
 
       .option:hover {
-        background: var(--cf-color-bg-tertiary, #e5e7eb);
+        background: var(--cf-theme-color-surface-tertiary, #e5e7eb);
       }
 
       .option.selected {
-        background: var(--cf-color-primary-surface, #eff6ff);
-        border-color: var(--cf-color-primary, #3b82f6);
-        color: var(--cf-color-primary, #3b82f6);
+        background: var(--cf-colors-blue-50, #eff6ff);
+        border-color: var(--cf-theme-color-primary, #3b82f6);
+        color: var(--cf-theme-color-primary, #3b82f6);
       }
 
       .text-input {
         width: 100%;
         padding: 10px 12px;
-        border: 1px solid var(--cf-color-border, #e5e5e7);
+        border: 1px solid var(--cf-theme-color-border, #e5e5e7);
         border-radius: 8px;
         font-size: 14px;
         margin-bottom: 12px;
@@ -87,13 +87,13 @@ export class CFQuestion extends BaseElement {
 
       .text-input:focus {
         outline: none;
-        border-color: var(--cf-color-primary, #3b82f6);
+        border-color: var(--cf-theme-color-primary, #3b82f6);
         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
       }
 
       .submit-btn {
         padding: 8px 20px;
-        background: var(--cf-color-primary, #3b82f6);
+        background: var(--cf-theme-color-primary, #3b82f6);
         color: white;
         border: none;
         border-radius: 8px;
@@ -104,11 +104,11 @@ export class CFQuestion extends BaseElement {
       }
 
       .submit-btn:hover {
-        background: var(--cf-color-primary-hover, #2563eb);
+        background: var(--cf-colors-blue-600, #2563eb);
       }
 
       .submit-btn:disabled {
-        background: var(--cf-color-gray-300, #d1d5db);
+        background: var(--cf-theme-color-border, #d1d5db);
         cursor: not-allowed;
       }
 
@@ -117,14 +117,14 @@ export class CFQuestion extends BaseElement {
         align-items: center;
         gap: 8px;
         padding: 12px;
-        background: var(--cf-color-success-surface, #f0fdf4);
-        border: 1px solid var(--cf-color-success, #22c55e);
+        background: var(--cf-colors-green-50, #f0fdf4);
+        border: 1px solid var(--cf-theme-color-success, #22c55e);
         border-radius: 8px;
       }
 
       .answered-badge {
         padding: 4px 8px;
-        background: var(--cf-color-success, #22c55e);
+        background: var(--cf-theme-color-success, #22c55e);
         color: white;
         border-radius: 4px;
         font-size: 12px;
@@ -133,7 +133,7 @@ export class CFQuestion extends BaseElement {
 
       .answered-text {
         font-size: 14px;
-        color: var(--cf-color-text, #111827);
+        color: var(--cf-theme-color-text, #111827);
       }
     `,
   ];

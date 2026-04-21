@@ -22,7 +22,7 @@ describe("CFButton", () => {
   it("should have default properties", () => {
     const element = new CFButton();
     expect(element.variant).toBe("primary");
-    expect(element.size).toBe("default");
+    expect(element.size).toBe("md");
     expect(element.disabled).toBe(false);
     expect(element.type).toBe("button");
   });

@@ -21,7 +21,11 @@ export const styles = css`
       )
     );
     --cf-code-editor-prose-font-size: var(--cf-theme-font-size, 1rem);
-    --cf-code-editor-focus-ring: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
+    --cf-code-editor-focus-ring: color-mix(
+      in srgb,
+      var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa)) 16%,
+      transparent
+    );
     --cf-code-editor-transition-duration: var(
       --cf-theme-animation-duration,
       150ms
@@ -29,62 +33,68 @@ export const styles = css`
     --cf-code-editor-transition-ease: var(--cf-transition-timing-ease, ease);
 
     --cf-code-editor-color-neutral-50: var(
-      --cf-color-neutral-50,
-      hsl(0, 0%, 97%)
+      --cf-colors-gray-100,
+      #f2f3f6
     );
     --cf-code-editor-color-neutral-100: var(
-      --cf-color-neutral-100,
-      hsl(0, 0%, 95%)
+      --cf-colors-gray-200,
+      #eceef1
     );
     --cf-code-editor-color-neutral-200: var(
-      --cf-color-neutral-200,
-      hsl(0, 0%, 88%)
+      --cf-colors-gray-300,
+      #d5d7dd
     );
     --cf-code-editor-color-neutral-400: var(
-      --cf-color-neutral-400,
-      hsl(0, 0%, 60%)
+      --cf-colors-gray-500,
+      #94979e
     );
     --cf-code-editor-color-neutral-500: var(
-      --cf-color-neutral-500,
-      hsl(0, 0%, 45%)
+      --cf-colors-gray-600,
+      #5b5f65
     );
 
-    --cf-code-editor-color-primary-50: var(
-      --cf-color-primary-50,
-      hsla(212, 100%, 47%, 0.08)
+    --cf-code-editor-color-primary-50: color-mix(
+      in srgb,
+      var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa)) 8%,
+      transparent
     );
-    --cf-code-editor-color-primary-100: var(
-      --cf-color-primary-100,
-      hsla(212, 100%, 47%, 0.15)
+    --cf-code-editor-color-primary-100: color-mix(
+      in srgb,
+      var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa)) 15%,
+      transparent
     );
-    --cf-code-editor-color-primary-200: var(
-      --cf-color-primary-200,
-      hsla(212, 100%, 47%, 0.25)
+    --cf-code-editor-color-primary-200: color-mix(
+      in srgb,
+      var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa)) 25%,
+      transparent
     );
-    --cf-code-editor-color-primary-300: var(
-      --cf-color-primary-300,
-      hsla(212, 72%, 48%, 0.4)
+    --cf-code-editor-color-primary-300: color-mix(
+      in srgb,
+      var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa)) 40%,
+      transparent
     );
     --cf-code-editor-color-primary-600: var(
-      --cf-color-primary-600,
-      hsl(212, 72%, 48%)
+      --cf-theme-color-primary,
+      var(--cf-colors-primary-600, #3e6af7)
     );
     --cf-code-editor-color-primary-700: var(
-      --cf-color-primary-700,
-      hsl(212, 80%, 40%)
+      --cf-theme-color-primary,
+      var(--cf-colors-primary-700, #376bf9)
     );
 
-    --cf-code-editor-color-warning-100: var(
-      --cf-color-warning-100,
-      hsla(45, 100%, 50%, 0.15)
+    --cf-code-editor-color-warning-100: color-mix(
+      in srgb,
+      var(--cf-theme-color-warning, var(--cf-colors-warning, #e5a126)) 15%,
+      transparent
     );
     --cf-code-editor-color-warning-400: var(
-      --cf-color-warning-400,
-      hsl(45, 70%, 50%)
+      --cf-theme-color-warning,
+      var(--cf-colors-warning, #e5a126)
     );
-    --cf-code-editor-color-warning-700: var(
-      --cf-color-warning-700,
-      hsl(45, 80%, 35%)
+    --cf-code-editor-color-warning-700: color-mix(
+      in srgb,
+      var(--cf-theme-color-warning, var(--cf-colors-warning, #e5a126)) 72%,
+      var(--cf-theme-color-text, var(--cf-colors-gray-900, #16181d))
     );
 
     display: flex;

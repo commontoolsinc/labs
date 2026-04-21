@@ -16,6 +16,7 @@ import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-st
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
 import { type Immutable, isObject } from "@commonfabric/utils/types";
 import type { FabricValue, MemorySpace, URI } from "../interface.ts";
+import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   type EntitySnapshot,
   type GraphQuery,
@@ -254,7 +255,10 @@ export const trackGraph = (
         sharedMemo,
       );
     } else {
-      schemaTracker.add(toDocKey(space, root.id, "application/json"), selector);
+      schemaTracker.add(
+        toDocKey(space, root.id, "application/json"),
+        selector,
+      );
     }
   }
 
@@ -451,10 +455,11 @@ const loadFactsForDoc = (
   }
 
   const docKey = toDocKey(space, fact.address.id, fact.address.type);
-  if (schemaTracker.hasValue(docKey, selector)) {
+  const internedSelector = internPathSelector(selector);
+  if (schemaTracker.hasValue(docKey, internedSelector)) {
     return;
   }
-  schemaTracker.add(docKey, selector);
+  schemaTracker.add(docKey, internedSelector);
 
   if (!isObject(fact.value)) {
     return;
@@ -520,7 +525,10 @@ const evaluateTrackedDocument = (
 ) => {
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
-    schemaTracker.add(toDocKey(space, address.id, address.type), selector);
+    schemaTracker.add(
+      toDocKey(space, address.id, address.type),
+      internPathSelector(selector),
+    );
     return;
   }
   const tracker = new CompoundCycleTracker<

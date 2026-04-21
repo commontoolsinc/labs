@@ -62,7 +62,7 @@ export class CFMarkdown extends BaseElement {
           sans-serif
         );
         line-height: 1.6;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
       }
 
       *,
@@ -165,13 +165,13 @@ export class CFMarkdown extends BaseElement {
       }
 
       .markdown-content p:not(:last-child) {
-        margin-bottom: var(--cf-theme-spacing, var(--cf-spacing-3, 0.75rem));
+        margin-bottom: var(--cf-theme-spacing-normal, var(--cf-spacing-3, 0.75rem));
       }
 
       /* Compact mode paragraph spacing */
       .markdown-content.compact p:not(:last-child) {
         margin-bottom: var(
-          --cf-theme-spacing-compact,
+          --cf-theme-spacing-tight,
           var(--cf-spacing-1, 0.25rem)
         );
       }
@@ -180,7 +180,7 @@ export class CFMarkdown extends BaseElement {
       .markdown-content a {
         color: var(
           --cf-theme-color-accent,
-          var(--cf-color-blue-500, #3b82f6)
+          var(--cf-colors-blue-500, #3b82f6)
         );
         text-decoration: none;
       }
@@ -199,7 +199,7 @@ export class CFMarkdown extends BaseElement {
       /* Lists */
       .markdown-content ul,
       .markdown-content ol {
-        margin: var(--cf-theme-spacing, var(--cf-spacing-3, 0.75rem)) 0;
+        margin: var(--cf-theme-spacing-normal, var(--cf-spacing-3, 0.75rem)) 0;
         padding-left: 2em;
       }
 
@@ -233,11 +233,14 @@ export class CFMarkdown extends BaseElement {
       /* Code blocks */
       .markdown-content pre {
         background-color: var(--cf-theme-color-surface, #f9fafb);
-        padding: var(--cf-theme-padding-block, var(--cf-spacing-3, 0.75rem));
+        padding: var(
+          --cf-theme-spacing-padding-block,
+          var(--cf-spacing-3, 0.75rem)
+        );
         border-radius: var(--cf-theme-border-radius, 0.5rem);
         border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         overflow-x: auto;
-        margin: var(--cf-theme-spacing, var(--cf-spacing-3, 0.75rem)) 0;
+        margin: var(--cf-theme-spacing-normal, var(--cf-spacing-3, 0.75rem)) 0;
       }
 
       .markdown-content pre code {
@@ -280,8 +283,8 @@ export class CFMarkdown extends BaseElement {
       /* Blockquotes */
       .markdown-content blockquote {
         border-left: 4px solid var(--cf-theme-color-border, #e5e7eb);
-        margin: var(--cf-theme-spacing, var(--cf-spacing-3, 0.75rem)) 0;
-        padding-left: var(--cf-theme-padding, var(--cf-spacing-3, 0.75rem));
+        margin: var(--cf-theme-spacing-normal, var(--cf-spacing-3, 0.75rem)) 0;
+        padding-left: var(--cf-theme-spacing-normal, var(--cf-spacing-3, 0.75rem));
         font-style: italic;
         color: var(--cf-theme-color-text-muted, #6b7280);
       }
@@ -318,7 +321,7 @@ export class CFMarkdown extends BaseElement {
       .markdown-content table {
         border-collapse: collapse;
         width: 100%;
-        margin: var(--cf-theme-spacing, var(--cf-spacing-3, 0.75rem)) 0;
+        margin: var(--cf-theme-spacing-normal, var(--cf-spacing-3, 0.75rem)) 0;
       }
 
       .markdown-content th,
