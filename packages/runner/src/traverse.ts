@@ -2,7 +2,6 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   hashSchemaItem,
-  internedPairKey,
   internSchema,
   internSchemaAsHashString,
 } from "@commonfabric/data-model/schema-hash";
@@ -34,6 +33,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   DEFAULT_SELECTOR,
   internPathSelector,
+  internedPairKey,
   REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
