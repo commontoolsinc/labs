@@ -257,7 +257,7 @@ export const trackGraph = (
     } else {
       schemaTracker.add(
         toDocKey(space, root.id, "application/json"),
-        internPathSelector(selector),
+        selector,
       );
     }
   }
