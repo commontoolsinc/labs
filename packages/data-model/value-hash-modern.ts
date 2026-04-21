@@ -76,6 +76,13 @@ const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
 // Core: recursive value feeding
 // ---------------------------------------------------------------------------
 
+/**
+ * Maximum encoded length of a string which is represented in just-encoded form.
+ * Longer strings are represented in a hash feed as the hash of the string (in
+ * Merkle-ish fashion).
+ */
+const MAX_DIRECT_STRING_LENGTH = 64;
+
 /** Shared TextEncoder for UTF-8 string encoding. */
 const encoder = new TextEncoder();
 
@@ -87,13 +94,6 @@ const f64View = new DataView(f64Buf);
 
 /** Byte-array "view" of `f64Buf`. */
 const f64Bytes = new Uint8Array(f64Buf);
-
-/**
- * Maximum encoded length of a string which is represented in just-encoded form.
- * Longer strings are represented in a hash feed as the hash of the string (in
- * Merkle-ish fashion).
- */
-const MAX_DIRECT_STRING_LENGTH = 64;
 
 /** LRU cache for string representations. */
 const stringRepCache = new LRUCache<string, Uint8Array>({
