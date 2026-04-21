@@ -105,9 +105,10 @@ const stringRepCache = new LRUCache<string, Uint8Array>({
   capacity: 50_000,
 });
 
-/** Cache of encoded small-length numbers. */
-const smallLengthCache: Uint8Array[] = Array(MAX_CACHED_SMALL_LENGTH + 1).fill(
-  undefined,
+/** Prepopulated cache of encoded small-length numbers. */
+const smallLengthCache: Uint8Array[] = Array.from(
+  { length: MAX_CACHED_SMALL_LENGTH + 1 },
+  (_, i) => encodeULEB128(i),
 );
 
 /**
@@ -152,13 +153,9 @@ function getStringRep(value: string) {
  * in-hash encoding for same.
  */
 function feedLength(hasher: IncrementalHasher, value: number): void {
-  let valueBuf = smallLengthCache[value];
-  if (valueBuf === undefined) {
-    valueBuf = encodeULEB128(value);
-    if (value <= MAX_CACHED_SMALL_LENGTH) {
-      smallLengthCache[value] = valueBuf;
-    }
-  }
+  const valueBuf = (value <= MAX_CACHED_SMALL_LENGTH)
+    ? smallLengthCache[value]
+    : encodeULEB128(value);
 
   hasher.update(valueBuf);
 }
