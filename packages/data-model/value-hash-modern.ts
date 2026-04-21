@@ -348,12 +348,9 @@ function feedPlainObject(
 
   hasher.update(TAG_OBJECT_BYTES);
   for (const key of keys) {
-    // Keys are encoded as TAG_STRING-style values (same format as strings).
-    hasher.update(TAG_STRING_BYTES);
-    const keyUtf8 = encoder.encode(key);
-    feedLength(hasher, keyUtf8.length);
-    hasher.update(keyUtf8);
-    // Value is hashed recursively.
+    // Keys are encoded in the same format as strings, and values are hashed
+    // recursively.
+    hasher.update(getStringRep(key));
     feedValue(hasher, value[key]);
   }
   hasher.update(TAG_END_BYTES);
