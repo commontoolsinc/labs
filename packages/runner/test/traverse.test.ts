@@ -1567,27 +1567,42 @@ for (const modernHash of [false, true]) {
     });
 
     describe("CompoundCycleTracker cleanup", () => {
-      it("removes the inner (partialKey, extraKey) entry on dispose", () => {
+      it("removes empty partial-key entries on dispose", () => {
         const tracker = new CompoundCycleTracker<object, boolean>();
         const key = { id: "k1" };
         const disposable = tracker.include(key, true);
         expect(disposable).not.toBeNull();
         disposable![Symbol.dispose]();
-        // Re-including the same (key, extraKey) pair must succeed — if the
-        // prior include's entry had not been removed, this would be a cycle
-        // and the call would return null.
+        // Outer `partial` and the parallel counter are both cleaned up
+        // when the inner map's live-entry count hits zero.
+        expect((tracker as any).partial.size).toBe(0);
+        expect((tracker as any).partialCounts.size).toBe(0);
+        // Re-including the same (key, extraKey) pair must succeed —
+        // implies the prior entry really was removed.
         const disposable2 = tracker.include(key, true);
         expect(disposable2).not.toBeNull();
         disposable2![Symbol.dispose]();
+      });
 
-        // Note: unlike the prior `Map<string, …>` implementation, the
-        // WeakMap-based one does NOT eagerly delete the outer `partialKey`
-        // entry when its inner map becomes empty (WeakMap has no `.size`).
-        // The inner WeakMap is retained only as long as `partialKey` is
-        // retained in the outer Map, and its entries are GC'd when the
-        // keying `SchemaAndHash` objects go out of scope, so this is not
-        // a leak for the tracker's intended scope-bounded use. No caller
-        // depends on observing the "empty inner map" state.
+      it("retains partial-key entries while sibling entries are live", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        const dispA = tracker.include(key, true);
+        const dispB = tracker.include(key, false);
+        expect(dispA).not.toBeNull();
+        expect(dispB).not.toBeNull();
+        // Disposing only A must not remove the outer `partial` entry —
+        // B's live entry still keys on the same partialKey.
+        dispA![Symbol.dispose]();
+        expect((tracker as any).partial.size).toBe(1);
+        expect((tracker as any).partialCounts.get(key)).toBe(1);
+        // Disposing B then cleans up.
+        dispB![Symbol.dispose]();
+        expect((tracker as any).partial.size).toBe(0);
+        expect((tracker as any).partialCounts.size).toBe(0);
       });
     });
 

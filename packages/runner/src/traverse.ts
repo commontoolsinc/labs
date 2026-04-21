@@ -392,8 +392,18 @@ export class CompoundCycleTracker<
 > {
   // partialKey (identity) → WeakMap<SchemaAndHash (interned extraKey), Value?>
   private partial: Map<EqualKey, WeakMap<SchemaAndHash, Value | undefined>>;
+  // partialKey → live-entry count for its inner WeakMap. Used to eagerly
+  // remove the outer `partial` entry when its inner map's live-entry count
+  // hits zero (WeakMap has no `.size`, so the count is tracked in
+  // parallel). Required because the outer container can't itself be a
+  // WeakMap: `EqualKey` admits primitives (`FabricValue` includes `null |
+  // boolean | number | string | bigint | ...`), which a WeakMap-keyed
+  // outer wouldn't accept. Without this parallel count, long-lived
+  // trackers would retain disposed-of `partialKey` entries indefinitely.
+  private partialCounts: Map<EqualKey, number>;
   constructor() {
     this.partial = new Map();
+    this.partialCounts = new Map();
   }
 
   include(
@@ -412,19 +422,22 @@ export class CompoundCycleTracker<
       return null;
     }
     existing.set(sah, value);
+    this.partialCounts.set(
+      partialKey,
+      (this.partialCounts.get(partialKey) ?? 0) + 1,
+    );
     return {
       [Symbol.dispose]: () => {
         const entries = this.partial.get(partialKey);
         if (entries) {
           entries.delete(sah);
-          // Note: WeakMap has no `size`, so we can't eagerly delete an
-          // empty inner map here the way the prior `Map<string, …>`
-          // version did. That's fine: the inner WeakMap itself is
-          // retained only as long as `partialKey` is retained in the
-          // outer Map, and its entries are GC'd when the keying
-          // `SchemaAndHash` objects go out of scope. Downstream
-          // callers do not depend on observing the "empty inner map"
-          // state (it was an internal optimization, not a contract).
+          const count = (this.partialCounts.get(partialKey) ?? 0) - 1;
+          if (count <= 0) {
+            this.partial.delete(partialKey);
+            this.partialCounts.delete(partialKey);
+          } else {
+            this.partialCounts.set(partialKey, count);
+          }
         }
       },
     };
