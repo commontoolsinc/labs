@@ -76,6 +76,18 @@ const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
 // Core: recursive value feeding
 // ---------------------------------------------------------------------------
 
+/**
+ * Maximum encoded length of a string which is represented in just-encoded form.
+ * Longer strings are represented in a hash feed as the hash of the string (in
+ * Merkle-ish fashion).
+ */
+const MAX_DIRECT_STRING_LENGTH = 64;
+
+/**
+ * Maximum value (inclusive) of the small-length-number cache.
+ */
+const MAX_CACHED_SMALL_LENGTH = 500;
+
 /** Shared TextEncoder for UTF-8 string encoding. */
 const encoder = new TextEncoder();
 
@@ -88,17 +100,16 @@ const f64View = new DataView(f64Buf);
 /** Byte-array "view" of `f64Buf`. */
 const f64Bytes = new Uint8Array(f64Buf);
 
-/**
- * Maximum encoded length of a string which is represented in just-encoded form.
- * Longer strings are represented in a hash feed as the hash of the string (in
- * Merkle-ish fashion).
- */
-const MAX_DIRECT_STRING_LENGTH = 64;
-
 /** LRU cache for string representations. */
 const stringRepCache = new LRUCache<string, Uint8Array>({
   capacity: 50_000,
 });
+
+/** Prepopulated cache of encoded small-length numbers. */
+const smallLengthCache: Uint8Array[] = Array.from(
+  { length: MAX_CACHED_SMALL_LENGTH + 1 },
+  (_, i) => encodeULEB128(i),
+);
 
 /**
  * Gets the bytes needed to represent the given string, either by computing it
@@ -114,15 +125,12 @@ function getStringRep(value: string) {
   let result;
 
   if (utf8Length <= MAX_DIRECT_STRING_LENGTH) {
-    const lengthBuf = encodeULEB128(utf8Length);
-    const lengthLength = lengthBuf.length;
-
     // Contents are: tag + utf8Length + utf8.
-    const totalLength = 1 + lengthLength + utf8Length;
+    const totalLength = 2 + utf8Length;
     result = new Uint8Array(totalLength);
     result[0] = TAG_STRING;
-    result.set(lengthBuf, 1); // After the tag.
-    result.set(utf8Buf, 1 + lengthLength); // After the length.
+    result[1] = utf8Length; // Always fits in a byte!
+    result.set(utf8Buf, 2); // After the tag and length.
   } else {
     const hashBuf = sha256(utf8Buf);
 
@@ -142,7 +150,11 @@ function getStringRep(value: string) {
  * in-hash encoding for same.
  */
 function feedLength(hasher: IncrementalHasher, value: number): void {
-  hasher.update(encodeULEB128(value));
+  const valueBuf = (value <= MAX_CACHED_SMALL_LENGTH)
+    ? smallLengthCache[value]
+    : encodeULEB128(value);
+
+  hasher.update(valueBuf);
 }
 
 /**
