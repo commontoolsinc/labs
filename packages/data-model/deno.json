@@ -46,6 +46,7 @@
     "./value-hash-legacy": "./value-hash-legacy.ts",
     "./schema-hash": "./schema-hash.ts",
     "./schema-hash-legacy": "./schema-hash-legacy.ts",
-    "./schema-hash-modern": "./schema-hash-modern.ts"
+    "./schema-hash-modern": "./schema-hash-modern.ts",
+    "./schema-and-hash": "./schema-and-hash.ts"
   }
 }

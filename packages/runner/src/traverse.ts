@@ -5,6 +5,7 @@ import {
   internSchema,
   internSchemaAsHashString,
 } from "@commonfabric/data-model/schema-hash";
+import { SchemaAndHash } from "@commonfabric/data-model/schema-and-hash";
 import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import type {
@@ -371,24 +372,30 @@ export class CycleTracker<K> {
 /**
  * Cycle tracker for more complex objects with multiple parts.
  *
- * This will not work correctly if the key is modified after being added.
+ * Identity check on `partialKey`, structural check on `extraKey` via
+ * `internSchema`: the inner per-partialKey map is keyed on the
+ * `SchemaAndHash` object identity returned by interning the `extraKey`,
+ * so repeat calls with a structurally-equal schema hit the WeakMap in
+ * O(1) without re-hashing.
+ *
+ * An `undefined` `extraKey` is normalized to `true` (JSON Schema's
+ * "accept everything", which is exactly what `undefined` means at
+ * every current call site), so `internSchema` can always be called.
+ *
+ * This will not work correctly if the key is modified after being
+ * added.
  */
 export class CompoundCycleTracker<
   EqualKey,
-  ExtraKey extends FabricValue,
+  ExtraKey extends JSONSchema | undefined,
   Value = unknown,
 > {
-  // partialKey (identity) → Map<hash(extraKey), Value?>
-  private partial: Map<EqualKey, Map<string, Value | undefined>>;
+  // partialKey (identity) → WeakMap<SchemaAndHash (interned extraKey), Value?>
+  private partial: Map<EqualKey, WeakMap<SchemaAndHash, Value | undefined>>;
   constructor() {
     this.partial = new Map();
   }
 
-  /**
-   * Identity check on `partialKey`, hash-based check on `extraKey`.
-   * Uses `hashSchemaItem` (with WeakMap identity cache in legacy mode)
-   * so schema objects hash in O(1) amortized after the first call.
-   */
   include(
     partialKey: EqualKey,
     extraKey: ExtraKey,
@@ -397,22 +404,27 @@ export class CompoundCycleTracker<
   ): Disposable | null {
     let existing = this.partial.get(partialKey);
     if (existing === undefined) {
-      existing = new Map();
+      existing = new WeakMap();
       this.partial.set(partialKey, existing);
     }
-    const hash = hashSchemaItem(extraKey);
-    if (existing.has(hash)) {
+    const sah = internSchema(extraKey ?? true, true);
+    if (existing.has(sah)) {
       return null;
     }
-    existing.set(hash, value);
+    existing.set(sah, value);
     return {
       [Symbol.dispose]: () => {
         const entries = this.partial.get(partialKey);
         if (entries) {
-          entries.delete(hash);
-          if (entries.size === 0) {
-            this.partial.delete(partialKey);
-          }
+          entries.delete(sah);
+          // Note: WeakMap has no `size`, so we can't eagerly delete an
+          // empty inner map here the way the prior `Map<string, …>`
+          // version did. That's fine: the inner WeakMap itself is
+          // retained only as long as `partialKey` is retained in the
+          // outer Map, and its entries are GC'd when the keying
+          // `SchemaAndHash` objects go out of scope. Downstream
+          // callers do not depend on observing the "empty inner map"
+          // state (it was an internal optimization, not a contract).
         }
       },
     };
@@ -424,8 +436,8 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = hashSchemaItem(extraKey);
-    return existing.get(hash);
+    const sah = internSchema(extraKey ?? true, true);
+    return existing.get(sah);
   }
 }
 
