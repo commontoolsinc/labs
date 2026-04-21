@@ -190,40 +190,6 @@ function resetInternCache(): void {
 seedBooleanInterns();
 
 /**
- * Intern a schema: Freeze it, compute its hash, and cache the bidirectional
- * mapping. Returns the actual interned schema object or, optionally, the full
- * `SchemaAndHash`. The returned schema object is the same as (`===` to) the
- * given `schema` only if an identical schema was not already interned.
- *
- * If given a non-deep-frozen `schema`, this function will _always_ make it
- * deep-frozen as a side effect. Callers must be okay with this! This design is
- * motivated by the desire to minimize unnecessary cloning of objects, colored
- * by the observation that most mutable schemas are built by starting with an
- * effectively -- if not actually -- deep-immutable schema and selectively
- * shallow-cloned as mutable, for the express purpose of tactical modification
- * and then immediately treated once again as deep-immutable.
- */
-export function internSchema(
-  schema: JSONSchema,
-  wantSchemaAndHash?: false,
-): JSONSchema;
-export function internSchema(
-  schema: JSONSchema,
-  wantSchemaAndHash: true,
-): SchemaAndHash;
-export function internSchema(
-  schema: JSONSchema,
-  wantSchemaAndHash?: boolean,
-): JSONSchema | SchemaAndHash;
-export function internSchema(
-  schema: JSONSchema,
-  wantSchemaAndHash: boolean = false,
-): JSONSchema | SchemaAndHash {
-  const sahResult = internSchemaReturningSchemaAndHash(schema);
-  return wantSchemaAndHash ? sahResult : sahResult.schema;
-}
-
-/**
  * Helper for `internSchema()` which always returns a `SchemaAndHash`.
  */
 function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
@@ -272,6 +238,40 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
   schemaFinalizer.register(frozen, hashStr);
 
   return sah;
+}
+
+/**
+ * Intern a schema: Freeze it, compute its hash, and cache the bidirectional
+ * mapping. Returns the actual interned schema object or, optionally, the full
+ * `SchemaAndHash`. The returned schema object is the same as (`===` to) the
+ * given `schema` only if an identical schema was not already interned.
+ *
+ * If given a non-deep-frozen `schema`, this function will _always_ make it
+ * deep-frozen as a side effect. Callers must be okay with this! This design is
+ * motivated by the desire to minimize unnecessary cloning of objects, colored
+ * by the observation that most mutable schemas are built by starting with an
+ * effectively -- if not actually -- deep-immutable schema and selectively
+ * shallow-cloned as mutable, for the express purpose of tactical modification
+ * and then immediately treated once again as deep-immutable.
+ */
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash?: false,
+): JSONSchema;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash: true,
+): SchemaAndHash;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash?: boolean,
+): JSONSchema | SchemaAndHash;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash: boolean = false,
+): JSONSchema | SchemaAndHash {
+  const sahResult = internSchemaReturningSchemaAndHash(schema);
+  return wantSchemaAndHash ? sahResult : sahResult.schema;
 }
 
 /**
@@ -329,36 +329,12 @@ export function isInternedSchema(schema: JSONSchema): boolean {
   return schemaToSah.has(schema);
 }
 
-// ---------------------------------------------------------------------------
-// Interned cache-key helpers
-// ---------------------------------------------------------------------------
-
 /**
  * Interns (and thus deep-freezes) the given schema, returning its hash
  * string. Equivalent to `internSchema(schema, true).hashString`, but names
  * the operation and avoids the non-obvious `true` (`wantSchemaAndHash`)
- * argument at call sites. Intended for building stable cache-key strings
- * that also benefit from `internSchema`'s identity-stable WeakMap
- * fast-path on repeat lookups.
+ * argument at call sites.
  */
 export function internSchemaAsHashString(schema: JSONSchema): string {
   return internSchema(schema, true).hashString;
-}
-
-/**
- * Returns a cache-key string for an ordered pair of schemas, each interned
- * (and thus deep-frozen) via `internSchema`. The `|` delimiter is outside
- * the base64url alphabet used by hash strings, so the two halves cannot
- * merge ambiguously.
- *
- * Used at the `traverse.ts` sites that key an intern cache on a merge
- * operation's two input schemas. Interning the inputs stabilizes their
- * identities in `internSchema`'s WeakMap, so subsequent calls with the
- * same object references hit the hash-cache fast path in O(1) rather
- * than re-hashing. See
- * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1
- * for the motivating regression.
- */
-export function internedPairKey(a: JSONSchema, b: JSONSchema): string {
-  return `${internSchemaAsHashString(a)}|${internSchemaAsHashString(b)}`;
 }
