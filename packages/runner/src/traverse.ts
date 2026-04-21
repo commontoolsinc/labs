@@ -32,6 +32,7 @@ import {
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
+  DEFAULT_SELECTOR,
   internPathSelector,
   REJECTING_SELECTOR,
   schemaWithProperties,
@@ -339,16 +340,6 @@ export class MapSetStringToStrings extends MapSet<string, string> {
     super();
   }
 }
-
-// SchemaPathSelectors are relative to the doc root, so if we want to look at
-// the value of the doc, we need to have "value" in the path. Interned on
-// module load so that downstream users (notably `MapSetStringToPathSelectors`'
-// hash fn) can rely on the selector's immutability and the schema's WeakMap
-// cache entry.
-const DefaultSelector: SchemaPathSelector = internPathSelector({
-  path: ["value"],
-  schema: true,
-});
 
 export class CycleTracker<K> {
   private partial: Set<K>;
@@ -687,7 +678,7 @@ function getNormalizedLink(
 export abstract class BaseObjectTraverser {
   constructor(
     protected tx: IExtendedStorageTransaction,
-    protected selector: SchemaPathSelector = DefaultSelector,
+    protected selector: SchemaPathSelector = DEFAULT_SELECTOR,
     protected tracker: PointerCycleTracker = new CompoundCycleTracker<
       Immutable<FabricValue>,
       JSONSchema | undefined
@@ -779,7 +770,7 @@ export abstract class BaseObjectTraverser {
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
             [],
-            DefaultSelector,
+            DEFAULT_SELECTOR,
             "writeRedirect",
           );
           const [linkDoc, _selector] = this.nextLink(redirDoc, redirSelector);
@@ -789,7 +780,11 @@ export abstract class BaseObjectTraverser {
             linkDoc.value !== undefined ? linkDoc.address : redirDoc.address,
           );
           // We can follow all the links, since we don't need to track cells
-          const [valueDoc, _] = this.getDocAtPath(linkDoc, [], DefaultSelector);
+          const [valueDoc, _] = this.getDocAtPath(
+            linkDoc,
+            [],
+            DEFAULT_SELECTOR,
+          );
           docItem = valueDoc;
           this.tx.read(docItem.address, READ_FOR_SCHEDULING);
           if (docItem.value === undefined) {
@@ -835,7 +830,7 @@ export abstract class BaseObjectTraverser {
         const [redirDoc, _redirSelector] = this.getDocAtPath(
           doc,
           [],
-          DefaultSelector,
+          DEFAULT_SELECTOR,
           "writeRedirect",
         );
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
@@ -863,7 +858,7 @@ export abstract class BaseObjectTraverser {
         // our item link should point to the target of the last redirect
         itemLink = getNormalizedLink(redirDoc.address, true);
         // We can follow all the links, since we don't need to track cells
-        const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DefaultSelector);
+        const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DEFAULT_SELECTOR);
         this.tx.read(valueDoc.address, READ_FOR_SCHEDULING);
         return this.traverseLinkedDoc(
           valueDoc,
@@ -1886,7 +1881,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
   constructor(
     tx: IExtendedStorageTransaction,
-    selector: SchemaPathSelector = DefaultSelector,
+    selector: SchemaPathSelector = DEFAULT_SELECTOR,
     tracker: PointerCycleTracker = new CompoundCycleTracker<
       Immutable<FabricValue>,
       JSONSchema | undefined

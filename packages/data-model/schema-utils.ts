@@ -321,6 +321,20 @@ export const REJECTING_SELECTOR: SchemaPathSelector = Object.freeze({
 });
 
 /**
+ * Canonical "accept the full value" path selector. `SchemaPathSelector`s
+ * are relative to the doc root, so to look at the value of the doc the
+ * path needs to have `"value"` in it.
+ *
+ * Frozen at module load; like `REJECTING_SELECTOR`, the boolean
+ * `schema: true` member is not routed through `internSchema` here
+ * (same circular-import reason — see `REJECTING_SELECTOR` doc comment).
+ */
+export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
+  path: Object.freeze(["value"]) as readonly string[],
+  schema: true as const,
+});
+
+/**
  * Helper for `schemaForValueType()` and `emptySchemaObject()` to do the
  * lookup and interning as necessary.
  */
