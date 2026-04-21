@@ -1575,6 +1575,104 @@ for (const modernHash of [false, true]) {
         disposable![Symbol.dispose]();
         expect((tracker as any).partial.size).toBe(0);
       });
+
+      it("retains partial-key entries while sibling entries are live", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        const dispA = tracker.include(key, true);
+        const dispB = tracker.include(key, false);
+        expect(dispA).not.toBeNull();
+        expect(dispB).not.toBeNull();
+        // Disposing only A must not remove the outer `partial` entry —
+        // B's live entry still keys on the same partialKey.
+        dispA![Symbol.dispose]();
+        expect((tracker as any).partial.size).toBe(1);
+        expect((tracker as any).partial.get(key)!.size).toBe(1);
+        // Disposing B then cleans up.
+        dispB![Symbol.dispose]();
+        expect((tracker as any).partial.size).toBe(0);
+      });
+    });
+
+    describe("CompoundCycleTracker intern-based keying (Tactic 2B)", () => {
+      it("detects cycles on structurally-equal extraKey (not just identity)", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        // Two distinct object references with structurally-equal content.
+        const schemaA: JSONSchema = {
+          type: "object",
+          title: `cctInternKeyTestAt${Date.now()}-${Math.random()}`,
+        };
+        const schemaB: JSONSchema = { ...schemaA };
+        const first = tracker.include(key, schemaA);
+        expect(first).not.toBeNull();
+        // Re-including with a structurally-equal-but-non-identical schema
+        // must detect the cycle via `internSchema`'s structural dedup.
+        const second = tracker.include(key, schemaB);
+        expect(second).toBeNull();
+      });
+
+      it("treats `undefined` extraKey as `true` (JSON Schema accept-all)", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        const first = tracker.include(key, undefined);
+        expect(first).not.toBeNull();
+        // Re-including with `true` must collide with the prior `undefined`
+        // call — the class normalizes both to the same interned schema.
+        const second = tracker.include(key, true);
+        expect(second).toBeNull();
+        // And vice-versa.
+        const key2 = { id: "k2" };
+        tracker.include(key2, true);
+        expect(tracker.include(key2, undefined)).toBeNull();
+      });
+
+      it("distinguishes boolean `false` from boolean `true` / `undefined`", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        const a = tracker.include(key, true);
+        expect(a).not.toBeNull();
+        const b = tracker.include(key, false);
+        expect(b).not.toBeNull();
+      });
+
+      it("getExisting returns the stored value on re-include", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined,
+          string
+        >();
+        const key = { id: "k1" };
+        const schema: JSONSchema = {
+          type: "object",
+          title: `cctInternKeyTestAt${Date.now()}-${Math.random()}`,
+        };
+        tracker.include(key, schema, "value-a");
+        expect(tracker.getExisting(key, schema)).toBe("value-a");
+        expect(tracker.getExisting(key, { ...schema })).toBe("value-a");
+        expect(tracker.getExisting(key, true)).toBeUndefined();
+      });
+
+      it("returns undefined from getExisting for unknown partialKey", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined,
+          string
+        >();
+        expect(tracker.getExisting({ id: "missing" }, true)).toBeUndefined();
+      });
     });
 
     describe("canBranchMatch", () => {
