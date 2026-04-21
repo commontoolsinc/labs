@@ -83,6 +83,11 @@ const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
  */
 const MAX_DIRECT_STRING_LENGTH = 64;
 
+/**
+ * Maximum value (inclusive) of the small-length-number cache.
+ */
+const MAX_CACHED_SMALL_LENGTH = 500;
+
 /** Shared TextEncoder for UTF-8 string encoding. */
 const encoder = new TextEncoder();
 
@@ -99,6 +104,9 @@ const f64Bytes = new Uint8Array(f64Buf);
 const stringRepCache = new LRUCache<string, Uint8Array>({
   capacity: 50_000,
 });
+
+/** Cache of encoded small length numbers. */
+const smallLengthCache: Uint8Array[] = [];
 
 /**
  * Gets the bytes needed to represent the given string, either by computing it
@@ -142,7 +150,15 @@ function getStringRep(value: string) {
  * in-hash encoding for same.
  */
 function feedLength(hasher: IncrementalHasher, value: number): void {
-  hasher.update(encodeULEB128(value));
+  let valueBuf = smallLengthCache[value];
+  if (valueBuf === undefined) {
+    valueBuf = encodeULEB128(value);
+    if (value <= MAX_CACHED_SMALL_LENGTH) {
+      smallLengthCache[value] = valueBuf;
+    }
+  }
+
+  hasher.update(valueBuf);
 }
 
 /**
