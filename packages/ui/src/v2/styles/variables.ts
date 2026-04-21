@@ -4,6 +4,13 @@
  */
 
 export const variablesCSS = `
+  /*
+   * Canonical token namespaces:
+   * - --cf-colors-* defines the base palette and literal ramps.
+   * - --cf-theme-* is the runtime semantic contract emitted by theme-context.ts.
+   * - The deprecated singular cf-color namespace must not be introduced in v2 components.
+   */
+
   /* Colors - Primary (Figma blue ramp) */
   --cf-colors-primary-50: #eef2fe;
   --cf-colors-primary-100: #d5dffd;
@@ -46,7 +53,12 @@ export const variablesCSS = `
   --cf-colors-slate-700: #34373c;
 
   /* Colors - Named (Figma design system) */
+  --cf-colors-white: #ffffff;
+  --cf-colors-blue-50: #eff6ff;
+  --cf-colors-blue-100: #dbeafe;
   --cf-colors-blue: #4979fa;
+  --cf-colors-blue-500: #3b82f6;
+  --cf-colors-blue-600: #2563eb;
   --cf-colors-blue-dark: #376bf9;
   --cf-colors-blue-a10: rgba(73, 121, 250, 0.1);
   --cf-colors-blue-a20: rgba(73, 121, 250, 0.15);
@@ -58,11 +70,21 @@ export const variablesCSS = `
   --cf-colors-purple-a20: rgba(137, 82, 253, 0.15);
 
   --cf-colors-red: #ff6057;
+  --cf-colors-red-50: #fef2f2;
+  --cf-colors-red-100: #fee2e2;
+  --cf-colors-red-200: #fecaca;
+  --cf-colors-red-500: #ef4444;
+  --cf-colors-red-600: #dc2626;
+  --cf-colors-red-700: #b91c1c;
   --cf-colors-red-dark: #eb4747;
   --cf-colors-red-a10: rgba(255, 96, 87, 0.1);
   --cf-colors-red-a20: rgba(255, 96, 87, 0.15);
 
+  --cf-colors-green-50: #f0fdf4;
+  --cf-colors-green-100: #dcfce7;
   --cf-colors-green: #21c17b;
+  --cf-colors-green-500: #22c55e;
+  --cf-colors-green-600: #16a34a;
   --cf-colors-coral: #fc856d;
   --cf-colors-indigo: #5b53ff;
 

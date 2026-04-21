@@ -576,6 +576,15 @@ export function applyThemeToElement(
     additionalSpacing?: Record<string, string>;
   } = {},
 ) {
+  /*
+   * Canonical theme contract:
+   * - Semantic colors are emitted as `--cf-theme-color-*`.
+   * - Typography is emitted as `--cf-theme-font-*` plus border radius and animation duration.
+   * - Spacing is emitted as `--cf-theme-spacing-*`.
+   *
+   * Compatibility aliases are also emitted for older v2 components that still read
+   * legacy `--cf-theme-*` names. New code should prefer the canonical namespaces above.
+   */
   const {
     includeSpacing = true,
     includeColors = true,
@@ -593,8 +602,13 @@ export function applyThemeToElement(
       "--cf-theme-mono-font-family",
       theme.monoFontFamily,
     );
+    element.style.setProperty("--cf-theme-font-mono", theme.monoFontFamily);
     element.style.setProperty("--cf-theme-font-size", theme.fontSize);
     element.style.setProperty("--cf-theme-border-radius", theme.borderRadius);
+    element.style.setProperty(
+      "--cf-theme-border-radius-full",
+      "var(--cf-border-radius-full, 9999px)",
+    );
     element.style.setProperty(
       "--cf-theme-animation-duration",
       getAnimationDuration(theme.animationSpeed),
@@ -642,6 +656,56 @@ export function applyThemeToElement(
         resolveColor(token, colorScheme),
       );
     });
+
+    const legacyColorAliases = {
+      "background": resolveColor(theme.colors.background, colorScheme),
+      "border": resolveColor(theme.colors.border, colorScheme),
+      "border-muted": resolveColor(theme.colors.borderMuted, colorScheme),
+      "error": resolveColor(theme.colors.error, colorScheme),
+      "primary": resolveColor(theme.colors.primary, colorScheme),
+      "success": resolveColor(theme.colors.success, colorScheme),
+      "surface": resolveColor(theme.colors.surface, colorScheme),
+      "surface-hover": resolveColor(theme.colors.surfaceHover, colorScheme),
+      "text": resolveColor(theme.colors.text, colorScheme),
+      "text-muted": resolveColor(theme.colors.textMuted, colorScheme),
+    };
+
+    Object.entries(legacyColorAliases).forEach(([key, value]) => {
+      element.style.setProperty(`--cf-theme-${key}`, value);
+    });
+
+    element.style.setProperty(
+      "--cf-theme-color-error-surface",
+      `color-mix(in srgb, ${
+        resolveColor(theme.colors.error, colorScheme)
+      } 12%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+    );
+    element.style.setProperty(
+      "--cf-theme-color-error-light",
+      `color-mix(in srgb, ${
+        resolveColor(theme.colors.error, colorScheme)
+      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+    );
+    element.style.setProperty(
+      "--cf-theme-color-primary-light",
+      `color-mix(in srgb, ${
+        resolveColor(theme.colors.primary, colorScheme)
+      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+    );
+    element.style.setProperty(
+      "--cf-theme-color-success-light",
+      `color-mix(in srgb, ${
+        resolveColor(theme.colors.success, colorScheme)
+      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+    );
+    element.style.setProperty(
+      "--cf-theme-color-muted",
+      resolveColor(theme.colors.surfaceTertiary, colorScheme),
+    );
+    element.style.setProperty(
+      "--cf-theme-color-text-secondary",
+      resolveColor(theme.colors.textMuted, colorScheme),
+    );
   }
 
   // Semantic spacing
@@ -658,7 +722,14 @@ export function applyThemeToElement(
 
     Object.entries(spacingMap).forEach(([key, value]) => {
       element.style.setProperty(`--cf-theme-spacing-${key}`, value);
+      if (key.startsWith("padding-") || key === "message-bottom") {
+        element.style.setProperty(`--cf-theme-${key}`, value);
+      }
     });
+
+    element.style.setProperty("--cf-theme-spacing", spacingMap.normal);
+    element.style.setProperty("--cf-theme-spacing-compact", spacingMap.tight);
+    element.style.setProperty("--cf-theme-padding", spacingMap.normal);
   }
 }
 

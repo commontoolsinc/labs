@@ -111,18 +111,23 @@ export class CFChat extends BaseElement {
 
       .pending-bubble {
         background-color: var(
-          --cf-theme-surface,
-          var(--cf-color-gray-100, #f2f3f6)
+          --cf-theme-color-surface,
+          #f2f3f6
         );
-        color: var(--cf-theme-text-muted, var(--cf-color-gray-900, #16181d));
-        padding: var(--cf-theme-padding-bubble, var(--cf-spacing-3, 0.75rem))
-          var(--cf-theme-padding-bubble-horizontal, var(--cf-spacing-4, 1rem));
+        color: var(--cf-theme-color-text-muted, #16181d);
+        padding: var(
+          --cf-theme-spacing-padding-bubble,
+          var(--cf-spacing-3, 0.75rem)
+        )
+          var(
+            --cf-theme-spacing-padding-bubble-horizontal,
+            var(--cf-spacing-4, 1rem)
+          );
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-lg, 0.5rem)
         );
-        border: 1px solid
-          var(--cf-theme-border-muted, var(--cf-color-gray-200, #eceef1));
+        border: 1px solid var(--cf-theme-color-border-muted, #eceef1);
         max-width: 70%;
         display: flex;
         align-items: center;
@@ -138,8 +143,8 @@ export class CFChat extends BaseElement {
         width: 8px;
         height: 8px;
         background-color: var(
-          --cf-theme-text-muted,
-          var(--cf-color-gray-400, #b3b6bc)
+          --cf-theme-color-text-muted,
+          #b3b6bc
         );
         border-radius: 50%;
         animation: typingBounce 1.4s infinite ease-in-out;
