@@ -369,6 +369,6 @@ export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
  * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1
  * for the motivating regression.
  */
-export function internedPairKey(a: JSONSchema, b: JSONSchema): string {
+export function internSchemaPairAsKey(a: JSONSchema, b: JSONSchema): string {
   return `${internSchemaAsHashString(a)}|${internSchemaAsHashString(b)}`;
 }
