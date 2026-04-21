@@ -272,7 +272,7 @@ export class CFOAuth extends BaseElement {
         );
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-white, #ffffff)
+          var(--cf-colors-white, #ffffff)
         );
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         max-width: 600px;
@@ -299,7 +299,7 @@ export class CFOAuth extends BaseElement {
       .user-name {
         margin: 0;
         font-size: 1.5rem;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
         font-weight: 600;
       }
 
@@ -307,7 +307,7 @@ export class CFOAuth extends BaseElement {
         margin: 0.25rem 0 0;
         color: var(
           --cf-theme-color-text-muted,
-          var(--cf-color-gray-600, #6b7280)
+          #6b7280
         );
       }
 
@@ -341,7 +341,7 @@ export class CFOAuth extends BaseElement {
       .oauth-button:disabled {
         background-color: var(
           --cf-theme-color-border,
-          var(--cf-color-gray-300, #d1d5db)
+          #d1d5db
         ) !important;
         cursor: not-allowed;
       }
@@ -360,14 +360,14 @@ export class CFOAuth extends BaseElement {
       .oauth-button.logout {
         background-color: var(
           --cf-theme-color-error,
-          var(--cf-color-red-600, #dc2626)
+          var(--cf-colors-red-600, #dc2626)
         ) !important;
       }
 
       .oauth-button.logout:hover {
         background-color: var(
           --cf-theme-color-error,
-          var(--cf-color-red-700, #b91c1c)
+          var(--cf-colors-red-700, #b91c1c)
         ) !important;
       }
     `,

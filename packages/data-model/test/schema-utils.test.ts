@@ -10,11 +10,13 @@ import type {
   JSONSchema,
   JSONSchemaObj,
   JSONSchemaTypes,
+  SchemaPathSelector,
 } from "@commonfabric/api";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,
   emptySchemaObject,
+  internPathSelector,
   isNontrivialSchema,
   schemaForValueType,
   schemaWithoutProperties,
@@ -860,5 +862,75 @@ describe("emptySchemaObject", () => {
 
   it("should return a frozen result", () => {
     assert(isDeepFrozen(emptySchemaObject()));
+  });
+});
+
+describe("internPathSelector", () => {
+  // Content-unique markers guarantee no prior interning has seen these
+  // schemas — avoids the flake shape Dan flagged on PR #3335.
+  const uniqueSchema = (): JSONSchema => ({
+    type: "object",
+    title: `internPathSelectorTestAt${Date.now()}-${Math.random()}`,
+  });
+
+  it("freezes `selector.path` and `selector` in place", () => {
+    const selector: SchemaPathSelector = {
+      path: ["a", "b"],
+      schema: uniqueSchema(),
+    };
+    assertStrictEquals(Object.isFrozen(selector), false);
+    assertStrictEquals(Object.isFrozen(selector.path), false);
+    internPathSelector(selector);
+    assertStrictEquals(Object.isFrozen(selector), true);
+    assertStrictEquals(Object.isFrozen(selector.path), true);
+  });
+
+  it("interns `selector.schema` when it is an object", () => {
+    const schema = uniqueSchema();
+    const selector: SchemaPathSelector = { path: ["x"], schema };
+    assertStrictEquals(isInternedSchema(schema), false);
+    internPathSelector(selector);
+    assertStrictEquals(isInternedSchema(schema), true);
+    assert(isDeepFrozen(schema));
+  });
+
+  it("handles selectors whose `schema` is undefined", () => {
+    const selector: SchemaPathSelector = { path: ["p"] };
+    // Must not throw — `internSchema(undefined)` would, and the guard
+    // `if (selector.schema !== undefined)` prevents it.
+    internPathSelector(selector);
+    assertStrictEquals(Object.isFrozen(selector), true);
+    assertStrictEquals(Object.isFrozen(selector.path), true);
+  });
+
+  it("handles boolean `selector.schema` (true and false)", () => {
+    const trueSelector: SchemaPathSelector = { path: ["t"], schema: true };
+    const falseSelector: SchemaPathSelector = { path: ["f"], schema: false };
+    internPathSelector(trueSelector);
+    internPathSelector(falseSelector);
+    assertStrictEquals(Object.isFrozen(trueSelector), true);
+    assertStrictEquals(Object.isFrozen(falseSelector), true);
+    assertStrictEquals(isInternedSchema(true), true);
+    assertStrictEquals(isInternedSchema(false), true);
+  });
+
+  it("returns its input reference (does not clone)", () => {
+    const selector: SchemaPathSelector = {
+      path: ["x"],
+      schema: uniqueSchema(),
+    };
+    const result = internPathSelector(selector);
+    assertStrictEquals(result, selector);
+  });
+
+  it("is idempotent: `internPathSelector(x) === internPathSelector(x)`", () => {
+    const selector: SchemaPathSelector = {
+      path: ["x"],
+      schema: uniqueSchema(),
+    };
+    const first = internPathSelector(selector);
+    const second = internPathSelector(selector);
+    assertStrictEquals(first, second);
+    assertStrictEquals(first, selector);
   });
 });

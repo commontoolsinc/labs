@@ -25,6 +25,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
+/** @deprecated Use ComponentSize instead */
 export type LoaderSize = "sm" | "md" | "lg";
 
 /**
@@ -33,7 +34,7 @@ export type LoaderSize = "sm" | "md" | "lg";
  * @tag cf-loader
  * @extends BaseElement
  *
- * @property {LoaderSize} size - Size variant: "sm" (12px), "md" (24px), "lg" (48px)
+ * @property {ComponentSize} size - Size variant: "sm" (16px), "md" (24px), "lg" (40px) (default: "md")
  * @property {boolean} showElapsed - Whether to display elapsed time
  * @property {boolean} showStop - Whether to display stop button
  *
@@ -48,19 +49,19 @@ export class CFLoader extends BaseElement {
     :host {
       --cf-loader-color-track: var(
         --cf-theme-color-border,
-        var(--cf-colors-gray-300, #e0e0e0)
+        var(--cf-colors-gray-300, #d5d7dd)
       );
       --cf-loader-color-arc: var(
         --cf-theme-color-primary,
-        var(--cf-colors-primary-500, #000)
+        var(--cf-colors-primary-500, #4979fa)
       );
       --cf-loader-color-text: var(
         --cf-theme-color-text-muted,
-        var(--cf-colors-gray-600, #666)
+        var(--cf-colors-gray-600, #5b5f65)
       );
       --cf-loader-color-surface: var(
         --cf-theme-color-surface,
-        var(--cf-colors-gray-100, #f0f0f0)
+        var(--cf-colors-gray-100, #f2f3f6)
       );
       --cf-loader-color-error: var(
         --cf-theme-color-error,
@@ -83,21 +84,21 @@ export class CFLoader extends BaseElement {
       animation: spin 0.8s linear infinite;
     }
 
-    /* Size variants: sm=12px, md=24px, lg=48px */
+    /* Size variants using coordinated scale */
     :host([size="sm"]) .spinner {
-      width: 12px;
-      height: 12px;
+      width: var(--cf-size-sm-icon-sm, 12px);
+      height: var(--cf-size-sm-icon-sm, 12px);
     }
 
     :host([size="md"]) .spinner,
     :host(:not([size])) .spinner {
-      width: 24px;
-      height: 24px;
+      width: var(--cf-size-md-icon-lg, 24px);
+      height: var(--cf-size-md-icon-lg, 24px);
     }
 
     :host([size="lg"]) .spinner {
-      width: 48px;
-      height: 48px;
+      width: var(--cf-size-xl-height, 48px);
+      height: var(--cf-size-xl-height, 48px);
     }
 
     .track {
@@ -171,7 +172,7 @@ export class CFLoader extends BaseElement {
     showStop: { type: Boolean, attribute: "show-stop" },
   };
 
-  declare size: LoaderSize;
+  declare size: "sm" | "md" | "lg";
   declare showElapsed: boolean;
   declare showStop: boolean;
 
