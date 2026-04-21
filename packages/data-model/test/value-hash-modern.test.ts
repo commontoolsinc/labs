@@ -4,7 +4,6 @@ import {
   hashOfModern as modernHashRaw,
   hashOfModernAsString,
 } from "../value-hash-modern.ts";
-import { encodeULEB128 } from "@commonfabric/leb128";
 import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { FabricHash } from "../fabric-hash.ts";
