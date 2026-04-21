@@ -70,32 +70,31 @@ const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
 
 // ---------------------------------------------------------------------------
-// Shared scratch buffer (safe in single-threaded synchronous JS -- see
-// async safety analysis in PR #2856 review round 2)
+// Core: recursive value feeding
 // ---------------------------------------------------------------------------
-
-/** Reusable 8-byte buffer for float64 encoding. */
-const f64Buf = new ArrayBuffer(8);
-const f64View = new DataView(f64Buf);
-const f64Bytes = new Uint8Array(f64Buf);
 
 /** Shared TextEncoder for UTF-8 string encoding. */
 const encoder = new TextEncoder();
 
-// ---------------------------------------------------------------------------
-// Helper: feed an unsigned LEB128 length prefix
-// ---------------------------------------------------------------------------
+/** Reusable 8-byte buffer for float64 encoding. */
+const f64Buf = new ArrayBuffer(8);
 
+/** Float64 "view" of `f64Buf`. */
+const f64View = new DataView(f64Buf);
+
+/** Byte-array "view" of `f64Buf`. */
+const f64Bytes = new Uint8Array(f64Buf);
+
+/**
+ * Updates an incremental hasher with a length value, using the standard
+ * in-hash encoding for same.
+ */
 function feedLength(hasher: IncrementalHasher, value: number): void {
   hasher.update(encodeULEB128(value));
 }
 
-// ---------------------------------------------------------------------------
-// Core: recursive value feeding
-// ---------------------------------------------------------------------------
-
 /**
- * Feed a single `FabricValue` into the hasher, using the type-tagged
+ * Feeds a single `FabricValue` into the hasher, using the type-tagged
  * byte format from the byte-level spec.
  */
 function feedValue(hasher: IncrementalHasher, value: unknown): void {
