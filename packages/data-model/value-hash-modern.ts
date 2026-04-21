@@ -105,8 +105,10 @@ const stringRepCache = new LRUCache<string, Uint8Array>({
   capacity: 50_000,
 });
 
-/** Cache of encoded small length numbers. */
-const smallLengthCache: Uint8Array[] = [];
+/** Cache of encoded small-length numbers. */
+const smallLengthCache: Uint8Array[] = Array(MAX_CACHED_SMALL_LENGTH + 1).fill(
+  undefined,
+);
 
 /**
  * Gets the bytes needed to represent the given string, either by computing it
