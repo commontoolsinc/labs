@@ -11,7 +11,11 @@ import type {
 } from "@commonfabric/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { cloneIfNecessary } from "./fabric-value.ts";
-import { internSchema, isInternedSchema } from "./schema-hash.ts";
+import {
+  internSchema,
+  internSchemaAsHashString,
+  isInternedSchema,
+} from "./schema-hash.ts";
 import { type FabricValue } from "./interface.ts";
 
 /**
@@ -19,6 +23,23 @@ import { type FabricValue } from "./interface.ts";
  * interned schemas. Populated lazily.
  */
 const BASIC_SCHEMAS: Record<string, JSONSchemaObj> = {};
+
+/**
+ * Helper for `schemaForValueType()` and `emptySchemaObject()` to do the
+ * lookup and interning as necessary.
+ */
+function getBasicSchema(key: string) {
+  const found = BASIC_SCHEMAS[key];
+
+  if (found) {
+    return found;
+  } else {
+    const result = BASIC_SCHEMAS[key] = internSchema({
+      type: key as JSONSchemaTypes,
+    }) as JSONSchemaObj;
+    return result;
+  }
+}
 
 /**
  * Indicates if the given (nullable) schema is in fact a non-trivial schema. A
@@ -335,18 +356,19 @@ export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
 });
 
 /**
- * Helper for `schemaForValueType()` and `emptySchemaObject()` to do the
- * lookup and interning as necessary.
+ * Returns a cache-key string for an ordered pair of schemas, each interned
+ * (and thus deep-frozen) via `internSchema`. The `|` delimiter is outside
+ * the base64url alphabet used by hash strings, so the two halves cannot
+ * merge ambiguously.
+ *
+ * Used at the `traverse.ts` sites that key an intern cache on a merge
+ * operation's two input schemas. Interning the inputs stabilizes their
+ * identities in `internSchema`'s WeakMap, so subsequent calls with the
+ * same object references hit the hash-cache fast path in O(1) rather
+ * than re-hashing. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1
+ * for the motivating regression.
  */
-function getBasicSchema(key: string) {
-  const found = BASIC_SCHEMAS[key];
-
-  if (found) {
-    return found;
-  } else {
-    const result = BASIC_SCHEMAS[key] = internSchema({
-      type: key as JSONSchemaTypes,
-    }) as JSONSchemaObj;
-    return result;
-  }
+export function internSchemaPairAsKey(a: JSONSchema, b: JSONSchema): string {
+  return `${internSchemaAsHashString(a)}|${internSchemaAsHashString(b)}`;
 }

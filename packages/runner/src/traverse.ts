@@ -2,7 +2,6 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   hashSchemaItem,
-  internedPairKey,
   internSchema,
   internSchemaAsHashString,
 } from "@commonfabric/data-model/schema-hash";
@@ -34,6 +33,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   DEFAULT_SELECTOR,
   internPathSelector,
+  internSchemaPairAsKey,
   REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
@@ -1455,7 +1455,7 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
-  const key = internedPairKey(flagSchema, schema);
+  const key = internSchemaPairAsKey(flagSchema, schema);
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
@@ -1503,7 +1503,7 @@ export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = internedPairKey(parentSchema, linkSchema);
+  const key = internSchemaPairAsKey(parentSchema, linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
@@ -3162,7 +3162,7 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  const key = internedPairKey(outerSchema, innerSchema);
+  const key = internSchemaPairAsKey(outerSchema, innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
   const result = schemaWithProperties(outerSchema, innerSchema);
