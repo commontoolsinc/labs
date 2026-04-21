@@ -37,7 +37,10 @@ import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
-import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
+import {
+  REJECTING_SELECTOR,
+  schemaWithProperties,
+} from "@commonfabric/data-model/schema-utils";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
@@ -789,12 +792,11 @@ export class Replica {
     // remote.
     // this is the object with the of/the/cause nesting, then a SchemaPathSelector inside
     const schemaSelector = {};
-    // Patch to have a valid selector for each entry
-    const defaultSelector = { path: [], schema: false };
+    // Patch to have a valid selector for each entry.
     const schemaEntries: [BaseMemoryAddress, SchemaPathSelector][] = entries
       .map((
         [address, schemaPathSelector],
-      ) => [address, schemaPathSelector ?? defaultSelector]);
+      ) => [address, schemaPathSelector ?? REJECTING_SELECTOR]);
     const promises = [];
     const newEntries: [BaseMemoryAddress, SchemaPathSelector][] = [];
     for (const [address, selector] of schemaEntries) {

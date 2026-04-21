@@ -303,6 +303,24 @@ export function internPathSelector(
 }
 
 /**
+ * Canonical "reject everything at the root" path selector. Used by sites
+ * that want to record a doc dependency (or normalize a `{ schema: false,
+ * ... }` input) without actually traversing into it.
+ *
+ * Frozen at module load, but its `schema: false` member is NOT routed
+ * through `internSchema` here (because doing so during `schema-utils.ts`'s
+ * module-load would reach into a not-yet-initialized `schema-hash.ts`
+ * due to the pre-existing circular import between the two modules). The
+ * boolean-schema intern path uses prefab singletons anyway, so
+ * lazy-interning the `false` on first real selector use is
+ * behaviorally equivalent to interning here.
+ */
+export const REJECTING_SELECTOR: SchemaPathSelector = Object.freeze({
+  path: Object.freeze([]) as readonly string[],
+  schema: false as const,
+});
+
+/**
  * Helper for `schemaForValueType()` and `emptySchemaObject()` to do the
  * lookup and interning as necessary.
  */

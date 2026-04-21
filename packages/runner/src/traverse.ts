@@ -33,6 +33,7 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   internPathSelector,
+  REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
@@ -347,14 +348,6 @@ export class MapSetStringToStrings extends MapSet<string, string> {
 const DefaultSelector: SchemaPathSelector = internPathSelector({
   path: ["value"],
   schema: true,
-});
-
-// Canonical "reject everything at the root" selector, used at sites that
-// want to record a doc dependency without actually traversing into it.
-// Interned on module load; reused by reference.
-const RejectingSelector: SchemaPathSelector = internPathSelector({
-  path: [],
-  schema: false,
 });
 
 export class CycleTracker<K> {
@@ -1433,7 +1426,7 @@ export function loadSource(
     return;
   }
   const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, RejectingSelector);
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
 
   // We've lost the space from our address in the tx.read, so recreate
   const fullEntry = { address: address, value: entry.value };
@@ -1756,7 +1749,7 @@ function loadLinkedPattern(
     return;
   }
   const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, RejectingSelector);
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
 }
 
 // docPath is where we found the pointer and are doing this work. It should
