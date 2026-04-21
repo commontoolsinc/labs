@@ -1607,7 +1607,7 @@ for (const modernHash of [false, true]) {
         // Two distinct object references with structurally-equal content.
         const schemaA: JSONSchema = {
           type: "object",
-          title: `cctWeakmapTestAt${Date.now()}-${Math.random()}`,
+          title: `cctInternKeyTestAt${Date.now()}-${Math.random()}`,
         };
         const schemaB: JSONSchema = { ...schemaA };
         const first = tracker.include(key, schemaA);
@@ -1657,7 +1657,7 @@ for (const modernHash of [false, true]) {
         const key = { id: "k1" };
         const schema: JSONSchema = {
           type: "object",
-          title: `cctWeakmapTestAt${Date.now()}-${Math.random()}`,
+          title: `cctInternKeyTestAt${Date.now()}-${Math.random()}`,
         };
         tracker.include(key, schema, "value-a");
         expect(tracker.getExisting(key, schema)).toBe("value-a");
