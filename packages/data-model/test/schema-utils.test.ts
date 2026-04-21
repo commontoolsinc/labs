@@ -17,8 +17,8 @@ import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,
   emptySchemaObject,
-  internSchemaPairAsKey,
   internPathSelector,
+  internSchemaPairAsKey,
   isNontrivialSchema,
   schemaForValueType,
   schemaWithoutProperties,
@@ -912,7 +912,10 @@ describe("internSchemaPairAsKey()", () => {
     };
     const b1: JSONSchema = { type: "array", items: { type: "number" } };
     const b2: JSONSchema = { type: "array", items: { type: "number" } };
-    assertStrictEquals(internSchemaPairAsKey(a1, b1), internSchemaPairAsKey(a2, b2));
+    assertStrictEquals(
+      internSchemaPairAsKey(a1, b1),
+      internSchemaPairAsKey(a2, b2),
+    );
   });
 
   it("interns both inputs as a side effect", () => {
