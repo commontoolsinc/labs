@@ -23,7 +23,7 @@ const textEncoder = new TextEncoder();
 /**
  * Cache of already-computed hashes for objects.
  */
-const hashCache = new WeakMap<object, string>();
+const hashCache = new WeakMap<object, FabricHash>();
 
 /**
  * LRU cache for primitive value hashes. Primitives (strings, numbers,
@@ -31,7 +31,7 @@ const hashCache = new WeakMap<object, string>();
  * The legacy `merkle-reference` uses a 50K-entry LRU with a reported 97%+
  * hit rate -- we match that sizing.
  */
-const primitiveHashCache = new LRUCache<string | number, string>({
+const primitiveHashCache = new LRUCache<string | number, FabricHash>({
   capacity: 50_000,
 });
 
@@ -87,12 +87,12 @@ function computeHashableString(value: unknown): string {
 /**
  * Computes the hash for a value based on a canonical string representation.
  */
-function computeHash(value: unknown): string {
+function computeHash(value: unknown): FabricHash {
   const hashable = computeHashableString(value);
   const encoded = textEncoder.encode(hashable);
   const hashed = sha256(encoded);
 
-  return toUnpaddedBase64url(hashed);
+  return new FabricHash(hashed, "legacy");
 }
 
 /** Pre-computed constant hashes (these values never change). */
@@ -106,7 +106,7 @@ const FALSE_HASH = computeHash(false);
  * same. Results are cached either via a `WeakMap` (for identity-bearing values)
  * or an LRU cache, so repeated hashing of the same value is O(1).
  */
-function computeOrFindHash(value: unknown): string {
+function computeOrFindHash(value: unknown): FabricHash {
   switch (typeof value) {
     case "boolean":
       return value ? TRUE_HASH : FALSE_HASH;
@@ -138,29 +138,19 @@ function computeOrFindHash(value: unknown): string {
   }
 }
 
-/** Wrap a hash result as a `FabricHash` with algorithm tag "legacy". */
-function makeLegacyFabricHash(s: string): FabricHash {
-  // Note: Because the inner code produces a base64url-encoded string, we have
-  // to undo it here. This arrangement is inefficient for this function, but
-  // it's actually the non-`FabricHash` functions that are more performance-
-  // sensitive.
-  const hashBytes = fromBase64url(s);
-  return new FabricHash(hashBytes, "legacy");
-}
-
 /** Legacy hash of a JSONSchema, returned as a string. */
 export function hashSchemaLegacyAsString(schema: JSONSchema): string {
-  return computeOrFindHash(schema);
+  return computeOrFindHash(schema).hashString;
 }
 
 /** Legacy hash of a schema-related item, returned as a string. */
 export function hashSchemaItemLegacyAsString(item: FabricValue): string {
-  return computeOrFindHash(item);
+  return computeOrFindHash(item).hashString;
 }
 
 /** Legacy hash of a schema-related item, returned as a FabricHash. */
 export function hashSchemaItemLegacy(
   item: FabricValue,
 ): FabricHash {
-  return makeLegacyFabricHash(computeOrFindHash(item));
+  return computeOrFindHash(item);
 }
