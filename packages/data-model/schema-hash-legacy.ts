@@ -7,10 +7,6 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 import { LRUCache } from "@commonfabric/utils/cache";
-import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
 import { sha256 } from "@commonfabric/content-hash";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
