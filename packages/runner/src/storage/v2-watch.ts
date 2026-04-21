@@ -1,5 +1,5 @@
-import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { hashSchema } from "@commonfabric/data-model/schema-hash";
+import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { MIME } from "@commonfabric/memory/interface";
 import { stableHash } from "../traverse.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -12,22 +12,21 @@ import type {
   URI,
 } from "./interface.ts";
 
+// Canonical "reject everything at the root" selector returned when
+// `normalizeSyncSelector` is given `undefined` or `{ schema: false, ... }`.
+// Interned on module load; reused by reference.
+const NORMALIZED_REJECT: SchemaPathSelector = internPathSelector({
+  path: [],
+  schema: false,
+});
+
 export const normalizeSyncSelector = (
   selector: SchemaPathSelector | undefined,
 ): SchemaPathSelector => {
-  if (selector !== undefined && selector.schema !== false) {
-    const schema = selector.schema === undefined
-      ? undefined
-      : internSchema(toDeepFrozenSchema(selector.schema, false));
-    if (schema === selector.schema) {
-      return selector;
-    }
-    return {
-      path: selector.path,
-      schema,
-    };
+  if (selector === undefined || selector.schema === false) {
+    return NORMALIZED_REJECT;
   }
-  return { path: [], schema: false };
+  return internPathSelector(selector);
 };
 
 export const normalizeSyncEntries = (

@@ -31,7 +31,10 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
+import {
+  internPathSelector,
+  schemaWithProperties,
+} from "@commonfabric/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,
@@ -307,12 +310,13 @@ export class MapSet<K, V> {
  * code. When `hashValues` is `true`, uses `hashSchemaItem` from the
  * schema-hash dispatch layer as the hash function.
  *
- * Before hashing, the selector is interned-and-frozen in place: `v.schema`
- * (if present) is interned via `internSchema`, and `v.path` and `v` are
- * frozen. This satisfies the `isDeepFrozen` guard in `hashOfModernInternal`,
- * so repeat hashes of the same selector reference hit the WeakMap cache,
- * and interning `v.schema` additionally stabilizes that inner identity for
- * any downstream caller that re-hashes it. See
+ * **Contract:** Callers must hand in selectors that have already been
+ * interned via `internPathSelector` (from `@commonfabric/data-model/schema-utils`).
+ * That helper deep-freezes `v.path` and `v`, and interns `v.schema`, so the
+ * `isDeepFrozen` guard in `hashOfModernInternal` is satisfied and repeat
+ * hashes of the same selector reference hit the WeakMap cache. Selectors
+ * constructed fresh at insertion sites should be wrapped with
+ * `internPathSelector(...)` there; see
  * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §4
  * Phase 2 "DEFEAT-8" for the motivating analysis.
  */
@@ -321,16 +325,7 @@ export class MapSetStringToPathSelectors extends MapSet<
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(
-      hashValues
-        ? (v) => {
-          if (v.schema !== undefined) internSchema(v.schema);
-          Object.freeze(v.path);
-          Object.freeze(v);
-          return hashSchemaItem(v);
-        }
-        : undefined,
-    );
+    super(hashValues ? (v) => hashSchemaItem(v) : undefined);
   }
 }
 
@@ -345,8 +340,22 @@ export class MapSetStringToStrings extends MapSet<string, string> {
 }
 
 // SchemaPathSelectors are relative to the doc root, so if we want to look at
-// the value of the doc, we need to have "value" in the path.
-const DefaultSelector: SchemaPathSelector = { path: ["value"], schema: true };
+// the value of the doc, we need to have "value" in the path. Interned on
+// module load so that downstream users (notably `MapSetStringToPathSelectors`'
+// hash fn) can rely on the selector's immutability and the schema's WeakMap
+// cache entry.
+const DefaultSelector: SchemaPathSelector = internPathSelector({
+  path: ["value"],
+  schema: true,
+});
+
+// Canonical "reject everything at the root" selector, used at sites that
+// want to record a doc dependency without actually traversing into it.
+// Interned on module load; reused by reference.
+const RejectingSelector: SchemaPathSelector = internPathSelector({
+  path: [],
+  schema: false,
+});
 
 export class CycleTracker<K> {
   private partial: Set<K>;
@@ -1352,7 +1361,7 @@ function trackVisitedDoc(
   // We have a reference to a different doc, so track the dependency
   // and update our targetDoc
   if (selector !== undefined) {
-    schemaTracker.add(getTrackerKey(target), selector);
+    schemaTracker.add(getTrackerKey(target), internPathSelector(selector));
   }
   // Load the sources/patterns recursively unless we're a retracted fact.
   if (includeSource) {
@@ -1421,7 +1430,7 @@ export function loadSource(
     return;
   }
   const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, { path: [], schema: false });
+  schemaTracker.add(docKey, RejectingSelector);
 
   // We've lost the space from our address in the tx.read, so recreate
   const fullEntry = { address: address, value: entry.value };
@@ -1744,7 +1753,7 @@ function loadLinkedPattern(
     return;
   }
   const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, { path: [], schema: false });
+  schemaTracker.add(docKey, RejectingSelector);
 }
 
 // docPath is where we found the pointer and are doing this work. It should
@@ -1993,7 +2002,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.schemaTracker.deepEqualMs = 0;
 
     logger.timeStart("traverse");
-    this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
+    this.schemaTracker.add(
+      getTrackerKey(doc.address),
+      internPathSelector(this.selector),
+    );
     // Flag the top level read of doc for the scheduler
     this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     const rv = this.traverseWithSelector(doc, this.selector, link);
