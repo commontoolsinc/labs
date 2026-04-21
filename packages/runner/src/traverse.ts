@@ -5,7 +5,6 @@ import {
   internSchema,
   internSchemaAsHashString,
 } from "@commonfabric/data-model/schema-hash";
-import { SchemaAndHash } from "@commonfabric/data-model/schema-and-hash";
 import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import type {
@@ -373,14 +372,16 @@ export class CycleTracker<K> {
  * Cycle tracker for more complex objects with multiple parts.
  *
  * Identity check on `partialKey`, structural check on `extraKey` via
- * `internSchema`: the inner per-partialKey map is keyed on the
- * `SchemaAndHash` object identity returned by interning the `extraKey`,
- * so repeat calls with a structurally-equal schema hit the WeakMap in
- * O(1) without re-hashing.
+ * the interned hash string of `extraKey`: the inner per-partialKey map
+ * is keyed on `internSchemaAsHashString(extraKey ?? true)`, so repeat
+ * calls with a structurally-equal schema re-lookup the same entry in
+ * O(1) without re-hashing — the intern cache's WeakMap returns the
+ * canonical hash string without invoking `hashSchemaItem` on
+ * already-interned inputs.
  *
  * An `undefined` `extraKey` is normalized to `true` (JSON Schema's
  * "accept everything", which is exactly what `undefined` means at
- * every current call site), so `internSchema` can always be called.
+ * every current call site), so the intern call can always be made.
  *
  * This will not work correctly if the key is modified after being
  * added.
@@ -390,20 +391,10 @@ export class CompoundCycleTracker<
   ExtraKey extends JSONSchema | undefined,
   Value = unknown,
 > {
-  // partialKey (identity) → WeakMap<SchemaAndHash (interned extraKey), Value?>
-  private partial: Map<EqualKey, WeakMap<SchemaAndHash, Value | undefined>>;
-  // partialKey → live-entry count for its inner WeakMap. Used to eagerly
-  // remove the outer `partial` entry when its inner map's live-entry count
-  // hits zero (WeakMap has no `.size`, so the count is tracked in
-  // parallel). Required because the outer container can't itself be a
-  // WeakMap: `EqualKey` admits primitives (`FabricValue` includes `null |
-  // boolean | number | string | bigint | ...`), which a WeakMap-keyed
-  // outer wouldn't accept. Without this parallel count, long-lived
-  // trackers would retain disposed-of `partialKey` entries indefinitely.
-  private partialCounts: Map<EqualKey, number>;
+  // partialKey (identity) → Map<interned extraKey hashString, Value?>
+  private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
     this.partial = new Map();
-    this.partialCounts = new Map();
   }
 
   include(
@@ -414,29 +405,21 @@ export class CompoundCycleTracker<
   ): Disposable | null {
     let existing = this.partial.get(partialKey);
     if (existing === undefined) {
-      existing = new WeakMap();
+      existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const sah = internSchema(extraKey ?? true, true);
-    if (existing.has(sah)) {
+    const hash = internSchemaAsHashString(extraKey ?? true);
+    if (existing.has(hash)) {
       return null;
     }
-    existing.set(sah, value);
-    this.partialCounts.set(
-      partialKey,
-      (this.partialCounts.get(partialKey) ?? 0) + 1,
-    );
+    existing.set(hash, value);
     return {
       [Symbol.dispose]: () => {
         const entries = this.partial.get(partialKey);
         if (entries) {
-          entries.delete(sah);
-          const count = (this.partialCounts.get(partialKey) ?? 0) - 1;
-          if (count <= 0) {
+          entries.delete(hash);
+          if (entries.size === 0) {
             this.partial.delete(partialKey);
-            this.partialCounts.delete(partialKey);
-          } else {
-            this.partialCounts.set(partialKey, count);
           }
         }
       },
@@ -449,8 +432,8 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const sah = internSchema(extraKey ?? true, true);
-    return existing.get(sah);
+    const hash = internSchemaAsHashString(extraKey ?? true);
+    return existing.get(hash);
   }
 }
 

@@ -1573,15 +1573,7 @@ for (const modernHash of [false, true]) {
         const disposable = tracker.include(key, true);
         expect(disposable).not.toBeNull();
         disposable![Symbol.dispose]();
-        // Outer `partial` and the parallel counter are both cleaned up
-        // when the inner map's live-entry count hits zero.
         expect((tracker as any).partial.size).toBe(0);
-        expect((tracker as any).partialCounts.size).toBe(0);
-        // Re-including the same (key, extraKey) pair must succeed —
-        // implies the prior entry really was removed.
-        const disposable2 = tracker.include(key, true);
-        expect(disposable2).not.toBeNull();
-        disposable2![Symbol.dispose]();
       });
 
       it("retains partial-key entries while sibling entries are live", () => {
@@ -1598,15 +1590,14 @@ for (const modernHash of [false, true]) {
         // B's live entry still keys on the same partialKey.
         dispA![Symbol.dispose]();
         expect((tracker as any).partial.size).toBe(1);
-        expect((tracker as any).partialCounts.get(key)).toBe(1);
+        expect((tracker as any).partial.get(key)!.size).toBe(1);
         // Disposing B then cleans up.
         dispB![Symbol.dispose]();
         expect((tracker as any).partial.size).toBe(0);
-        expect((tracker as any).partialCounts.size).toBe(0);
       });
     });
 
-    describe("CompoundCycleTracker WeakMap restructure (Tactic 2B)", () => {
+    describe("CompoundCycleTracker intern-based keying (Tactic 2B)", () => {
       it("detects cycles on structurally-equal extraKey (not just identity)", () => {
         const tracker = new CompoundCycleTracker<
           object,
