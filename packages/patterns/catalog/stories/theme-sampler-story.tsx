@@ -1,4 +1,11 @@
-import { computed, NAME, pattern, UI, type VNode, Writable } from "commonfabric";
+import {
+  computed,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
 
 import { Controls, SelectControl } from "../ui/controls/index.ts";
 
@@ -288,14 +295,21 @@ function ComponentSampler() {
         >
           Chips & Badges
         </div>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
           <cf-chip>Default</cf-chip>
           <cf-chip variant="primary">Primary</cf-chip>
           <cf-chip variant="accent">Accent</cf-chip>
-          <cf-badge variant="default">Badge</cf-badge>
-          <cf-badge variant="success">Success</cf-badge>
-          <cf-badge variant="warning">Warning</cf-badge>
-          <cf-badge variant="error">Error</cf-badge>
+          <cf-badge variant="default">Default</cf-badge>
+          <cf-badge variant="secondary">Secondary</cf-badge>
+          <cf-badge variant="destructive">Destructive</cf-badge>
+          <cf-badge variant="outline">Outline</cf-badge>
         </div>
       </div>
 
@@ -320,7 +334,7 @@ function ComponentSampler() {
           <cf-alert variant="success" title="Success">
             Operation completed using theme tokens.
           </cf-alert>
-          <cf-alert variant="error" title="Error">
+          <cf-alert variant="destructive" title="Error">
             Something went wrong using theme tokens.
           </cf-alert>
         </div>
@@ -343,8 +357,8 @@ function ComponentSampler() {
         <cf-card>
           <span slot="header">Card Title</span>
           <div>
-            Card content rendered inside a themed surface. Border, radius,
-            and background should all resolve from the active theme.
+            Card content rendered inside a themed surface. Border, radius, and
+            background should all resolve from the active theme.
           </div>
         </cf-card>
       </div>
@@ -372,7 +386,10 @@ function ComponentSampler() {
         >
           <cf-list-item title="First item" description="With a description" />
           <cf-list-item title="Second item" description="Also themed" />
-          <cf-list-item title="Third item" description="Hover to check surfaceHover" />
+          <cf-list-item
+            title="Third item"
+            description="Hover to check surfaceHover"
+          />
         </div>
       </div>
 
@@ -408,10 +425,17 @@ function ComponentSampler() {
           Text
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <span style={{ color: "var(--cf-theme-color-text)", fontSize: "14px" }}>
+          <span
+            style={{ color: "var(--cf-theme-color-text)", fontSize: "14px" }}
+          >
             Default text color
           </span>
-          <span style={{ color: "var(--cf-theme-color-text-muted)", fontSize: "14px" }}>
+          <span
+            style={{
+              color: "var(--cf-theme-color-text-muted)",
+              fontSize: "14px",
+            }}
+          >
             Muted text color
           </span>
           <cf-label>Label component</cf-label>
@@ -478,7 +502,7 @@ export default pattern<ThemeSamplerStoryInput, ThemeSamplerStoryOutput>(
             label="theme"
             description="Active theme preset"
             defaultValue="default"
-            $value={selectedTheme}
+            value={selectedTheme}
             items={themeItems}
           />
         </Controls>
