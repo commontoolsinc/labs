@@ -409,12 +409,12 @@ describe("modernHash", () => {
     const pushShortString = (value: string) => {
       const encoded = enc.encode(value);
       stream.push(0x24, encoded.length, ...encoded);
-    }
+    };
 
     const pushLongString = (value: string) => {
       const hashed = sha256(enc.encode(value));
       stream.push(0xf0, ...hashed);
-    }
+    };
 
     // Deconstructed state is an object with sorted keys.
     // FabricError.DECONSTRUCT() returns:
