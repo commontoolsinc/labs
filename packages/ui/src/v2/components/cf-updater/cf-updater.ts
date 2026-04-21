@@ -21,7 +21,7 @@ export class CFUpdater extends BaseElement {
       :host {
         --button-background: var(
           --cf-theme-color-primary,
-          #3b82f6
+          var(--cf-colors-blue-500, #3b82f6)
         );
         --button-color: var(
           --cf-theme-color-primary-foreground,
