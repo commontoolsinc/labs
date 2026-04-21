@@ -31,6 +31,7 @@ interface CatalogInput {
         items: [
           { id: "kitchen-sink"; label: "Kitchen Sink" },
           { id: "style-tokens"; label: "Style Tokens" },
+          { id: "theme-sampler"; label: "Theme Sampler" },
         ];
       },
       {

@@ -67,7 +67,7 @@ export class CFIframe extends BaseElement {
       .error-content {
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-white, #ffffff)
+          var(--cf-colors-white, #ffffff)
         );
         padding: var(--cf-theme-spacing-loose, 1.25rem);
         border-radius: var(
@@ -82,18 +82,18 @@ export class CFIframe extends BaseElement {
 
       .error-content h2 {
         margin: 0 0 1rem;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
       }
 
       .error-content p {
         margin: 0.5rem 0;
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
       }
 
       .error-content pre {
         background-color: var(
           --cf-theme-color-surface-hover,
-          var(--cf-color-gray-100, #f3f4f6)
+          #f3f4f6
         );
         padding: 1rem;
         border-radius: var(
@@ -117,13 +117,12 @@ export class CFIframe extends BaseElement {
           --cf-theme-border-radius,
           var(--cf-border-radius-md, 0.375rem)
         );
-        border: 1px solid
-          var(--cf-theme-color-border, var(--cf-color-gray-300, #d1d5db));
+        border: 1px solid var(--cf-theme-color-border, #d1d5db);
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-white, #ffffff)
+          var(--cf-colors-white, #ffffff)
         );
-        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, #111827);
         cursor: pointer;
         font-size: 0.875rem;
         font-weight: 500;
@@ -133,22 +132,22 @@ export class CFIframe extends BaseElement {
       .error-actions button:hover {
         background-color: var(
           --cf-theme-color-surface-hover,
-          var(--cf-color-gray-100, #f3f4f6)
+          #f3f4f6
         );
       }
 
       .error-actions button:first-child {
         background-color: var(
           --cf-theme-color-primary,
-          var(--cf-color-primary, #3b82f6)
+          #3b82f6
         );
         color: var(
           --cf-theme-color-primary-foreground,
-          var(--cf-color-white, #ffffff)
+          var(--cf-colors-white, #ffffff)
         );
         border-color: var(
           --cf-theme-color-primary,
-          var(--cf-color-primary, #3b82f6)
+          #3b82f6
         );
       }
 

@@ -132,10 +132,9 @@ export class CFLocation extends BaseElement {
         border-radius: var(--cf-theme-border-radius, 0.375rem);
         background-color: var(
           --cf-theme-color-surface,
-          var(--cf-color-gray-100, #f3f4f6)
+          #f3f4f6
         );
-        border: 1px solid
-          var(--cf-theme-color-border, var(--cf-color-gray-300, #d1d5db));
+        border: 1px solid var(--cf-theme-color-border, #d1d5db);
         cursor: pointer;
         transition: all 0.2s ease;
         font-size: 0.875rem;
@@ -146,7 +145,7 @@ export class CFLocation extends BaseElement {
       .location-button:hover:not(:disabled) {
         background-color: var(
           --cf-theme-color-surface-hover,
-          var(--cf-color-gray-200, #e5e7eb)
+          #e5e7eb
         );
       }
 
@@ -162,22 +161,22 @@ export class CFLocation extends BaseElement {
       .location-button.requesting {
         background-color: var(
           --cf-theme-color-primary-light,
-          var(--cf-color-blue-100, #dbeafe)
+          var(--cf-colors-blue-100, #dbeafe)
         );
         border-color: var(
           --cf-theme-color-primary,
-          var(--cf-color-blue-500, #3b82f6)
+          var(--cf-colors-blue-500, #3b82f6)
         );
       }
 
       .location-button.watching {
         background-color: var(
           --cf-theme-color-success-light,
-          var(--cf-color-green-100, #dcfce7)
+          var(--cf-colors-green-100, #dcfce7)
         );
         border-color: var(
           --cf-theme-color-success,
-          var(--cf-color-green-500, #22c55e)
+          var(--cf-colors-green-500, #22c55e)
         );
         animation: pulse 2s ease-in-out infinite;
       }
@@ -214,8 +213,8 @@ export class CFLocation extends BaseElement {
 
       .location-display {
         font-size: 0.75rem;
-        color: var(--cf-theme-color-text-muted, var(--cf-color-gray-500, #6b7280));
-        font-family: var(--cf-theme-font-mono, monospace);
+        color: var(--cf-theme-color-text-muted, #6b7280);
+        font-family: var(--cf-theme-mono-font-family, monospace);
       }
 
       .location-display .coords {
@@ -232,9 +231,9 @@ export class CFLocation extends BaseElement {
         border-radius: var(--cf-theme-border-radius, 0.375rem);
         background-color: var(
           --cf-theme-color-error-light,
-          var(--cf-color-red-100, #fee2e2)
+          var(--cf-colors-red-100, #fee2e2)
         );
-        color: var(--cf-theme-color-error, var(--cf-color-red-600, #dc2626));
+        color: var(--cf-theme-color-error, var(--cf-colors-red-600, #dc2626));
         font-size: 0.75rem;
       }
     `,

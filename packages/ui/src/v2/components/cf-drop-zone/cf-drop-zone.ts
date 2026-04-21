@@ -39,7 +39,7 @@ export class CFDropZone extends BaseElement {
         content: "";
         position: absolute;
         inset: 0;
-        border: 2px dashed var(--cf-color-primary, #0066cc);
+        border: 2px dashed var(--cf-theme-color-primary, #0066cc);
         border-radius: inherit;
         z-index: 1000;
         pointer-events: none;

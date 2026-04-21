@@ -118,7 +118,7 @@ export class CFPromptInput extends BaseElement {
         .container:focus-within {
           border-color: var(
             --cf-theme-color-primary,
-            var(--cf-color-primary, #3b82f6)
+            #3b82f6
           );
           box-shadow: 0 0 0 0.5px
             var(--cf-theme-color-primary, rgba(59, 130, 246, 0.1));
@@ -147,7 +147,7 @@ export class CFPromptInput extends BaseElement {
             font-family: var(--cf-theme-font-family, inherit);
             font-size: 0.875rem;
             line-height: 1.25rem;
-            color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+            color: var(--cf-theme-color-text, #111827);
             overflow-y: auto;
           }
 
@@ -156,7 +156,7 @@ export class CFPromptInput extends BaseElement {
           }
 
           textarea::placeholder {
-            color: var(--cf-theme-color-text-muted, var(--cf-color-gray-400, #9ca3af));
+            color: var(--cf-theme-color-text-muted, #9ca3af);
           }
 
           .send-button-wrapper {
@@ -240,16 +240,16 @@ export class CFPromptInput extends BaseElement {
             );
             cursor: pointer;
             transition: background-color 0.15s;
-            color: var(--cf-theme-color-text-muted, var(--cf-color-gray-500, #6b7280));
+            color: var(--cf-theme-color-text-muted, #6b7280);
             font-size: 1rem;
           }
 
           .upload-button:hover {
             background: var(
-              --cf-theme-surface,
-              var(--cf-color-gray-100, #f3f4f6)
+              --cf-theme-color-surface,
+              #f3f4f6
             );
-            color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
+            color: var(--cf-theme-color-text, #111827);
           }
 
           input[type="file"] {
@@ -264,14 +264,13 @@ export class CFPromptInput extends BaseElement {
             padding: 0.25rem 0.625rem;
             background: var(
               --cf-theme-color-surface,
-              var(--cf-color-gray-100, #f5f5f5)
+              #f5f5f5
             );
             color: var(
               --cf-theme-color-text,
-              var(--cf-color-gray-900, #212121)
+              #212121
             );
-            border: 1px solid
-              var(--cf-theme-color-border, var(--cf-color-gray-300, #e0e0e0));
+            border: 1px solid var(--cf-theme-color-border, #e0e0e0);
             border-radius: var(
               --cf-theme-border-radius,
               var(--cf-border-radius-full, 9999px)
@@ -295,7 +294,7 @@ export class CFPromptInput extends BaseElement {
           .model-select:hover {
             background: var(
               --cf-theme-color-surface-hover,
-              var(--cf-color-gray-200, #eeeeee)
+              #eeeeee
             );
           }
 
@@ -1051,7 +1050,7 @@ export class CFPromptInput extends BaseElement {
             }
             .mention-item:hover,
             .mention-item.selected {
-              background-color: var(--cf-theme-surface, #f3f4f6);
+              background-color: var(--cf-theme-color-surface, #f3f4f6);
             }
             .mention-name {
               font-weight: 500;

@@ -124,11 +124,10 @@ export class CFFileInput extends BaseElement {
           var(--cf-border-radius-md, 0.375rem)
         );
         overflow: hidden;
-        border: 1px solid
-          var(--cf-theme-color-border, var(--cf-color-gray-200, #e5e7eb));
+        border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         background: var(
           --cf-theme-color-background,
-          var(--cf-color-gray-50, #f9fafb)
+          #f9fafb
         );
       }
 
@@ -160,7 +159,7 @@ export class CFFileInput extends BaseElement {
         padding: 1rem;
         background: var(
           --cf-theme-color-background,
-          var(--cf-color-gray-50, #f9fafb)
+          #f9fafb
         );
       }
 
@@ -175,7 +174,7 @@ export class CFFileInput extends BaseElement {
         word-break: break-word;
         color: var(
           --cf-theme-color-text-muted,
-          var(--cf-color-gray-600, #4b5563)
+          #4b5563
         );
       }
 
@@ -208,7 +207,7 @@ export class CFFileInput extends BaseElement {
         font-size: 0.75rem;
         color: var(
           --cf-theme-color-text-muted,
-          var(--cf-color-gray-600, #4b5563)
+          #4b5563
         );
         white-space: nowrap;
         overflow: hidden;
@@ -222,7 +221,7 @@ export class CFFileInput extends BaseElement {
         padding: 1rem;
         color: var(
           --cf-theme-color-text-muted,
-          var(--cf-color-gray-600, #4b5563)
+          #4b5563
         );
         font-size: 0.875rem;
       }
