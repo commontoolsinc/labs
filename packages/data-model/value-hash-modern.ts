@@ -12,6 +12,7 @@
 import {
   createHasher,
   type IncrementalHasher,
+  sha256,
 } from "@commonfabric/content-hash";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
@@ -48,6 +49,9 @@ const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
 const TAG_CONTENT_HASH = 0x29;
 
+// Special for hashing:
+const TAG_STRING_HASH = 0xf0;
+
 // ---------------------------------------------------------------------------
 // Pre-allocated tag byte arrays (avoids per-call allocation)
 // ---------------------------------------------------------------------------
@@ -62,7 +66,6 @@ const TAG_UNDEFINED_BYTES = new Uint8Array([TAG_UNDEFINED]);
 const TAG_BOOLEAN_TRUE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x01]);
 const TAG_BOOLEAN_FALSE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x00]);
 const TAG_NUMBER_BYTES = new Uint8Array([TAG_NUMBER]);
-const TAG_STRING_BYTES = new Uint8Array([TAG_STRING]);
 const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
@@ -70,32 +73,92 @@ const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
 
 // ---------------------------------------------------------------------------
-// Shared scratch buffer (safe in single-threaded synchronous JS -- see
-// async safety analysis in PR #2856 review round 2)
-// ---------------------------------------------------------------------------
-
-/** Reusable 8-byte buffer for float64 encoding. */
-const f64Buf = new ArrayBuffer(8);
-const f64View = new DataView(f64Buf);
-const f64Bytes = new Uint8Array(f64Buf);
-
-/** Shared TextEncoder for UTF-8 string encoding. */
-const encoder = new TextEncoder();
-
-// ---------------------------------------------------------------------------
-// Helper: feed an unsigned LEB128 length prefix
-// ---------------------------------------------------------------------------
-
-function feedLength(hasher: IncrementalHasher, value: number): void {
-  hasher.update(encodeULEB128(value));
-}
-
-// ---------------------------------------------------------------------------
 // Core: recursive value feeding
 // ---------------------------------------------------------------------------
 
 /**
- * Feed a single `FabricValue` into the hasher, using the type-tagged
+ * Maximum encoded length of a string which is represented in just-encoded form.
+ * Longer strings are represented in a hash feed as the hash of the string (in
+ * Merkle-ish fashion).
+ */
+const MAX_DIRECT_STRING_LENGTH = 64;
+
+/**
+ * Maximum value (inclusive) of the small-length-number cache.
+ */
+const MAX_CACHED_SMALL_LENGTH = 500;
+
+/** Shared TextEncoder for UTF-8 string encoding. */
+const encoder = new TextEncoder();
+
+/** Reusable 8-byte buffer for float64 encoding. */
+const f64Buf = new ArrayBuffer(8);
+
+/** Float64 "view" of `f64Buf`. */
+const f64View = new DataView(f64Buf);
+
+/** Byte-array "view" of `f64Buf`. */
+const f64Bytes = new Uint8Array(f64Buf);
+
+/** LRU cache for string representations. */
+const stringRepCache = new LRUCache<string, Uint8Array>({
+  capacity: 50_000,
+});
+
+/** Prepopulated cache of encoded small-length numbers. */
+const smallLengthCache: Uint8Array[] = Array.from(
+  { length: MAX_CACHED_SMALL_LENGTH + 1 },
+  (_, i) => encodeULEB128(i),
+);
+
+/**
+ * Gets the bytes needed to represent the given string, either by computing it
+ * or retrieving a previously-computed result from the cache.
+ */
+function getStringRep(value: string) {
+  const cached = stringRepCache.get(value);
+  if (cached !== undefined) return cached;
+
+  const utf8Buf = encoder.encode(value);
+  const utf8Length = utf8Buf.length;
+
+  let result;
+
+  if (utf8Length <= MAX_DIRECT_STRING_LENGTH) {
+    // Contents are: tag + utf8Length + utf8.
+    const totalLength = 2 + utf8Length;
+    result = new Uint8Array(totalLength);
+    result[0] = TAG_STRING;
+    result[1] = utf8Length; // Always fits in a byte!
+    result.set(utf8Buf, 2); // After the tag and length.
+  } else {
+    const hashBuf = sha256(utf8Buf);
+
+    // Contents are: tag + hash.
+    const totalLength = 1 + hashBuf.length;
+    result = new Uint8Array(totalLength);
+    result[0] = TAG_STRING_HASH;
+    result.set(hashBuf, 1); // After the tag.
+  }
+
+  stringRepCache.put(value, result);
+  return result;
+}
+
+/**
+ * Updates an incremental hasher with a length value, using the standard
+ * in-hash encoding for same.
+ */
+function feedLength(hasher: IncrementalHasher, value: number): void {
+  const valueBuf = (value <= MAX_CACHED_SMALL_LENGTH)
+    ? smallLengthCache[value]
+    : encodeULEB128(value);
+
+  hasher.update(valueBuf);
+}
+
+/**
+ * Feeds a single `FabricValue` into the hasher, using the type-tagged
  * byte format from the byte-level spec.
  */
 function feedValue(hasher: IncrementalHasher, value: unknown): void {
@@ -117,10 +180,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       break;
 
     case "string": {
-      hasher.update(TAG_STRING_BYTES);
-      const utf8 = encoder.encode(value);
-      feedLength(hasher, utf8.length);
-      hasher.update(utf8);
+      hasher.update(getStringRep(value));
       break;
     }
 
@@ -299,12 +359,9 @@ function feedPlainObject(
 
   hasher.update(TAG_OBJECT_BYTES);
   for (const key of keys) {
-    // Keys are encoded as TAG_STRING-style values (same format as strings).
-    hasher.update(TAG_STRING_BYTES);
-    const keyUtf8 = encoder.encode(key);
-    feedLength(hasher, keyUtf8.length);
-    hasher.update(keyUtf8);
-    // Value is hashed recursively.
+    // Keys are encoded in the same format as strings, and values are hashed
+    // recursively.
+    hasher.update(getStringRep(key));
     feedValue(hasher, value[key]);
   }
   hasher.update(TAG_END_BYTES);
