@@ -13,8 +13,8 @@ import type {
   URI,
 } from "@commonfabric/memory/interface";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
+import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   canBranchMatch,
   CompoundCycleTracker,
@@ -2625,13 +2625,14 @@ for (const modernHash of [false, true]) {
       });
     });
 
-    describe("MapSetStringToPathSelectors hash-fn freeze-on-entry", () => {
-      // These tests exercise the intern-and-freeze behavior added per the
-      // 2026-04-16 cache-audit DEFEAT-8 recommendation: when `hashValues`
-      // is true, the internal hash function interns `v.schema` (if
-      // present) and freezes `v.path` and `v` itself, so subsequent
-      // hashes of the same selector reference hit the
-      // `hashOfModernInternal` WeakMap fast path.
+    describe("MapSetStringToPathSelectors assumes pre-interned inputs", () => {
+      // Per the contract simplification: as of Dan's intermediate PR,
+      // MSP's hash fn no longer interns or freezes its input. Callers
+      // must hand in an already-interned selector (via
+      // `internPathSelector`) for the `hashOfModernInternal` WeakMap
+      // cache to retain the hash. These tests verify the post-contract
+      // behavior: correctness of dedup under pre-interned inputs, plus
+      // the no-op behavior when `hashValues` is false.
 
       // Content-unique title guarantees no prior interning has seen the
       // exact schema in this test file or in imported modules.
@@ -2640,49 +2641,33 @@ for (const modernHash of [false, true]) {
         title: `mapSetPathSelectorTestAt${Date.now()}-${Math.random()}`,
       });
 
-      it("freezes `v.path` and `v` as a side effect of add()", () => {
-        const mapSet = new MapSetStringToPathSelectors(true);
-        const selector: SchemaPathSelector = {
-          path: ["a", "b"],
-          schema: uniqueSchema(),
-        };
-        expect(Object.isFrozen(selector)).toBe(false);
-        expect(Object.isFrozen(selector.path)).toBe(false);
-        mapSet.add("k", selector);
-        expect(Object.isFrozen(selector)).toBe(true);
-        expect(Object.isFrozen(selector.path)).toBe(true);
-      });
-
-      it("interns `v.schema` as a side effect of add()", () => {
+      it("deduplicates structurally-equal pre-interned selectors", () => {
         const mapSet = new MapSetStringToPathSelectors(true);
         const schema = uniqueSchema();
-        const selector: SchemaPathSelector = { path: ["x"], schema };
-        expect(isInternedSchema(schema)).toBe(false);
-        mapSet.add("k", selector);
-        expect(isInternedSchema(schema)).toBe(true);
-        expect(isDeepFrozen(schema)).toBe(true);
-      });
-
-      it("handles selectors whose `schema` is undefined", () => {
-        const mapSet = new MapSetStringToPathSelectors(true);
-        const selector: SchemaPathSelector = { path: ["p"] };
-        // Should not throw — the guard `if (v.schema !== undefined)`
-        // prevents calling `internSchema(undefined)`.
-        mapSet.add("k", selector);
-        expect(Object.isFrozen(selector)).toBe(true);
-        expect(Object.isFrozen(selector.path)).toBe(true);
-      });
-
-      it("deduplicates structurally-equal selectors under the same key", () => {
-        const mapSet = new MapSetStringToPathSelectors(true);
-        const schema = uniqueSchema();
-        const a: SchemaPathSelector = { path: ["x"], schema };
-        const b: SchemaPathSelector = { path: ["x"], schema };
+        const a = internPathSelector({ path: ["x"], schema });
+        const b = internPathSelector({ path: ["x"], schema });
         mapSet.add("k", a);
         mapSet.add("k", b);
         const values = mapSet.get("k");
         expect(values).toBeDefined();
         expect(values!.size).toBe(1);
+      });
+
+      it("accepts selectors with `schema: undefined`", () => {
+        const mapSet = new MapSetStringToPathSelectors(true);
+        const selector = internPathSelector({ path: ["p"] });
+        // Must not throw.
+        mapSet.add("k", selector);
+        expect(mapSet.get("k")!.size).toBe(1);
+      });
+
+      it("accepts selectors with boolean schemas", () => {
+        const mapSet = new MapSetStringToPathSelectors(true);
+        const sTrue = internPathSelector({ path: ["t"], schema: true });
+        const sFalse = internPathSelector({ path: ["f"], schema: false });
+        mapSet.add("k", sTrue);
+        mapSet.add("k", sFalse);
+        expect(mapSet.get("k")!.size).toBe(2);
       });
 
       it("does nothing to inputs when `hashValues` is false", () => {
@@ -2696,15 +2681,13 @@ for (const modernHash of [false, true]) {
         expect(isInternedSchema(schema)).toBe(false);
       });
 
-      it("is safe to re-add an already-frozen selector (idempotent)", () => {
+      it("is idempotent on repeat add of the same pre-interned selector", () => {
         const mapSet = new MapSetStringToPathSelectors(true);
-        const selector: SchemaPathSelector = {
+        const selector = internPathSelector({
           path: ["x"],
           schema: uniqueSchema(),
-        };
+        });
         mapSet.add("k", selector);
-        // Second add with the same frozen reference should not throw and
-        // should leave the map in the same shape.
         mapSet.add("k", selector);
         expect(mapSet.get("k")!.size).toBe(1);
       });

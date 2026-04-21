@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import {
   assert,
   assertEquals,
+  assertNotEquals,
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
@@ -10,11 +11,14 @@ import type {
   JSONSchema,
   JSONSchemaObj,
   JSONSchemaTypes,
+  SchemaPathSelector,
 } from "@commonfabric/api";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,
   emptySchemaObject,
+  internPathSelector,
+  internSchemaPairAsKey,
   isNontrivialSchema,
   schemaForValueType,
   schemaWithoutProperties,
@@ -860,5 +864,149 @@ describe("emptySchemaObject", () => {
 
   it("should return a frozen result", () => {
     assert(isDeepFrozen(emptySchemaObject()));
+  });
+});
+
+describe("internSchemaPairAsKey()", () => {
+  it("composes the two interned `hashString`s with `|`", () => {
+    const a: JSONSchema = { type: "number" };
+    const b: JSONSchema = { type: "string" };
+    const aHash = internSchema(a, true).hashString;
+    const bHash = internSchema(b, true).hashString;
+    assertStrictEquals(internSchemaPairAsKey(a, b), `${aHash}|${bHash}`);
+  });
+
+  it("handles boolean schemas on either side", () => {
+    const obj: JSONSchema = { type: "number" };
+    const objHash = internSchema(obj, true).hashString;
+    const trueHash = internSchema(true, true).hashString;
+    const falseHash = internSchema(false, true).hashString;
+    assertStrictEquals(
+      internSchemaPairAsKey(true, obj),
+      `${trueHash}|${objHash}`,
+    );
+    assertStrictEquals(
+      internSchemaPairAsKey(obj, false),
+      `${objHash}|${falseHash}`,
+    );
+    assertStrictEquals(
+      internSchemaPairAsKey(true, false),
+      `${trueHash}|${falseHash}`,
+    );
+  });
+
+  it("is order-sensitive", () => {
+    const a: JSONSchema = { type: "number" };
+    const b: JSONSchema = { type: "string" };
+    assertNotEquals(internSchemaPairAsKey(a, b), internSchemaPairAsKey(b, a));
+  });
+
+  it("matches for structurally-equal inputs", () => {
+    const a1: JSONSchema = {
+      type: "object",
+      properties: { x: { type: "string" } },
+    };
+    const a2: JSONSchema = {
+      type: "object",
+      properties: { x: { type: "string" } },
+    };
+    const b1: JSONSchema = { type: "array", items: { type: "number" } };
+    const b2: JSONSchema = { type: "array", items: { type: "number" } };
+    assertStrictEquals(
+      internSchemaPairAsKey(a1, b1),
+      internSchemaPairAsKey(a2, b2),
+    );
+  });
+
+  it("interns both inputs as a side effect", () => {
+    // Content-unique keys guarantee no prior interning has seen
+    // these exact schemas, so `isInternedSchema` reflects what
+    // THIS call did.
+    const stamp = `${Date.now()}-${Math.random()}`;
+    const a: JSONSchemaObj = {
+      type: "number",
+      title: `schemaHashTestAt${stamp}-a`,
+    };
+    const b: JSONSchemaObj = {
+      type: "string",
+      title: `schemaHashTestAt${stamp}-b`,
+    };
+    assertStrictEquals(isInternedSchema(a), false);
+    assertStrictEquals(isInternedSchema(b), false);
+    internSchemaPairAsKey(a, b);
+    assertStrictEquals(isInternedSchema(a), true);
+    assertStrictEquals(isInternedSchema(b), true);
+    assert(isDeepFrozen(a));
+    assert(isDeepFrozen(b));
+  });
+});
+
+describe("internPathSelector", () => {
+  // Content-unique markers guarantee no prior interning has seen these
+  // schemas — avoids the flake shape Dan flagged on PR #3335.
+  const uniqueSchema = (): JSONSchema => ({
+    type: "object",
+    title: `internPathSelectorTestAt${Date.now()}-${Math.random()}`,
+  });
+
+  it("freezes `selector.path` and `selector` in place", () => {
+    const selector: SchemaPathSelector = {
+      path: ["a", "b"],
+      schema: uniqueSchema(),
+    };
+    assertStrictEquals(Object.isFrozen(selector), false);
+    assertStrictEquals(Object.isFrozen(selector.path), false);
+    internPathSelector(selector);
+    assertStrictEquals(Object.isFrozen(selector), true);
+    assertStrictEquals(Object.isFrozen(selector.path), true);
+  });
+
+  it("interns `selector.schema` when it is an object", () => {
+    const schema = uniqueSchema();
+    const selector: SchemaPathSelector = { path: ["x"], schema };
+    assertStrictEquals(isInternedSchema(schema), false);
+    internPathSelector(selector);
+    assertStrictEquals(isInternedSchema(schema), true);
+    assert(isDeepFrozen(schema));
+  });
+
+  it("handles selectors whose `schema` is undefined", () => {
+    const selector: SchemaPathSelector = { path: ["p"] };
+    // Must not throw — `internSchema(undefined)` would, and the guard
+    // `if (selector.schema !== undefined)` prevents it.
+    internPathSelector(selector);
+    assertStrictEquals(Object.isFrozen(selector), true);
+    assertStrictEquals(Object.isFrozen(selector.path), true);
+  });
+
+  it("handles boolean `selector.schema` (true and false)", () => {
+    const trueSelector: SchemaPathSelector = { path: ["t"], schema: true };
+    const falseSelector: SchemaPathSelector = { path: ["f"], schema: false };
+    internPathSelector(trueSelector);
+    internPathSelector(falseSelector);
+    assertStrictEquals(Object.isFrozen(trueSelector), true);
+    assertStrictEquals(Object.isFrozen(falseSelector), true);
+    assertStrictEquals(isInternedSchema(true), true);
+    assertStrictEquals(isInternedSchema(false), true);
+  });
+
+  it("returns its input reference (does not clone)", () => {
+    const selector: SchemaPathSelector = {
+      path: ["x"],
+      schema: uniqueSchema(),
+    };
+    const result = internPathSelector(selector);
+    assertStrictEquals(result, selector);
+  });
+
+  it("is idempotent: `internPathSelector(x) === internPathSelector(x)`", () => {
+    const selector: SchemaPathSelector = {
+      path: ["x"],
+      schema: uniqueSchema(),
+    };
+    const first = internPathSelector(selector);
+    const second = internPathSelector(selector);
+    assertStrictEquals(first, second);
+    assertStrictEquals(first, selector);
   });
 });
