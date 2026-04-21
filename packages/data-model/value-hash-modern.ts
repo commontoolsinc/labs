@@ -66,7 +66,6 @@ const TAG_UNDEFINED_BYTES = new Uint8Array([TAG_UNDEFINED]);
 const TAG_BOOLEAN_TRUE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x01]);
 const TAG_BOOLEAN_FALSE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x00]);
 const TAG_NUMBER_BYTES = new Uint8Array([TAG_NUMBER]);
-const TAG_STRING_BYTES = new Uint8Array([TAG_STRING]);
 const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
