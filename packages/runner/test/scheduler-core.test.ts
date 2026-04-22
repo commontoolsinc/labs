@@ -15,6 +15,7 @@ import {
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Entity } from "@commonfabric/memory/interface";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -123,11 +124,11 @@ describe("scheduler", () => {
     };
     runtime.scheduler.subscribe(adder, {
       reads: [
-        a.getAsNormalizedFullLink(),
-        b.getAsNormalizedFullLink(),
+        toMemorySpaceAddress(a.getAsNormalizedFullLink()),
+        toMemorySpaceAddress(b.getAsNormalizedFullLink()),
       ],
       shallowReads: [],
-      writes: [c.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
     }, {});
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
@@ -170,7 +171,7 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [],
       },
@@ -246,18 +247,18 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       computeIntermediate,
       {
-        reads: [a.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [b.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
       },
       { changeGroup: "compute-intermediate-change-group" },
     );
     runtime.scheduler.subscribe(
       effectSink,
       {
-        reads: [b.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [c.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -338,17 +339,17 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       computeIntermediate,
       {
-        reads: [a.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [b.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
       },
     );
     runtime.scheduler.subscribe(
       effectSink,
       {
-        reads: [b.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [c.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -484,11 +485,11 @@ describe("scheduler", () => {
     };
     const cancel = runtime.scheduler.subscribe(adder, {
       reads: [
-        a.getAsNormalizedFullLink(),
-        b.getAsNormalizedFullLink(),
+        toMemorySpaceAddress(a.getAsNormalizedFullLink()),
+        toMemorySpaceAddress(b.getAsNormalizedFullLink()),
       ],
       shallowReads: [],
-      writes: [c.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
     }, {});
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
@@ -755,11 +756,11 @@ describe("scheduler", () => {
       increment,
       {
         reads: [
-          counter.getAsNormalizedFullLink(),
-          step.getAsNormalizedFullLink(),
+          toMemorySpaceAddress(counter.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(step.getAsNormalizedFullLink()),
         ],
         shallowReads: [],
-        writes: [counter.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -1019,12 +1020,7 @@ describe("scheduler", () => {
     tx = runtime.edit();
 
     const sourceLink = sourceCell.getAsNormalizedFullLink();
-    const sourceAddress = {
-      space: sourceLink.space,
-      id: sourceLink.id,
-      type: sourceLink.type,
-      path: ["value", ...sourceLink.path],
-    };
+    const sourceAddress = toMemorySpaceAddress(sourceLink);
 
     let actionRunCount = 0;
     const action: Action = (actionTx) => {
@@ -1703,18 +1699,20 @@ describe("reactive retries", () => {
       runtime.scheduler.subscribe(
         action1,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [intermediate.getAsNormalizedFullLink()],
+          writes: [
+            toMemorySpaceAddress(intermediate.getAsNormalizedFullLink()),
+          ],
         },
         {},
       );
       runtime.scheduler.subscribe(
         action2,
         {
-          reads: [intermediate.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );

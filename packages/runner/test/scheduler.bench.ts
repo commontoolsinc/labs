@@ -15,6 +15,7 @@ import {
   addressesToPathByEntity,
   sortAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -87,9 +88,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -144,9 +145,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [input.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -202,9 +203,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -257,9 +258,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -307,9 +308,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [input.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -374,9 +375,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         actionAB,
         {
-          reads: [a.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [b.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -389,9 +390,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         actionAC,
         {
-          reads: [a.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [c.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -406,9 +407,12 @@ Deno.bench(
       runtime.scheduler.subscribe(
         actionBCD,
         {
-          reads: [b.getAsNormalizedFullLink(), c.getAsNormalizedFullLink()],
+          reads: [
+            toMemorySpaceAddress(b.getAsNormalizedFullLink()),
+            toMemorySpaceAddress(c.getAsNormalizedFullLink()),
+          ],
           shallowReads: [],
-          writes: [result.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -461,9 +465,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [input.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -520,9 +524,9 @@ Deno.bench(
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );

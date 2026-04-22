@@ -8,6 +8,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type Action } from "../src/scheduler.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -180,9 +181,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionA,
       {
-        reads: [cellA.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellB.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -190,9 +191,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionB,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -201,9 +202,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -252,9 +253,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [counter.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [doubled.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(doubled.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -272,9 +273,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [counter.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [doubled.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(doubled.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -339,9 +340,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionA,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -349,9 +350,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionB,
       {
-        reads: [cellA.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellB.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -360,9 +361,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -415,9 +416,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -435,9 +436,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -499,9 +500,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionA,
       {
-        reads: [cellC.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellC.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -510,9 +511,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionB,
       {
-        reads: [cellA.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellB.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -521,9 +522,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionC,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellC.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellC.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -729,9 +730,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -749,9 +750,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -826,9 +827,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       acyclicAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computed.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computed.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -837,9 +838,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       cycleActionA,
       {
-        reads: [cycleA.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cycleA.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cycleB.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cycleB.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -848,9 +849,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       cycleActionB,
       {
-        reads: [cycleB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cycleB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cycleA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cycleA.getAsNormalizedFullLink())],
       },
       {},
     );
