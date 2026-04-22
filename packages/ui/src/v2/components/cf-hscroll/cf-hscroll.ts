@@ -1,6 +1,7 @@
 import { css, html } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { layoutSpacingUtilityStyles } from "../../styles/layout-spacing.ts";
 
 /**
  * CFHScroll - Horizontal scroll container
@@ -40,134 +41,111 @@ export class CFHScroll extends BaseElement {
   declare _atStart: boolean;
   declare _atEnd: boolean;
 
-  static override styles = css`
-    :host {
-      --cf-hscroll-color-surface: var(--cf-theme-color-surface, #f1f5f9);
-      --cf-hscroll-color-thumb: var(--cf-theme-color-text-muted, #64748b);
-      --cf-hscroll-color-thumb-hover: var(--cf-theme-color-text, #475569);
-      --cf-hscroll-color-background: var(--cf-theme-color-background, #ffffff);
+  static override styles = [
+    layoutSpacingUtilityStyles,
+    css`
+      :host {
+        --cf-hscroll-color-surface: var(--cf-theme-color-surface, #f1f5f9);
+        --cf-hscroll-color-thumb: var(--cf-theme-color-text-muted, #64748b);
+        --cf-hscroll-color-thumb-hover: var(--cf-theme-color-text, #475569);
+        --cf-hscroll-color-background: var(--cf-theme-color-background, #ffffff);
 
-      display: block;
-      position: relative;
-      overflow: hidden;
-    }
+        display: block;
+        position: relative;
+        overflow: hidden;
+      }
 
-    .scroll-wrapper {
-      position: relative;
-      width: 100%;
-      height: 100%;
-    }
+      .scroll-wrapper {
+        position: relative;
+        width: 100%;
+        height: 100%;
+      }
 
-    .scroll-container {
-      overflow-x: auto;
-      overflow-y: hidden;
-      width: 100%;
-      height: 100%;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: thin;
-    }
+      .scroll-container {
+        overflow-x: auto;
+        overflow-y: hidden;
+        width: 100%;
+        height: 100%;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+      }
 
-    /* Hide scrollbar by default */
-    :host(:not([show-scrollbar])) .scroll-container {
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-    }
+      /* Hide scrollbar by default */
+      :host(:not([show-scrollbar])) .scroll-container {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
 
-    :host(:not([show-scrollbar])) .scroll-container::-webkit-scrollbar {
-      display: none;
-    }
+      :host(:not([show-scrollbar])) .scroll-container::-webkit-scrollbar {
+        display: none;
+      }
 
-    /* Scrollbar styling when visible */
-    .scroll-container::-webkit-scrollbar {
-      height: 8px;
-    }
+      /* Scrollbar styling when visible */
+      .scroll-container::-webkit-scrollbar {
+        height: 8px;
+      }
 
-    .scroll-container::-webkit-scrollbar-track {
-      background: var(--cf-hscroll-color-surface, #f1f5f9);
-      border-radius: 4px;
-    }
+      .scroll-container::-webkit-scrollbar-track {
+        background: var(--cf-hscroll-color-surface, #f1f5f9);
+        border-radius: 4px;
+      }
 
-    .scroll-container::-webkit-scrollbar-thumb {
-      background: var(--cf-hscroll-color-thumb, #64748b);
-      border-radius: 4px;
-    }
+      .scroll-container::-webkit-scrollbar-thumb {
+        background: var(--cf-hscroll-color-thumb, #64748b);
+        border-radius: 4px;
+      }
 
-    .scroll-container::-webkit-scrollbar-thumb:hover {
-      background: var(--cf-hscroll-color-thumb-hover, #475569);
-    }
+      .scroll-container::-webkit-scrollbar-thumb:hover {
+        background: var(--cf-hscroll-color-thumb-hover, #475569);
+      }
 
-    /* Padding utilities */
-    .p-0 {
-      padding: 0;
-    }
-    .p-1 {
-      padding: 0.25rem;
-    }
-    .p-2 {
-      padding: 0.5rem;
-    }
-    .p-3 {
-      padding: 0.75rem;
-    }
-    .p-4 {
-      padding: 1rem;
-    }
-    .p-5 {
-      padding: 1.25rem;
-    }
-    .p-6 {
-      padding: 1.5rem;
-    }
-    .p-8 {
-      padding: 2rem;
-    }
+      /* Fade edges */
+      :host([fade-edges]) .scroll-wrapper::before,
+      :host([fade-edges]) .scroll-wrapper::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2rem;
+        pointer-events: none;
+        z-index: 1;
+        transition: opacity 0.2s;
+      }
 
-    /* Fade edges */
-    :host([fade-edges]) .scroll-wrapper::before,
-    :host([fade-edges]) .scroll-wrapper::after {
-      content: "";
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      width: 2rem;
-      pointer-events: none;
-      z-index: 1;
-      transition: opacity 0.2s;
-    }
+      :host([fade-edges]) .scroll-wrapper::before {
+        left: 0;
+        background: linear-gradient(
+          to right,
+          var(--cf-hscroll-color-background, white),
+          transparent
+        );
+        opacity: 0;
+      }
 
-    :host([fade-edges]) .scroll-wrapper::before {
-      left: 0;
-      background: linear-gradient(
-        to right,
-        var(--cf-hscroll-color-background, white),
-        transparent
-      );
-      opacity: 0;
-    }
+      :host([fade-edges]) .scroll-wrapper::after {
+        right: 0;
+        background: linear-gradient(
+          to left,
+          var(--cf-hscroll-color-background, white),
+          transparent
+        );
+        opacity: 0;
+      }
 
-    :host([fade-edges]) .scroll-wrapper::after {
-      right: 0;
-      background: linear-gradient(
-        to left,
-        var(--cf-hscroll-color-background, white),
-        transparent
-      );
-      opacity: 0;
-    }
+      :host([fade-edges]) .scroll-wrapper:not(.at-start)::before {
+        opacity: 1;
+      }
 
-    :host([fade-edges]) .scroll-wrapper:not(.at-start)::before {
-      opacity: 1;
-    }
+      :host([fade-edges]) .scroll-wrapper:not(.at-end)::after {
+        opacity: 1;
+      }
 
-    :host([fade-edges]) .scroll-wrapper:not(.at-end)::after {
-      opacity: 1;
-    }
-
-    /* Ensure content doesn't wrap */
-    ::slotted(*) {
-      flex-shrink: 0;
-    }
-  `;
+      /* Ensure content doesn't wrap */
+      ::slotted(*) {
+        flex-shrink: 0;
+      }
+    `,
+  ];
 
   private _scrollContainer: HTMLElement | null = null;
 

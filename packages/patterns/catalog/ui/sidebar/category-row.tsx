@@ -15,7 +15,7 @@ const styles = {
     padding: "4px 16px 6px",
     fontSize: "11px",
     fontWeight: "700",
-    color: "#798186",
+    color: "var(--cf-theme-color-text-muted, #798186)",
     textTransform: "uppercase",
     letterSpacing: "0.08em",
   },

@@ -146,19 +146,18 @@ const styles = {
   preview: {
     flex: "1",
     overflow: "auto",
-    backgroundColor: "#ffffff",
   },
   controls: {
-    borderTop: "1px solid #e6e9ed",
+    borderTop: "1px solid var(--cf-theme-color-border, #e6e9ed)",
     padding: "16px",
-    backgroundColor: "#fafafa",
+    backgroundColor: "var(--cf-theme-color-surface, #fafafa)",
     maxHeight: "400px",
     overflow: "auto",
   },
   controlsHeading: {
     fontSize: "12px",
     fontWeight: "700",
-    color: "#798186",
+    color: "var(--cf-theme-color-text-muted, #798186)",
     textTransform: "uppercase",
     letterSpacing: "0.08em",
     marginBottom: "12px",
@@ -198,8 +197,9 @@ export default pattern<CatalogInput, CatalogOutput>(
                 <div
                   style={{
                     flexShrink: "0",
-                    borderRight: "1px solid #e6e9ed",
-                    backgroundColor: "#f6f7f9",
+                    borderRight:
+                      "1px solid var(--cf-theme-color-border, #e6e9ed)",
+                    backgroundColor: "var(--cf-theme-color-surface, #f6f7f9)",
                     padding: "12px",
                   }}
                 >

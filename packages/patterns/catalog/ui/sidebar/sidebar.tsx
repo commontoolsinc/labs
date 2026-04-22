@@ -18,8 +18,8 @@ interface SidebarOutput {
 const styles = {
   root: {
     width: "220px",
-    backgroundColor: "#f6f7f9",
-    borderRight: "1px solid #e6e9ed",
+    backgroundColor: "var(--cf-theme-color-surface, #f6f7f9)",
+    borderRight: "1px solid var(--cf-theme-color-border, #e6e9ed)",
     overflowY: "auto",
     flexShrink: "0",
     fontFamily:
@@ -30,7 +30,7 @@ const styles = {
   },
   header: {
     padding: "12px 16px",
-    borderBottom: "1px solid #e6e9ed",
+    borderBottom: "1px solid var(--cf-theme-color-border, #e6e9ed)",
     display: "flex",
     alignItems: "center",
     gap: "8px",
@@ -38,7 +38,7 @@ const styles = {
   headerTitle: {
     fontSize: "14px",
     fontWeight: "700",
-    color: "#2e3438",
+    color: "var(--cf-theme-color-text, #2e3438)",
     letterSpacing: "-0.01em",
   },
   content: {
