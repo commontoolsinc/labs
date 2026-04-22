@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { cf, checkStderr } from "./utils.ts";
+import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import { recreateSpaceRootPattern, type SpaceConfig } from "../lib/piece.ts";
 import {
   parseLink,
@@ -193,7 +193,7 @@ describe("cli piece parsing", () => {
   it("shows recreate-root as a space-scoped command", async () => {
     const { code, stdout, stderr } = await cf("piece recreate-root --help");
     checkStderr(stderr);
-    const output = stdout.join("\n");
+    const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(
       "Recreate the root pattern for the explicitly targeted space.",
     );
