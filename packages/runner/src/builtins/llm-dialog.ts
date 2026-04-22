@@ -36,6 +36,7 @@ import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
   createLLMFriendlyLink,
   matchLLMFriendlyLink,
+  type NormalizedFullLink,
   parseLink,
   parseLLMFriendlyLink,
   sanitizeSchemaForLinks,
@@ -45,8 +46,10 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import type { CfcLabelView } from "../cfc/label-view.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -89,6 +92,22 @@ function stripInjectedResult(
 // --------------------
 
 type ToolKind = "handler" | "cell" | "pattern";
+type LLMObservationSerializationResult = {
+  value: unknown;
+  observedConfidentiality: readonly unknown[];
+};
+
+type SerializeForLLMObservationParams = {
+  value: unknown;
+  schema?: JSONSchema;
+  seen?: Set<unknown>;
+  contextSpace?: MemorySpace;
+  depth?: number;
+  logicalPath?: readonly string[];
+  rootLink?: NormalizedFullLink;
+  labelView?: CfcLabelView;
+  observationMaxConfidentiality?: readonly unknown[];
+};
 
 function normalizeInputSchema(schemaLike: unknown): JSONSchema {
   let inputSchema: any = schemaLike;
@@ -378,6 +397,280 @@ function simplifySchemaForContext(
   return simplified as JSONSchema;
 }
 
+function isPathPrefix(
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean {
+  return prefix.length <= path.length &&
+    prefix.every((segment, index) => segment === path[index]);
+}
+
+function joinObservedConfidentiality(
+  parts: Iterable<readonly unknown[] | undefined>,
+): readonly unknown[] {
+  const joined: unknown[] = [];
+  for (const part of parts) {
+    if (!Array.isArray(part)) {
+      continue;
+    }
+    joined.push(...part);
+  }
+  return ContextualFlowControl.uniqueAtoms(joined);
+}
+
+function confidentialityForCurrentNode(
+  schema: JSONSchema | undefined,
+  labelView: CfcLabelView | undefined,
+  logicalPath: readonly string[],
+): readonly unknown[] {
+  const joined: unknown[] = [];
+
+  if (isRecord(schema) && isRecord(schema.ifc)) {
+    joined.push(...(schema.ifc.confidentiality ?? []));
+  }
+
+  if (labelView !== undefined) {
+    for (const entry of labelView.entries) {
+      if (!isPathPrefix(entry.path, logicalPath)) {
+        continue;
+      }
+      joined.push(...(entry.label.confidentiality ?? []));
+    }
+  }
+
+  return ContextualFlowControl.uniqueAtoms(joined);
+}
+
+function fitsObservationCeiling(
+  confidentiality: readonly unknown[],
+  observationMaxConfidentiality: readonly unknown[] | undefined,
+): boolean {
+  if (
+    observationMaxConfidentiality === undefined ||
+    observationMaxConfidentiality.length === 0 ||
+    confidentiality.length === 0
+  ) {
+    return true;
+  }
+
+  return confidentiality.every((value) =>
+    observationMaxConfidentiality.some((allowed) => deepEqual(allowed, value))
+  );
+}
+
+function observationLinkForValue(
+  value: unknown,
+  logicalPath: readonly string[],
+  contextSpace: MemorySpace | undefined,
+  rootLink: NormalizedFullLink | undefined,
+): { "@link": string } | undefined {
+  if (rootLink !== undefined) {
+    return {
+      "@link": createLLMFriendlyLink({
+        ...rootLink,
+        path: [...rootLink.path, ...logicalPath],
+      }, contextSpace),
+    };
+  }
+
+  if (isCellResultForDereferencing(value)) {
+    value = getCellOrThrow(value);
+  }
+
+  if (isCell(value)) {
+    return {
+      "@link": createLLMFriendlyLink(
+        value.resolveAsCell().getAsNormalizedFullLink(),
+        contextSpace,
+      ),
+    };
+  }
+
+  return undefined;
+}
+
+function serializeForLLMObservation(
+  {
+    value,
+    schema,
+    seen = new Set(),
+    contextSpace,
+    depth = 0,
+    logicalPath = [],
+    rootLink,
+    labelView,
+    observationMaxConfidentiality,
+  }: SerializeForLLMObservationParams,
+): LLMObservationSerializationResult {
+  if (depth > MAX_SERIALIZE_DEPTH) {
+    const msg =
+      `[LLM Serialize] Maximum depth of ${MAX_SERIALIZE_DEPTH} reached.`;
+    logger.warn(msg);
+    console.warn(msg);
+    return {
+      value: "[Maximum depth reached]",
+      observedConfidentiality: [],
+    };
+  }
+
+  const nodeConfidentiality = confidentialityForCurrentNode(
+    schema,
+    labelView,
+    logicalPath,
+  );
+  if (
+    !fitsObservationCeiling(
+      nodeConfidentiality,
+      observationMaxConfidentiality,
+    )
+  ) {
+    const link = observationLinkForValue(
+      value,
+      logicalPath,
+      contextSpace,
+      rootLink,
+    );
+    if (link !== undefined) {
+      return { value: link, observedConfidentiality: [] };
+    }
+  }
+
+  if (!isRecord(value)) {
+    return {
+      value,
+      observedConfidentiality: nodeConfidentiality,
+    };
+  }
+
+  // If we encounter an `any` schema, turn value into a cell link
+  if (
+    seen.size > 0 && schema !== undefined &&
+    ContextualFlowControl.isTrueSchema(schema) &&
+    isCellResultForDereferencing(value)
+  ) {
+    value = getCellOrThrow(value);
+  }
+
+  // Turn cells into a link, unless they are data: URIs and traverse instead
+  if (isCell(value)) {
+    const link = value.resolveAsCell().getAsNormalizedFullLink();
+    if (link.id.startsWith("data:")) {
+      return serializeForLLMObservation({
+        value: value.get(),
+        schema,
+        seen,
+        contextSpace,
+        depth: depth + 1,
+        logicalPath,
+        rootLink,
+        labelView,
+        observationMaxConfidentiality,
+      });
+    }
+    return {
+      value: { "@link": createLLMFriendlyLink(link, contextSpace) },
+      observedConfidentiality: [],
+    };
+  }
+
+  if (seen.has(value)) {
+    if (isCellResultForDereferencing(value)) {
+      return serializeForLLMObservation({
+        value: getCellOrThrow(value),
+        schema,
+        seen,
+        contextSpace,
+        depth: depth + 1,
+        logicalPath,
+        rootLink,
+        labelView,
+        observationMaxConfidentiality,
+      });
+    }
+    throw new Error(
+      "Cannot serialize a value that has already been seen and cannot be mapped to a cell.",
+    );
+  }
+
+  const nextSeen = new Set(seen);
+  nextSeen.add(value);
+
+  const cfc = new ContextualFlowControl();
+
+  if (Array.isArray(value)) {
+    const observedParts: Array<readonly unknown[] | undefined> = [
+      nodeConfidentiality,
+    ];
+    const serialized = value.map((v, index) => {
+      const linkSchema = schema !== undefined
+        ? cfc.schemaAtPath(schema, [index.toString()])
+        : undefined;
+      let child = serializeForLLMObservation({
+        value: v,
+        schema: linkSchema,
+        seen: nextSeen,
+        contextSpace,
+        depth: depth + 1,
+        logicalPath: [...logicalPath, index.toString()],
+        rootLink,
+        labelView,
+        observationMaxConfidentiality,
+      });
+      observedParts.push(child.observedConfidentiality);
+
+      if (isRecord(child.value) && isCellResultForDereferencing(v)) {
+        const link = getCellOrThrow(v).resolveAsCell()
+          .getAsNormalizedFullLink();
+        if (!link.id.startsWith("data:")) {
+          child = {
+            ...child,
+            value: {
+              "@arrayEntry": createLLMFriendlyLink(link, contextSpace),
+              ...child.value,
+            },
+          };
+        }
+      }
+      return child.value;
+    });
+
+    return {
+      value: serialized,
+      observedConfidentiality: joinObservedConfidentiality(observedParts),
+    };
+  }
+
+  const observedParts: Array<readonly unknown[] | undefined> = [
+    nodeConfidentiality,
+  ];
+  const serialized = Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !key.startsWith("$"))
+      .map(([key, propValue]) => {
+        const child = serializeForLLMObservation({
+          value: propValue,
+          schema: schema !== undefined
+            ? cfc.schemaAtPath(schema, [key])
+            : undefined,
+          seen: nextSeen,
+          contextSpace,
+          depth: depth + 1,
+          logicalPath: [...logicalPath, key],
+          rootLink,
+          labelView,
+          observationMaxConfidentiality,
+        });
+        observedParts.push(child.observedConfidentiality);
+        return [key, child.value];
+      }),
+  );
+
+  return {
+    value: serialized,
+    observedConfidentiality: joinObservedConfidentiality(observedParts),
+  };
+}
+
 /**
  * Traverses a value and serializes any cells mentioned to our LLM-friendly JSON
  * link object format.
@@ -395,110 +688,13 @@ function traverseAndSerialize(
   contextSpace?: MemorySpace,
   depth: number = 0,
 ): unknown {
-  if (depth > MAX_SERIALIZE_DEPTH) {
-    const msg =
-      `[LLM Serialize] Maximum depth of ${MAX_SERIALIZE_DEPTH} reached.`;
-    logger.warn(msg);
-    console.warn(msg);
-    return "[Maximum depth reached]";
-  }
-  if (!isRecord(value)) return value;
-
-  // If we encounter an `any` schema, turn value into a cell link
-  if (
-    seen.size > 0 && schema !== undefined &&
-    ContextualFlowControl.isTrueSchema(schema) &&
-    isCellResultForDereferencing(value)
-  ) {
-    // Next step will turn this into a link
-    value = getCellOrThrow(value);
-  }
-
-  // Turn cells into a link, unless they are data: URIs and traverse instead
-  if (isCell(value)) {
-    const link = value.resolveAsCell().getAsNormalizedFullLink();
-    if (link.id.startsWith("data:")) {
-      return traverseAndSerialize(
-        value.get(),
-        schema,
-        seen,
-        contextSpace,
-        depth + 1,
-      );
-    } else {
-      // Use createLLMFriendlyLink to include space for cross-space cells
-      return { "@link": createLLMFriendlyLink(link, contextSpace) };
-    }
-  }
-
-  // If we've already seen this and it can be mapped to a cell, serialized as
-  // cell link, otherwise throw (this should never happen in our cases)
-  if (seen.has(value)) {
-    if (isCellResultForDereferencing(value)) {
-      return traverseAndSerialize(
-        getCellOrThrow(value),
-        schema,
-        seen,
-        contextSpace,
-        depth + 1,
-      );
-    } else {
-      throw new Error(
-        "Cannot serialize a value that has already been seen and cannot be mapped to a cell.",
-      );
-    }
-  }
-  const nextSeen = new Set(seen);
-  nextSeen.add(value);
-
-  const cfc = new ContextualFlowControl();
-
-  if (Array.isArray(value)) {
-    return value.map((v, index) => {
-      const linkSchema = schema !== undefined
-        ? cfc.schemaAtPath(schema, [index.toString()])
-        : undefined;
-      let result = traverseAndSerialize(
-        v,
-        linkSchema,
-        nextSeen,
-        contextSpace,
-        depth + 1,
-      );
-      // Decorate array entries with links that point to underlying cells, if
-      // any. Ignores data: URIs, since they're not useful as links for the LLM.
-      if (isRecord(result) && isCellResultForDereferencing(v)) {
-        const link = getCellOrThrow(v).resolveAsCell()
-          .getAsNormalizedFullLink();
-        if (!link.id.startsWith("data:")) {
-          result = {
-            // Use createLLMFriendlyLink for cross-space support
-            "@arrayEntry": createLLMFriendlyLink(link, contextSpace),
-            ...result,
-          };
-        }
-      }
-      return result;
-    });
-  } else {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
-        .filter(([key]) => !key.startsWith("$"))
-        .map((
-          [key, propValue],
-        ) => [
-          key,
-          traverseAndSerialize(
-            propValue,
-            schema !== undefined ? cfc.schemaAtPath(schema, [key]) : undefined,
-            nextSeen,
-            contextSpace,
-            depth + 1,
-          ),
-        ]),
-    );
-  }
+  return serializeForLLMObservation({
+    value,
+    schema,
+    seen,
+    contextSpace,
+    depth,
+  }).value;
 }
 
 /**
@@ -1562,6 +1758,7 @@ function createToolResultMessages(
 export const llmDialogTestHelpers = {
   parseLLMFriendlyLink,
   traverseAndSerialize,
+  serializeForLLMObservation,
   traverseAndCellify,
   extractStringField,
   extractRunArguments,

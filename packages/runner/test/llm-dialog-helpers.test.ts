@@ -2,6 +2,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 const {
   parseLLMFriendlyLink,
@@ -14,6 +15,7 @@ const {
   simplifySchemaForContext,
   prepareSchemaForLLM,
   resolveRefsForLLM,
+  serializeForLLMObservation,
 } = llmDialogTestHelpers;
 
 Deno.test("parseTargetString recognizes handle format", () => {
@@ -257,6 +259,113 @@ Deno.test("createToolResultMessages handles null result with explicit null", () 
   assertEquals(messages.length, 1);
   const outputPart = messages[0].content?.[0] as any;
   assertEquals(outputPart.output, { type: "json", value: null });
+});
+
+Deno.test("serializeForLLMObservation keeps below-ceiling data inline", () => {
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-inline",
+    space: "did:test:inline",
+    type: "application/json",
+    path: [],
+  };
+  const result = serializeForLLMObservation({
+    value: { body: "hello" },
+    schema: {
+      type: "object",
+      properties: {
+        body: {
+          type: "string",
+          ifc: { confidentiality: ["internal"] },
+        },
+      },
+    },
+    contextSpace: "did:test:inline",
+    rootLink,
+    observationMaxConfidentiality: ["internal"],
+  });
+
+  assertEquals(result.value, { body: "hello" });
+  assertEquals(result.observedConfidentiality, ["internal"]);
+});
+
+Deno.test("serializeForLLMObservation redacts above-ceiling fields to links", () => {
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-redacted",
+    space: "did:test:redacted",
+    type: "application/json",
+    path: [],
+  };
+  const result = serializeForLLMObservation({
+    value: { public: "ok", secret: "classified" },
+    schema: {
+      type: "object",
+      properties: {
+        public: { type: "string" },
+        secret: {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+      },
+    },
+    contextSpace: "did:test:redacted",
+    rootLink,
+    observationMaxConfidentiality: ["internal"],
+  });
+
+  assertEquals(result.value, {
+    public: "ok",
+    secret: { "@link": "/of:test-redacted/secret" },
+  });
+  assertEquals(result.observedConfidentiality, []);
+});
+
+Deno.test("serializeForLLMObservation does not taint from redacted nested values", () => {
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-mixed",
+    space: "did:test:mixed",
+    type: "application/json",
+    path: [],
+  };
+  const result = serializeForLLMObservation({
+    value: {
+      headline: "public",
+      details: {
+        safe: "allowed",
+        secret: "hidden",
+      },
+    },
+    schema: {
+      type: "object",
+      properties: {
+        headline: { type: "string" },
+        details: {
+          type: "object",
+          properties: {
+            safe: {
+              type: "string",
+              ifc: { confidentiality: ["internal"] },
+            },
+            secret: {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+          },
+        },
+      },
+    },
+    contextSpace: "did:test:mixed",
+    rootLink,
+    observationMaxConfidentiality: ["internal"],
+  });
+
+  assertEquals(result.value, {
+    headline: "public",
+    details: {
+      safe: "allowed",
+      secret: { "@link": "/of:test-mixed/details/secret" },
+    },
+  });
+  assertEquals(result.observedConfidentiality, ["internal"]);
 });
 
 // Tests for simplifySchemaForContext
