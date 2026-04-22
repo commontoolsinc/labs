@@ -40,6 +40,7 @@ import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   REJECTING_SELECTOR,
   schemaWithProperties,
+  toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
@@ -487,8 +488,22 @@ export class SelectorTracker<T = Result<Unit, Error>> {
             newSchemaObj && sortedSubSchemaObj &&
             newSchemaRefs.size == 0
           ) {
-            const { $defs: _defs1, ...newSchemaNoDefs } = newSchemaObj;
-            const { $defs: _defs2, ...subSchemaNoDefs } = sortedSubSchemaObj;
+            // `{ ...x }` produces fresh (non-frozen) objects, but
+            // `getStandardSchema` only populates its cache for
+            // deep-frozen inputs. Freeze these locally-owned spreads
+            // in place (`canShare: true`) so repeat calls across
+            // reactive updates hit the cache instead of re-traversing.
+            const { $defs: _defs1, ...newSchemaNoDefsSpread } = newSchemaObj;
+            const { $defs: _defs2, ...subSchemaNoDefsSpread } =
+              sortedSubSchemaObj;
+            const newSchemaNoDefs = toDeepFrozenSchema(
+              newSchemaNoDefsSpread,
+              true,
+            );
+            const subSchemaNoDefs = toDeepFrozenSchema(
+              subSchemaNoDefsSpread,
+              true,
+            );
             if (
               hashSchema(
                 SelectorTracker.getStandardSchema(subSchemaNoDefs),
