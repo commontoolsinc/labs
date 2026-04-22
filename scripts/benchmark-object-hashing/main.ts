@@ -11,7 +11,8 @@
  *   deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing/main.ts
  */
 
-// Import our own hasher for comparison
+// Import our own hashers for comparison
+import { hashSchemaItemLegacyAsString } from "../../packages/data-model/schema-hash-legacy.ts";
 import { hashOfModernAsString } from "../../packages/data-model/value-hash-modern.ts";
 
 // Import libraries from esm.sh to avoid adding dependencies
@@ -918,6 +919,11 @@ async function createStrategies() {
   // hashOfModernAsString (our own hasher)
   strategies["hashOfModernAsString"] = (obj: any) => {
     return hashOfModernAsString(obj);
+  };
+
+  // hashSchemaItemLegacyAsString (our own "legacy" pseudo-hasher)
+  strategies["hashSchemaItemLegacyAsString"] = (obj: any) => {
+    return hashSchemaItemLegacyAsString(obj);
   };
 
   return strategies;
