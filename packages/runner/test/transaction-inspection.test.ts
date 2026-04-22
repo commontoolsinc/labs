@@ -77,7 +77,7 @@ describe("transaction inspection", () => {
     });
   });
 
-  it("preserves non-document-prefixed paths in derived reactivity logs", () => {
+  it("preserves document-root paths in derived reactivity logs", () => {
     assertEquals(
       reactivityLogFromActivities([
         {
@@ -119,7 +119,7 @@ describe("transaction inspection", () => {
           space: "did:key:test",
           id: "of:shallow",
           type: "application/json",
-          path: ["items"],
+          path: ["value", "items"],
         }],
         writes: [{
           space: "did:key:test",
@@ -158,7 +158,7 @@ describe("transaction inspection", () => {
           space,
           id,
           type: "application/json",
-          path: [],
+          path: ["value"],
         }],
         shallowReads: [],
         writes: [{
@@ -269,7 +269,7 @@ describe("transaction inspection", () => {
           space,
           id,
           type: "application/json",
-          path: [],
+          path: ["value"],
         }],
         shallowReads: [],
         writes: [{
@@ -491,17 +491,17 @@ describe("transaction inspection", () => {
           space,
           id,
           type: "application/json",
-          path: [],
+          path: ["value"],
         }, {
           space,
           id,
           type: "application/json",
-          path: ["profile"],
+          path: ["value", "profile"],
         }, {
           space,
           id,
           type: "application/json",
-          path: ["profile", "name"],
+          path: ["value", "profile", "name"],
         }],
       });
 
@@ -566,22 +566,22 @@ describe("transaction inspection", () => {
           space,
           id,
           type: "application/json",
-          path: [],
+          path: ["value"],
         }, {
           space,
           id,
           type: "application/json",
-          path: ["profile"],
+          path: ["value", "profile"],
         }, {
           space,
           id,
           type: "application/json",
-          path: ["profile", "age"],
+          path: ["value", "profile", "age"],
         }, {
           space,
           id,
           type: "application/json",
-          path: ["profile", "name"],
+          path: ["value", "profile", "name"],
         }],
       });
 
@@ -644,17 +644,17 @@ describe("transaction inspection", () => {
           space,
           id,
           type: "application/json",
-          path: ["tags"],
+          path: ["value", "tags"],
         }, {
           space,
           id,
           type: "application/json",
-          path: ["tags", "0"],
+          path: ["value", "tags", "0"],
         }, {
           space,
           id,
           type: "application/json",
-          path: ["tags", "length"],
+          path: ["value", "tags", "length"],
         }],
       });
     } finally {
@@ -695,7 +695,7 @@ describe("transaction inspection", () => {
           space,
           id,
           type: "application/json",
-          path: ["tags", "0"],
+          path: ["value", "tags", "0"],
         }],
       });
     } finally {

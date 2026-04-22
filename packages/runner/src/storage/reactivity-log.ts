@@ -56,8 +56,6 @@ export function isInternalVerifierRead(meta?: Metadata): boolean {
 export function reactivityLogFromActivities(
   activities: Iterable<Activity>,
 ): TransactionReactivityLog {
-  const normalizedPath = (path: readonly string[]): string[] =>
-    path[0] === "value" ? path.slice(1) : [...path];
   const log: TransactionReactivityLog = {
     reads: [],
     shallowReads: [],
@@ -72,7 +70,7 @@ export function reactivityLogFromActivities(
         space: activity.read.space,
         id: activity.read.id,
         type: activity.read.type,
-        path: normalizedPath(activity.read.path),
+        path: [...activity.read.path],
       };
       if (activity.read.nonRecursive === true) {
         log.shallowReads.push(address);
@@ -90,7 +88,7 @@ export function reactivityLogFromActivities(
         space: activity.write.space,
         id: activity.write.id,
         type: activity.write.type,
-        path: normalizedPath(activity.write.path),
+        path: [...activity.write.path],
       });
     }
   }

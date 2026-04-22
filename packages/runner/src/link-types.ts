@@ -32,9 +32,23 @@ export type NormalizedLink = {
  * Full normalized link that from a complete link, i.e. with required id, space
  * and type. Gets created by parseLink if a base is provided.
  *
- * Any such link can be used as a memory address.
+ * Any such link can be used as a memory address
  */
 export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
+
+/**
+ * Convert a value-relative normalized link into a document-root memory address.
+ */
+export function toMemorySpaceAddress(
+  link: NormalizedFullLink,
+): IMemorySpaceAddress {
+  return {
+    space: link.space,
+    id: link.id,
+    type: link.type ?? "application/json",
+    path: ["value", ...link.path],
+  };
+}
 
 /**
  * Primitive cell link types that can be serialized.

@@ -9,6 +9,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type Action } from "../src/scheduler.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toMemorySpaceAddress } from "../src/link-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -336,7 +337,9 @@ describe("effect/computation tracking", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [data.key("foo").getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -373,7 +376,9 @@ describe("effect/computation tracking", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [data.key("foo").getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -385,8 +390,8 @@ describe("effect/computation tracking", () => {
       reads: [],
       shallowReads: [],
       writes: [
-        data.key("foo").getAsNormalizedFullLink(),
-        data.key("bar").getAsNormalizedFullLink(),
+        toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+        toMemorySpaceAddress(data.key("bar").getAsNormalizedFullLink()),
       ],
     });
 

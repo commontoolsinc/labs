@@ -386,32 +386,13 @@ describe("scheduler", () => {
     expect(computeRuns.at(-1)?.declaredWrites[0]).toMatchObject({
       space,
       entityId: expect.stringMatching(/^of:/),
-      path: [],
+      path: ["value"],
     });
     expect(effectRuns.at(-1)?.declaredWrites[0]).toMatchObject({
       space,
       entityId: expect.stringMatching(/^of:/),
-      path: [],
+      path: ["value"],
     });
-  });
-
-  it("falls back to value-path write details for non-JSON diagnostics", () => {
-    const scheduler = runtime.scheduler as any;
-    const write = {
-      space,
-      id: "scheduler-non-json-value-fallback",
-      type: "text/plain",
-      path: ["body"],
-    };
-    const details = new Map<string, unknown>([[
-      scheduler.makeAddressKey({
-        ...write,
-        path: ["value", "body"],
-      }),
-      "hello",
-    ]]);
-
-    expect(scheduler.lookupComparableWriteValue(details, write)).toBe("hello");
   });
 
   it("should remove actions", async () => {
@@ -904,16 +885,22 @@ describe("scheduler", () => {
     // The "nested" path should appear in potentialWrites
     expect(log.potentialWrites).toBeDefined();
     expect(
-      log.potentialWrites!.some((addr) => addr.path[0] === "nested"),
+      log.potentialWrites!.some((addr) =>
+        addr.path[0] === "value" && addr.path[1] === "nested"
+      ),
     ).toBe(true);
 
     // Only `b` changed within nested, so nested.b should be in writes
     expect(
-      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "b"),
+      log.writes.some((w) =>
+        w.path[0] === "value" && w.path[1] === "nested" && w.path[2] === "b"
+      ),
     ).toBe(true);
     // nested.a should NOT be in writes (value didn't change)
     expect(
-      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "a"),
+      log.writes.some((w) =>
+        w.path[0] === "value" && w.path[1] === "nested" && w.path[2] === "a"
+      ),
     ).toBe(false);
 
     await setTx.commit();
@@ -942,17 +929,25 @@ describe("scheduler", () => {
     // The "data" path should be in potentialWrites because diffAndUpdate
     // reads the nested object to compare
     expect(log.potentialWrites).toBeDefined();
-    expect(log.potentialWrites!.some((addr) => addr.path[0] === "data")).toBe(
-      true,
-    );
+    expect(
+      log.potentialWrites!.some((addr) =>
+        addr.path[0] === "value" && addr.path[1] === "data"
+      ),
+    ).toBe(true);
 
     // Only changed property within data should be in writes
     expect(
-      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "changed"),
+      log.writes.some((w) =>
+        w.path[0] === "value" && w.path[1] === "data" &&
+        w.path[2] === "changed"
+      ),
     ).toBe(true);
     // unchanged property should NOT be in writes (value didn't change)
     expect(
-      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "unchanged"),
+      log.writes.some((w) =>
+        w.path[0] === "value" && w.path[1] === "data" &&
+        w.path[2] === "unchanged"
+      ),
     ).toBe(false);
 
     await setTx.commit();

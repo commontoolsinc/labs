@@ -7,6 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type Action } from "../src/scheduler.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toMemorySpaceAddress } from "../src/link-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -77,23 +78,23 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [cell1.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell1.getAsNormalizedFullLink())],
       },
       {},
     );
 
     expect(runtime.scheduler.getMightWrite(action)).toEqual([
-      cell1.getAsNormalizedFullLink(),
+      toMemorySpaceAddress(cell1.getAsNormalizedFullLink()),
     ]);
 
     runtime.scheduler.resubscribe(action, {
       reads: [],
       shallowReads: [],
-      writes: [cell2.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(cell2.getAsNormalizedFullLink())],
     });
 
     expect(runtime.scheduler.getMightWrite(action)).toEqual([
-      cell2.getAsNormalizedFullLink(),
+      toMemorySpaceAddress(cell2.getAsNormalizedFullLink()),
     ]);
   });
 
@@ -185,7 +186,9 @@ describe("push-triggered filtering", () => {
       writes: [],
     });
 
-    expect(runtime.scheduler.getMightWrite(action)).toEqual([declaredWrite]);
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
   });
 
   it("should track filter stats", async () => {
