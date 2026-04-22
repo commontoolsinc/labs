@@ -323,9 +323,7 @@ function feedObjectValue(
     case NATIVE_TAGS.ContentHash: {
       const cid = value as FabricHash;
       hasher.update(TAG_CONTENT_HASH_BYTES);
-      const algTagUtf8 = encoder.encode(cid.tag);
-      feedLength(hasher, algTagUtf8.length);
-      hasher.update(algTagUtf8);
+      hasher.update(getStringRep(cid.tag));
       // TODO(@danfuzz): Look into avoiding making a copy of bytes here.
       // This could be a performance issue.
       const cidBytes = cid.bytes;
@@ -359,9 +357,7 @@ function feedObjectValue(
           `hashOfModern: FabricInstance missing typeTag property`,
         );
       }
-      const typeTagUtf8 = encoder.encode(typeTag);
-      feedLength(hasher, typeTagUtf8.length);
-      hasher.update(typeTagUtf8);
+      hasher.update(getStringRep(typeTag));
       const state = (value as FabricInstance)[DECONSTRUCT]();
       feedValue(hasher, state);
       return;
