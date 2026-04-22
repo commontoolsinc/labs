@@ -524,6 +524,8 @@ export default pattern<Record<string, never>>(() => {
     schema: SANITIZED_BRIEFING_SCHEMA,
     observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
   });
+  const sanitizerMessages = computed(() => sanitizerTrace.messages ?? []);
+  const hasSanitizerMessages = computed(() => sanitizerMessages.length > 0);
 
   const unsafeAgent = DemoAgentChat({
     title: "Unsafe raw reader",
@@ -736,7 +738,7 @@ If you do not yet have a sanitizeBriefing result, your next move must be the san
                   <cf-hstack align="center" gap="1">
                     <cf-message-beads
                       label="Sanitizer trace"
-                      $messages={sanitizerTrace.messages}
+                      $messages={sanitizerMessages}
                       pending={sanitizerTrace.pending}
                     />
                     <cf-button
@@ -746,7 +748,7 @@ If you do not yet have a sanitizeBriefing result, your next move must be the san
                       Clear trace
                     </cf-button>
                   </cf-hstack>
-                  {computed(() => (sanitizerTrace.messages?.length ?? 0) > 0)
+                  {hasSanitizerMessages
                     ? (
                       <cf-vscroll
                         showScrollbar
@@ -762,7 +764,7 @@ If you do not yet have a sanitizeBriefing result, your next move must be the san
                         }}
                       >
                         <cf-chat
-                          $messages={sanitizerTrace.messages}
+                          $messages={sanitizerMessages}
                           pending={sanitizerTrace.pending}
                         />
                       </cf-vscroll>
