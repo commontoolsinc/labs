@@ -48,7 +48,7 @@ export type HashObject<
  * functions dispatch to modern hash implementations instead of
  * merkle-reference.
  */
-let modernHashEnabled = true;
+let modernHashEnabled = false;
 
 /**
  * Activates or deactivates modern hashing mode. Called by the `Runtime`
@@ -67,12 +67,12 @@ export function getModernHashConfig(): boolean {
 }
 
 /**
- * Restores modern hashing mode to its default (enabled). Called by
+ * Restores modern hashing mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs.
  */
 export function resetModernHashConfig(): void {
-  modernHashEnabled = true;
+  modernHashEnabled = false;
 }
 
 // ---------------------------------------------------------------------------
