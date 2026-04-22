@@ -94,6 +94,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IReadOptions,
+  MediaType,
 } from "./storage/interface.ts";
 import {
   createChildCellTransaction,
@@ -1467,7 +1468,12 @@ export class CellImpl<T extends FabricValue>
 
   getMetaRaw(metaField: MetaField): FabricValue | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    const metaAddr = { ...this.link, path: [metaField] };
+    const metaAddr = {
+      space: this.link.space,
+      id: this.link.id,
+      type: this.link.type as MediaType,
+      path: [metaField],
+    };
     return this.runtime.readTx(this.tx).readOrThrow(metaAddr);
   }
 
@@ -1476,7 +1482,12 @@ export class CellImpl<T extends FabricValue>
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
     if (!this.synced) this.sync();
-    const metaAddr = { ...this.link, path: [metaField] };
+    const metaAddr = {
+      space: this.link.space,
+      id: this.link.id,
+      type: this.link.type as MediaType,
+      path: [metaField],
+    };
     this.tx.writeOrThrow(metaAddr, value as FabricValue);
   }
 
