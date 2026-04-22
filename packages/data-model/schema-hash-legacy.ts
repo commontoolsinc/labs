@@ -22,6 +22,11 @@ const textEncoder = new TextEncoder();
 const hashCache = new WeakMap<object, FabricHash>();
 
 /**
+ * Cache of already-computed partial stringify results for objects.
+ */
+const objectStringCache = new WeakMap<object, string>();
+
+/**
  * LRU cache for primitive value hashes. Primitives (strings, numbers,
  * bigints) can't be `WeakMap` keys, so they use a bounded cache.
  * The legacy `merkle-reference` uses a 50K-entry LRU with a reported 97%+
@@ -30,6 +35,29 @@ const hashCache = new WeakMap<object, FabricHash>();
 const primitiveHashCache = new LRUCache<string | number, FabricHash>({
   capacity: 50_000,
 });
+
+/**
+ * Computes the canonical hashable string of a non-null `object`.
+ */
+function computeHashableStringForObject(value: object): string {
+  if (Array.isArray(value)) {
+    return "[" + value.map(computeHashableString).join(",") + "]";
+  } else if (value instanceof Date) {
+    return `D${value.getTime()}`;
+  } else if (value instanceof RegExp) {
+    return `R${value.toString()}`;
+  } else {
+    // Object keys are sorted for deterministic output so structurally-equal
+    // objects always hash identically.
+    const keys = Object.keys(value).sort();
+    return "{" +
+      keys.map((k) =>
+        k + ":" +
+        computeHashableString((value as Record<string, unknown>)[k])
+      ).join(",") +
+      "}";
+  }
+}
 
 /**
  * Computes the canonical hashable string of a value.
@@ -55,22 +83,12 @@ function computeHashableString(value: unknown): string {
     case "object": {
       if (value === null) {
         return "n";
-      } else if (Array.isArray(value)) {
-        return "[" + value.map(computeHashableString).join(",") + "]";
-      } else if (value instanceof Date) {
-        return `D${value.getTime()}`;
-      } else if (value instanceof RegExp) {
-        return `R${value.toString()}`;
       } else {
-        // Object keys are sorted for deterministic output so structurally-equal
-        // objects always hash identically.
-        const keys = Object.keys(value).sort();
-        return "{" +
-          keys.map((k) =>
-            k + ":" +
-            computeHashableString((value as Record<string, unknown>)[k])
-          ).join(",") +
-          "}";
+        const cached = objectStringCache.get(value);
+        if (cached !== undefined) return cached;
+        const result = computeHashableStringForObject(value);
+        objectStringCache.set(value, result);
+        return result;
       }
     }
 
