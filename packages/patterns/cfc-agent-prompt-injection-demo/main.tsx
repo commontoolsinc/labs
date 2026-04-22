@@ -207,46 +207,57 @@ const sendMessage = handler<
   });
 });
 
-const clearChat = handler<
-  void,
+const clearChat = handler((
+  _: never,
   {
+    messages,
+    pending,
+  }: {
     messages: Writable<Array<BuiltInLLMMessage>>;
     pending: Writable<boolean | undefined>;
-  }
->((_, { messages, pending }) => {
+  },
+) => {
   messages.set([]);
   pending.set(false);
 });
 
-const sendDemoPrompt = handler<
-  void,
+const sendDemoPrompt = handler((
+  _: never,
   {
+    addMessage,
+    prompt,
+  }: {
     addMessage: Stream<BuiltInLLMMessage>;
     prompt: string;
-  }
->((_, { addMessage, prompt }) => {
+  },
+) => {
   addMessage.send({
     role: "user",
     content: [{ type: "text" as const, text: prompt }],
   });
 });
 
-const clearEmailLog = handler<
-  void,
-  { emails: Writable<SentEmail[]> }
->((_, { emails }) => {
+const clearEmailLog = handler((
+  _: never,
+  { emails }: { emails: Writable<SentEmail[]> },
+) => {
   emails.set([]);
 });
 
-const runBothAgents = handler<
-  void,
+const runBothAgents = handler((
+  _: never,
   {
+    unsafeAddMessage,
+    safeAddMessage,
+    subAgentRunKey,
+    prompt,
+  }: {
     unsafeAddMessage: Stream<BuiltInLLMMessage>;
     safeAddMessage: Stream<BuiltInLLMMessage>;
     subAgentRunKey: Writable<number>;
     prompt: string;
-  }
->((_, { unsafeAddMessage, safeAddMessage, subAgentRunKey, prompt }) => {
+  },
+) => {
   unsafeAddMessage.send({
     role: "user" as const,
     content: [{ type: "text" as const, text: prompt }],
@@ -258,14 +269,18 @@ const runBothAgents = handler<
   subAgentRunKey.set((subAgentRunKey.get() ?? 0) + 1);
 });
 
-const runSafeAgent = handler<
-  void,
+const runSafeAgent = handler((
+  _: never,
   {
+    safeAddMessage,
+    subAgentRunKey,
+    prompt,
+  }: {
     safeAddMessage: Stream<BuiltInLLMMessage>;
     subAgentRunKey: Writable<number>;
     prompt: string;
-  }
->((_, { safeAddMessage, subAgentRunKey, prompt }) => {
+  },
+) => {
   safeAddMessage.send({
     role: "user" as const,
     content: [{ type: "text" as const, text: prompt }],
@@ -273,22 +288,23 @@ const runSafeAgent = handler<
   subAgentRunKey.set((subAgentRunKey.get() ?? 0) + 1);
 });
 
-const clearSubAgentTrace = handler<
-  void,
-  {
-    subAgentRunKey: Writable<number>;
-  }
->((_, { subAgentRunKey }) => {
+const clearSubAgentTrace = handler((
+  _: never,
+  { subAgentRunKey }: { subAgentRunKey: Writable<number> },
+) => {
   subAgentRunKey.set(0);
 });
 
-const clearSafeFlow = handler<
-  void,
+const clearSafeFlow = handler((
+  _: never,
   {
+    clearChat,
+    subAgentRunKey,
+  }: {
     clearChat: Stream<void>;
     subAgentRunKey: Writable<number>;
-  }
->((_, { clearChat, subAgentRunKey }) => {
+  },
+) => {
   clearChat.send(undefined);
   subAgentRunKey.set(0);
 });
