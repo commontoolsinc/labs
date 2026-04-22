@@ -62,7 +62,6 @@ import {
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
 } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
