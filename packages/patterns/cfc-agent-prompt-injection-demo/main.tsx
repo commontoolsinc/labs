@@ -185,12 +185,14 @@ const runBothAgents = handler<
     prompt: string;
   }
 >((_, { unsafeAddMessage, safeAddMessage, prompt }) => {
-  const message = {
+  unsafeAddMessage.send({
     role: "user" as const,
     content: [{ type: "text" as const, text: prompt }],
-  };
-  unsafeAddMessage.send(message);
-  safeAddMessage.send(message);
+  });
+  safeAddMessage.send({
+    role: "user" as const,
+    content: [{ type: "text" as const, text: prompt }],
+  });
 });
 
 const appendDecision = handler<
