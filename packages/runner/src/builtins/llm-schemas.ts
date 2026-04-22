@@ -218,6 +218,7 @@ export const GenerateObjectResultSchema = internSchema(
     properties: {
       pending: { type: "boolean", default: false },
       result: { type: "object" },
+      messages: { type: "array", items: LLMMessageSchema },
       error: {},
       partial: { type: "string" },
       requestHash: { type: "string" },

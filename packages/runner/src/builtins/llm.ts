@@ -837,6 +837,7 @@ export function generateObject<T extends Record<string, unknown>>(
     }
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
+    const messagesWithLog = resultCell.key("messages").withTx(tx);
     const errorWithLog = resultCell.key("error").withTx(tx);
     const partialWithLog = resultCell.key("partial").withTx(tx);
     const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
@@ -864,6 +865,7 @@ export function generateObject<T extends Record<string, unknown>>(
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
     if ((!hasPrompt && (!messages || messages.length === 0)) || !schema) {
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
@@ -994,6 +996,7 @@ export function generateObject<T extends Record<string, unknown>>(
       const thisRun = currentRun;
 
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
@@ -1048,6 +1051,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
+              let finalMessages: readonly BuiltInLLMMessage[] = requestMessages;
 
               // Custom execution loop for generateObject with presentResult extraction
               const executeRecursive = async (
@@ -1115,6 +1119,7 @@ export function generateObject<T extends Record<string, unknown>>(
                     assistantMessage,
                     ...toolResultMessages,
                   ];
+                  finalMessages = updatedMessages;
 
                   const nextObservedConfidentiality = ContextualFlowControl
                     .uniqueAtoms([
@@ -1148,10 +1153,13 @@ export function generateObject<T extends Record<string, unknown>>(
                   throw new Error("presentResult was never called");
                 }
 
-                return finalResult;
+                return {
+                  object: finalResult,
+                  messages: finalMessages,
+                };
               };
 
-              const objectResult = queueName
+              const objectResponse = queueName
                 ? await runtime.getOrCreateQueue(queueName).enqueue(doWork)
                 : await doWork();
 
@@ -1161,7 +1169,10 @@ export function generateObject<T extends Record<string, unknown>>(
 
               await runtime.editWithRetry((tx) => {
                 resultCell.key("pending").withTx(tx).set(false);
-                resultCell.key("result").withTx(tx).set(objectResult);
+                resultCell.key("result").withTx(tx).set(objectResponse.object);
+                resultCell.key("messages").withTx(tx).set(
+                  JSON.parse(JSON.stringify(objectResponse.messages)) as any,
+                );
                 resultCell.key("error").withTx(tx).set(undefined);
                 resultCell.key("requestHash").withTx(tx).set(hash);
               });
@@ -1252,6 +1263,7 @@ export function generateObject<T extends Record<string, unknown>>(
       const thisRun = currentRun;
 
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
@@ -1310,8 +1322,16 @@ export function generateObject<T extends Record<string, unknown>>(
               await runtime.idle();
 
               await runtime.editWithRetry((tx) => {
+                const assistantMessage: BuiltInLLMMessage = {
+                  role: "assistant",
+                  content: JSON.stringify(response.object, null, 2),
+                };
                 resultCell.key("pending").withTx(tx).set(false);
                 resultCell.key("result").withTx(tx).set(response.object);
+                resultCell.key("messages").withTx(tx).set([
+                  ...JSON.parse(JSON.stringify(requestMessages)),
+                  JSON.parse(JSON.stringify(assistantMessage)),
+                ] as any);
                 resultCell.key("error").withTx(tx).set(undefined);
                 resultCell.key("requestHash").withTx(tx).set(hash);
               });

@@ -1561,6 +1561,7 @@ export interface BuiltInLLMState {
 export interface BuiltInLLMGenerateObjectState<T> {
   pending: boolean;
   result?: T;
+  messages?: BuiltInLLMMessage[];
   partial?: string;
   error?: unknown;
   cancelGeneration: Stream<void>;

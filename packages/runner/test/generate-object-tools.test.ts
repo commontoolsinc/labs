@@ -154,6 +154,43 @@ describe("generateObject with tools", () => {
       name: "Alice",
       age: 30,
     });
+    expect(result.key("messages").get()).toEqual([
+      {
+        role: "user",
+        content: "test-presentResult-person-with-name-and-age",
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_presentResult_1",
+            toolName: "presentResult",
+            input: {
+              name: "Alice",
+              age: 30,
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_presentResult_1",
+            toolName: "presentResult",
+            output: {
+              type: "json",
+              value: {
+                name: "Alice",
+                age: 30,
+              },
+            },
+          },
+        ],
+      },
+    ]);
   });
 
   it("should work without tools parameter (backward compatibility)", async () => {
@@ -214,6 +251,17 @@ describe("generateObject with tools", () => {
       title: "Test Title",
       description: "Test Description",
     });
+    expect(result.key("messages").get()).toEqual([
+      {
+        role: "user",
+        content: "test-no-tools-document-with-title-and-description",
+      },
+      {
+        role: "assistant",
+        content:
+          '{\n  "title": "Test Title",\n  "description": "Test Description"\n}',
+      },
+    ]);
   });
 
   it("should handle errors when presentResult is never called", async () => {
