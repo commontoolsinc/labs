@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("runtime-v2-read-tx-fallback");
 const space = signer.did();
@@ -140,7 +141,12 @@ describe("Runtime v2 read transaction fallback", () => {
       expect(cell.withTx(readTx2).get()).toBe(3);
       expect(() => readTx1.writeValueOrThrow(cell.getAsNormalizedFullLink(), 4))
         .toThrow(/runtime\.edit\(\)/);
-      expect(() => readTx1.tx.write(cell.getAsNormalizedFullLink(), 4))
+      expect(() =>
+        readTx1.tx.write(
+          toMemorySpaceAddress(cell.getAsNormalizedFullLink()),
+          4,
+        )
+      )
         .toThrow(/runtime\.edit\(\)/);
       expect(() => readTx1.abort()).toThrow(/runtime\.edit\(\)/);
       await expect(readTx1.commit()).resolves.toEqual({ ok: {} });

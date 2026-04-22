@@ -394,14 +394,14 @@ describe("Schema - Examples", () => {
       expect(
         reads.some((r) =>
           r.id === toURI(docCell.entityId!) &&
-          r.path[0] === "current"
+          r.path[0] === "value" && r.path[1] === "current"
         ),
       ).toBe(true);
       // The initial entity is read via followPointer at the "foo" sub-path.
       expect(
         reads.some((r) =>
           r.id === toURI(initialEntityId) &&
-          r.path[0] === "foo"
+          r.path[0] === "value" && r.path[1] === "foo"
         ),
       ).toBe(true);
 

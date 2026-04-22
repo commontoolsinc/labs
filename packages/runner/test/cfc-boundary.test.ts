@@ -9,7 +9,7 @@ import * as V2Storage from "../src/storage/v2.ts";
 import { raw } from "../src/module.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   canonicalizeCfcMetadata,
   canonicalizePreparedDigestInput,
@@ -1400,12 +1400,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const link = cell.getAsNormalizedFullLink();
       const verify = runtime.edit();
-      const stored = verify.readOrThrow({
-        space: link.space,
-        id: link.id,
-        type: link.type,
-        path: [],
-      }) as { cfc?: unknown };
+      const stored = verify.readOrThrow(toMemorySpaceAddress(link)) as {
+        cfc?: unknown;
+      };
       expect(stored.cfc).toBeUndefined();
       expect(storedCfcMetadataAppliesToPath(verify, link)).toBe(false);
       verify.abort();

@@ -29,12 +29,35 @@ export type NormalizedLink = {
 };
 
 /**
- * Full normalized link that from a complete link, i.e. with required id, space
- * and type. Gets created by parseLink if a base is provided.
+ * Full normalized link from a complete link, i.e. with required id, space and
+ * type. Gets created by parseLink if a base is provided.
  *
- * Any such link can be used as a memory address.
+ * Normalized link paths are value-relative. Use `toMemorySpaceAddress` when a
+ * document-root memory address is required.
  */
-export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
+export type NormalizedFullLink = NormalizedLink & {
+  id: URI;
+  space: MemorySpace;
+  type: string; // just string, so we can't use it as an IMemorySpaceAddress
+};
+
+export type ValuePath = readonly ["value", ...string[]];
+export type IMemorySpaceValueAddress = IMemorySpaceAddress & {
+  path: ValuePath;
+};
+/**
+ * Convert a value-relative normalized link into a document-root memory address.
+ */
+export function toMemorySpaceAddress(
+  link: NormalizedFullLink,
+): IMemorySpaceValueAddress {
+  return {
+    space: link.space,
+    id: link.id,
+    type: (link.type ?? "application/json") as IMemorySpaceValueAddress["type"],
+    path: ["value", ...link.path],
+  };
+}
 
 /**
  * Primitive cell link types that can be serialized.
@@ -207,8 +230,14 @@ export function areNormalizedLinksSame(
  * Serialize an address to a string key for use in Maps/Sets/memoization.
  * Includes space, id, type, and path — the same fields compared by
  * areNormalizedLinksSame.
+ *
+ * Because links are relative to "value", the IMemorySpaceAddress and
+ * NormalizedFullLink version of the same address will return different
+ * keys, so they should not be mixed up.
  */
-export function addressKey(addr: IMemorySpaceAddress): string {
+export function addressKey(
+  addr: IMemorySpaceAddress | NormalizedFullLink,
+): string {
   return JSON.stringify([addr.space, addr.id, addr.type, addr.path]);
 }
 
