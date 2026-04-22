@@ -246,11 +246,10 @@ export class RuntimeInternals extends EventTarget {
     }
   }
 
-  async #settleNavigationSideEffects(): Promise<void> {
+  async #waitForNavigationConvergence(): Promise<void> {
     this.#check();
     await this.#client.idle();
     await this.#client.synced();
-    await this.#client.idle();
   }
 
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
@@ -274,9 +273,9 @@ export class RuntimeInternals extends EventTarget {
 
       if (sameSpace) {
         await this.registerNavigatedPiece(cell);
-        await this.#settleNavigationSideEffects();
+        await this.#waitForNavigationConvergence();
       } else {
-        await this.#settleNavigationSideEffects();
+        await this.#waitForNavigationConvergence();
       }
 
       if (sameSpace && this.#spaceName) {

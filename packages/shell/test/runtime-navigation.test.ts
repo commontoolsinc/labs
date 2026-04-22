@@ -29,11 +29,26 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   }
 }
 
-async function flushMicrotasks(count = 4): Promise<void> {
-  for (let i = 0; i < count; i += 1) {
-    await Promise.resolve();
-  }
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+};
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
+
+type NavigationDetail = {
+  spaceDid: DID;
+  pieceId: string;
+};
 
 describe("RuntimeInternals navigation", () => {
   it("waits for same-space registration and convergence before navigating", async () => {
@@ -82,22 +97,19 @@ describe("RuntimeInternals navigation", () => {
     );
 
     let registrations = 0;
-    let releaseRegistration: (() => void) | undefined;
-    runtime.registerNavigatedPiece = () => {
+    const registrationStarted = deferred<void>();
+    const registrationReleased = deferred<void>();
+    runtime.registerNavigatedPiece = async () => {
       registrations += 1;
-      return new Promise<void>((resolve) => {
-        releaseRegistration = resolve;
-      });
+      registrationStarted.resolve();
+      await registrationReleased.promise;
     };
 
-    let navigation:
-      | {
-        spaceDid: DID;
-        pieceId: string;
-      }
-      | undefined;
+    let navigation: NavigationDetail | undefined;
+    const navigationReceived = deferred<NavigationDetail>();
     const onNavigate = (event: Event) => {
       navigation = (event as CustomEvent<typeof navigation>).detail;
+      navigationReceived.resolve(navigation!);
     };
     globalThis.addEventListener("cf-navigate", onNavigate);
 
@@ -109,17 +121,17 @@ describe("RuntimeInternals navigation", () => {
         },
       });
 
-      await flushMicrotasks();
+      await registrationStarted.promise;
 
       expect(registrations).toBe(1);
       expect(client.idleCalls).toBe(0);
       expect(client.syncedCalls).toBe(0);
       expect(navigation).toBeUndefined();
 
-      releaseRegistration?.();
-      await flushMicrotasks();
+      registrationReleased.resolve();
+      await navigationReceived.promise;
 
-      expect(client.idleCalls).toBe(2);
+      expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
       expect(navigation).toEqual({
         spaceDid,
@@ -189,14 +201,11 @@ describe("RuntimeInternals navigation", () => {
       currentSpace,
     );
 
-    let navigation:
-      | {
-        spaceDid: DID;
-        pieceId: string;
-      }
-      | undefined;
+    let navigation: NavigationDetail | undefined;
+    const navigationReceived = deferred<NavigationDetail>();
     const onNavigate = (event: Event) => {
       navigation = (event as CustomEvent<typeof navigation>).detail;
+      navigationReceived.resolve(navigation!);
     };
     globalThis.addEventListener("cf-navigate", onNavigate);
 
@@ -208,9 +217,9 @@ describe("RuntimeInternals navigation", () => {
         },
       });
 
-      await flushMicrotasks();
+      await navigationReceived.promise;
 
-      expect(client.idleCalls).toBe(2);
+      expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
       expect(navigation).toEqual({
         spaceDid: nextSpace,
