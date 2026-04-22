@@ -11,7 +11,7 @@ import {
 } from "commonfabric";
 
 interface PatternState {
-  value: Default<number, 0>;
+  value: number | Default<0>;
 }
 
 const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
@@ -61,7 +61,7 @@ export const Counter = pattern<PatternState>((state) => {
 
 interface FactoryInput {
   // Provided by the shell; not used directly here
-  allPieces: Default<unknown[], []>;
+  allPieces: unknown[] | Default<[]>;
 }
 
 // No additional outputs beyond name and UI

@@ -257,6 +257,7 @@ export async function executeResolvedCallable(
 
   let outputValue: unknown;
   try {
+    resolved.manager.runtime.prepareTxForCommit?.(tx);
     await tx.commit();
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();

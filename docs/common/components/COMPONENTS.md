@@ -8,7 +8,8 @@ Common Fabric UI components with bidirectional binding support.
 
 ## Bidirectional Binding
 
-Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
+Use `$` prefix for explicit two-way sync. That is the normal authoring form for
+Common Fabric controls. No handler is needed for simple updates.
 
 ```tsx
 <cf-checkbox $checked={item.done} />    // Auto-syncs checkbox state
@@ -95,11 +96,13 @@ Useful styling hooks include:
 // With placeholder
 <cf-input $value={searchQuery} placeholder="Search..." />
 
-// Manual handler for side effects
-<cf-input value={title} oncf-input={(e) => {
-  title.set(e.detail.value);
-  console.log("Changed:", e.detail.value);
-}} />
+// Binding plus side effect
+<cf-input
+  $value={title}
+  oncf-input={(e) => {
+    console.log("Changed:", e.detail.value);
+  }}
+/>
 ```
 
 Useful styling hooks include:
@@ -155,6 +158,11 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 />
 ```
 
+When a control is already bound to a cell, usually via `$value`, treat that
+binding as the primary value path. Avoid `oncf-change` handlers that simply
+write the same value back into that same cell. Use `oncf-change` only for
+dependent state updates or other side effects.
+
 ---
 
 ## cf-message-input
@@ -198,6 +206,68 @@ Useful styling hooks include:
 - `--cf-card-color-border`
 - `--cf-card-color-hover-surface`
 - `--cf-card-border-radius`
+
+### Gradient and frosted-glass backgrounds
+
+Use `--cf-card-background` to apply a gradient or tinted background. Use `--cf-card-backdrop-blur` for a frosted-glass effect. Both default to the theme surface color and 0px blur, so existing usage is unaffected.
+
+```tsx
+// Gradient tint
+<cf-card style="--cf-card-background: linear-gradient(145deg, rgba(255,255,255,0.52), #ece9ff);">
+  <p>Tinted card</p>
+</cf-card>
+
+// Frosted glass (requires a background behind the card)
+<cf-card style="--cf-card-background: rgba(255,255,255,0.45); --cf-card-backdrop-blur: 8px;">
+  <p>Frosted card</p>
+</cf-card>
+
+// Combined: gradient + blur
+<cf-card style="--cf-card-background: linear-gradient(145deg, rgba(255,255,255,0.52), #ece9ff); --cf-card-backdrop-blur: 8px;">
+  <p>Gradient frosted card</p>
+</cf-card>
+```
+
+CSS custom properties:
+
+- `--cf-card-background` — card background (default: `var(--cf-card-color-surface)`). Accepts any CSS `background` value including gradients.
+- `--cf-card-backdrop-blur` — backdrop blur radius (default: `0px`). Use values like `8px` or `var(--cf-backdrop-blur-md)` for frosted-glass.
+
+---
+
+## cf-chip
+
+Compact label/tag element. Use for status indicators, categories, action pills, and filter chips.
+
+```tsx
+// Basic usage
+<cf-chip label="Draft" />
+
+// Sizes
+<cf-chip label="Small" size="sm" />
+<cf-chip label="Medium" size="md" />  {/* default */}
+<cf-chip label="Large" size="lg" />
+
+// Color overrides (per-instance)
+<cf-chip label="Review" size="sm"
+  style="--cf-chip-background: linear-gradient(135deg, #5f89ff, #4d77fb); --cf-chip-color: white;" />
+
+// Removable chip
+<cf-chip label="Tag" removable oncf-remove={() => tags.remove(tag)} />
+```
+
+Attributes:
+
+- `label` — display text (string)
+- `size` — `"sm" | "md" | "lg"` (default `"md"`)
+- `removable` — boolean, shows an X button
+- `disabled` — boolean
+
+CSS custom properties for per-instance color overrides:
+
+- `--cf-chip-background` — chip background (default: theme chip surface)
+- `--cf-chip-color` — chip text color (default: theme chip text)
+- `--cf-chip-border-color` — chip border color (default: theme chip border)
 
 ---
 
@@ -263,22 +333,150 @@ const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
 
 ---
 
-## cf-screen
+## cf-modal (Sheet Presentation)
 
-Full-screen container for app-like layouts. Use instead of `<div style={{ height: "100%" }}>` which doesn't work (parent has no explicit height). The component already sets `display: flex; flex-direction: column;` internally.
+`cf-modal` supports a `presentation` attribute that switches between a centered dialog and a bottom sheet:
 
 ```tsx
-// ❌ DOESN'T WORK - content appears blank
-<div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-  {/* Content in DOM but invisible */}
-</div>
+// Centered dialog (default)
+<cf-modal $open={dialogOpen} presentation="dialog" size="md" dismissable>
+  <span slot="header">Confirm</span>
+  <p>Are you sure?</p>
+</cf-modal>
 
-// ✅ WORKS - full available width and height
+// Bottom sheet
+<cf-modal $open={sheetOpen} presentation="sheet" grabber detent="half" dismissable>
+  <span slot="header">Options</span>
+  <p>Sheet content slides up from bottom.</p>
+</cf-modal>
+```
+
+Sheet-specific attributes:
+
+- `presentation` — `"dialog"` (default) or `"sheet"`
+- `grabber` — boolean, shows a drag-handle pill above the header
+- `detent` — `"auto"` (content-sized, max 90vh), `"half"` (50vh), `"full"` (92vh)
+
+Both modes share the same slots (header, default, footer, close-button), events, focus trap, Escape handling, and `ModalManager` stacking.
+
+---
+
+## cf-tab-bar
+
+Fixed-position navigation bar for app-like UIs. Distinct from `cf-tabs` — fires selection events instead of managing ARIA tab panels.
+
+```tsx
+const activeTab = Writable.of("home");
+
+<cf-tab-bar $value={activeTab} variant="inset">
+  <cf-tab-bar-item value="home" label="Home">
+    <span slot="icon">🏠</span>
+  </cf-tab-bar-item>
+  <cf-tab-bar-item value="search" label="Search">
+    <span slot="icon">🔍</span>
+  </cf-tab-bar-item>
+  <cf-tab-bar-item value="inbox" label="Inbox">
+    <span slot="icon">📬</span>
+  </cf-tab-bar-item>
+</cf-tab-bar>
+```
+
+- `$value` — Cell binding for the selected item value
+- `position` — `"bottom"` (default) or `"top"`
+- `variant` — `"default"` (full-width) or `"inset"` (floating pill)
+- `action` slot — optional primary action button (FAB) beside the nav pill
+- Events: `cf-change` with `{ value, oldValue }`
+- Keyboard: Arrow keys, Home/End, Enter/Space
+
+### Action slot (FAB)
+
+```tsx
+<cf-tab-bar $value={activeTab} variant="inset">
+  {/* ... tab items ... */}
+  <cf-button slot="action" variant="primary" onClick={openSheet}
+    style="border-radius: var(--cf-border-radius-xl); width: 3.5rem; height: 100%; padding: 0;">
+    ＋
+  </cf-button>
+</cf-tab-bar>
+```
+
+The action button renders beside the nav pill, not inside it. Use a regular `cf-button` — no special FAB component needed.
+
+### View switching
+
+The parent pattern owns view-switching logic via `computed()`:
+
+```tsx
+const mainContent = computed(() => {
+  switch (activeTab.get()) {
+    case "home":    return <HomeView />;
+    case "search":  return <SearchView />;
+    default:        return <HomeView />;
+  }
+});
+```
+
+---
+
+## cf-toast
+
+Floating ephemeral notifications. Place a `cf-toast-provider` at the app root and `cf-toast` elements inside it.
+
+```tsx
+<cf-toast-provider position="bottom">
+  <cf-toast open={saved} variant="success" duration={4000}
+    oncf-toast-dismiss={action(() => saved.set(false))}>
+    Changes saved.
+    <cf-button slot="action" variant="ghost" style="padding: 2px 8px; font-size: 13px;">
+      View
+    </cf-button>
+  </cf-toast>
+</cf-toast-provider>
+```
+
+### cf-toast-provider
+
+- `position` — `"top"`, `"bottom"`, `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`
+- `max` — maximum visible toasts (default 3), oldest dismissed on overflow
+
+### cf-toast
+
+- `variant` — `"default"`, `"success"`, `"error"`, `"warning"`
+- `duration` — auto-dismiss in ms (default 5000, `0` for persistent)
+- `dismissable` — show X button
+- `open` — visibility
+- Slots: default (message), `action`, `icon`
+- Events: `cf-toast-dismiss` with `{ reason: "timeout" | "user" }`, `cf-toast-action`
+- ARIA: error variant uses `role="alert"` + `aria-live="assertive"`, others use `role="status"` + `aria-live="polite"`
+
+---
+
+## cf-screen
+
+Full-height app layout with pinned header, auto-scrolling main area, and pinned
+footer. Use instead of `<div style={{ height: "100%" }}>` which doesn't work
+(parent has no explicit height).
+
+Content in the default slot scrolls automatically when it overflows. Use
+`cf-vscroll` inside `cf-screen` only when you need snap-to-bottom (chat),
+fade-edges, or a styled/hidden scrollbar.
+
+```tsx
+// Simple case — main area scrolls automatically
 <cf-screen>
-  <header>Title</header>
-  <cf-vscroll style="flex: 1;">
-    {/* Scrollable content */}
+  <cf-heading slot="header" level={2}>Title</cf-heading>
+  <cf-vstack gap="4" padding="4">
+    {items}
+  </cf-vstack>
+</cf-screen>
+
+// Chat case — snap-to-bottom + fade-edges
+<cf-screen>
+  <cf-heading slot="header" level={2}>Chat</cf-heading>
+  <cf-vscroll flex snapToBottom fadeEdges>
+    {messages}
   </cf-vscroll>
+  <cf-message-input slot="footer" />
 </cf-screen>
 ```
 
@@ -569,6 +767,46 @@ SVG charting components. Compose mark elements inside a `cf-chart` container.
 - **Data auto-detection:** Number arrays auto-index. String x-values use band scale. Date/ISO strings use time scale.
 - **Responsive width:** Chart fills its container width. Use CSS to control.
 - **Crosshair:** Enabled by default. Shows nearest data point on hover.
+
+---
+
+## Design Tokens
+
+The following CSS custom properties are defined globally (in `variables.ts`) and available throughout your patterns via `cf-theme` or direct `style` attributes.
+
+### Backdrop blur
+
+```css
+--cf-backdrop-blur-sm: 4px;
+--cf-backdrop-blur-md: 8px;
+--cf-backdrop-blur-lg: 16px;
+--cf-backdrop-blur-xl: 24px;
+```
+
+Use with `--cf-card-backdrop-blur` or any `backdrop-filter` CSS.
+
+### Translucent surfaces
+
+```css
+--cf-surface-translucent: rgba(255, 255, 255, 0.72);
+--cf-surface-translucent-strong: rgba(255, 255, 255, 0.88);
+--cf-overlay-dim: rgba(0, 0, 0, 0.4);
+```
+
+Useful for frosted-glass cards, modal backdrops, and overlay tints.
+
+### Semantic z-index layers
+
+```css
+--cf-z-layer-sticky:  10;
+--cf-z-layer-fixed:   500;
+--cf-z-layer-fab:     900;
+--cf-z-layer-sheet:   950;
+--cf-z-layer-overlay: 1000;
+--cf-z-layer-toast:   1100;
+```
+
+`cf-fab` uses `--cf-z-layer-fab` internally. `cf-modal` and `cf-toast-provider` use their own z-index values (`1000+` and `1100` respectively) but do not yet reference these tokens. Reference the tokens in custom overlays to maintain correct stacking.
 
 ---
 

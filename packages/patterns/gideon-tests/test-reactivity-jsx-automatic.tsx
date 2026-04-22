@@ -36,12 +36,11 @@ interface User {
 }
 
 interface TestInput {
-  count: Default<number, 0>;
-  user: Default<User, { name: "Alice"; age: 30 }>;
-  items: Default<
-    Item[],
-    [{ title: "Item 1" }, { title: "Item 2" }, { title: "Item 3" }]
-  >;
+  count: number | Default<0>;
+  user: User | Default<{ name: "Alice"; age: 30 }>;
+  items:
+    | Item[]
+    | Default<[{ title: "Item 1" }, { title: "Item 2" }, { title: "Item 3" }]>;
 }
 
 const updateAllValues = handler<

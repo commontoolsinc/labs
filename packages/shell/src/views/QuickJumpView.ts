@@ -15,7 +15,7 @@ export class XQuickJumpView extends BaseView {
       top: 0;
       left: 0;
       width: 100vw;
-      height: 100vh;
+      height: 100dvh;
       display: none;
       align-items: center;
       justify-content: center;
@@ -35,7 +35,7 @@ export class XQuickJumpView extends BaseView {
     .panel {
       position: relative;
       width: min(720px, 90vw);
-      background: #fff;
+      background: var(--shell-surface);
       border: var(--border-width, 2px) solid var(--border-color, #000);
       box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
       overflow: hidden;
@@ -51,6 +51,8 @@ export class XQuickJumpView extends BaseView {
       font-size: 14px;
       width: 100%;
       box-sizing: border-box;
+      background: var(--shell-surface);
+      color: var(--font-color);
     }
 
     .list {
@@ -71,19 +73,19 @@ export class XQuickJumpView extends BaseView {
     }
 
     .item[aria-selected="true"] {
-      background: #f0f4ff;
+      background: var(--shell-highlight);
     }
     .item:hover {
-      background: #f0f4ff;
+      background: var(--shell-highlight);
     }
 
     .name {
       flex: 1;
-      color: var(--text-primary, #000);
+      color: var(--font-color);
     }
 
     .id {
-      color: #666;
+      color: var(--shell-text-muted);
       font-size: 12px;
     }
   `;

@@ -33,9 +33,9 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface PhoneModuleInput {
   /** Label for this phone (Mobile, Home, Work, etc.) */
-  label: Default<string, "Mobile">;
+  label: string | Default<"Mobile">;
   /** Phone number (preserve original formatting) */
-  number: Default<string, "">;
+  number: string | Default<"">;
 }
 
 // ===== The Pattern =====

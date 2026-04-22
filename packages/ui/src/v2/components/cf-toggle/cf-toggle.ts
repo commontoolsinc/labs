@@ -3,6 +3,9 @@ import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { toggleStyles } from "./styles.ts";
 
+/** @deprecated Use ComponentSize instead */
+export type ToggleSize = "sm" | "md" | "lg";
+
 /**
  * CFToggle - Toggle button that can be pressed/unpressed with multiple variants and sizes
  *
@@ -11,7 +14,7 @@ import { toggleStyles } from "./styles.ts";
  * @attr {boolean} pressed - Whether the toggle is pressed
  * @attr {boolean} disabled - Whether the toggle is disabled
  * @attr {string} variant - Visual style variant: "default" | "outline"
- * @attr {string} size - Toggle size: "default" | "sm" | "lg"
+ * @attr {string} size - Toggle size: "sm" | "md" | "lg" (default: "md")
  * @attr {string} value - Value attribute for use in toggle groups
  *
  * @slot - Default slot for toggle content
@@ -22,7 +25,6 @@ import { toggleStyles } from "./styles.ts";
  * <cf-toggle pressed>Bold</cf-toggle>
  */
 export type ToggleVariant = "default" | "outline";
-export type ToggleSize = "default" | "sm" | "lg";
 
 export class CFToggle extends BaseElement {
   static override properties = {
@@ -37,7 +39,7 @@ export class CFToggle extends BaseElement {
   declare pressed: boolean;
   declare disabled: boolean;
   declare variant: ToggleVariant;
-  declare size: ToggleSize;
+  declare size: "sm" | "md" | "lg";
   declare ariaLabel: string;
 
   private _buttonElement: HTMLButtonElement | null = null;
@@ -47,7 +49,7 @@ export class CFToggle extends BaseElement {
     this.pressed = false;
     this.disabled = false;
     this.variant = "default";
-    this.size = "default";
+    this.size = "md";
     this.ariaLabel = "";
   }
 

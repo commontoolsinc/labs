@@ -44,6 +44,7 @@ type BindingKind = "builder" | "data" | "function" | "import" | "unknown";
 
 interface BindingInfo {
   kind: BindingKind;
+  dependencySpecifier?: string;
   trustedRuntimeName?: string;
   namespaceImport?: boolean;
   hardeningHelper?: boolean;
@@ -64,6 +65,8 @@ const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
 const CANONICAL_FACTORY_GUARD_STATEMENTS = createFactoryShadowGuardSource().map(
   (statement: string) => stripJsTrivia(statement),
 );
+const DEFAULT_EXPORT_ALLOWED_BINDING_ERROR =
+  "Default exports must be trusted builders, direct functions, verified data, or import re-exports";
 
 interface ParsedNormalizedCallReference {
   kind: "identifier" | "member" | "commaMember";
@@ -374,6 +377,7 @@ function predeclareFactoryDependencies(
       );
       env.set(parameter, {
         kind: "import",
+        dependencySpecifier: dependency,
         namespaceImport: true,
         trustedRuntimeName: isRuntimeModuleIdentifier(dependency)
           ? dependency
@@ -586,9 +590,44 @@ function verifyCompiledExportAssignment(
     chain.value.end,
     env,
   );
+  if (chain.exportedNames.includes("default")) {
+    verifyDefaultExportBinding(source, filename, chain.value.start, binding);
+  }
   for (const name of chain.exportedNames) {
     env.set(name, cloneBindingInfo(binding));
   }
+}
+
+function verifyDefaultExportBinding(
+  source: string,
+  filename: string,
+  offset: number,
+  binding: BindingInfo,
+): void {
+  if (!isDisallowedTrustedRuntimeDefaultExport(binding)) {
+    return;
+  }
+
+  throw verificationErrorAt(
+    source,
+    filename,
+    offset,
+    DEFAULT_EXPORT_ALLOWED_BINDING_ERROR,
+  );
+}
+
+function isDisallowedTrustedRuntimeDefaultExport(
+  binding: BindingInfo,
+): boolean {
+  if (binding.kind !== "import") {
+    return false;
+  }
+
+  return !binding.dependencySpecifier ||
+    binding.dependencySpecifier === "require" ||
+    binding.dependencySpecifier === "exports" ||
+    binding.trustedRuntimeName === "commonfabric" ||
+    binding.trustedRuntimeName === "commonfabric/schema";
 }
 
 function classifyExpressionText(
@@ -1512,11 +1551,11 @@ function isStringDirectiveRange(
   end: number,
 ): boolean {
   const quote = source[start];
-  if ((quote !== "'" && quote !== '"') || source[end - 1] !== quote) {
-    return source[end - 1] === ";" && end - start >= 2 &&
-      source[end - 2] === quote;
+  if (quote !== "'" && quote !== '"') {
+    return false;
   }
-  return true;
+  const last = source[end - 1] === ";" ? end - 2 : end - 1;
+  return last > start && source[last] === quote;
 }
 
 function isClassDeclarationRange(

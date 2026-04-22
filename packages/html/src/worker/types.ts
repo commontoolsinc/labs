@@ -104,6 +104,16 @@ export interface RenderPolicy {
    * This is a temporary low-level capability hook for trusted UI experiments.
    */
   declassifyConfidentiality: readonly unknown[];
+
+  /**
+   * Integrity required for user-visible text in this subtree.
+   * Undefined means descendant text is not integrity-gated.
+   */
+  textIntegrity?: {
+    requiredIntegrity: readonly unknown[];
+    allowLiteralText: boolean;
+    boundaryNodeId: number;
+  };
 }
 
 /**
@@ -146,6 +156,9 @@ export interface NodeState {
 
   /** Original authored children, before any render-policy placeholder rewrite. */
   sourceChildren?: WorkerVNode["children"];
+
+  /** Original authored props, used to recompute child render policy. */
+  sourceProps?: WorkerVNode["props"];
 }
 
 /**

@@ -4,6 +4,7 @@
 
 import { isDeno } from "@commonfabric/utils/env";
 import type { IncrementalHasher } from "./interface.ts";
+import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
 
 // Can't `import` at the top, because then `import`ing this module would fail
 // in a non-Deno environment.
@@ -18,25 +19,26 @@ if (isDeno()) {
 }
 
 /**
- * Throws an error indicating that this module is not usable.
+ * Throws an error indicating that this module is not usable, if it is not in
+ * fact usable. Otherwise, does nothing.
  */
-function cantUse(): never {
-  throw new Error("Cannot use `sha256-deno` in this environment.");
+function assertUsable() {
+  if (crypto === null) {
+    throw new Error("Cannot use `sha256-deno` in this environment.");
+  }
 }
 
 /**
  * Deno-specific incremental hasher.
  */
-class DenoHasher implements IncrementalHasher {
-  #hasher = (crypto === null) ? cantUse() : crypto.createHash("sha256");
+class DenoHasher extends BaseIncrementalHasher {
+  #hasher = crypto!.createHash("sha256");
 
-  update(data: Uint8Array) {
+  _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
-  digest(): Uint8Array;
-  digest(encoding: "base64url"): string;
-  digest(encoding?: string): Uint8Array | string {
+  _rawDigest(encoding: string | undefined): Uint8Array | string {
     switch (encoding) {
       case "base64url": {
         return this.#hasher.digest(encoding);
@@ -68,14 +70,12 @@ export function canUseDeno() {
  * Performs a hash on a single array.
  */
 export function sha256Deno(payload: Uint8Array): Uint8Array {
-  if (crypto === null) {
-    cantUse();
-  }
+  assertUsable();
 
   // `node:crypto digest()` returns a `Buffer` (a `Uint8Array` subclass);
   // normalize it to plain `Uint8Array`, so downstream equality checks work
   // correctly.
-  const buf = crypto.createHash("sha256").update(payload).digest();
+  const buf = crypto!.createHash("sha256").update(payload).digest();
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
@@ -83,5 +83,6 @@ export function sha256Deno(payload: Uint8Array): Uint8Array {
  * Creates an incremental hasher.
  */
 export function createHasherDeno(): IncrementalHasher {
+  assertUsable();
   return new DenoHasher();
 }

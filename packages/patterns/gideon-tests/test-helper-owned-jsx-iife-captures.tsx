@@ -20,7 +20,7 @@ interface Entry {
 }
 
 interface Input {
-  entries: Writable<Default<Entry[], []>>;
+  entries: Writable<Entry[] | Default<[]>>;
 }
 
 interface Output {
@@ -28,7 +28,7 @@ interface Output {
 }
 
 function visibleEntries(
-  entries: Writable<Default<Entry[], []>>,
+  entries: Writable<Entry[] | Default<[]>>,
   prefix: string,
 ): Entry[] {
   const list = entries.get();

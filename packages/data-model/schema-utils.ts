@@ -7,10 +7,15 @@ import type {
   JSONSchemaObj,
   JSONSchemaObjMutable,
   JSONSchemaTypes,
+  SchemaPathSelector,
 } from "@commonfabric/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { cloneIfNecessary } from "./fabric-value.ts";
-import { internSchema, isInternedSchema } from "./schema-hash.ts";
+import {
+  internSchema,
+  internSchemaAsHashString,
+  isInternedSchema,
+} from "./schema-hash.ts";
 import { type FabricValue } from "./interface.ts";
 
 /**
@@ -18,6 +23,23 @@ import { type FabricValue } from "./interface.ts";
  * interned schemas. Populated lazily.
  */
 const BASIC_SCHEMAS: Record<string, JSONSchemaObj> = {};
+
+/**
+ * Helper for `schemaForValueType()` and `emptySchemaObject()` to do the
+ * lookup and interning as necessary.
+ */
+function getBasicSchema(key: string) {
+  const found = BASIC_SCHEMAS[key];
+
+  if (found) {
+    return found;
+  } else {
+    const result = BASIC_SCHEMAS[key] = internSchema({
+      type: key as JSONSchemaTypes,
+    }) as JSONSchemaObj;
+    return result;
+  }
+}
 
 /**
  * Indicates if the given (nullable) schema is in fact a non-trivial schema. A
@@ -131,22 +153,48 @@ export function cloneSchemaMutable(
  * `schema` is interned, then the result of this function will also be interned.
  *
  * - `undefined` and `true` ("accept everything") are treated as an interned
- *   `{}` before applying overrides.
- * - `false` ("reject everything") short-circuits: no overrides can make a
- *   "never" schema accept anything, so `false` is returned as-is.
+ *   `{}`.
+ * - `false` ("reject everything"), whether in `schema` or `overrides`, results
+ *   in a `false` result. That is, adding properties to a "never" schema still
+ *   results in "never," and adding "never" to any schema makes it a "never."
  */
 export function schemaWithProperties(
   schema: JSONSchema | undefined,
-  overrides: JSONSchemaObj,
+  overrides: JSONSchema,
 ): JSONSchema {
-  if (schema === false) return false;
+  schema ??= true;
 
-  const base = (schema === undefined || schema === true)
-    ? emptySchemaObject()
-    : schema;
-  const result = { ...base, ...overrides };
+  if (typeof schema === "boolean") {
+    if (schema === false) {
+      return false;
+    } else if (typeof overrides === "boolean") {
+      return overrides;
+    } else {
+      // Since `schema` is (definitionally) interned, "intern contagion"
+      // applies, and the result is to be interned. We need to "manually" call
+      // `toDeepFrozenSchema()` to ensure the value can become owned by the
+      // intern cache (because an un-frozen argument needs to remain untouched).
+      return internSchema(toDeepFrozenSchema(overrides));
+    }
+  }
 
-  return isInternedSchema(base)
+  // `schema` is an object.
+
+  if (typeof overrides === "boolean") {
+    if (overrides === false) {
+      return false;
+    } else {
+      // Note: This covers the "intern contagion" case, since
+      // `toDeepFrozenSchema()` returns the given schema if already deep-frozen,
+      // and interned schemas are definitionally deep-frozen.
+      return toDeepFrozenSchema(schema);
+    }
+  }
+
+  // Both `schema` and `overrides` are objects.
+
+  const result = { ...schema, ...overrides };
+  return isInternedSchema(schema)
     ? internSchema(result)
     : toDeepFrozenSchema(result, true);
 }
@@ -251,18 +299,76 @@ export function emptySchemaObject() {
 }
 
 /**
- * Helper for `schemaForValueType()` and `emptySchemaObject()` to do the
- * lookup and interning as necessary.
+ * Return the given `SchemaPathSelector` with its `schema` (if any) interned
+ * and with both its `path` array and the selector object itself deep-frozen
+ * in place. The input reference is returned — this function does not clone.
+ * Idempotent on repeat calls: `internPathSelector(internPathSelector(x)) ===
+ * internPathSelector(x)`.
+ *
+ * Exists so that callers who feed selectors into
+ * `MapSetStringToPathSelectors` (or any other cache keyed on
+ * `hashSchemaItem` of a selector) can hand in an already-interned,
+ * deep-frozen selector. That satisfies the `isDeepFrozen` guard in
+ * `hashOfModernInternal` and lets the modern-hash WeakMap cache retain
+ * its hash across repeat calls. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §4
+ * Phase 2 "DEFEAT-8" for the motivating analysis.
  */
-function getBasicSchema(key: string) {
-  const found = BASIC_SCHEMAS[key];
+export function internPathSelector(
+  selector: SchemaPathSelector,
+): SchemaPathSelector {
+  if (selector.schema !== undefined) internSchema(selector.schema);
+  Object.freeze(selector.path);
+  Object.freeze(selector);
+  return selector;
+}
 
-  if (found) {
-    return found;
-  } else {
-    const result = BASIC_SCHEMAS[key] = internSchema({
-      type: key as JSONSchemaTypes,
-    }) as JSONSchemaObj;
-    return result;
-  }
+/**
+ * Canonical "reject everything at the root" path selector. Used by sites
+ * that want to record a doc dependency (or normalize a `{ schema: false,
+ * ... }` input) without actually traversing into it.
+ *
+ * Frozen at module load, but its `schema: false` member is NOT routed
+ * through `internSchema` here (because doing so during `schema-utils.ts`'s
+ * module-load would reach into a not-yet-initialized `schema-hash.ts`
+ * due to the pre-existing circular import between the two modules). The
+ * boolean-schema intern path uses prefab singletons anyway, so
+ * lazy-interning the `false` on first real selector use is
+ * behaviorally equivalent to interning here.
+ */
+export const REJECTING_SELECTOR: SchemaPathSelector = Object.freeze({
+  path: Object.freeze([]) as readonly string[],
+  schema: false as const,
+});
+
+/**
+ * Canonical "accept the full value" path selector. `SchemaPathSelector`s
+ * are relative to the doc root, so to look at the value of the doc the
+ * path needs to have `"value"` in it.
+ *
+ * Frozen at module load; like `REJECTING_SELECTOR`, the boolean
+ * `schema: true` member is not routed through `internSchema` here
+ * (same circular-import reason — see `REJECTING_SELECTOR` doc comment).
+ */
+export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
+  path: Object.freeze(["value"]) as readonly string[],
+  schema: true as const,
+});
+
+/**
+ * Returns a cache-key string for an ordered pair of schemas, each interned
+ * (and thus deep-frozen) via `internSchema`. The `|` delimiter is outside
+ * the base64url alphabet used by hash strings, so the two halves cannot
+ * merge ambiguously.
+ *
+ * Used at the `traverse.ts` sites that key an intern cache on a merge
+ * operation's two input schemas. Interning the inputs stabilizes their
+ * identities in `internSchema`'s WeakMap, so subsequent calls with the
+ * same object references hit the hash-cache fast path in O(1) rather
+ * than re-hashing. See
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1
+ * for the motivating regression.
+ */
+export function internSchemaPairAsKey(a: JSONSchema, b: JSONSchema): string {
+  return `${internSchemaAsHashString(a)}|${internSchemaAsHashString(b)}`;
 }

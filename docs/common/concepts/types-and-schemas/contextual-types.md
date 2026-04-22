@@ -9,12 +9,12 @@ import { Default, Writable, pattern, UI } from 'commonfabric';
 
 interface ShoppingItem {
   title: string;
-  done: Default<boolean, false>;
+  done: boolean | Default<false>;
 }
 
 // Context 1: Schema definition
 interface Input {
-  items: Default<ShoppingItem[], []>;
+  items: ShoppingItem[] | Default<[]>;
 }
 
 // Context 2: Pattern parameter (with Writable<> for write access)

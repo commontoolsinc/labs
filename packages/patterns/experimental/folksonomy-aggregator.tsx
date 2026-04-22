@@ -53,7 +53,7 @@ interface CommunityTagSuggestion {
 }
 
 interface Input {
-  events: Default<TagEvent[], []>;
+  events: TagEvent[] | Default<[]>;
 }
 
 /**

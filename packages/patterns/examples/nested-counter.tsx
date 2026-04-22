@@ -11,7 +11,7 @@ import {
 // ===== Types =====
 
 interface CounterInput {
-  value: Writable<Default<number, 0>>;
+  value: Writable<number | Default<0>>;
 }
 
 // ===== Handlers at module scope =====

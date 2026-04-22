@@ -19,7 +19,7 @@ import EventDetail, { type EventPiece } from "./event-detail.tsx";
 export type { EventPiece };
 
 interface CalendarInput {
-  events?: Writable<Default<EventPiece[], []>>;
+  events?: Writable<EventPiece[] | Default<[]>>;
 }
 
 interface CalendarOutput {

@@ -4,7 +4,7 @@
 import { computed, Default, pattern, UI, Writable } from "commonfabric";
 
 export default pattern<{
-  value: Writable<Default<string, "hello">>;
+  value: Writable<string | Default<"hello">>;
 }>(({ value }) => {
   // Anti-pattern: Appending to an array instead of replacing — grows infinitely
   const log = Writable.of<string[]>([]);

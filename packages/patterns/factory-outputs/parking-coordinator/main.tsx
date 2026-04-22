@@ -52,7 +52,8 @@ export interface SpotRequest {
 
 export interface ParkingCoordinatorInput {
   spots: Writable<
-    Default<ParkingSpot[], [
+    | ParkingSpot[]
+    | Default<[
       { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
       { spotNumber: "5"; label: ""; notes: ""; active: true },
       {
@@ -63,8 +64,8 @@ export interface ParkingCoordinatorInput {
       },
     ]>
   >;
-  people: Writable<Default<Person[], []>>;
-  requests: Writable<Default<SpotRequest[], []>>;
+  people: Writable<Person[] | Default<[]>>;
+  requests: Writable<SpotRequest[] | Default<[]>>;
 }
 
 export interface ParkingCoordinatorOutput {

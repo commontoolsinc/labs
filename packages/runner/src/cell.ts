@@ -92,6 +92,7 @@ import {
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
+  IMemorySpaceAddress,
   IReadOptions,
 } from "./storage/interface.ts";
 import {
@@ -1398,7 +1399,7 @@ export class CellImpl<T extends FabricValue>
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
     let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
-      { ...this.link, path: ["source"] },
+      { ...this.link, path: ["source"] } as IMemorySpaceAddress,
       {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
       },
@@ -1438,7 +1439,7 @@ export class CellImpl<T extends FabricValue>
     }
     // System-owned provenance metadata, not user-surface value data.
     this.tx.writeOrThrow(
-      { ...this.link, path: ["source"] },
+      { ...this.link, path: ["source"] } as IMemorySpaceAddress,
       // TODO(@ubik2): Transition source links to sigil links?
       { "/": fromURI(sourceLink.id) },
     );

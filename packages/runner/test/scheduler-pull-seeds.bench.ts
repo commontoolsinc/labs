@@ -3,6 +3,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -61,9 +62,9 @@ async function setupSharedSeedGraph(effectCount: number) {
   runtime.scheduler.subscribe(
     computation,
     {
-      reads: [source.getAsNormalizedFullLink()],
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
       shallowReads: [],
-      writes: [intermediate.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
     },
     {},
   );
@@ -77,9 +78,9 @@ async function setupSharedSeedGraph(effectCount: number) {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [intermediate.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );

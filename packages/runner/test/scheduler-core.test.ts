@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
+import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -15,6 +16,7 @@ import {
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Entity } from "@commonfabric/memory/interface";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -123,11 +125,11 @@ describe("scheduler", () => {
     };
     runtime.scheduler.subscribe(adder, {
       reads: [
-        a.getAsNormalizedFullLink(),
-        b.getAsNormalizedFullLink(),
+        toMemorySpaceAddress(a.getAsNormalizedFullLink()),
+        toMemorySpaceAddress(b.getAsNormalizedFullLink()),
       ],
       shallowReads: [],
-      writes: [c.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
     }, {});
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
@@ -170,7 +172,7 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [],
       },
@@ -246,18 +248,18 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       computeIntermediate,
       {
-        reads: [a.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [b.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
       },
       { changeGroup: "compute-intermediate-change-group" },
     );
     runtime.scheduler.subscribe(
       effectSink,
       {
-        reads: [b.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [c.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -338,17 +340,17 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       computeIntermediate,
       {
-        reads: [a.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [b.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
       },
     );
     runtime.scheduler.subscribe(
       effectSink,
       {
-        reads: [b.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [c.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -386,32 +388,13 @@ describe("scheduler", () => {
     expect(computeRuns.at(-1)?.declaredWrites[0]).toMatchObject({
       space,
       entityId: expect.stringMatching(/^of:/),
-      path: [],
+      path: ["value"],
     });
     expect(effectRuns.at(-1)?.declaredWrites[0]).toMatchObject({
       space,
       entityId: expect.stringMatching(/^of:/),
-      path: [],
+      path: ["value"],
     });
-  });
-
-  it("falls back to value-path write details for non-JSON diagnostics", () => {
-    const scheduler = runtime.scheduler as any;
-    const write = {
-      space,
-      id: "scheduler-non-json-value-fallback",
-      type: "text/plain",
-      path: ["body"],
-    };
-    const details = new Map<string, unknown>([[
-      scheduler.makeAddressKey({
-        ...write,
-        path: ["value", "body"],
-      }),
-      "hello",
-    ]]);
-
-    expect(scheduler.lookupComparableWriteValue(details, write)).toBe("hello");
   });
 
   it("should remove actions", async () => {
@@ -503,11 +486,11 @@ describe("scheduler", () => {
     };
     const cancel = runtime.scheduler.subscribe(adder, {
       reads: [
-        a.getAsNormalizedFullLink(),
-        b.getAsNormalizedFullLink(),
+        toMemorySpaceAddress(a.getAsNormalizedFullLink()),
+        toMemorySpaceAddress(b.getAsNormalizedFullLink()),
       ],
       shallowReads: [],
-      writes: [c.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
     }, {});
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
@@ -774,11 +757,11 @@ describe("scheduler", () => {
       increment,
       {
         reads: [
-          counter.getAsNormalizedFullLink(),
-          step.getAsNormalizedFullLink(),
+          toMemorySpaceAddress(counter.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(step.getAsNormalizedFullLink()),
         ],
         shallowReads: [],
-        writes: [counter.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -882,6 +865,171 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
   });
 
+  it("should not react to stored CFC metadata updates read through verifier helpers", async () => {
+    const sourceCell = runtime.getCell<{ secret: string }>(
+      space,
+      "source-cell-for-cfc-metadata-reactivity-test",
+      {
+        type: "object",
+        properties: {
+          secret: { type: "string" },
+        },
+        required: ["secret"],
+      },
+      tx,
+    );
+    sourceCell.set({ secret: "seed" });
+
+    const resultCell = runtime.getCell<{ count: number; applies: boolean }>(
+      space,
+      "result-cell-for-cfc-metadata-reactivity-test",
+      undefined,
+      tx,
+    );
+    resultCell.set({ count: 0, applies: false });
+    tx.commit();
+    tx = runtime.edit();
+
+    const secretLink = sourceCell.key("secret").getAsNormalizedFullLink();
+
+    let actionRunCount = 0;
+    let lastApplies = false;
+
+    const cfcMetadataReadAction: Action = (actionTx) => {
+      actionRunCount++;
+      lastApplies = storedCfcMetadataAppliesToPath(actionTx, secretLink);
+      resultCell.withTx(actionTx).set({
+        count: actionRunCount,
+        applies: lastApplies,
+      });
+    };
+
+    runtime.scheduler.subscribe(
+      cfcMetadataReadAction,
+      { reads: [], shallowReads: [], writes: [] },
+      {},
+    );
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(1);
+    expect(lastApplies).toBe(false);
+    expect(resultCell.get()).toEqual({ count: 1, applies: false });
+
+    tx.writeOrThrow(
+      {
+        space: secretLink.space,
+        id: secretLink.id,
+        type: secretLink.type as "application/json",
+        path: ["cfc"],
+      },
+      {
+        version: 1,
+        schemaHash: "cfc-reactivity-test-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["secret"],
+            label: { confidentiality: ["secret"] },
+          }],
+        },
+      },
+    );
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(1);
+    expect(resultCell.get()).toEqual({ count: 1, applies: false });
+
+    const verifyTx = runtime.edit();
+    expect(storedCfcMetadataAppliesToPath(verifyTx, secretLink)).toBe(true);
+    await verifyTx.commit();
+  });
+
+  it("should react to direct reads of stored CFC metadata when the cfc field changes", async () => {
+    const sourceCell = runtime.getCell<{ secret: string }>(
+      space,
+      "source-cell-for-direct-cfc-read-reactivity-test",
+      {
+        type: "object",
+        properties: {
+          secret: { type: "string" },
+        },
+        required: ["secret"],
+      },
+      tx,
+    );
+    sourceCell.set({ secret: "seed" });
+
+    const resultCell = runtime.getCell<{ count: number; version: number }>(
+      space,
+      "result-cell-for-direct-cfc-read-reactivity-test",
+      undefined,
+      tx,
+    );
+    resultCell.set({ count: 0, version: 0 });
+    tx.commit();
+    tx = runtime.edit();
+
+    const sourceLink = sourceCell.getAsNormalizedFullLink();
+
+    let actionRunCount = 0;
+    let lastVersion = 0;
+
+    const directCfcReadAction: Action = (actionTx) => {
+      actionRunCount++;
+      const cfcDocument = actionTx.readOrThrow({
+        space: sourceLink.space,
+        id: sourceLink.id,
+        type: sourceLink.type as "application/json",
+        path: ["cfc"],
+      }) as { version?: number } | undefined;
+      lastVersion = cfcDocument?.version ?? 0;
+      resultCell.withTx(actionTx).set({
+        count: actionRunCount,
+        version: lastVersion,
+      });
+    };
+
+    runtime.scheduler.subscribe(
+      directCfcReadAction,
+      { reads: [], shallowReads: [], writes: [] },
+      {},
+    );
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(1);
+    expect(lastVersion).toBe(0);
+    expect(resultCell.get()).toEqual({ count: 1, version: 0 });
+
+    tx.writeOrThrow(
+      {
+        space: sourceLink.space,
+        id: sourceLink.id,
+        type: sourceLink.type as "application/json",
+        path: ["cfc"],
+      },
+      {
+        version: 1,
+        schemaHash: "cfc-direct-read-reactivity-test-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["secret"],
+            label: { confidentiality: ["secret"] },
+          }],
+        },
+      },
+    );
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(2);
+    expect(lastVersion).toBe(1);
+    expect(resultCell.get()).toEqual({ count: 2, version: 1 });
+  });
+
   it("should track potentialWrites via Cell.set on nested path", async () => {
     // Create a cell with nested structure
     const testCell = runtime.getCell<{ nested: { a: number; b: string } }>(
@@ -904,16 +1052,22 @@ describe("scheduler", () => {
     // The "nested" path should appear in potentialWrites
     expect(log.potentialWrites).toBeDefined();
     expect(
-      log.potentialWrites!.some((addr) => addr.path[0] === "nested"),
+      log.potentialWrites!.some((addr) =>
+        addr.path[0] === "value" && addr.path[1] === "nested"
+      ),
     ).toBe(true);
 
     // Only `b` changed within nested, so nested.b should be in writes
     expect(
-      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "b"),
+      log.writes.some((w) =>
+        w.path[0] === "value" && w.path[1] === "nested" && w.path[2] === "b"
+      ),
     ).toBe(true);
     // nested.a should NOT be in writes (value didn't change)
     expect(
-      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "a"),
+      log.writes.some((w) =>
+        w.path[0] === "value" && w.path[1] === "nested" && w.path[2] === "a"
+      ),
     ).toBe(false);
 
     await setTx.commit();
@@ -942,17 +1096,25 @@ describe("scheduler", () => {
     // The "data" path should be in potentialWrites because diffAndUpdate
     // reads the nested object to compare
     expect(log.potentialWrites).toBeDefined();
-    expect(log.potentialWrites!.some((addr) => addr.path[0] === "data")).toBe(
-      true,
-    );
+    expect(
+      log.potentialWrites!.some((addr) =>
+        addr.path[0] === "value" && addr.path[1] === "data"
+      ),
+    ).toBe(true);
 
     // Only changed property within data should be in writes
     expect(
-      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "changed"),
+      log.writes.some((w) =>
+        w.path[0] === "value" && w.path[1] === "data" &&
+        w.path[2] === "changed"
+      ),
     ).toBe(true);
     // unchanged property should NOT be in writes (value didn't change)
     expect(
-      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "unchanged"),
+      log.writes.some((w) =>
+        w.path[0] === "value" && w.path[1] === "data" &&
+        w.path[2] === "unchanged"
+      ),
     ).toBe(false);
 
     await setTx.commit();
@@ -1024,12 +1186,7 @@ describe("scheduler", () => {
     tx = runtime.edit();
 
     const sourceLink = sourceCell.getAsNormalizedFullLink();
-    const sourceAddress = {
-      space: sourceLink.space,
-      id: sourceLink.id,
-      type: sourceLink.type,
-      path: ["value", ...sourceLink.path],
-    };
+    const sourceAddress = toMemorySpaceAddress(sourceLink);
 
     let actionRunCount = 0;
     const action: Action = (actionTx) => {
@@ -1708,18 +1865,20 @@ describe("reactive retries", () => {
       runtime.scheduler.subscribe(
         action1,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [intermediate.getAsNormalizedFullLink()],
+          writes: [
+            toMemorySpaceAddress(intermediate.getAsNormalizedFullLink()),
+          ],
         },
         {},
       );
       runtime.scheduler.subscribe(
         action2,
         {
-          reads: [intermediate.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );

@@ -1,10 +1,12 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { LINK_V1_TAG, type LinkV1Inner } from "./sigil-types.ts";
 import {
   type CellLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
@@ -97,10 +99,10 @@ export function resolveLink(
     let nextLink: NormalizedFullLink | undefined;
 
     // Sigil probe at full path
-    const sigilProbe = tx.read({
+    const sigilProbe = tx.read(toMemorySpaceAddress({
       ...link,
-      path: ["value", ...link.path, "/", LINK_V1_TAG],
-    });
+      path: [...link.path, "/", LINK_V1_TAG],
+    }));
     if (
       sigilProbe.ok &&
       isRecord(sigilProbe.ok.value) &&
@@ -137,10 +139,10 @@ export function resolveLink(
           }
         } else {
           // Check sigil at this parent, then legacy
-          const parentSigil = tx.read({
+          const parentSigil = tx.read(toMemorySpaceAddress({
             ...link,
-            path: ["value", ...lastValid, "/", LINK_V1_TAG],
-          });
+            path: [...lastValid, "/", LINK_V1_TAG],
+          }));
           if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
             // Read the full value at the parent to ensure proper reactivity
             const whole = tx.readValueOrThrow({ ...link, path: lastValid });
@@ -198,6 +200,16 @@ export function resolveLink(
 
   const result = { ...link } satisfies NormalizedFullLink;
 
+  // Intern the schema at this single link-resolution exit so downstream
+  // consumers see an identity-canonical, deep-frozen schema reference.
+  // `getSchemaAtPath` (called within the loop above) can emit freshly-
+  // constructed schemas; interning here collapses structurally-equal
+  // outputs to the same `===` reference across calls, letting
+  // identity-based caches downstream hit rather than miss.
+  if (result.schema !== undefined) {
+    result.schema = internSchema(result.schema);
+  }
+
   // Remove overwrite field, i.e. when the last followed link was a write
   // redirect. The idea is that this is a link pointing to the final value, it
   // doesn't matter how we got there.
@@ -214,10 +226,10 @@ function checkLegacyAt(
   atPath: readonly string[],
   onlyRedirects: boolean,
 ): NormalizedFullLink | undefined {
-  const aliasPath = tx.read({
+  const aliasPath = tx.read(toMemorySpaceAddress({
     ...link,
-    path: ["value", ...atPath, "$alias", "path"],
-  });
+    path: [...atPath, "$alias", "path"],
+  }));
   if (Array.isArray(aliasPath.ok?.value)) {
     return parseLink(
       tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
@@ -225,10 +237,10 @@ function checkLegacyAt(
     );
   }
   if (onlyRedirects) return undefined;
-  const legacyCell = tx.read({
+  const legacyCell = tx.read(toMemorySpaceAddress({
     ...link,
-    path: ["value", ...atPath, "cell", "/"],
-  });
+    path: [...atPath, "cell", "/"],
+  }));
   if (typeof legacyCell.ok?.value === "string") {
     return parseLink(
       tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,

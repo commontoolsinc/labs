@@ -48,7 +48,7 @@ interface Item {
 }
 
 interface DragDropDemoInput {
-  availableItems: Default<Item[], [{ title: "Item A" }, { title: "Item B" }, { title: "Item C" }]>;
+  availableItems: Item[] | Default<[{ title: "Item A" }, { title: "Item B" }, { title: "Item C" }]>;
   droppedItems: Writable<Item[]>;
 }
 

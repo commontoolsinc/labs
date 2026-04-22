@@ -62,7 +62,7 @@ const clearChat = handler(
 );
 
 type ChatInput = {
-  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+  messages?: Writable<Array<BuiltInLLMMessage> | Default<[]>>;
   tools?: any;
   theme?: any;
   system?: string;

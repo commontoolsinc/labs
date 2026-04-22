@@ -11,6 +11,7 @@ import SwitchStory from "../stories/cf-switch-story.tsx";
 import ToggleStory from "../stories/cf-toggle-story.tsx";
 import ToggleGroupStory from "../stories/cf-toggle-group-story.tsx";
 import CardStory from "../stories/cf-card-story.tsx";
+import ListItemStory from "../stories/cf-list-item-story.tsx";
 import ModalStory from "../stories/cf-modal-story.tsx";
 import ProgressStory from "../stories/cf-progress-story.tsx";
 import VStackStory from "../stories/cf-vstack-story.tsx";
@@ -34,6 +35,7 @@ import LoaderStory from "../stories/cf-loader-story.tsx";
 import SkeletonStory from "../stories/cf-skeleton-story.tsx";
 import CollapsibleStory from "../stories/cf-collapsible-story.tsx";
 import TabListStory from "../stories/cf-tab-list-story.tsx";
+import TabBarStory from "../stories/cf-tab-bar-story.tsx";
 import TabsStory from "../stories/cf-tabs-story.tsx";
 import ChartStory from "../stories/cf-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
@@ -49,6 +51,10 @@ import TagsStory from "../stories/cf-tags-story.tsx";
 import GridStory from "../stories/cf-grid-story.tsx";
 import VignetteRecipeStory from "../stories/vignette-recipe-story.tsx";
 import VignetteFinanceStory from "../stories/vignette-finance-story.tsx";
+import VignetteMobileAppStory from "../stories/vignette-mobile-app-story.tsx";
+import ToastStory from "../stories/cf-toast-story.tsx";
+import StyleTokensStory from "../stories/style-tokens-story.tsx";
+import ThemeSamplerStory from "../stories/theme-sampler-story.tsx";
 
 interface StoryRendererInput {
   selected: string;
@@ -57,7 +63,7 @@ interface StoryRendererInput {
 interface StoryRendererOutput {
   [NAME]: string;
   [UI]: VNode;
-  controls: VNode;
+  controls?: VNode;
 }
 
 type CatalogStory = {
@@ -92,6 +98,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ToggleGroupStory({});
         case "card":
           return CardStory({});
+        case "list-item":
+          return ListItemStory({});
         case "modal":
           return ModalStory({});
         case "progress":
@@ -138,6 +146,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return CollapsibleStory({});
         case "tab-list":
           return TabListStory({});
+        case "tab-bar":
+          return TabBarStory({});
         case "tabs":
           return TabsStory({});
         case "chart":
@@ -168,6 +178,14 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return VignetteRecipeStory({});
         case "vignette-finance":
           return VignetteFinanceStory({});
+        case "vignette-mobile-app":
+          return VignetteMobileAppStory({});
+        case "toast":
+          return ToastStory({});
+        case "style-tokens":
+          return StyleTokensStory({});
+        case "theme-sampler":
+          return ThemeSamplerStory({});
         default:
           return null;
       }
@@ -176,7 +194,7 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
     return {
       [NAME]: "StoryRenderer",
       [UI]: <>{story}</>,
-      controls: <>{story?.controls ?? null}</>,
+      controls: story?.controls,
     };
   },
 );

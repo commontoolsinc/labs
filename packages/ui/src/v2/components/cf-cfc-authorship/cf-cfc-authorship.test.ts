@@ -53,6 +53,29 @@ describe("CFCFCAuthorship", () => {
     expect(element.authorshipState).toBe("unverified");
   });
 
+  it("does not report verified when strict descendant text was blocked", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.author = "alice";
+    element.verifyTextIntegrity = true;
+    element.textIntegrityState = "blocked";
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+
+    await element.refreshLabel();
+
+    expect(element.authorshipState).toBe("unverified");
+  });
+
   it("does not verify missing label data", async () => {
     const element = new CFCFCAuthorship();
     element.author = "alice";

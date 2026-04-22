@@ -44,14 +44,14 @@ type MentionablePiece = {
 };
 
 interface Input {
-  title?: Writable<Default<string, "Untitled Event">>;
-  date?: Writable<Default<string, "">>; // YYYY-MM-DD
-  startTime?: Writable<Default<string, "09:00">>; // HH:MM
-  endTime?: Writable<Default<string, "10:00">>; // HH:MM
-  color?: Writable<Default<string, "#fef08a">>;
-  notes?: Writable<Default<string, "">>;
-  isHidden?: Default<boolean, false>;
-  eventId?: Default<string, "">;
+  title?: Writable<string | Default<"Untitled Event">>;
+  date?: Writable<string | Default<"">>; // YYYY-MM-DD
+  startTime?: Writable<string | Default<"09:00">>; // HH:MM
+  endTime?: Writable<string | Default<"10:00">>; // HH:MM
+  color?: Writable<string | Default<"#fef08a">>;
+  notes?: Writable<string | Default<"">>;
+  isHidden?: boolean | Default<false>;
+  eventId?: string | Default<"">;
 }
 
 /** Represents a calendar event with a date, time, and notes. */

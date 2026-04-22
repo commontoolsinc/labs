@@ -7,6 +7,7 @@ interface SidebarInput {
   selected: string;
   categories: Category[];
   onSelect: Stream<{ id: string }>;
+  onCollapse?: Stream<void>;
 }
 
 interface SidebarOutput {
@@ -17,8 +18,8 @@ interface SidebarOutput {
 const styles = {
   root: {
     width: "220px",
-    backgroundColor: "#f6f7f9",
-    borderRight: "1px solid #e6e9ed",
+    backgroundColor: "var(--cf-theme-color-surface, #f6f7f9)",
+    borderRight: "1px solid var(--cf-theme-color-border, #e6e9ed)",
     overflowY: "auto",
     flexShrink: "0",
     fontFamily:
@@ -28,13 +29,16 @@ const styles = {
     gap: "16px",
   },
   header: {
-    padding: "16px",
-    borderBottom: "1px solid #e6e9ed",
+    padding: "12px 16px",
+    borderBottom: "1px solid var(--cf-theme-color-border, #e6e9ed)",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
   },
   headerTitle: {
     fontSize: "14px",
     fontWeight: "700",
-    color: "#2e3438",
+    color: "var(--cf-theme-color-text, #2e3438)",
     letterSpacing: "-0.01em",
   },
   content: {
@@ -45,13 +49,20 @@ const styles = {
 };
 
 export const Sidebar = pattern<SidebarInput, SidebarOutput>(
-  ({ selected, categories, onSelect }) => {
+  ({ selected, categories, onSelect, onCollapse }) => {
     return {
       [NAME]: "Sidebar",
       [UI]: (
         <div style={styles.root}>
           {/* Header area */}
           <div style={styles.header}>
+            <cf-button
+              variant="ghost"
+              onClick={onCollapse}
+              style="font-size: 18px; padding: 2px 6px; flex-shrink: 0;"
+            >
+              &#9776;
+            </cf-button>
             <div style={styles.headerTitle}>
               Component Catalog
             </div>

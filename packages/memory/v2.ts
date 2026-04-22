@@ -8,6 +8,7 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
 import { getSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
+import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import { getModernHashConfig } from "@commonfabric/data-model/value-hash";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
 import type { ReconstructionContext } from "@commonfabric/data-model/interface";
@@ -401,12 +402,21 @@ export const toDocumentPath = (path: readonly string[]): DocumentPath =>
 export const toValuePath = (path: readonly string[]): ValuePath =>
   path as ValuePath;
 
+/**
+ * Builds a document-level selector (path rooted under `"value"`) from a
+ * schema path selector. The result is interned-and-frozen via
+ * `internPathSelector`, so callers can feed it directly to
+ * `MapSetStringToPathSelectors` (or any other `hashSchemaItem`-keyed
+ * cache) and get the `hashOfModernInternal` WeakMap fast-path on
+ * repeat hashes.
+ */
 export const toDocumentSelector = (
   selector: Pick<SchemaPathSelector, "path" | "schema">,
-): DocumentSchemaPathSelector => ({
-  ...selector,
-  path: toDocumentPath(["value", ...selector.path]),
-});
+): DocumentSchemaPathSelector =>
+  internPathSelector({
+    ...selector,
+    path: toDocumentPath(["value", ...selector.path]),
+  }) as DocumentSchemaPathSelector;
 
 export const isSourceLink = (value: unknown): value is SourceLink => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {

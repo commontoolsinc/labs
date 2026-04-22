@@ -41,6 +41,19 @@ export class CFThemeProvider extends BaseElement {
 
   #unsubs: Array<() => void> = [];
 
+  private _mediaQuery?: MediaQueryList;
+  private _onMediaChange = () => this._recomputeAndApply();
+  private _onThemePreferenceChanged = () => this._recomputeAndApply();
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    // Re-resolve when user toggles theme preference (data-theme attribute)
+    document.addEventListener(
+      "theme-preference-changed",
+      this._onThemePreferenceChanged,
+    );
+  }
+
   override firstUpdated(changed: Map<string | number | symbol, unknown>) {
     super.firstUpdated(changed);
     this._recomputeAndApply();
@@ -57,6 +70,24 @@ export class CFThemeProvider extends BaseElement {
     this._computedTheme = mergeWithDefaultTheme(this.theme);
     applyThemeToElement(this, this._computedTheme);
     this.#setupSubscriptions();
+
+    // Manage the matchMedia listener based on the resolved colorScheme
+    if (this._computedTheme.colorScheme === "auto") {
+      if (
+        !this._mediaQuery && typeof globalThis !== "undefined" &&
+        globalThis.matchMedia
+      ) {
+        this._mediaQuery = globalThis.matchMedia(
+          "(prefers-color-scheme: dark)",
+        );
+        this._mediaQuery.addEventListener("change", this._onMediaChange);
+      }
+    } else {
+      if (this._mediaQuery) {
+        this._mediaQuery.removeEventListener("change", this._onMediaChange);
+        this._mediaQuery = undefined;
+      }
+    }
   }
 
   #setupSubscriptions() {
@@ -82,6 +113,14 @@ export class CFThemeProvider extends BaseElement {
     super.disconnectedCallback();
     for (const off of this.#unsubs) off();
     this.#unsubs = [];
+    if (this._mediaQuery) {
+      this._mediaQuery.removeEventListener("change", this._onMediaChange);
+      this._mediaQuery = undefined;
+    }
+    document.removeEventListener(
+      "theme-preference-changed",
+      this._onThemePreferenceChanged,
+    );
   }
 
   override render() {

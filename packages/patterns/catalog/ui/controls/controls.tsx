@@ -13,11 +13,11 @@ const headerCell = { padding: "0 12px" };
 const styles = {
   header: {
     display: "flex",
-    borderBottom: "1px solid #e6e9ed",
+    borderBottom: "1px solid var(--cf-theme-color-border, #e6e9ed)",
     padding: "8px 0",
     fontSize: "11px",
     fontWeight: "700",
-    color: "#798186",
+    color: "var(--cf-theme-color-text-muted, #798186)",
     textTransform: "uppercase",
     letterSpacing: "0.08em",
   },

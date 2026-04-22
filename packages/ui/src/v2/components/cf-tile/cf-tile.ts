@@ -41,8 +41,8 @@ export class CFTile extends BaseElement {
       --accent: #3b82f6;
       --accent-foreground: #ffffff;
 
-      --tile-padding: 1rem;
-      --tile-border-radius: 0.5rem;
+      --tile-padding: var(--cf-size-xl-spacing, 16px);
+      --tile-border-radius: var(--cf-size-md-radius, 8px);
       --tile-border: 1px solid var(--border);
       --tile-shadow:
         0 1px 3px 0 rgb(0 0 0 / 0.1),
@@ -78,7 +78,7 @@ export class CFTile extends BaseElement {
 
       .tile-title {
         font-weight: bold;
-        font-size: 1.125rem;
+        font-size: var(--cf-size-xl-font-size, 18px);
         color: var(--foreground);
         margin: 0 0 0.5rem 0;
         line-height: 1.25;
@@ -94,7 +94,7 @@ export class CFTile extends BaseElement {
       .tile-content {
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: var(--cf-size-md-spacing, 8px);
       }
 
       .summary-details {

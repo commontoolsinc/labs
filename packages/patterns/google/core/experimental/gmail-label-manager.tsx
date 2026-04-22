@@ -69,11 +69,11 @@ type OperationResult = {
 
 interface Input {
   /** Message ID(s) to manage labels for - can be single string or array */
-  messageIds: Default<string[], []>;
+  messageIds: string[] | Default<[]>;
   /** Labels to add (by ID) */
-  labelsToAdd: Default<string[], []>;
+  labelsToAdd: string[] | Default<[]>;
   /** Labels to remove (by ID) */
-  labelsToRemove: Default<string[], []>;
+  labelsToRemove: string[] | Default<[]>;
 }
 
 /** Gmail label manager with confirmation. #gmailLabelManager */

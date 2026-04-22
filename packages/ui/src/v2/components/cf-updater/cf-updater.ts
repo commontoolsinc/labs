@@ -21,20 +21,20 @@ export class CFUpdater extends BaseElement {
       :host {
         --button-background: var(
           --cf-theme-color-primary,
-          var(--cf-color-primary, #3b82f6)
+          var(--cf-colors-blue-500, #3b82f6)
         );
         --button-color: var(
           --cf-theme-color-primary-foreground,
-          var(--cf-color-white, #ffffff)
+          var(--cf-colors-white, #ffffff)
         );
         --button-height: 2.5rem;
         --button-success-background: var(
           --cf-theme-color-success,
-          var(--cf-color-green-600, #16a34a)
+          var(--cf-colors-green-600, #16a34a)
         );
         --button-error-background: var(
           --cf-theme-color-error,
-          var(--cf-color-red-600, #dc2626)
+          var(--cf-colors-red-600, #dc2626)
         );
         display: block;
       }

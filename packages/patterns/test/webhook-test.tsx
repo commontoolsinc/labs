@@ -18,7 +18,7 @@ interface WebhookConfig {
 }
 
 interface WebhookPatternInput {
-  webhookConfig: Writable<Default<WebhookConfig | null, null>>;
+  webhookConfig: Writable<WebhookConfig | null | Default<null>>;
 }
 
 interface WebhookPatternOutput {

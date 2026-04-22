@@ -51,7 +51,7 @@ interface Summary {
 }
 
 interface Input {
-  articles: Default<Article[], []>;
+  articles: Article[] | Default<[]>;
 }
 
 const addArticle = handler<

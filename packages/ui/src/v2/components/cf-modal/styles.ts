@@ -19,12 +19,37 @@ export const modalStyles = css`
     --cf-modal-color-text-muted: var(--cf-theme-color-text-muted, #6b7280);
     --cf-modal-color-primary: var(--cf-theme-color-primary, #3b82f6);
     --cf-modal-animation-duration: var(--cf-theme-animation-duration, 200ms);
-    --cf-modal-border-radius: var(--cf-theme-border-radius, 12px);
+    --cf-modal-border-radius: var(
+      --cf-surface-overlay-border-radius,
+      var(--cf-theme-border-radius, 0.5rem)
+    );
+    --cf-modal-border: var(
+      --cf-surface-overlay-border,
+      1px solid var(--cf-theme-color-border, #e5e7eb)
+    );
+    --cf-modal-padding: var(--cf-surface-overlay-padding, 16px 20px);
+    --cf-modal-box-shadow: var(
+      --cf-surface-overlay-box-shadow,
+      0 25px 50px -12px rgba(0, 0, 0, 0.25)
+    );
+    --cf-modal-sheet-box-shadow: var(
+      --cf-surface-overlay-sheet-box-shadow,
+      0 -4px 24px rgba(0, 0, 0, 0.15)
+    );
 
     /* CSS custom properties for customization */
     --_backdrop-color: var(--cf-modal-backdrop-color, rgba(0, 0, 0, 0.5));
-    --_backdrop-blur: var(--cf-modal-backdrop-blur, 8px);
-    --_border-radius: var(--cf-modal-border-radius, 12px);
+    --_backdrop-blur: var(
+      --cf-modal-backdrop-blur,
+      var(--cf-backdrop-blur-md, 8px)
+    );
+    --_border-radius: var(
+      --cf-modal-border-radius,
+      var(
+        --cf-surface-overlay-border-radius,
+        var(--cf-theme-border-radius, 0.5rem)
+      )
+    );
     --_width-sm: var(--cf-modal-width-sm, 320px);
     --_width-md: var(--cf-modal-width-md, 500px);
     --_width-lg: var(--cf-modal-width-lg, 700px);
@@ -63,15 +88,19 @@ export const modalStyles = css`
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
+    padding: var(--cf-spacing-4, 16px);
   }
 
   /* ===== Dialog ===== */
   .dialog {
     position: relative;
-    background: var(--cf-modal-color-background, white);
+    background: var(
+      --cf-surface-overlay-background,
+      var(--cf-modal-color-background, white)
+    );
+    border: var(--cf-modal-border);
     border-radius: var(--_border-radius);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--cf-modal-box-shadow);
     max-height: var(--_max-height);
     overflow: hidden;
     display: flex;
@@ -112,7 +141,7 @@ export const modalStyles = css`
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 16px 20px;
+      padding: var(--cf-modal-padding);
       border-bottom: 1px solid var(--cf-modal-color-border, #e5e7eb);
       background: var(--cf-modal-color-surface, #fafafa);
       flex-shrink: 0;
@@ -161,7 +190,7 @@ export const modalStyles = css`
 
     /* ===== Content ===== */
     .content {
-      padding: 20px;
+      padding: var(--cf-modal-padding);
       overflow: auto;
       flex: 1;
     }
@@ -171,7 +200,7 @@ export const modalStyles = css`
       display: flex;
       justify-content: flex-end;
       gap: 12px;
-      padding: 16px 20px;
+      padding: var(--cf-modal-padding);
       border-top: 1px solid var(--cf-modal-color-border, #e5e7eb);
       background: var(--cf-modal-color-surface, #fafafa);
       flex-shrink: 0;
@@ -186,56 +215,82 @@ export const modalStyles = css`
       width: 100%;
     }
 
-    /* ===== Mobile Bottom Sheet Transformation ===== */
-    @media (max-width: 480px) {
-      .container {
-        align-items: flex-end;
-        padding: 0;
+    /* ===== Sheet Presentation Mode ===== */
+
+    /* Grabber: hidden by default */
+    .grabber {
+      display: none;
+    }
+
+    /* Grabber visible when both presentation=sheet and grabber attr */
+    :host([presentation="sheet"][grabber]) .grabber {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 8px 0 4px;
+      flex-shrink: 0;
+      background: var(--cf-modal-color-surface, #fafafa);
+    }
+
+    :host([presentation="sheet"][grabber]) .grabber::after {
+      content: "";
+      display: block;
+      width: 36px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--cf-modal-color-border, #e5e7eb);
+    }
+
+    /* Sheet container: bottom-aligned */
+    :host([presentation="sheet"]) .container {
+      align-items: flex-end;
+      padding: 0;
+    }
+
+    /* Sheet dialog: full-width, top-only border-radius */
+    :host([presentation="sheet"]) .dialog {
+      width: 100%;
+      border-radius: var(--_border-radius) var(--_border-radius) 0 0;
+      box-shadow: var(--cf-modal-sheet-box-shadow);
+
+      /* Sheet animation: slide up instead of scale */
+      transform: translateY(100%);
+      opacity: 1;
+      transition: transform var(--_animation-duration)
+        cubic-bezier(0.32, 0.72, 0, 1);
       }
 
-      .dialog {
-        width: 100%;
-        max-height: 85vh;
-        border-radius: var(--_border-radius) var(--_border-radius) 0 0;
-
-        /* Mobile: slide up animation instead of scale */
-        transform: translateY(100%);
+      :host([presentation="sheet"][open]) .dialog {
+        transform: translateY(0);
         opacity: 1;
       }
 
-      :host([open]) .dialog {
-        transform: translateY(0);
+      /* Sheet detent variants */
+      :host([presentation="sheet"][detent="auto"]) .dialog,
+      :host([presentation="sheet"]:not([detent])) .dialog {
+        max-height: 90vh;
       }
 
-      /* Drag handle indicator for sheet */
-      .dialog::before {
-        content: "";
-        display: block;
-        width: 36px;
-        height: 4px;
-        background: var(--cf-modal-color-border, #e5e7eb);
-        border-radius: 2px;
-        margin: 8px auto 0;
+      :host([presentation="sheet"][detent="half"]) .dialog {
+        max-height: 50vh;
       }
 
-      /* Adjust header for sheet layout */
-      .header {
-        padding-top: 8px;
+      :host([presentation="sheet"][detent="full"]) .dialog {
+        max-height: 92vh;
       }
 
-      /* Full width for size variants on mobile */
-      :host([size="sm"]) .dialog,
-      :host([size="md"]) .dialog,
-      :host([size="lg"]) .dialog {
+      /* Sheet overrides size variants */
+      :host([presentation="sheet"][size="sm"]) .dialog,
+      :host([presentation="sheet"][size="md"]) .dialog,
+      :host([presentation="sheet"][size="lg"]) .dialog {
         width: 100%;
       }
-    }
 
-    /* ===== Reduced Motion ===== */
-    @media (prefers-reduced-motion: reduce) {
-      .backdrop,
-      .dialog {
-        transition: none;
+      /* ===== Reduced Motion ===== */
+      @media (prefers-reduced-motion: reduce) {
+        .backdrop,
+        .dialog {
+          transition: none;
+        }
       }
-    }
-  `;
+    `;

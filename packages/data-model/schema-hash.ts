@@ -13,9 +13,6 @@
  *
  * Follows the same inline-flag-test dispatch pattern used by
  * `fabric-value.ts`.
- *
- * DO NOT MERGE! This comment makes this PR not the same as `main`. Just to
- * force a diff and a build.
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
@@ -95,12 +92,8 @@ export function hashSchemaItem(item: FabricValue): string {
     : hashSchemaItemLegacyAsString(item);
 }
 
-// ---------------------------------------------------------------------------
-// Internal: FabricHash-returning hash for intern cache use only
-// ---------------------------------------------------------------------------
-
 /** Hash a schema-related item as a FabricHash (for intern cache). */
-function _hashSchemaItemAsFabricHash(item: FabricValue): FabricHash {
+export function hashSchemaItemAsFabricHash(item: FabricValue): FabricHash {
   return modernSchemaHashEnabled
     ? hashSchemaItemModern(item)
     : hashSchemaItemLegacy(item);
@@ -143,8 +136,8 @@ let booleanSentinels = {
   false: Object.freeze({ cacheSentinel: false }) as JSONSchemaObj,
 };
 let booleanInterns = {
-  true: new SchemaAndHash(true, _hashSchemaItemAsFabricHash(true)),
-  false: new SchemaAndHash(false, _hashSchemaItemAsFabricHash(false)),
+  true: new SchemaAndHash(true, hashSchemaItemAsFabricHash(true)),
+  false: new SchemaAndHash(false, hashSchemaItemAsFabricHash(false)),
 };
 let schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
   const ref = hashToRef.get(hashStr);
@@ -187,14 +180,65 @@ function resetInternCache(): void {
     false: Object.freeze({ cacheSentinel: false }) as JSONSchemaObj,
   };
   booleanInterns = {
-    true: new SchemaAndHash(true, _hashSchemaItemAsFabricHash(true)),
-    false: new SchemaAndHash(false, _hashSchemaItemAsFabricHash(false)),
+    true: new SchemaAndHash(true, hashSchemaItemAsFabricHash(true)),
+    false: new SchemaAndHash(false, hashSchemaItemAsFabricHash(false)),
   };
   seedBooleanInterns();
 }
 
 // Initial seed.
 seedBooleanInterns();
+
+/**
+ * Helper for `internSchema()` which always returns a `SchemaAndHash`.
+ */
+function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
+  // Boolean schemas are primitives — return prefab instances.
+  if (typeof schema === "boolean") {
+    return schema ? booleanInterns.true : booleanInterns.false;
+  }
+
+  // Object schema — check the WeakMap first.
+  const cached = schemaToSah.get(schema);
+  if (cached) return cached;
+
+  // `toDeepFrozenSchema()` returns the same reference if already deep-frozen.
+  const frozen = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
+
+  // Check the hash-keyed reverse map (structurally-equal but different object).
+  const hash = hashSchemaItemAsFabricHash(frozen);
+  const hashStr = hash.toString();
+
+  const ref = hashToRef.get(hashStr);
+  if (ref) {
+    const existing = ref.deref();
+    if (existing !== undefined) {
+      const existingSah = schemaToSah.get(existing)!;
+
+      // Cache the caller's schema so future calls with the same object
+      // hit the WeakMap at the top instead of re-hashing every time.
+      // We only do this when the input was already deep-frozen
+      // (frozen === schema), because mutable objects could be changed
+      // after caching, producing stale hits.
+      const inputIsFrozen = frozen === schema;
+      if (inputIsFrozen) {
+        schemaToSah.set(frozen, existingSah);
+      }
+
+      return existingSah;
+    }
+    // WeakRef is dead — clean up.
+    hashToRef.delete(hashStr);
+  }
+
+  // Not interned yet — create, cache, and return.
+  const sah = new SchemaAndHash(frozen, hash);
+  schemaToSah.set(frozen, sah);
+  hashToRef.set(hashStr, new WeakRef(frozen));
+  schemaFinalizer.register(frozen, hashStr);
+
+  return sah;
+}
 
 /**
  * Intern a schema: Freeze it, compute its hash, and cache the bidirectional
@@ -228,57 +272,6 @@ export function internSchema(
 ): JSONSchema | SchemaAndHash {
   const sahResult = internSchemaReturningSchemaAndHash(schema);
   return wantSchemaAndHash ? sahResult : sahResult.schema;
-}
-
-/**
- * Helper for `internSchema()` which always returns a `SchemaAndHash`.
- */
-function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
-  // Boolean schemas are primitives — return prefab instances.
-  if (typeof schema === "boolean") {
-    return schema ? booleanInterns.true : booleanInterns.false;
-  }
-
-  // Object schema — check the WeakMap first.
-  const cached = schemaToSah.get(schema);
-  if (cached) return cached;
-
-  // `toDeepFrozenSchema()` returns the same reference if already deep-frozen.
-  const frozen = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
-
-  // Check the hash-keyed reverse map (structurally-equal but different object).
-  const hash = _hashSchemaItemAsFabricHash(frozen);
-  const hashStr = hash.toString();
-
-  const ref = hashToRef.get(hashStr);
-  if (ref) {
-    const existing = ref.deref();
-    if (existing !== undefined) {
-      const existingSah = schemaToSah.get(existing)!;
-
-      // Cache the caller's schema so future calls with the same object
-      // hit the WeakMap at the top instead of re-hashing every time.
-      // We only do this when the input was already deep-frozen
-      // (frozen === schema), because mutable objects could be changed
-      // after caching, producing stale hits.
-      const inputIsFrozen = frozen === schema;
-      if (inputIsFrozen) {
-        schemaToSah.set(frozen, existingSah);
-      }
-
-      return existingSah;
-    }
-    // WeakRef is dead — clean up.
-    hashToRef.delete(hashStr);
-  }
-
-  // Not interned yet — create, cache, and return.
-  const sah = new SchemaAndHash(frozen, hash);
-  schemaToSah.set(frozen, sah);
-  hashToRef.set(hashStr, new WeakRef(frozen));
-  schemaFinalizer.register(frozen, hashStr);
-
-  return sah;
 }
 
 /**
@@ -325,7 +318,8 @@ export function findInternedSchema(
 /**
  * Indicates whether or not the given `schema` is already interned. This returns
  * `false` even if there is already a schema in the intern cache that is
- * equivalent to the given one.
+ * equivalent to the given one, unless `schema` is in fact the one that is in
+ * the cache.
  */
 export function isInternedSchema(schema: JSONSchema): boolean {
   if (typeof schema === "boolean") {
@@ -333,4 +327,14 @@ export function isInternedSchema(schema: JSONSchema): boolean {
   }
 
   return schemaToSah.has(schema);
+}
+
+/**
+ * Interns (and thus deep-freezes) the given schema, returning its hash
+ * string. Equivalent to `internSchema(schema, true).hashString`, but names
+ * the operation and avoids the non-obvious `true` (`wantSchemaAndHash`)
+ * argument at call sites.
+ */
+export function internSchemaAsHashString(schema: JSONSchema): string {
+  return internSchema(schema, true).hashString;
 }

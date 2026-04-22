@@ -66,7 +66,7 @@ has been explicitly verified as problematic.
 
 | Violation | Fix |
 |-----------|-----|
-| array without `Default<T[], []>` where undefined would be invalid | Add a sensible default |
+| array without `T[] | Default<[]>` where undefined would be invalid | Add a sensible default |
 | missing `Writable<>` wrapper on values later mutated | Add `Writable<T>` to the relevant type |
 | `Map` or `Set` in serialized cell data | Use plain objects or arrays |
 | custom identity field where `equals()` is intended | Use `equals()` instead of ad hoc identity |
@@ -79,6 +79,7 @@ has been explicitly verified as problematic.
 | `value={title}` | `$value={title}` |
 | `$checked={item}` | `$checked={item.done}` |
 | wrong event name | Use `oncf-send`, `oncf-input`, or `oncf-change` |
+| cell-bound control (for example `$value={status}`) with `oncf-change` writing `status.set(...)` | Let the binding own the control value; use the handler only for dependent state or side effects |
 
 ### 6. Custom Component Props and Styling Affordances
 

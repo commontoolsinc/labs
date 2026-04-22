@@ -508,7 +508,7 @@ const decrement = handler<void, { value: Cell<number> }>(
   (_, { value }) => value.set(value.get() - 1)
 );
 
-interface Input { value: Default<number, 0>; }
+interface Input { value: number | Default<0>; }
 interface Output { value: number; increment: Stream<void>; decrement: Stream<void>; }
 
 export default pattern<Input, Output>(({ value }) => ({

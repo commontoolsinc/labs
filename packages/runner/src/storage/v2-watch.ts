@@ -1,5 +1,8 @@
-import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { hashSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  internPathSelector,
+  REJECTING_SELECTOR,
+} from "@commonfabric/data-model/schema-utils";
 import type { MIME } from "@commonfabric/memory/interface";
 import { stableHash } from "../traverse.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -15,19 +18,10 @@ import type {
 export const normalizeSyncSelector = (
   selector: SchemaPathSelector | undefined,
 ): SchemaPathSelector => {
-  if (selector !== undefined && selector.schema !== false) {
-    const schema = selector.schema === undefined
-      ? undefined
-      : internSchema(toDeepFrozenSchema(selector.schema, false));
-    if (schema === selector.schema) {
-      return selector;
-    }
-    return {
-      path: selector.path,
-      schema,
-    };
+  if (selector === undefined || selector.schema === false) {
+    return REJECTING_SELECTOR;
   }
-  return { path: [], schema: false };
+  return internPathSelector(selector);
 };
 
 export const normalizeSyncEntries = (
@@ -71,7 +65,7 @@ const selectorIdentity = (selector: SchemaPathSelector): string =>
     path: selector.path,
     schemaHash: selector.schema === undefined
       ? ""
-      : hashSchema(selector.schema).toString(),
+      : hashSchema(selector.schema),
   });
 
 export const watchIdForEntry = (

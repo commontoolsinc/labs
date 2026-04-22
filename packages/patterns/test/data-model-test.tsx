@@ -39,10 +39,10 @@ function nowTimestamp(): string {
 }
 
 interface Input {
-  value: Writable<Default<any, null>>;
-  inputText: Writable<Default<string, "">>;
-  errorMsg: Writable<Default<string, "">>;
-  evalTime: Writable<Default<string, "(never)">>;
+  value: Writable<any | Default<null>>;
+  inputText: Writable<string | Default<"">>;
+  errorMsg: Writable<string | Default<"">>;
+  evalTime: Writable<string | Default<"(never)">>;
 }
 
 interface Output {

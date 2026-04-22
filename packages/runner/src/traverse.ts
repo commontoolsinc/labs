@@ -1,6 +1,8 @@
 import {
   hashSchema,
   hashSchemaItem,
+  internSchema,
+  internSchemaAsHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -28,8 +30,11 @@ import {
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
+  DEFAULT_SELECTOR,
+  internPathSelector,
+  internSchemaPairAsKey,
+  REJECTING_SELECTOR,
   schemaWithProperties,
-  toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
@@ -58,8 +63,12 @@ import type {
 } from "./storage/interface.ts";
 import { createReadOnlyTransactionError } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
-import { isWriteRedirectLink } from "./link-types.ts";
-import { LastNode } from "./link-resolution.ts";
+import {
+  type IMemorySpaceValueAddress,
+  isWriteRedirectLink,
+  type ValuePath,
+} from "./link-types.ts";
+import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
@@ -91,10 +100,6 @@ const enum TypeValidity {
   Unknown = 2,
 }
 
-type ValuePath = readonly ["value", ...string[]];
-export type IMemorySpaceValueAddress = IMemorySpaceAddress & {
-  path: ValuePath;
-};
 export type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
   address: IMemorySpaceValueAddress;
 };
@@ -109,8 +114,10 @@ const _hashCache = new WeakMap<object, string>();
 
 // Schema operation intern caches: memoize merge/combine results so
 // structurally-identical operations return the same object identity.
-// This ensures downstream hashSchema hits the WeakMap cache
-// (O(1) identity lookup) instead of re-walking the schema tree.
+// The cached value is run through `internSchema`, which deep-freezes and
+// dedups structurally-equal results — so downstream `hashSchema` calls
+// on the cached output hit `internSchema`'s WeakMap in O(1) instead of
+// re-walking the schema tree.
 // Capped to prevent unbounded growth in long-running servers.
 const INTERN_CACHE_MAX = 10_000;
 const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
@@ -125,7 +132,7 @@ function internSet(
 ): JSONSchema {
   if (cache.size >= INTERN_CACHE_MAX) cache.clear();
 
-  const result = toDeepFrozenSchema(value, true);
+  const result = internSchema(value);
   cache.set(key, result);
   return result;
 }
@@ -303,13 +310,23 @@ export class MapSet<K, V> {
  * `SchemaPathSelector` values — the common case throughout traverse/query
  * code. When `hashValues` is `true`, uses `hashSchemaItem` from the
  * schema-hash dispatch layer as the hash function.
+ *
+ * **Contract:** Callers must hand in selectors that have already been
+ * interned via `internPathSelector` (from `@commonfabric/data-model/schema-utils`).
+ * That helper deep-freezes `v.path` and `v`, and interns `v.schema`, so the
+ * `isDeepFrozen` guard in `hashOfModernInternal` is satisfied and repeat
+ * hashes of the same selector reference hit the WeakMap cache. Selectors
+ * constructed fresh at insertion sites should be wrapped with
+ * `internPathSelector(...)` there; see
+ * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §4
+ * Phase 2 "DEFEAT-8" for the motivating analysis.
  */
 export class MapSetStringToPathSelectors extends MapSet<
   string,
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? (v) => hashSchemaItem(v).toString() : undefined);
+    super(hashValues ? (v) => hashSchemaItem(v) : undefined);
   }
 }
 
@@ -322,10 +339,6 @@ export class MapSetStringToStrings extends MapSet<string, string> {
     super();
   }
 }
-
-// SchemaPathSelectors are relative to the doc root, so if we want to look at
-// the value of the doc, we need to have "value" in the path.
-const DefaultSelector: SchemaPathSelector = { path: ["value"], schema: true };
 
 export class CycleTracker<K> {
   private partial: Set<K>;
@@ -357,24 +370,32 @@ export class CycleTracker<K> {
 /**
  * Cycle tracker for more complex objects with multiple parts.
  *
- * This will not work correctly if the key is modified after being added.
+ * Identity check on `partialKey`, structural check on `extraKey` via
+ * the interned hash string of `extraKey`: the inner per-partialKey map
+ * is keyed on `internSchemaAsHashString(extraKey ?? true)`, so repeat
+ * calls with a structurally-equal schema re-lookup the same entry in
+ * O(1) without re-hashing — the intern cache's WeakMap returns the
+ * canonical hash string without invoking `hashSchemaItem` on
+ * already-interned inputs.
+ *
+ * An `undefined` `extraKey` is normalized to `true` (JSON Schema's
+ * "accept everything", which is exactly what `undefined` means at
+ * every current call site), so the intern call can always be made.
+ *
+ * This will not work correctly if the key is modified after being
+ * added.
  */
 export class CompoundCycleTracker<
   EqualKey,
-  ExtraKey extends FabricValue,
+  ExtraKey extends JSONSchema | undefined,
   Value = unknown,
 > {
-  // partialKey (identity) → Map<hash(extraKey), Value?>
+  // partialKey (identity) → Map<interned extraKey hashString, Value?>
   private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
     this.partial = new Map();
   }
 
-  /**
-   * Identity check on `partialKey`, hash-based check on `extraKey`.
-   * Uses `hashSchemaItem` (with WeakMap identity cache in legacy mode)
-   * so schema objects hash in O(1) amortized after the first call.
-   */
   include(
     partialKey: EqualKey,
     extraKey: ExtraKey,
@@ -386,7 +407,7 @@ export class CompoundCycleTracker<
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = hashSchemaItem(extraKey).toString();
+    const hash = internSchemaAsHashString(extraKey ?? true);
     if (existing.has(hash)) {
       return null;
     }
@@ -410,7 +431,7 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = hashSchemaItem(extraKey).toString();
+    const hash = internSchemaAsHashString(extraKey ?? true);
     return existing.get(hash);
   }
 }
@@ -664,7 +685,7 @@ function getNormalizedLink(
 export abstract class BaseObjectTraverser {
   constructor(
     protected tx: IExtendedStorageTransaction,
-    protected selector: SchemaPathSelector = DefaultSelector,
+    protected selector: SchemaPathSelector = DEFAULT_SELECTOR,
     protected tracker: PointerCycleTracker = new CompoundCycleTracker<
       Immutable<FabricValue>,
       JSONSchema | undefined
@@ -756,7 +777,7 @@ export abstract class BaseObjectTraverser {
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
             [],
-            DefaultSelector,
+            DEFAULT_SELECTOR,
             "writeRedirect",
           );
           const [linkDoc, _selector] = this.nextLink(redirDoc, redirSelector);
@@ -766,7 +787,11 @@ export abstract class BaseObjectTraverser {
             linkDoc.value !== undefined ? linkDoc.address : redirDoc.address,
           );
           // We can follow all the links, since we don't need to track cells
-          const [valueDoc, _] = this.getDocAtPath(linkDoc, [], DefaultSelector);
+          const [valueDoc, _] = this.getDocAtPath(
+            linkDoc,
+            [],
+            DEFAULT_SELECTOR,
+          );
           docItem = valueDoc;
           this.tx.read(docItem.address, READ_FOR_SCHEDULING);
           if (docItem.value === undefined) {
@@ -801,15 +826,18 @@ export abstract class BaseObjectTraverser {
         const link = parseLink(doc.value, doc.address);
         if (link.id !== undefined) {
           const targetKey = `${link.space}/${link.id}/${link.type}`;
-          alreadyTracked = this.schemaTracker.hasValue(targetKey, {
-            path: ["value", ...link.path],
-            schema: true,
-          });
+          alreadyTracked = this.schemaTracker.hasValue(
+            targetKey,
+            internPathSelector({
+              path: ["value", ...link.path],
+              schema: true,
+            }),
+          );
         }
         const [redirDoc, _redirSelector] = this.getDocAtPath(
           doc,
           [],
-          DefaultSelector,
+          DEFAULT_SELECTOR,
           "writeRedirect",
         );
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
@@ -837,7 +865,7 @@ export abstract class BaseObjectTraverser {
         // our item link should point to the target of the last redirect
         itemLink = getNormalizedLink(redirDoc.address, true);
         // We can follow all the links, since we don't need to track cells
-        const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DefaultSelector);
+        const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DEFAULT_SELECTOR);
         this.tx.read(valueDoc.address, READ_FOR_SCHEDULING);
         return this.traverseLinkedDoc(
           valueDoc,
@@ -1331,7 +1359,7 @@ function trackVisitedDoc(
   // We have a reference to a different doc, so track the dependency
   // and update our targetDoc
   if (selector !== undefined) {
-    schemaTracker.add(getTrackerKey(target), selector);
+    schemaTracker.add(getTrackerKey(target), internPathSelector(selector));
   }
   // Load the sources/patterns recursively unless we're a retracted fact.
   if (includeSource) {
@@ -1400,7 +1428,7 @@ export function loadSource(
     return;
   }
   const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, { path: [], schema: false });
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
 
   // We've lost the space from our address in the tx.read, so recreate
   const fullEntry = { address: address, value: entry.value };
@@ -1434,8 +1462,7 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
-  const key = hashSchema(flagSchema).toString() + "|" +
-    hashSchema(schema).toString();
+  const key = internSchemaPairAsKey(flagSchema, schema);
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
@@ -1483,8 +1510,7 @@ export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = hashSchema(parentSchema).toString() + "|" +
-    hashSchema(linkSchema).toString();
+  const key = internSchemaPairAsKey(parentSchema, linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
@@ -1696,7 +1722,7 @@ function loadLinkedPattern(
     return;
   }
   const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, { path: [], schema: false });
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
 }
 
 // docPath is where we found the pointer and are doing this work. It should
@@ -1833,7 +1859,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
   constructor(
     tx: IExtendedStorageTransaction,
-    selector: SchemaPathSelector = DefaultSelector,
+    selector: SchemaPathSelector = DEFAULT_SELECTOR,
     tracker: PointerCycleTracker = new CompoundCycleTracker<
       Immutable<FabricValue>,
       JSONSchema | undefined
@@ -1945,7 +1971,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.schemaTracker.deepEqualMs = 0;
 
     logger.timeStart("traverse");
-    this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
+    this.schemaTracker.add(
+      getTrackerKey(doc.address),
+      internPathSelector(this.selector),
+    );
     // Flag the top level read of doc for the scheduler
     this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     const rv = this.traverseWithSelector(doc, this.selector, link);
@@ -2095,7 +2124,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (this.traverseCells) {
         const memo = this.activeMemo;
         const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
-          hashSchema(schema).toString();
+          hashSchema(schema);
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
           this.schemaMemoHits++;
@@ -3111,15 +3140,10 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  const key = hashSchema(outerSchema).toString() + "|" +
-    hashSchema(innerSchema).toString();
+  const key = internSchemaPairAsKey(outerSchema, innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
-  const result = isRecord(innerSchema)
-    ? { ...outerSchema, ...innerSchema }
-    : innerSchema
-    ? outerSchema // innerSchema === true
-    : false; // innerSchema === false
+  const result = schemaWithProperties(outerSchema, innerSchema);
   return internSet(_mergeSchemaOptionCache, key, result as JSONSchema);
 }
 
@@ -3219,18 +3243,22 @@ export function mergeAnyOfBranchSchemas(
 ): JSONSchema | null {
   if (branches.length < 2) return null;
 
-  const key = hashSchema(outerSchema).toString() + "||" +
-    branches.map((b) => hashSchema(b).toString()).join("|");
+  // Inline 1+N intern-based key: outer schema, then each branch.
+  // Interning each input stabilizes its identity so downstream callers
+  // hit the hash-cache fast path; `||` separates outer from branches,
+  // `|` separates branches.
+  const key = `${internSchemaAsHashString(outerSchema)}||` +
+    branches.map(internSchemaAsHashString).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
   const result = _mergeAnyOfBranchSchemasUncached(branches, outerSchema);
-  const frozen = result !== null ? toDeepFrozenSchema(result, true) : null;
+  const interned = result !== null ? internSchema(result) : null;
   if (_mergeAnyOfBranchCache.size >= INTERN_CACHE_MAX) {
     _mergeAnyOfBranchCache.clear();
   }
-  _mergeAnyOfBranchCache.set(key, frozen);
-  return frozen;
+  _mergeAnyOfBranchCache.set(key, interned);
+  return interned;
 }
 
 function _mergeAnyOfBranchSchemasUncached(
@@ -3299,10 +3327,12 @@ function _mergeAnyOfBranchSchemasUncached(
   // Build merged properties
   const mergedProperties: Record<string, JSONSchema> = {};
   for (const [propKey, schemas] of allProps) {
-    // Deduplicate schemas using hashSchema
+    // Deduplicate structurally-equal property schemas across branches by
+    // keying on the interned hash; interning also stabilizes these schema
+    // identities for any downstream caller that re-hashes them.
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(hashSchema(s).toString(), s);
+      uniqueHashes.set(internSchemaAsHashString(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema

@@ -9,6 +9,7 @@ import {
   cloneIfNecessary,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   isNontrivialSchema,
   toDeepFrozenSchema,
@@ -18,7 +19,10 @@ import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
-import { type NormalizedFullLink } from "./link-utils.ts";
+import {
+  type IMemorySpaceValueAddress,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isCellResultForDereferencing,
@@ -26,7 +30,6 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
-  IMemorySpaceValueAddress,
   IObjectCreator,
   mergeAnyOfMatches,
   mergeSchemaFlags,
@@ -34,6 +37,7 @@ import {
 } from "@commonfabric/runner/traverse";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -93,6 +97,16 @@ export function resolveSchema(
     : undefined;
 }
 
+// Memo for `schemaHasIfc` top-level calls. Safe **only** because entries
+// are populated under an `isDeepFrozen` guard below: the predicate's
+// answer depends on the entire subtree's shape, so caching against a
+// merely-TS-`readonly` or shallow-frozen input would be unsound — a
+// future sub-schema swap would silently invalidate the cached answer.
+// A future contributor must not relax the populate guard to accept
+// non-deep-frozen inputs. `Object.isFrozen` is **not** sufficient; it
+// is shallow-only.
+const _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
+
 export function schemaHasIfc(
   schema: JSONSchema | undefined,
   seen: Set<JSONSchema> = new Set(),
@@ -101,6 +115,29 @@ export function schemaHasIfc(
   if (schema === undefined || typeof schema === "boolean") {
     return false;
   }
+  // Top-level calls (the default entry from cell.ts / schema.ts) can
+  // consult the memo. Recursive calls carry caller-provided `seen` and
+  // `fullSchema`, which aren't captured in the cache key, so they must
+  // bypass.
+  const isTopLevel = seen.size === 0 && fullSchema === schema;
+  if (isTopLevel) {
+    const cached = _hasIfcCache.get(schema);
+    if (cached !== undefined) return cached;
+  }
+  const result = _schemaHasIfcUncached(schema, seen, fullSchema);
+  // Populate only under a deep-frozen guard. See the invariant comment
+  // above `_hasIfcCache`.
+  if (isTopLevel && isDeepFrozen(schema)) {
+    _hasIfcCache.set(schema, result);
+  }
+  return result;
+}
+
+function _schemaHasIfcUncached(
+  schema: JSONSchemaObj,
+  seen: Set<JSONSchema>,
+  fullSchema: JSONSchema | undefined,
+): boolean {
   if (seen.has(schema)) {
     return false;
   }
@@ -541,13 +578,7 @@ export function validateAndTransform(
   }
 
   // Link paths don't include value, but doc address should
-  const { space, id, type, path } = ref;
-  const address: IMemorySpaceValueAddress = {
-    space,
-    id,
-    type,
-    path: ["value", ...path],
-  };
+  const address: IMemorySpaceValueAddress = toMemorySpaceAddress(ref);
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
   const value = tx.readOrThrow(address, {

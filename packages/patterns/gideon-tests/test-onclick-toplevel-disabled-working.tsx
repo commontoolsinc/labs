@@ -45,9 +45,9 @@ import {
 } from "commonfabric";
 
 interface State {
-  count: Default<number, 0>;
-  pending: Default<boolean, false>;
-  isProcessing: Default<boolean, false>;
+  count: number | Default<0>;
+  pending: boolean | Default<false>;
+  isProcessing: boolean | Default<false>;
 }
 
 const incrementHandler = handler<

@@ -8,6 +8,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type Action } from "../src/scheduler.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -75,7 +76,11 @@ describe("debounce and throttling", () => {
     // Subscribe with proper writes for pull mode
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+      },
       {},
     );
 
@@ -119,7 +124,7 @@ describe("debounce and throttling", () => {
         {
           reads: [],
           shallowReads: [],
-          writes: [cell.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -157,7 +162,11 @@ describe("debounce and throttling", () => {
     // Subscribe with debounce option (and proper writes for pull mode)
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+      },
       { debounce: 50 },
     );
 
@@ -309,9 +318,9 @@ describe("debounce and throttling", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -322,9 +331,9 @@ describe("debounce and throttling", () => {
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [cell.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [cell.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -376,9 +385,9 @@ describe("debounce and throttling", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -578,7 +587,11 @@ describe("debounce and throttling", () => {
 
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+      },
       {},
     );
 
@@ -836,9 +849,9 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -852,9 +865,9 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -887,9 +900,9 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -900,9 +913,9 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -916,9 +929,9 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -957,9 +970,9 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1013,9 +1026,9 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       { throttle: 50, isEffect: true },
     );
@@ -1090,7 +1103,11 @@ describe("throttle - staleness tolerance", () => {
     // First run should still execute (no previous timestamp to throttle against)
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+      },
       {},
     );
     await cell.pull();

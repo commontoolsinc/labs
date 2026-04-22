@@ -1,7 +1,7 @@
 import { Default, NAME, pattern, UI } from "commonfabric";
 import Note from "./notes/note.tsx";
 
-export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
+export default pattern<{ title: string | Default<"Suggestion Tester"> }>(
   ({ title }) => {
     const note = Note({
       title: "Demo",

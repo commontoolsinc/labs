@@ -33,6 +33,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "../../runner/src/link-utils.ts";
+import { syncSourceCellChain } from "../../runner/src/source-cell.ts";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
@@ -543,10 +544,16 @@ export class RuntimeProcessor {
     };
   }
 
-  handleCellGetCfcLabel(
+  async handleCellGetCfcLabel(
     request: CellGetCfcLabelRequest,
-  ): CfcLabelViewResponse {
+  ): Promise<CfcLabelViewResponse> {
     const cell = getCell(this.runtime, request.cell);
+    const rootCell = this.runtime.getCellFromLink({
+      ...cell.getAsNormalizedFullLink(),
+      path: [],
+    });
+    await syncSourceCellChain(rootCell);
+    await cell.sync();
     return {
       cfcLabel: cfcLabelViewForCell(cell),
     };
@@ -921,7 +928,7 @@ export class RuntimeProcessor {
       case RequestType.CellResolveAsCell:
         return this.handleCellResolveAsCell(request);
       case RequestType.CellGetCfcLabel:
-        return this.handleCellGetCfcLabel(request);
+        return await this.handleCellGetCfcLabel(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:

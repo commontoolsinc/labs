@@ -39,8 +39,6 @@ export default pattern(() => {
         required: ["result"]
     } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
-                type: "undefined"
-            }, {
                 type: "object",
                 properties: {
                     result: {
@@ -48,6 +46,8 @@ export default pattern(() => {
                     }
                 },
                 required: ["result"]
+            }, {
+                type: "undefined"
             }]
     } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
         type: "object",
@@ -81,8 +81,6 @@ export default pattern(() => {
         type: "undefined"
     } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
-                type: "undefined"
-            }, {
                 type: "object",
                 properties: {
                     data: {
@@ -90,6 +88,8 @@ export default pattern(() => {
                     }
                 },
                 required: ["data"]
+            }, {
+                type: "undefined"
             }]
     } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
         type: "object",

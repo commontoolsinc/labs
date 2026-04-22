@@ -27,7 +27,7 @@ const preset: Item[] = [
 ];
 
 export default pattern<{
-  items: Writable<Default<Item[], typeof preset>>;
+  items: Writable<Item[] | Default<typeof preset>>;
 }>(({ items }) => {
   // Anti-pattern: Random sort before Set insertion changes iteration order
   const uniqueTags = Writable.of<string[]>([]);

@@ -56,9 +56,9 @@ When polishing a non-trivial UI, default to this workflow:
 2. Wrap the main surface in `<cf-theme theme={theme}>`.
 3. Compose the layout with `cf-screen`, `cf-vstack`, `cf-hstack`, `cf-vgroup`,
    `cf-hgroup`, and `cf-card`.
-4. If content can exceed one viewport, put the body content inside `cf-vscroll`
-   (or `cf-hscroll` for wide tabular content) rather than placing a long stack
-   directly under `cf-screen`.
+4. Content in `cf-screen`'s default slot scrolls automatically when it
+   overflows. Use `cf-vscroll` only when you need snap-to-bottom (chat),
+   fade-edges, or styled scrollbar. Use `cf-hscroll` for wide tabular content.
 5. Let the theme carry most of the color / type / radius / density decisions.
 6. Use component-specific custom properties only for local emphasis or one-off
    refinement.
@@ -108,18 +108,20 @@ defaults, or layouts that read like a raw form dump.
 <cf-checkbox $checked={done} />
 ```
 
+If a control is already bound to a cell, usually via `$value` or `$checked`, do
+not add a change handler that simply writes the same value back into that same
+cell. Use handlers only for dependent state updates or other side effects.
+
 **Layout structure:**
 
 ```tsx
 <cf-screen>
   <cf-heading slot="header" level={2}>My Pattern</cf-heading>
-  <cf-vscroll flex showScrollbar fadeEdges>
-    <cf-vstack gap="4" padding="4">
-      <cf-hstack gap="3">
-        {/* horizontal items */}
-      </cf-hstack>
-    </cf-vstack>
-  </cf-vscroll>
+  <cf-vstack gap="4" padding="4">
+    <cf-hstack gap="3">
+      {/* horizontal items — scrolls automatically if content overflows */}
+    </cf-hstack>
+  </cf-vstack>
 </cf-screen>;
 ```
 
@@ -147,9 +149,9 @@ const theme = {
 <cf-theme theme={theme}>
   <cf-screen>
     <cf-heading slot="header" level={2}>My Pattern</cf-heading>
-    <cf-vscroll flex>
+    <cf-vstack gap="4" padding="4">
       {/* ... */}
-    </cf-vscroll>
+    </cf-vstack>
   </cf-screen>
 </cf-theme>;
 ```
@@ -174,4 +176,5 @@ domain flow, not as the first place to copy styling from.
 - empty or first-run states are not neglected
 - a `cf-theme` strategy is used intentionally when available
 - the result has a clear visual idea rather than a generic default shell
-- full-height layouts remain scrollable when content exceeds one screen
+- full-height layouts use `cf-screen` (auto-scrolls); `cf-vscroll` only for
+  chat/fade-edges

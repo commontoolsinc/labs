@@ -39,9 +39,6 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
-                showHistory: {
-                    type: "boolean"
-                },
                 messageCount: {
                     type: "number"
                 },
@@ -50,7 +47,7 @@ export default pattern((__cf_pattern_input) => {
                     asCell: ["cell"]
                 }
             },
-            required: ["showHistory", "messageCount", "dismissedIndex"]
+            required: ["messageCount", "dismissedIndex"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {

@@ -12,8 +12,8 @@ import {
 // ===== Types =====
 
 type DiagramInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 
 type DiagramOutput = {

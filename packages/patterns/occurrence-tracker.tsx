@@ -45,12 +45,12 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 interface Occurrence {
   timestamp: string; // ISO 8601
-  note: Default<string, "">;
+  note: string | Default<"">;
 }
 
 export interface OccurrenceTrackerInput {
-  label: Default<string, "">;
-  occurrences: Writable<Default<Occurrence[], []>>;
+  label: string | Default<"">;
+  occurrences: Writable<Occurrence[] | Default<[]>>;
 }
 
 // ===== Helper Functions =====

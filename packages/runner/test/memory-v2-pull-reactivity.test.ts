@@ -9,6 +9,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Action } from "../src/scheduler.ts";
 import type { URI } from "@commonfabric/memory/interface";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");
 const space = signer.did();
@@ -108,9 +109,9 @@ describe("Memory v2 pull reactivity", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -207,9 +208,9 @@ describe("Memory v2 pull reactivity", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [root.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(root.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       {},
     );

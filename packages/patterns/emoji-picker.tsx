@@ -29,7 +29,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 
 // ===== Types =====
 export interface EmojiPickerInput {
-  selectedEmoji: Default<string, "">;
+  selectedEmoji: string | Default<"">;
 }
 
 interface AutocompleteItem {

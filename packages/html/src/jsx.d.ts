@@ -2832,7 +2832,9 @@ interface CFThemeDef {
   colors: CFThemeColors;
 }
 
-type CFThemeInput = Partial<CFThemeDef> & Record<string, unknown>;
+type CFThemeInput =
+  & Partial<Omit<CFThemeDef, "colors"> & { colors: Partial<CFThemeColors> }>
+  & Record<string, unknown>;
 
 type CFEvent<T> = {
   detail: T;
@@ -2885,6 +2887,7 @@ interface CFModalElement extends CFHTMLElement {}
 interface CFModalProviderElement extends CFHTMLElement {}
 interface CFChevronButtonElement extends CFHTMLElement {}
 interface CFCardElement extends CFHTMLElement {}
+interface CFListItemElement extends CFHTMLElement {}
 interface CFCalendarElement extends CFHTMLElement {}
 interface CFQuestionElement extends CFHTMLElement {}
 interface CFAlertElement extends CFHTMLElement {}
@@ -2941,6 +2944,8 @@ interface CFTabsElement extends CFHTMLElement {}
 interface CFTabElement extends CFHTMLElement {}
 interface CFTabListElement extends CFHTMLElement {}
 interface CFTabPanelElement extends CFHTMLElement {}
+interface CFTabBarElement extends CFHTMLElement {}
+interface CFTabBarItemElement extends CFHTMLElement {}
 
 // Accordion components
 interface CFAccordionElement extends CFHTMLElement {}
@@ -2979,6 +2984,10 @@ interface CFResizableHandleElement extends CFHTMLElement {}
 interface CFHScrollElement extends CFHTMLElement {}
 interface CFScrollAreaElement extends CFHTMLElement {}
 interface CFToolCallElement extends CFHTMLElement {}
+
+// Toast components
+type CFToastElement = HTMLElement;
+type CFToastProviderElement = HTMLElement;
 
 interface CFDraggableAttributes<T> extends CFHTMLAttributes<T> {
   "key"?: number;
@@ -3209,7 +3218,7 @@ interface CFToolbarAttributes<T> extends CFHTMLAttributes<T> {
 interface CFTableAttributes<T> extends CFHTMLAttributes<T> {
   "striped"?: boolean;
   "bordered"?: boolean;
-  "size"?: "sm" | "md" | "lg";
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | "sm" | "md" | "lg";
   "sticky-header"?: boolean;
   "full-width"?: boolean;
   "hover"?: boolean;
@@ -3346,8 +3355,36 @@ interface CFAlertAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-dismiss"?: EventHandler<{}>;
 }
 
+interface CFToastAttributes<T> extends CFHTMLAttributes<T> {
+  "variant"?: "default" | "success" | "error" | "warning";
+  "duration"?: number;
+  "dismissable"?: boolean;
+  "open"?: boolean;
+  "oncf-toast-dismiss"?: EventHandler<{ reason: string }>;
+  "oncf-toast-action"?: EventHandler<{}>;
+}
+
+interface CFToastProviderAttributes<T> extends CFHTMLAttributes<T> {
+  "position"?:
+    | "top"
+    | "bottom"
+    | "top-left"
+    | "top-right"
+    | "bottom-left"
+    | "bottom-right";
+  "max"?: number;
+}
+
 interface CFCardAttributes<T> extends CFHTMLAttributes<T> {
   "clickable"?: boolean;
+}
+
+interface CFListItemAttributes<T> extends CFHTMLAttributes<T> {
+  "label"?: string;
+  "description"?: string;
+  "expandable"?: boolean;
+  "expanded"?: boolean;
+  "disabled"?: boolean;
 }
 
 interface CFRouterAttributes<T> extends CFHTMLAttributes<T> {
@@ -3387,7 +3424,7 @@ interface CFButtonAttributes<T> extends CFHTMLAttributes<T> {
     | "ghost"
     | "link"
     | "pill";
-  "size"?: "default" | "sm" | "lg" | "icon";
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | "icon" | "default" | "sm" | "lg";
   "disabled"?: boolean;
   "outline"?: boolean;
   "type"?: "button" | "submit" | "reset";
@@ -3403,7 +3440,17 @@ interface CFCopyButtonAttributes<T> extends CFHTMLAttributes<T> {
     | "ghost"
     | "link"
     | "pill";
-  "size"?: "default" | "sm" | "lg" | "icon" | "md";
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "icon"
+    | "default"
+    | "sm"
+    | "md"
+    | "lg";
   "disabled"?: boolean;
   "feedback-duration"?: number;
   "icon-only"?: boolean;
@@ -3427,7 +3474,17 @@ interface CFFileDownloadAttributes<T> extends CFHTMLAttributes<T> {
     | "ghost"
     | "link"
     | "pill";
-  "size"?: "default" | "sm" | "lg" | "icon" | "md";
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "icon"
+    | "default"
+    | "sm"
+    | "md"
+    | "lg";
   "disabled"?: boolean;
   "feedback-duration"?: number;
   "feedbackDuration"?: number;
@@ -3488,6 +3545,10 @@ interface CFCFCAuthorshipAttributes<T> extends CFHTMLAttributes<T> {
   "authorName"?: unknown;
   "avatar"?: unknown;
   "kind"?: string;
+  "verifyTextIntegrity"?: boolean;
+  "allowLiteralText"?: boolean;
+  "requiredTextIntegrity"?: unknown | readonly unknown[];
+  "textIntegrityState"?: "ok" | "blocked";
 }
 
 interface CFCFCRenderBoundaryAttributes<T> extends CFHTMLAttributes<T> {
@@ -3521,7 +3582,7 @@ interface CFDropZoneAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFLoaderAttributes<T> extends CFHTMLAttributes<T> {
-  "size"?: "sm" | "md" | "lg";
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | "sm" | "md" | "lg";
   "show-elapsed"?: boolean;
   "show-stop"?: boolean;
   /** Fired when stop button is clicked */
@@ -3550,6 +3611,9 @@ interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "$open"?: CellLike<boolean> | boolean;
   "dismissable"?: boolean;
   "size"?: "sm" | "md" | "lg" | "full";
+  "presentation"?: "dialog" | "sheet";
+  "grabber"?: boolean;
+  "detent"?: "auto" | "half" | "full";
   "prevent-scroll"?: boolean;
   "label"?: string;
   "oncf-modal-open"?: EventHandler<void>;
@@ -3563,6 +3627,16 @@ interface CFModalProviderAttributes<T> extends CFHTMLAttributes<T> {}
 interface CFChevronButtonAttributes<T> extends CFHTMLAttributes<T> {
   "expanded"?: boolean;
   "loading"?: boolean;
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "sm"
+    | "md"
+    | "lg"
+    | CellLike<string>;
   "oncf-toggle"?: EventHandler<void>;
 }
 
@@ -3602,7 +3676,8 @@ interface CFInputAttributes<T> extends CFHTMLAttributes<T> {
   "maxlength"?: string;
   "minlength"?: string;
   "inputmode"?: string;
-  "size"?: number;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
+  "length"?: number;
   "multiple"?: boolean;
   "accept"?: string;
   "list"?: string;
@@ -3628,6 +3703,7 @@ interface CFTextAreaAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<string | undefined>;
   "value"?: CellLike<string> | string;
   "placeholder"?: string;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "disabled"?: boolean;
   "readonly"?: boolean;
   "error"?: boolean;
@@ -3771,7 +3847,8 @@ interface CFSelectAttributes<T> extends CFHTMLAttributes<T> {
   "multiple"?: boolean;
   "disabled"?: boolean;
   "required"?: boolean;
-  "size"?: number;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
+  "visible-rows"?: number;
   "name"?: string;
   "placeholder"?: string;
   "oncf-change"?: EventHandler<
@@ -3927,6 +4004,21 @@ interface CFTabPanelAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: string; // Panel identifier (plain string, no cell binding needed)
 }
 
+// Tab bar component attributes
+interface CFTabBarAttributes<T> extends CFHTMLAttributes<T> {
+  "$value"?: CellLike<string> | string; // Bidirectional cell binding
+  "value"?: string; // Plain string value (use $value for cells)
+  "position"?: "bottom" | "top";
+  "variant"?: "default" | "inset";
+  "oncf-change"?: EventHandler<{ value: string; oldValue: string }>;
+}
+
+interface CFTabBarItemAttributes<T> extends CFHTMLAttributes<T> {
+  "value"?: string;
+  "label"?: string;
+  "disabled"?: boolean;
+}
+
 // Accordion component attributes
 interface CFAccordionAttributes<T> extends CFHTMLAttributes<T> {
   "type"?: "single" | "multiple" | CellLike<"single" | "multiple">;
@@ -3980,7 +4072,16 @@ interface CFToggleAttributes<T> extends CFHTMLAttributes<T> {
   "$pressed"?: CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
   "variant"?: "default" | "outline" | CellLike<"default" | "outline">;
-  "size"?: "default" | "sm" | "lg" | CellLike<"default" | "sm" | "lg">;
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "default"
+    | "sm"
+    | "lg"
+    | CellLike<"xs" | "sm" | "md" | "lg" | "xl" | "default" | "sm" | "lg">;
   "oncf-change"?: EventHandler<{ pressed: boolean }>;
 }
 
@@ -4031,6 +4132,7 @@ interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
     | "destructive"
     | "outline"
     | CellLike<"default" | "secondary" | "destructive" | "outline">;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "removable"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
 }
@@ -4042,6 +4144,16 @@ interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
     | "primary"
     | "accent"
     | CellLike<"default" | "primary" | "accent">;
+  "size"?:
+    | "xs"
+    | "s"
+    | "m"
+    | "l"
+    | "xl"
+    | "sm"
+    | "md"
+    | "lg"
+    | CellLike<"xs" | "sm" | "md" | "lg" | "xl" | "sm" | "md" | "lg">;
   "removable"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
@@ -4802,6 +4914,10 @@ declare global {
         CFCardAttributes<CFCardElement>,
         CFCardElement
       >;
+      "cf-list-item": CFDOM.DetailedHTMLProps<
+        CFListItemAttributes<CFListItemElement>,
+        CFListItemElement
+      >;
       "cf-router": CFDOM.DetailedHTMLProps<
         CFRouterAttributes<CFRouterElement>,
         CFRouterElement
@@ -4980,6 +5096,14 @@ declare global {
         CFTabPanelAttributes<CFTabPanelElement>,
         CFTabPanelElement
       >;
+      "cf-tab-bar": CFDOM.DetailedHTMLProps<
+        CFTabBarAttributes<CFTabBarElement>,
+        CFTabBarElement
+      >;
+      "cf-tab-bar-item": CFDOM.DetailedHTMLProps<
+        CFTabBarItemAttributes<CFTabBarItemElement>,
+        CFTabBarItemElement
+      >;
 
       // Accordion components
       "cf-accordion": CFDOM.DetailedHTMLProps<
@@ -5123,6 +5247,16 @@ declare global {
       "cf-dot-mark": CFDOM.DetailedHTMLProps<
         CFDotMarkAttributes<CFDotMarkElement>,
         CFDotMarkElement
+      >;
+
+      // Toast components
+      "cf-toast": CFDOM.DetailedHTMLProps<
+        CFToastAttributes<CFToastElement>,
+        CFToastElement
+      >;
+      "cf-toast-provider": CFDOM.DetailedHTMLProps<
+        CFToastProviderAttributes<CFToastProviderElement>,
+        CFToastProviderElement
       >;
     }
   }

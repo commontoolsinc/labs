@@ -13,6 +13,8 @@ import type {
   URI,
 } from "@commonfabric/memory/interface";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
+import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   canBranchMatch,
   CompoundCycleTracker,
@@ -1573,6 +1575,104 @@ for (const modernHash of [false, true]) {
         disposable![Symbol.dispose]();
         expect((tracker as any).partial.size).toBe(0);
       });
+
+      it("retains partial-key entries while sibling entries are live", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        const dispA = tracker.include(key, true);
+        const dispB = tracker.include(key, false);
+        expect(dispA).not.toBeNull();
+        expect(dispB).not.toBeNull();
+        // Disposing only A must not remove the outer `partial` entry —
+        // B's live entry still keys on the same partialKey.
+        dispA![Symbol.dispose]();
+        expect((tracker as any).partial.size).toBe(1);
+        expect((tracker as any).partial.get(key)!.size).toBe(1);
+        // Disposing B then cleans up.
+        dispB![Symbol.dispose]();
+        expect((tracker as any).partial.size).toBe(0);
+      });
+    });
+
+    describe("CompoundCycleTracker intern-based keying (Tactic 2B)", () => {
+      it("detects cycles on structurally-equal extraKey (not just identity)", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        // Two distinct object references with structurally-equal content.
+        const schemaA: JSONSchema = {
+          type: "object",
+          title: `cctInternKeyTestAt${Date.now()}-${Math.random()}`,
+        };
+        const schemaB: JSONSchema = { ...schemaA };
+        const first = tracker.include(key, schemaA);
+        expect(first).not.toBeNull();
+        // Re-including with a structurally-equal-but-non-identical schema
+        // must detect the cycle via `internSchema`'s structural dedup.
+        const second = tracker.include(key, schemaB);
+        expect(second).toBeNull();
+      });
+
+      it("treats `undefined` extraKey as `true` (JSON Schema accept-all)", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        const first = tracker.include(key, undefined);
+        expect(first).not.toBeNull();
+        // Re-including with `true` must collide with the prior `undefined`
+        // call — the class normalizes both to the same interned schema.
+        const second = tracker.include(key, true);
+        expect(second).toBeNull();
+        // And vice-versa.
+        const key2 = { id: "k2" };
+        tracker.include(key2, true);
+        expect(tracker.include(key2, undefined)).toBeNull();
+      });
+
+      it("distinguishes boolean `false` from boolean `true` / `undefined`", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined
+        >();
+        const key = { id: "k1" };
+        const a = tracker.include(key, true);
+        expect(a).not.toBeNull();
+        const b = tracker.include(key, false);
+        expect(b).not.toBeNull();
+      });
+
+      it("getExisting returns the stored value on re-include", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined,
+          string
+        >();
+        const key = { id: "k1" };
+        const schema: JSONSchema = {
+          type: "object",
+          title: `cctInternKeyTestAt${Date.now()}-${Math.random()}`,
+        };
+        tracker.include(key, schema, "value-a");
+        expect(tracker.getExisting(key, schema)).toBe("value-a");
+        expect(tracker.getExisting(key, { ...schema })).toBe("value-a");
+        expect(tracker.getExisting(key, true)).toBeUndefined();
+      });
+
+      it("returns undefined from getExisting for unknown partialKey", () => {
+        const tracker = new CompoundCycleTracker<
+          object,
+          JSONSchema | undefined,
+          string
+        >();
+        expect(tracker.getExisting({ id: "missing" }, true)).toBeUndefined();
+      });
     });
 
     describe("canBranchMatch", () => {
@@ -2620,6 +2720,74 @@ for (const modernHash of [false, true]) {
         expect(arr[0]).toBe(10);
         expect(1 in arr).toBe(false); // hole preserved
         expect(arr[2]).toBe(30);
+      });
+    });
+
+    describe("MapSetStringToPathSelectors assumes pre-interned inputs", () => {
+      // Per the contract simplification: as of Dan's intermediate PR,
+      // MSP's hash fn no longer interns or freezes its input. Callers
+      // must hand in an already-interned selector (via
+      // `internPathSelector`) for the `hashOfModernInternal` WeakMap
+      // cache to retain the hash. These tests verify the post-contract
+      // behavior: correctness of dedup under pre-interned inputs, plus
+      // the no-op behavior when `hashValues` is false.
+
+      // Content-unique title guarantees no prior interning has seen the
+      // exact schema in this test file or in imported modules.
+      const uniqueSchema = (): JSONSchema => ({
+        type: "object",
+        title: `mapSetPathSelectorTestAt${Date.now()}-${Math.random()}`,
+      });
+
+      it("deduplicates structurally-equal pre-interned selectors", () => {
+        const mapSet = new MapSetStringToPathSelectors(true);
+        const schema = uniqueSchema();
+        const a = internPathSelector({ path: ["x"], schema });
+        const b = internPathSelector({ path: ["x"], schema });
+        mapSet.add("k", a);
+        mapSet.add("k", b);
+        const values = mapSet.get("k");
+        expect(values).toBeDefined();
+        expect(values!.size).toBe(1);
+      });
+
+      it("accepts selectors with `schema: undefined`", () => {
+        const mapSet = new MapSetStringToPathSelectors(true);
+        const selector = internPathSelector({ path: ["p"] });
+        // Must not throw.
+        mapSet.add("k", selector);
+        expect(mapSet.get("k")!.size).toBe(1);
+      });
+
+      it("accepts selectors with boolean schemas", () => {
+        const mapSet = new MapSetStringToPathSelectors(true);
+        const sTrue = internPathSelector({ path: ["t"], schema: true });
+        const sFalse = internPathSelector({ path: ["f"], schema: false });
+        mapSet.add("k", sTrue);
+        mapSet.add("k", sFalse);
+        expect(mapSet.get("k")!.size).toBe(2);
+      });
+
+      it("does nothing to inputs when `hashValues` is false", () => {
+        const mapSet = new MapSetStringToPathSelectors(false);
+        const schema = uniqueSchema();
+        const selector: SchemaPathSelector = { path: ["x"], schema };
+        mapSet.add("k", selector);
+        // Without a hash function, the add path goes through `setMap`
+        // which uses reference equality and doesn't freeze anything.
+        expect(Object.isFrozen(selector)).toBe(false);
+        expect(isInternedSchema(schema)).toBe(false);
+      });
+
+      it("is idempotent on repeat add of the same pre-interned selector", () => {
+        const mapSet = new MapSetStringToPathSelectors(true);
+        const selector = internPathSelector({
+          path: ["x"],
+          schema: uniqueSchema(),
+        });
+        mapSet.add("k", selector);
+        mapSet.add("k", selector);
+        expect(mapSet.get("k")!.size).toBe(1);
       });
     });
   }); // describe(`modernHash=${modernHash}`)

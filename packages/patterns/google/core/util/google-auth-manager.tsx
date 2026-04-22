@@ -112,7 +112,5 @@ export function GoogleAuthManager(
   )(input);
 }
 
-export default GoogleAuthManager;
-
 // Backward-compatible export for existing code that uses createGoogleAuth()
 export const createGoogleAuth = GoogleAuthManager;

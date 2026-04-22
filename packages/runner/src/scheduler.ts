@@ -19,6 +19,7 @@ import type {
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
@@ -214,9 +215,10 @@ function addressMatchesLinkPrefix(
   address: IMemorySpaceAddress,
   link: NormalizedFullLink,
 ): boolean {
+  const documentAddress = toMemorySpaceAddress(link);
   return address.space === link.space &&
     address.id === link.id &&
-    arraysOverlap(link.path, address.path);
+    arraysOverlap(documentAddress.path, address.path);
 }
 
 function filterIgnoredAddresses(
@@ -683,28 +685,9 @@ export class Scheduler {
         }
         writeDetailsBySpace.set(write.space, details);
       }
-      writes.set(key, this.lookupComparableWriteValue(details, write));
-      if (!writes.has(key)) writes.set(key, undefined);
+      writes.set(key, details.has(key) ? details.get(key) : undefined);
     }
     return writes;
-  }
-
-  private lookupComparableWriteValue(
-    details: Map<string, unknown>,
-    write: IMemorySpaceAddress,
-  ): unknown {
-    const exactKey = this.makeAddressKey(write);
-    if (details.has(exactKey)) {
-      return details.get(exactKey);
-    }
-    const valueKey = this.makeAddressKey({
-      ...write,
-      path: ["value", ...write.path],
-    });
-    if (details.has(valueKey)) {
-      return details.get(valueKey);
-    }
-    return undefined;
   }
 
   private runIdempotencyRecheck(
@@ -934,7 +917,7 @@ export class Scheduler {
         this.setDependencies(action, {
           reads: [],
           shallowReads: [],
-          writes: declaredWrites,
+          writes: declaredWrites.map(toMemorySpaceAddress),
         });
       }
     }
@@ -1027,7 +1010,7 @@ export class Scheduler {
     // Only set if not already set (resubscribe can be called multiple times)
     this.registerParentChild(action, { allowExisting: false });
 
-    const { entities, pathsWithValuesByEntity } = this.addTriggerPaths(
+    const { entities, triggerPathsByEntity } = this.addTriggerPaths(
       action,
       reads,
       shallowReads,
@@ -1035,14 +1018,14 @@ export class Scheduler {
 
     logger.debug("schedule-resubscribe", () => [
       `Action: ${actionId}`,
-      `Entities: ${pathsWithValuesByEntity.size}`,
+      `Entities: ${triggerPathsByEntity.size}`,
       `Reads: ${reads.length}`,
     ]);
 
-    for (const [spaceAndURI, pathsWithValues] of pathsWithValuesByEntity) {
+    for (const [spaceAndURI, triggerPaths] of triggerPathsByEntity) {
       logger.debug("schedule-resubscribe-path", () => [
         `Registered action for ${spaceAndURI}`,
-        `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
+        `Paths: ${triggerPaths.map((p) => p.join("/")).join(", ")}`,
       ]);
     }
 
@@ -1756,7 +1739,9 @@ export class Scheduler {
     );
     const declaredWrites = sortAndCompactPaths(
       filterIgnoredAddresses(
-        (action as Partial<TelemetryAnnotations>).writes,
+        ((action as Partial<TelemetryAnnotations>).writes ?? []).map(
+          toMemorySpaceAddress,
+        ),
         ignoredSchedulingWrites,
       ),
     );
@@ -1878,7 +1863,7 @@ export class Scheduler {
     shallowReads: IMemorySpaceAddress[],
   ): {
     entities: Set<SpaceAndURI>;
-    pathsWithValuesByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
+    triggerPathsByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
   } {
     this.clearActionTriggers(action);
     const pathsByEntity = addressesToPathByEntity(reads);
@@ -1886,7 +1871,7 @@ export class Scheduler {
       shallowReads,
     );
     const entities = new Set<SpaceAndURI>();
-    const pathsWithValuesByEntity = new Map<
+    const triggerPathsByEntity = new Map<
       SpaceAndURI,
       SortedAndCompactPaths
     >();
@@ -1896,30 +1881,18 @@ export class Scheduler {
       if (!this.triggers.has(spaceAndURI)) {
         this.triggers.set(spaceAndURI, new Map());
       }
-      const pathsWithValues = paths.map((path) =>
-        [
-          "value",
-          ...path,
-        ] as readonly MemoryAddressPathComponent[]
-      );
-      this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-      pathsWithValuesByEntity.set(spaceAndURI, pathsWithValues);
+      this.triggers.get(spaceAndURI)!.set(action, paths);
+      triggerPathsByEntity.set(spaceAndURI, paths);
     }
     for (const [spaceAndURI, paths] of nonRecursivePathsByEntity) {
       entities.add(spaceAndURI);
       if (!this.nonRecursiveTriggers.has(spaceAndURI)) {
         this.nonRecursiveTriggers.set(spaceAndURI, new Map());
       }
-      const pathsWithValues = paths.map((path) =>
-        [
-          "value",
-          ...path,
-        ] as readonly MemoryAddressPathComponent[]
-      );
-      this.nonRecursiveTriggers.get(spaceAndURI)!.set(action, pathsWithValues);
+      this.nonRecursiveTriggers.get(spaceAndURI)!.set(action, paths);
     }
 
-    return { entities, pathsWithValuesByEntity };
+    return { entities, triggerPathsByEntity };
   }
 
   private clearActionTriggers(action: Action): void {
@@ -2113,13 +2086,10 @@ export class Scheduler {
   }
 
   private pathMatchesWrite(
-    pathWithValuePrefix: readonly MemoryAddressPathComponent[],
+    readPath: readonly MemoryAddressPathComponent[],
     writePath: readonly MemoryAddressPathComponent[],
     options: { nonRecursive?: boolean } = {},
   ): boolean {
-    const readPath = pathWithValuePrefix[0] === "value"
-      ? pathWithValuePrefix.slice(1)
-      : pathWithValuePrefix;
     return options.nonRecursive
       ? writePath.length <= readPath.length + 1 &&
         arraysOverlap(writePath, readPath)
@@ -3270,7 +3240,7 @@ export class Scheduler {
             space: read.space,
             id: read.id,
             type: read.type ?? "application/json",
-            path: ["value", ...read.path],
+            path: [...read.path],
           },
           { meta: ignoreReadForScheduling },
         );
@@ -3298,11 +3268,7 @@ export class Scheduler {
           }
           writeDetailsBySpace.set(write.space, details);
         }
-        writeValues.set(
-          key,
-          this.lookupComparableWriteValue(details, write),
-        );
-        if (!writeValues.has(key)) writeValues.set(key, undefined);
+        writeValues.set(key, details.has(key) ? details.get(key) : undefined);
       } catch {
         writeValues.set(key, "[write-error]");
       }

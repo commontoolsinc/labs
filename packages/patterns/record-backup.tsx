@@ -74,7 +74,7 @@ interface ImportResult {
 // ===== Pattern Input/Output =====
 
 interface Input {
-  importJson: Default<string, "">;
+  importJson: string | Default<"">;
 }
 
 interface Output {
