@@ -1,5 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { cf, checkStderr, stripAnsi } from "./utils.ts";
+import { recreateSpaceRootPattern, type SpaceConfig } from "../lib/piece.ts";
 import {
   parseLink,
   parsePieceOptions,
@@ -157,6 +159,46 @@ describe("cli piece parsing", () => {
         piece: PIECE,
       })
     ).toThrow();
+  });
+
+  it("recreateSpaceRootPattern() targets the explicit space", async () => {
+    const seen: { config?: SpaceConfig; manager?: object } = {};
+    const pieceId = await recreateSpaceRootPattern({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+    }, {
+      loadManager: (config) => {
+        seen.config = config;
+        const manager = {};
+        seen.manager = manager;
+        return Promise.resolve(manager as any);
+      },
+      createController: (manager) => {
+        expect(manager).toBe(seen.manager);
+        return {
+          recreateDefaultPattern: () => Promise.resolve({ id: PIECE }),
+        };
+      },
+    });
+
+    expect(seen.config).toEqual({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+    });
+    expect(pieceId).toBe(PIECE);
+  });
+
+  it("shows recreate-root as a space-scoped command", async () => {
+    const { code, stdout, stderr } = await cf("piece recreate-root --help");
+    checkStderr(stderr);
+    const output = stripAnsi(stdout.join("\n"));
+    expect(output).toContain(
+      "Recreate the root pattern for the explicitly targeted space.",
+    );
+    expect(output).toContain("--space <space>");
+    expect(code).toBe(0);
   });
 
   describe("parseLink", () => {

@@ -14,6 +14,7 @@ import {
   MapFormat,
   newPiece,
   PieceConfig,
+  recreateSpaceRootPattern,
   removePiece,
   resetHomePattern,
   savePiecePattern,
@@ -780,22 +781,45 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     await removePiece(pieceConfig);
     render(`Removed piece ${pieceConfig.piece}`);
   })
+  /* piece recreate-root */
+  .command(
+    "recreate-root",
+    "Recreate the root pattern for the explicitly targeted space.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece recreate-root ${EX_ID} ${EX_COMP}`),
+    `Recreate the root pattern for "${RAW_EX_COMP.space}".`,
+  )
+  .example(
+    cliText(`cf piece recreate-root ${EX_ID} ${EX_URL}`),
+    `Recreate the root pattern for "${RAW_EX_COMP.space}".`,
+  )
+  .action(async (options) => {
+    setQuietMode(!!options.quiet);
+    const spaceConfig = parseSpaceOptions(options);
+    const pieceId = await recreateSpaceRootPattern(spaceConfig);
+    render(pieceId);
+    hint(cliText(`NEXT STEPS:
+  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
+  → Inspect state:         cf piece inspect --piece ${pieceId} ...`));
+  })
   /* piece set-home */
   .command(
     "set-home",
-    "Deploy a custom home pattern or reset to system default.",
+    "Deploy a custom home-space pattern or reset the identity's home space to system default.",
   )
   .example(
     cliText(
       `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
     ),
-    `Deploy a custom home pattern.`,
+    `Deploy a custom pattern to the identity's home space.`,
   )
   .example(
     cliText(
       `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
     ),
-    `Reset to the system default home pattern.`,
+    `Reset the identity's home space to the system default pattern.`,
   )
   .option("--reset", "Reset to the system default home pattern")
   .option(

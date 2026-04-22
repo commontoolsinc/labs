@@ -10,8 +10,12 @@ export function bytesToLines(stream: Uint8Array): string[] {
 // deno-lint-ignore no-control-regex
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE, "");
+}
+
 export function isIgnorableDenoWarningLine(line: string): boolean {
-  const trimmed = line.replace(ANSI_RE, "").trimStart();
+  const trimmed = stripAnsi(line).trimStart();
   return trimmed.startsWith(
     "Warning The following peer dependency issues were found:",
   ) ||
