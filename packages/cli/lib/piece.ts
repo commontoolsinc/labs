@@ -988,6 +988,29 @@ export async function removePiece(config: PieceConfig): Promise<void> {
   }
 }
 
+interface RootPatternController {
+  recreateDefaultPattern(): Promise<{ id: string }>;
+}
+
+interface RootPatternDeps {
+  loadManager?: typeof loadManager;
+  createController?: (manager: PieceManager) => RootPatternController;
+}
+
+/**
+ * Recreate the default/root pattern for an explicitly targeted space.
+ */
+export async function recreateSpaceRootPattern(
+  config: SpaceConfig,
+  deps: RootPatternDeps = {},
+): Promise<string> {
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const piece = await pieces.recreateDefaultPattern();
+  return piece.id;
+}
+
 function isVNodeLike(value: unknown): value is VNode {
   const visited = new Set<object>();
   while (isRecord(value) && UI in value) {
