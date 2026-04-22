@@ -273,7 +273,7 @@ const DemoAgentChat = pattern<DemoChatInput, DemoChatOutput>(
       system,
       messages,
       tools,
-      model: "anthropic:claude-sonnet",
+      model: "claude-sonnet-4-6",
       builtinTools: false,
       observationMaxConfidentiality: observationMaxConfidentiality as any,
     } as any);
