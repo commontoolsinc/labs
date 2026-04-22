@@ -42,8 +42,12 @@ const readStreamText = async (
 export class DenoProcessRunner implements ProcessRunner {
   async run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     const controller = new AbortController();
+    let timeoutTriggered = false;
     const timeoutId = request.timeoutMs !== undefined
-      ? setTimeout(() => controller.abort(), request.timeoutMs)
+      ? setTimeout(() => {
+        timeoutTriggered = true;
+        controller.abort();
+      }, request.timeoutMs)
       : undefined;
     try {
       const child = new Deno.Command(request.command, {
@@ -73,6 +77,13 @@ export class DenoProcessRunner implements ProcessRunner {
         readStreamText(child.stderr),
         writeInput(),
       ]);
+
+      if (timeoutTriggered && status.code !== 0) {
+        throw new ProcessTimeoutError(
+          [request.command, ...request.args].join(" "),
+          request.timeoutMs ?? 0,
+        );
+      }
 
       return {
         stdout,
