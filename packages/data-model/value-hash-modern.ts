@@ -146,6 +146,21 @@ function getStringRep(value: string) {
 }
 
 /**
+ * Helper for `compareStrings()`: Is the given character code a surrogate?
+ */
+function isSurrogateCharCode(c: number) {
+  return (c >= 0xd800) && (c <= 0xdfff);
+}
+
+/**
+ * Helper for `compareStrings()`: Does the given string contain any surrogate
+ * code points?
+ */
+function hasSurrogateCharCode(value: string) {
+  return /[\ud800-\udfff]/.test(value);
+}
+
+/**
  * Compares strings by UTF-8 sort order.
  *
  * Note: Even though we could conceivably define the sort to be something
@@ -156,22 +171,39 @@ function getStringRep(value: string) {
  * a performance cost because of it).
  */
 function compareStrings(a: string, b: string): number {
+  // Credit where due: Though this started out as an independent implementation
+  // of the key insight for fast sorting, this incorporates ideas from
+  // <https://github.com/rocicorp/compare-utf8>.
+
   // Here's what's going on: JS native string sort and UTF-8 sort can differ
   // only when at least one of the JS-form strings contains a codepoint for a
   // surrogate-pair. As long as we don't run into one of those, we can just
   // do a regular difference-based comparison. But if we _do_ run into one, then
   // we have to do something extra, one way or another.
 
-  const isSurrogate = (c: number) => (c >= 0xd800) && (c <= 0xdfff);
+  if (a === b) {
+    // Easy out!
+    return 0;
+  }
 
   const minCharLen = Math.min(a.length, b.length);
+
+  if (
+    (minCharLen >= 20) && !(hasSurrogateCharCode(a) || hasSurrogateCharCode(b))
+  ) {
+    // Strings are long enough that it's worth a preflight check for surrogate
+    // pairs, and it turns out that neither had them.
+    return (a < b) ? -1 : ((a > b) ? 1 : 0);
+  }
+
+  // No luck for us today. Gotta do it the hard way.
 
   for (let i = 0; i < minCharLen; i++) {
     const aChar = a.charCodeAt(i);
     const bChar = b.charCodeAt(i);
     if (aChar === bChar) {
       continue;
-    } else if (!(isSurrogate(aChar) || isSurrogate(bChar))) {
+    } else if (!(isSurrogateCharCode(aChar) || isSurrogateCharCode(bChar))) {
       return aChar - bChar;
     } else {
       // At least one is a surrogate. Use `codePointAt()` to decode whichever of
