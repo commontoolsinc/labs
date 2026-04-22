@@ -2,6 +2,7 @@ import { css, html } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { styleMap } from "lit/directives/style-map.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { layoutSpacingUtilityStyles } from "../../styles/layout-spacing.ts";
 
 /**
  * CFVScroll - Vertical scroll container
@@ -41,134 +42,111 @@ export class CFVScroll extends BaseElement {
     _atEnd: { type: Boolean, state: true },
   };
 
-  static override styles = css`
-    :host {
-      --cf-vscroll-color-surface: var(--cf-theme-color-surface, #f1f5f9);
-      --cf-vscroll-color-thumb: var(--cf-theme-color-text-muted, #64748b);
-      --cf-vscroll-color-thumb-hover: var(--cf-theme-color-text, #475569);
-      --cf-vscroll-color-background: var(--cf-theme-color-background, #ffffff);
+  static override styles = [
+    layoutSpacingUtilityStyles,
+    css`
+      :host {
+        --cf-vscroll-color-surface: var(--cf-theme-color-surface, #f1f5f9);
+        --cf-vscroll-color-thumb: var(--cf-theme-color-text-muted, #64748b);
+        --cf-vscroll-color-thumb-hover: var(--cf-theme-color-text, #475569);
+        --cf-vscroll-color-background: var(--cf-theme-color-background, #ffffff);
 
-      display: block;
-      position: relative;
-      overflow: hidden;
-      min-height: 0;
-    }
+        display: block;
+        position: relative;
+        overflow: hidden;
+        min-height: 0;
+      }
 
-    :host([flex]) {
-      flex: 1;
-    }
+      :host([flex]) {
+        flex: 1;
+      }
 
-    .scroll-wrapper {
-      position: relative;
-      overflow: hidden;
-      width: 100%;
-      height: 100%;
-    }
+      .scroll-wrapper {
+        position: relative;
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+      }
 
-    .scroll-container {
-      overflow-y: auto;
-      overflow-x: hidden;
-      width: 100%;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: thin;
-    }
+      .scroll-container {
+        overflow-y: auto;
+        overflow-x: hidden;
+        width: 100%;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+      }
 
-    /* Hide scrollbar by default */
-    :host(:not([show-scrollbar])) .scroll-container {
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-    }
+      /* Hide scrollbar by default */
+      :host(:not([show-scrollbar])) .scroll-container {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
 
-    :host(:not([show-scrollbar])) .scroll-container::-webkit-scrollbar {
-      display: none;
-    }
+      :host(:not([show-scrollbar])) .scroll-container::-webkit-scrollbar {
+        display: none;
+      }
 
-    /* Scrollbar styling when visible */
-    .scroll-container::-webkit-scrollbar {
-      width: 8px;
-    }
+      /* Scrollbar styling when visible */
+      .scroll-container::-webkit-scrollbar {
+        width: 8px;
+      }
 
-    .scroll-container::-webkit-scrollbar-track {
-      background: var(--cf-vscroll-color-surface, #f1f5f9);
-      border-radius: 4px;
-    }
+      .scroll-container::-webkit-scrollbar-track {
+        background: var(--cf-vscroll-color-surface, #f1f5f9);
+        border-radius: 4px;
+      }
 
-    .scroll-container::-webkit-scrollbar-thumb {
-      background: var(--cf-vscroll-color-thumb, #64748b);
-      border-radius: 4px;
-    }
+      .scroll-container::-webkit-scrollbar-thumb {
+        background: var(--cf-vscroll-color-thumb, #64748b);
+        border-radius: 4px;
+      }
 
-    .scroll-container::-webkit-scrollbar-thumb:hover {
-      background: var(--cf-vscroll-color-thumb-hover, #475569);
-    }
+      .scroll-container::-webkit-scrollbar-thumb:hover {
+        background: var(--cf-vscroll-color-thumb-hover, #475569);
+      }
 
-    /* Padding utilities */
-    .p-0 {
-      padding: 0;
-    }
-    .p-1 {
-      padding: 0.25rem;
-    }
-    .p-2 {
-      padding: 0.5rem;
-    }
-    .p-3 {
-      padding: 0.75rem;
-    }
-    .p-4 {
-      padding: 1rem;
-    }
-    .p-5 {
-      padding: 1.25rem;
-    }
-    .p-6 {
-      padding: 1.5rem;
-    }
-    .p-8 {
-      padding: 2rem;
-    }
+      /* Fade edges */
+      :host([fade-edges]) .scroll-wrapper::before,
+      :host([fade-edges]) .scroll-wrapper::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 2rem;
+        pointer-events: none;
+        z-index: 1;
+        transition: opacity 0.2s;
+      }
 
-    /* Fade edges */
-    :host([fade-edges]) .scroll-wrapper::before,
-    :host([fade-edges]) .scroll-wrapper::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      height: 2rem;
-      pointer-events: none;
-      z-index: 1;
-      transition: opacity 0.2s;
-    }
+      :host([fade-edges]) .scroll-wrapper::before {
+        top: 0;
+        background: linear-gradient(
+          to bottom,
+          var(--cf-vscroll-color-background, white),
+          transparent
+        );
+        opacity: 0;
+      }
 
-    :host([fade-edges]) .scroll-wrapper::before {
-      top: 0;
-      background: linear-gradient(
-        to bottom,
-        var(--cf-vscroll-color-background, white),
-        transparent
-      );
-      opacity: 0;
-    }
+      :host([fade-edges]) .scroll-wrapper::after {
+        bottom: 0;
+        background: linear-gradient(
+          to top,
+          var(--cf-vscroll-color-background, white),
+          transparent
+        );
+        opacity: 0;
+      }
 
-    :host([fade-edges]) .scroll-wrapper::after {
-      bottom: 0;
-      background: linear-gradient(
-        to top,
-        var(--cf-vscroll-color-background, white),
-        transparent
-      );
-      opacity: 0;
-    }
+      :host([fade-edges]) .scroll-wrapper:not(.at-start)::before {
+        opacity: 1;
+      }
 
-    :host([fade-edges]) .scroll-wrapper:not(.at-start)::before {
-      opacity: 1;
-    }
-
-    :host([fade-edges]) .scroll-wrapper:not(.at-end)::after {
-      opacity: 1;
-    }
-  `;
+      :host([fade-edges]) .scroll-wrapper:not(.at-end)::after {
+        opacity: 1;
+      }
+    `,
+  ];
 
   declare showScrollbar: boolean;
   declare fadeEdges: boolean;

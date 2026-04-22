@@ -124,7 +124,11 @@ export const variablesCSS = `
   --cf-line-height-relaxed: 1.625;
   --cf-line-height-loose: 2;
 
-  /* Spacing */
+  /*
+   * Spacing
+   * Layout utility props like gap="4" and padding="2" map directly to
+   * this shared spacing namespace.
+   */
   --cf-spacing-0: 0;
   --cf-spacing-1: 0.25rem;
   --cf-spacing-2: 0.5rem;
@@ -138,6 +142,11 @@ export const variablesCSS = `
   --cf-spacing-16: 4rem;
   --cf-spacing-20: 5rem;
   --cf-spacing-24: 6rem;
+  --cf-spacing-xs: 0.125rem;
+  --cf-spacing-sm: var(--cf-spacing-1);
+  --cf-spacing-md: var(--cf-spacing-2);
+  --cf-spacing-lg: var(--cf-spacing-3);
+  --cf-spacing-xl: var(--cf-spacing-4);
 
   /* Border Radius */
   --cf-border-radius-none: 0;
