@@ -210,6 +210,8 @@ describe("Pattern Runner - Handlers", () => {
     addEventHandlerSpy.restore();
   });
   it("should demand handler-written pattern results when pulled", async () => {
+    runtime.scheduler.enablePullMode();
+
     const counter = runtime.getCell<{ value: number }>(
       space,
       "should demand handler-written pattern results when pulled 1",

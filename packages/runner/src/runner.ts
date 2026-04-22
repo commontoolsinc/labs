@@ -62,6 +62,7 @@ import {
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
 } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
@@ -1963,7 +1964,41 @@ export class Runner {
         ),
       );
 
-    addCancel(() => this.stop(resultCell));
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+      const rawResult = tx.readValueOrThrow(
+        resultCell.getAsNormalizedFullLink(),
+        {
+          meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+        },
+      );
+      const resultRedirects = findAllWriteRedirectCells(rawResult, processCell);
+      const readResultAction: Action = (tx) =>
+        resultRedirects.forEach((link) => tx.readValueOrThrow(link));
+
+      if (name) {
+        setRunnableName(readResultAction, `readResult:${name}`, {
+          setSrc: true,
+        });
+      }
+
+      const cancel = this.runtime.scheduler.subscribe(
+        readResultAction,
+        readResultAction,
+        { isEffect: true },
+      );
+      tx.addCommitCallback((_committedTx, result) => {
+        if (result.error) {
+          cancel();
+          this.stop(resultCell);
+        }
+      });
+      addCancel(() => {
+        cancel();
+        this.stop(resultCell);
+      });
+    } else {
+      addCancel(() => this.stop(resultCell));
+    }
 
     return result;
   }

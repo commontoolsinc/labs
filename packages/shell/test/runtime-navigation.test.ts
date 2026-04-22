@@ -127,7 +127,6 @@ describe("RuntimeInternals navigation", () => {
 
       registrationReleased.resolve();
       await navigationReceived.promise;
-
       expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
       expect(navigation).toEqual({
