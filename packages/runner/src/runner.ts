@@ -49,7 +49,6 @@ import type { SigilLink } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
-  IMemorySpaceAddress,
   IStorageSubscription,
   MemorySpace,
   URI,
