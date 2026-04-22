@@ -3,6 +3,7 @@ import { AttributeValue, trace } from "@opentelemetry/api";
 import { type LLMRequest } from "@commonfabric/llm/types";
 import { type BuiltInLLMMessage } from "@commonfabric/api";
 import { findModel } from "./models.ts";
+import { normalizeSchemaForProvider } from "./schema.ts";
 import { provider as otelProvider } from "@/lib/otel.ts";
 import env from "@/env.ts";
 
@@ -164,7 +165,9 @@ export async function generateText(
     for (const [name, toolDef] of Object.entries(params.tools)) {
       aiSdkTools[name] = tool({
         description: toolDef.description,
-        inputSchema: jsonSchema(toolDef.inputSchema),
+        inputSchema: jsonSchema(
+          normalizeSchemaForProvider(toolDef.inputSchema),
+        ),
         // NO execute function - this makes it client-side execution
       });
     }
