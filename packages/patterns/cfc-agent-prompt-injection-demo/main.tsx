@@ -97,6 +97,8 @@ type DisclosureContentArgument = {
 const DEMO_PROMPT = "Review the partner release briefing and log the outcome.";
 const HOSTILE_BRIEFING_TITLE = "Acme partner release briefing";
 const HOSTILE_BRIEFING_SOURCE = "https://partner.example.invalid/briefing";
+const HOSTILE_BRIEFING_DOCUMENT_ID =
+  "cfc-agent-prompt-injection-demo-briefing-acme-v1";
 const DEMO_MODEL = "gateway:z-ai/glm-5";
 const HOSTILE_BRIEFING_BODY = `# Acme partner release briefing
 
@@ -439,7 +441,7 @@ const DemoAgentChat = pattern<DemoChatInput, DemoChatOutput>(
 
 export default pattern<Record<string, never>>(() => {
   const hostileBody = makePromptInfluenceDocument({
-    id: "cfc-agent-prompt-injection-demo-briefing",
+    id: HOSTILE_BRIEFING_DOCUMENT_ID,
     content: HOSTILE_BRIEFING_BODY,
   });
   const decisions = Writable.of<DecisionEntry[]>([]);
@@ -526,7 +528,6 @@ export default pattern<Record<string, never>>(() => {
     observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
   });
   const sanitizerMessages = computed(() => sanitizerTrace.messages ?? []);
-  const hasSanitizerMessages = computed(() => sanitizerMessages.length > 0);
 
   const unsafeAgent = DemoAgentChat({
     title: "Unsafe raw reader",
@@ -754,41 +755,36 @@ If you do not yet have a sanitizeBriefing result, your next move must be the san
                       Clear trace
                     </cf-button>
                   </cf-hstack>
-                  {hasSanitizerMessages
-                    ? (
-                      <cf-vscroll
-                        showScrollbar
-                        fadeEdges
-                        snapToBottom
-                        style={{
-                          minHeight: "16rem",
-                          maxHeight: "24rem",
-                          border: "1px solid var(--cf-color-gray-200)",
-                          borderRadius: "12px",
-                          padding: "0.75rem",
-                          background: "var(--cf-color-gray-25, #fcfcfd)",
-                        }}
-                      >
-                        <cf-chat
-                          $messages={sanitizerMessages}
-                          pending={sanitizerTrace.pending}
-                        />
-                      </cf-vscroll>
-                    )
-                    : (
-                      <div
-                        style={{
-                          color: "var(--cf-color-gray-500)",
-                          padding: "1rem 0",
-                        }}
-                      >
-                        {computed(() =>
-                          sanitizerTrace.pending
-                            ? "Sanitizer subagent is running..."
-                            : "Run the safe path to inspect the sanitizer subagent."
-                        )}
-                      </div>
+                  <cf-vscroll
+                    showScrollbar
+                    fadeEdges
+                    snapToBottom
+                    style={{
+                      minHeight: "16rem",
+                      maxHeight: "24rem",
+                      border: "1px solid var(--cf-color-gray-200)",
+                      borderRadius: "12px",
+                      padding: "0.75rem",
+                      background: "var(--cf-color-gray-25, #fcfcfd)",
+                    }}
+                  >
+                    <cf-chat
+                      $messages={sanitizerMessages}
+                      pending={sanitizerTrace.pending}
+                    />
+                  </cf-vscroll>
+                  <div
+                    style={{
+                      color: "var(--cf-color-gray-500)",
+                      padding: "0.25rem 0 0",
+                    }}
+                  >
+                    {computed(() =>
+                      sanitizerTrace.pending
+                        ? "Sanitizer subagent is running..."
+                        : "The trace mirrors the sanitizer's generateObject transcript."
                     )}
+                  </div>
                   {computed(() => !!sanitizerTrace.result)
                     ? (
                       <pre
