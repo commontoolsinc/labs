@@ -9,6 +9,7 @@ import {
   cloneIfNecessary,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   isNontrivialSchema,
   toDeepFrozenSchema,
@@ -93,6 +94,16 @@ export function resolveSchema(
     : undefined;
 }
 
+// Memo for `schemaHasIfc` top-level calls. Safe **only** because entries
+// are populated under an `isDeepFrozen` guard below: the predicate's
+// answer depends on the entire subtree's shape, so caching against a
+// merely-TS-`readonly` or shallow-frozen input would be unsound — a
+// future sub-schema swap would silently invalidate the cached answer.
+// A future contributor must not relax the populate guard to accept
+// non-deep-frozen inputs. `Object.isFrozen` is **not** sufficient; it
+// is shallow-only.
+const _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
+
 export function schemaHasIfc(
   schema: JSONSchema | undefined,
   seen: Set<JSONSchema> = new Set(),
@@ -101,6 +112,29 @@ export function schemaHasIfc(
   if (schema === undefined || typeof schema === "boolean") {
     return false;
   }
+  // Top-level calls (the default entry from cell.ts / schema.ts) can
+  // consult the memo. Recursive calls carry caller-provided `seen` and
+  // `fullSchema`, which aren't captured in the cache key, so they must
+  // bypass.
+  const isTopLevel = seen.size === 0 && fullSchema === schema;
+  if (isTopLevel) {
+    const cached = _hasIfcCache.get(schema);
+    if (cached !== undefined) return cached;
+  }
+  const result = _schemaHasIfcUncached(schema, seen, fullSchema);
+  // Populate only under a deep-frozen guard. See the invariant comment
+  // above `_hasIfcCache`.
+  if (isTopLevel && isDeepFrozen(schema)) {
+    _hasIfcCache.set(schema, result);
+  }
+  return result;
+}
+
+function _schemaHasIfcUncached(
+  schema: JSONSchemaObj,
+  seen: Set<JSONSchema>,
+  fullSchema: JSONSchema | undefined,
+): boolean {
   if (seen.has(schema)) {
     return false;
   }
