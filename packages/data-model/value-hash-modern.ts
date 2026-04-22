@@ -146,6 +146,50 @@ function getStringRep(value: string) {
 }
 
 /**
+ * Compares strings by UTF-8 sort order.
+ *
+ * Note: Even though we could conceivably define the sort to be something
+ * easier to calculate in JS, (a) ultimately we want this implementation to be
+ * but one of several that aren't all written in JS, (b) those other languages
+ * don't necessarily have the same encoding bias as JS, and (c) we want to make
+ * the specification for hashing straightforward anyway (and are willing to pay
+ * a performance cost because of it).
+ */
+function compareStrings(a: string, b: string): number {
+  // Here's what's going on: JS native string sort and UTF-8 sort can differ
+  // only when at least one of the JS-form strings contains a codepoint for a
+  // surrogate-pair. As long as we don't run into one of those, we can just
+  // do a regular difference-based comparison. But if we _do_ run into one, then
+  // we have to do something extra, one way or another.
+
+  const isSurrogate = (c: number) => (c >= 0xd800) && (c <= 0xdfff);
+
+  const minCharLen = Math.min(a.length, b.length);
+
+  for (let i = 0; i < minCharLen; i++) {
+    const aChar = a.charCodeAt(i);
+    const bChar = b.charCodeAt(i);
+    if (aChar === bChar) {
+      continue;
+    } else if (!(isSurrogate(aChar) || isSurrogate(bChar))) {
+      return aChar - bChar;
+    } else {
+      // At least one is a surrogate. Use `codePointAt()` to decode whichever of
+      // the strings have surrogate characters. That method operates reasonably
+      // whether or not the code point is in the basic or astral plane, and it
+      // also returns a reasonable value given an invalid surrogate-pair
+      // sequence. Importantly, Unicode code-point order corresponds to UTF-8
+      // byte order.
+      const aPoint = a.codePointAt(i)!;
+      const bPoint = b.codePointAt(i)!;
+      return aPoint - bPoint;
+    }
+  }
+
+  return a.length - b.length;
+}
+
+/**
  * Updates an incremental hasher with a length value, using the standard
  * in-hash encoding for same.
  */
@@ -345,7 +389,7 @@ function feedPlainObject(
   hasher: IncrementalHasher,
   value: Record<string, unknown>,
 ): void {
-  const keys = Object.keys(value);
+  const keys = Object.keys(value).sort(compareStrings);
   // Sort keys by UTF-8 byte comparison.
   keys.sort((a, b) => {
     const aBytes = encoder.encode(a);
