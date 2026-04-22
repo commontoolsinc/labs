@@ -168,16 +168,16 @@ describe("cli piece parsing", () => {
       space: SPACE,
       identity: ID,
     }, {
-      loadManager: async (config) => {
+      loadManager: (config) => {
         seen.config = config;
         const manager = {};
         seen.manager = manager;
-        return manager as any;
+        return Promise.resolve(manager as any);
       },
       createController: (manager) => {
         expect(manager).toBe(seen.manager);
         return {
-          recreateDefaultPattern: async () => ({ id: PIECE }),
+          recreateDefaultPattern: () => Promise.resolve({ id: PIECE }),
         };
       },
     });
