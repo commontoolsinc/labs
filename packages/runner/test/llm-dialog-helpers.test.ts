@@ -16,6 +16,7 @@ const {
   prepareSchemaForLLM,
   resolveRefsForLLM,
   serializeForLLMObservation,
+  toolAllowsObservedConfidentiality,
 } = llmDialogTestHelpers;
 
 Deno.test("parseTargetString recognizes handle format", () => {
@@ -366,6 +367,48 @@ Deno.test("serializeForLLMObservation does not taint from redacted nested values
     },
   });
   assertEquals(result.observedConfidentiality, ["internal"]);
+});
+
+Deno.test("toolAllowsObservedConfidentiality denies tools above maxConfidentiality", () => {
+  const allowed = toolAllowsObservedConfidentiality(
+    {
+      llmTools: {
+        restrictedTool: {
+          description: "restricted",
+          inputSchema: {
+            type: "object",
+            ifc: { maxConfidentiality: ["internal"] },
+          },
+        },
+      },
+      dynamicToolCells: new Map(),
+    },
+    "restrictedTool",
+    ["secret"],
+  );
+
+  assertEquals(allowed, false);
+});
+
+Deno.test("toolAllowsObservedConfidentiality permits tools within maxConfidentiality", () => {
+  const allowed = toolAllowsObservedConfidentiality(
+    {
+      llmTools: {
+        restrictedTool: {
+          description: "restricted",
+          inputSchema: {
+            type: "object",
+            ifc: { maxConfidentiality: ["secret"] },
+          },
+        },
+      },
+      dynamicToolCells: new Map(),
+    },
+    "restrictedTool",
+    ["secret"],
+  );
+
+  assertEquals(allowed, true);
 });
 
 // Tests for simplifySchemaForContext

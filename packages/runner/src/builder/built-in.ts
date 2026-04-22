@@ -38,7 +38,15 @@ const WISH_ARGUMENT_SCHEMA = internSchema({
     query: { type: "string" },
     path: { type: "array", items: { type: "string" } },
     schema: { type: "object" },
-    context: { type: "object", additionalProperties: { asCell: ["cell"] } },
+    context: {
+      type: "object",
+      additionalProperties: {
+        anyOf: [
+          { type: "unknown", asCell: ["cell"] },
+          { type: "unknown", asCell: ["opaque"] },
+        ],
+      },
+    },
     scope: { type: "array", items: { type: "string" } },
   },
 });

@@ -18,7 +18,8 @@ import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { type Cell } from "../cell.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import { type Cell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -32,7 +33,11 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -253,9 +258,14 @@ function buildContextDocumentation(
   runtime: Runtime,
   space: any,
   tx: IExtendedStorageTransaction,
-): string {
+): { docs: string; observedConfidentiality: readonly unknown[] } {
   const context = inputs.key("context").withTx(tx).get();
-  if (!context) return "";
+  if (!context) {
+    return {
+      docs: "",
+      observedConfidentiality: [],
+    };
+  }
 
   // Create empty pinned cells array with proper schema
   const pinnedCellsSchema = {
@@ -270,18 +280,22 @@ function buildContextDocumentation(
     },
   } as const;
 
-  return llmToolExecutionHelpers.buildAvailableCellsDocumentation(
-    runtime,
-    space,
-    context,
-    // LLM builtins don't have pinned cells (only llmDialog does)
-    runtime.getCell(
+  return llmToolExecutionHelpers
+    .buildAvailableCellsDocumentationWithObservation(
+      runtime,
       space,
-      { llm: { pinnedCells: [] } },
-      pinnedCellsSchema,
-      tx,
-    ),
-  );
+      context,
+      // LLM builtins don't have pinned cells (only llmDialog does)
+      runtime.getCell(
+        space,
+        { llm: { pinnedCells: [] } },
+        pinnedCellsSchema,
+        tx,
+      ),
+      inputs.key("observationMaxConfidentiality").withTx(tx).get() as
+        | readonly unknown[]
+        | undefined,
+    );
 }
 
 function enqueuePostCommitLLMWork(
@@ -317,6 +331,25 @@ function markRequestHashPendingCommit(
       setPreviousCallHash(previousCallHash);
     }
   });
+}
+
+async function pullContextCells(
+  context: Record<string, unknown> | undefined,
+) {
+  for (const value of Object.values(context ?? {})) {
+    try {
+      const resolved = isCellResultForDereferencing(value)
+        ? getCellOrThrow(value).resolveAsCell()
+        : isCell(value)
+        ? value.resolveAsCell()
+        : isRecord(value) && typeof value.resolveAsCell === "function"
+        ? value.resolveAsCell()
+        : undefined;
+      await resolved?.pull?.();
+    } catch {
+      // Ignore unresolved context cells and let request construction continue.
+    }
+  }
 }
 
 /**
@@ -385,7 +418,7 @@ export function llm(
     );
 
     const llmParams: LLMRequest = {
-      system: ((system ?? "") + contextDocs).trim() ||
+      system: ((system ?? "") + contextDocs.docs).trim() ||
         "You are a helpful assistant.",
       messages: (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
       stop: stop ?? "",
@@ -608,7 +641,7 @@ export function generateText(
     );
 
     const llmParams: LLMRequest = {
-      system: ((system ?? "") + contextDocs).trim() ||
+      system: ((system ?? "") + contextDocs.docs).trim() ||
         "You are a helpful assistant.",
       messages: requestMessages,
       stop: "",
@@ -819,6 +852,14 @@ export function generateObject<T extends Record<string, unknown>>(
       tools,
       metadata,
     } = inputs.withTx(tx).get() ?? {};
+    const context = inputs.key("context").withTx(tx).get() as
+      | Record<string, unknown>
+      | undefined;
+    const observationMaxConfidentiality = inputs.key(
+      "observationMaxConfidentiality",
+    ).withTx(tx).get() as
+      | readonly unknown[]
+      | undefined;
 
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
     if ((!hasPrompt && (!messages || messages.length === 0)) || !schema) {
@@ -837,12 +878,34 @@ export function generateObject<T extends Record<string, unknown>>(
       [{ role: "user", content: prompt! }];
 
     // Build context documentation from context cells and append to system prompt
-    const contextDocs = buildContextDocumentation(
-      inputs,
-      runtime,
-      parentCell.space,
-      tx,
-    );
+    const pinnedCellsSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          name: { type: "string" },
+        },
+        required: ["path", "name"],
+      },
+    } as const;
+    const contextDocs = context
+      ? llmToolExecutionHelpers.buildAvailableCellsDocumentationWithObservation(
+        runtime,
+        parentCell.space,
+        context as Record<string, Cell<any>>,
+        runtime.getCell(
+          parentCell.space,
+          { generateObject: { pinnedCells: [] } },
+          pinnedCellsSchema,
+          tx,
+        ),
+        observationMaxConfidentiality,
+      )
+      : {
+        docs: "",
+        observedConfidentiality: [],
+      };
 
     // Determine whether to use the tool-calling path or the direct generateObject path
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
@@ -850,7 +913,7 @@ export function generateObject<T extends Record<string, unknown>>(
     if (hasTools) {
       // Use tool-calling path with presentResult builtin tool
       const llmParams: LLMRequest = {
-        system: ((system ?? "") + contextDocs).trim() ||
+        system: ((system ?? "") + contextDocs.docs).trim() ||
           "You are a helpful assistant.",
         messages: requestMessages,
         stop: "",
@@ -957,17 +1020,45 @@ export function generateObject<T extends Record<string, unknown>>(
         () => {
           const resultPromise = (async () => {
             try {
+              await inputs.pull();
+              const liveContext = inputs.key("context").get() as
+                | Record<string, unknown>
+                | undefined;
+              await pullContextCells(liveContext);
+              const liveContextDocs = liveContext
+                ? llmToolExecutionHelpers
+                  .buildAvailableCellsDocumentationWithObservation(
+                    runtime,
+                    parentCell.space,
+                    liveContext as Record<string, Cell<any>>,
+                    runtime.getCell(
+                      parentCell.space,
+                      { generateObject: { pinnedCells: [] } },
+                      pinnedCellsSchema,
+                    ),
+                    observationMaxConfidentiality,
+                  )
+                : {
+                  docs: "",
+                  observedConfidentiality: [],
+                };
+              const liveSystem =
+                ((system ?? "") + liveContextDocs.docs).trim() ||
+                "You are a helpful assistant.";
+
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
 
               // Custom execution loop for generateObject with presentResult extraction
               const executeRecursive = async (
                 currentMessages: readonly BuiltInLLMMessage[],
+                observedConfidentiality: readonly unknown[],
               ): Promise<void> => {
                 if (isRunCancelled()) return;
 
                 const requestParams: LLMRequest = {
                   ...llmParamsWithTools,
+                  system: liveSystem,
                   messages: currentMessages,
                 };
 
@@ -995,6 +1086,9 @@ export function generateObject<T extends Record<string, unknown>>(
                       parentCell.space,
                       toolCatalog,
                       toolCallParts,
+                      undefined,
+                      observedConfidentiality,
+                      observationMaxConfidentiality,
                     );
 
                   // Check if presentResult was called. Cellify from the raw
@@ -1022,9 +1116,20 @@ export function generateObject<T extends Record<string, unknown>>(
                     ...toolResultMessages,
                   ];
 
+                  const nextObservedConfidentiality = ContextualFlowControl
+                    .uniqueAtoms([
+                      ...observedConfidentiality,
+                      ...toolResults.flatMap((result) =>
+                        result.observedConfidentiality ?? []
+                      ),
+                    ]);
+
                   // Continue if presentResult wasn't called yet
                   if (!presentResultPart) {
-                    await executeRecursive(updatedMessages);
+                    await executeRecursive(
+                      updatedMessages,
+                      nextObservedConfidentiality,
+                    );
                   }
                 } else {
                   throw new Error(
@@ -1034,7 +1139,10 @@ export function generateObject<T extends Record<string, unknown>>(
               };
 
               const doWork = async () => {
-                await executeRecursive(requestMessages);
+                await executeRecursive(
+                  requestMessages,
+                  liveContextDocs.observedConfidentiality,
+                );
 
                 if (finalResult === undefined) {
                   throw new Error("presentResult was never called");
@@ -1100,7 +1208,8 @@ export function generateObject<T extends Record<string, unknown>>(
       };
 
       // Always set system prompt with context documentation
-      generateObjectParams.system = ((system ?? "") + contextDocs).trim() ||
+      generateObjectParams.system =
+        ((system ?? "") + contextDocs.docs).trim() ||
         "You are a helpful assistant.";
 
       const requestSnapshot = createFrozenRequestSnapshot(generateObjectParams);
@@ -1158,12 +1267,37 @@ export function generateObject<T extends Record<string, unknown>>(
         "generateObject-start",
         requestSnapshot,
         () => {
-          const doWork = () =>
-            client.generateObject(
-              generateObjectParams,
-            ) as Promise<{
+          const doWork = async () => {
+            await inputs.pull();
+            const liveContext = inputs.key("context").get() as
+              | Record<string, unknown>
+              | undefined;
+            await pullContextCells(liveContext);
+            const liveContextDocs = liveContext
+              ? llmToolExecutionHelpers
+                .buildAvailableCellsDocumentationWithObservation(
+                  runtime,
+                  parentCell.space,
+                  liveContext as Record<string, Cell<any>>,
+                  runtime.getCell(
+                    parentCell.space,
+                    { generateObject: { pinnedCells: [] } },
+                    pinnedCellsSchema,
+                  ),
+                  observationMaxConfidentiality,
+                )
+              : {
+                docs: "",
+                observedConfidentiality: [],
+              };
+            return await client.generateObject({
+              ...generateObjectParams,
+              system: ((system ?? "") + liveContextDocs.docs).trim() ||
+                "You are a helpful assistant.",
+            }) as {
               object: T;
-            }>;
+            };
+          };
 
           const resultPromise = queueName
             ? runtime.getOrCreateQueue(queueName).enqueue(doWork)

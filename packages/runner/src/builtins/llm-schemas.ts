@@ -86,6 +86,13 @@ export const LLMReducedToolSchema = internSchema(
   },
 );
 
+const LLMContextEntrySchema = {
+  anyOf: [
+    { type: "unknown", asCell: ["cell"] },
+    { type: "unknown", asCell: ["opaque"] },
+  ],
+} as const;
+
 /** Runtime schema for {@link BuiltInLLMParams} (packages/api/index.ts). */
 export const LLMParamsSchema = internSchema(
   {
@@ -96,6 +103,10 @@ export const LLMParamsSchema = internSchema(
       maxTokens: { type: "number" },
       system: { type: "string" },
       stop: { type: "string" },
+      observationMaxConfidentiality: {
+        type: "array",
+        items: {},
+      },
       tools: {
         type: "object",
         additionalProperties: LLMToolSchema,
@@ -103,7 +114,7 @@ export const LLMParamsSchema = internSchema(
       },
       context: {
         type: "object",
-        additionalProperties: { asCell: ["cell"] },
+        additionalProperties: LLMContextEntrySchema,
         default: {},
       },
       resultSchema: { type: "object" },
@@ -121,7 +132,7 @@ export const GenerateTextParamsSchema = internSchema(
       messages: { type: "array", items: LLMMessageSchema },
       context: {
         type: "object",
-        additionalProperties: { asCell: ["cell"] },
+        additionalProperties: LLMContextEntrySchema,
         default: {},
       },
       system: { type: "string" },
@@ -145,13 +156,17 @@ export const GenerateObjectParamsSchema = internSchema(
       messages: { type: "array", items: LLMMessageSchema },
       context: {
         type: "object",
-        additionalProperties: { asCell: ["cell"] },
+        additionalProperties: LLMContextEntrySchema,
         default: {},
       },
       schema: { type: "object" },
       system: { type: "string" },
       model: { type: "string" },
       maxTokens: { type: "number" },
+      observationMaxConfidentiality: {
+        type: "array",
+        items: {},
+      },
       cache: { type: "boolean" },
       metadata: { type: "object" },
       tools: { type: "object", additionalProperties: LLMToolSchema },

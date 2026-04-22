@@ -1516,6 +1516,7 @@ export interface BuiltInLLMParams {
   system?: string;
   stop?: string;
   maxTokens?: number;
+  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
   /**
    * Specifies the mode of operation for the LLM.
    * - `"json"`: Indicates that the LLM should process and return data in JSON format.
@@ -1582,6 +1583,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
+    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
     queue?: string;
@@ -1595,6 +1597,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
+    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
     queue?: string;

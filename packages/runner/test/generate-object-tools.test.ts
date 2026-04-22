@@ -1202,6 +1202,156 @@ describe("generateObject with tools", () => {
     expect(value).toEqual(presentResultValue);
     expect(link?.id).toBe(linkedCellId);
   });
+
+  it("should redact high-conf context docs in the tool-calling generateObject path", async () => {
+    const resultSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        ok: { type: "boolean" },
+      },
+      required: ["ok"],
+    };
+
+    const testPrompt = "test-observation-ceiling-context-redaction";
+    let capturedSystem = "";
+
+    addMockResponse(
+      (req) => {
+        capturedSystem = req.system ?? "";
+        return true;
+      },
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_present_context_redaction",
+          toolName: "presentResult",
+          input: { ok: true },
+        }],
+        id: "mock-context-redaction",
+      },
+    );
+
+    const contextSchema = {
+      type: "object",
+      properties: {
+        public: { type: "string" },
+        secret: {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+      },
+      required: ["public", "secret"],
+    } as const satisfies JSONSchema;
+
+    const testPattern = pattern<Record<string, never>>(
+      () => {
+        const dossier = Cell.of({
+          public: "visible",
+          secret: "classified",
+        }, contextSchema);
+        return generateObject({
+          prompt: testPrompt,
+          schema: resultSchema,
+          observationMaxConfidentiality: ["internal"],
+          context: { dossier: dossier as any },
+          tools: {
+            dummy: {
+              description: "Force the tool-calling path",
+              pattern: dummyPattern,
+            },
+          },
+        } as any);
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-context-redaction-test",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForCondition(() => capturedSystem.length > 0)).resolves
+      .toBeUndefined();
+    await runtime.idle();
+
+    expect(capturedSystem).toContain('"public": "visible"');
+    expect(capturedSystem).toContain('"@link"');
+    expect(capturedSystem).not.toContain("classified");
+  });
+
+  it("should redact high-conf context docs in the direct generateObject path", async () => {
+    const resultSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        ok: { type: "boolean" },
+      },
+      required: ["ok"],
+    };
+
+    const testPrompt = "test-observation-ceiling-direct-generateObject";
+    let capturedSystem = "";
+
+    addMockObjectResponse(
+      (req) => {
+        capturedSystem = req.system ?? "";
+        return true;
+      },
+      {
+        object: { ok: true },
+        id: "mock-direct-context-redaction",
+      },
+    );
+
+    const contextSchema = {
+      type: "object",
+      properties: {
+        public: { type: "string" },
+        secret: {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+      },
+      required: ["public", "secret"],
+    } as const satisfies JSONSchema;
+
+    const testPattern = pattern<Record<string, never>>(
+      () => {
+        const dossier = Cell.of({
+          public: "visible",
+          secret: "classified",
+        }, contextSchema);
+        return generateObject({
+          prompt: testPrompt,
+          schema: resultSchema,
+          observationMaxConfidentiality: ["internal"],
+          context: { dossier: dossier as any },
+        } as any);
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-direct-context-redaction-test",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForCondition(() => capturedSystem.length > 0)).resolves
+      .toBeUndefined();
+    await runtime.idle();
+
+    expect(capturedSystem).toContain('"public": "visible"');
+    expect(capturedSystem).toContain('"@link"');
+    expect(capturedSystem).not.toContain("classified");
+  });
 });
 
 function waitForPendingToBecomeFalse(result: Cell<any>) {
@@ -1226,5 +1376,30 @@ function waitForPendingToBecomeFalse(result: Cell<any>) {
   }).finally(() => {
     clearTimeout(timeout);
     cancel();
+  });
+}
+
+function waitForCondition(
+  condition: () => boolean,
+  timeoutMs = 1000,
+) {
+  return new Promise<void>((resolve, reject) => {
+    const start = Date.now();
+
+    const tick = () => {
+      if (condition()) {
+        resolve();
+        return;
+      }
+
+      if (Date.now() - start >= timeoutMs) {
+        reject(new Error("Timeout waiting for condition"));
+        return;
+      }
+
+      setTimeout(tick, 10);
+    };
+
+    tick();
   });
 }

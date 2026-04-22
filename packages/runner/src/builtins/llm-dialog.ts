@@ -46,7 +46,7 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import type { CfcLabelView } from "../cfc/label-view.ts";
+import { type CfcLabelView, cfcLabelViewForCell } from "../cfc/label-view.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -804,6 +804,39 @@ type DialogRequestSnapshot = {
   queueName?: string;
 };
 
+type AvailableCellsDocumentation = {
+  docs: string;
+  observedConfidentiality: readonly unknown[];
+};
+
+function resolveDirectContextCellRef(cell: unknown): Cell<any> | undefined {
+  return isCellResultForDereferencing(cell)
+    ? getCellOrThrow(cell).resolveAsCell()
+    : isCell(cell)
+    ? cell.resolveAsCell()
+    : isRecord(cell) && typeof cell.resolveAsCell === "function"
+    ? cell.resolveAsCell()
+    : undefined;
+}
+
+function resolveContextCellRef(cell: unknown): Cell<any> | undefined {
+  const resolved = resolveDirectContextCellRef(cell);
+  if (!resolved) {
+    return undefined;
+  }
+
+  try {
+    const nested = resolveDirectContextCellRef(resolved.get());
+    if (nested) {
+      return nested;
+    }
+  } catch {
+    // Ignore nested resolution failures and use the outer cell.
+  }
+
+  return resolved;
+}
+
 function collectToolEntries(
   toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
 ): { legacy: LegacyToolEntry[]; pieces: PieceToolEntry[] } {
@@ -1322,25 +1355,34 @@ function materializeDialogRequestSnapshot(
  * (managed by pin/unpin tools). Includes schemas and current values for each cell.
  * This is appended to the system prompt so the LLM has immediate context.
  */
-function buildAvailableCellsDocumentation(
+function buildAvailableCellsDocumentationWithObservation(
   runtime: Runtime,
   space: MemorySpace,
-  context: Record<string, Cell<any>> | undefined,
+  context: Record<string, unknown> | undefined,
   pinnedCells: Cell<PinnedCell[]>,
-): string {
+  observationMaxConfidentiality?: readonly unknown[],
+): AvailableCellsDocumentation {
   // Collect all cell entries, deduplicating by resolved path.
   // When the same cell appears multiple times (e.g., from context AND pinned),
   // prefer the entry with a schema.
   const seenPaths = new Map<
     string,
-    { name: string; entry: string; hasSchema: boolean }
+    {
+      name: string;
+      entry: string;
+      hasSchema: boolean;
+      observedConfidentiality: readonly unknown[];
+    }
   >();
 
   function addCellEntry(
     name: string,
-    cell: Cell<any>,
+    cell: unknown,
   ): void {
-    const resolvedCell = cell.resolveAsCell();
+    const resolvedCell = resolveContextCellRef(cell);
+    if (!resolvedCell) {
+      throw new Error(`Context entry "${name}" is not a cell`);
+    }
     const link = resolvedCell.getAsNormalizedFullLink();
     const path = createLLMFriendlyLink(link, space);
     const schemaInfo = getCellSchema(resolvedCell);
@@ -1350,6 +1392,7 @@ function buildAvailableCellsDocumentation(
     if (existing?.hasSchema && !schemaInfo) return;
 
     let entry = `## ${name} (${path})\n`;
+    let observedConfidentiality: readonly unknown[] = [];
 
     if (schemaInfo !== undefined) {
       const schemaStr = getSchemaTypeString(schemaInfo);
@@ -1358,14 +1401,18 @@ function buildAvailableCellsDocumentation(
 
     try {
       const value = resolvedCell.get();
-      const serialized = traverseAndSerialize(
+      const serialized = serializeForLLMObservation({
         value,
-        schemaInfo,
-        new Set(),
-        space,
-      );
+        schema: schemaInfo,
+        seen: new Set(),
+        contextSpace: space,
+        rootLink: link,
+        labelView: cfcLabelViewForCell(resolvedCell),
+        observationMaxConfidentiality,
+      });
+      observedConfidentiality = serialized.observedConfidentiality;
 
-      let valueJson = JSON.stringify(serialized, null, 2);
+      let valueJson = JSON.stringify(serialized.value, null, 2);
 
       const MAX_VALUE_LENGTH = 2000;
       if (valueJson.length > MAX_VALUE_LENGTH) {
@@ -1387,6 +1434,7 @@ function buildAvailableCellsDocumentation(
       name,
       entry,
       hasSchema: schemaInfo !== undefined,
+      observedConfidentiality,
     });
   }
 
@@ -1429,11 +1477,35 @@ function buildAvailableCellsDocumentation(
   }
 
   if (seenPaths.size === 0) {
-    return "";
+    return {
+      docs: "",
+      observedConfidentiality: [],
+    };
   }
 
   const entries = [...seenPaths.values()].map((v) => v.entry);
-  return "\n\n# Available Cells\n\n" + entries.join("\n\n");
+  return {
+    docs: "\n\n# Available Cells\n\n" + entries.join("\n\n"),
+    observedConfidentiality: joinObservedConfidentiality(
+      [...seenPaths.values()].map((value) => value.observedConfidentiality),
+    ),
+  };
+}
+
+function buildAvailableCellsDocumentation(
+  runtime: Runtime,
+  space: MemorySpace,
+  context: Record<string, unknown> | undefined,
+  pinnedCells: Cell<PinnedCell[]>,
+  observationMaxConfidentiality?: readonly unknown[],
+): string {
+  return buildAvailableCellsDocumentationWithObservation(
+    runtime,
+    space,
+    context,
+    pinnedCells,
+    observationMaxConfidentiality,
+  ).docs;
 }
 
 // Discriminated union separating external tools from built-in tools
@@ -1690,7 +1762,30 @@ type ToolCallExecutionResult = {
   toolName: string;
   result?: any;
   error?: string;
+  observedConfidentiality?: readonly unknown[];
 };
+
+function toolAllowsObservedConfidentiality(
+  toolCatalog: ToolCatalog,
+  toolName: string,
+  observedConfidentiality: readonly unknown[] | undefined,
+): boolean {
+  if (!observedConfidentiality || observedConfidentiality.length === 0) {
+    return true;
+  }
+
+  const toolSchema = toolCatalog.llmTools[toolName]?.inputSchema;
+  const maxConfidentiality = isRecord(toolSchema) && isRecord(toolSchema.ifc)
+    ? toolSchema.ifc.maxConfidentiality
+    : undefined;
+  if (!Array.isArray(maxConfidentiality) || maxConfidentiality.length === 0) {
+    return true;
+  }
+
+  return observedConfidentiality.every((value) =>
+    maxConfidentiality.some((allowed) => deepEqual(allowed, value))
+  );
+}
 
 async function executeToolCalls(
   runtime: Runtime,
@@ -1698,10 +1793,28 @@ async function executeToolCalls(
   toolCatalog: ToolCatalog,
   toolCallParts: BuiltInLLMToolCallPart[],
   pinnedCells?: Cell<PinnedCell[]>,
+  observedConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly unknown[],
 ): Promise<ToolCallExecutionResult[]> {
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
     try {
+      if (
+        !toolAllowsObservedConfidentiality(
+          toolCatalog,
+          part.toolName,
+          observedConfidentiality,
+        )
+      ) {
+        results.push({
+          id: part.toolCallId,
+          toolName: part.toolName,
+          error:
+            `Tool call denied: observed confidentiality exceeds maxConfidentiality for ${part.toolName}`,
+        });
+        continue;
+      }
+
       const resolved = resolveToolCall(runtime, space, part, toolCatalog);
       const resultValue = await invokeToolCall(
         runtime,
@@ -1709,11 +1822,13 @@ async function executeToolCalls(
         resolved,
         toolCatalog,
         pinnedCells,
+        observationMaxConfidentiality,
       );
       results.push({
         id: part.toolCallId,
         toolName: part.toolName,
-        result: resultValue,
+        result: resultValue.result,
+        observedConfidentiality: resultValue.observedConfidentiality,
       });
     } catch (error) {
       console.error(`Tool ${part.toolName} failed:`, error);
@@ -1770,6 +1885,7 @@ export const llmDialogTestHelpers = {
   simplifySchemaForContext,
   prepareSchemaForLLM,
   resolveRefsForLLM,
+  toolAllowsObservedConfidentiality,
 };
 
 /**
@@ -1785,8 +1901,11 @@ export const llmToolExecutionHelpers = {
   createToolResultMessages,
   hasValidContent,
   buildAvailableCellsDocumentation,
+  buildAvailableCellsDocumentationWithObservation,
   traverseAndCellify,
   prepareSchemaForLLM,
+  serializeForLLMObservation,
+  toolAllowsObservedConfidentiality,
 };
 
 /**
@@ -1901,28 +2020,52 @@ function handleSchema(
 /**
  * Handles the read tool call.
  */
-function handleRead(
+async function handleRead(
   resolved: ResolvedToolCall & { type: "read" },
   space: MemorySpace,
-): { type: string; value: unknown } {
-  let cell = resolved.cellRef;
-  if (!cell.schema) {
-    cell = cell.asSchema(getCellSchema(cell));
+  observationMaxConfidentiality?: readonly unknown[],
+): Promise<
+  {
+    result: { type: string; value: unknown };
+    observedConfidentiality: readonly unknown[];
   }
-
-  const schema = cell.schema;
-  const serialized = traverseAndSerialize(
-    cell.get(),
+> {
+  let cell = resolved.cellRef.resolveAsCell().asSchemaFromLinks();
+  await cell.pull();
+  let schema = cell.schema ?? getCellSchema(cell);
+  if (!cell.schema && schema) {
+    cell = cell.asSchema(schema);
+  }
+  schema = cell.schema ?? schema;
+  let value = schema ? cell.get() : cell.getRaw();
+  if (value === undefined) {
+    const sourceCell = cell.getSourceCell()?.resolveAsCell()
+      .asSchemaFromLinks();
+    if (sourceCell) {
+      await sourceCell.pull();
+      schema = sourceCell.schema ?? getCellSchema(sourceCell);
+      cell = schema ? sourceCell.asSchema(schema) : sourceCell;
+      value = schema ? cell.get() : cell.getRaw();
+    }
+  }
+  const serialized = serializeForLLMObservation({
+    value,
     schema,
-    new Set(),
-    space,
-  );
+    seen: new Set(),
+    contextSpace: space,
+    rootLink: cell.getAsNormalizedFullLink(),
+    labelView: cfcLabelViewForCell(cell),
+    observationMaxConfidentiality,
+  });
 
   // Handle undefined by returning null (valid JSON) instead
   return {
-    type: "json",
-    value: serialized ?? null,
-    ...(schema !== undefined && { schema }),
+    result: {
+      type: "json",
+      value: serialized.value ?? null,
+      ...(schema !== undefined && { schema }),
+    },
+    observedConfidentiality: serialized.observedConfidentiality,
   };
 }
 
@@ -1981,7 +2124,11 @@ async function handleInvoke(
   runtime: Runtime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
-): Promise<{ type: string; value: any }> {
+  observationMaxConfidentiality?: readonly unknown[],
+): Promise<{
+  result: { type: string; value: any };
+  observedConfidentiality: readonly unknown[];
+}> {
   const toolCall = resolved.call;
 
   // Extract pattern/handler/params based on the resolved type
@@ -2066,18 +2213,25 @@ async function handleInvoke(
 
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
+    const serialized = serializeForLLMObservation({
+      value: result.get(),
+      schema: resultSchema,
+      seen: new Set(),
+      contextSpace: space,
+      rootLink: result.getAsNormalizedFullLink(),
+      labelView: cfcLabelViewForCell(result),
+      observationMaxConfidentiality,
+    });
     return {
-      type: "json",
-      value: {
-        "@resultLocation": resultLink,
-        result: traverseAndSerialize(
-          result.get(),
-          resultSchema,
-          new Set(),
-          space,
-        ),
-        schema: resultSchema,
+      result: {
+        type: "json",
+        value: {
+          "@resultLocation": resultLink,
+          result: serialized.value,
+          schema: resultSchema,
+        },
       },
+      observedConfidentiality: serialized.observedConfidentiality,
     };
   }
 
@@ -2087,22 +2241,32 @@ async function handleInvoke(
     const resultValue = result.get();
 
     if (resultValue !== undefined && resultValue !== null) {
+      const serialized = serializeForLLMObservation({
+        value: resultValue,
+        schema: resultSchema,
+        seen: new Set(),
+        contextSpace: space,
+        rootLink: result.getAsNormalizedFullLink(),
+        labelView: cfcLabelViewForCell(result),
+        observationMaxConfidentiality,
+      });
       return {
-        type: "json",
-        value: {
-          "@resultLocation": resultLink,
-          result: traverseAndSerialize(
-            resultValue,
-            resultSchema,
-            new Set(),
-            space,
-          ),
-          schema: resultSchema,
+        result: {
+          type: "json",
+          value: {
+            "@resultLocation": resultLink,
+            result: serialized.value,
+            schema: resultSchema,
+          },
         },
+        observedConfidentiality: serialized.observedConfidentiality,
       };
     }
     // Handler didn't write anything, return null
-    return { type: "json", value: null };
+    return {
+      result: { type: "json", value: null },
+      observedConfidentiality: [],
+    };
   }
 
   throw new Error("Tool has neither pattern nor handler");
@@ -2125,22 +2289,32 @@ async function invokeToolCall(
   resolved: ResolvedToolCall,
   _catalog?: ToolCatalog,
   pinnedCells?: Cell<PinnedCell[]>,
+  observationMaxConfidentiality?: readonly unknown[],
 ) {
   // Handle pinned cell tools
   if (resolved.type === "pin") {
-    return handlePin(runtime, resolved, pinnedCells!);
+    return {
+      result: handlePin(runtime, resolved, pinnedCells!),
+      observedConfidentiality: [],
+    };
   }
 
   if (resolved.type === "unpin") {
-    return handleUnpin(runtime, resolved, pinnedCells!);
+    return {
+      result: handleUnpin(runtime, resolved, pinnedCells!),
+      observedConfidentiality: [],
+    };
   }
 
   if (resolved.type === "schema") {
-    return handleSchema(resolved);
+    return {
+      result: handleSchema(resolved),
+      observedConfidentiality: [],
+    };
   }
 
   if (resolved.type === "read") {
-    return handleRead(resolved, space);
+    return await handleRead(resolved, space, observationMaxConfidentiality);
   }
 
   if (resolved.type === "presentResult") {
@@ -2149,18 +2323,29 @@ async function invokeToolCall(
     // from the raw tool call input to store on the dialog's result cell.
     const cellified = traverseAndCellify(runtime, space, resolved.result);
     return {
-      type: "json",
-      value: traverseAndSerialize(cellified, undefined, new Set(), space),
+      result: {
+        type: "json",
+        value: traverseAndSerialize(cellified, undefined, new Set(), space),
+      },
+      observedConfidentiality: [],
     };
   }
 
   // Handle run-type tools (external, run with pattern/handler)
   if (resolved.type === "updateArgument") {
-    return handleUpdateArgument(runtime, resolved);
+    return {
+      result: handleUpdateArgument(runtime, resolved),
+      observedConfidentiality: [],
+    };
   }
 
   // Handle invoke-type tools (external, invoke with pattern/handler)
-  return await handleInvoke(runtime, space, resolved);
+  return await handleInvoke(
+    runtime,
+    space,
+    resolved,
+    observationMaxConfidentiality,
+  );
 }
 
 /**
@@ -2509,9 +2694,7 @@ async function startRequest(
   // Also pull individual context cells and pinned cell targets
   const contextCellsForPull = inputs.key("context").get() ?? {};
   for (const cell of Object.values(contextCellsForPull)) {
-    if (isCell(cell)) {
-      await cell.resolveAsCell().pull();
-    }
+    await resolveContextCellRef(cell)?.pull();
   }
   const pinnedCellsForPull = pinnedCells.get() ?? [];
   for (const pinnedCell of pinnedCellsForPull) {
@@ -2543,7 +2726,10 @@ async function startRequest(
     // Convert context cells to PinnedCell format
     .map(
       ([name, cell]) => {
-        const link = cell.resolveAsCell().getAsNormalizedFullLink();
+        const link = resolveContextCellRef(cell)?.getAsNormalizedFullLink();
+        if (!link) {
+          throw new Error(`Context entry "${name}" is not a cell`);
+        }
         const path = createLLMFriendlyLink(link, space);
         return { name, path };
       },
