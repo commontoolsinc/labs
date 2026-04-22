@@ -999,6 +999,7 @@ export function generateObject<T extends Record<string, unknown>>(
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
+      messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
       pendingWithLog.set(true);
 
       const { callback: updatePartial, cleanup: cleanupPartial } =
@@ -1266,6 +1267,7 @@ export function generateObject<T extends Record<string, unknown>>(
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
+      messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
       pendingWithLog.set(true);
 
       const isRunCancelled = queueName
