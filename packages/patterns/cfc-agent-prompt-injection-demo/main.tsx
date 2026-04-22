@@ -273,7 +273,7 @@ const DemoAgentChat = pattern<DemoChatInput, DemoChatOutput>(
       system,
       messages,
       tools,
-      model: "claude-sonnet-4-6",
+      model: "gateway:claude-sonnet-4-6",
       builtinTools: false,
       observationMaxConfidentiality: observationMaxConfidentiality as any,
     } as any);
