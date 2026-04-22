@@ -11,6 +11,7 @@ import type { HarnessRunState } from "./run-state.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
+import type { HarnessCapabilitySnapshot } from "./diagnostics.ts";
 
 const sanitizeArtifactName = (input: string): string =>
   input.replace(/[^A-Za-z0-9._-]+/g, "_");
@@ -59,6 +60,9 @@ export interface HarnessArtifactStore {
   persistTranscript(
     transcript: readonly HarnessTranscriptMessage[],
   ): Promise<string>;
+  persistCapabilitySnapshot(
+    snapshot: HarnessCapabilitySnapshot,
+  ): Promise<string>;
   persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,
@@ -96,6 +100,15 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     return path;
   }
 
+  async persistCapabilitySnapshot(
+    snapshot: HarnessCapabilitySnapshot,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "capabilities.json");
+    await writeJsonFile(path, snapshot);
+    return path;
+  }
+
   async persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,
@@ -127,6 +140,7 @@ const normalizeHarnessRunState = (
       : createHarnessPolicyEvent(event)
   ),
   toolOutputs: [...(state.toolOutputs ?? [])],
+  failureRecords: [...(state.failureRecords ?? [])],
 });
 
 export const readHarnessRunState = async (

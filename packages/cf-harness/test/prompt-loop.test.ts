@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import type {
@@ -38,6 +39,21 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.shellRequests.push(request);
+    if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
+      return Promise.resolve({
+        stdout: [
+          "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
+          "sh\tpresent\t/bin/sh\tBusyBox v1.36.1",
+          "node\tmissing\t\t",
+          "deno\tpresent\t/usr/local/bin/deno\tdeno 2.2.0",
+          "python\tmissing\t\t",
+          "python3\tpresent\t/usr/bin/python3\tPython 3.11.9",
+          "git\tpresent\t/usr/bin/git\tgit version 2.45.1",
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0,
+      });
+    }
     if (this.shellError) {
       return Promise.reject(this.shellError);
     }
@@ -62,6 +78,10 @@ class FailingArtifactStore implements HarnessArtifactStore {
 
   persistTranscript(): Promise<string> {
     return Promise.resolve(`${this.runRoot}/transcript.json`);
+  }
+
+  persistCapabilitySnapshot(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/capabilities.json`);
   }
 
   persistToolOutput(): Promise<string> {
@@ -499,8 +519,9 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
     toolId: "bash",
     toolCallId: "call-observe",
     detail: "bash would require direct-command authorization in enforce modes",
-    at: "2026-04-15T22:30:02.000Z",
+    at: "2026-04-15T22:30:04.000Z",
   }]);
+  assertEquals(result.runState.failureRecords, []);
   assertEquals(
     result.transcript.at(-2),
     {
@@ -606,8 +627,9 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
       detail:
         "write_file requires direct-command authorization in enforce-explicit",
     },
-    at: "2026-04-15T22:40:02.000Z",
+    at: "2026-04-15T22:40:04.000Z",
   }]);
+  assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
   assertEquals(
     result.transcript.at(-2),
     {
@@ -700,8 +722,9 @@ Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlis
       reason: "not-authorized",
       detail: "bash is not allowed in this run",
     },
-    at: "2026-04-16T23:20:02.000Z",
+    at: "2026-04-16T23:20:04.000Z",
   }]);
+  assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
   assertEquals(
     result.transcript.at(-2),
     {

@@ -1,6 +1,11 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
+import type {
+  HarnessCapabilitySnapshot,
+  HarnessFailureRecord,
+} from "./diagnostics.ts";
+import { selectPrimaryHarnessFailure } from "./diagnostics.ts";
 
 export type HarnessRunStatus =
   | "pending"
@@ -18,8 +23,12 @@ export interface HarnessRunState {
   model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
+  capabilitySnapshot?: HarnessCapabilitySnapshot;
+  capabilitiesPath?: string;
   policyEvents: HarnessPolicyEvent[];
   toolOutputs: ToolResultRef[];
+  failureRecords?: HarnessFailureRecord[];
+  primaryFailure?: HarnessFailureRecord;
 }
 
 export interface CreateHarnessRunStateOptions {
@@ -30,6 +39,10 @@ export interface CreateHarnessRunStateOptions {
   model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
+  capabilitySnapshot?: HarnessCapabilitySnapshot;
+  capabilitiesPath?: string;
+  failureRecords?: HarnessFailureRecord[];
+  primaryFailure?: HarnessFailureRecord;
   now?: string;
 }
 
@@ -51,8 +64,18 @@ export const createHarnessRunState = (
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
       : {}),
+    ...(options.capabilitySnapshot !== undefined
+      ? { capabilitySnapshot: options.capabilitySnapshot }
+      : {}),
+    ...(options.capabilitiesPath !== undefined
+      ? { capabilitiesPath: options.capabilitiesPath }
+      : {}),
     policyEvents: [],
     toolOutputs: [],
+    failureRecords: [...(options.failureRecords ?? [])],
+    ...(options.primaryFailure !== undefined
+      ? { primaryFailure: options.primaryFailure }
+      : {}),
   };
 };
 
@@ -86,6 +109,21 @@ export const appendHarnessPolicyEvent = (
   policyEvents: [...state.policyEvents, event],
 });
 
+export const appendHarnessFailureRecord = (
+  state: HarnessRunState,
+  failure: HarnessFailureRecord,
+  now = new Date().toISOString(),
+): HarnessRunState => {
+  const failureRecords = [...(state.failureRecords ?? []), failure];
+  const primaryFailure = selectPrimaryHarnessFailure(failureRecords);
+  return {
+    ...state,
+    updatedAt: now,
+    failureRecords,
+    ...(primaryFailure !== undefined ? { primaryFailure } : {}),
+  };
+};
+
 export const setHarnessRunCurrentDir = (
   state: HarnessRunState,
   currentDir: string,
@@ -103,5 +141,17 @@ export const setHarnessTranscriptPath = (
 ): HarnessRunState => ({
   ...state,
   transcriptPath,
+  updatedAt: now,
+});
+
+export const setHarnessCapabilitySnapshot = (
+  state: HarnessRunState,
+  capabilitySnapshot: HarnessCapabilitySnapshot,
+  capabilitiesPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  capabilitySnapshot,
+  ...(capabilitiesPath !== undefined ? { capabilitiesPath } : {}),
   updatedAt: now,
 });

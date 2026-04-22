@@ -8,6 +8,7 @@ import {
   readHarnessTranscript,
 } from "../src/artifacts.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import type {
@@ -43,6 +44,21 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.shellRequests.push(request);
+    if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
+      return Promise.resolve({
+        stdout: [
+          "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
+          "sh\tpresent\t/bin/sh\tBusyBox v1.36.1",
+          "node\tmissing\t\t",
+          "deno\tpresent\t/usr/local/bin/deno\tdeno 2.2.0",
+          "python\tmissing\t\t",
+          "python3\tpresent\t/usr/bin/python3\tPython 3.11.9",
+          "git\tpresent\t/usr/bin/git\tgit version 2.45.1",
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0,
+      });
+    }
     return Promise.resolve(
       this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
@@ -70,8 +86,10 @@ Deno.test({
             "2026-04-15T21:00:00.000Z",
             "2026-04-15T21:00:01.000Z",
             "2026-04-15T21:00:02.000Z",
+            "2026-04-15T21:00:03.000Z",
+            "2026-04-15T21:00:04.000Z",
           ];
-          return () => timestamps.shift() ?? "2026-04-15T21:00:03.000Z";
+          return () => timestamps.shift() ?? "2026-04-15T21:00:05.000Z";
         })(),
       });
 
@@ -82,6 +100,7 @@ Deno.test({
       const persistedState = await readHarnessRunState(
         join(runRoot, "run-state.json"),
       );
+      const capabilitySnapshotPath = join(runRoot, "capabilities.json");
 
       assertEquals(
         result.resultRef.artifactPath,
@@ -101,16 +120,55 @@ Deno.test({
           cwd: "/workspace",
         },
       );
+      assertEquals(
+        JSON.parse(await Deno.readTextFile(capabilitySnapshotPath)),
+        persistedState.capabilitySnapshot,
+      );
       assertEquals(persistedState, {
         runId: "run-artifacts",
         status: "completed",
         createdAt: "2026-04-15T21:00:00.000Z",
-        updatedAt: "2026-04-15T21:00:03.000Z",
+        updatedAt: "2026-04-15T21:00:05.000Z",
         cfcEnforcementMode: "observe",
         currentDir: "/workspace",
         artifactRoot: runRoot,
+        capabilitySnapshot: {
+          type: "cf-harness.capability-snapshot",
+          at: "2026-04-15T21:00:01.000Z",
+          commands: {
+            bash: {
+              present: true,
+              path: "/bin/bash",
+              version: "GNU bash, version 5.2.26(1)-release",
+            },
+            sh: {
+              present: true,
+              path: "/bin/sh",
+              version: "BusyBox v1.36.1",
+            },
+            node: { present: false },
+            deno: {
+              present: true,
+              path: "/usr/local/bin/deno",
+              version: "deno 2.2.0",
+            },
+            python: { present: false },
+            python3: {
+              present: true,
+              path: "/usr/bin/python3",
+              version: "Python 3.11.9",
+            },
+            git: {
+              present: true,
+              path: "/usr/bin/git",
+              version: "git version 2.45.1",
+            },
+          },
+        },
+        capabilitiesPath: capabilitySnapshotPath,
         policyEvents: [],
         toolOutputs: [result.resultRef],
+        failureRecords: [],
       });
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
@@ -206,6 +264,11 @@ Deno.test({
       assertEquals(persistedState.transcriptPath, transcriptPath);
       assertEquals(persistedState.artifactRoot, runRoot);
       assertEquals(persistedState.policyEvents, []);
+      assertEquals(persistedState.failureRecords, []);
+      assertEquals(
+        persistedState.capabilitySnapshot?.commands.python3.present,
+        true,
+      );
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }
@@ -249,6 +312,7 @@ Deno.test({
           transcriptPath: outsideTranscriptPath,
           policyEvents: [],
           toolOutputs: [],
+          failureRecords: [],
         }),
       );
       await Deno.writeTextFile(
