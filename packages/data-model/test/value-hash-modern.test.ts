@@ -402,9 +402,8 @@ describe("modernHash", () => {
     const error = new FabricError(new Error("test"));
     const enc = new TextEncoder();
 
-    // TAG_INSTANCE (0x12) + LEB128(typeTagLen) + typeTag UTF-8
-    const typeTagUtf8 = enc.encode("Error@1"); // 7 bytes
-    const stream: number[] = [0x12, typeTagUtf8.length, ...typeTagUtf8];
+    // TAG_INSTANCE (0x12)
+    const stream: number[] = [0x12];
 
     const pushShortString = (value: string) => {
       const encoded = enc.encode(value);
@@ -415,6 +414,9 @@ describe("modernHash", () => {
       const hashed = sha256(enc.encode(value));
       stream.push(0xf0, ...hashed);
     };
+
+    // Type tag.
+    pushShortString("Error@1");
 
     // Deconstructed state is an object with sorted keys.
     // FabricError.DECONSTRUCT() returns:
@@ -841,9 +843,10 @@ describe("modernHash", () => {
       new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]),
       "fid1",
     );
-    // Expected: TAG_CONTENT_ID(0x29), algTagLen(0x04), "fid1", hashLen(0x04), hash
+    // Expected: TAG_CONTENT_ID(0x29), "fid1" (encoded), hashLen(0x04), hash
     const expected = sha256([
       0x29,
+      0x24,
       0x04,
       0x66,
       0x69,
