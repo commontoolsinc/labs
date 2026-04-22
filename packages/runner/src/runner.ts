@@ -104,6 +104,17 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   logCountEvery: 0,
 });
 
+const EAGER_RESULT_BUILTIN_REFS = new Set([
+  "fetchData",
+  "fetchProgram",
+  "generateObject",
+  "generateText",
+  "llm",
+  "llmDialog",
+  "navigateTo",
+  "streamData",
+]);
+
 type ProcessCellData<T> = {
   [TYPE]: string;
   spell?: SigilLink;
@@ -1164,6 +1175,7 @@ export class Runner {
     resultCell: Cell<T>,
     givenPattern?: Pattern,
     options: { doNotUpdateOnPatternChange?: boolean } = {},
+    pullOnceAfterStart: boolean = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
     tx.addCommitCallback((_committedTx, result) => {
@@ -1188,6 +1200,10 @@ export class Runner {
               "Error committing deferred start transaction",
               error,
             );
+            return;
+          }
+          if (pullOnceAfterStart) {
+            this.pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
           this.stop(committedResultCell);
@@ -1268,14 +1284,24 @@ export class Runner {
     );
 
     if (needsStart) {
+      const pullOnceAfterStart = this.patternNeedsOneShotPull(pattern);
       if (
         tx.tx.immediate === true &&
         (tx.tx as { deferRunnerStartUntilCommit?: boolean })
             .deferRunnerStartUntilCommit === true
       ) {
-        this.startAfterSuccessfulCommit(tx, resultCell, pattern, options);
+        this.startAfterSuccessfulCommit(
+          tx,
+          resultCell,
+          pattern,
+          options,
+          pullOnceAfterStart,
+        );
       } else {
         this.startWithTx(tx, resultCell, pattern, options);
+        if (pullOnceAfterStart) {
+          this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
+        }
       }
     }
 
@@ -1967,9 +1993,56 @@ export class Runner {
       resultCell,
     );
     if (resultSetup.needsStart) {
-      this.startAfterSuccessfulCommit(tx, resultCell, resultSetup.pattern);
+      this.startAfterSuccessfulCommit(
+        tx,
+        resultCell,
+        resultSetup.pattern,
+        {},
+        this.patternNeedsOneShotPull(resultSetup.pattern),
+      );
     }
     return resultCell;
+  }
+
+  private patternNeedsOneShotPull(pattern?: Pattern): boolean {
+    if (!this.runtime.scheduler.isPullModeEnabled() || !pattern) {
+      return false;
+    }
+    return pattern.nodes.some(({ module }) => {
+      if (module.type !== "ref" || typeof module.implementation !== "string") {
+        return false;
+      }
+      return EAGER_RESULT_BUILTIN_REFS.has(module.implementation);
+    });
+  }
+
+  private pullCellOnceAfterSuccessfulCommit<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+  ): void {
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+      return;
+    }
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        return;
+      }
+      this.pullCellOnceInPullMode(this.runtime.getCellFromLink<T>(resultLink));
+    });
+  }
+
+  private pullCellOnceInPullMode<T = any>(cell: Cell<T>): void {
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+      return;
+    }
+    void cell.pull().catch((error) => {
+      logger.error(
+        "runner-start",
+        "Transient result pull failed after commit",
+        error,
+      );
+    });
   }
 
   private writeJavaScriptActionResult(
