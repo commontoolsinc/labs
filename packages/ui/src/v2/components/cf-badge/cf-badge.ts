@@ -24,6 +24,31 @@ export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 export class CFBadge extends BaseElement {
   static override styles = css`
     :host {
+      --cf-badge-border-radius: var(
+        --cf-pill-border-radius,
+        var(--cf-border-radius-full, 9999px)
+      );
+      --cf-badge-min-height: var(
+        --cf-pill-sm-min-height,
+        var(--cf-size-sm-height)
+      );
+      --cf-badge-padding-h: var(
+        --cf-pill-sm-padding-h,
+        var(--cf-size-sm-padding-h)
+      );
+      --cf-badge-padding-v: var(
+        --cf-pill-sm-padding-v,
+        var(--cf-size-sm-padding-v)
+      );
+      --cf-badge-gap: var(--cf-pill-sm-gap, var(--cf-size-sm-spacing));
+      --cf-badge-font-size: var(
+        --cf-pill-sm-font-size,
+        var(--cf-size-sm-font-size)
+      );
+      --cf-badge-line-height: var(
+        --cf-pill-sm-line-height,
+        var(--cf-size-sm-line-height)
+      );
       --cf-badge-color-primary: var(
         --cf-theme-color-primary,
         hsl(212, 100%, 47%)
@@ -65,44 +90,53 @@ export class CFBadge extends BaseElement {
     .badge {
       display: inline-flex;
       align-items: center;
-      gap: var(--cf-size-sm-spacing);
-      padding: var(--cf-size-sm-padding-v) var(--cf-size-sm-padding-h);
-      font-size: var(--cf-size-sm-font-size);
+      min-height: var(--cf-badge-min-height);
+      gap: var(--cf-badge-gap);
+      padding: var(--cf-badge-padding-v) var(--cf-badge-padding-h);
+      font-size: var(--cf-badge-font-size);
       font-weight: 600;
-      line-height: var(--cf-size-sm-line-height);
-      border-radius: 9999px;
+      line-height: var(--cf-badge-line-height);
+      border-radius: var(--cf-badge-border-radius);
       border: 1px solid transparent;
       transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     :host([size="xs"]) .badge {
-      padding: var(--cf-size-xs-padding-v) var(--cf-size-xs-padding-h);
-      font-size: var(--cf-size-xs-font-size);
-      line-height: var(--cf-size-xs-line-height);
-      gap: var(--cf-size-xs-spacing);
+      min-height: var(--cf-pill-xs-min-height, var(--cf-size-xs-height));
+      padding: var(--cf-pill-xs-padding-v, var(--cf-size-xs-padding-v))
+        var(--cf-pill-xs-padding-h, var(--cf-size-xs-padding-h));
+      font-size: var(--cf-pill-xs-font-size, var(--cf-size-xs-font-size));
+      line-height: var(--cf-pill-xs-line-height, var(--cf-size-xs-line-height));
+      gap: var(--cf-pill-xs-gap, var(--cf-size-xs-spacing));
     }
 
     /* sm is default — no override needed */
 
     :host([size="md"]) .badge {
-      padding: var(--cf-size-md-padding-v) var(--cf-size-md-padding-h);
-      font-size: var(--cf-size-md-font-size);
-      line-height: var(--cf-size-md-line-height);
-      gap: var(--cf-size-md-spacing);
+      min-height: var(--cf-pill-md-min-height, var(--cf-size-md-height));
+      padding: var(--cf-pill-md-padding-v, var(--cf-size-md-padding-v))
+        var(--cf-pill-md-padding-h, var(--cf-size-md-padding-h));
+      font-size: var(--cf-pill-md-font-size, var(--cf-size-md-font-size));
+      line-height: var(--cf-pill-md-line-height, var(--cf-size-md-line-height));
+      gap: var(--cf-pill-md-gap, var(--cf-size-md-spacing));
     }
 
     :host([size="lg"]) .badge {
-      padding: var(--cf-size-lg-padding-v) var(--cf-size-lg-padding-h);
-      font-size: var(--cf-size-lg-font-size);
-      line-height: var(--cf-size-lg-line-height);
-      gap: var(--cf-size-lg-spacing);
+      min-height: var(--cf-pill-lg-min-height, var(--cf-size-lg-height));
+      padding: var(--cf-pill-lg-padding-v, var(--cf-size-lg-padding-v))
+        var(--cf-pill-lg-padding-h, var(--cf-size-lg-padding-h));
+      font-size: var(--cf-pill-lg-font-size, var(--cf-size-lg-font-size));
+      line-height: var(--cf-pill-lg-line-height, var(--cf-size-lg-line-height));
+      gap: var(--cf-pill-lg-gap, var(--cf-size-lg-spacing));
     }
 
     :host([size="xl"]) .badge {
-      padding: var(--cf-size-xl-padding-v) var(--cf-size-xl-padding-h);
-      font-size: var(--cf-size-xl-font-size);
-      line-height: var(--cf-size-xl-line-height);
-      gap: var(--cf-size-xl-spacing);
+      min-height: var(--cf-pill-xl-min-height, var(--cf-size-xl-height));
+      padding: var(--cf-pill-xl-padding-v, var(--cf-size-xl-padding-v))
+        var(--cf-pill-xl-padding-h, var(--cf-size-xl-padding-h));
+      font-size: var(--cf-pill-xl-font-size, var(--cf-size-xl-font-size));
+      line-height: var(--cf-pill-xl-line-height, var(--cf-size-xl-line-height));
+      gap: var(--cf-pill-xl-gap, var(--cf-size-xl-spacing));
     }
 
     /* Variant styles */

@@ -215,6 +215,50 @@ export const variablesCSS = `
   --cf-size-xl-font-size: 18px;
   --cf-size-xl-line-height: 24px;
 
+  /*
+   * Shared pill geometry
+   * Badge, chip, and button[variant="pill"] keep separate semantics and
+   * colors, but they should share the same compact rounded size contract.
+   */
+  --cf-pill-border-radius: var(
+    --cf-theme-border-radius-full,
+    var(--cf-border-radius-full, 9999px)
+  );
+  --cf-pill-xs-min-height: var(--cf-size-xs-height);
+  --cf-pill-xs-padding-h: var(--cf-size-xs-padding-h);
+  --cf-pill-xs-padding-v: var(--cf-size-xs-padding-v);
+  --cf-pill-xs-gap: var(--cf-size-xs-spacing);
+  --cf-pill-xs-font-size: var(--cf-size-xs-font-size);
+  --cf-pill-xs-line-height: var(--cf-size-xs-line-height);
+
+  --cf-pill-sm-min-height: var(--cf-size-sm-height);
+  --cf-pill-sm-padding-h: var(--cf-size-sm-padding-h);
+  --cf-pill-sm-padding-v: var(--cf-size-sm-padding-v);
+  --cf-pill-sm-gap: var(--cf-size-sm-spacing);
+  --cf-pill-sm-font-size: var(--cf-size-sm-font-size);
+  --cf-pill-sm-line-height: var(--cf-size-sm-line-height);
+
+  --cf-pill-md-min-height: var(--cf-size-md-height);
+  --cf-pill-md-padding-h: var(--cf-size-md-padding-h);
+  --cf-pill-md-padding-v: var(--cf-size-md-padding-v);
+  --cf-pill-md-gap: var(--cf-size-md-spacing);
+  --cf-pill-md-font-size: var(--cf-size-md-font-size);
+  --cf-pill-md-line-height: var(--cf-size-md-line-height);
+
+  --cf-pill-lg-min-height: var(--cf-size-lg-height);
+  --cf-pill-lg-padding-h: var(--cf-size-lg-padding-h);
+  --cf-pill-lg-padding-v: var(--cf-size-lg-padding-v);
+  --cf-pill-lg-gap: var(--cf-size-lg-spacing);
+  --cf-pill-lg-font-size: var(--cf-size-lg-font-size);
+  --cf-pill-lg-line-height: var(--cf-size-lg-line-height);
+
+  --cf-pill-xl-min-height: var(--cf-size-xl-height);
+  --cf-pill-xl-padding-h: var(--cf-size-xl-padding-h);
+  --cf-pill-xl-padding-v: var(--cf-size-xl-padding-v);
+  --cf-pill-xl-gap: var(--cf-size-xl-spacing);
+  --cf-pill-xl-font-size: var(--cf-size-xl-font-size);
+  --cf-pill-xl-line-height: var(--cf-size-xl-line-height);
+
   /* Shadows */
   --cf-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --cf-shadow-base: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
