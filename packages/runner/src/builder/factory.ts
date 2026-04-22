@@ -40,6 +40,7 @@ import {
   patternTool,
   str,
   streamData,
+  subAgentTool,
   unless,
   when,
   wish,
@@ -119,6 +120,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     trustValue(
       (patternTool as (...args: any[]) => unknown)(...args),
     )) as typeof patternTool;
+  const trustedSubAgentTool = ((...args: any[]) =>
+    trustValue(
+      (subAgentTool as (...args: any[]) => unknown)(...args),
+    )) as typeof subAgentTool;
 
   // Associate runtime programs with patterns after compilation and initial eval
   // and before compilation returns, so before any e.g. pattern would be
@@ -136,6 +141,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // Pattern creation
     pattern: trustedPattern,
     patternTool: trustedPatternTool,
+    subAgentTool: trustedSubAgentTool,
 
     // Module creation
     lift: trustedLift,

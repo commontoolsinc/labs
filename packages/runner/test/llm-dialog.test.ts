@@ -258,6 +258,148 @@ describe("llmDialog", () => {
     );
   });
 
+  it("should deny low-ceiling tools after internal-conf tool results", async () => {
+    loadConversationFixture({
+      description: "readInternal then deny publicOnly then finish",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["readInternal", "publicOnly"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_read_internal",
+              toolName: "readInternal",
+              input: {},
+            }],
+            id: "deny-r1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_public_only",
+              toolName: "publicOnly",
+              input: {},
+            }],
+            id: "deny-r2",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 5 },
+          response: {
+            role: "assistant",
+            content: "Denied as expected.",
+            id: "deny-r3",
+          },
+        },
+      ],
+    });
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        error: { type: "object", additionalProperties: true },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const readInternal = pattern(
+      () => {
+        return { note: "internal-only" };
+      },
+      { type: "object" },
+      {
+        type: "object",
+        properties: {
+          note: { type: "string" },
+        },
+        required: ["note"],
+        ifc: { confidentiality: ["internal"] },
+      } as const satisfies JSONSchema,
+    );
+
+    const publicOnly = pattern(
+      () => {
+        return { ok: true };
+      },
+      {
+        type: "object",
+        ifc: { maxConfidentiality: ["public"] },
+      } as const satisfies JSONSchema,
+      {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+        },
+        required: ["ok"],
+      } as const satisfies JSONSchema,
+    );
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          observationMaxConfidentiality: ["internal"],
+          tools: {
+            readInternal: patternTool(
+              readInternal,
+            ) as unknown as BuiltInLLMTool,
+            publicOnly: patternTool(publicOnly) as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          error: dialog.error,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-observation-deny-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Start the workflow." });
+
+    await expect(waitForMessages(result, 6)).resolves.toBeUndefined();
+
+    const messages = (await result.key("messages").pull())!;
+    expect(messages[4].role).toBe("tool");
+    expect((messages[4].content as any)[0].toolName).toBe("publicOnly");
+    expect((messages[4].content as any)[0].output.type).toBe("error-text");
+    expect((messages[4].content as any)[0].output.value).toContain(
+      "Tool call denied",
+    );
+    expect(messages[5].content).toBe("Denied as expected.");
+  });
+
   it("should support pinning cells via pin tool", async () => {
     loadConversationFixture({
       description: "Pin tool: pin a cell via tool call",
@@ -519,12 +661,19 @@ describe("llmDialog", () => {
       },
       required: ["addMessage"],
     } as const satisfies JSONSchema;
-
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        // Create context cell inside pattern
-        const contextCell = Cell.of({ value: "test context data" });
+        const contextCell = Cell.of(
+          { value: "test context data" },
+          {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          } as const satisfies JSONSchema,
+        );
         const dialog = llmDialog({
           messages,
           context: {
@@ -653,16 +802,23 @@ describe("llmDialog", () => {
       },
       required: ["addMessage"],
     } as const satisfies JSONSchema;
-
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        // Create context cell inside pattern
-        const contextCell = Cell.of({ value: "context data" });
+        const contextCell = Cell.of(
+          { value: "context data" },
+          {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          } as const satisfies JSONSchema,
+        );
         const dialog = llmDialog({
           messages,
           context: {
-            contextCell: contextCell,
+            contextCell,
           },
         });
         return {

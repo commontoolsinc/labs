@@ -26,6 +26,7 @@ import type {
   FetchOptions,
   PatternToolFunction,
   PatternToolResult,
+  SubAgentToolFunction,
   WishParams,
   WishState,
 } from "commonfabric";
@@ -435,3 +436,42 @@ export const patternTool = (<
     extraParams: (extraParams ?? {}) as E,
   };
 }) as PatternToolFunction;
+
+/**
+ * Create an LLM tool backed by a nested generateObject() call.
+ * The generated pattern returns only the subagent's structured result,
+ * which keeps the tool boundary schema-limited.
+ */
+export const subAgentTool = (<
+  T,
+  E extends object = Record<PropertyKey, never>,
+>(
+  buildParams: (
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+  ) => Opaque<Record<string, unknown>>,
+  argumentSchema: JSONSchema,
+  resultSchema: JSONSchema,
+  extraParams?: Opaque<E>,
+): PatternToolResult<E> => {
+  const resolvedPattern = pattern<T, unknown>(
+    (input) => {
+      const params = buildParams(
+        input as OpaqueRef<RequireDefaults<T>> & {
+          [SELF]: OpaqueRef<any>;
+        },
+      ) as BuiltInGenerateObjectParams;
+      return generateObject({
+        ...params,
+        schema: resultSchema,
+      } as BuiltInGenerateObjectParams).result;
+    },
+    argumentSchema,
+    resultSchema,
+  );
+
+  return {
+    pattern: resolvedPattern,
+    extraParams: (extraParams ?? {}) as E,
+    useResultSchemaForObservation: true,
+  };
+}) as SubAgentToolFunction;

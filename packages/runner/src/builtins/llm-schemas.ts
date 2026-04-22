@@ -66,6 +66,7 @@ export const LLMToolSchema = internSchema(
         asCell: ["cell"],
       },
       extraParams: { type: "object" },
+      useResultSchemaForObservation: { type: "boolean" },
       piece: {
         // Accept whole piece - its own schema defines its handlers
         asCell: ["cell"],

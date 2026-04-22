@@ -27,7 +27,7 @@ import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Pattern } from "../builder/types.ts";
-import type { Action } from "../scheduler.ts";
+import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -50,6 +50,8 @@ import { type CfcLabelView, cfcLabelViewForCell } from "../cfc/label-view.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { resolveLink } from "../link-resolution.ts";
+import { internalVerifierRead } from "../storage/reactivity-log.ts";
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -774,6 +776,14 @@ const internalSchema = internSchema(
     properties: {
       requestId: { type: "string" },
       lastActivity: { type: "number" },
+      messageObservations: {
+        type: "object",
+        additionalProperties: {
+          type: "array",
+          items: {},
+        },
+        default: {},
+      },
     },
     required: ["requestId", "lastActivity"],
   },
@@ -797,11 +807,15 @@ type ToolCatalog = {
   dynamicToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
 };
 
+type DialogMessageObservationMap = Record<string, unknown[]>;
+
 type DialogRequestSnapshot = {
   llmParams: LLMRequest;
   toolCatalog: ToolCatalog;
   userResultSchema: unknown;
   queueName?: string;
+  observationMaxConfidentiality?: readonly unknown[];
+  systemObservedConfidentiality: readonly unknown[];
 };
 
 type AvailableCellsDocumentation = {
@@ -835,6 +849,21 @@ function resolveContextCellRef(cell: unknown): Cell<any> | undefined {
   }
 
   return resolved;
+}
+
+function readCellValueForObservation(
+  cell: Cell<unknown>,
+): unknown {
+  const readTx = cell.runtime.readTx();
+  const link = resolveLink(
+    cell.runtime,
+    readTx,
+    cell.getAsNormalizedFullLink(),
+    "top",
+  );
+  return readTx.readValueOrThrow(link, {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  });
 }
 
 function collectToolEntries(
@@ -1297,6 +1326,9 @@ function materializeDialogRequestSnapshot(
 ): DialogRequestSnapshot {
   const { system, maxTokens, model } = inputs.withTx(tx).get();
   const context = inputs.key("context").withTx(tx).get();
+  const observationMaxConfidentiality = inputs.key(
+    "observationMaxConfidentiality",
+  ).withTx(tx).get() as readonly unknown[] | undefined;
   const toolsCell = inputs.key("tools").withTx(tx) as Cell<
     Record<string, Schema<typeof LLMToolSchema>>
   >;
@@ -1312,17 +1344,29 @@ function materializeDialogRequestSnapshot(
     };
   }
 
-  const cellsDocs = buildAvailableCellsDocumentation(
-    runtime,
-    space,
-    context,
-    pinnedCells.withTx(tx),
-  );
+  const cellsDocs = observationMaxConfidentiality &&
+      observationMaxConfidentiality.length > 0
+    ? buildAvailableCellsDocumentationWithObservation(
+      runtime,
+      space,
+      context,
+      pinnedCells.withTx(tx),
+      observationMaxConfidentiality,
+    )
+    : {
+      docs: buildAvailableCellsDocumentation(
+        runtime,
+        space,
+        context,
+        pinnedCells.withTx(tx),
+      ),
+      observedConfidentiality: [],
+    };
   const linkModelDocs =
     "\n\n# Link and Cell Model\n\nThe system organizes all data and computation into cells. Use links to navigate between related data and compose tool operations.";
   const listRecentHint =
     "\n\nIf the user's request is unclear or you need context about what they're referring to, call listRecent() to see recently viewed pieces.";
-  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
+  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs +
     listRecentHint;
 
   const llmParams = {
@@ -1343,6 +1387,8 @@ function materializeDialogRequestSnapshot(
     ),
     toolCatalog,
     userResultSchema,
+    observationMaxConfidentiality,
+    systemObservedConfidentiality: cellsDocs.observedConfidentiality,
     queueName: inputs.key("queue").withTx(tx).get() as unknown as
       | string
       | undefined,
@@ -1383,9 +1429,10 @@ function buildAvailableCellsDocumentationWithObservation(
     if (!resolvedCell) {
       throw new Error(`Context entry "${name}" is not a cell`);
     }
-    const link = resolvedCell.getAsNormalizedFullLink();
+    const concreteCell = resolvedCell;
+    const link = concreteCell.getAsNormalizedFullLink();
     const path = createLLMFriendlyLink(link, space);
-    const schemaInfo = getCellSchema(resolvedCell);
+    const schemaInfo = getCellSchema(concreteCell);
 
     // Deduplicate: skip if we already have an entry with schema for this path
     const existing = seenPaths.get(path);
@@ -1400,19 +1447,31 @@ function buildAvailableCellsDocumentationWithObservation(
     }
 
     try {
-      const value = resolvedCell.get();
+      let value = observationMaxConfidentiality &&
+          observationMaxConfidentiality.length > 0
+        ? readCellValueForObservation(concreteCell)
+        : concreteCell.get() ?? concreteCell.getRaw();
+      if (
+        value === undefined &&
+        isRecord(schemaInfo) &&
+        Object.hasOwn(schemaInfo, "default")
+      ) {
+        value = (schemaInfo as Record<string, unknown>).default;
+      }
       const serialized = serializeForLLMObservation({
         value,
         schema: schemaInfo,
         seen: new Set(),
         contextSpace: space,
         rootLink: link,
-        labelView: cfcLabelViewForCell(resolvedCell),
+        labelView: observationMaxConfidentiality
+          ? cfcLabelViewForCell(concreteCell)
+          : undefined,
         observationMaxConfidentiality,
       });
       observedConfidentiality = serialized.observedConfidentiality;
 
-      let valueJson = JSON.stringify(serialized.value, null, 2);
+      let valueJson = JSON.stringify(serialized.value ?? null, null, 2);
 
       const MAX_VALUE_LENGTH = 2000;
       if (valueJson.length > MAX_VALUE_LENGTH) {
@@ -1506,6 +1565,69 @@ function buildAvailableCellsDocumentation(
     pinnedCells,
     observationMaxConfidentiality,
   ).docs;
+}
+
+function getObservedDialogMessages(
+  messagesCell: Cell<any>,
+  messages: readonly BuiltInLLMMessage[],
+  messageObservations: DialogMessageObservationMap,
+): {
+  messages: readonly BuiltInLLMMessage[];
+  observedConfidentiality: readonly unknown[];
+} {
+  const labelView = cfcLabelViewForCell(messagesCell);
+  const observedConfidentiality = joinObservedConfidentiality(
+    messages.map((_message, index) => {
+      const stored = messageObservations[index.toString()];
+      if (Array.isArray(stored)) {
+        return stored;
+      }
+      return confidentialityForCurrentNode(
+        undefined,
+        labelView,
+        [index.toString()],
+      );
+    }),
+  );
+
+  return { messages, observedConfidentiality };
+}
+
+function mergeDialogMessageObservations(
+  current: DialogMessageObservationMap | undefined,
+  updates: Array<
+    { index: number; observedConfidentiality: readonly unknown[] }
+  >,
+): DialogMessageObservationMap {
+  const merged: Record<string, unknown[]> = {
+    ...(current ?? {}),
+  };
+  for (const update of updates) {
+    const key = update.index.toString();
+    merged[key] = ContextualFlowControl.uniqueAtoms([
+      ...(merged[key] ?? []),
+      ...(update.observedConfidentiality ?? []),
+    ]) as unknown[];
+  }
+  return merged;
+}
+
+function recordDialogMessageObservations(
+  tx: IExtendedStorageTransaction,
+  internal: Cell<Schema<typeof internalSchema>>,
+  updates: Array<
+    { index: number; observedConfidentiality: readonly unknown[] }
+  >,
+): void {
+  if (updates.length === 0) {
+    return;
+  }
+  const current = internal.withTx(tx).key("messageObservations").get() as
+    | DialogMessageObservationMap
+    | undefined;
+  internal.withTx(tx).key("messageObservations").set(
+    mergeDialogMessageObservations(current, updates),
+  );
 }
 
 // Discriminated union separating external tools from built-in tools
@@ -2135,6 +2257,7 @@ async function handleInvoke(
   let pattern: Readonly<Pattern> | undefined;
   let extraParams: Record<string, unknown> = {};
   let handler: any;
+  let useResultSchemaForObservation = false;
 
   if (resolved.type === "external") {
     pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
@@ -2142,6 +2265,9 @@ async function handleInvoke(
       | undefined;
     extraParams = resolved.toolDef.key("extraParams").get() ?? {};
     handler = resolved.toolDef.key("handler");
+    useResultSchemaForObservation = Boolean(
+      resolved.toolDef.key("useResultSchemaForObservation").get(),
+    );
   } else if (resolved.type === "invoke") {
     pattern = resolved.pattern;
     extraParams = resolved.extraParams ?? {};
@@ -2219,7 +2345,9 @@ async function handleInvoke(
       seen: new Set(),
       contextSpace: space,
       rootLink: result.getAsNormalizedFullLink(),
-      labelView: cfcLabelViewForCell(result),
+      labelView: useResultSchemaForObservation
+        ? undefined
+        : cfcLabelViewForCell(result),
       observationMaxConfidentiality,
     });
     return {
@@ -2512,6 +2640,8 @@ export function llmDialog(
           internal.withTx(tx).set({
             requestId: nextRequestId,
             lastActivity: Date.now(),
+            messageObservations:
+              internal.withTx(tx).key("messageObservations").get() ?? {},
           });
 
           const capturedRequest = materializeDialogRequestSnapshot(
@@ -2685,7 +2815,6 @@ async function startRequest(
   requestId: string,
   abortSignal: AbortSignal,
   capturedRequest?: DialogRequestSnapshot,
-  useCapturedMessages = true,
 ) {
   // Pull input dependencies to ensure they're computed in pull mode
   await inputs.pull();
@@ -2712,6 +2841,11 @@ async function startRequest(
   const { system, maxTokens, model } = inputs.get();
   const queueName = capturedRequest?.queueName ??
     (inputs.key("queue").get() as unknown as string | undefined);
+  const observationMaxConfidentiality = capturedRequest
+    ?.observationMaxConfidentiality ??
+    (inputs.key("observationMaxConfidentiality").get() as
+      | readonly unknown[]
+      | undefined);
 
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools") as Cell<
@@ -2766,12 +2900,24 @@ async function startRequest(
 
   // Build available cells documentation (both context and pinned cells)
   const context = inputs.key("context").get();
-  const cellsDocs = buildAvailableCellsDocumentation(
-    runtime,
-    space,
-    context,
-    pinnedCells,
-  );
+  const cellsDocs = observationMaxConfidentiality &&
+      observationMaxConfidentiality.length > 0
+    ? buildAvailableCellsDocumentationWithObservation(
+      runtime,
+      space,
+      context,
+      pinnedCells,
+      observationMaxConfidentiality,
+    )
+    : {
+      docs: buildAvailableCellsDocumentation(
+        runtime,
+        space,
+        context,
+        pinnedCells,
+      ),
+      observedConfidentiality: [],
+    };
 
   const linkModelDocs = `
 
@@ -2819,20 +2965,30 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
     "call listRecent() to see recently viewed pieces.";
 
-  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
+  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs +
     listRecentHint;
 
   const liveMessages = messagesCell.get() as readonly BuiltInLLMMessage[];
+  const visibleMessages = getObservedDialogMessages(
+    messagesCell,
+    liveMessages,
+    (internal.key("messageObservations")
+      .get() as DialogMessageObservationMap) ??
+      {},
+  );
+  const requestObservedConfidentiality = joinObservedConfidentiality([
+    visibleMessages.observedConfidentiality,
+    cellsDocs.observedConfidentiality,
+  ]);
   const llmParams: LLMRequest = capturedRequest
     ? {
       ...capturedRequest.llmParams,
-      messages: useCapturedMessages
-        ? capturedRequest.llmParams.messages
-        : liveMessages,
+      system: augmentedSystem,
+      messages: visibleMessages.messages,
     }
     : {
       system: augmentedSystem,
-      messages: liveMessages,
+      messages: visibleMessages.messages,
       maxTokens: maxTokens,
       stream: true,
       model: model ?? DEFAULT_MODEL_NAME,
@@ -2905,6 +3061,15 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             internal,
             requestId,
             (tx) => {
+              const nextIndex = (messagesCell.withTx(tx).get() as
+                | readonly BuiltInLLMMessage[]
+                | undefined)?.length ?? 0;
+              recordDialogMessageObservations(tx, internal, [
+                {
+                  index: nextIndex,
+                  observedConfidentiality: requestObservedConfidentiality,
+                },
+              ]);
               messagesCell.withTx(tx).push(
                 assistantMessage as Schema<typeof LLMMessageSchema>,
               );
@@ -2918,6 +3083,8 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             toolCatalog,
             toolCallParts,
             pinnedCells,
+            requestObservedConfidentiality,
+            observationMaxConfidentiality,
           );
 
           // If presentResult was called, cellify the raw input so we can
@@ -2991,6 +3158,18 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               if (cellifiedResult !== undefined) {
                 result.withTx(tx).key("result").set(cellifiedResult);
               }
+              const nextIndex = (messagesCell.withTx(tx).get() as
+                | readonly BuiltInLLMMessage[]
+                | undefined)?.length ?? 0;
+              recordDialogMessageObservations(
+                tx,
+                internal,
+                toolResultMessages.map((_, index) => ({
+                  index: nextIndex + index,
+                  observedConfidentiality:
+                    toolResults[index]?.observedConfidentiality ?? [],
+                })),
+              );
               messagesCell.withTx(tx).push(
                 ...(toolResultMessages as Schema<typeof LLMMessageSchema>[]),
               );
@@ -3039,7 +3218,6 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               requestId,
               abortSignal,
               capturedRequest,
-              false,
             );
           } else {
             logger.info(
@@ -3065,6 +3243,15 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           internal,
           requestId,
           (tx) => {
+            const nextIndex = (messagesCell.withTx(tx).get() as
+              | readonly BuiltInLLMMessage[]
+              | undefined)?.length ?? 0;
+            recordDialogMessageObservations(tx, internal, [
+              {
+                index: nextIndex,
+                observedConfidentiality: requestObservedConfidentiality,
+              },
+            ]);
             messagesCell.withTx(tx).push(
               assistantMessage as Schema<typeof LLMMessageSchema>,
             );

@@ -46,6 +46,7 @@ import type {
   SELF as SELFSymbol,
   StreamDataFunction,
   StrFunction,
+  SubAgentToolFunction,
   UiActionProps,
   UiDisclosureProps,
   UiPromptSlotProps,
@@ -268,6 +269,7 @@ export interface BuilderFunctionsAndConstants {
   // Pattern creation
   pattern: PatternBuilder;
   patternTool: PatternToolFunction;
+  subAgentTool: SubAgentToolFunction;
 
   // Module creation
   lift: LiftFunction;

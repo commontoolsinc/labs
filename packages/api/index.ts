@@ -1505,7 +1505,12 @@ export interface ImageData {
 export type BuiltInLLMTool =
   & { description?: string }
   & (
-    | { pattern: Pattern; handler?: never; extraParams?: Record<string, any> }
+    | {
+      pattern: Pattern;
+      handler?: never;
+      extraParams?: Record<string, any>;
+      useResultSchemaForObservation?: boolean;
+    }
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
   );
 
@@ -1694,6 +1699,7 @@ export interface PatternFunction {
 export interface PatternToolResult<E = Record<PropertyKey, never>> {
   pattern: Pattern;
   extraParams: E;
+  useResultSchemaForObservation?: boolean;
 }
 
 export type PatternToolFunction = <
@@ -1706,6 +1712,22 @@ export type PatternToolFunction = <
     ) => any)
     | PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
+  extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
+) => PatternToolResult<E>;
+
+export type SubAgentToolParams =
+  & Omit<BuiltInGenerateObjectParams, "schema">
+  & { schema?: never };
+
+export type SubAgentToolFunction = <
+  T,
+  E extends object = Record<PropertyKey, never>,
+>(
+  buildParams: (
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+  ) => Opaque<SubAgentToolParams>,
+  argumentSchema: JSONSchema,
+  resultSchema: JSONSchema,
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
 
@@ -2126,6 +2148,7 @@ export type EqualsFunction = (
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
 export declare const patternTool: PatternToolFunction;
+export declare const subAgentTool: SubAgentToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;
