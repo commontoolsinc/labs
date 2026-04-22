@@ -483,7 +483,7 @@ export class ContextualFlowControl {
       }
       if (isRecord(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];
-        const subSchemaHashes: string[] = [];
+        const subSchemaHashes = new Set<string>();
         const options = (cursor.anyOf && cursor.oneOf)
           ? [...cursor.anyOf, ...cursor.oneOf]
           : cursor.anyOf ?? cursor.oneOf ?? [];
@@ -509,12 +509,11 @@ export class ContextualFlowControl {
             // Safe against non-JSON-compatible `FabricValue`s (e.g.
             // `FabricEpochNsec`, `FabricBytes`, `FabricHash`) that may
             // appear in schema `default` fields.
-            const subSchemaHash = internSchemaAsHashString(subSchema);
-            if (subSchemaHashes.includes(subSchemaHash)) {
-              continue;
+            const sizeBefore = subSchemaHashes.size;
+            subSchemaHashes.add(internSchemaAsHashString(subSchema));
+            if (subSchemaHashes.size !== sizeBefore) {
+              subSchemas.push(subSchema as JSONSchema);
             }
-            subSchemas.push(subSchema as JSONSchema);
-            subSchemaHashes.push(subSchemaHash);
           }
         }
         // Only update cursor from subSchemas if the isTrueSchema branch
