@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
+import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -862,6 +863,171 @@ describe("scheduler", () => {
     // Still should not have run
     expect(actionRunCount).toBe(1);
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
+  });
+
+  it("should not react to stored CFC metadata updates read through verifier helpers", async () => {
+    const sourceCell = runtime.getCell<{ secret: string }>(
+      space,
+      "source-cell-for-cfc-metadata-reactivity-test",
+      {
+        type: "object",
+        properties: {
+          secret: { type: "string" },
+        },
+        required: ["secret"],
+      },
+      tx,
+    );
+    sourceCell.set({ secret: "seed" });
+
+    const resultCell = runtime.getCell<{ count: number; applies: boolean }>(
+      space,
+      "result-cell-for-cfc-metadata-reactivity-test",
+      undefined,
+      tx,
+    );
+    resultCell.set({ count: 0, applies: false });
+    tx.commit();
+    tx = runtime.edit();
+
+    const secretLink = sourceCell.key("secret").getAsNormalizedFullLink();
+
+    let actionRunCount = 0;
+    let lastApplies = false;
+
+    const cfcMetadataReadAction: Action = (actionTx) => {
+      actionRunCount++;
+      lastApplies = storedCfcMetadataAppliesToPath(actionTx, secretLink);
+      resultCell.withTx(actionTx).set({
+        count: actionRunCount,
+        applies: lastApplies,
+      });
+    };
+
+    runtime.scheduler.subscribe(
+      cfcMetadataReadAction,
+      { reads: [], shallowReads: [], writes: [] },
+      {},
+    );
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(1);
+    expect(lastApplies).toBe(false);
+    expect(resultCell.get()).toEqual({ count: 1, applies: false });
+
+    tx.writeOrThrow(
+      {
+        space: secretLink.space,
+        id: secretLink.id,
+        type: secretLink.type as "application/json",
+        path: ["cfc"],
+      },
+      {
+        version: 1,
+        schemaHash: "cfc-reactivity-test-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["secret"],
+            label: { confidentiality: ["secret"] },
+          }],
+        },
+      },
+    );
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(1);
+    expect(resultCell.get()).toEqual({ count: 1, applies: false });
+
+    const verifyTx = runtime.edit();
+    expect(storedCfcMetadataAppliesToPath(verifyTx, secretLink)).toBe(true);
+    await verifyTx.commit();
+  });
+
+  it("should react to direct reads of stored CFC metadata when the cfc field changes", async () => {
+    const sourceCell = runtime.getCell<{ secret: string }>(
+      space,
+      "source-cell-for-direct-cfc-read-reactivity-test",
+      {
+        type: "object",
+        properties: {
+          secret: { type: "string" },
+        },
+        required: ["secret"],
+      },
+      tx,
+    );
+    sourceCell.set({ secret: "seed" });
+
+    const resultCell = runtime.getCell<{ count: number; version: number }>(
+      space,
+      "result-cell-for-direct-cfc-read-reactivity-test",
+      undefined,
+      tx,
+    );
+    resultCell.set({ count: 0, version: 0 });
+    tx.commit();
+    tx = runtime.edit();
+
+    const sourceLink = sourceCell.getAsNormalizedFullLink();
+
+    let actionRunCount = 0;
+    let lastVersion = 0;
+
+    const directCfcReadAction: Action = (actionTx) => {
+      actionRunCount++;
+      const cfcDocument = actionTx.readOrThrow({
+        space: sourceLink.space,
+        id: sourceLink.id,
+        type: sourceLink.type as "application/json",
+        path: ["cfc"],
+      }) as { version?: number } | undefined;
+      lastVersion = cfcDocument?.version ?? 0;
+      resultCell.withTx(actionTx).set({
+        count: actionRunCount,
+        version: lastVersion,
+      });
+    };
+
+    runtime.scheduler.subscribe(
+      directCfcReadAction,
+      { reads: [], shallowReads: [], writes: [] },
+      {},
+    );
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(1);
+    expect(lastVersion).toBe(0);
+    expect(resultCell.get()).toEqual({ count: 1, version: 0 });
+
+    tx.writeOrThrow(
+      {
+        space: sourceLink.space,
+        id: sourceLink.id,
+        type: sourceLink.type as "application/json",
+        path: ["cfc"],
+      },
+      {
+        version: 1,
+        schemaHash: "cfc-direct-read-reactivity-test-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["secret"],
+            label: { confidentiality: ["secret"] },
+          }],
+        },
+      },
+    );
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(2);
+    expect(lastVersion).toBe(1);
+    expect(resultCell.get()).toEqual({ count: 2, version: 1 });
   });
 
   it("should track potentialWrites via Cell.set on nested path", async () => {
