@@ -35,8 +35,12 @@ export const CategoryRowItem = pattern<
         <div
           style={{
             ...styles.root,
-            color: isActive ? "#1ea7fd" : "#2e3438",
-            backgroundColor: isActive ? "#e8f4fd" : "transparent",
+            color: isActive
+              ? "var(--cf-theme-color-primary, #1ea7fd)"
+              : "var(--cf-theme-color-text, #2e3438)",
+            backgroundColor: isActive
+              ? "var(--cf-theme-color-primary-light, #e8f4fd)"
+              : "transparent",
             fontWeight: isActive ? "600" : "400",
           }}
           onClick={() => onSelect.send({ id: item.id })}
