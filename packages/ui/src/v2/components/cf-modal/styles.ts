@@ -19,7 +19,23 @@ export const modalStyles = css`
     --cf-modal-color-text-muted: var(--cf-theme-color-text-muted, #6b7280);
     --cf-modal-color-primary: var(--cf-theme-color-primary, #3b82f6);
     --cf-modal-animation-duration: var(--cf-theme-animation-duration, 200ms);
-    --cf-modal-border-radius: var(--cf-theme-border-radius, 12px);
+    --cf-modal-border-radius: var(
+      --cf-surface-overlay-border-radius,
+      var(--cf-theme-border-radius, 0.5rem)
+    );
+    --cf-modal-border: var(
+      --cf-surface-overlay-border,
+      1px solid var(--cf-theme-color-border, #e5e7eb)
+    );
+    --cf-modal-padding: var(--cf-surface-overlay-padding, 16px 20px);
+    --cf-modal-box-shadow: var(
+      --cf-surface-overlay-box-shadow,
+      0 25px 50px -12px rgba(0, 0, 0, 0.25)
+    );
+    --cf-modal-sheet-box-shadow: var(
+      --cf-surface-overlay-sheet-box-shadow,
+      0 -4px 24px rgba(0, 0, 0, 0.15)
+    );
 
     /* CSS custom properties for customization */
     --_backdrop-color: var(--cf-modal-backdrop-color, rgba(0, 0, 0, 0.5));
@@ -27,7 +43,13 @@ export const modalStyles = css`
       --cf-modal-backdrop-blur,
       var(--cf-backdrop-blur-md, 8px)
     );
-    --_border-radius: var(--cf-modal-border-radius, 12px);
+    --_border-radius: var(
+      --cf-modal-border-radius,
+      var(
+        --cf-surface-overlay-border-radius,
+        var(--cf-theme-border-radius, 0.5rem)
+      )
+    );
     --_width-sm: var(--cf-modal-width-sm, 320px);
     --_width-md: var(--cf-modal-width-md, 500px);
     --_width-lg: var(--cf-modal-width-lg, 700px);
@@ -66,15 +88,19 @@ export const modalStyles = css`
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
+    padding: var(--cf-spacing-4, 16px);
   }
 
   /* ===== Dialog ===== */
   .dialog {
     position: relative;
-    background: var(--cf-modal-color-background, white);
+    background: var(
+      --cf-surface-overlay-background,
+      var(--cf-modal-color-background, white)
+    );
+    border: var(--cf-modal-border);
     border-radius: var(--_border-radius);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--cf-modal-box-shadow);
     max-height: var(--_max-height);
     overflow: hidden;
     display: flex;
@@ -115,7 +141,7 @@ export const modalStyles = css`
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 16px 20px;
+      padding: var(--cf-modal-padding);
       border-bottom: 1px solid var(--cf-modal-color-border, #e5e7eb);
       background: var(--cf-modal-color-surface, #fafafa);
       flex-shrink: 0;
@@ -164,7 +190,7 @@ export const modalStyles = css`
 
     /* ===== Content ===== */
     .content {
-      padding: 20px;
+      padding: var(--cf-modal-padding);
       overflow: auto;
       flex: 1;
     }
@@ -174,7 +200,7 @@ export const modalStyles = css`
       display: flex;
       justify-content: flex-end;
       gap: 12px;
-      padding: 16px 20px;
+      padding: var(--cf-modal-padding);
       border-top: 1px solid var(--cf-modal-color-border, #e5e7eb);
       background: var(--cf-modal-color-surface, #fafafa);
       flex-shrink: 0;
@@ -225,7 +251,7 @@ export const modalStyles = css`
     :host([presentation="sheet"]) .dialog {
       width: 100%;
       border-radius: var(--_border-radius) var(--_border-radius) 0 0;
-      box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
+      box-shadow: var(--cf-modal-sheet-box-shadow);
 
       /* Sheet animation: slide up instead of scale */
       transform: translateY(100%);

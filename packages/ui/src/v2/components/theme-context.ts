@@ -734,6 +734,14 @@ export function applyThemeToElement(
 }
 
 /**
- * Context for sharing theme across Common Fabric components
+ * Context for sharing theme across Common Fabric components.
+ *
+ * Default theme integration uses ambient CSS custom properties from `cf-theme`.
+ * Most components should read `var(--cf-theme-*)` in CSS with sane fallbacks
+ * rather than consuming this context directly.
+ *
+ * Only consume `cfThemeContext` when the JavaScript theme object is actually
+ * needed for runtime logic, derived values, or calling `applyThemeToElement()`
+ * on dynamically created elements.
  */
 export const cfThemeContext = createContext<CFTheme>("cf-theme");
