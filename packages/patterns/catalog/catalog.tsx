@@ -197,8 +197,9 @@ export default pattern<CatalogInput, CatalogOutput>(
                 <div
                   style={{
                     flexShrink: "0",
-                    borderRight: "1px solid #e6e9ed",
-                    backgroundColor: "#f6f7f9",
+                    borderRight:
+                      "1px solid var(--cf-theme-color-border, #e6e9ed)",
+                    backgroundColor: "var(--cf-theme-color-surface, #f6f7f9)",
                     padding: "12px",
                   }}
                 >
