@@ -2,6 +2,7 @@ import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { internSchemaAsHashString } from "@commonfabric/data-model/schema-hash";
 import type { CellKind, JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
@@ -482,7 +483,7 @@ export class ContextualFlowControl {
       }
       if (isRecord(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];
-        const subSchemaStrings: string[] = [];
+        const subSchemaHashes: string[] = [];
         const options = (cursor.anyOf && cursor.oneOf)
           ? [...cursor.anyOf, ...cursor.oneOf]
           : cursor.anyOf ?? cursor.oneOf ?? [];
@@ -505,12 +506,15 @@ export class ContextualFlowControl {
             cursor = true;
             break;
           } else {
-            const subSchemaString = JSON.stringify(subSchema);
-            if (subSchemaStrings.includes(subSchemaString)) {
+            // Safe against non-JSON-compatible `FabricValue`s (e.g.
+            // `FabricEpochNsec`, `FabricBytes`, `FabricHash`) that may
+            // appear in schema `default` fields.
+            const subSchemaHash = internSchemaAsHashString(subSchema);
+            if (subSchemaHashes.includes(subSchemaHash)) {
               continue;
             }
             subSchemas.push(subSchema as JSONSchema);
-            subSchemaStrings.push(subSchemaString);
+            subSchemaHashes.push(subSchemaHash);
           }
         }
         // Only update cursor from subSchemas if the isTrueSchema branch
