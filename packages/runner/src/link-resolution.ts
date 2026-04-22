@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { LINK_V1_TAG, type LinkV1Inner } from "./sigil-types.ts";
 import {
   type CellLink,
@@ -197,6 +198,16 @@ export function resolveLink(
   }
 
   const result = { ...link } satisfies NormalizedFullLink;
+
+  // Intern the schema at this single link-resolution exit so downstream
+  // consumers see an identity-canonical, deep-frozen schema reference.
+  // `getSchemaAtPath` (called within the loop above) can emit freshly-
+  // constructed schemas; interning here collapses structurally-equal
+  // outputs to the same `===` reference across calls, letting
+  // identity-based caches downstream hit rather than miss.
+  if (result.schema !== undefined) {
+    result.schema = internSchema(result.schema);
+  }
 
   // Remove overwrite field, i.e. when the last followed link was a write
   // redirect. The idea is that this is a link pointing to the final value, it
