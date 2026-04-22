@@ -48,7 +48,9 @@ export const LLMToolSchema = internSchema(
     type: "object",
     properties: {
       description: { type: "string" },
-      inputSchema: { type: "object" },
+      inputSchema: {
+        anyOf: [{ type: "object" }, { type: "boolean" }],
+      },
       handler: {
         // Deliberately no schema, so it gets populated from the handler
         asCell: ["stream"],
@@ -56,8 +58,12 @@ export const LLMToolSchema = internSchema(
       pattern: {
         type: "object",
         properties: {
-          argumentSchema: { type: "object" },
-          resultSchema: { type: "object" },
+          argumentSchema: {
+            anyOf: [{ type: "object" }, { type: "boolean" }],
+          },
+          resultSchema: {
+            anyOf: [{ type: "object" }, { type: "boolean" }],
+          },
           nodes: { type: "array", items: { type: "object" } },
           program: { type: "object" },
           initial: { type: "object" },

@@ -1720,6 +1720,12 @@ export type SubAgentToolParams =
   & Omit<BuiltInGenerateObjectParams, "schema">
   & { schema?: never };
 
+export type SubAgentToolResultSchema<T> =
+  | JSONSchema
+  | ((
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+  ) => Opaque<JSONSchema>);
+
 export type SubAgentToolFunction = <
   T,
   E extends object = Record<PropertyKey, never>,
@@ -1728,7 +1734,7 @@ export type SubAgentToolFunction = <
     input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
   ) => Opaque<SubAgentToolParams>,
   argumentSchema: JSONSchema,
-  resultSchema: JSONSchema,
+  resultSchema: SubAgentToolResultSchema<T>,
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
 

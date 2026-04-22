@@ -450,28 +450,37 @@ export const subAgentTool = (<
     input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
   ) => Opaque<Record<string, unknown>>,
   argumentSchema: JSONSchema,
-  resultSchema: JSONSchema,
+  resultSchema:
+    | JSONSchema
+    | ((
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    ) => Opaque<JSONSchema>),
   extraParams?: Opaque<E>,
 ): PatternToolResult<E> => {
+  const hasDynamicResultSchema = typeof resultSchema === "function";
   const resolvedPattern = pattern<T, unknown>(
     (input) => {
-      const params = buildParams(
-        input as OpaqueRef<RequireDefaults<T>> & {
-          [SELF]: OpaqueRef<any>;
-        },
-      ) as BuiltInGenerateObjectParams;
+      const typedInput = input as OpaqueRef<RequireDefaults<T>> & {
+        [SELF]: OpaqueRef<any>;
+      };
+      const params = buildParams(typedInput) as BuiltInGenerateObjectParams;
+      const resolvedResultSchema = hasDynamicResultSchema
+        ? (resultSchema as (
+          input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+        ) => Opaque<JSONSchema>)(typedInput)
+        : resultSchema;
       return generateObject({
         ...params,
-        schema: resultSchema,
+        schema: resolvedResultSchema,
       } as BuiltInGenerateObjectParams).result;
     },
     argumentSchema,
-    resultSchema,
+    hasDynamicResultSchema ? true : resultSchema,
   );
 
   return {
     pattern: resolvedPattern,
     extraParams: (extraParams ?? {}) as E,
-    useResultSchemaForObservation: true,
+    useResultSchemaForObservation: !hasDynamicResultSchema,
   };
 }) as SubAgentToolFunction;
