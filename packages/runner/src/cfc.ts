@@ -482,8 +482,7 @@ export class ContextualFlowControl {
         }
       }
       if (isRecord(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
-        const subSchemas: JSONSchema[] = [];
-        const seen = new Set<JSONSchema>();
+        const subSchemas = new Set<JSONSchema>();
         const options = (cursor.anyOf && cursor.oneOf)
           ? [...cursor.anyOf, ...cursor.oneOf]
           : cursor.anyOf ?? cursor.oneOf ?? [];
@@ -512,23 +511,19 @@ export class ContextualFlowControl {
             // `Set<JSONSchema>`, and correctly handles non-JSON-compatible
             // `FabricValue`s (e.g. `FabricEpochNsec`, `FabricBytes`,
             // `FabricHash`) that may appear in schema `default` fields.
-            const interned = internSchema(subSchema as JSONSchema);
-            const sizeBefore = seen.size;
-            seen.add(interned);
-            if (seen.size !== sizeBefore) {
-              subSchemas.push(interned);
-            }
+            subSchemas.add(internSchema(subSchema as JSONSchema));
           }
         }
         // Only update cursor from subSchemas if the isTrueSchema branch
         // didn't already set cursor = true and break out of the loop.
         if (cursor !== true) {
-          if (subSchemas.length === 0) {
+          const subSchemaArr = [...subSchemas];
+          if (subSchemaArr.length === 0) {
             cursor = false;
-          } else if (subSchemas.length === 1) {
-            cursor = subSchemas[0];
+          } else if (subSchemaArr.length === 1) {
+            cursor = subSchemaArr[0];
           } else {
-            cursor = { "anyOf": subSchemas };
+            cursor = { "anyOf": subSchemaArr };
           }
         }
         break;
