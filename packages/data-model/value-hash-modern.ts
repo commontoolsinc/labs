@@ -422,16 +422,6 @@ function feedPlainObject(
   value: Record<string, unknown>,
 ): void {
   const keys = Object.keys(value).sort(compareStrings);
-  // Sort keys by UTF-8 byte comparison.
-  keys.sort((a, b) => {
-    const aBytes = encoder.encode(a);
-    const bBytes = encoder.encode(b);
-    const minLen = Math.min(aBytes.length, bBytes.length);
-    for (let j = 0; j < minLen; j++) {
-      if (aBytes[j] !== bBytes[j]) return aBytes[j] - bBytes[j];
-    }
-    return aBytes.length - bBytes.length;
-  });
 
   hasher.update(TAG_OBJECT_BYTES);
   for (const key of keys) {
