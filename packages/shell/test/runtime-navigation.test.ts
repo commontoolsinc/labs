@@ -29,8 +29,14 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   }
 }
 
+async function flushMicrotasks(count = 4): Promise<void> {
+  for (let i = 0; i < count; i += 1) {
+    await Promise.resolve();
+  }
+}
+
 describe("RuntimeInternals navigation", () => {
-  it("registers same-space navigations when the active view is keyed by DID", async () => {
+  it("waits for same-space registration and convergence before navigating", async () => {
     const env = globalThis as typeof globalThis & {
       $API_URL?: string;
       $ENVIRONMENT?: string;
@@ -76,8 +82,12 @@ describe("RuntimeInternals navigation", () => {
     );
 
     let registrations = 0;
+    let releaseRegistration: (() => void) | undefined;
     runtime.registerNavigatedPiece = () => {
       registrations += 1;
+      return new Promise<void>((resolve) => {
+        releaseRegistration = resolve;
+      });
     };
 
     let navigation:
@@ -99,11 +109,18 @@ describe("RuntimeInternals navigation", () => {
         },
       });
 
-      await Promise.resolve();
+      await flushMicrotasks();
 
       expect(registrations).toBe(1);
       expect(client.idleCalls).toBe(0);
       expect(client.syncedCalls).toBe(0);
+      expect(navigation).toBeUndefined();
+
+      releaseRegistration?.();
+      await flushMicrotasks();
+
+      expect(client.idleCalls).toBe(2);
+      expect(client.syncedCalls).toBe(1);
       expect(navigation).toEqual({
         spaceDid,
         pieceId: "piece-123",
@@ -191,10 +208,9 @@ describe("RuntimeInternals navigation", () => {
         },
       });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushMicrotasks();
 
-      expect(client.idleCalls).toBe(1);
+      expect(client.idleCalls).toBe(2);
       expect(client.syncedCalls).toBe(1);
       expect(navigation).toEqual({
         spaceDid: nextSpace,

@@ -246,6 +246,13 @@ export class RuntimeInternals extends EventTarget {
     }
   }
 
+  async #settleNavigationSideEffects(): Promise<void> {
+    this.#check();
+    await this.#client.idle();
+    await this.#client.synced();
+    await this.#client.idle();
+  }
+
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
     const { metadata, method, args } = e;
     if (metadata?.pieceId) {
@@ -266,10 +273,10 @@ export class RuntimeInternals extends EventTarget {
       const sameSpace = cell.space() === this.#space;
 
       if (sameSpace) {
-        void this.registerNavigatedPiece(cell);
+        await this.registerNavigatedPiece(cell);
+        await this.#settleNavigationSideEffects();
       } else {
-        await this.#client.idle();
-        await this.#client.synced();
+        await this.#settleNavigationSideEffects();
       }
 
       if (sameSpace && this.#spaceName) {
