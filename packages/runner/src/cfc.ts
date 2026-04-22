@@ -2,6 +2,7 @@ import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { CellKind, JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
@@ -481,8 +482,7 @@ export class ContextualFlowControl {
         }
       }
       if (isRecord(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
-        const subSchemas: JSONSchema[] = [];
-        const subSchemaStrings: string[] = [];
+        const subSchemas = new Set<JSONSchema>();
         const options = (cursor.anyOf && cursor.oneOf)
           ? [...cursor.anyOf, ...cursor.oneOf]
           : cursor.anyOf ?? cursor.oneOf ?? [];
@@ -505,23 +505,25 @@ export class ContextualFlowControl {
             cursor = true;
             break;
           } else {
-            const subSchemaString = JSON.stringify(subSchema);
-            if (subSchemaStrings.includes(subSchemaString)) {
-              continue;
-            }
-            subSchemas.push(subSchema as JSONSchema);
-            subSchemaStrings.push(subSchemaString);
+            // `internSchema()` returns the canonical (identity-unique)
+            // schema object, so structurally-equal schemas collapse to
+            // the same reference. That gives identity-based dedup via
+            // `Set<JSONSchema>`, and correctly handles non-JSON-compatible
+            // `FabricValue`s (e.g. `FabricEpochNsec`, `FabricBytes`,
+            // `FabricHash`) that may appear in schema `default` fields.
+            subSchemas.add(internSchema(subSchema as JSONSchema));
           }
         }
         // Only update cursor from subSchemas if the isTrueSchema branch
         // didn't already set cursor = true and break out of the loop.
         if (cursor !== true) {
-          if (subSchemas.length === 0) {
+          const subSchemaArr = [...subSchemas];
+          if (subSchemaArr.length === 0) {
             cursor = false;
-          } else if (subSchemas.length === 1) {
-            cursor = subSchemas[0];
+          } else if (subSchemaArr.length === 1) {
+            cursor = subSchemaArr[0];
           } else {
-            cursor = { "anyOf": subSchemas };
+            cursor = { "anyOf": subSchemaArr };
           }
         }
         break;

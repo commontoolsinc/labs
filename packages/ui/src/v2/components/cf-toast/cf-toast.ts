@@ -27,6 +27,22 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CFToast extends BaseElement {
   static override styles = css`
     :host {
+      --cf-toast-border-radius: var(
+        --cf-surface-transient-border-radius,
+        var(--cf-theme-border-radius, 0.5rem)
+      );
+      --cf-toast-border: var(
+        --cf-surface-transient-border,
+        1px solid var(--cf-theme-color-border, #e2e8f0)
+      );
+      --cf-toast-padding: var(
+        --cf-surface-transient-padding,
+        0.625rem 0.875rem
+      );
+      --cf-toast-box-shadow: var(
+        --cf-surface-transient-box-shadow,
+        0 4px 16px rgba(0, 0, 0, 0.08)
+      );
       display: block;
     }
 
@@ -40,17 +56,14 @@ export class CFToast extends BaseElement {
       align-items: center;
       gap: 0.5rem;
       padding: var(--cf-toast-padding, 0.625rem 0.875rem);
-      border-radius: var(
-        --cf-toast-border-radius,
-        var(--cf-theme-border-radius, 0.5rem)
-      );
+      border-radius: var(--cf-toast-border-radius);
       max-width: var(--cf-toast-max-width, 420px);
       min-width: var(--cf-toast-min-width, 240px);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+      box-shadow: var(--cf-toast-box-shadow);
       backdrop-filter: blur(var(--cf-toast-backdrop-blur, 8px));
       font-size: 0.875rem;
       font-family: inherit;
-      border: 1px solid transparent;
+      border: var(--cf-toast-border);
     }
 
     /* Default variant */
@@ -58,11 +71,7 @@ export class CFToast extends BaseElement {
     :host(:not([variant])) .toast {
       background: var(
         --cf-toast-background,
-        color-mix(
-          in srgb,
-          var(--cf-theme-color-surface, #f8fafc) 85%,
-          transparent
-        )
+        var(--cf-surface-transient-background)
       );
       color: var(--cf-toast-color, var(--cf-theme-color-text, #0f172a));
       border-color: var(
