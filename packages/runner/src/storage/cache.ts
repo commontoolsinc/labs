@@ -40,7 +40,6 @@ import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   REJECTING_SELECTOR,
   schemaWithProperties,
-  toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
@@ -488,22 +487,20 @@ export class SelectorTracker<T = Result<Unit, Error>> {
             newSchemaObj && sortedSubSchemaObj &&
             newSchemaRefs.size == 0
           ) {
-            // `{ ...x }` produces fresh (non-frozen) objects, but
-            // `getStandardSchema` only populates its cache for
-            // deep-frozen inputs. Freeze these locally-owned spreads
-            // in place (`canShare: true`) so repeat calls across
-            // reactive updates hit the cache instead of re-traversing.
+            // `{ ...x }` produces fresh (non-frozen) objects that would
+            // miss `getStandardSchema`'s `isDeepFrozen`-gated cache on
+            // every call. Intern the spreads so structurally-equal
+            // variants collapse to the same canonical reference across
+            // reactive updates — `internSchema` deep-freezes in place
+            // (via `toDeepFrozenSchema(_, true)`) and then returns the
+            // canonical entry from the intern cache, so the downstream
+            // `standardizedSchemaCache` identity-key actually hits on
+            // repeat calls with structurally-equal inputs.
             const { $defs: _defs1, ...newSchemaNoDefsSpread } = newSchemaObj;
             const { $defs: _defs2, ...subSchemaNoDefsSpread } =
               sortedSubSchemaObj;
-            const newSchemaNoDefs = toDeepFrozenSchema(
-              newSchemaNoDefsSpread,
-              true,
-            );
-            const subSchemaNoDefs = toDeepFrozenSchema(
-              subSchemaNoDefsSpread,
-              true,
-            );
+            const newSchemaNoDefs = internSchema(newSchemaNoDefsSpread);
+            const subSchemaNoDefs = internSchema(subSchemaNoDefsSpread);
             if (
               hashSchema(
                 SelectorTracker.getStandardSchema(subSchemaNoDefs),
