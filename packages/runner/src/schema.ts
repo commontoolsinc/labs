@@ -218,7 +218,10 @@ function _schemaHasIfcUncached(
   return false;
 }
 
-const _filterAsCellCache = new WeakMap<JSONSchemaObj, JSONSchema | "<undefined>">();
+const _filterAsCellCache = new WeakMap<
+  JSONSchemaObj,
+  JSONSchema | "<undefined>"
+>();
 
 function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
   if (!isNontrivialSchema(schema)) {
