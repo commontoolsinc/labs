@@ -9,12 +9,54 @@ import type {
   SandboxShellRequest,
 } from "./types.ts";
 
-export const DEFAULT_DOCKER_RUNSC_IMAGE = "alpine:3.20";
+export const DEFAULT_DOCKER_RUNSC_IMAGE =
+  "us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest";
 export const DEFAULT_DOCKER_RUNTIME_NAME = "runsc-cfc";
 export const DEFAULT_DOCKER_BINARY = "docker";
 export const DEFAULT_WORKSPACE_MOUNT_PATH = "/workspace";
 export const DEFAULT_SANDBOX_SHELL = "/bin/sh";
 export const DEFAULT_DOCKER_NETWORK_MODE = "none" as const;
+
+const resolveDefaultContainerUser = (): string | undefined => {
+  if (Deno.build.os === "windows") {
+    return undefined;
+  }
+  try {
+    const uidFromEnv = Deno.env.get("UID");
+    const gidFromEnv = Deno.env.get("GID");
+    if (uidFromEnv !== undefined && gidFromEnv !== undefined) {
+      return `${uidFromEnv}:${gidFromEnv}`;
+    }
+  } catch {}
+  try {
+    const uid = Deno.uid();
+    const gid = Deno.gid();
+    return `${uid}:${gid}`;
+  } catch {
+    try {
+      const uidResult = new Deno.Command("id", {
+        args: ["-u"],
+        stdout: "piped",
+        stderr: "null",
+      }).outputSync();
+      const gidResult = new Deno.Command("id", {
+        args: ["-g"],
+        stdout: "piped",
+        stderr: "null",
+      }).outputSync();
+      if (uidResult.success && gidResult.success) {
+        const uid = new TextDecoder().decode(uidResult.stdout).trim();
+        const gid = new TextDecoder().decode(gidResult.stdout).trim();
+        if (uid.length > 0 && gid.length > 0) {
+          return `${uid}:${gid}`;
+        }
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+};
 
 const normalizeWorkspacePath = (path: string): string => {
   const normalized = normalize(path);
@@ -32,18 +74,22 @@ const isWithinRoot = (root: string, path: string): boolean => {
 
 export const resolveDockerRunscSandboxConfig = (
   options: ResolveDockerRunscSandboxConfigOptions,
-): DockerRunscSandboxConfig => ({
-  kind: "docker-runsc-cfc",
-  dockerBinary: options.dockerBinary ?? DEFAULT_DOCKER_BINARY,
-  runtimeName: options.runtimeName ?? DEFAULT_DOCKER_RUNTIME_NAME,
-  image: options.image ?? DEFAULT_DOCKER_RUNSC_IMAGE,
-  workspaceHostPath: options.workspaceHostPath,
-  workspaceMountPath: options.workspaceMountPath ??
-    DEFAULT_WORKSPACE_MOUNT_PATH,
-  shellPath: options.shellPath ?? DEFAULT_SANDBOX_SHELL,
-  dockerNetworkMode: options.dockerNetworkMode ?? DEFAULT_DOCKER_NETWORK_MODE,
-  extraDockerArgs: options.extraDockerArgs ?? [],
-});
+): DockerRunscSandboxConfig => {
+  const containerUser = options.containerUser ?? resolveDefaultContainerUser();
+  return {
+    kind: "docker-runsc-cfc",
+    dockerBinary: options.dockerBinary ?? DEFAULT_DOCKER_BINARY,
+    runtimeName: options.runtimeName ?? DEFAULT_DOCKER_RUNTIME_NAME,
+    image: options.image ?? DEFAULT_DOCKER_RUNSC_IMAGE,
+    ...(containerUser !== undefined ? { containerUser } : {}),
+    workspaceHostPath: options.workspaceHostPath,
+    workspaceMountPath: options.workspaceMountPath ??
+      DEFAULT_WORKSPACE_MOUNT_PATH,
+    shellPath: options.shellPath ?? DEFAULT_SANDBOX_SHELL,
+    dockerNetworkMode: options.dockerNetworkMode ?? DEFAULT_DOCKER_NETWORK_MODE,
+    extraDockerArgs: options.extraDockerArgs ?? [],
+  };
+};
 
 export class DockerRunscSandboxRuntime implements SandboxRuntime {
   readonly kind = "docker-runsc-cfc" as const;
@@ -80,6 +126,9 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       this.config.runtimeName,
       "--network",
       this.config.dockerNetworkMode,
+      ...(this.config.containerUser !== undefined
+        ? ["--user", this.config.containerUser]
+        : []),
       "--mount",
       `type=bind,src=${this.config.workspaceHostPath},dst=${this.config.workspaceMountPath}`,
       "-w",
