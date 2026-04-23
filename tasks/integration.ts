@@ -198,6 +198,9 @@ async function runPatternTests(
   const testFiles = await findPatternTests(rootDir, patternsDir, filter);
   const memoryVersion = Deno.env.get("CF_TEST_MEMORY_VERSION") ??
     Deno.env.get("CF_INTEGRATION_MEMORY_VERSION");
+  const phaseSummaryEnabled = ["1", "true", "yes", "on"].includes(
+    (Deno.env.get("CF_INTEGRATION_PHASE_SUMMARY") ?? "").toLowerCase(),
+  );
 
   if (testFiles.length === 0) {
     console.log("No pattern test files found.");
@@ -233,6 +236,7 @@ async function runPatternTests(
             "180000",
             "--root",
             patternsDir,
+            ...(phaseSummaryEnabled ? ["--phase-summary"] : []),
             ...(memoryVersion === "v1" || memoryVersion === "v2"
               ? ["--memory-version", memoryVersion]
               : []),
