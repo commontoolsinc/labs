@@ -52,52 +52,17 @@ export type ToolsRecord = Record<
 // Union type for tools input
 type ToolsInput = ToolsChipTool[] | ToolsRecord;
 
-// JSON Schema for tools array (used when binding CellHandle)
+// Keep the binding schema intentionally permissive so runtime-generated tool
+// catalogs such as llmDialog.flattenedTools are preserved for display.
 const ToolsArraySchema = {
   anyOf: [
     {
       type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          description: { type: "string" },
-          schema: {
-            type: "object",
-            properties: { "description": { type: "string" } },
-          },
-        },
-        required: ["name"],
-      },
+      items: true,
     },
     {
       type: "object",
-      additionalProperties: {
-        type: "object",
-        properties: {
-          description: { type: "string" },
-          handler: {
-            type: "object",
-            properties: {
-              "description": { type: "string" },
-              "argumentSchema": {
-                type: "object",
-                properties: { "description": { type: "string" } },
-              },
-            },
-          },
-          pattern: {
-            type: "object",
-            properties: {
-              "description": { type: "string" },
-              "argumentSchema": {
-                type: "object",
-                properties: { "description": { type: "string" } },
-              },
-            },
-          },
-        },
-      },
+      additionalProperties: true,
     },
   ],
 } as const satisfies JSONSchema;
