@@ -169,6 +169,23 @@ Deno.test("read_file tool rejects non-integer maxBytes", async () => {
   assertEquals(sandbox.calls, []);
 });
 
+Deno.test("read_file tool rejects missing files instead of returning empty content", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "",
+    stderr: "file not found: /workspace/notes/missing.txt",
+    exitCode: 1,
+  }]);
+
+  await assertRejects(
+    () =>
+      readFileTool.invoke(createContext(sandbox), {
+        path: "notes/missing.txt",
+      }),
+    Error,
+    "read_file failed for /workspace/notes/missing.txt: file not found: /workspace/notes/missing.txt",
+  );
+});
+
 Deno.test("write_file tool supports append mode and passes content over stdin", async () => {
   const sandbox = new FakeSandboxRuntime();
   const output = await writeFileTool.invoke(createContext(sandbox), {
@@ -258,4 +275,22 @@ Deno.test("write_file uses the cwd established by an earlier bash call", async (
       stdinText: "line one\n",
     },
   });
+});
+
+Deno.test("write_file tool rejects nonzero shell exits", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "",
+    stderr: "permission denied",
+    exitCode: 13,
+  }]);
+
+  await assertRejects(
+    () =>
+      writeFileTool.invoke(createContext(sandbox), {
+        path: "notes/log.txt",
+        content: "line one\n",
+      }),
+    Error,
+    "write_file failed for /workspace/notes/log.txt: permission denied",
+  );
 });

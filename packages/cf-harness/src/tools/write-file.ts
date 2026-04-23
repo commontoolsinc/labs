@@ -60,7 +60,7 @@ export const writeFileTool: HarnessToolDefinition<
   async invoke(context, input) {
     const resolvedPath = context.resolvePath(input.path);
     const mode = input.mode ?? "replace";
-    await context.sandbox.runShell({
+    const result = await context.sandbox.runShell({
       command: [
         "set -eu",
         'path="$1"',
@@ -85,6 +85,11 @@ export const writeFileTool: HarnessToolDefinition<
       args: [resolvedPath, mode, String(input.createParents ?? false)],
       stdinText: input.content,
     });
+    if (result.exitCode !== 0) {
+      const detail = result.stderr.trim() || result.stdout.trim() ||
+        `shell exited with code ${result.exitCode}`;
+      throw new Error(`write_file failed for ${resolvedPath}: ${detail}`);
+    }
     return {
       outputId: context.nextOutputId("write_file"),
       path: resolvedPath,

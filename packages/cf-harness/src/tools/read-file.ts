@@ -73,6 +73,11 @@ export const readFileTool: HarnessToolDefinition<
         input.maxBytes !== undefined ? String(input.maxBytes) : "",
       ],
     });
+    if (result.exitCode !== 0) {
+      const detail = result.stderr.trim() || result.stdout.trim() ||
+        `shell exited with code ${result.exitCode}`;
+      throw new Error(`read_file failed for ${resolvedPath}: ${detail}`);
+    }
     return {
       outputId: context.nextOutputId("read_file"),
       path: resolvedPath,
