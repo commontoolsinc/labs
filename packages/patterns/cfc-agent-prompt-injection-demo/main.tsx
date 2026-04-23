@@ -1,10 +1,12 @@
 import {
   type BuiltInLLMMessage,
+  type BuiltInLLMTool,
   Cell,
   computed,
   type Confidential,
   generateObject,
   handler,
+  type ImmutableJSONValue,
   lift,
   llmDialog,
   NAME,
@@ -16,6 +18,7 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
+import type { JSONSchema } from "commonfabric";
 
 const PROMPT_INFLUENCE_ATOM = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
@@ -48,8 +51,8 @@ type DemoChatInput = {
   title: string;
   subtitle: string;
   system: string;
-  tools: any;
-  observationMaxConfidentiality?: readonly any[];
+  tools: Record<string, DemoTool>;
+  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
 };
 
 type DemoChatOutput = {
@@ -71,6 +74,10 @@ type SendMailArgs = {
 type AssessmentResult = {
   approved: boolean;
   summary: string;
+};
+
+type DemoTool = BuiltInLLMTool & {
+  inputSchema?: JSONSchema;
 };
 
 type DisclosureContentArgument = {
@@ -353,22 +360,24 @@ const buildReadRawBriefingTool = (
   title: string,
   source: string,
   body: any,
-) => ({
-  description:
-    "Read the partner briefing. No input. Returns { title, source, analystHint, body }. If your observation ceiling is too low, body may be returned as an opaque link instead of raw text.",
-  inputSchema: EMPTY_TOOL_INPUT_SCHEMA,
-  handler: readRawBriefing({ title, source, body }),
-});
+) =>
+  ({
+    description:
+      "Read the partner briefing. No input. Returns { title, source, analystHint, body }. If your observation ceiling is too low, body may be returned as an opaque link instead of raw text.",
+    inputSchema: EMPTY_TOOL_INPUT_SCHEMA,
+    handler: readRawBriefing({ title, source, body }),
+  }) satisfies DemoTool;
 
 const buildSendMailTool = (
   emails: Writable<SentEmail[]>,
   route: string,
-) => ({
-  description:
-    "Send an email. Input: { recipient, subject, body }. This is the externally visible action in the demo.",
-  inputSchema: SEND_MAIL_INPUT_SCHEMA,
-  handler: logEmail({ emails, route }),
-});
+) =>
+  ({
+    description:
+      "Send an email. Input: { recipient, subject, body }. This is the externally visible action in the demo.",
+    inputSchema: SEND_MAIL_INPUT_SCHEMA,
+    handler: logEmail({ emails, route }),
+  }) satisfies DemoTool;
 
 const buildNestedWorkerTools = (
   title: string,
@@ -376,10 +385,11 @@ const buildNestedWorkerTools = (
   body: any,
   emails: Writable<SentEmail[]>,
   route: string,
-) => ({
-  readRawBriefing: buildReadRawBriefingTool(title, source, body),
-  sendMail: buildSendMailTool(emails, route),
-});
+) =>
+  ({
+    readRawBriefing: buildReadRawBriefingTool(title, source, body),
+    sendMail: buildSendMailTool(emails, route),
+  }) satisfies Record<string, DemoTool>;
 
 const buildAgentTools = (
   title: string,
@@ -387,31 +397,35 @@ const buildAgentTools = (
   body: any,
   emails: Writable<SentEmail[]>,
   route: string,
-) => ({
-  readRawBriefing: buildReadRawBriefingTool(title, source, body),
-  subAgent: {
-    description:
-      "Run a higher-clearance worker with the same task tools except recursive subAgent. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
-    ...(subAgentTool(
-      ({ prompt }: any) => ({
-        model: DEMO_MODEL,
-        system: SUB_AGENT_SYSTEM_PROMPT,
-        prompt,
-        tools: buildNestedWorkerTools(
-          title,
-          source,
-          body,
-          emails,
-          `${route}:subagent`,
-        ),
-        observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
-      }),
-      SUB_AGENT_INPUT_SCHEMA,
-      ({ resultSchema }: any) => resultSchema,
-    ) as any),
-  },
-  sendMail: buildSendMailTool(emails, route),
-});
+) => {
+  const nestedSubAgentTool = subAgentTool(
+    ({ prompt }: any) => ({
+      model: DEMO_MODEL,
+      system: SUB_AGENT_SYSTEM_PROMPT,
+      prompt,
+      tools: buildNestedWorkerTools(
+        title,
+        source,
+        body,
+        emails,
+        `${route}:subagent`,
+      ),
+      observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
+    }),
+    SUB_AGENT_INPUT_SCHEMA,
+    ({ resultSchema }: any) => resultSchema,
+  );
+
+  return {
+    readRawBriefing: buildReadRawBriefingTool(title, source, body),
+    subAgent: {
+      description:
+        "Run a higher-clearance worker with the same task tools except recursive subAgent. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
+      ...nestedSubAgentTool,
+    } satisfies DemoTool,
+    sendMail: buildSendMailTool(emails, route),
+  } satisfies Record<string, DemoTool>;
+};
 
 const DemoAgentChat = pattern<DemoChatInput, DemoChatOutput>(
   ({ title, subtitle, system, tools, observationMaxConfidentiality }) => {
@@ -429,8 +443,8 @@ const DemoAgentChat = pattern<DemoChatInput, DemoChatOutput>(
       tools,
       model: DEMO_MODEL,
       builtinTools: false,
-      observationMaxConfidentiality: observationMaxConfidentiality as any,
-    } as any);
+      observationMaxConfidentiality,
+    });
 
     return {
       [NAME]: title,
