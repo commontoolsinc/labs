@@ -165,6 +165,7 @@ export interface TestRunResult {
   results: TestResult[];
   totalDurationMs: number;
   error?: string;
+  phaseSummary?: TestRunPhaseSummary;
   /** Navigation events recorded during the test run */
   navigations: NavigationEvent[];
   /** Runtime errors captured via errorHandlers during the test run */
@@ -177,9 +178,26 @@ export interface TestRunResult {
   expectNonIdempotent?: boolean;
 }
 
+export interface TestRunPhaseSummary {
+  resolveMs: number;
+  compileMs: number;
+  evaluateMs: number;
+  defaultPatternSetupMs: number;
+  patternRunMs: number;
+  initialSettleMs: number;
+  actionSettleMs: number;
+  actionSettleIterations: number;
+  assertionEvalMs: number;
+  assertionRetrySettleMs: number;
+  assertionRetrySettleIterations: number;
+  cleanupMs: number;
+}
+
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
+  /** Print a compact per-file phase summary to help diagnose harness overhead. */
+  phaseSummary?: boolean;
   /** Root directory for resolving imports. If not provided, uses the test file's directory. */
   root?: string;
   /** Force the storage/runtime memory implementation used by the test harness. */
@@ -243,6 +261,26 @@ function fmtMs(ms: number): string {
   if (ms >= 10) return `${Math.round(ms)}ms`;
   if (ms >= 1) return `${ms.toFixed(1)}ms`;
   return `${ms.toFixed(2)}ms`;
+}
+
+function printPhaseSummary(summary: TestRunPhaseSummary): void {
+  console.log(
+    "  ⏱ phase summary " +
+      `resolve=${fmtMs(summary.resolveMs)} ` +
+      `compile=${fmtMs(summary.compileMs)} ` +
+      `evaluate=${fmtMs(summary.evaluateMs)} ` +
+      `defaultPattern=${fmtMs(summary.defaultPatternSetupMs)} ` +
+      `patternRun=${fmtMs(summary.patternRunMs)} ` +
+      `initialSettle=${fmtMs(summary.initialSettleMs)} ` +
+      `actionSettle=${
+        fmtMs(summary.actionSettleMs)
+      } (${summary.actionSettleIterations} iter) ` +
+      `assertEval=${fmtMs(summary.assertionEvalMs)} ` +
+      `assertRetrySettle=${
+        fmtMs(summary.assertionRetrySettleMs)
+      } (${summary.assertionRetrySettleIterations} iter) ` +
+      `cleanup=${fmtMs(summary.cleanupMs)}`,
+  );
 }
 
 function printSettleStats(stats: SettleStats | null): void {
@@ -806,6 +844,20 @@ export async function runTestPattern(
 
   // Collect runtime errors via the scheduler's error handler
   const runtimeErrors: ErrorWithContext[] = [];
+  const phaseSummary: TestRunPhaseSummary = {
+    resolveMs: 0,
+    compileMs: 0,
+    evaluateMs: 0,
+    defaultPatternSetupMs: 0,
+    patternRunMs: 0,
+    initialSettleMs: 0,
+    actionSettleMs: 0,
+    actionSettleIterations: 0,
+    assertionEvalMs: 0,
+    assertionRetrySettleMs: 0,
+    assertionRetrySettleIterations: 0,
+    cleanupMs: 0,
+  };
 
   // 1. Create emulated runtime (same as piece step)
   const identity = await withPhase(
@@ -872,6 +924,7 @@ export async function runTestPattern(
 
   try {
     // 2. Compile the test pattern
+    const resolveStart = performance.now();
     const program = await withPhase(
       ["runTestPattern", "resolve"],
       () =>
@@ -879,14 +932,19 @@ export async function runTestPattern(
           new FileSystemProgramResolver(testPath, options.root),
         ),
     );
+    phaseSummary.resolveMs += performance.now() - resolveStart;
+    const compileStart = performance.now();
     const { jsScript, id } = await withPhase(
       ["runTestPattern", "compile"],
       () => engine.compile(program),
     );
+    phaseSummary.compileMs += performance.now() - compileStart;
+    const evaluateStart = performance.now();
     const { main } = await withPhase(
       ["runTestPattern", "evaluate"],
       () => engine.evaluate(id, jsScript, program.files),
     );
+    phaseSummary.evaluateMs += performance.now() - evaluateStart;
 
     if (!main?.default) {
       throw new Error(
@@ -906,6 +964,7 @@ export async function runTestPattern(
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
     // access allPieces, recentPieces, etc. work correctly.
+    const defaultPatternSetupStart = performance.now();
     await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
@@ -925,8 +984,11 @@ export async function runTestPattern(
       await setupTx.commit();
       await runtime.idle();
     });
+    phaseSummary.defaultPatternSetupMs += performance.now() -
+      defaultPatternSetupStart;
 
     // 4. Instantiate the test pattern using runtime.run() for proper space context
+    const patternRunStart = performance.now();
     const patternResult = await withPhase(
       ["runTestPattern", "patternRun"],
       async () => {
@@ -949,7 +1011,9 @@ export async function runTestPattern(
         return value;
       },
     );
+    phaseSummary.patternRunMs += performance.now() - patternRunStart;
 
+    const initialSettleStart = performance.now();
     await withPhase(["runTestPattern", "initialSettle"], async () => {
       // Wait for initial setup to complete
       await runtime.idle();
@@ -959,6 +1023,7 @@ export async function runTestPattern(
       await storageManager.synced();
       await runtime.idle();
     });
+    phaseSummary.initialSettleMs += performance.now() - initialSettleStart;
 
     // 4. Get the tests array from pattern output
     const testsCell = await withPhase(
@@ -1010,13 +1075,16 @@ export async function runTestPattern(
       stepIndex: number,
       stepLabel: string,
       maxSettle = 20,
-    ): Promise<void> => {
+    ): Promise<{ durationMs: number; iterations: number }> => {
+      const settleStart = performance.now();
+      let iterations = 0;
       await withPhase(
         ["runTestPattern", "step", stepLabel, "settle"],
         () =>
           Promise.race([
             (async () => {
               for (let settle = 0; settle < maxSettle; settle++) {
+                iterations = settle + 1;
                 const iterStart = performance.now();
                 await withPhase(
                   [
@@ -1061,6 +1129,10 @@ export async function runTestPattern(
             ),
           ]),
       );
+      return {
+        durationMs: performance.now() - settleStart,
+        iterations,
+      };
     };
 
     // 5. Process tests sequentially
@@ -1161,7 +1233,9 @@ export async function runTestPattern(
         // resolve quickly (< 1ms), indicating quiescence. Max iterations
         // as a safety net against infinite loops.
         try {
-          await settleRuntime(i, actionName, 20);
+          const settleResult = await settleRuntime(i, actionName, 20);
+          phaseSummary.actionSettleMs += settleResult.durationMs;
+          phaseSummary.actionSettleIterations += settleResult.iterations;
         } catch (err) {
           results.push({
             name: actionName,
@@ -1340,16 +1414,27 @@ export async function runTestPattern(
           }
         };
 
+        const assertionEvalStart = performance.now();
         ({ passed, error } = await withPhase(
           ["runTestPattern", "step", assertionName, "evaluate"],
           () => evaluateAssertion(),
         ));
+        phaseSummary.assertionEvalMs += performance.now() - assertionEvalStart;
 
         if (!passed && lastActionIndex !== null) {
           try {
             for (let retry = 0; retry < 3 && !passed; retry++) {
               await new Promise((resolve) => setTimeout(resolve, 0));
-              await settleRuntime(i, assertionName, 6);
+              const retrySettleResult = await settleRuntime(
+                i,
+                assertionName,
+                6,
+              );
+              phaseSummary.assertionRetrySettleMs +=
+                retrySettleResult.durationMs;
+              phaseSummary.assertionRetrySettleIterations +=
+                retrySettleResult.iterations;
+              const retryEvalStart = performance.now();
               ({ passed, error } = await withPhase(
                 [
                   "runTestPattern",
@@ -1360,6 +1445,8 @@ export async function runTestPattern(
                 ],
                 () => evaluateAssertion(),
               ));
+              phaseSummary.assertionEvalMs += performance.now() -
+                retryEvalStart;
             }
           } catch (err) {
             passed = false;
@@ -1425,6 +1512,7 @@ export async function runTestPattern(
       path: testPath,
       results,
       totalDurationMs: performance.now() - startTime,
+      phaseSummary,
       navigations,
       runtimeErrors: errorMessages,
       allowRuntimeErrors,
@@ -1449,6 +1537,7 @@ export async function runTestPattern(
       path: testPath,
       results: [],
       totalDurationMs: performance.now() - startTime,
+      phaseSummary,
       navigations,
       runtimeErrors: errorMessages,
       nonIdempotent: [],
@@ -1456,6 +1545,7 @@ export async function runTestPattern(
     };
   } finally {
     // 6. Cleanup
+    const cleanupStart = performance.now();
     await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
       engine.dispose();
     });
@@ -1463,6 +1553,7 @@ export async function runTestPattern(
       ["runTestPattern", "cleanup", "storageClose"],
       () => storageManager.close(),
     );
+    phaseSummary.cleanupMs += performance.now() - cleanupStart;
   }
 }
 
@@ -1560,6 +1651,10 @@ export async function runTests(
             console.log(`    ${truncated}`);
           }
         }
+      }
+
+      if (options.phaseSummary && result.phaseSummary) {
+        printPhaseSummary(result.phaseSummary);
       }
     }
   }
