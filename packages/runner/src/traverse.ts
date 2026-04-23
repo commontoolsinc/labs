@@ -64,8 +64,12 @@ import type {
 } from "./storage/interface.ts";
 import { createReadOnlyTransactionError } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
-import { isWriteRedirectLink } from "./link-types.ts";
-import { LastNode } from "./link-resolution.ts";
+import {
+  type IMemorySpaceValueAddress,
+  isWriteRedirectLink,
+  type ValuePath,
+} from "./link-types.ts";
+import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
@@ -97,10 +101,6 @@ const enum TypeValidity {
   Unknown = 2,
 }
 
-type ValuePath = readonly ["value", ...string[]];
-export type IMemorySpaceValueAddress = IMemorySpaceAddress & {
-  path: ValuePath;
-};
 export type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
   address: IMemorySpaceValueAddress;
 };

@@ -9,6 +9,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type Action } from "../src/scheduler.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -207,7 +208,7 @@ describe("effect/computation tracking", () => {
     };
 
     runtime.scheduler.subscribe(parentAction, {
-      reads: [sourceCell.getAsNormalizedFullLink()],
+      reads: [toMemorySpaceAddress(sourceCell.getAsNormalizedFullLink())],
       shallowReads: [],
       writes: [],
     }, { isEffect: true }); // Mark as effect so it runs in pull mode
@@ -283,9 +284,9 @@ describe("effect/computation tracking", () => {
     runtime.scheduler.subscribe(
       action1,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [intermediate.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -295,9 +296,9 @@ describe("effect/computation tracking", () => {
     runtime.scheduler.subscribe(
       action2,
       {
-        reads: [intermediate.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -336,7 +337,9 @@ describe("effect/computation tracking", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [data.key("foo").getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -373,7 +376,9 @@ describe("effect/computation tracking", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [data.key("foo").getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -385,8 +390,8 @@ describe("effect/computation tracking", () => {
       reads: [],
       shallowReads: [],
       writes: [
-        data.key("foo").getAsNormalizedFullLink(),
-        data.key("bar").getAsNormalizedFullLink(),
+        toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+        toMemorySpaceAddress(data.key("bar").getAsNormalizedFullLink()),
       ],
     });
 
@@ -431,7 +436,7 @@ describe("effect/computation tracking", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -486,7 +491,7 @@ describe("effect/computation tracking", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [cellA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -496,7 +501,7 @@ describe("effect/computation tracking", () => {
     runtime.scheduler.resubscribe(computation, {
       reads: [],
       shallowReads: [],
-      writes: [cellB.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
     });
 
     expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(
@@ -529,7 +534,7 @@ describe("effect/computation tracking", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -538,7 +543,7 @@ describe("effect/computation tracking", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-      potentialWrites: [output.getAsNormalizedFullLink()],
+      potentialWrites: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
     });
 
     expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(true);

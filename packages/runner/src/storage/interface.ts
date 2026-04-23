@@ -39,6 +39,7 @@ import type {
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 
 export type {
   Assertion,
@@ -675,7 +676,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @returns The read value.
    */
   readValueOrThrow(
-    address: IMemorySpaceAddress,
+    address: NormalizedFullLink,
     options?: IReadOptions,
   ): FabricValue;
 
@@ -714,7 +715,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param value - Value to write.
    */
   writeValueOrThrow(
-    address: IMemorySpaceAddress,
+    address: NormalizedFullLink,
     value: FabricValue,
   ): void;
 
@@ -723,7 +724,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * `["value", ...path]` helper semantics on top of `writeBatch`.
    */
   writeValuesOrThrow?(
-    writes: Iterable<ITransactionWriteRequest>,
+    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
   ): void;
 }
 

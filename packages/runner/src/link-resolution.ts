@@ -6,6 +6,7 @@ import {
   type CellLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
@@ -98,10 +99,10 @@ export function resolveLink(
     let nextLink: NormalizedFullLink | undefined;
 
     // Sigil probe at full path
-    const sigilProbe = tx.read({
+    const sigilProbe = tx.read(toMemorySpaceAddress({
       ...link,
-      path: ["value", ...link.path, "/", LINK_V1_TAG],
-    });
+      path: [...link.path, "/", LINK_V1_TAG],
+    }));
     if (
       sigilProbe.ok &&
       isRecord(sigilProbe.ok.value) &&
@@ -138,10 +139,10 @@ export function resolveLink(
           }
         } else {
           // Check sigil at this parent, then legacy
-          const parentSigil = tx.read({
+          const parentSigil = tx.read(toMemorySpaceAddress({
             ...link,
-            path: ["value", ...lastValid, "/", LINK_V1_TAG],
-          });
+            path: [...lastValid, "/", LINK_V1_TAG],
+          }));
           if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
             // Read the full value at the parent to ensure proper reactivity
             const whole = tx.readValueOrThrow({ ...link, path: lastValid });
@@ -225,10 +226,10 @@ function checkLegacyAt(
   atPath: readonly string[],
   onlyRedirects: boolean,
 ): NormalizedFullLink | undefined {
-  const aliasPath = tx.read({
+  const aliasPath = tx.read(toMemorySpaceAddress({
     ...link,
-    path: ["value", ...atPath, "$alias", "path"],
-  });
+    path: [...atPath, "$alias", "path"],
+  }));
   if (Array.isArray(aliasPath.ok?.value)) {
     return parseLink(
       tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
@@ -236,10 +237,10 @@ function checkLegacyAt(
     );
   }
   if (onlyRedirects) return undefined;
-  const legacyCell = tx.read({
+  const legacyCell = tx.read(toMemorySpaceAddress({
     ...link,
-    path: ["value", ...atPath, "cell", "/"],
-  });
+    path: [...atPath, "cell", "/"],
+  }));
   if (typeof legacyCell.ok?.value === "string") {
     return parseLink(
       tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,

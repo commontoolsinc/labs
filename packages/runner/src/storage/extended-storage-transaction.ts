@@ -19,7 +19,6 @@ import type {
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
-  ITransactionWriteRequest,
   MemorySpace,
   ReaderError,
   ReadError,
@@ -43,6 +42,10 @@ import {
   reactivityLogFromActivities,
 } from "./reactivity-log.ts";
 
+import {
+  type NormalizedFullLink,
+  toMemorySpaceAddress,
+} from "../link-types.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   type AttemptedWrite,
@@ -327,13 +330,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   readValueOrThrow(
-    address: IMemorySpaceAddress,
+    address: NormalizedFullLink,
     options?: IReadOptions,
   ): Immutable<FabricValue> {
-    return this.readOrThrow(
-      { ...address, path: ["value", ...address.path] },
-      options,
-    );
+    return this.readOrThrow(toMemorySpaceAddress(address), options);
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
@@ -429,15 +429,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   writeValueOrThrow(
-    address: IMemorySpaceAddress,
+    address: NormalizedFullLink,
     value: FabricValue,
   ): void {
     this.assertWritable("writeValueOrThrow()");
-    this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
+    this.writeOrThrow(toMemorySpaceAddress(address), value);
   }
 
   writeValuesOrThrow(
-    writes: Iterable<ITransactionWriteRequest>,
+    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
   ): void {
     this.assertWritable("writeValuesOrThrow()");
     if (this.tx.writeBatch) {
@@ -445,10 +445,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         (function* () {
           for (const write of writes) {
             yield {
-              address: {
-                ...write.address,
-                path: ["value", ...write.address.path],
-              },
+              address: toMemorySpaceAddress(write.address),
               value: write.value,
             };
           }
@@ -777,7 +774,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   }
 
   readValueOrThrow(
-    address: IMemorySpaceAddress,
+    address: NormalizedFullLink,
     options?: IReadOptions,
   ): FabricValue {
     return this.wrapped.readValueOrThrow(
@@ -805,14 +802,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   }
 
   writeValueOrThrow(
-    address: IMemorySpaceAddress,
+    address: NormalizedFullLink,
     value: FabricValue,
   ): void {
     return this.wrapped.writeValueOrThrow(address, value);
   }
 
   writeValuesOrThrow(
-    writes: Iterable<ITransactionWriteRequest>,
+    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
   ): void {
     if (this.wrapped.writeValuesOrThrow) {
       return this.wrapped.writeValuesOrThrow(writes);
