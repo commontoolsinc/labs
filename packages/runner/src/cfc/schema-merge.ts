@@ -1,4 +1,4 @@
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
@@ -281,7 +281,7 @@ const mergeSchemaNode = (
     mergedItems = right.items;
   }
 
-  const merged = {
+  return {
     ...left,
     ...right,
     ...(Object.keys(mergedProperties).length > 0
@@ -291,9 +291,7 @@ const mergeSchemaNode = (
     ifc: mergeIfc(left.ifc, right.ifc),
     required: mergeRequired(left.required, right.required, mergedProperties),
     default: mergeDefaults(left.default, right.default),
-  } satisfies JSONSchemaObj;
-
-  return toDeepFrozenSchema(merged, true);
+  };
 };
 
 export const mergeCfcSchemaEnvelopes = (
@@ -302,5 +300,5 @@ export const mergeCfcSchemaEnvelopes = (
 ): JSONSchema => {
   assertNoDivergentIfcBranches(existing);
   assertNoDivergentIfcBranches(candidate);
-  return mergeSchemaNode(existing, candidate);
+  return internSchema(mergeSchemaNode(existing, candidate));
 };
