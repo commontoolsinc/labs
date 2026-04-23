@@ -29,8 +29,29 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   }
 }
 
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+};
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+type NavigationDetail = {
+  spaceDid: DID;
+  pieceId: string;
+};
+
 describe("RuntimeInternals navigation", () => {
-  it("registers same-space navigations when the active view is keyed by DID", async () => {
+  it("waits for same-space registration and convergence before navigating", async () => {
     const env = globalThis as typeof globalThis & {
       $API_URL?: string;
       $ENVIRONMENT?: string;
@@ -76,18 +97,19 @@ describe("RuntimeInternals navigation", () => {
     );
 
     let registrations = 0;
-    runtime.registerNavigatedPiece = () => {
+    const registrationStarted = deferred<void>();
+    const registrationReleased = deferred<void>();
+    runtime.registerNavigatedPiece = async () => {
       registrations += 1;
+      registrationStarted.resolve();
+      await registrationReleased.promise;
     };
 
-    let navigation:
-      | {
-        spaceDid: DID;
-        pieceId: string;
-      }
-      | undefined;
+    let navigation: NavigationDetail | undefined;
+    const navigationReceived = deferred<NavigationDetail>();
     const onNavigate = (event: Event) => {
       navigation = (event as CustomEvent<typeof navigation>).detail;
+      navigationReceived.resolve(navigation!);
     };
     globalThis.addEventListener("cf-navigate", onNavigate);
 
@@ -99,11 +121,18 @@ describe("RuntimeInternals navigation", () => {
         },
       });
 
-      await Promise.resolve();
+      await registrationStarted.promise;
 
       expect(registrations).toBe(1);
       expect(client.idleCalls).toBe(0);
       expect(client.syncedCalls).toBe(0);
+      expect(navigation).toBeUndefined();
+
+      registrationReleased.resolve();
+      await navigationReceived.promise;
+
+      expect(client.idleCalls).toBe(1);
+      expect(client.syncedCalls).toBe(1);
       expect(navigation).toEqual({
         spaceDid,
         pieceId: "piece-123",
@@ -172,14 +201,11 @@ describe("RuntimeInternals navigation", () => {
       currentSpace,
     );
 
-    let navigation:
-      | {
-        spaceDid: DID;
-        pieceId: string;
-      }
-      | undefined;
+    let navigation: NavigationDetail | undefined;
+    const navigationReceived = deferred<NavigationDetail>();
     const onNavigate = (event: Event) => {
       navigation = (event as CustomEvent<typeof navigation>).detail;
+      navigationReceived.resolve(navigation!);
     };
     globalThis.addEventListener("cf-navigate", onNavigate);
 
@@ -191,8 +217,7 @@ describe("RuntimeInternals navigation", () => {
         },
       });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await navigationReceived.promise;
 
       expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
