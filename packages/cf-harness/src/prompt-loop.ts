@@ -322,6 +322,7 @@ export class CfHarnessPromptLoop {
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     let modelTurns = 0;
+    await this.engine.ensureDiagnosticsInitialized();
     this.engine.setRunStatus("running");
     await this.engine.persistRunState();
     await this.engine.persistTranscript(transcript);
@@ -343,7 +344,7 @@ export class CfHarnessPromptLoop {
         });
         const toolCalls = assistantMessage.toolCalls ?? [];
         if (toolCalls.length === 0) {
-          this.engine.setRunStatus("completed");
+          this.engine.setRunStatus("completed", "assistant_completed");
           await this.engine.persistRunState();
           return {
             model,
@@ -367,7 +368,8 @@ export class CfHarnessPromptLoop {
         }
       }
     } catch (error) {
-      this.engine.setRunStatus("failed");
+      this.engine.appendFailureFromError(error);
+      this.engine.setRunStatus("failed", "prompt_loop_error");
       try {
         await this.engine.persistRunState();
         await this.engine.persistTranscript(transcript);
@@ -376,12 +378,14 @@ export class CfHarnessPromptLoop {
       }
       throw error;
     }
-    this.engine.setRunStatus("failed");
-    await this.engine.persistRunState();
-    await this.engine.persistTranscript(transcript);
-    throw new Error(
+    const turnLimitError = new Error(
       `prompt loop exceeded max model turns (${maxModelTurns}) without a final assistant response`,
     );
+    this.engine.appendFailureFromError(turnLimitError);
+    this.engine.setRunStatus("failed", "max_model_turns");
+    await this.engine.persistRunState();
+    await this.engine.persistTranscript(transcript);
+    throw turnLimitError;
   }
 
   #buildChatCompletionRequest(
