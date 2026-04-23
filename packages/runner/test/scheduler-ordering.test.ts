@@ -7,6 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type Action } from "../src/scheduler.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -52,7 +53,11 @@ describe("push-triggered filtering", () => {
     // Run action
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+      },
       {},
     );
     await cell.pull();
@@ -77,23 +82,23 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [cell1.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell1.getAsNormalizedFullLink())],
       },
       {},
     );
 
     expect(runtime.scheduler.getMightWrite(action)).toEqual([
-      cell1.getAsNormalizedFullLink(),
+      toMemorySpaceAddress(cell1.getAsNormalizedFullLink()),
     ]);
 
     runtime.scheduler.resubscribe(action, {
       reads: [],
       shallowReads: [],
-      writes: [cell2.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(cell2.getAsNormalizedFullLink())],
     });
 
     expect(runtime.scheduler.getMightWrite(action)).toEqual([
-      cell2.getAsNormalizedFullLink(),
+      toMemorySpaceAddress(cell2.getAsNormalizedFullLink()),
     ]);
   });
 
@@ -134,7 +139,7 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [cell1.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell1.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -142,7 +147,7 @@ describe("push-triggered filtering", () => {
     runtime.scheduler.resubscribe(action, {
       reads: [],
       shallowReads: [],
-      writes: [cell2.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(cell2.getAsNormalizedFullLink())],
     });
 
     expect(
@@ -174,7 +179,7 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [declaredWrite],
+        writes: [toMemorySpaceAddress(declaredWrite)],
       },
       {},
     );
@@ -185,7 +190,9 @@ describe("push-triggered filtering", () => {
       writes: [],
     });
 
-    expect(runtime.scheduler.getMightWrite(action)).toEqual([declaredWrite]);
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
   });
 
   it("should track filter stats", async () => {
@@ -235,7 +242,11 @@ describe("push-triggered filtering", () => {
     // First run with default scheduling should work
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+      },
       {},
     );
     await cell.pull();
@@ -270,9 +281,9 @@ describe("push-triggered filtering", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -317,7 +328,11 @@ describe("push-triggered filtering", () => {
     // Run once to establish mightWrite
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+      },
       {},
     );
     await cell.pull();
@@ -328,7 +343,11 @@ describe("push-triggered filtering", () => {
     // Run again with default scheduling - should bypass filter
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+      },
       {},
     );
     await cell.pull();
@@ -460,7 +479,7 @@ describe("parent-child action ordering", () => {
     runtime.scheduler.subscribe(
       parentAction,
       {
-        reads: [toggle.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(toggle.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [],
       },
@@ -634,7 +653,7 @@ describe("parent-child action ordering", () => {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
           {
-            reads: [source.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
             shallowReads: [],
             writes: [],
           },
@@ -651,7 +670,7 @@ describe("parent-child action ordering", () => {
     const parentCanceler = runtime.scheduler.subscribe(
       parentAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [],
       },

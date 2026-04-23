@@ -235,9 +235,6 @@ const collapseEmptyJsonDocumentEnvelope = (
 
 const EMPTY_META = Object.freeze({});
 
-const normalizeReactivityPath = (path: readonly string[]): string[] =>
-  path[0] === "value" ? [...path.slice(1)] : [...path];
-
 type PathInspection =
   | {
     kind: "ok";
@@ -1682,7 +1679,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         space: read.space,
         id: read.id,
         type: read.type,
-        path: normalizeReactivityPath(read.path),
+        path: read.path,
       };
 
       if (read.nonRecursive === true) {
@@ -1725,7 +1722,7 @@ export class V2StorageTransaction implements IStorageTransaction {
             space,
             id,
             type,
-            path: normalizeReactivityPath(path),
+            path,
           });
         }
       }

@@ -487,8 +487,20 @@ export class SelectorTracker<T = Result<Unit, Error>> {
             newSchemaObj && sortedSubSchemaObj &&
             newSchemaRefs.size == 0
           ) {
-            const { $defs: _defs1, ...newSchemaNoDefs } = newSchemaObj;
-            const { $defs: _defs2, ...subSchemaNoDefs } = sortedSubSchemaObj;
+            // `{ ...x }` produces fresh (non-frozen) objects that would
+            // miss `getStandardSchema`'s `isDeepFrozen`-gated cache on
+            // every call. Intern the spreads so structurally-equal
+            // variants collapse to the same canonical reference across
+            // reactive updates — `internSchema` deep-freezes in place
+            // (via `toDeepFrozenSchema(_, true)`) and then returns the
+            // canonical entry from the intern cache, so the downstream
+            // `standardizedSchemaCache` identity-key actually hits on
+            // repeat calls with structurally-equal inputs.
+            const { $defs: _defs1, ...newSchemaNoDefsSpread } = newSchemaObj;
+            const { $defs: _defs2, ...subSchemaNoDefsSpread } =
+              sortedSubSchemaObj;
+            const newSchemaNoDefs = internSchema(newSchemaNoDefsSpread);
+            const subSchemaNoDefs = internSchema(subSchemaNoDefsSpread);
             if (
               hashSchema(
                 SelectorTracker.getStandardSchema(subSchemaNoDefs),

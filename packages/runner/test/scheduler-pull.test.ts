@@ -9,6 +9,7 @@ import { type Action, type EventHandler } from "../src/scheduler.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -118,9 +119,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -175,7 +176,7 @@ describe("pull-based scheduling", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [target.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(target.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -242,9 +243,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [intermediate.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -254,9 +255,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [intermediate.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [effectResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -338,9 +339,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [intermediate.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -348,9 +349,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       leftEffect,
       {
-        reads: [intermediate.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [leftResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(leftResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -358,9 +359,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       rightEffect,
       {
-        reads: [intermediate.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [rightResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(rightResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -479,9 +480,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation1,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [intermediate1.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(intermediate1.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -490,9 +491,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation2,
       {
-        reads: [intermediate1.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(intermediate1.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [intermediate2.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(intermediate2.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -501,9 +502,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [intermediate2.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(intermediate2.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [effectResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -586,11 +587,11 @@ describe("pull-based scheduling", () => {
       computation,
       {
         reads: [
-          selector.getAsNormalizedFullLink(),
-          sourceA.getAsNormalizedFullLink(),
+          toMemorySpaceAddress(selector.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(sourceA.getAsNormalizedFullLink()),
         ],
         shallowReads: [],
-        writes: [intermediate.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -599,9 +600,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [intermediate.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [effectResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -660,7 +661,7 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [],
       },
@@ -798,9 +799,9 @@ describe("pull mode with references", () => {
     runtime.scheduler.subscribe(
       innerLift,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [innerOutput.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(innerOutput.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -809,9 +810,9 @@ describe("pull mode with references", () => {
     runtime.scheduler.subscribe(
       outerLift,
       {
-        reads: [innerOutput.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(innerOutput.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [outerOutput.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(outerOutput.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -820,9 +821,9 @@ describe("pull mode with references", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [outerOutput.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(outerOutput.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [effectResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -1012,9 +1013,11 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.subscribe(
       computedAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computedOutput.getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(computedOutput.getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -1181,9 +1184,11 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.subscribe(
       computedAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [data.key("foo").getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -1294,9 +1299,9 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.subscribe(
       computedAction1,
       {
-        reads: [source1.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source1.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computed1.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computed1.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1304,9 +1309,9 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.subscribe(
       computedAction2,
       {
-        reads: [source2.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source2.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computed2.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computed2.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1432,9 +1437,9 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.subscribe(
       computedAction1,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computed1.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computed1.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1442,9 +1447,9 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.subscribe(
       computedAction2,
       {
-        reads: [computed1.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(computed1.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computed2.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computed2.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1547,9 +1552,9 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computed.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computed.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1632,9 +1637,9 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computed.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computed.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1748,9 +1753,9 @@ describe("handler dependency pulling", () => {
     // This tests that the lift is pulled when handler B needs it
     // Use resubscribe to set up triggers without scheduling immediate execution
     runtime.scheduler.resubscribe(liftAction, {
-      reads: [liftInput.getAsNormalizedFullLink()],
+      reads: [toMemorySpaceAddress(liftInput.getAsNormalizedFullLink())],
       shallowReads: [],
-      writes: [liftOutput.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(liftOutput.getAsNormalizedFullLink())],
     });
 
     await runtime.idle();
@@ -1992,9 +1997,9 @@ describe("pull mode array reactivity", () => {
     runtime.scheduler.subscribe(
       filterAction,
       {
-        reads: [sourceArray.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(sourceArray.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [filteredCell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(filteredCell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -2062,9 +2067,9 @@ describe("pull mode array reactivity", () => {
     runtime.scheduler.subscribe(
       transformAction,
       {
-        reads: [sourceArray.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(sourceArray.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computedCell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computedCell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -2173,9 +2178,11 @@ describe("pull mode array reactivity", () => {
     runtime.scheduler.subscribe(
       computeVisiblePieces,
       {
-        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -2269,9 +2276,9 @@ describe("pull mode array reactivity", () => {
     runtime.scheduler.subscribe(
       countPieces,
       {
-        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [countCell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(countCell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -2366,9 +2373,11 @@ describe("pull mode array reactivity", () => {
     runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -2467,9 +2476,11 @@ describe("pull mode array reactivity", () => {
     let cancelComputation = runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -2500,9 +2511,11 @@ describe("pull mode array reactivity", () => {
     cancelComputation = runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -2579,9 +2592,11 @@ describe("pull mode array reactivity", () => {
     let cancelComputation = runtime.scheduler.subscribe(
       computeVisible1,
       {
-        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
+        ],
       },
       {},
     );
@@ -2617,9 +2632,11 @@ describe("pull mode array reactivity", () => {
     cancelComputation = runtime.scheduler.subscribe(
       computeVisible2,
       {
-        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
+        ],
       },
       {},
     );

@@ -19,7 +19,10 @@ import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
-import { type NormalizedFullLink } from "./link-utils.ts";
+import {
+  type IMemorySpaceValueAddress,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isCellResultForDereferencing,
@@ -27,7 +30,6 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
-  IMemorySpaceValueAddress,
   IObjectCreator,
   mergeAnyOfMatches,
   mergeSchemaFlags,
@@ -35,6 +37,7 @@ import {
 } from "@commonfabric/runner/traverse";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -575,13 +578,7 @@ export function validateAndTransform(
   }
 
   // Link paths don't include value, but doc address should
-  const { space, id, type, path } = ref;
-  const address: IMemorySpaceValueAddress = {
-    space,
-    id,
-    type,
-    path: ["value", ...path],
-  };
+  const address: IMemorySpaceValueAddress = toMemorySpaceAddress(ref);
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
   const value = tx.readOrThrow(address, {
