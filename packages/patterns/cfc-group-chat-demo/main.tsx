@@ -500,19 +500,6 @@ export const TrustedChatSendSurface = pattern<
     participants,
     messages,
   });
-  const draftPreview = computed(() => {
-    const saved = findParticipantBySlot(
-      participantsValue(participants),
-      slotId,
-    );
-    const trimmedDraft = messageDraft.get().trim();
-    if (!trimmedDraft) {
-      return "Type a message below.";
-    }
-    return saved
-      ? `Ready to send as ${saved.name}: ${trimmedDraft}`
-      : `Set your name before sending: ${trimmedDraft}`;
-  });
 
   return {
     [NAME]: computed(() => `${metaForSlot(slotId).label} trusted send surface`),
@@ -534,10 +521,18 @@ export const TrustedChatSendSurface = pattern<
             viewerSlotId: slotId,
             id: `trusted-conversation-preview-${slotId}`,
           })}
-          <cf-hstack justify="between" align="center" wrap gap="2">
-            <cf-label id={`trusted-draft-preview-${slotId}`}>
-              {draftPreview}
-            </cf-label>
+          <cf-hstack align="center" wrap gap="2">
+            <cf-vgroup
+              gap="sm"
+              style={{ minWidth: "16rem", flex: "1 1 16rem" }}
+            >
+              <cf-input
+                id={`trusted-message-draft-${slotId}`}
+                size="sm"
+                $value={messageDraft}
+                placeholder="Write a message"
+              />
+            </cf-vgroup>
             <cf-button
               id={`trusted-send-button-${slotId}`}
               data-ui-action={TRUSTED_GROUP_CHAT_SEND_ACTION}
@@ -545,7 +540,7 @@ export const TrustedChatSendSurface = pattern<
               disabled={sendDisabled}
               onClick={sendMessage}
             >
-              Trusted send
+              Send
             </cf-button>
           </cf-hstack>
         </cf-vstack>
@@ -583,9 +578,10 @@ export const ParticipantRoom = pattern<
 >(({ slotId, participants, messages, invalidMessages, lobbyPiece }) => {
   const meta = metaForSlot(slotId);
   const profileDraft = Writable.of("");
-  const messageDraft = Writable.of("");
+  const trustedMessageDraft = Writable.of("");
+  const hostMessageDraft = Writable.of("");
   const setProfileDraft = writeDraftText({ value: profileDraft });
-  const setMessageDraft = writeDraftText({ value: messageDraft });
+  const setMessageDraft = writeDraftText({ value: trustedMessageDraft });
   const trustedProfileSave = TrustedProfileSaveSurface({
     slotId,
     nameDraft: profileDraft,
@@ -593,7 +589,7 @@ export const ParticipantRoom = pattern<
   });
   const trustedSend = TrustedChatSendSurface({
     slotId,
-    messageDraft,
+    messageDraft: trustedMessageDraft,
     participants,
     messages,
     invalidMessages,
@@ -606,7 +602,7 @@ export const ParticipantRoom = pattern<
     return saved ? saved.name : "Name not set";
   });
   const hostSendDisabled = computed(() =>
-    messageDraft.get().trim().length === 0
+    hostMessageDraft.get().trim().length === 0
   );
   const addRandomMessagesDisabled = computed(() =>
     participantsValue(participants).length === 0 ||
@@ -682,7 +678,7 @@ export const ParticipantRoom = pattern<
                 <cf-input
                   id={`host-message-draft-${slotId}`}
                   size="sm"
-                  $value={messageDraft}
+                  $value={hostMessageDraft}
                   placeholder="Write a message"
                 />
               </cf-vgroup>
@@ -691,19 +687,19 @@ export const ParticipantRoom = pattern<
                 disabled={hostSendDisabled}
                 onClick={hostLookalikeSend}
               >
-                Send message
-              </cf-button>
-              <cf-button
-                id={`add-random-invalid-${slotId}`}
-                variant="ghost"
-                size="sm"
-                disabled={addRandomMessagesDisabled}
-                onClick={addRandomMessages}
-              >
-                Add random invalid
+                Send
               </cf-button>
             </cf-hstack>
           </cf-card>
+          <cf-button
+            id={`add-random-invalid-${slotId}`}
+            size="lg"
+            style={{ width: "100%" }}
+            disabled={addRandomMessagesDisabled}
+            onClick={addRandomMessages}
+          >
+            Insert fake messages
+          </cf-button>
         </cf-vstack>
       </cf-screen>
     ),

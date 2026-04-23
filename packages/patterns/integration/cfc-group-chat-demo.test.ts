@@ -109,6 +109,13 @@ describe("cfc group chat demo integration test", () => {
       "#shared-transcript-participant-1",
       "Hello from Alice",
     );
+    await waitForDisabled(page, "#trusted-send-button-participant-1", true);
+
+    await fillCfInput(
+      page,
+      "#trusted-message-draft-participant-1",
+      "Hello from Alice",
+    );
 
     await clickTrustedAction(page, TRUSTED_GROUP_CHAT_SEND_ACTION);
     await waitForText(
@@ -167,10 +174,10 @@ describe("cfc group chat demo integration test", () => {
       "Bob",
     );
 
-    await scrollIntoView(page, "#host-message-draft-participant-2");
+    await scrollIntoView(page, "#trusted-message-draft-participant-2");
     await fillCfInput(
       page,
-      "#host-message-draft-participant-2",
+      "#trusted-message-draft-participant-2",
       "Hello from Bob",
     );
     await clickTrustedAction(page, TRUSTED_GROUP_CHAT_SEND_ACTION);
