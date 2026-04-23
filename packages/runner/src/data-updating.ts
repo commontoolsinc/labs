@@ -10,7 +10,11 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
-import { CellImpl, isCell } from "./cell.ts";
+import {
+  CellImpl,
+  isCell,
+  recordRelevantSchemaWritePolicyInput,
+} from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -29,6 +33,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
+import { resolveSchemaForValue } from "./schema.ts";
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
@@ -645,9 +650,15 @@ export function normalizeAndDiff(
       space: link.space,
       scope: link.scope,
       path: [],
+      type: link.type,
+      schema: resolveSchemaForValue(link.schema, rest),
     };
 
     seen.set(newValue, newEntryLink);
+
+    // When a child value becomes its own entity document, carry the child
+    // schema over so CFC metadata can be prepared for that new document too.
+    recordRelevantSchemaWritePolicyInput(tx, newEntryLink, newEntryLink.schema);
 
     return [
       // If it wasn't already, set the current value to be a doc link to this doc

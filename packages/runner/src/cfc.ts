@@ -28,6 +28,13 @@ type IFCAtom = ImmutableJSONValue;
 // Class for handling cfc rules.
 // The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
+  private static childFullSchema(
+    schema: JSONSchema,
+    fallback: JSONSchema,
+  ): JSONSchema {
+    return isRecord(schema) && isRecord(schema.$defs) ? schema : fallback;
+  }
+
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
     return uniqueCfcAtoms(atoms);
   }
@@ -85,7 +92,7 @@ export class ContextualFlowControl {
         ContextualFlowControl.joinSchema(
           joined,
           value,
-          fullSchema,
+          ContextualFlowControl.childFullSchema(value, fullSchema),
           cycleTracker,
         );
       }
@@ -97,7 +104,10 @@ export class ContextualFlowControl {
       ContextualFlowControl.joinSchema(
         joined,
         schema.additionalProperties,
-        fullSchema,
+        ContextualFlowControl.childFullSchema(
+          schema.additionalProperties,
+          fullSchema,
+        ),
         cycleTracker,
       );
     } else if (schema.items && typeof schema.items === "object") {
@@ -105,7 +115,7 @@ export class ContextualFlowControl {
       ContextualFlowControl.joinSchema(
         joined,
         schema.items,
-        fullSchema,
+        ContextualFlowControl.childFullSchema(schema.items, fullSchema),
         cycleTracker,
       );
     } else if (schema.$ref) {

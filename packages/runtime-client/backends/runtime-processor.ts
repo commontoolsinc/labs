@@ -544,7 +544,8 @@ export class RuntimeProcessor {
   async handleCellGetCfcLabel(
     request: CellGetCfcLabelRequest,
   ): Promise<CfcLabelViewResponse> {
-    const cell = getCell(this.runtime, request.cell);
+    const { schema: _schema, ...cellRef } = request.cell;
+    const cell = getCell(this.runtime, cellRef);
     const rootCell = this.runtime.getCellFromLink({
       ...cell.getAsNormalizedFullLink(),
       path: [],

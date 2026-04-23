@@ -2451,6 +2451,354 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("persists cfc metadata for nested entity documents created from labelled collection items", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-nested-entity-metadata",
+        {
+          type: "object",
+          properties: {
+            messages: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  piece: {
+                    type: "object",
+                    properties: {
+                      body: { type: "string" },
+                    },
+                    required: ["body"],
+                    ifc: {
+                      integrity: [{
+                        kind: "authored-by",
+                        subject: "alice",
+                      }],
+                    },
+                  },
+                },
+                required: ["piece"],
+              },
+            },
+          },
+          required: ["messages"],
+        },
+        tx,
+      );
+      cell.set({
+        messages: [{
+          piece: { body: "hello" },
+        }],
+      });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const rootId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: unknown;
+          cfc?: {
+            schemaHash: string;
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  confidentiality?: unknown[];
+                  integrity?: unknown[];
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const rootDoc = replica.getDocument(rootId);
+      const nestedLink = parseLink(
+        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+      );
+      expect(nestedLink?.id).toBeDefined();
+
+      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["piece"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists matched anyOf branch cfc metadata for nested entity documents", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-nested-anyof-entity-metadata",
+        {
+          type: "object",
+          properties: {
+            messages: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  piece: {
+                    anyOf: [
+                      {
+                        type: "object",
+                        properties: {
+                          id: {
+                            type: "string",
+                            enum: ["alice"],
+                          },
+                          body: { type: "string" },
+                        },
+                        required: ["id", "body"],
+                        ifc: {
+                          integrity: [{
+                            kind: "authored-by",
+                            subject: "alice",
+                          }],
+                        },
+                      },
+                      {
+                        type: "object",
+                        properties: {
+                          id: {
+                            type: "string",
+                            enum: ["bob"],
+                          },
+                          body: { type: "string" },
+                        },
+                        required: ["id", "body"],
+                        ifc: {
+                          integrity: [{
+                            kind: "authored-by",
+                            subject: "bob",
+                          }],
+                        },
+                      },
+                    ],
+                  },
+                },
+                required: ["piece"],
+              },
+            },
+          },
+          required: ["messages"],
+        },
+        tx,
+      );
+      cell.set({
+        messages: [{
+          piece: { id: "alice", body: "hello" },
+        }],
+      });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const rootId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: unknown;
+          cfc?: {
+            schemaHash: string;
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  confidentiality?: unknown[];
+                  integrity?: unknown[];
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const rootDoc = replica.getDocument(rootId);
+      const nestedLink = parseLink(
+        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+      );
+      expect(nestedLink?.id).toBeDefined();
+
+      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["piece"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists nested item labels when child refs rely on parent defs during push", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-parent-defs-push-metadata",
+        {
+          type: "object",
+          properties: {
+            messages: {
+              type: "array",
+              items: {
+                $ref: "#/$defs/SharedMessageEntry",
+              },
+            },
+          },
+          required: ["messages"],
+          $defs: {
+            SharedMessageEntry: {
+              type: "object",
+              properties: {
+                piece: {
+                  $ref: "#/$defs/TrustedMessage",
+                },
+              },
+              required: ["piece"],
+            },
+            TrustedMessage: {
+              anyOf: [
+                { $ref: "#/$defs/TrustedMessageAlice" },
+                { $ref: "#/$defs/TrustedMessageBob" },
+              ],
+            },
+            TrustedMessageAlice: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "string",
+                  enum: ["alice-message"],
+                },
+                author: {
+                  type: "object",
+                  properties: {
+                    id: {
+                      type: "string",
+                      enum: ["alice"],
+                    },
+                  },
+                  required: ["id"],
+                },
+                body: { type: "string" },
+              },
+              required: ["id", "author", "body"],
+              ifc: {
+                integrity: [{
+                  kind: "authored-by",
+                  subject: "alice",
+                }],
+              },
+            },
+            TrustedMessageBob: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "string",
+                  enum: ["bob-message"],
+                },
+                author: {
+                  type: "object",
+                  properties: {
+                    id: {
+                      type: "string",
+                      enum: ["bob"],
+                    },
+                  },
+                  required: ["id"],
+                },
+                body: { type: "string" },
+              },
+              required: ["id", "author", "body"],
+              ifc: {
+                integrity: [{
+                  kind: "authored-by",
+                  subject: "bob",
+                }],
+              },
+            },
+          },
+        },
+      );
+
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      cell.withTx(seed).set({ messages: [] });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      cell.withTx(tx).key("messages").push({
+        piece: {
+          id: "alice-message",
+          author: { id: "alice" },
+          body: "hello",
+        },
+      });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const rootId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: { messages?: unknown[] };
+          cfc?: {
+            schemaHash: string;
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  confidentiality?: unknown[];
+                  integrity?: unknown[];
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const rootDoc = replica.getDocument(rootId);
+      const nestedLink = parseLink(
+        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+      );
+      expect(nestedLink?.id).toBeDefined();
+
+      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["piece"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("keeps derived read labels out of persisted label metadata", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

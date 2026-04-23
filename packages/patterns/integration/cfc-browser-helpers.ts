@@ -309,11 +309,41 @@ async function textIsPresent(
   text: string,
 ): Promise<boolean> {
   try {
-    const node = await page.waitForSelector(selector, {
-      strategy: "pierce",
-      timeout: 500,
-    });
-    return (await node.innerText())?.includes(text) === true;
+    return await page.evaluate((targetSelector, targetText) => {
+      function collect(root: Document | ShadowRoot, result: Element[]): void {
+        for (const element of root.querySelectorAll("*")) {
+          try {
+            if (element.matches(targetSelector)) {
+              result.push(element);
+            }
+          } catch {
+            // Invalid selectors are reported through the empty probe.
+          }
+          if (element.shadowRoot) {
+            collect(element.shadowRoot, result);
+          }
+        }
+      }
+
+      function deepText(root: ParentNode): string {
+        let content = "";
+        if (root instanceof HTMLElement) {
+          content = root.innerText ?? root.textContent ?? "";
+        } else if (root instanceof ShadowRoot) {
+          content = root.textContent ?? "";
+        }
+        for (const element of root.querySelectorAll("*")) {
+          if (element.shadowRoot) {
+            content += ` ${deepText(element.shadowRoot)}`;
+          }
+        }
+        return content;
+      }
+
+      const matches: Element[] = [];
+      collect(document, matches);
+      return matches.some((element) => deepText(element).includes(targetText));
+    }, { args: [selector, text] });
   } catch {
     return false;
   }
@@ -596,6 +626,21 @@ async function readTextProbe(
         style.display !== "none";
     }
 
+    function deepText(root: ParentNode): string {
+      let content = "";
+      if (root instanceof HTMLElement) {
+        content = root.innerText ?? root.textContent ?? "";
+      } else if (root instanceof ShadowRoot) {
+        content = root.textContent ?? "";
+      }
+      for (const element of root.querySelectorAll("*")) {
+        if (element.shadowRoot) {
+          content += ` ${deepText(element.shadowRoot)}`;
+        }
+      }
+      return content;
+    }
+
     const matches: Element[] = [];
     collect(document, matches);
     return {
@@ -605,7 +650,7 @@ async function readTextProbe(
         const rect = target.getBoundingClientRect();
         return {
           tagName: target.tagName.toLowerCase(),
-          text: (target.innerText ?? target.textContent ?? "").trim().slice(
+          text: deepText(target).trim().slice(
             0,
             500,
           ),

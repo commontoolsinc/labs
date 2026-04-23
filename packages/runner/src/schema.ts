@@ -1,4 +1,5 @@
 import { AnyCellWrapping } from "@commonfabric/api";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Immutable, isRecord } from "@commonfabric/utils/types";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
@@ -30,6 +31,7 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
 import {
+  canBranchMatch,
   combineSchema,
   IObjectCreator,
   mergeAnyOfMatches,
@@ -101,6 +103,96 @@ const labelViewForLink = (
     return rebaseCfcLabelView(baseView, link.path.slice(baseLink.path.length));
   }
   return rebaseCfcLabelView(baseView, link.path);
+};
+
+const branchWithParentDefs = (
+  parent: JSONSchemaObj,
+  branch: JSONSchema,
+): JSONSchema => {
+  if (
+    !isRecord(branch) ||
+    typeof branch.$ref !== "string" ||
+    branch.$defs !== undefined ||
+    !isRecord(parent.$defs)
+  ) {
+    return branch;
+  }
+  return {
+    ...branch,
+    $defs: parent.$defs,
+  } satisfies JSONSchemaObj;
+};
+
+const matchesConcreteValue = (
+  schema: JSONSchema,
+  value: unknown,
+): boolean => {
+  const resolved = resolveSchema(schema);
+  if (resolved === undefined) {
+    return true;
+  }
+  if (typeof resolved === "boolean") {
+    return resolved;
+  }
+  if (!canBranchMatch(resolved, value)) {
+    return false;
+  }
+  if (resolved.const !== undefined && !deepEqual(resolved.const, value)) {
+    return false;
+  }
+  if (
+    Array.isArray(resolved.enum) &&
+    !resolved.enum.some((candidate) => deepEqual(candidate, value))
+  ) {
+    return false;
+  }
+
+  if (Array.isArray(resolved.anyOf)) {
+    const { anyOf, ...rest } = resolved;
+    return anyOf.some((branch) =>
+      matchesConcreteValue(
+        combineSchema(
+          rest as JSONSchemaObj,
+          resolveSchema(branchWithParentDefs(resolved, branch)) ??
+            branchWithParentDefs(resolved, branch),
+        ),
+        value,
+      )
+    );
+  }
+  if (Array.isArray(resolved.oneOf)) {
+    const { oneOf, ...rest } = resolved;
+    return oneOf.filter((branch) =>
+      matchesConcreteValue(
+        combineSchema(
+          rest as JSONSchemaObj,
+          resolveSchema(branchWithParentDefs(resolved, branch)) ??
+            branchWithParentDefs(resolved, branch),
+        ),
+        value,
+      )
+    ).length === 1;
+  }
+
+  if (isRecord(value) && isRecord(resolved.properties)) {
+    return Object.entries(resolved.properties).every(([key, childSchema]) =>
+      value[key] === undefined ||
+      matchesConcreteValue(
+        branchWithParentDefs(resolved, childSchema),
+        value[key],
+      )
+    );
+  }
+
+  if (
+    Array.isArray(value) && typeof resolved.items === "object" &&
+    resolved.items !== null
+  ) {
+    const itemSchema = branchWithParentDefs(resolved, resolved.items);
+    return value.every((item) => matchesConcreteValue(itemSchema, item));
+  }
+
+  return true;
 };
 
 /**
@@ -185,6 +277,82 @@ export function resolveSchema(
   return isNontrivialSchema(resolvedSchema)
     ? internSchema(resolvedSchema)
     : undefined;
+}
+
+const selectMatchingCompoundBranch = (
+  schema: JSONSchemaObj,
+  value: unknown,
+  kind: "anyOf" | "oneOf",
+): JSONSchema | undefined => {
+  const branches = schema[kind];
+  if (!Array.isArray(branches) || branches.length === 0) {
+    return undefined;
+  }
+
+  const { [kind]: _compound, ...rest } = schema;
+  const baseSchema = rest as JSONSchemaObj;
+  const matches = branches.flatMap((branch) => {
+    const resolvedBranch =
+      resolveSchema(branchWithParentDefs(schema, branch)) ??
+        branchWithParentDefs(schema, branch);
+    const merged = combineSchema(baseSchema, resolvedBranch);
+    return matchesConcreteValue(merged, value) ? [merged] : [];
+  });
+
+  return matches.length === 1 ? matches[0] : undefined;
+};
+
+export function resolveSchemaForValue(
+  schema: JSONSchema | undefined,
+  value: unknown,
+): JSONSchema | undefined {
+  const resolved = resolveSchema(schema);
+  if (
+    resolved === undefined || typeof resolved === "boolean" ||
+    !isRecord(resolved)
+  ) {
+    return resolved;
+  }
+
+  let narrowed: JSONSchema = resolved;
+  if (Array.isArray(resolved.anyOf)) {
+    narrowed = selectMatchingCompoundBranch(resolved, value, "anyOf") ??
+      resolved;
+  } else if (Array.isArray(resolved.oneOf)) {
+    narrowed = selectMatchingCompoundBranch(resolved, value, "oneOf") ??
+      resolved;
+  }
+
+  if (!isRecord(narrowed)) {
+    return narrowed;
+  }
+
+  if (!isRecord(value) || !isRecord(narrowed.properties)) {
+    return narrowed;
+  }
+
+  let changed = false;
+  const nextProperties: Record<string, JSONSchema> = {
+    ...narrowed.properties,
+  };
+  for (const [key, childSchema] of Object.entries(narrowed.properties)) {
+    const childValue = value[key];
+    const resolvedChild = resolveSchemaForValue(
+      branchWithParentDefs(narrowed, childSchema),
+      childValue,
+    );
+    if (resolvedChild !== undefined && resolvedChild !== childSchema) {
+      nextProperties[key] = resolvedChild;
+      changed = true;
+    }
+  }
+
+  return changed
+    ? {
+      ...narrowed,
+      properties: nextProperties,
+    }
+    : narrowed;
 }
 
 // Memo for `schemaHasIfc` top-level calls. Safe **only** because entries

@@ -186,7 +186,7 @@ const storedSchemaForWritePolicyInput = (
   );
 };
 
-const recordRelevantSchemaWritePolicyInput = (
+export const recordRelevantSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
