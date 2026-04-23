@@ -835,10 +835,7 @@ export const prepareBoundaryCommit = (
         continue;
       }
     }
-    const schemaAndHash = internSchema(
-      toDeepFrozenSchema(mergedSchema, true) as JSONSchema,
-      true,
-    );
+    const schemaAndHash = internSchema(mergedSchema, true);
     const mergedSchemaEntries = walkIfcSchema(mergedSchema);
     const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
       mergedSchemaEntries.map((entry) => [
