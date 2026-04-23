@@ -17,17 +17,23 @@ export const DEFAULT_WORKSPACE_MOUNT_PATH = "/workspace";
 export const DEFAULT_SANDBOX_SHELL = "/bin/sh";
 export const DEFAULT_DOCKER_NETWORK_MODE = "none" as const;
 
+const readEnvVar = (name: string): string | undefined => {
+  try {
+    return Deno.env.get(name);
+  } catch {
+    return undefined;
+  }
+};
+
 const resolveDefaultContainerUser = (): string | undefined => {
   if (Deno.build.os === "windows") {
     return undefined;
   }
-  try {
-    const uidFromEnv = Deno.env.get("UID");
-    const gidFromEnv = Deno.env.get("GID");
-    if (uidFromEnv !== undefined && gidFromEnv !== undefined) {
-      return `${uidFromEnv}:${gidFromEnv}`;
-    }
-  } catch {}
+  const uidFromEnv = readEnvVar("UID");
+  const gidFromEnv = readEnvVar("GID");
+  if (uidFromEnv !== undefined && gidFromEnv !== undefined) {
+    return `${uidFromEnv}:${gidFromEnv}`;
+  }
   try {
     const uid = Deno.uid();
     const gid = Deno.gid();
