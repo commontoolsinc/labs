@@ -1260,16 +1260,21 @@ function buildToolCatalog(
   >();
 
   for (const entry of legacy) {
-    const toolValue = (entry.cell.get() ?? entry.tool ?? {}) as Record<
-      string,
-      unknown
-    >;
-    const patternValue = toolValue.pattern;
+    const cellToolValue = (entry.cell.get() ?? {}) as Record<string, unknown>;
+    const parentToolValue = (entry.tool ?? {}) as Record<string, unknown>;
+    // Prefer the parent object from toolsCell.get() for static fields like
+    // description/inputSchema. Child tool cells can lose nested schema detail
+    // after transformer lowering, but still remain useful as a fallback.
+    const toolValue = {
+      ...cellToolValue,
+      ...parentToolValue,
+    } as Record<string, unknown>;
+    const patternValue = toolValue.pattern ?? cellToolValue.pattern;
     const pattern = (isCell(patternValue)
       ? patternValue.resolveAsCell().get()
       : (patternValue as { get?: () => unknown } | undefined)?.get?.() ??
         patternValue) as { argumentSchema?: JSONSchema } | undefined;
-    const handlerValue = toolValue.handler;
+    const handlerValue = toolValue.handler ?? cellToolValue.handler;
     const handler = (isCell(handlerValue)
       ? handlerValue.resolveAsCell()
       : undefined) as Cell<any> | undefined;

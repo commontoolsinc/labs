@@ -18,6 +18,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -355,6 +356,55 @@ describe("llmDialog", () => {
 
     await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
     expect(capturedToolSchema).toMatchObject({
+      type: "object",
+      properties: {
+        recipient: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string" },
+      },
+      required: ["recipient", "subject", "body"],
+    });
+  });
+
+  it("should prefer parent tool schemas over flattened child tool cells", () => {
+    const fullSchema = {
+      type: "object",
+      properties: {
+        recipient: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string" },
+      },
+      required: ["recipient", "subject", "body"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const toolsCell = {
+      get() {
+        return {
+          sendMail: {
+            description: "Send an email.",
+            inputSchema: fullSchema,
+          },
+        };
+      },
+      key(_name: string) {
+        return {
+          get() {
+            return {
+              description: "Send an email.",
+              inputSchema: {},
+            };
+          },
+        };
+      },
+    } as any;
+
+    const catalog = llmToolExecutionHelpers.buildToolCatalog(
+      toolsCell,
+      false,
+    );
+
+    expect(catalog.llmTools.sendMail.inputSchema).toMatchObject({
       type: "object",
       properties: {
         recipient: { type: "string" },
