@@ -106,7 +106,7 @@ describe("cfc group chat demo integration test", () => {
     await waitForRuntimeIdle(page);
     await waitForTextAbsent(
       page,
-      "#shared-transcript-participant-1",
+      "#trusted-conversation-preview-participant-1",
       "Hello from Alice",
     );
     await waitForDisabled(page, "#trusted-send-button-participant-1", true);
@@ -120,13 +120,13 @@ describe("cfc group chat demo integration test", () => {
     await clickTrustedAction(page, TRUSTED_GROUP_CHAT_SEND_ACTION);
     await waitForText(
       page,
-      "#shared-transcript-participant-1",
+      "#trusted-conversation-preview-participant-1",
       "1 message",
     );
     await waitForAuthorshipState(
       page,
       "Hello from Alice",
-      "#shared-transcript-participant-1",
+      "#trusted-conversation-preview-participant-1",
     );
 
     const backButton = await page.waitForSelector(
@@ -183,13 +183,13 @@ describe("cfc group chat demo integration test", () => {
     await clickTrustedAction(page, TRUSTED_GROUP_CHAT_SEND_ACTION);
     await waitForText(
       page,
-      "#shared-transcript-participant-2",
+      "#trusted-conversation-preview-participant-2",
       "2 messages",
     );
     await waitForAuthorshipState(
       page,
       "Hello from Bob",
-      "#shared-transcript-participant-2",
+      "#trusted-conversation-preview-participant-2",
     );
 
     const addRandomInvalidButton = await page.waitForSelector(
@@ -200,17 +200,17 @@ describe("cfc group chat demo integration test", () => {
 
     await waitForText(
       page,
-      "#shared-transcript-participant-2",
+      "#trusted-conversation-preview-participant-2",
       "4 messages",
     );
     await waitForText(
       page,
-      "#shared-transcript-participant-2",
+      "#trusted-conversation-preview-participant-2",
       "Invalid claim",
     );
     await waitForInvalidAuthorshipState(
       page,
-      "#shared-transcript-participant-2",
+      "#trusted-conversation-preview-participant-2",
     );
   });
 });

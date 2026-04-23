@@ -663,12 +663,6 @@ export const ParticipantRoom = pattern<
           </cf-hstack>
           {trustedProfileSave}
           {trustedSend}
-          {SharedTranscript({
-            messages,
-            invalidMessages,
-            viewerSlotId: slotId,
-            id: `shared-transcript-${slotId}`,
-          })}
           <cf-card id={`host-send-panel-${slotId}`}>
             <cf-hstack slot="content" gap="2" align="center" wrap>
               <cf-vgroup
