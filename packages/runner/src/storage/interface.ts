@@ -1010,9 +1010,13 @@ export interface ITransactionJournal {
 
 export interface TransactionReactivityLog {
   reads: IMemorySpaceAddress[];
-  shallowReads: IMemorySpaceAddress[];
+  shallowReads: ShallowReadDependency[];
   writes: IMemorySpaceAddress[];
   potentialWrites?: IMemorySpaceAddress[];
+}
+
+export interface ShallowReadDependency extends IMemorySpaceAddress {
+  interestedChildren?: readonly MemoryAddressPathComponent[];
 }
 
 export interface TransactionWriteDetail {

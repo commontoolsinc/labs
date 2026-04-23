@@ -7,6 +7,7 @@ import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
+  ShallowReadDependency,
 } from "./storage/interface.ts";
 
 export type SortedAndCompactPaths = Array<
@@ -46,10 +47,10 @@ type Keyable = Record<MemoryAddressPathComponent, FabricValue>;
  * @param compactifyChildren - whether to remove entries that have the same prefix
  * @returns The sorted and compactified paths.
  */
-export function sortAndCompactPaths(
-  unsorted: IMemorySpaceAddress[],
+export function sortAndCompactPaths<T extends IMemorySpaceAddress>(
+  unsorted: readonly T[],
   compactifyChildren = true,
-): IMemorySpaceAddress[] {
+): T[] {
   if (unsorted.length === 0) return [];
 
   const sorted = unsorted.toSorted((a, b) =>
@@ -67,7 +68,7 @@ export function sortAndCompactPaths(
       ? -1
       : 1
   );
-  const result: IMemorySpaceAddress[] = [sorted[0]];
+  const result: T[] = [sorted[0]];
   let previous = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
     if (
@@ -79,6 +80,8 @@ export function sortAndCompactPaths(
       // If we compactifyChildren, or the paths are identical, skip this
       (compactifyChildren || previous.path.length === sorted[i].path.length)
     ) {
+      result[result.length - 1] = mergeCompactablePaths(previous, sorted[i]);
+      previous = result[result.length - 1];
       continue;
     }
     result.push(sorted[i]);
@@ -102,6 +105,22 @@ export function addressesToPathByEntity(
     const key: SpaceAndURI = `${address.space}/${address.id}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
+  }
+  return map;
+}
+
+export function shallowReadsToDependencyByEntity(
+  addresses: ShallowReadDependency[],
+): Map<SpaceAndURI, SortedAndCompactNonRecursiveDependencies> {
+  const map = new Map<SpaceAndURI, SortedAndCompactNonRecursiveDependencies>();
+  for (const address of addresses) {
+    if (address.type !== "application/json") continue;
+    const key: SpaceAndURI = `${address.space}/${address.id}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push({
+      path: address.path,
+      interestedChildren: address.interestedChildren,
+    });
   }
   return map;
 }
@@ -290,6 +309,30 @@ export function arraysOverlap(
     : a.every((value, index) => value === b[index]);
 }
 
+export function nonRecursiveReadMayOverlapWrite(
+  read: NonRecursiveDependencyPath,
+  writePath: readonly MemoryAddressPathComponent[],
+): boolean {
+  if (
+    writePath.length > read.path.length + 1 ||
+    !arraysOverlap(writePath, read.path)
+  ) {
+    return false;
+  }
+
+  if (writePath.length <= read.path.length) {
+    return true;
+  }
+
+  const interested = read.interestedChildren;
+  if (!interested || interested.length === 0) {
+    return true;
+  }
+
+  const child = writePath[read.path.length];
+  return interested.includes(child ?? "");
+}
+
 function commonPrefixLength(
   a: readonly MemoryAddressPathComponent[],
   b: readonly MemoryAddressPathComponent[],
@@ -359,6 +402,33 @@ function comparePaths(
   return a.length - b.length;
 }
 
+function mergeCompactablePaths<T extends IMemorySpaceAddress>(
+  left: T,
+  right: T,
+): T {
+  const leftChildren =
+    (left as Partial<ShallowReadDependency>).interestedChildren;
+  const rightChildren = (right as Partial<ShallowReadDependency>)
+    .interestedChildren;
+
+  if (!leftChildren && !rightChildren) {
+    return left;
+  }
+
+  const interestedChildren = mergeInterestedChildren(
+    leftChildren,
+    rightChildren,
+  );
+  if (!interestedChildren) {
+    return left;
+  }
+
+  return {
+    ...left,
+    interestedChildren,
+  } as T;
+}
+
 function dependencyPath(
   dependency: TriggerDependencyPath,
 ): readonly MemoryAddressPathComponent[] {
@@ -401,4 +471,18 @@ function isNonRecursiveDependencyPath(
   dependency: TriggerDependencyPath,
 ): dependency is NonRecursiveDependencyPath {
   return !Array.isArray(dependency);
+}
+
+function mergeInterestedChildren(
+  left?: readonly MemoryAddressPathComponent[],
+  right?: readonly MemoryAddressPathComponent[],
+): readonly MemoryAddressPathComponent[] | undefined {
+  if (!left?.length) return right;
+  if (!right?.length) return left;
+
+  const merged = new Set(left);
+  for (const child of right) {
+    merged.add(child);
+  }
+  return [...merged];
 }
