@@ -18,6 +18,7 @@ import {
   isNontrivialSchema,
   toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   LLMMessageSchema,
   LLMParamsSchema,
@@ -961,13 +962,20 @@ function _toolsHaveChanged(
     // Compare description
     if (newTool.description !== oldTool.description) return true;
 
-    // Compare inputSchema (safe to stringify as it's a JSON Schema)
+    // Compare inputSchema via interned-schema identity. `internSchema()`
+    // returns the canonical reference, so structurally-equal schemas
+    // collapse to `===`. Handles non-JSON-compatible `FabricValue`s in
+    // schema `default` fields correctly, unlike plain `JSON.stringify`
+    // (which silently mis-encodes them and could hide real changes).
     try {
-      const newSchema = JSON.stringify(newTool.inputSchema);
-      const oldSchema = JSON.stringify(oldTool.inputSchema);
-      if (newSchema !== oldSchema) return true;
+      if (
+        internSchema(newTool.inputSchema) !== internSchema(oldTool.inputSchema)
+      ) {
+        return true;
+      }
     } catch {
-      // If schema has circular refs (unlikely), consider it changed
+      // Defensive: preserve the prior try/catch shape in case of
+      // unexpected input. Treat any failure as "changed."
       return true;
     }
 
