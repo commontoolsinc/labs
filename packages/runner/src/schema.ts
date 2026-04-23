@@ -218,14 +218,37 @@ function _schemaHasIfcUncached(
   return false;
 }
 
+const _filterAsCellCache = new WeakMap<
+  JSONSchemaObj,
+  JSONSchema | "<undefined>"
+>();
+
 function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
   if (!isNontrivialSchema(schema)) {
     return schema;
   }
-  const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
-  return isNontrivialSchema(restSchema)
-    ? toDeepFrozenSchema(restSchema)
-    : undefined;
+
+  const makeRawResult = () => {
+    const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
+    return isNontrivialSchema(restSchema) ? restSchema : undefined;
+  };
+
+  if (isDeepFrozen(schema)) {
+    // Note: We cache literal `<undefined>` when we are to return `undefined`,
+    // to disambiguate with no-entry.
+    const cached = _filterAsCellCache.get(schema);
+    if (cached) return (cached === "<undefined>") ? undefined : cached;
+    const result = makeRawResult();
+    if (result) {
+      _filterAsCellCache.set(schema, result);
+      return result;
+    } else {
+      _filterAsCellCache.set(schema, "<undefined>");
+      return undefined;
+    }
+  } else {
+    return makeRawResult();
+  }
 }
 
 /**
