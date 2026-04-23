@@ -246,6 +246,12 @@ export class RuntimeInternals extends EventTarget {
     }
   }
 
+  async #waitForNavigationConvergence(): Promise<void> {
+    this.#check();
+    await this.#client.idle();
+    await this.#client.synced();
+  }
+
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
     const { metadata, method, args } = e;
     if (metadata?.pieceId) {
@@ -266,10 +272,10 @@ export class RuntimeInternals extends EventTarget {
       const sameSpace = cell.space() === this.#space;
 
       if (sameSpace) {
-        void this.registerNavigatedPiece(cell);
+        await this.registerNavigatedPiece(cell);
+        await this.#waitForNavigationConvergence();
       } else {
-        await this.#client.idle();
-        await this.#client.synced();
+        await this.#waitForNavigationConvergence();
       }
 
       if (sameSpace && this.#spaceName) {
