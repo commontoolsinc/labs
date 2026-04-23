@@ -2025,7 +2025,7 @@ tree construction.
 
 The following single-byte type tags are used by the canonical hash byte format
 and are recommended for any binary encoding of `FabricValue`s. They are
-organized into three categories by high nibble:
+organized into four categories by high nibble:
 
 **Meta tags (`0x0N`)** — structural markers that are not themselves value types:
 
@@ -2050,17 +2050,25 @@ organized into three categories by high nibble:
 | `TAG_UNDEFINED`   | `0x21` | 33      | `undefined`                     |
 | `TAG_BOOLEAN`     | `0x22` | 34      | `boolean`                       |
 | `TAG_NUMBER`      | `0x23` | 35      | `number` (finite, non-NaN)      |
-| `TAG_STRING`      | `0x24` | 36      | `string`                        |
+| `TAG_STRING`      | `0x24` | 36      | `string` (direct form)          |
 | `TAG_BYTES`       | `0x25` | 37      | `FabricBytes`                 |
 | `TAG_BIGINT`      | `0x26` | 38      | `bigint`                        |
 | `TAG_EPOCH_NSEC`  | `0x27` | 39      | `FabricEpochNsec`             |
 | `TAG_EPOCH_DAYS`  | `0x28` | 40      | `FabricEpochDays`             |
 | `TAG_CONTENT_ID`  | `0x29` | 41      | `FabricHash`             |
 
+**Optimized tags (`0xFN`)** — hash-level substitutes that replace the raw
+payload of a primitive type with a digest, when doing so shortens the byte
+stream fed to the outer hasher:
+
+| Tag                | Hex    | Decimal | Used for                                 |
+|:-------------------|:-------|:--------|:-----------------------------------------|
+| `TAG_STRING_HASH`  | `0xF0` | 240     | `string` (hashed form; see byte-format spec §4.4) |
+
 All unassigned values are reserved for future use. The category structure
-(meta/compound/primitive) is a convention for readability and is not enforced by
-the encoding — a decoder should handle any tag byte it encounters regardless of
-nibble range.
+(meta/compound/primitive/optimized) is a convention for readability and is not
+enforced by the encoding — a decoder should handle any tag byte it encounters
+regardless of nibble range.
 
 > **Scope.** These tag bytes are defined here for use by any wire format that
 > needs to distinguish `FabricValue` types at the byte level. The canonical
@@ -2106,16 +2114,27 @@ nibble range.
  */
 export function hashOfModern(value: unknown): FabricHash {
   // Type tag bytes — see Section 6.3 for the full table.
-  // Tag categories: meta (0x0N), compound (0x1N), primitive (0x2N).
+  // Tag categories: meta (0x0N), compound (0x1N), primitive (0x2N),
+  // optimized (0xFN).
   //
   // Implementation feeds type-tagged data into the hasher.
   // Byte-length prefixes for raw payloads use unsigned LEB128.
   // Compound types (array, object) use TAG_END instead of a count prefix.
   //
+  // Strings use two forms based on UTF-8 byte length (threshold is 64
+  // bytes; see byte-format spec §4.4). The helper `hashStr(s)` emits:
+  //   - direct form (utf8ByteLen <= 64):
+  //       hash(TAG_STRING, leb128(utf8ByteLen), utf8Bytes)
+  //   - hashed form (utf8ByteLen > 64):
+  //       hash(TAG_STRING_HASH, sha256(utf8Bytes))
+  // The `hashStr` abstraction is used wherever the algorithm emits a
+  // complete tagged string — including object keys, FabricInstance type
+  // tags, and FabricHash algorithm tags.
+  //
   // - `null`:              hash(TAG_NULL)
   // - `boolean`:           hash(TAG_BOOLEAN, boolByte)
   // - `number`:            hash(TAG_NUMBER, ieee754Float64Bytes)
-  // - `string`:            hash(TAG_STRING, leb128(utf8ByteLen), utf8Bytes)
+  // - `string`:            hashStr(s)
   // - `bigint`:            hash(TAG_BIGINT, leb128(byteLen), signedTwosComplementBytes)
   // - `undefined`:         hash(TAG_UNDEFINED)
   // - `FabricBytes`:      hash(TAG_BYTES, leb128(byteLen), rawBytes)
@@ -2124,9 +2143,9 @@ export function hashOfModern(value: unknown): FabricHash {
   //                        (same payload format as TAG_BIGINT but distinct tag)
   // - `FabricEpochDays`: hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   //                        (same payload format as TAG_BIGINT but distinct tag)
-  // - `FabricHash`: hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
+  // - `FabricHash`: hash(TAG_CONTENT_ID, hashStr(algTag),
   //                              leb128(hashByteLen), hashBytes)
-  //                        (algorithm tag as UTF-8 string, then raw hash bytes)
+  //                        (algorithm tag as a tagged string, then raw hash bytes)
   // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
   //                        Elements are hashed in index order:
   //                          if `i in array`: hashOfModern(array[i])
@@ -2157,9 +2176,9 @@ export function hashOfModern(value: unknown): FabricHash {
   //                        indices to form maximal runs.
   // - object:              hash(TAG_OBJECT, ...sortedKeyValuePairs, TAG_END)
   //                        Keys sorted lexicographically by UTF-8.
-  //                        Each pair: TAG_STRING key + tagged value.
+  //                        Each pair: hashStr(key) + tagged value.
   //                        TAG_END marks the end of the pair sequence.
-  // - `FabricInstance`:  hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
+  // - `FabricInstance`:  hash(TAG_INSTANCE, hashStr(typeTag),
   //                              hashOfModern(deconstructedState))
   //
   // The native object wrappers and temporal types are hashed as follows:
@@ -2167,7 +2186,7 @@ export function hashOfModern(value: unknown): FabricHash {
   // - `FabricError`, `FabricMap`, `FabricSet`, `FabricRegExp`,
   //   and other `FabricInstance`s with recursively-processable
   //   deconstructed state are hashed via TAG_INSTANCE:
-  //     hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
+  //     hash(TAG_INSTANCE, hashStr(typeTag),
   //          hashOfModern(deconstructedState))
   //
   // - `FabricBytes` uses TAG_BYTES (dedicated primitive tag).
@@ -2175,16 +2194,18 @@ export function hashOfModern(value: unknown): FabricHash {
   // - `FabricEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
   // - `FabricHash` uses TAG_CONTENT_ID (dedicated primitive tag).
   //
-  // Examples:
-  // - `FabricError`:      hash(TAG_INSTANCE, ..., "Error@1", hashOfModern(errorState))
-  // - `FabricMap`:        hash(TAG_INSTANCE, ..., "Map@1", hashOfModern(entries))
+  // Examples (existing type tags are all short enough for the direct
+  // string form, so `hashStr(tag)` below expands to
+  // `TAG_STRING, leb128(utf8ByteLen), utf8Bytes`):
+  // - `FabricError`:      hash(TAG_INSTANCE, hashStr("Error@1"), hashOfModern(errorState))
+  // - `FabricMap`:        hash(TAG_INSTANCE, hashStr("Map@1"), hashOfModern(entries))
   //                         where entries are hashed in insertion order
-  // - `FabricSet`:        hash(TAG_INSTANCE, ..., "Set@1", hashOfModern(elements))
+  // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOfModern(elements))
   //                         where elements are hashed in insertion order
-  // - `FabricRegExp`:     hash(TAG_INSTANCE, ..., "RegExp@1", hashOfModern({source, flags, flavor}))
+  // - `FabricRegExp`:     hash(TAG_INSTANCE, hashStr("RegExp@1"), hashOfModern({source, flags, flavor}))
   // - `FabricEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `FabricEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
-  // - `FabricHash`:  hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
+  // - `FabricHash`:  hash(TAG_CONTENT_ID, hashStr(algTag),
   //                               leb128(hashByteLen), hashBytes)
   // - `FabricBytes`:      hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //
