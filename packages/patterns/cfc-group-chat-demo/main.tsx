@@ -601,6 +601,14 @@ export const ParticipantRoom = pattern<
     );
     return saved ? saved.name : "Name not set";
   });
+  // This ordinary host control reuses the trusted send handler so the runtime
+  // can demonstrate rejecting the same write outside the trusted UI boundary.
+  const hostLookalikeSend = commitTrustedMessageSend({
+    slotId,
+    messageDraft: hostMessageDraft,
+    participants,
+    messages,
+  });
   const hostSendDisabled = computed(() =>
     hostMessageDraft.get().trim().length === 0
   );
@@ -611,9 +619,6 @@ export const ParticipantRoom = pattern<
         invalidMessageEntriesValue(invalidMessages).length
       ) === 0
   );
-  const hostLookalikeSend = action(() => {
-    // This ordinary host control intentionally cannot release the private draft.
-  });
   const addRandomMessages = action(() => {
     const nextMessages = createRandomInvalidClaimedMessages(
       sortDisplayMessages([

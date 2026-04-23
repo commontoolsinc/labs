@@ -890,6 +890,256 @@ describe("CFC trusted UI event enforcement", () => {
     cancel();
   });
 
+  it("fails closed for untrusted array pushes guarded by a root uiContract", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-array-push-reject",
+      { asStream: true },
+    );
+    const messages = runtime.getCell<string[]>(
+      space,
+      "cfc-ui-contract-output-array-push-reject",
+      {
+        type: "array",
+        items: { type: "string" },
+        ifc: {
+          ...trustedPatternUiActionSchema.ifc,
+        },
+      },
+    );
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        messages.withTx(tx).push("rejected");
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [messages.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(messages.get()).toBeUndefined();
+    cancel();
+  });
+
+  it("fails closed for untrusted pushes into object arrays guarded by a root uiContract", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-object-array-push-reject",
+      { asStream: true },
+    );
+    const messages = runtime.getCell<
+      Array<{ id: string; body: string }>
+    >(
+      space,
+      "cfc-ui-contract-output-object-array-push-reject",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            body: { type: "string" },
+          },
+          required: ["id", "body"],
+        },
+        ifc: {
+          ...trustedPatternUiActionSchema.ifc,
+        },
+      },
+    );
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        messages.withTx(tx).push({
+          id: "message-1",
+          body: "rejected",
+        });
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [messages.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(messages.get()).toBeUndefined();
+    cancel();
+  });
+
+  it("preserves nested cell-link schemas so later untrusted writes still fail closed", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-nested-cell-link-schema",
+      { asStream: true },
+    );
+    const protectedMessagesSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          body: { type: "string" },
+        },
+        required: ["body"],
+      },
+      ifc: {
+        ...trustedPatternUiActionSchema.ifc,
+      },
+    } as const;
+    const protectedRoot = runtime.getCell(
+      space,
+      "cfc-ui-contract-protected-root-nested-cell-link-schema",
+      {
+        type: "object",
+        properties: {
+          messages: protectedMessagesSchema,
+        },
+      },
+    );
+    const holder = runtime.getCell(
+      space,
+      "cfc-ui-contract-holder-nested-cell-link-schema",
+      {
+        type: "object",
+        properties: {
+          messages: {},
+        },
+      },
+    );
+
+    await runtime.editWithRetry((tx) => {
+      holder.withTx(tx).set({
+        messages: protectedRoot.key("messages"),
+      } as { messages: unknown });
+    });
+
+    expect(
+      holder.key("messages").resolveAsCell().getAsNormalizedFullLink().schema,
+    ).toEqual(protectedMessagesSchema);
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        const messages = holder.withTx(tx).key("messages")
+          .resolveAsCell() as any;
+        messages.push({ body: "rejected" });
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [holder.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(protectedRoot.get()).toBeUndefined();
+    cancel();
+  });
+
   it("fails closed when trusted event markers are missing or mismatched", async () => {
     storageManager = StorageManager.emulate({
       as: signer,

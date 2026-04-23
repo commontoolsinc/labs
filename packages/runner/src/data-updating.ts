@@ -453,7 +453,7 @@ export function normalizeAndDiff(
     linkOriginFromCell = true;
     const carriedCfcLabelView = getCarriedCfcLabelView(newValue);
     newValue = attachCfcLabelViewToSigilLink(
-      newValue.getAsLink(),
+      newValue.getAsLink({ includeSchema: true }),
       carriedCfcLabelView,
     );
   }
