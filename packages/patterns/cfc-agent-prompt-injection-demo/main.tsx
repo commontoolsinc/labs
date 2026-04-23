@@ -13,7 +13,6 @@ import {
   safeDateNow,
   type Stream,
   UI,
-  type VNode,
   Writable,
 } from "commonfabric";
 import type { JSONSchema } from "commonfabric";

@@ -1275,10 +1275,11 @@ function buildToolCatalog(
       : (patternValue as { get?: () => unknown } | undefined)?.get?.() ??
         patternValue) as { argumentSchema?: JSONSchema } | undefined;
     const handlerValue = toolValue.handler ?? cellToolValue.handler;
-    const handler = (isCell(handlerValue)
-      ? handlerValue.resolveAsCell()
-      : undefined) as Cell<any> | undefined;
-    let inputSchema = pattern?.argumentSchema ?? toolValue?.inputSchema ??
+    const handler =
+      (isCell(handlerValue) ? handlerValue.resolveAsCell() : undefined) as
+        | Cell<any>
+        | undefined;
+    const inputSchema = pattern?.argumentSchema ?? toolValue?.inputSchema ??
       handler?.schema;
     if (inputSchema === undefined) {
       logger.warn("llm", `No input schema found for tool ${entry.name}`);

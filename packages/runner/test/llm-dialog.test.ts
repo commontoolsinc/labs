@@ -578,16 +578,6 @@ describe("llmDialog", () => {
   });
 
   it("should preserve mixed custom tools including subAgent when builtinTools is false", async () => {
-    const childResultSchema = {
-      type: "object",
-      properties: {
-        approved: { type: "boolean" },
-        summary: { type: "string" },
-      },
-      required: ["approved", "summary"],
-      additionalProperties: false,
-    } as const satisfies JSONSchema;
-
     loadConversationFixture({
       description:
         "llmDialog safe demo tool catalog should include subAgent alongside handler tools",
