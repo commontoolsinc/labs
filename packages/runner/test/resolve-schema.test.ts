@@ -10,7 +10,10 @@ import {
   isNontrivialSchema,
   toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  internSchema,
+  isInternedSchema,
+} from "@commonfabric/data-model/schema-hash";
 
 /** Narrow a JSONSchema | undefined to JSONSchemaObj or fail the test. */
 function expectNontrivial(
@@ -64,15 +67,30 @@ describe("resolveSchema", () => {
     // `resolveSchema` returns the canonical interned reference for its
     // input's structural content. These tests pin down what that means at
     // the edges.
+    //
+    // Markers use `${...}TestAt${Date.now()}-${Math.random()}` titles to
+    // guarantee the input is not already in the intern cache from a prior
+    // test run or module load — any static marker string could collide
+    // with a previously-interned entry and silently invalidate a
+    // "not yet interned" precondition.
+
+    it("returns a deep-frozen interned schema for a non-trivial input", () => {
+      // Pins the primitive contract: the returned schema passes
+      // `isInternedSchema`. All the other tests in this describe block
+      // verify downstream canonicalization behavior; this one confirms
+      // the direct invariant that `resolveSchema` interns its output.
+      const got = resolveSchema({
+        type: "string",
+        title: `resolveSchemaInternedTestAt${Date.now()}-${Math.random()}`,
+      });
+      expect(got).not.toBe(undefined);
+      expect(isInternedSchema(got!)).toBe(true);
+    });
 
     it("returns an equal result for a deep-frozen-but-not-interned input", () => {
-      // Uses a unique property name so this schema is unlikely to have
-      // been interned by any other test or module load. That lets us
-      // assert structural equality without having to know whether the
-      // caller's reference is canonical.
       const schema: JSONSchema = toDeepFrozenSchema({
         type: "string",
-        description: "resolve-schema-test-unique-marker-A",
+        title: `resolveSchemaEqualTestAt${Date.now()}-${Math.random()}`,
       });
       const got = resolveSchema(schema);
       expect(got).toEqual(schema);
@@ -80,15 +98,14 @@ describe("resolveSchema", () => {
     });
 
     it("returns the canonical interned reference when the input is content-equal to an already-interned schema", () => {
+      const marker =
+        `resolveSchemaCanonicalTestAt${Date.now()}-${Math.random()}`;
       // Intern a schema first, establishing the canonical reference.
-      const canonical = internSchema({
-        type: "string",
-        description: "resolve-schema-test-unique-marker-B",
-      });
+      const canonical = internSchema({ type: "string", title: marker });
       // Build a *different* (but content-equal) deep-frozen reference.
       const lookalike: JSONSchema = toDeepFrozenSchema({
         type: "string",
-        description: "resolve-schema-test-unique-marker-B",
+        title: marker,
       });
       // `resolveSchema` must return the canonical reference, not the
       // caller's lookalike.
@@ -102,23 +119,25 @@ describe("resolveSchema", () => {
       // through `internSchema`'s WeakMap and comes back unchanged.
       const canonical = internSchema({
         type: "string",
-        description: "resolve-schema-test-unique-marker-C",
+        title: `resolveSchemaPreserveTestAt${Date.now()}-${Math.random()}`,
       });
       expect(resolveSchema(canonical)).toBe(canonical);
     });
 
     it("canonicalizes compound schemas across calls", () => {
+      const marker =
+        `resolveSchemaCompoundTestAt${Date.now()}-${Math.random()}`;
       // Two content-equal non-interned inputs produce the same reference
       // on their respective `resolveSchema` calls, because both are
       // canonicalized through the intern cache.
       const first = resolveSchema({
         type: "object",
-        description: "resolve-schema-test-unique-marker-D",
+        title: marker,
         properties: { name: { type: "string" } },
       });
       const second = resolveSchema({
         type: "object",
-        description: "resolve-schema-test-unique-marker-D",
+        title: marker,
         properties: { name: { type: "string" } },
       });
       expect(first).toBe(second);
