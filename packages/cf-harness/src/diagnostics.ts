@@ -220,6 +220,32 @@ const extractLeadingCommandName = (command: string): string | undefined => {
   return undefined;
 };
 
+const MISSING_COMMAND_CAPTURE_PATTERNS = [
+  /(?:^|:\s*)["']?([^"' \t:]+)["']?:\s*command not found$/i,
+  /(?:^|:\s*)["']?([^"' \t:]+)["']?:\s*not found$/i,
+  /(?:^|:\s*)["']?([^"' \t:]+)["']?:\s*no such file or directory$/i,
+  /["']?([^"' \t]+)["']?\s+is not recognized as an internal or external command\b/i,
+];
+
+const extractMissingCommandNameFromText = (
+  text: string,
+): string | undefined => {
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "") {
+      continue;
+    }
+    for (const pattern of MISSING_COMMAND_CAPTURE_PATTERNS) {
+      const match = line.match(pattern);
+      const commandName = match?.[1]?.trim();
+      if (commandName !== undefined && commandName !== "") {
+        return commandName;
+      }
+    }
+  }
+  return undefined;
+};
+
 const capabilityCommandForName = (
   input: string | undefined,
 ): HarnessCapabilityCommand | undefined =>
@@ -265,7 +291,9 @@ export const classifyBashToolFailure = (
   ) {
     return undefined;
   }
-  const commandName = extractLeadingCommandName(input.command);
+  const commandName =
+    extractMissingCommandNameFromText(`${output.stderr}\n${output.stdout}`) ??
+      extractLeadingCommandName(input.command);
   return createHarnessFailureRecord({
     kind: "missing_binary",
     source: "tool_output",

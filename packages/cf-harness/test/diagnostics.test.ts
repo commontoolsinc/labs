@@ -156,6 +156,40 @@ Deno.test("classifyBashToolFailure uses the capability snapshot to explain missi
   });
 });
 
+Deno.test("classifyBashToolFailure prefers the missing subcommand from shell output", async () => {
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    new FakeSandboxRuntime(),
+    "/workspace",
+    "2026-04-23T18:20:00.000Z",
+  );
+
+  const failure = classifyBashToolFailure(
+    { command: "echo ok && python script.py" },
+    {
+      outputId: createToolOutputId("run-2", "bash", 1),
+      stdout: "ok",
+      stderr: "/bin/sh: python: command not found",
+      exitCode: 127,
+      cwd: "/workspace",
+    },
+    "2026-04-23T18:20:01.000Z",
+    snapshot,
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "missing_binary",
+    source: "tool_output",
+    detail: "python is not available in the sandbox. python3 is available.",
+    at: "2026-04-23T18:20:01.000Z",
+    toolId: "bash",
+    outputId: createToolOutputId("run-2", "bash", 1),
+    command: "echo ok && python script.py",
+    commandName: "python",
+    exitCode: 127,
+  });
+});
+
 Deno.test("classifyHarnessRunError maps timeouts and path escapes deterministically", () => {
   assertEquals(
     classifyHarnessRunError(
