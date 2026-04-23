@@ -129,6 +129,8 @@ Deno.test({
         status: "completed",
         createdAt: "2026-04-15T21:00:00.000Z",
         updatedAt: "2026-04-15T21:00:05.000Z",
+        endedAt: "2026-04-15T21:00:05.000Z",
+        terminalReason: "tool_completed",
         cfcEnforcementMode: "observe",
         currentDir: "/workspace",
         artifactRoot: runRoot,
@@ -263,6 +265,8 @@ Deno.test({
       );
       assertEquals(persistedState.transcriptPath, transcriptPath);
       assertEquals(persistedState.artifactRoot, runRoot);
+      assertEquals(persistedState.endedAt, "2026-04-15T21:10:07.000Z");
+      assertEquals(persistedState.terminalReason, "assistant_completed");
       assertEquals(persistedState.policyEvents, []);
       assertEquals(persistedState.failureRecords, []);
       assertEquals(

@@ -156,6 +156,8 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
     "The todo file says hello from file.",
   );
   assertEquals(result.modelTurns, 2);
+  assertEquals(result.runState.endedAt, "2026-04-15T20:00:06.000Z");
+  assertEquals(result.runState.terminalReason, "assistant_completed");
   assertEquals(result.transcript, [
     { role: "system", content: "You are a test harness." },
     { role: "user", content: "Read the todo file and summarize it." },
@@ -345,6 +347,7 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
     "prompt loop exceeded max model turns (1)",
   );
   assertEquals(loop.engine.getRunState().status, "failed");
+  assertEquals(loop.engine.getRunState().terminalReason, "max_model_turns");
   assertEquals(loop.engine.getRunState().policyEvents, []);
 });
 

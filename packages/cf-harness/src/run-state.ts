@@ -13,11 +13,20 @@ export type HarnessRunStatus =
   | "completed"
   | "failed";
 
+export type HarnessRunTerminalReason =
+  | "assistant_completed"
+  | "tool_completed"
+  | "tool_error"
+  | "max_model_turns"
+  | "prompt_loop_error";
+
 export interface HarnessRunState {
   runId: string;
   status: HarnessRunStatus;
   createdAt: string;
   updatedAt: string;
+  endedAt?: string;
+  terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
   currentDir: string;
   model?: string;
@@ -34,6 +43,8 @@ export interface HarnessRunState {
 export interface CreateHarnessRunStateOptions {
   runId?: string;
   status?: HarnessRunStatus;
+  endedAt?: string;
+  terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
   currentDir: string;
   model?: string;
@@ -55,6 +66,10 @@ export const createHarnessRunState = (
     status: options.status ?? "pending",
     createdAt: now,
     updatedAt: now,
+    ...(options.endedAt !== undefined ? { endedAt: options.endedAt } : {}),
+    ...(options.terminalReason !== undefined
+      ? { terminalReason: options.terminalReason }
+      : {}),
     cfcEnforcementMode: options.cfcEnforcementMode,
     currentDir: options.currentDir,
     ...(options.model !== undefined ? { model: options.model } : {}),
@@ -83,11 +98,26 @@ export const setHarnessRunStatus = (
   state: HarnessRunState,
   status: HarnessRunStatus,
   now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  status,
-  updatedAt: now,
-});
+  terminalReason?: HarnessRunTerminalReason,
+): HarnessRunState => {
+  const base = {
+    ...state,
+    status,
+    updatedAt: now,
+  };
+  if (status === "completed" || status === "failed") {
+    return {
+      ...base,
+      endedAt: now,
+      ...(terminalReason !== undefined ? { terminalReason } : {}),
+    };
+  }
+  const { endedAt: _endedAt, terminalReason: _terminalReason, ...nonTerminal } =
+    base;
+  return {
+    ...nonTerminal,
+  };
+};
 
 export const appendHarnessToolOutput = (
   state: HarnessRunState,

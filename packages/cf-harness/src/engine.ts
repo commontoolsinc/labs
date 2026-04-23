@@ -13,6 +13,7 @@ import {
   appendHarnessToolOutput,
   createHarnessRunState,
   type HarnessRunState,
+  type HarnessRunTerminalReason,
   setHarnessCapabilitySnapshot,
   setHarnessRunCurrentDir,
   setHarnessRunStatus,
@@ -210,8 +211,16 @@ export class CfHarnessEngine {
     );
   }
 
-  setRunStatus(status: HarnessRunState["status"]): HarnessRunState {
-    this.#runState = setHarnessRunStatus(this.#runState, status, this.#now());
+  setRunStatus(
+    status: HarnessRunState["status"],
+    terminalReason?: HarnessRunTerminalReason,
+  ): HarnessRunState {
+    this.#runState = setHarnessRunStatus(
+      this.#runState,
+      status,
+      this.#now(),
+      terminalReason,
+    );
     return this.getRunState();
   }
 
@@ -334,7 +343,12 @@ export class CfHarnessEngine {
       );
       const completionTime = this.#now();
       this.#runState = appendHarnessToolOutput(
-        setHarnessRunStatus(this.#runState, "completed", completionTime),
+        setHarnessRunStatus(
+          this.#runState,
+          "completed",
+          completionTime,
+          "tool_completed",
+        ),
         resultRef,
         completionTime,
       );
@@ -364,6 +378,7 @@ export class CfHarnessEngine {
         this.#runState,
         "failed",
         failureTime,
+        "tool_error",
       );
       this.#runState = appendHarnessFailureRecord(
         this.#runState,

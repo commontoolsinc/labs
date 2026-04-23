@@ -126,6 +126,8 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
   assertEquals(engine.getRunState().status, "completed");
   assertEquals(engine.getRunState().createdAt, "2026-04-15T19:00:00.000Z");
   assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:00:05.000Z");
+  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:00:05.000Z");
+  assertEquals(engine.getRunState().terminalReason, "tool_completed");
   assertEquals(engine.getRunState().cfcEnforcementMode, "observe");
   assertEquals(engine.getRunState().currentDir, "/workspace");
   assertEquals(engine.getRunState().policyEvents, []);
@@ -168,6 +170,8 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
   assertEquals(engine.getRunState().status, "failed");
   assertEquals(engine.getRunState().createdAt, "2026-04-15T19:10:00.000Z");
   assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:10:02.000Z");
+  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:10:02.000Z");
+  assertEquals(engine.getRunState().terminalReason, "tool_error");
   assertEquals(engine.getRunState().cfcEnforcementMode, "observe");
   assertEquals(engine.getRunState().currentDir, "/workspace");
   assertEquals(engine.getRunState().policyEvents, []);
@@ -184,6 +188,8 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
       status: "completed",
       createdAt: "2026-04-17T20:10:00.000Z",
       updatedAt: "2026-04-17T20:10:01.000Z",
+      endedAt: "2026-04-17T20:10:01.000Z",
+      terminalReason: "tool_completed",
       cfcEnforcementMode: "observe",
       currentDir: "/workspace",
       policyEvents: [createHarnessPolicyEvent({
@@ -213,6 +219,8 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
     status: "completed",
     createdAt: "2026-04-17T20:10:00.000Z",
     updatedAt: "2026-04-17T20:10:01.000Z",
+    endedAt: "2026-04-17T20:10:01.000Z",
+    terminalReason: "tool_completed",
     cfcEnforcementMode: "observe",
     currentDir: "/workspace",
     policyEvents: [createHarnessPolicyEvent({
