@@ -254,20 +254,20 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
  * shallow-cloned as mutable, for the express purpose of tactical modification
  * and then immediately treated once again as deep-immutable.
  */
-export function internSchema(
-  schema: JSONSchema,
+export function internSchema<T extends JSONSchema>(
+  schema: T,
   wantSchemaAndHash?: false,
-): JSONSchema;
-export function internSchema(
-  schema: JSONSchema,
+): T;
+export function internSchema<T extends JSONSchema>(
+  schema: T,
   wantSchemaAndHash: true,
 ): SchemaAndHash;
-export function internSchema(
-  schema: JSONSchema,
+export function internSchema<T extends JSONSchema>(
+  schema: T,
   wantSchemaAndHash?: boolean,
 ): JSONSchema | SchemaAndHash;
-export function internSchema(
-  schema: JSONSchema,
+export function internSchema<T extends JSONSchema>(
+  schema: T,
   wantSchemaAndHash: boolean = false,
 ): JSONSchema | SchemaAndHash {
   const sahResult = internSchemaReturningSchemaAndHash(schema);
