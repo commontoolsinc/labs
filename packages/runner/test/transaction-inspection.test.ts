@@ -13,7 +13,10 @@ import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
-import { reactivityLogFromActivities } from "../src/storage/reactivity-log.ts";
+import {
+  reactivityLogFromActivities,
+  shallowReadInterestedChildren,
+} from "../src/storage/reactivity-log.ts";
 import {
   getTransactionReadActivities,
   getTransactionWriteDetails,
@@ -237,6 +240,41 @@ describe("transaction inspection", () => {
       };
 
       assertEquals(tx.getReactivityLog?.(), expected);
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("preserves interested children in native v2 shallow reads", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const tx = storageManager.edit();
+      const id = "test:transaction-inspection-shallow-interest-v2" as const;
+      tx.read({
+        space,
+        id,
+        type: "application/json",
+        path: ["value"],
+      }, {
+        nonRecursive: true,
+        meta: shallowReadInterestedChildren(["name"]),
+      });
+
+      assertEquals(tx.getReactivityLog?.(), {
+        reads: [],
+        shallowReads: [{
+          space,
+          id,
+          type: "application/json",
+          path: ["value"],
+          interestedChildren: ["name"],
+        }],
+        writes: [],
+      });
     } finally {
       await storageManager.close();
     }

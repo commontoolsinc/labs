@@ -61,6 +61,7 @@ import {
   WriteIsolationError,
 } from "./transaction.ts";
 import {
+  getShallowReadInterestedChildren,
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
   isReadMarkedAsPotentialWrite,
@@ -1666,7 +1667,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private buildReactivityLog(): TransactionReactivityLog {
     const reads: IMemorySpaceAddress[] = [];
-    const shallowReads: IMemorySpaceAddress[] = [];
+    const shallowReads: TransactionReactivityLog["shallowReads"] = [];
     let potentialWrites: IMemorySpaceAddress[] | undefined;
 
     for (const read of this.#readActivities) {
@@ -1683,7 +1684,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       };
 
       if (read.nonRecursive === true) {
-        shallowReads.push(address);
+        const interestedChildren = getShallowReadInterestedChildren(meta);
+        shallowReads.push({
+          ...address,
+          ...(interestedChildren ? { interestedChildren } : {}),
+        });
       } else {
         reads.push(address);
       }

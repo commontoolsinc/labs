@@ -64,6 +64,7 @@ import type {
   WriterError,
 } from "./storage/interface.ts";
 import { createReadOnlyTransactionError } from "./storage/interface.ts";
+import { shallowReadInterestedChildren } from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -85,6 +86,85 @@ const READ_NON_RECURSIVE_FOR_SCHEDULING: IReadOptions = {
   nonRecursive: true,
   trackReadWithoutLoad: true,
 };
+
+function readNonRecursiveForScheduling(
+  interestedChildren?: readonly string[],
+): IReadOptions {
+  if (!interestedChildren || interestedChildren.length === 0) {
+    return READ_NON_RECURSIVE_FOR_SCHEDULING;
+  }
+  return {
+    ...READ_NON_RECURSIVE_FOR_SCHEDULING,
+    meta: shallowReadInterestedChildren(interestedChildren),
+  };
+}
+
+function readNonRecursiveForSchedulingForSelector(
+  docPath: readonly string[],
+  selector?: SchemaPathSelector,
+): IReadOptions {
+  return readNonRecursiveForScheduling(
+    interestedChildrenForSelector(docPath, selector),
+  );
+}
+
+function readNonRecursiveForSchedulingForSchema(
+  schema: JSONSchema | undefined,
+): IReadOptions {
+  return readNonRecursiveForScheduling(interestedChildrenForSchema(schema));
+}
+
+function interestedChildrenForSelector(
+  docPath: readonly string[],
+  selector?: SchemaPathSelector,
+): readonly string[] | undefined {
+  if (!selector || docPath.length > selector.path.length) {
+    return undefined;
+  }
+  for (let i = 0; i < docPath.length; i++) {
+    if (docPath[i] !== selector.path[i]) {
+      return undefined;
+    }
+  }
+  if (selector.path.length > docPath.length) {
+    return [selector.path[docPath.length]!];
+  }
+  return interestedChildrenForSchema(selector.schema);
+}
+
+function interestedChildrenForSchema(
+  schema: JSONSchema | undefined,
+): readonly string[] | undefined {
+  if (
+    !isRecord(schema) ||
+    schema.anyOf !== undefined ||
+    schema.oneOf !== undefined ||
+    schema.allOf !== undefined
+  ) {
+    return undefined;
+  }
+
+  if (
+    isRecord(schema.patternProperties) &&
+    Object.keys(schema.patternProperties).length > 0
+  ) {
+    return undefined;
+  }
+
+  if (
+    schema.additionalProperties !== undefined &&
+    schema.additionalProperties !== false
+  ) {
+    return undefined;
+  }
+
+  if (!isRecord(schema.properties)) {
+    return undefined;
+  }
+
+  const keys = Object.keys(schema.properties);
+  return keys.length > 0 ? keys : undefined;
+}
 
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 export type { SchemaPathSelector };
@@ -1093,7 +1173,10 @@ export function getAtPath(
           value: elementAt(curDoc.value, part),
         };
       }
-      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+      tx.read(
+        curDoc.address,
+        readNonRecursiveForSchedulingForSelector(curDoc.address.path, selector),
+      );
     } else if (isString(curDoc.value) && part === "length") {
       // Handle native property access on string primitives (e.g., .length).
       // Intentionally do not call tx.read here: string length changes only when
@@ -1117,7 +1200,10 @@ export function getAtPath(
         },
         value: cursorObj[part] as Immutable<FabricValue>,
       };
-      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+      tx.read(
+        curDoc.address,
+        readNonRecursiveForSchedulingForSelector(curDoc.address.path, selector),
+      );
     } else {
       // we can only descend into pointers, objects, and arrays
       // this can happen when things aren't set up yet, so it's just debug.
@@ -1137,7 +1223,10 @@ export function getAtPath(
       };
       // go ahead and register this read -- a subsequent write
       // at this location should re-trigger us
-      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+      tx.read(
+        curDoc.address,
+        readNonRecursiveForSchedulingForSelector(curDoc.address.path, selector),
+      );
       return [curDoc, selector];
     }
   }
@@ -2007,7 +2096,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
       internPathSelector(this.selector),
     );
     // Flag the top level read of doc for the scheduler
-    this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+    this.tx.readOrThrow(
+      doc.address,
+      readNonRecursiveForSchedulingForSelector(doc.address.path, this.selector),
+    );
     const rv = this.traverseWithSelector(doc, this.selector, link);
     const { error } = rv;
     const elapsed = logger.timeEnd("traverse") ?? 0;
@@ -2663,11 +2755,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
         },
         value: item,
       };
-      this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       let curSelector: SchemaPathSelector = {
         path: curDoc.address.path,
         schema: itemSchema,
       };
+      this.tx.read(
+        curDoc.address,
+        readNonRecursiveForSchedulingForSelector(
+          curDoc.address.path,
+          curSelector,
+        ),
+      );
       // Sparse array holes are densified to `null` at the storage boundary in
       // legacy JSON mode. When the item schema expects cells/streams, or the
       // schema rejects both `null` and `undefined`, treat that committed `null`
@@ -2718,7 +2816,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const [linkDoc, linkSelector] = this.nextLink(redirDoc, curSelector);
         curDoc = linkDoc;
         curSelector = linkSelector!;
-        this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+        this.tx.read(
+          curDoc.address,
+          readNonRecursiveForSchedulingForSelector(
+            curDoc.address.path,
+            curSelector,
+          ),
+        );
         if (curDoc.value === undefined) {
           logger.info(
             "traverse",
@@ -2909,7 +3013,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
         filteredObj[propKey] = val;
       } else {
         const propDoc = { address: propAddress, value: propValue };
-        this.tx.read(propDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+        this.tx.read(
+          propDoc.address,
+          readNonRecursiveForSchedulingForSchema(propSchema),
+        );
         const { ok: val, error } = this.traverseWithSchema(propDoc, propSchema);
         if (error === undefined) {
           filteredObj[propKey] = val;
