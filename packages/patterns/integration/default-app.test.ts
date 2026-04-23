@@ -1978,7 +1978,7 @@ async function collectNoteTitlesInList(page: Page): Promise<string[]> {
           const text = el.textContent;
           if (text) {
             for (
-              const match of text.matchAll(/📝 New Note #[a-z0-9]+/g)
+              const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
             ) {
               titles.add(match[0]);
             }
