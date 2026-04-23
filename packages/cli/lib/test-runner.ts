@@ -37,7 +37,7 @@ import type {
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { OpaqueRef } from "@commonfabric/api";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
@@ -104,7 +104,7 @@ type HarnessTestStepMeta = {
 
 type HarnessTestStepCell = Cell<unknown>;
 
-const testStepPeekSchema = toDeepFrozenSchema(
+const testStepPeekSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -113,24 +113,21 @@ const testStepPeekSchema = toDeepFrozenSchema(
       skip: { type: "boolean" },
     },
   },
-  true,
 );
 
-const testStepEntrySchema = toDeepFrozenSchema(
+const testStepEntrySchema = internSchema(
   {
     type: "object",
     asCell: true,
   },
-  true,
 );
 
-const testStepListSchema = toDeepFrozenSchema(
+const testStepListSchema = internSchema(
   {
     type: "array",
     items: testStepEntrySchema,
     default: [],
   },
-  true,
 );
 
 function actionStreamForStep(stepCell: HarnessTestStepCell): Stream<unknown> {
