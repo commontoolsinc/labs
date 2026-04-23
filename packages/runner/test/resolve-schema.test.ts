@@ -10,6 +10,7 @@ import {
   isNontrivialSchema,
   toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 /** Narrow a JSONSchema | undefined to JSONSchemaObj or fail the test. */
 function expectNontrivial(
@@ -59,18 +60,68 @@ describe("resolveSchema", () => {
     });
   });
 
-  describe("frozen input handling", () => {
-    it("returns the same schema for a non-trivial deep-frozen schema", () => {
-      const schema: JSONSchema = toDeepFrozenSchema({ type: "string" });
-      expect(resolveSchema(schema)).toBe(schema);
+  describe("canonical intern contract", () => {
+    // `resolveSchema` returns the canonical interned reference for its
+    // input's structural content. These tests pin down what that means at
+    // the edges.
+
+    it("returns an equal result for a deep-frozen-but-not-interned input", () => {
+      // Uses a unique property name so this schema is unlikely to have
+      // been interned by any other test or module load. That lets us
+      // assert structural equality without having to know whether the
+      // caller's reference is canonical.
+      const schema: JSONSchema = toDeepFrozenSchema({
+        type: "string",
+        description: "resolve-schema-test-unique-marker-A",
+      });
+      const got = resolveSchema(schema);
+      expect(got).toEqual(schema);
+      expect(Object.isFrozen(got)).toBe(true);
     });
 
-    it("returns somewhat less trivial frozen input as-is", () => {
-      const schema: JSONSchema = toDeepFrozenSchema({
+    it("returns the canonical interned reference when the input is content-equal to an already-interned schema", () => {
+      // Intern a schema first, establishing the canonical reference.
+      const canonical = internSchema({
+        type: "string",
+        description: "resolve-schema-test-unique-marker-B",
+      });
+      // Build a *different* (but content-equal) deep-frozen reference.
+      const lookalike: JSONSchema = toDeepFrozenSchema({
+        type: "string",
+        description: "resolve-schema-test-unique-marker-B",
+      });
+      // `resolveSchema` must return the canonical reference, not the
+      // caller's lookalike.
+      const got = resolveSchema(lookalike);
+      expect(got).toBe(canonical);
+      expect(got === lookalike).toBe(false);
+    });
+
+    it("preserves the caller's reference when the input is already the canonical interned instance", () => {
+      // An input that is itself the canonical instance short-circuits
+      // through `internSchema`'s WeakMap and comes back unchanged.
+      const canonical = internSchema({
+        type: "string",
+        description: "resolve-schema-test-unique-marker-C",
+      });
+      expect(resolveSchema(canonical)).toBe(canonical);
+    });
+
+    it("canonicalizes compound schemas across calls", () => {
+      // Two content-equal non-interned inputs produce the same reference
+      // on their respective `resolveSchema` calls, because both are
+      // canonicalized through the intern cache.
+      const first = resolveSchema({
         type: "object",
+        description: "resolve-schema-test-unique-marker-D",
         properties: { name: { type: "string" } },
-      }, true);
-      expect(resolveSchema(schema)).toBe(schema);
+      });
+      const second = resolveSchema({
+        type: "object",
+        description: "resolve-schema-test-unique-marker-D",
+        properties: { name: { type: "string" } },
+      });
+      expect(first).toBe(second);
     });
   });
 });
