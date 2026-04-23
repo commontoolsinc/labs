@@ -19,7 +19,6 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   LLMMessageSchema,
   LLMParamsSchema,
-  LLMReducedToolSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -1252,7 +1251,7 @@ function buildToolCatalog(
   includeBuiltinTools = true,
 ): ToolCatalog {
   const { legacy } = collectToolEntries(
-    toolsCell.asSchema(TOOL_CATALOG_SCHEMA),
+    toolsCell as Cell<Record<string, Schema<typeof LLMToolSchema>>>,
   );
   const llmTools: ToolCatalog["llmTools"] = {};
   const dynamicToolCells = new Map<
@@ -1261,21 +1260,34 @@ function buildToolCatalog(
   >();
 
   for (const entry of legacy) {
-    const toolValue = entry.tool ?? {};
-    const pattern = toolValue?.pattern?.get?.() ?? toolValue?.pattern;
-    const handler = isCell(toolValue?.handler)
-      ? toolValue.handler.resolveAsCell()
-      : undefined;
-    let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
-      toolValue?.inputSchema;
+    const toolValue = (entry.cell.get() ?? entry.tool ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const patternValue = toolValue.pattern;
+    const pattern = (isCell(patternValue)
+      ? patternValue.resolveAsCell().get()
+      : (patternValue as { get?: () => unknown } | undefined)?.get?.() ??
+        patternValue) as { argumentSchema?: JSONSchema } | undefined;
+    const handlerValue = toolValue.handler;
+    const handler = (isCell(handlerValue)
+      ? handlerValue.resolveAsCell()
+      : undefined) as Cell<any> | undefined;
+    let inputSchema = pattern?.argumentSchema ?? toolValue?.inputSchema ??
+      handler?.schema;
     if (inputSchema === undefined) {
       logger.warn("llm", `No input schema found for tool ${entry.name}`);
       continue;
     }
-    inputSchema = normalizeInputSchema(inputSchema);
+    const normalizedInputSchema = normalizeInputSchema(
+      inputSchema as JSONSchema | boolean,
+    ) as JSONSchema;
     const description: string = toolValue.description ??
-      (inputSchema as any)?.description ?? "";
-    llmTools[entry.name] = { description, inputSchema };
+      (normalizedInputSchema as any)?.description ?? "";
+    llmTools[entry.name] = {
+      description,
+      inputSchema: normalizedInputSchema,
+    };
     dynamicToolCells.set(entry.name, entry.cell);
   }
 
@@ -2793,12 +2805,9 @@ export function llmDialog(
     // Update flattened tools whenever tools change
     // `flattenedTools` is for now just used in the UI, and so we only need
     // inputSchema and description. This makes retrieving the tools much faster.
-    const toolsCell = inputs.key("tools").asSchema(
-      {
-        type: "object",
-        additionalProperties: LLMReducedToolSchema,
-      } as const,
-    ).withTx(tx);
+    const toolsCell = inputs.key("tools").withTx(tx) as Cell<
+      Record<string, Schema<typeof LLMToolSchema>>
+    >;
     const builtinTools = inputs.key("builtinTools").withTx(tx).get() !== false;
     const flattened = flattenTools(toolsCell, builtinTools);
 

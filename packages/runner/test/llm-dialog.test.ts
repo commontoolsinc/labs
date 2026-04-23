@@ -30,6 +30,7 @@ describe("llmDialog", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let patternTool: ReturnType<
     typeof createBuilder
   >["commonfabric"]["patternTool"];
@@ -46,7 +47,7 @@ describe("llmDialog", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, llmDialog, Cell, patternTool } = commonfabric);
+    ({ pattern, llmDialog, Cell, handler, patternTool } = commonfabric);
   });
 
   afterEach(async () => {
@@ -256,6 +257,515 @@ describe("llmDialog", () => {
     expect(messages[3].content).toBe(
       "The weather in San Francisco is sunny and 25C.",
     );
+  });
+
+  it("should prefer explicit handler tool inputSchema in provider requests", async () => {
+    let capturedToolSchema: unknown;
+
+    addMockResponse(
+      (req) => {
+        capturedToolSchema = req.tools?.sendMail?.inputSchema;
+        return true;
+      },
+      {
+        role: "assistant",
+        content: "Ready.",
+        id: "handler-schema-r1",
+      },
+    );
+
+    const sendMailHandler = handler(
+      {
+        type: "object",
+        properties: {
+          recipient: { type: "string" },
+          subject: { type: "string" },
+          body: { type: "string" },
+          result: { type: "object", asCell: true },
+        },
+        required: ["recipient", "subject", "body", "result"],
+      },
+      {
+        type: "object",
+        properties: {},
+      },
+      ({ result }: any) => {
+        result.set({ ok: true });
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          builtinTools: false,
+          tools: {
+            sendMail: {
+              description: "Send an email.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  recipient: { type: "string" },
+                  subject: { type: "string" },
+                  body: { type: "string" },
+                },
+                required: ["recipient", "subject", "body"],
+                additionalProperties: false,
+              } as const satisfies JSONSchema,
+              handler: sendMailHandler({}),
+            } as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-handler-input-schema-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Send the email." });
+
+    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    expect(capturedToolSchema).toMatchObject({
+      type: "object",
+      properties: {
+        recipient: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string" },
+      },
+      required: ["recipient", "subject", "body"],
+    });
+  });
+
+  it("should expose subAgentTool in llmDialog tool catalogs", async () => {
+    const childResultSchema = {
+      type: "object",
+      properties: {
+        approved: { type: "boolean" },
+        summary: { type: "string" },
+      },
+      required: ["approved", "summary"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    loadConversationFixture({
+      description: "llmDialog subAgent tool should be available to the parent",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["delegate"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_delegate",
+              toolName: "delegate",
+              input: {
+                prompt: "analyze the hidden text",
+                resultSchema: childResultSchema,
+              },
+            }],
+            id: "dlg-subagent-r1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["helperTool", "presentResult"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_child_present",
+              toolName: "presentResult",
+              input: {
+                approved: false,
+                summary: "Not approved.",
+              },
+            }],
+            id: "dlg-subagent-r2",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["delegate"],
+            messageCount: 3,
+          },
+          response: {
+            role: "assistant",
+            content: "Delegate completed.",
+            id: "dlg-subagent-r3",
+          },
+        },
+      ],
+    });
+
+    const helperTool = pattern(
+      () => ({ ok: true }),
+      {
+        type: "object",
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      } as const satisfies JSONSchema,
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const { subAgentTool } = createTrustedBuilder(runtime).commonfabric;
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          tools: {
+            delegate: {
+              description: "Run a child agent and return schema-limited JSON.",
+              ...(subAgentTool(
+                ({ prompt }: any) => ({
+                  prompt,
+                  tools: {
+                    helperTool: patternTool(
+                      helperTool,
+                    ) as unknown as BuiltInLLMTool,
+                  },
+                }),
+                {
+                  type: "object",
+                  properties: {
+                    prompt: { type: "string" },
+                    resultSchema: {
+                      type: "object",
+                      additionalProperties: true,
+                    },
+                  },
+                  required: ["prompt", "resultSchema"],
+                  additionalProperties: false,
+                },
+                ({ resultSchema }: any) => resultSchema,
+              ) as unknown as BuiltInLLMTool),
+            },
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-subagent-tool-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Start the workflow." });
+
+    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    const messages = (await result.key("messages").pull())!;
+    expect(messages.at(-1)?.content).toBe("Delegate completed.");
+  });
+
+  it("should preserve mixed custom tools including subAgent when builtinTools is false", async () => {
+    const childResultSchema = {
+      type: "object",
+      properties: {
+        approved: { type: "boolean" },
+        summary: { type: "string" },
+      },
+      required: ["approved", "summary"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    loadConversationFixture({
+      description:
+        "llmDialog safe demo tool catalog should include subAgent alongside handler tools",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["readRawBriefing", "subAgent", "sendMail"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: "Tool catalog is available.",
+            id: "dlg-safe-catalog-r1",
+          },
+        },
+      ],
+    });
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+        flattenedTools: {
+          type: "object",
+          additionalProperties: {
+            type: "object",
+            additionalProperties: true,
+          },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const { subAgentTool } = createTrustedBuilder(runtime).commonfabric;
+
+    const readRawBriefing = handler(
+      {
+        type: "object",
+        properties: {
+          result: { type: "object", asCell: true },
+        },
+        required: ["result"],
+      },
+      {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          source: { type: "string" },
+          body: { type: "object", additionalProperties: true },
+        },
+        required: ["title", "source", "body"],
+      },
+      ({ result }: { result: any }, { title, source, body }: any) => {
+        result.set({
+          title,
+          source,
+          analystHint: "Untrusted partner source.",
+          body,
+        });
+      },
+    );
+
+    const sendMail = handler(
+      {
+        type: "object",
+        properties: {
+          recipient: { type: "string" },
+          subject: { type: "string" },
+          body: { type: "string" },
+          result: { type: "object", asCell: true },
+        },
+        required: ["recipient", "subject", "body", "result"],
+      },
+      {
+        type: "object",
+        properties: {
+          sent: { type: "object", asCell: true },
+          route: { type: "string" },
+        },
+        required: ["sent"],
+      },
+      (
+        { recipient, subject, body, result }: any,
+        { sent, route }: any,
+      ) => {
+        sent.set({ recipient, subject, body, route });
+        result.set({ ok: true });
+      },
+    );
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const sent = Cell.of({});
+        const emails = Cell.of({});
+        const hostileBody = Cell.of({ text: "hostile body" });
+        const dialog = llmDialog({
+          system: "Safe demo parent.",
+          messages,
+          builtinTools: false,
+          observationMaxConfidentiality: ["internal"],
+          tools: {
+            readRawBriefing: {
+              description: "Read the briefing.",
+              inputSchema: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              } as const satisfies JSONSchema,
+              handler: readRawBriefing({
+                title: "Briefing",
+                source: "https://example.invalid",
+                body: {
+                  redacted: true,
+                  nextStep: "Use subAgent.",
+                },
+              }),
+            } as unknown as BuiltInLLMTool,
+            subAgent: {
+              description:
+                "Run a higher-clearance worker and return schema-limited JSON.",
+              ...(subAgentTool(
+                ({ prompt, body, emails, route }: any) => ({
+                  prompt,
+                  system: "Child worker.",
+                  tools: {
+                    readRawBriefing: {
+                      description: "Read the nested body.",
+                      inputSchema: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: false,
+                      } as const satisfies JSONSchema,
+                      handler: readRawBriefing({
+                        title: "Briefing",
+                        source: "https://example.invalid",
+                        body,
+                      }),
+                    } as unknown as BuiltInLLMTool,
+                    sendMail: {
+                      description: "Send a nested email.",
+                      inputSchema: {
+                        type: "object",
+                        properties: {
+                          recipient: { type: "string" },
+                          subject: { type: "string" },
+                          body: { type: "string" },
+                        },
+                        required: ["recipient", "subject", "body"],
+                        additionalProperties: false,
+                      } as const satisfies JSONSchema,
+                      handler: sendMail({ sent: emails, route }),
+                    } as unknown as BuiltInLLMTool,
+                  },
+                  observationMaxConfidentiality: ["internal"],
+                }),
+                {
+                  type: "object",
+                  properties: {
+                    prompt: { type: "string" },
+                    resultSchema: {
+                      type: "object",
+                      additionalProperties: true,
+                    },
+                  },
+                  required: ["prompt", "resultSchema"],
+                  additionalProperties: false,
+                },
+                ({ resultSchema }: any) => resultSchema,
+                { body: hostileBody, emails, route: "safe-child" },
+              ) as unknown as BuiltInLLMTool),
+            },
+            sendMail: {
+              description: "Send an email.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  recipient: { type: "string" },
+                  subject: { type: "string" },
+                  body: { type: "string" },
+                },
+                required: ["recipient", "subject", "body"],
+                additionalProperties: false,
+              } as const satisfies JSONSchema,
+              handler: sendMail({ sent, route: "parent" }),
+            } as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          messages,
+          flattenedTools: dialog.flattenedTools,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-safe-demo-tool-catalog-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const flattenedTools = await result.key("flattenedTools").pull();
+    expect(Object.keys(flattenedTools ?? {}).sort()).toEqual([
+      "readRawBriefing",
+      "sendMail",
+      "subAgent",
+    ]);
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Start the safe workflow." });
+
+    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    const messages = (await result.key("messages").pull())!;
+    expect(messages.at(-1)?.content).toBe("Tool catalog is available.");
   });
 
   it("should deny low-ceiling tools after internal-conf tool results", async () => {
@@ -1047,6 +1557,113 @@ describe("llmDialog", () => {
 
     const flattenedTools = await result.key("flattenedTools").pull();
     expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
+  });
+
+  it("should expose handler-based custom tools in flattenedTools", async () => {
+    let capturedRequest: any;
+
+    addMockResponse(
+      (req) => {
+        capturedRequest = req;
+        return true;
+      },
+      {
+        role: "assistant",
+        content: "Using handler tools.",
+        id: "mock-handler-tool-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        error: { type: "object", additionalProperties: true },
+        flattenedTools: {
+          type: "object",
+          additionalProperties: true,
+        },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const pingHandler = handler(
+      {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      {},
+      () => "pong",
+    );
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          builtinTools: false,
+          system: "Base system prompt.",
+          tools: {
+            ping: {
+              description: "Ping the system.",
+              inputSchema: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+              handler: pingHandler({}),
+            } as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          error: dialog.error,
+          flattenedTools: dialog.flattenedTools,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-handler-tools-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({
+      role: "user",
+      content: "Reply with handler tools available.",
+    });
+
+    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+
+    expect(capturedRequest).toBeDefined();
+    expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
+
+    const flattenedTools = await result.key("flattenedTools").pull();
+    expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
+    expect(flattenedTools?.ping).toMatchObject({
+      description: "Ping the system.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+    });
   });
 });
 
