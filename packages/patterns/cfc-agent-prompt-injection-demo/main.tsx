@@ -4,21 +4,20 @@ import {
   Cell,
   computed,
   type Confidential,
-  Default,
   handler,
-  type ImmutableJSONValue,
   lift,
   llmDialog,
   NAME,
   pattern,
+  patternTool,
   safeDateNow,
   type Stream,
-  subAgentTool,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
 import type { JSONSchema } from "commonfabric";
+import { subAgentPattern } from "./subAgent.tsx";
 
 const PROMPT_INFLUENCE_ATOM = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
@@ -47,24 +46,10 @@ type SentEmail = {
   loggedAt: string;
 };
 
-type DemoChatInput = {
-  title: string;
-  subtitle: string;
-  system: string;
-  messages: Writable<Array<BuiltInLLMMessage> | Default<[]>>;
-  tools: Record<string, DemoTool>;
-  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
-};
-
 type SendMailArgs = {
   recipient: string;
   subject: string;
   body: string;
-};
-
-type AssessmentResult = {
-  approved: boolean;
-  summary: string;
 };
 
 type ReadRawBriefingResult = {
@@ -145,34 +130,6 @@ const SEND_MAIL_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-const SUB_AGENT_INPUT_SCHEMA = {
-  type: "object",
-  properties: {
-    prompt: {
-      type: "string",
-      description: "Task for the higher-clearance worker.",
-    },
-    resultSchema: {
-      type: "object",
-      description:
-        "JSON Schema object describing the exact structured result the worker must return.",
-      additionalProperties: true,
-    },
-  },
-  required: ["prompt", "resultSchema"],
-  additionalProperties: false,
-} as const;
-
-const ASSESSMENT_RESULT_SCHEMA = {
-  type: "object",
-  properties: {
-    approved: { type: "boolean" },
-    summary: { type: "string" },
-  },
-  required: ["approved", "summary"],
-  additionalProperties: false,
-} as const;
-
 const ASSESSMENT_RESULT_SCHEMA_TEXT = `{
   "type": "object",
   "properties": {
@@ -239,19 +196,6 @@ const clearChat = handler((
 ) => {
   messages.set([]);
   pending.set(false);
-});
-
-const sendDemoPrompt = handler((
-  _: never,
-  {
-    enqueuePrompt,
-    prompt,
-  }: {
-    enqueuePrompt: Stream<string>;
-    prompt: string;
-  },
-) => {
-  enqueuePrompt.send(prompt);
 });
 
 const makeUserPromptMessage = (prompt: string): BuiltInLLMMessage => ({
@@ -330,13 +274,12 @@ const buildSendMailTool = (
     handler,
   }) satisfies DemoTool;
 
-const buildSubAgentParams = (
-  { prompt, body, emails, route }: any,
-) => ({
-  model: DEMO_MODEL,
-  system: SUB_AGENT_SYSTEM_PROMPT,
-  prompt,
-  tools: {
+const buildNestedSubAgentTools = (
+  body: any,
+  emails: Writable<SentEmail[]>,
+  route: string,
+) =>
+  ({
     readRawBriefing: buildReadRawBriefingTool(
       readRawBriefing({
         title: HOSTILE_BRIEFING_TITLE,
@@ -345,11 +288,7 @@ const buildSubAgentParams = (
       }),
     ),
     sendMail: buildSendMailTool(logEmail({ emails, route })),
-  },
-  observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
-});
-
-const selectSubAgentResultSchema = ({ resultSchema }: any) => resultSchema;
+  }) satisfies Record<string, DemoTool>;
 
 export default pattern<Record<string, never>>(() => {
   const hostileBody = makePromptInfluenceDocument({
@@ -382,15 +321,17 @@ export default pattern<Record<string, never>>(() => {
   const unsafeSubAgentTool = {
     description:
       "Run a higher-clearance worker with the same task tools except recursive subAgent. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
-    inputSchema: SUB_AGENT_INPUT_SCHEMA,
-    ...subAgentTool(
-      buildSubAgentParams,
-      SUB_AGENT_INPUT_SCHEMA,
-      selectSubAgentResultSchema,
+    ...patternTool(
+      subAgentPattern,
       {
-        body: hostileBody,
-        emails,
-        route: "unsafe-parent:subagent",
+        model: DEMO_MODEL,
+        system: SUB_AGENT_SYSTEM_PROMPT,
+        tools: buildNestedSubAgentTools(
+          hostileBody,
+          emails,
+          "unsafe-parent:subagent",
+        ),
+        observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
       },
     ),
   } satisfies DemoTool;
@@ -398,15 +339,17 @@ export default pattern<Record<string, never>>(() => {
   const safeSubAgentTool = {
     description:
       "Run a higher-clearance worker with the same task tools except recursive subAgent. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
-    inputSchema: SUB_AGENT_INPUT_SCHEMA,
-    ...subAgentTool(
-      buildSubAgentParams,
-      SUB_AGENT_INPUT_SCHEMA,
-      selectSubAgentResultSchema,
+    ...patternTool(
+      subAgentPattern,
       {
-        body: hostileBody,
-        emails,
-        route: "safe-parent:subagent",
+        model: DEMO_MODEL,
+        system: SUB_AGENT_SYSTEM_PROMPT,
+        tools: buildNestedSubAgentTools(
+          hostileBody,
+          emails,
+          "safe-parent:subagent",
+        ),
+        observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
       },
     ),
   } satisfies DemoTool;
