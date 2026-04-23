@@ -1,10 +1,10 @@
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { cfcAtom } from "../cfc/atoms.ts";
 
 const credentialSecretAtom = cfcAtom.resource("CredentialSecret");
 
 // This is used by the various Google tokens created with tokenToAuthData
-export const AuthSchema = toDeepFrozenSchema(
+export const AuthSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -32,11 +32,10 @@ export const AuthSchema = toDeepFrozenSchema(
       },
     },
   },
-  true,
 );
 
 // More general OAuth2 Token (used by Airtable and future OAuth2 providers)
-export const OAuth2TokenSchema = toDeepFrozenSchema(
+export const OAuth2TokenSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -65,11 +64,10 @@ export const OAuth2TokenSchema = toDeepFrozenSchema(
     },
     required: ["accessToken", "tokenType"],
   },
-  true,
 );
 
 // Webhook confidential config: URL and bearer token written by toolshed
-export const WebhookConfigSchema = toDeepFrozenSchema(
+export const WebhookConfigSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -86,5 +84,4 @@ export const WebhookConfigSchema = toDeepFrozenSchema(
     },
     required: ["url", "secret"],
   },
-  true,
 );

@@ -12,7 +12,7 @@ import { type Action } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { NAME, type Pattern, UI } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -26,12 +26,11 @@ const wishFlowLogger = getLogger("runner.wish-flow", {
 
 // Schema for mentionable array - items are cell references (asCell: true)
 // Don't restrict properties so .get() returns full cell data
-const mentionableListSchema = toDeepFrozenSchema(
+const mentionableListSchema = internSchema(
   {
     type: "array",
     items: { asCell: true },
   },
-  true,
 );
 
 class WishError extends Error {
@@ -617,7 +616,7 @@ function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("cf-cell-link", { $cell: cell });
 }
 
-const TARGET_SCHEMA = toDeepFrozenSchema(
+const TARGET_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
@@ -629,7 +628,6 @@ const TARGET_SCHEMA = toDeepFrozenSchema(
     },
     required: ["query"],
   },
-  true,
 );
 
 export function wish(

@@ -2,7 +2,7 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
@@ -226,7 +226,7 @@ type StreamDataInputs = {
   options?: { body?: any; method?: string; headers?: Record<string, string> };
 };
 
-const streamDataInputSchema = toDeepFrozenSchema(
+const streamDataInputSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -244,7 +244,6 @@ const streamDataInputSchema = toDeepFrozenSchema(
       },
     },
   },
-  true,
 );
 
 function snapshotStreamDataInputs(

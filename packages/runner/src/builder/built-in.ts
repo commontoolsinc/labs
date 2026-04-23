@@ -1,5 +1,5 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createNodeFactory, lift } from "./module.ts";
 import { pattern } from "./pattern.ts";
 import { isPattern } from "./types.ts";
@@ -32,7 +32,7 @@ import type {
 import { isRecord } from "@commonfabric/utils/types";
 import { isCell } from "../cell.ts";
 
-const WISH_ARGUMENT_SCHEMA = toDeepFrozenSchema({
+const WISH_ARGUMENT_SCHEMA = internSchema({
   type: "object",
   properties: {
     query: { type: "string" },
