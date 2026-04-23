@@ -55,7 +55,7 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type CfcEnforcementMode, type TrustSnapshot } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
@@ -215,7 +215,7 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
  * reachable object from these pieces.
  * @see SchemaObjectTraverser.traverseObjectWithSchema for more detail.
  */
-export const spaceCellSchema: JSONSchema = toDeepFrozenSchema(
+export const spaceCellSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -247,7 +247,6 @@ export const spaceCellSchema: JSONSchema = toDeepFrozenSchema(
       },
     },
   },
-  true,
 );
 
 export interface SpaceCellContents {

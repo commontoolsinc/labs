@@ -44,10 +44,12 @@ prevents cross-type collisions (e.g., the number `0` and the boolean `false`
 produce different hashes even though both could be represented as a zero byte).
 
 The authoritative tag assignments are in formal spec Section 6.3. Tags are
-organized into three categories by high nibble: **meta** (`0x0N`) for structural
+organized into four categories by high nibble: **meta** (`0x0N`) for structural
 markers like `TAG_END` and `TAG_HOLE`, **compound** (`0x1N`) for containers
-whose children are tagged values, and **primitive** (`0x2N`) for leaf value
-types. All unassigned values are reserved for future use.
+whose children are tagged values, **primitive** (`0x2N`) for leaf value
+types, and **optimized** (`0xFN`) for hash-level encodings of primitive values
+that substitute a digest for the raw payload (see Section 4.4 for the long-string
+optimization). All unassigned values are reserved for future use.
 
 ---
 
@@ -126,6 +128,14 @@ big-endian byte order.
 
 ### 4.4 `string`
 
+Strings use one of two encodings based on their UTF-8 byte length. The
+threshold is **64 bytes** (inclusive): strings whose UTF-8 encoding is 64 bytes
+or fewer use the **direct** form, and strings whose UTF-8 encoding exceeds 64
+bytes use the **hashed** form. The threshold compares against the UTF-8 byte
+length, not the JavaScript `string.length` (UTF-16 code units).
+
+**Direct form** (UTF-8 length ≤ 64 bytes):
+
 ```
 Bytes: TAG_STRING  LENGTH_LEB128  UTF8_BYTES
        0x24        <1+ bytes>     <length bytes>
@@ -142,6 +152,36 @@ encoding.
 
 Empty string (`""`) is encoded as `0x24 0x00` — the tag plus a zero-length
 prefix and no payload bytes.
+
+**Hashed form** (UTF-8 length > 64 bytes):
+
+```
+Bytes: TAG_STRING_HASH  SHA256_OF_UTF8
+       0xF0             <32 bytes>
+```
+
+Total: 33 bytes, regardless of the string's length.
+
+- **Payload**: The raw 32-byte SHA-256 digest (per Section 1, FIPS 180-4) of
+  the string's UTF-8 byte sequence. The digest bytes are emitted in their
+  natural order as produced by SHA-256 (bytes 0 through 31 of the digest). No
+  transformation, truncation, or re-encoding is applied. No length prefix is
+  emitted in this form — the digest is always exactly 32 bytes.
+
+This is a Merkle-style optimization: the hasher substitutes a SHA-256 of the
+UTF-8 bytes for the raw payload when the raw payload would be long. It shortens
+the byte stream fed to the outer hasher and enables a string-representation
+cache keyed by the JavaScript string. Because the two encodings use different
+type tags (`0x24` vs. `0xF0`), they are unambiguous and cannot collide.
+
+**The two forms produce different hashes for the same string.** The
+64-byte threshold is part of the canonical format, and conforming
+implementations must use the threshold when deciding which form to emit.
+
+The hashed form applies everywhere this spec encodes a string via the
+`TAG_STRING` layout: standalone strings (this section), object keys (Section
+4.12), `FabricInstance` type tags (Section 4.13), and `FabricHash` algorithm
+tags (Section 4.10).
 
 ### 4.5 `bigint`
 
@@ -235,21 +275,21 @@ so the two temporal types are always distinguishable.
 ### 4.10 `FabricHash`
 
 ```
-Bytes: TAG_CONTENT_ID  ALG_TAG_LEN_LEB128  ALG_TAG_UTF8  HASH_LEN_LEB128  HASH_BYTES
-       0x29            <1+ bytes>          <varies>      <1+ bytes>       <varies>
+Bytes: TAG_CONTENT_ID  ALG_TAG_STRING   HASH_LEN_LEB128  HASH_BYTES
+       0x29            <string, §4.4>   <1+ bytes>       <varies>
 ```
-
-Total: 1 + len(LEB128) + A + len(LEB128) + H bytes, where A is the byte length
-of the algorithm tag in UTF-8 and H is the number of hash bytes.
 
 `FabricHash` represents a content identifier — a hash with an algorithm
 tag. It is a `FabricPrimitive` subclass and has a dedicated type tag.
 
-- **Algorithm tag length**: The byte length of the algorithm tag string in
-  UTF-8, encoded as unsigned LEB128.
-- **Algorithm tag**: The algorithm tag string (e.g., `"fid1"`) encoded as raw
-  UTF-8 bytes.
-- **Hash byte length**: The number of hash bytes, encoded as unsigned LEB128.
+- **Algorithm tag**: The algorithm tag string (e.g., `"fid1"`) encoded as a
+  complete tagged string value per Section 4.4. Concretely, this emits either
+  the direct form (`TAG_STRING` + LEB128 length + UTF-8 bytes) for tags whose
+  UTF-8 encoding is 64 bytes or fewer, or the hashed form (`TAG_STRING_HASH` +
+  32-byte SHA-256 of the UTF-8) for longer tags. Algorithm tags are always
+  short in practice, so the direct form is used.
+- **Hash byte length**: The number of raw hash bytes that follow, encoded as
+  unsigned LEB128.
 - **Hash bytes**: The raw hash bytes, in order.
 
 The two-field encoding ensures that content IDs with different algorithm tags
@@ -283,8 +323,13 @@ Bytes: TAG_OBJECT  KEY_0  VALUE_0  KEY_1  VALUE_1  ...  TAG_END
 - **Key-value pairs**: Emitted in **sorted order**. Keys are sorted
   lexicographically by their UTF-8 byte representation (see Section 5). For each
   key-value pair:
-  - The **key** is encoded as a `TAG_STRING`-style value: `TAG_STRING` +
-    LEB128 byte length + UTF-8 bytes (same format as Section 4.4).
+  - The **key** is encoded as a complete tagged string value per Section 4.4
+    — direct form (`TAG_STRING` + LEB128 length + UTF-8 bytes) for keys of 64
+    UTF-8 bytes or fewer, or hashed form (`TAG_STRING_HASH` + 32-byte SHA-256
+    of the UTF-8) for longer keys. The threshold applies per-key
+    independently. Sort order is always by the UTF-8 bytes of the key itself
+    (see Section 5), regardless of which encoding form is used for the hash
+    feed.
   - The **value** is hashed recursively as a complete tagged value.
 - **Terminator**: `TAG_END` (`0x00`) marks the end of the key-value sequence.
 
@@ -294,14 +339,17 @@ Empty object (`{}`) is encoded as `0x11 0x00` — the tag immediately followed b
 ### 4.13 `FabricInstance`
 
 ```
-Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
-       0x12          <1+ bytes>           <varies>       <recursive>
+Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
+       0x12          <string, §4.4>   <recursive>
 ```
 
-- **Type tag length**: The byte length of the type tag string in UTF-8,
-  encoded as unsigned LEB128.
 - **Type tag**: The `FabricInstance`'s type tag string (e.g., `"Error@1"`,
-  `"Map@1"`, `"Set@1"`, `"RegExp@1"`), encoded as raw UTF-8 bytes.
+  `"Map@1"`, `"Set@1"`, `"RegExp@1"`) encoded as a complete tagged string
+  value per Section 4.4. Concretely, this emits either the direct form
+  (`TAG_STRING` + LEB128 length + UTF-8 bytes) for type tags of 64 UTF-8 bytes
+  or fewer, or the hashed form (`TAG_STRING_HASH` + 32-byte SHA-256 of the
+  UTF-8) for longer type tags. Existing type tags are short, so the direct
+  form is used in practice.
 - **Deconstructed state**: The value returned by `[DECONSTRUCT]()`, hashed
   recursively as a complete tagged value.
 
@@ -477,41 +525,48 @@ two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
 
 ### 7.11 `FabricHash("fid1", <4 bytes: 0xDE 0xAD 0xBE 0xEF>)`
 
-Algorithm tag `"fid1"` is 4 bytes in UTF-8: `0x66`, `0x69`, `0x64`, `0x31`.
-Hash payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
+Algorithm tag `"fid1"` is 4 bytes in UTF-8: `0x66`, `0x69`, `0x64`, `0x31` —
+well under the 64-byte threshold, so the direct string form applies. Hash
+payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
 
 ```
-29  04  66 69 64 31  04  DE AD BE EF
+29  24 04 66 69 64 31  04  DE AD BE EF
 ```
 
-`TAG_CONTENT_ID` (`0x29`), algorithm tag length 4 (`0x04`), algorithm tag
-`"fid1"`, hash byte length 4 (`0x04`), hash bytes.
+- `TAG_CONTENT_ID` (`0x29`)
+- Algorithm tag (string, §4.4 direct form): `TAG_STRING` (`0x24`), length 4
+  (`0x04`), UTF-8 bytes `66 69 64 31`
+- Hash byte length 4 (`0x04`)
+- Hash bytes: `DE AD BE EF`
 
 ### 7.12 `FabricRegExp(/abc/gi)`
 
 `FabricRegExp` is a `FabricInstance` and is hashed via `TAG_INSTANCE`.
 
 Type tag `"RegExp@1"` is 8 bytes in UTF-8: `0x52`, `0x65`, `0x67`, `0x45`,
-`0x78`, `0x70`, `0x40`, `0x31`.
+`0x78`, `0x70`, `0x40`, `0x31` — under the 64-byte threshold, so the direct
+string form applies.
 
 Deconstructed state is `{ source: "abc", flags: "gi" }`, an object with keys
-sorted by UTF-8 bytes: `"flags"` (0x66...) < `"source"` (0x73...).
+sorted by UTF-8 bytes: `"flags"` (0x66...) < `"source"` (0x73...). All keys
+and string values shown here are also under the threshold, so they use the
+direct string form.
 
 - Instance tag: `12`
-- Type tag length 8 (LEB128): `08`
-- Type tag `"RegExp@1"`: `52 65 67 45 78 70 40 31`
+- Type tag (string, §4.4 direct form): `TAG_STRING` `24`, length 8 `08`,
+  UTF-8 `52 65 67 45 78 70 40 31`
 - State (object):
   - Object tag: `11`
-  - Key `"flags"` (5 bytes): `24 05 66 6C 61 67 73`
-  - Value `"gi"` (2 bytes): `24 02 67 69`
-  - Key `"source"` (6 bytes): `24 06 73 6F 75 72 63 65`
-  - Value `"abc"` (3 bytes): `24 03 61 62 63`
+  - Key `"flags"` (5 bytes UTF-8): `24 05 66 6C 61 67 73`
+  - Value `"gi"` (2 bytes UTF-8): `24 02 67 69`
+  - Key `"source"` (6 bytes UTF-8): `24 06 73 6F 75 72 63 65`
+  - Value `"abc"` (3 bytes UTF-8): `24 03 61 62 63`
   - End: `00`
 
 Full byte stream:
 ```
 12
-08  52 65 67 45 78 70 40 31
+24 08 52 65 67 45 78 70 40 31
 11
 24 05 66 6C 61 67 73
 24 02 67 69
@@ -585,6 +640,30 @@ These three arrays produce different byte streams at the middle element:
 - `[1, , 3]`: middle element is `01 01` (`TAG_HOLE` + run of 1)
 - `[1, null, 3]`: middle element is `20` (`TAG_NULL`)
 
+### 7.18 Long string (hashed form)
+
+A string whose UTF-8 encoding exceeds 64 bytes uses the hashed form (Section
+4.4). Let `S` be any such string and let `H = SHA-256(utf8(S))` be its 32-byte
+SHA-256 digest. The byte stream is:
+
+```
+F0  <32 bytes: H[0] H[1] ... H[31]>
+```
+
+Total: 33 bytes. The length of the original UTF-8 payload is not emitted —
+the receiver simply reads a fixed-width 32-byte digest after `TAG_STRING_HASH`.
+
+The **boundary case** at exactly 64 UTF-8 bytes uses the direct form, since
+the rule is "64 bytes or fewer → direct". A 65-byte UTF-8 string uses the
+hashed form.
+
+This rule applies to every string the hasher feeds, including standalone
+strings (Section 4.4), object keys (Section 4.12), `FabricInstance` type
+tags (Section 4.13), and `FabricHash` algorithm tags (Section 4.10). The
+threshold is evaluated per-string independently: an object may mix short
+keys (direct form) and long keys (hashed form) in the same key-value
+sequence.
+
 ---
 
 ## 8. Rejected Values
@@ -607,14 +686,16 @@ rather than producing a hash.
 
 | Context                           | Mechanism       | Details                          |
 |:----------------------------------|:----------------|:---------------------------------|
-| String byte length                | unsigned LEB128 | Byte count of UTF-8 payload      |
+| String direct form (≤ 64 UTF-8 bytes) | unsigned LEB128 | Byte count of UTF-8 payload, prefixed by `TAG_STRING` |
+| String hashed form (> 64 UTF-8 bytes) | fixed 32 bytes  | Raw SHA-256 of UTF-8, prefixed by `TAG_STRING_HASH`; no length prefix |
 | Bigint payload bytes              | unsigned LEB128 | Byte count of two's complement   |
-| Byte sequence (`FabricBytes`) | unsigned LEB128 | Byte count of raw payload        |
-| `FabricEpochNsec` payload       | unsigned LEB128 | Byte count of two's complement   |
-| `FabricEpochDays` payload       | unsigned LEB128 | Byte count of two's complement   |
-| `FabricHash` algorithm tag | unsigned LEB128 | Byte count of algorithm tag UTF-8|
-| `FabricHash` hash bytes    | unsigned LEB128 | Byte count of raw hash payload   |
-| `FabricInstance` type tag       | unsigned LEB128 | Byte count of type tag UTF-8     |
+| Byte sequence (`FabricBytes`)     | unsigned LEB128 | Byte count of raw payload        |
+| `FabricEpochNsec` payload         | unsigned LEB128 | Byte count of two's complement   |
+| `FabricEpochDays` payload         | unsigned LEB128 | Byte count of two's complement   |
+| `FabricHash` algorithm tag        | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |
+| `FabricHash` hash bytes           | unsigned LEB128 | Byte count of raw hash payload   |
+| `FabricInstance` type tag         | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |
+| Object keys                       | string (§4.4)   | Emitted as complete tagged string values (direct or hashed form per key) |
 | Hole run count                    | unsigned LEB128 | Number of consecutive holes      |
 | Array elements                    | `TAG_END`       | Sentinel after last element      |
 | Object key-value pairs            | `TAG_END`       | Sentinel after last pair         |
