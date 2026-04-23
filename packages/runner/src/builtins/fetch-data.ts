@@ -4,7 +4,7 @@ import type { Runtime } from "../runtime.ts";
 import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import {
@@ -26,7 +26,7 @@ type FetchDataInputs = {
  * which is `any`) lets cell.asSchema(schema).get() materialize nested
  * properties like options.headers as plain objects instead of proxies.
  */
-const fetchDataInputSchema = toDeepFrozenSchema(
+const fetchDataInputSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -45,7 +45,6 @@ const fetchDataInputSchema = toDeepFrozenSchema(
       },
     },
   },
-  true,
 );
 
 function snapshotFetchDataInputs(

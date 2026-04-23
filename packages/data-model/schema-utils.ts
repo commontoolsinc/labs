@@ -77,6 +77,10 @@ export function isNontrivialSchema(
  *
  * Boolean schemas (`true` / `false`) are primitives and therefore already
  * immutable — they are returned as-is regardless of `canShare`.
+ *
+ * Note: Use `internSchema()` in preference to this function, which can cost a
+ * little more to run but which will save both time and memory when the schema
+ * in question is reused.
  */
 export function toDeepFrozenSchema<T extends JSONSchema>(
   schema: T,

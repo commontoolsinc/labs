@@ -7,7 +7,7 @@ import {
   unsafe_originalPattern,
   unsafe_verifiedLoadId,
 } from "./builder/types.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Cell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
@@ -25,7 +25,7 @@ const logger = getLogger("pattern-manager");
  */
 const MAX_PATTERN_CACHE_SIZE = 100;
 
-export const patternMetaSchema = toDeepFrozenSchema(
+export const patternMetaSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -57,7 +57,6 @@ export const patternMetaSchema = toDeepFrozenSchema(
     },
     required: ["id"],
   },
-  true,
 );
 
 export type PatternMeta = Schema<typeof patternMetaSchema>;

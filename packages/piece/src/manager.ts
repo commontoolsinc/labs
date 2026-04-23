@@ -17,7 +17,7 @@ import {
   TYPE,
   URI,
 } from "@commonfabric/runner";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type Session } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
@@ -30,7 +30,7 @@ import {
 } from "@commonfabric/runner/schemas";
 ensureNotRenderThread();
 
-const PRIVILEGED_PIECE_LIST_SCHEMA = toDeepFrozenSchema({
+const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
   ...pieceListSchema,
   ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
 });
