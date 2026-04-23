@@ -35,7 +35,7 @@ import { toDeepFrozenSchema } from "./schema-utils.ts";
 // Modern schema hash mode flag
 // ---------------------------------------------------------------------------
 
-let modernSchemaHashEnabled = true;
+let modernSchemaHashEnabled = false;
 
 /**
  * Activates or deactivates modern schema hash mode. Called by the `Runtime`
@@ -56,13 +56,13 @@ export function getSchemaHashConfig(): boolean {
 }
 
 /**
- * Restores modern schema hash mode to its default (enabled). Called by
+ * Restores modern schema hash mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs. Wipes the intern cache since cached hashes are
  * flag-dependent.
  */
 export function resetSchemaHashConfig(): void {
-  modernSchemaHashEnabled = true;
+  modernSchemaHashEnabled = false;
   resetInternCache();
 }
 
