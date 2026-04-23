@@ -110,6 +110,7 @@ export const LLMParamsSchema = internSchema(
       maxTokens: { type: "number" },
       system: { type: "string" },
       stop: { type: "string" },
+      builtinTools: { type: "boolean", default: true },
       observationMaxConfidentiality: {
         type: "array",
         items: {},

@@ -1521,6 +1521,7 @@ export interface BuiltInLLMParams {
   system?: string;
   stop?: string;
   maxTokens?: number;
+  builtinTools?: boolean;
   observationMaxConfidentiality?: readonly ImmutableJSONValue[];
   /**
    * Specifies the mode of operation for the LLM.

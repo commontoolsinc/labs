@@ -872,6 +872,95 @@ describe("llmDialog", () => {
     // Note: Pinned cell won't appear in system prompt on first request,
     // only after it's been pinned and the next LLM request is made
   });
+
+  it("should omit built-in tools and guidance when builtinTools is false", async () => {
+    let capturedRequest: any;
+
+    addMockResponse(
+      (req) => {
+        capturedRequest = req;
+        return true;
+      },
+      {
+        role: "assistant",
+        content: "Using only custom tools.",
+        id: "mock-no-builtins-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        error: { type: "object", additionalProperties: true },
+        flattenedTools: {
+          type: "object",
+          additionalProperties: true,
+        },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const pingTool = pattern(
+      () => "pong",
+      { type: "object" },
+      { type: "string" },
+    );
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          builtinTools: false,
+          system: "Base system prompt.",
+          tools: {
+            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          error: dialog.error,
+          flattenedTools: dialog.flattenedTools,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-no-builtins-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({
+      role: "user",
+      content: "Reply without built-in tools.",
+    });
+
+    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+
+    expect(capturedRequest).toBeDefined();
+    expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
+    expect(capturedRequest.system).not.toContain("# Link and Cell Model");
+    expect(capturedRequest.system).not.toContain("call listRecent()");
+
+    const flattenedTools = await result.key("flattenedTools").pull();
+    expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
+  });
 });
 
 function waitForMessages(result: any, expectedCount: number) {

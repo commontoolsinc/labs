@@ -1111,6 +1111,7 @@ function extractRunArguments(input: unknown): Record<string, any> {
  */
 function flattenTools(
   toolsCell: Cell<any>,
+  includeBuiltinTools = true,
 ): Record<
   string,
   {
@@ -1136,6 +1137,10 @@ function flattenTools(
       passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
     }
     flattened[entry.name] = passThrough;
+  }
+
+  if (!includeBuiltinTools) {
+    return flattened;
   }
 
   flattened[READ_TOOL_NAME] = {
@@ -1244,6 +1249,7 @@ function buildToolCatalog(
   toolsCell:
     | Cell<Record<string, Schema<typeof LLMToolSchema>>>
     | Cell<Record<string, BuiltInLLMTool> | undefined>,
+  includeBuiltinTools = true,
 ): ToolCatalog {
   const { legacy } = collectToolEntries(
     toolsCell.asSchema(TOOL_CATALOG_SCHEMA),
@@ -1271,6 +1277,10 @@ function buildToolCatalog(
       (inputSchema as any)?.description ?? "";
     llmTools[entry.name] = { description, inputSchema };
     dynamicToolCells.set(entry.name, entry.cell);
+  }
+
+  if (!includeBuiltinTools) {
+    return { llmTools, dynamicToolCells };
   }
 
   llmTools[READ_TOOL_NAME] = {
@@ -1332,7 +1342,8 @@ function materializeDialogRequestSnapshot(
   const toolsCell = inputs.key("tools").withTx(tx) as Cell<
     Record<string, Schema<typeof LLMToolSchema>>
   >;
-  const toolCatalog = buildToolCatalog(toolsCell);
+  const builtinTools = inputs.key("builtinTools").withTx(tx).get() !== false;
+  const toolCatalog = buildToolCatalog(toolsCell, builtinTools);
   const userResultSchema = inputs.key("resultSchema").withTx(tx).get();
   if (userResultSchema) {
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
@@ -1362,10 +1373,12 @@ function materializeDialogRequestSnapshot(
       ),
       observedConfidentiality: [],
     };
-  const linkModelDocs =
-    "\n\n# Link and Cell Model\n\nThe system organizes all data and computation into cells. Use links to navigate between related data and compose tool operations.";
-  const listRecentHint =
-    "\n\nIf the user's request is unclear or you need context about what they're referring to, call listRecent() to see recently viewed pieces.";
+  const linkModelDocs = builtinTools
+    ? "\n\n# Link and Cell Model\n\nThe system organizes all data and computation into cells. Use links to navigate between related data and compose tool operations."
+    : "";
+  const listRecentHint = builtinTools
+    ? "\n\nIf the user's request is unclear or you need context about what they're referring to, call listRecent() to see recently viewed pieces."
+    : "";
   const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs +
     listRecentHint;
 
@@ -2786,7 +2799,8 @@ export function llmDialog(
         additionalProperties: LLMReducedToolSchema,
       } as const,
     ).withTx(tx);
-    const flattened = flattenTools(toolsCell);
+    const builtinTools = inputs.key("builtinTools").withTx(tx).get() !== false;
+    const flattened = flattenTools(toolsCell, builtinTools);
 
     // Runtime already makes this a no-op if there are no changes
     result.withTx(tx).key("flattenedTools").set(flattened);
@@ -2846,6 +2860,7 @@ async function startRequest(
     (inputs.key("observationMaxConfidentiality").get() as
       | readonly unknown[]
       | undefined);
+  const builtinTools = inputs.key("builtinTools").get() !== false;
 
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools") as Cell<
@@ -2881,6 +2896,7 @@ async function startRequest(
 
   const toolCatalog = capturedRequest?.toolCatalog ?? buildToolCatalog(
     toolsCell,
+    builtinTools,
   );
 
   // If resultSchema is provided, inject presentResult built-in tool
@@ -2919,7 +2935,8 @@ async function startRequest(
       observedConfidentiality: [],
     };
 
-  const linkModelDocs = `
+  const linkModelDocs = builtinTools
+    ? `
 
 # Link and Cell Model
 
@@ -2959,11 +2976,13 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 - Arguments can be updated with \`updateArgument()\` to change pattern behavior dynamically
 - May link to other cells in the system
 
-**Use links to navigate between related data and compose operations.**`;
+**Use links to navigate between related data and compose operations.**`
+    : "";
 
-  const listRecentHint =
-    "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
-    "call listRecent() to see recently viewed pieces.";
+  const listRecentHint = builtinTools
+    ? "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
+      "call listRecent() to see recently viewed pieces."
+    : "";
 
   const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs +
     listRecentHint;
