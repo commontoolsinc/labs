@@ -218,6 +218,11 @@ type StructuralProvenanceInput = Extract<
   { kind: "structural-provenance" }
 >;
 
+type LinkWritePolicyInput = Extract<
+  WritePolicyInput,
+  { kind: "link-write" }
+>;
+
 const structuralProvenanceForPath = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -321,6 +326,28 @@ const candidateSchemasByTarget = (
         ? candidate
         : mergeCfcSchemaEnvelopes(existing, candidate),
     );
+  }
+  return result;
+};
+
+const targetKey = (target: {
+  space: MemorySpace;
+  id: string;
+  type: string;
+}): string => `${target.space}\u0000${target.id}\u0000${target.type}`;
+
+const linkWritesByTarget = (
+  inputs: readonly WritePolicyInput[],
+): Map<string, LinkWritePolicyInput[]> => {
+  const result = new Map<string, LinkWritePolicyInput[]>();
+  for (const input of inputs) {
+    if (input.kind !== "link-write") {
+      continue;
+    }
+    const key = targetKey(input.target);
+    const entries = result.get(key) ?? [];
+    entries.push(input);
+    result.set(key, entries);
   }
   return result;
 };
@@ -432,8 +459,7 @@ const valueWriteTargets = (
       ) {
         continue;
       }
-      const key =
-        `${write.address.space}\u0000${write.address.id}\u0000${write.address.type}`;
+      const key = targetKey(write.address);
       result.set(key, {
         space: write.address.space,
         id: write.address.id as URI,
@@ -719,6 +745,66 @@ const derivePersistedLabel = (
   };
 };
 
+const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
+  type: "https://commonfabric.org/cfc/atom/LinkReference",
+  source: {
+    space: input.source.space,
+    id: input.source.id,
+    type: input.source.type,
+    path: canonicalizeLogicalPath(input.source.path),
+  },
+  target: {
+    space: input.target.space,
+    id: input.target.id,
+    type: input.target.type,
+    path: canonicalizeLogicalPath(input.target.path),
+  },
+});
+
+const rootLabelFromSchema = (schema: JSONSchema | undefined): IFCLabel => {
+  if (schema === undefined) {
+    return {};
+  }
+  const root = walkIfcSchema(schema).find((entry) => entry.path.length === 0);
+  return root?.label ?? {};
+};
+
+const derivePersistedLinkLabel = (
+  tx: IExtendedStorageTransaction,
+  input: LinkWritePolicyInput,
+): { label?: IFCLabel; reason?: string } => {
+  const sourceMetadata = storedMetadataFor(
+    tx,
+    input.source.space,
+    input.source.id as URI,
+    input.source.type as MediaType,
+  );
+  if (sourceMetadata === undefined) {
+    return {
+      reason: `missing link source metadata for ${input.target.id} at /${
+        input.target.path.join("/")
+      }`,
+    };
+  }
+  const sourceLabel = labelAtPath(
+    sourceMetadata,
+    canonicalizeLogicalPath(input.source.path),
+  ) ?? {};
+  const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
+  const label: IFCLabel = {
+    confidentiality: mergeLabelValues(
+      sourceLabel.confidentiality,
+      linkSchemaLabel.confidentiality,
+    ),
+    integrity: mergeLabelValues(
+      sourceLabel.integrity,
+      linkSchemaLabel.integrity,
+      [linkReferenceIntegrity(input)],
+    ),
+  };
+  return { label };
+};
+
 const ensureSchemaDocument = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -777,8 +863,9 @@ export const prepareBoundaryCommit = (
     tx.getCfcState().writePolicyInputs,
     tx.getCfcState().implementationIdentity,
   );
+  const linkWrites = linkWritesByTarget(tx.getCfcState().writePolicyInputs);
   for (const [key, target] of valueWriteTargets(tx)) {
-    if (candidates.has(key)) {
+    if (candidates.has(key) || linkWrites.has(key)) {
       continue;
     }
     if (
@@ -790,39 +877,31 @@ export const prepareBoundaryCommit = (
       `missing schema write-policy input for ${target.id}`,
     );
   }
-  for (const [key, schema] of candidates) {
+  const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
+  for (const key of targetKeys) {
+    const schema = candidates.get(key);
     const [space, id, type] = key.split("\u0000") as [
       MemorySpace,
       URI,
       MediaType,
     ];
-    const frozen = toDeepFrozenSchema(schema, true) as JSONSchema;
+    const frozen = toDeepFrozenSchema(schema ?? {}, true) as JSONSchema;
 
     const target = { space, id, type };
-    const requirementFailure = verifyInputRequirements(tx, frozen, target);
-    if (requirementFailure) {
-      reasons.push(requirementFailure);
-      continue;
-    }
-    const trustedEventFailure = verifyTrustedEventRequirements(
-      tx,
-      target,
-      frozen,
-    );
-    if (trustedEventFailure) {
-      reasons.push(trustedEventFailure);
-      continue;
-    }
-
-    const exactCopyFailure = verifyExactCopyRequirements(tx, target, frozen);
-    if (exactCopyFailure) {
-      reasons.push(exactCopyFailure);
-      continue;
-    }
-
     const existing = storedMetadataFor(tx, space, id, type);
     let mergedSchema = frozen;
-    if (existing !== undefined) {
+    if (existing !== undefined && schema === undefined) {
+      try {
+        mergedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
+      } catch (error) {
+        reasons.push(
+          error instanceof Error
+            ? error.message
+            : `schema load failed for ${id}`,
+        );
+        continue;
+      }
+    } else if (existing !== undefined) {
       try {
         const storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
         mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, frozen);
@@ -835,6 +914,36 @@ export const prepareBoundaryCommit = (
         continue;
       }
     }
+
+    const requirementFailure = verifyInputRequirements(
+      tx,
+      mergedSchema,
+      target,
+    );
+    if (requirementFailure) {
+      reasons.push(requirementFailure);
+      continue;
+    }
+    const trustedEventFailure = verifyTrustedEventRequirements(
+      tx,
+      target,
+      mergedSchema,
+    );
+    if (trustedEventFailure) {
+      reasons.push(trustedEventFailure);
+      continue;
+    }
+
+    const exactCopyFailure = verifyExactCopyRequirements(
+      tx,
+      target,
+      mergedSchema,
+    );
+    if (exactCopyFailure) {
+      reasons.push(exactCopyFailure);
+      continue;
+    }
+
     const schemaAndHash = internSchema(mergedSchema, true);
     const mergedSchemaEntries = walkIfcSchema(mergedSchema);
     const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
@@ -856,6 +965,19 @@ export const prepareBoundaryCommit = (
         }]
         : [];
     });
+    for (const input of linkWrites.get(key) ?? []) {
+      const result = derivePersistedLinkLabel(tx, input);
+      if (result.reason !== undefined) {
+        reasons.push(result.reason);
+        continue;
+      }
+      if (result.label !== undefined && hasLabelValues(result.label)) {
+        persistedLabelEntries.push({
+          path: canonicalizeLogicalPath(input.target.path),
+          label: result.label,
+        });
+      }
+    }
 
     if (persistedLabelEntries.length === 0) {
       continue;

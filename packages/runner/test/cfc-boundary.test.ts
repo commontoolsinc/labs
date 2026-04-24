@@ -114,6 +114,7 @@ describe("CFC canonicalization helpers", () => {
       }],
       potentialWrites: [],
       writes: [],
+      dereferenceTraces: [],
       writePolicyInputs: [{
         kind: "custom",
         name: "b",
@@ -134,6 +135,29 @@ describe("CFC canonicalization helpers", () => {
         item.kind === "custom" ? item.name : ""
       ),
     ).toEqual(["a", "b"]);
+  });
+
+  it("canonicalizes link-write policy input paths", () => {
+    const canonical = canonicalizeWritePolicyInput({
+      kind: "link-write",
+      target: {
+        space: signer.did(),
+        id: "of:target",
+        type: "application/json",
+        path: ["value", "bookmark"],
+      },
+      source: {
+        space: signer.did(),
+        id: "of:source",
+        type: "application/json",
+        path: ["value", "title"],
+      },
+    });
+
+    expect(canonical).toMatchObject({
+      target: { path: ["bookmark"] },
+      source: { path: ["title"] },
+    });
   });
 });
 
@@ -1476,6 +1500,170 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         readTx,
       );
       expect(readCell.get()).toEqual({ secret: "hello" });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists CFC metadata for stored link writes without link schema", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-link-write-source",
+        {
+          type: "object",
+          ifc: {
+            confidentiality: ["shared-space"],
+            integrity: ["authored-by-bob"],
+          },
+          properties: {
+            title: { type: "string" },
+          },
+        },
+        seed,
+      );
+      source.set({ title: "shared notes" });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const linkedSource = runtime.getCell(
+        signer.did(),
+        "cfc-link-write-source",
+        undefined,
+        tx,
+      );
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-link-write-target",
+        undefined,
+        tx,
+      );
+      target.set(linkedSource);
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        id: target.getAsNormalizedFullLink().id,
+        type: "application/json",
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      const entries = stored.cfc?.labelMap?.entries as Array<{
+        path: string[];
+        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+      }>;
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: [],
+            label: expect.objectContaining({
+              confidentiality: ["shared-space"],
+              integrity: expect.arrayContaining([
+                "authored-by-bob",
+                expect.objectContaining({
+                  type: "https://commonfabric.org/cfc/atom/LinkReference",
+                }),
+              ]),
+            }),
+          }),
+        ]),
+      );
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects CFC-relevant link writes when source metadata is missing", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-link-missing-source-target",
+        {
+          type: "object",
+          ifc: { confidentiality: ["personal-space"] },
+        },
+        seed,
+      );
+      target.set({ existing: true });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const unlabeledSource = runtime.getCell(
+        signer.did(),
+        "cfc-link-missing-source",
+        undefined,
+        tx,
+      );
+      unlabeledSource.set({ title: "unlabeled" });
+      const linkedTarget = runtime.getCell(
+        signer.did(),
+        "cfc-link-missing-source-target",
+        undefined,
+        tx,
+      );
+      linkedTarget.set(unlabeledSource);
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "missing link source metadata",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not record link-write provenance when a link is collapsed to a snapshot", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("observe");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-collapsed-link-provenance",
+        undefined,
+        tx,
+      );
+      const link = cell.getAsNormalizedFullLink();
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: link.id,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { title: "parent" },
+        cfc: {
+          version: 1,
+          schemaHash: "source-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { confidentiality: ["source-root"] },
+            }],
+          },
+        },
+      });
+
+      cell.key("child").set(cell.getAsLink() as never);
+      expect(tx.getCfcState().writePolicyInputs).not.toContainEqual(
+        expect.objectContaining({ kind: "link-write" }),
+      );
+      tx.abort();
     } finally {
       await runtime.dispose();
       await storageManager.close();

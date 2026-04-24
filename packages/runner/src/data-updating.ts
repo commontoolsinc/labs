@@ -33,6 +33,11 @@ import {
   allowMutableTransactionRead,
   markReadAsPotentialWrite,
 } from "./scheduler.ts";
+import {
+  readStoredCfcMetadata,
+  storedCfcMetadataAppliesToPath,
+} from "./cfc/metadata.ts";
+import type { CfcAddress } from "./cfc/types.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -41,6 +46,33 @@ const diffLogger = getLogger("normalizeAndDiff", {
 
 // Sentinel value to distinguish "no precomputed value" from "precomputed value is undefined"
 const NO_PRECOMPUTED = Symbol("no-precomputed");
+
+const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
+  space: link.space,
+  id: link.id,
+  type: link.type,
+  path: [...link.path],
+});
+
+const recordLinkWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  target: NormalizedFullLink,
+  source: NormalizedFullLink,
+): void => {
+  const sourceMetadata = readStoredCfcMetadata(tx, source);
+  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target);
+  if (sourceMetadata === undefined && !targetRelevant) {
+    return;
+  }
+
+  tx.markCfcRelevant(`link-write:${target.id}`);
+  tx.recordCfcWritePolicyInput({
+    kind: "link-write",
+    target: cfcAddressFromLink(target),
+    source: cfcAddressFromLink(source),
+    ...(source.schema !== undefined && { linkSchema: source.schema }),
+  });
+};
 
 /**
  * Traverses newValue and updates `current` and any relevant linked documents.
@@ -377,6 +409,7 @@ export function normalizeAndDiff(
         () =>
           `[BRANCH_CELL_LINK] Different cell link, updating at path=${pathStr}`,
       );
+      recordLinkWritePolicyInput(tx, link, parsedLink);
       return [
         // TODO(seefeld): Normalize the link to a sigil link?
         { location: link, value: newValue as FabricValue },

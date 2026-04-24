@@ -31,6 +31,7 @@ import {
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
 import type {
+  CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcTxState,
   ImplementationIdentity,
@@ -623,6 +624,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
+  recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
   prepareCfc(input?: PreparedDigestInput): string;
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void;
   setCfcImplementationIdentity(

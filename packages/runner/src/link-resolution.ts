@@ -14,6 +14,7 @@ import type {
 } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
+import type { CfcAddress } from "./cfc/types.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -30,6 +31,35 @@ export type ResolvedFullLink = NormalizedFullLink & {
 };
 
 const MAX_PATH_RESOLUTION_LENGTH = 100;
+
+type LinkHop = {
+  link: NormalizedFullLink;
+  source: NormalizedFullLink;
+  kind: "value" | "write-redirect";
+};
+
+const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
+  space: link.space,
+  id: link.id,
+  type: link.type,
+  path: [...link.path],
+});
+
+const hopKindForLink = (
+  link: NormalizedFullLink,
+): LinkHop["kind"] =>
+  link.overwrite === "redirect" ? "write-redirect" : "value";
+
+const recordDereferenceHop = (
+  tx: IExtendedStorageTransaction,
+  hop: LinkHop,
+): void => {
+  tx.recordCfcDereferenceTrace({
+    source: cfcAddressFromLink(hop.source),
+    target: cfcAddressFromLink(hop.link),
+    kind: hop.kind,
+  });
+};
 
 /**
  * Resolves a document path with support for links inside documents.
@@ -96,7 +126,7 @@ export function resolveLink(
 
     // Optimized fast-path: a single sigil probe at the full remaining path.
     // If not a sigil link, use that error's path to check legacy or parent once.
-    let nextLink: NormalizedFullLink | undefined;
+    let nextHop: LinkHop | undefined;
 
     // Sigil probe at full path
     const sigilProbe = tx.read(toMemorySpaceAddress({
@@ -113,7 +143,12 @@ export function resolveLink(
       // Read the full value at this path to ensure correct reactivity logging
       // (we need to be reactive to siblings that could invalidate the link)
       const whole = tx.readValueOrThrow({ ...link, path: link.path });
-      nextLink = parseLink(whole as CellLink, link);
+      const nextLink = parseLink(whole as CellLink, link);
+      nextHop = {
+        link: nextLink,
+        source: { ...link, path: [...link.path] },
+        kind: hopKindForLink(nextLink),
+      };
     } else if (sigilProbe.error?.name === "NotFoundError") {
       const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
 
@@ -135,7 +170,11 @@ export function resolveLink(
             lastNode === "writeRedirect",
           );
           if (legacy) {
-            nextLink = legacy;
+            nextHop = {
+              link: legacy,
+              source: { ...link, path: [...lastValid] },
+              kind: hopKindForLink(legacy),
+            };
           }
         } else {
           // Check sigil at this parent, then legacy
@@ -146,33 +185,50 @@ export function resolveLink(
           if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
             // Read the full value at the parent to ensure proper reactivity
             const whole = tx.readValueOrThrow({ ...link, path: lastValid });
-            nextLink = parseLink(whole as CellLink, {
+            const nextLink = parseLink(whole as CellLink, {
               ...link,
               path: lastValid,
             });
+            nextHop = {
+              link: nextLink,
+              source: { ...link, path: [...lastValid] },
+              kind: hopKindForLink(nextLink),
+            };
           } else {
-            nextLink = checkLegacyAt(tx, link, lastValid, false);
+            const legacy = checkLegacyAt(tx, link, lastValid, false);
+            if (legacy) {
+              nextHop = {
+                link: legacy,
+                source: { ...link, path: [...lastValid] },
+                kind: hopKindForLink(legacy),
+              };
+            }
           }
         }
 
-        if (nextLink) {
+        if (nextHop) {
           const remainingPath = link.path.slice(lastValid.length);
-          let { schema, ...restLink } = nextLink;
+          let { schema, ...restLink } = nextHop.link;
           if (schema !== undefined && remainingPath.length > 0) {
             const cfc = new ContextualFlowControl();
             schema = cfc.getSchemaAtPath(schema, remainingPath);
           }
-          nextLink = {
-            ...restLink,
-            path: [...nextLink.path, ...remainingPath],
-            ...(schema !== undefined && { schema }),
+          nextHop = {
+            ...nextHop,
+            link: {
+              ...restLink,
+              path: [...nextHop.link.path, ...remainingPath],
+              ...(schema !== undefined && { schema }),
+            },
           };
         }
       }
       // If still nothing found we fall through and break the loop
     }
 
-    if (nextLink !== undefined) {
+    if (nextHop !== undefined) {
+      recordDereferenceHop(tx, nextHop);
+      const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
       if (nextLink.schema === undefined && link.schema !== undefined) {
         link = {
