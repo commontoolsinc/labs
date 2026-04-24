@@ -13,6 +13,7 @@ import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
+  schemaWithProperties,
   toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
@@ -475,7 +476,7 @@ export function mergeDefaults(
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 
-  return toDeepFrozenSchema({ ...base, default: mergedDefault }, true);
+  return schemaWithProperties(base, { default: mergedDefault });
 }
 
 /**
