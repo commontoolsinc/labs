@@ -583,17 +583,17 @@ Current-main behavior distinguishes three buckets for non-JSX authored sites:
    - inside those callbacks, authored conditionals stay authored JS inside the
      callback body rather than being rewritten to helper control flow
 3. **supported collection-callback locals**
-   - callback-local structural sites such as `call-argument`,
-     `object-property`, `array-element`, and plain conditional
-     `variable-initializer` expressions prefer direct inner control-flow
-     lowering (for example `?:` to `ifElse(...)`)
-   - direct callback `return-expression` ordinary call roots still join the
-     shared ordinary-call slice and lower as whole callback-local
-     `derive(...)` wrappers
+   - callback-local **ordinary call roots** now join the shared ordinary-call
+     slice across `variable-initializer`, `object-property`, `array-element`,
+     and direct `return-expression` sites, so the whole call lowers as a
+     callback-local `derive(...)`
+   - callback-local **plain structural control-flow sites** that are not under
+     an owning ordinary call root still lower directly (for example bare
+     conditional `object-property` / `array-element` / `variable-initializer`
+     expressions lowering to `ifElse(...)`)
 
-In other words, the current split is closer to **call-root vs nested structural
-site ownership** than to a fixed per-container rule, with the main callback
-exception being direct return-expression call roots.
+In other words, the split is now explicitly **call-root vs nested structural
+site ownership** rather than a special-case callback return-expression rule.
 
 ## 10. Schema Injection
 

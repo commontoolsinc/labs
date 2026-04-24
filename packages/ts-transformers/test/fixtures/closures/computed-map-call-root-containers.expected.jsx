@@ -11,7 +11,47 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: row, params: {} }) => __cfHelpers.derive({
+const __cfModuleCallback_1 = __cfHardenFn(({ element: row, params: {} }) => ({
+    value: __cfHelpers.derive({
+        type: "object",
+        properties: {
+            row: {
+                type: "object",
+                properties: {
+                    done: {
+                        type: "boolean"
+                    }
+                },
+                required: ["done"]
+            }
+        },
+        required: ["row"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { row: {
+            done: row.done
+        } }, ({ row }) => identity(row.done ? "Done" : "Pending")),
+    list: [__cfHelpers.derive({
+            type: "object",
+            properties: {
+                row: {
+                    type: "object",
+                    properties: {
+                        done: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["done"]
+                }
+            },
+            required: ["row"]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, { row: {
+                done: row.done
+            } }, ({ row }) => identity(row.done ? "Done" : "Pending"))],
+}));
+const __cfModuleCallback_2 = __cfHardenFn(({ element: row, params: {} }) => __cfHelpers.derive({
     type: "object",
     properties: {
         row: {
@@ -38,14 +78,13 @@ interface State {
     items: Item[];
 }
 // FIXTURE: computed-map-call-root-containers
-// Verifies: inside a computed-array .map() callback, nested structural sites
-//   still lower inner conditionals directly, while a direct callback
-//   return-expression ordinary call root lowers as a whole callback-local
-//   derive.
+// Verifies: inside a computed-array .map() callback, callback-local ordinary
+//   call roots whole-wrap as callback-local derives across object-property,
+//   array-element, and direct return-expression sites.
 //   ({ value: identity(row.done ? "Done" : "Pending") })
-//   → ({ value: identity(ifElse(row.done, "Done", "Pending")) })
+//   → ({ value: derive(..., ({ row }) => identity(row.done ? "Done" : "Pending")) })
 //   [identity(row.done ? "Done" : "Pending")]
-//   → [identity(ifElse(row.done, "Done", "Pending"))]
+//   → [derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))]
 //   row => identity(row.done ? "Done" : "Pending")
 //   → row => derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))
 export default pattern((state) => {
@@ -95,39 +134,11 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
-        } }, ({ state }) => state.items);
-    const views = rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const row = __cf_pattern_input.key("element");
-        return ({
-            value: identity(__cfHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                "enum": ["Done", "Pending"]
-            } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending")),
-            list: [identity(__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    "enum": ["Done", "Pending"]
-                } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending"))],
-        });
-    }, {
+        } }, ({ state }) => state.items).for("rows", true);
+    const views = rows.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
         type: "object",
         properties: {
             element: {
-                $ref: "#/$defs/Item"
-            }
-        },
-        required: ["element"],
-        $defs: {
-            Item: {
                 type: "object",
                 properties: {
                     done: {
@@ -136,7 +147,8 @@ export default pattern((state) => {
                 },
                 required: ["done"]
             }
-        }
+        },
+        required: ["element"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -151,8 +163,8 @@ export default pattern((state) => {
             }
         },
         required: ["value", "list"]
-    } as const satisfies __cfHelpers.JSONSchema), {});
-    const labels = rows.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+    } as const satisfies __cfHelpers.JSONSchema), {}).for("views", true);
+    const labels = rows.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
         type: "object",
         properties: {
             element: {
@@ -168,7 +180,7 @@ export default pattern((state) => {
         required: ["element"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    } as const satisfies __cfHelpers.JSONSchema), {}).for("labels", true);
     return { views, labels };
 }, {
     type: "object",

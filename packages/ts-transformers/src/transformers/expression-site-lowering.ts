@@ -15,6 +15,7 @@ import {
   getExpressionContainerKind,
   isControlFlowRewriteExpression,
   isDirectArrayMethodRootExpression,
+  shouldPreferArrayMethodSharedCallRootSite,
 } from "./expression-site-policy.ts";
 import { rewriteExpression } from "./expression-rewrite/mod.ts";
 import {
@@ -722,6 +723,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
     }
 
     if (
+      !shouldPreferArrayMethodSharedCallRootSite(expression, context, analyze) &&
       findPreferredNestedLowerableExpressionSite(expression, context, analyze)
     ) {
       return undefined;
