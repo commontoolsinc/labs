@@ -10,15 +10,17 @@ import { filterDirectCallableCaptures } from "../utils/callable-capture-filter.t
 import { markCallbackAndAncestorsNonHoistable } from "../utils/non-hoistable-callbacks.ts";
 
 /**
- * ActionStrategy transforms action() calls to handler() calls with explicit closures.
+ * ActionStrategy transforms action() calls to handler() calls with explicit
+ * closure state where that transport is supported.
  *
  * This is to handler as computed is to lift/derive:
  * - Input: action(() => count.set(count.get() + 1))
  * - Output: handler((_, { count }) => count.set(count.get() + 1))({ count })
  *
- * The action callback takes zero or one parameters (optional event) and closes
- * over scope variables. The transformer extracts these closures and makes them
- * explicit as handler params.
+ * The action callback takes zero or one parameters (optional event) and may
+ * close over outer scope values. Most captures become explicit handler state,
+ * but direct callable root captures stay lexical because generated closure
+ * state/params objects cannot faithfully transport them today.
  *
  * Examples:
  * - action(() => doSomething())           → no event, schema is false
@@ -90,7 +92,9 @@ function extractActionCallback(
 }
 
 /**
- * Transform an action call to a handler call with explicit closures.
+ * Transform an action call to a handler call with explicit closure state where
+ * supported.
+ *
  * Converts: action(() => count.set(count.get() + 1))
  * To: handler((_, { count }) => count.set(count.get() + 1))({ count })
  */

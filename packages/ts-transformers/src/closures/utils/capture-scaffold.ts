@@ -17,6 +17,12 @@ export function buildCaptureParamsObject(
   );
 }
 
+/**
+ * Build the shared `handler(...)(captures)` scaffold for closure strategies.
+ *
+ * Callers are responsible for filtering out any captures that must remain
+ * lexical, such as direct callable root captures.
+ */
 export function buildCapturedHandlerClosureCall(
   originalNode: ts.Node,
   callback: ts.ArrowFunction,
