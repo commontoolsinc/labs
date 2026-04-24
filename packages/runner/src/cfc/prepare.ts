@@ -917,7 +917,7 @@ export const prepareBoundaryCommit = (
 
     const requirementFailure = verifyInputRequirements(
       tx,
-      mergedSchema,
+      frozen,
       target,
     );
     if (requirementFailure) {
@@ -927,7 +927,7 @@ export const prepareBoundaryCommit = (
     const trustedEventFailure = verifyTrustedEventRequirements(
       tx,
       target,
-      mergedSchema,
+      frozen,
     );
     if (trustedEventFailure) {
       reasons.push(trustedEventFailure);
@@ -937,7 +937,7 @@ export const prepareBoundaryCommit = (
     const exactCopyFailure = verifyExactCopyRequirements(
       tx,
       target,
-      mergedSchema,
+      frozen,
     );
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);

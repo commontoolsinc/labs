@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -1844,6 +1845,158 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           type: "string",
           default: "",
         });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not re-check existing trusted-event claims for unrelated schema candidates", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const documentId = "of:cfc-existing-trusted-event-unrelated-write";
+      const type = "application/json";
+      const existingSchemaAndHash = internSchema(
+        {
+          type: "object",
+          properties: {
+            argument: {
+              type: "object",
+              properties: {
+                savedTitle: {
+                  type: "string",
+                  ifc: {
+                    uiContract: {
+                      helper: "UiAction",
+                      action: "TrustedSaveDraft",
+                      trustedPattern: "TrustedSaveDraftSurface",
+                    },
+                  },
+                },
+                savedBody: {
+                  type: "string",
+                  ifc: {
+                    uiContract: {
+                      helper: "UiAction",
+                      action: "TrustedSaveDraft",
+                      trustedPattern: "TrustedSaveDraftSurface",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+
+      const seed = runtime.edit();
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: documentId,
+        type,
+        path: [],
+      }, {
+        value: {
+          argument: {
+            savedTitle: "Launch checklist",
+            savedBody: "Ship it",
+          },
+          internal: {
+            stage: "drafting",
+          },
+        },
+        cfc: {
+          version: 1,
+          schemaHash: existingSchemaAndHash.hashString,
+          labelMap: {
+            version: 1,
+            entries: [
+              { path: ["argument", "savedTitle"], label: {} },
+              { path: ["argument", "savedBody"], label: {} },
+            ],
+          },
+        },
+      });
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: `cid:${existingSchemaAndHash.hashString}`,
+        type,
+        path: [],
+      }, {
+        value: existingSchemaAndHash.schema,
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const stageSchemaAndHash = internSchema(
+        {
+          enum: ["drafting", "saved", "reviewed", "published"],
+        } satisfies JSONSchema,
+        true,
+      );
+      const update = runtime.edit();
+      update.setCfcEnforcementMode("enforce-explicit");
+      update.markCfcRelevant("stage-derived-from-cfc-input");
+      update.writeValueOrThrow({
+        space: signer.did(),
+        id: documentId,
+        type,
+        path: ["internal", "stage"],
+      }, "saved");
+      update.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          space: signer.did(),
+          id: documentId,
+          type,
+          path: ["internal", "stage"],
+        },
+        schemaHash: stageSchemaAndHash.hashString,
+        schema: stageSchemaAndHash.schema,
+      });
+
+      update.prepareCfc();
+      expect(update.getCfcState().diagnostics).not.toContain(
+        `missing trusted-event policy input for ${documentId} at /argument/savedTitle`,
+      );
+      const result = await update.commit();
+      expect(result.ok).toBeDefined();
+
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: {
+            internal?: { stage?: string };
+          };
+          cfc?: { schemaHash: string };
+        } | undefined;
+      };
+      const persisted = replica.getDocument(documentId);
+      expect(persisted?.value?.internal?.stage).toBe("saved");
+      const schemaDoc = replica.getDocument(
+        `cid:${persisted!.cfc!.schemaHash}`,
+      );
+      expect(schemaDoc?.value).toMatchObject({
+        properties: {
+          argument: {
+            properties: {
+              savedTitle: {
+                ifc: {
+                  uiContract: {
+                    action: "TrustedSaveDraft",
+                  },
+                },
+              },
+            },
+          },
+          internal: {
+            properties: {
+              stage: {
+                enum: ["drafting", "saved", "reviewed", "published"],
+              },
+            },
+          },
+        },
+      });
     } finally {
       await runtime.dispose();
       await storageManager.close();
