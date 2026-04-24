@@ -289,7 +289,7 @@ function assertJsxRouteCase(testCase: JsxRouteCase): void {
 }
 
 Deno.test(
-  "Expression site policy: array-method callback call arguments are tracked separately from helper-owned branches",
+  "Expression site policy: array-method callback call arguments under local helper roots defer to the enclosing call root",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare function identity<T>(value: T): T;
@@ -308,6 +308,13 @@ Deno.test(
     context.markAsArrayMethodCallback(callback);
 
     const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const helperCall = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "identity",
+    );
     const analyze = createDataFlowAnalyzer(checker);
     assertEquals(
       canRewriteExpressionSite(
@@ -316,7 +323,7 @@ Deno.test(
         context,
         analyze,
       ),
-      true,
+      false,
     );
     assertEquals(
       canRewriteHelperOwnedExpressionSite(
@@ -327,6 +334,15 @@ Deno.test(
       ),
       false,
     );
+
+    const lowerableSite = findLowerableExpressionSite(
+      conditional,
+      context,
+      analyze,
+    );
+    assert(lowerableSite);
+    assert(lowerableSite.expression === helperCall);
+    assertEquals(lowerableSite.containerKind, "variable-initializer");
   },
 );
 

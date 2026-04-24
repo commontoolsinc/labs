@@ -723,7 +723,11 @@ export function rewriteArrayMethodCallbackExpressionSites(
     }
 
     if (
-      !shouldPreferArrayMethodSharedCallRootSite(expression, context, analyze) &&
+      !shouldPreferArrayMethodSharedCallRootSite(
+        expression,
+        context,
+        analyze,
+      ) &&
       findPreferredNestedLowerableExpressionSite(expression, context, analyze)
     ) {
       return undefined;

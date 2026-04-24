@@ -42,7 +42,7 @@ export const objectAndArray = pattern((state) => {
             "enum": ["Done", "Pending"]
         } as const satisfies __cfHelpers.JSONSchema, { state: {
                 done: state.key("done")
-            } }, ({ state }) => identity(state.done ? "Done" : "Pending")),
+            } }, ({ state }) => identity(state.done ? "Done" : "Pending")).for(["view", "value"], true),
         list: [__cfHelpers.derive({
                 type: "object",
                 properties: {
@@ -61,7 +61,7 @@ export const objectAndArray = pattern((state) => {
                 "enum": ["Done", "Pending"]
             } as const satisfies __cfHelpers.JSONSchema, { state: {
                     done: state.key("done")
-                } }, ({ state }) => identity(state.done ? "Done" : "Pending"))],
+                } }, ({ state }) => identity(state.done ? "Done" : "Pending")).for(["view", "list", 0], true)]
     };
     return view;
 }, {
@@ -105,7 +105,7 @@ export default pattern((state) => __cfHelpers.derive({
     "enum": ["Done", "Pending"]
 } as const satisfies __cfHelpers.JSONSchema, { state: {
         done: state.key("done")
-    } }, ({ state }) => identity(state.done ? "Done" : "Pending")), {
+    } }, ({ state }) => identity(state.done ? "Done" : "Pending")).for("__patternResult", true), {
     type: "object",
     properties: {
         done: {

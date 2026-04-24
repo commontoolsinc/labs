@@ -11,10 +11,11 @@ interface State {
 }
 
 // FIXTURE: computed-map-call-arg-logical-and
-// Verifies: nested && inside a callback-local call argument within a
-//   computed-array .map() callback is lowered to when().
+// Verifies: callback-local ordinary call roots within a computed-array .map()
+//   callback whole-wrap as callback-local derives rather than lowering only
+//   the nested && argument site.
 //   const label = identity(row.done && "Done")
-//   → const label = identity(when(row.done, "Done"))
+//   → const label = derive(..., ({ row }) => identity(row.done && "Done"))
 export default pattern<State>((state) => {
   const rows = computed(() => state.items);
 
