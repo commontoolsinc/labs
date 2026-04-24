@@ -38,8 +38,8 @@ import type {
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { OpaqueRef } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import process from "@node/process";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { cpuUsage, memoryUsage } from "node:process";
 import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
@@ -257,10 +257,10 @@ function fmtMs(ms: number): string {
 }
 
 function collectCpuMetrics(
-  startCpu = cpuUsage(),
+  startCpu = process.cpuUsage(),
 ): TestRunCpuMetrics {
-  const cpu = cpuUsage(startCpu);
-  const memory = memoryUsage();
+  const cpu = process.cpuUsage(startCpu);
+  const memory = process.memoryUsage();
   return {
     userCpuMicros: cpu.user,
     systemCpuMicros: cpu.system,
@@ -837,7 +837,7 @@ export async function runTestPattern(
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
   const startTime = performance.now();
-  const startCpu = cpuUsage();
+  const startCpu = process.cpuUsage();
   performance.clearMarks();
   performance.clearMeasures();
   resetAllLoggerCounts();

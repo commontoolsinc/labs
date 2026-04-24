@@ -354,6 +354,8 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: 🧪 Run pattern unit tests
+        env:
+          CF_INTEGRATION_PERF_JSON: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: |
           chmod +x ./common-binaries/cf
           mkdir -p test-results
