@@ -208,6 +208,55 @@ describe("CFC builtin implementation identity", () => {
     });
   });
 
+  it("registers exported trusted builder bindings with source identity", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+    });
+
+    const program = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cts-enable />
+          import { handler, pattern, Writable, WriteAuthorizedBy } from "commonfabric";
+
+          export const saveTitle = handler<void, { title: Writable<string> }>(
+            (_event, { title }) => {
+              title.set(title.get());
+            },
+          );
+
+          export type SavedTitle = WriteAuthorizedBy<string, typeof saveTitle>;
+
+          export default pattern(() => ({ saveTitle }));
+        `,
+      }],
+    };
+
+    const { id, jsScript } = await runtime.harness.compile(program);
+    const { main } = await runtime.harness.evaluate(
+      id,
+      jsScript,
+      program.files,
+    );
+
+    expect(
+      runtime.harness.getVerifiedBindingMetadata(
+        (main as { saveTitle: { implementationRef: string } }).saveTitle
+          .implementationRef,
+      ),
+    ).toEqual({
+      sourceFile: "/main.tsx",
+      bindingPath: ["saveTitle"],
+    });
+  });
+
   it("treats unknown implementation identities as untrusted", () => {
     const module = { type: "javascript" as const };
     expect(resolvePolicyFacingImplementationIdentity(module)).toBeUndefined();

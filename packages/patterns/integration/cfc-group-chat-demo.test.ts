@@ -6,16 +6,11 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
-  clickTrustedAction,
-  clickTrustedActionAndWaitForText,
   fillCfInput,
   waitForRuntimeIdle,
   waitForText,
   waitForTextAbsent,
 } from "./cfc-browser-helpers.ts";
-
-const TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION = "TrustedGroupChatSaveProfile";
-const TRUSTED_GROUP_CHAT_SEND_ACTION = "TrustedGroupChatSendMessage";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -57,7 +52,7 @@ describe("cfc group chat demo integration test", () => {
     await cc?.dispose();
   });
 
-  it("gates sends through the trusted surface and shows injected unsigned claims as invalid", async () => {
+  it("gates sends through the trusted surface and lets authorship verification reject imported claims", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -67,14 +62,7 @@ describe("cfc group chat demo integration test", () => {
       },
       identity,
     });
-
-    const roomOneButton = await page.waitForSelector(
-      "#open-room-participant-1",
-      {
-        strategy: "pierce",
-      },
-    );
-    await roomOneButton.click();
+    await waitForRuntimeIdle(page);
 
     await waitForDisabled(page, "#trusted-send-button-participant-1", true);
 
@@ -83,41 +71,35 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-profile-name-participant-1",
       "Alice",
     );
-    await clickTrustedActionAndWaitForText(
+    await clickCfButton(page, "#trusted-profile-save-participant-1");
+    await waitForDeepText(
       page,
-      TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION,
       "#trusted-participants-panel-participant-1",
       "Alice",
     );
+    await waitForRuntimeIdle(page);
 
-    await scrollIntoView(page, "#host-message-draft-participant-1");
     await fillCfInput(
       page,
       "#host-message-draft-participant-1",
-      "Hello from Alice",
+      "Fake hello from Alice",
     );
-
-    const hostSendButton = await page.waitForSelector(
-      "#host-send-button-participant-1",
-      { strategy: "pierce" },
-    );
-    await hostSendButton.click();
-
+    await clickCfButton(page, "#host-send-button-participant-1");
     await waitForRuntimeIdle(page);
     await waitForTextAbsent(
       page,
       "#trusted-conversation-preview-participant-1",
-      "Hello from Alice",
+      "Fake hello from Alice",
     );
-    await waitForDisabled(page, "#trusted-send-button-participant-1", true);
 
     await fillCfInput(
       page,
       "#trusted-message-draft-participant-1",
       "Hello from Alice",
     );
-
-    await clickTrustedAction(page, TRUSTED_GROUP_CHAT_SEND_ACTION);
+    await waitForRuntimeIdle(page);
+    await waitForDisabled(page, "#trusted-send-button-participant-1", false);
+    await clickCfButton(page, "#trusted-send-button-participant-1");
     await waitForText(
       page,
       "#trusted-conversation-preview-participant-1",
@@ -128,22 +110,6 @@ describe("cfc group chat demo integration test", () => {
       "Hello from Alice",
       "#trusted-conversation-preview-participant-1",
     );
-
-    const backButton = await page.waitForSelector(
-      "#back-to-lobby-participant-1",
-      {
-        strategy: "pierce",
-      },
-    );
-    await backButton.click();
-
-    const roomTwoButton = await page.waitForSelector(
-      "#open-room-participant-2",
-      {
-        strategy: "pierce",
-      },
-    );
-    await roomTwoButton.click();
 
     await waitForText(
       page,
@@ -167,12 +133,13 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-profile-name-participant-2",
       "Bob",
     );
-    await clickTrustedActionAndWaitForText(
+    await clickCfButton(page, "#trusted-profile-save-participant-2");
+    await waitForDeepText(
       page,
-      TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION,
       "#trusted-participants-panel-participant-2",
       "Bob",
     );
+    await waitForRuntimeIdle(page);
 
     await scrollIntoView(page, "#trusted-message-draft-participant-2");
     await fillCfInput(
@@ -180,7 +147,8 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-message-draft-participant-2",
       "Hello from Bob",
     );
-    await clickTrustedAction(page, TRUSTED_GROUP_CHAT_SEND_ACTION);
+    await waitForRuntimeIdle(page);
+    await clickCfButton(page, "#trusted-send-button-participant-2");
     await waitForText(
       page,
       "#trusted-conversation-preview-participant-2",
@@ -192,18 +160,14 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-conversation-preview-participant-2",
     );
 
-    const addRandomInvalidButton = await page.waitForSelector(
-      "#add-random-invalid-participant-2",
-      { strategy: "pierce" },
-    );
-    await addRandomInvalidButton.click();
+    await clickCfButton(page, "#add-random-messages-participant-2");
 
     await waitForText(
       page,
       "#trusted-conversation-preview-participant-2",
       "4 messages",
     );
-    await waitForText(
+    await waitForTextAbsent(
       page,
       "#trusted-conversation-preview-participant-2",
       "Invalid claim",
@@ -251,6 +215,82 @@ async function waitForDisabled(
       }`,
       { cause },
     );
+  }
+}
+
+async function clickCfButton(page: Page, selector: string) {
+  const token = `cf-button-${crypto.randomUUID()}`;
+  const attr = "data-cfc-click-target";
+  const mark = async () =>
+    await page.evaluate(async (targetSelector, targetToken, targetAttr) => {
+      function collect(
+        root: Document | ShadowRoot,
+        result: Element[],
+      ): void {
+        for (const element of root.querySelectorAll("*")) {
+          try {
+            if (element.matches(targetSelector)) {
+              result.push(element);
+            }
+          } catch {
+            // Invalid selectors are reported by returning false.
+          }
+          if (element.shadowRoot) {
+            collect(element.shadowRoot, result);
+          }
+        }
+      }
+
+      const matches: Element[] = [];
+      collect(document, matches);
+      const target = matches[0] as HTMLElement | undefined;
+      if (!target) {
+        return false;
+      }
+      target.scrollIntoView({ block: "center", inline: "center" });
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      );
+      const clickTarget =
+        (target.shadowRoot?.querySelector("[data-cf-button]") as
+          | HTMLElement
+          | null) ?? target;
+      clickTarget.setAttribute(targetAttr, targetToken);
+      return true;
+    }, { args: [selector, token, attr] });
+  try {
+    await waitFor(mark, { timeout: 15_000, delay: 250 });
+  } catch (cause) {
+    throw new Error(`Unable to mark ${selector} for click`, { cause });
+  }
+  try {
+    const clickTarget = await page.waitForSelector(`[${attr}="${token}"]`, {
+      strategy: "pierce",
+      timeout: 2_000,
+    });
+    await clickTarget.click();
+  } finally {
+    await page.evaluate((targetToken, targetAttr) => {
+      function collect(
+        root: Document | ShadowRoot,
+        result: Element[],
+      ): void {
+        for (const element of root.querySelectorAll("*")) {
+          if (element.getAttribute(targetAttr) === targetToken) {
+            result.push(element);
+          }
+          if (element.shadowRoot) {
+            collect(element.shadowRoot, result);
+          }
+        }
+      }
+
+      const matches: Element[] = [];
+      collect(document, matches);
+      for (const element of matches) {
+        element.removeAttribute(targetAttr);
+      }
+    }, { args: [token, attr] }).catch(() => {});
   }
 }
 

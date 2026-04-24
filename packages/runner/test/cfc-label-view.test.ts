@@ -1082,6 +1082,70 @@ describe("CFC label view helpers", () => {
     }
   });
 
+  it("follows array-element links to stored metadata", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cfc label view linked array entry",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-array-source",
+        undefined,
+        tx,
+      );
+      const sourceLink = parseLink(source.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: sourceLink.id!,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { body: "labelled content" },
+        cfc: {
+          version: 1,
+          schemaHash: "test-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { integrity: ["trusted-source"] },
+            }],
+          },
+        },
+      });
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-array-target",
+        { type: "array", items: true },
+        tx,
+      );
+      target.setRawUntyped([source.getAsLink()]);
+      await tx.commit();
+
+      const schemaLessEntry = runtime.getCellFromLink({
+        ...target.key(0).getAsNormalizedFullLink(),
+        schema: undefined,
+      });
+
+      expect(cfcLabelViewForCell(schemaLessEntry)).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: { integrity: ["trusted-source"] },
+        }],
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("reads stored metadata directly from the queried cell", () => {
     const cell = {
       getAsNormalizedFullLink: () => ({

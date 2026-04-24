@@ -1,4 +1,4 @@
-import { type Cfc, nonPrivateRandom, safeDateNow } from "commonfabric";
+import { nonPrivateRandom, safeDateNow } from "commonfabric";
 
 export const SLOT_IDS = [
   "participant-1",
@@ -7,6 +7,8 @@ export const SLOT_IDS = [
 ] as const;
 
 export type SlotId = typeof SLOT_IDS[number];
+
+export type MessageOrigin = "sent" | "imported";
 
 type SlotMeta = {
   readonly id: SlotId;
@@ -32,26 +34,44 @@ const SLOT_META: readonly SlotMeta[] = [
   },
 ] as const;
 
-export type AuthorshipIntegrity<Author extends string> = {
-  readonly kind: "authored-by";
-  readonly subject: Author;
-};
-
-type ParticipantProfile<Slot extends SlotId> = {
+export type ParticipantProfile<Slot extends SlotId> = {
   readonly id: Slot;
   readonly slotLabel: string;
   readonly name: string;
   readonly accentColor: string;
 };
 
-type ChatMessage<Slot extends SlotId> = {
+export type ParticipantOne = ParticipantProfile<"participant-1">;
+export type ParticipantTwo = ParticipantProfile<"participant-2">;
+export type ParticipantThree = ParticipantProfile<"participant-3">;
+export type Participant = ParticipantOne | ParticipantTwo | ParticipantThree;
+
+export type ChatMessage<Slot extends SlotId, Origin extends MessageOrigin> = {
+  readonly origin: Origin;
   readonly id: string;
   readonly author: ParticipantProfile<Slot>;
   readonly body: string;
   readonly timestamp: number;
 };
 
-const RANDOM_INVALID_BODIES = [
+export type SentChatMessageOne = ChatMessage<"participant-1", "sent">;
+export type SentChatMessageTwo = ChatMessage<"participant-2", "sent">;
+export type SentChatMessageThree = ChatMessage<"participant-3", "sent">;
+export type PlainSentChatMessage =
+  | SentChatMessageOne
+  | SentChatMessageTwo
+  | SentChatMessageThree;
+
+export type ImportedClaimedChatMessage =
+  | ChatMessage<"participant-1", "imported">
+  | ChatMessage<"participant-2", "imported">
+  | ChatMessage<"participant-3", "imported">;
+
+export type PlainChatMessage =
+  | PlainSentChatMessage
+  | ImportedClaimedChatMessage;
+
+const RANDOM_IMPORTED_BODIES = [
   "Jumping in late here.",
   "I think we already covered this above.",
   "Can we loop back on the last point?",
@@ -59,76 +79,13 @@ const RANDOM_INVALID_BODIES = [
   "I might be missing context, but this seems fine.",
 ] as const;
 
-type TrustedParticipantOne = Cfc<
-  ParticipantProfile<"participant-1">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-1">] }
->;
-
-type TrustedParticipantTwo = Cfc<
-  ParticipantProfile<"participant-2">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-2">] }
->;
-
-type TrustedParticipantThree = Cfc<
-  ParticipantProfile<"participant-3">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-3">] }
->;
-
-export type TrustedParticipant =
-  | TrustedParticipantOne
-  | TrustedParticipantTwo
-  | TrustedParticipantThree;
-
-export type TrustedMessageOne = Cfc<
-  ChatMessage<"participant-1">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-1">] }
->;
-
-export type TrustedMessageTwo = Cfc<
-  ChatMessage<"participant-2">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-2">] }
->;
-
-export type TrustedMessageThree = Cfc<
-  ChatMessage<"participant-3">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-3">] }
->;
-
-export type TrustedChatMessage =
-  | TrustedMessageOne
-  | TrustedMessageTwo
-  | TrustedMessageThree;
-
-export type ClaimedParticipant = ParticipantProfile<SlotId>;
-
-export type InvalidClaimedChatMessage =
-  | ChatMessage<"participant-1">
-  | ChatMessage<"participant-2">
-  | ChatMessage<"participant-3">;
-
-export type DisplayChatMessage = TrustedChatMessage | InvalidClaimedChatMessage;
-
 export const metaForSlot = (slotId: SlotId): SlotMeta =>
   SLOT_META.find((slot) => slot.id === slotId) ?? SLOT_META[0];
 
-export const findParticipantBySlot = (
-  participants: readonly TrustedParticipant[],
-  slotId: SlotId,
-): TrustedParticipant | undefined =>
-  participants.find((participant) => participant.id === slotId);
-
-const sortParticipants = (
-  participants: readonly TrustedParticipant[],
-): TrustedParticipant[] =>
-  SLOT_IDS.flatMap((slotId) => {
-    const match = participants.find((participant) => participant.id === slotId);
-    return match ? [match] : [];
-  });
-
-const makeTrustedParticipant = (
+export const makeParticipantSnapshot = (
   slotId: SlotId,
   name: string,
-): TrustedParticipant => {
+): Participant => {
   const meta = metaForSlot(slotId);
   switch (slotId) {
     case "participant-1":
@@ -137,36 +94,54 @@ const makeTrustedParticipant = (
         slotLabel: meta.label,
         name,
         accentColor: meta.accentColor,
-      } as TrustedParticipantOne;
+      };
     case "participant-2":
       return {
         id: "participant-2",
         slotLabel: meta.label,
         name,
         accentColor: meta.accentColor,
-      } as TrustedParticipantTwo;
+      };
     case "participant-3":
       return {
         id: "participant-3",
         slotLabel: meta.label,
         name,
         accentColor: meta.accentColor,
-      } as TrustedParticipantThree;
+      };
   }
 };
 
-const makeTrustedMessage = (
+export const findParticipantBySlot = <ParticipantValue extends Participant>(
+  participants: readonly ParticipantValue[],
   slotId: SlotId,
-  author: TrustedParticipant,
-  body: string,
-): TrustedChatMessage => {
-  const timestamp = safeDateNow();
-  const id = `msg-${slotId}-${timestamp}-${
+): ParticipantValue | undefined =>
+  participants.find((participant) => participant.id === slotId);
+
+export const sortParticipants = <ParticipantValue extends Participant>(
+  participants: readonly ParticipantValue[],
+): ParticipantValue[] =>
+  SLOT_IDS.flatMap((slotId) => {
+    const match = participants.find((participant) => participant.id === slotId);
+    return match ? [match] : [];
+  });
+
+const createId = (prefix: string, slotId: SlotId): string =>
+  `${prefix}-${slotId}-${safeDateNow()}-${
     nonPrivateRandom().toString(36).slice(2, 8)
   }`;
+
+export const createSentMessageSnapshot = (
+  slotId: SlotId,
+  author: Participant,
+  body: string,
+): PlainSentChatMessage => {
+  const timestamp = safeDateNow();
+  const id = createId("msg", slotId);
   switch (slotId) {
     case "participant-1":
       return {
+        origin: "sent",
         id,
         author: {
           id: "participant-1",
@@ -176,9 +151,10 @@ const makeTrustedMessage = (
         },
         body,
         timestamp,
-      } as TrustedMessageOne;
+      };
     case "participant-2":
       return {
+        origin: "sent",
         id,
         author: {
           id: "participant-2",
@@ -188,9 +164,10 @@ const makeTrustedMessage = (
         },
         body,
         timestamp,
-      } as TrustedMessageTwo;
+      };
     case "participant-3":
       return {
+        origin: "sent",
         id,
         author: {
           id: "participant-3",
@@ -200,21 +177,45 @@ const makeTrustedMessage = (
         },
         body,
         timestamp,
-      } as TrustedMessageThree;
+      };
   }
 };
 
-const makeInvalidClaimedMessage = (
-  author: TrustedParticipant,
+export const prepareSentMessageSnapshot = (
+  participants: readonly Participant[],
+  slotId: SlotId,
+  rawBody: string,
+): {
+  trimmedBody: string | null;
+  message: PlainSentChatMessage | null;
+} => {
+  const participantList = Array.from(participants);
+  const trimmedBody = rawBody.trim();
+  const sender = findParticipantBySlot(participantList, slotId);
+
+  if (!trimmedBody || !sender) {
+    return {
+      trimmedBody: null,
+      message: null,
+    };
+  }
+
+  return {
+    trimmedBody,
+    message: createSentMessageSnapshot(slotId, sender, trimmedBody),
+  };
+};
+
+const createImportedClaimedMessage = (
+  author: Participant,
   body: string,
   timestamp: number,
-): InvalidClaimedChatMessage => {
-  const id = `invalid-${author.id}-${safeDateNow()}-${
-    nonPrivateRandom().toString(36).slice(2, 8)
-  }`;
+): ImportedClaimedChatMessage => {
+  const id = createId("imported", author.id);
   switch (author.id) {
     case "participant-1":
       return {
+        origin: "imported",
         id,
         author: {
           id: "participant-1",
@@ -227,6 +228,7 @@ const makeInvalidClaimedMessage = (
       };
     case "participant-2":
       return {
+        origin: "imported",
         id,
         author: {
           id: "participant-2",
@@ -239,6 +241,7 @@ const makeInvalidClaimedMessage = (
       };
     case "participant-3":
       return {
+        origin: "imported",
         id,
         author: {
           id: "participant-3",
@@ -253,14 +256,16 @@ const makeInvalidClaimedMessage = (
 };
 
 const compareMessagesByThreadOrder = (
-  left: Pick<DisplayChatMessage, "id" | "timestamp">,
-  right: Pick<DisplayChatMessage, "id" | "timestamp">,
+  left: Pick<PlainChatMessage, "id" | "timestamp">,
+  right: Pick<PlainChatMessage, "id" | "timestamp">,
 ): number =>
   left.timestamp === right.timestamp
     ? left.id.localeCompare(right.id)
     : left.timestamp - right.timestamp;
 
-export const sortDisplayMessages = <Message extends DisplayChatMessage>(
+export const sortDisplayMessages = <
+  Message extends Pick<PlainChatMessage, "id" | "timestamp">,
+>(
   messages: readonly Message[],
 ): Message[] => Array.from(messages).sort(compareMessagesByThreadOrder);
 
@@ -274,7 +279,7 @@ const chooseRandom = <Value>(values: readonly Value[]): Value | undefined => {
 };
 
 const randomInsertTimestamp = (
-  messages: readonly DisplayChatMessage[],
+  messages: readonly PlainChatMessage[],
 ): number => {
   const ordered = sortDisplayMessages(messages);
   if (ordered.length === 0) {
@@ -299,92 +304,10 @@ const randomInsertTimestamp = (
     : leftTimestamp + nonPrivateRandom() * 0.001;
 };
 
-export const prepareTrustedMessageSend = (
-  participants: readonly TrustedParticipant[],
-  slotId: SlotId,
-  rawBody: string,
-): {
-  trimmedBody: string | null;
-  message: TrustedChatMessage | null;
-} => {
-  const participantList = Array.from(participants);
-  const trimmedBody = rawBody.trim();
-  const sender = findParticipantBySlot(participantList, slotId);
-
-  if (!trimmedBody || !sender) {
-    return {
-      trimmedBody: null,
-      message: null,
-    };
-  }
-
-  return {
-    trimmedBody,
-    message: makeTrustedMessage(slotId, sender, trimmedBody),
-  };
-};
-
-export const applyTrustedProfileSave = (
-  participants: readonly TrustedParticipant[],
-  slotId: SlotId,
-  rawName: string,
-): {
-  trimmedName: string | null;
-  nextParticipants: TrustedParticipant[];
-} => {
-  const participantList = Array.from(participants);
-  const trimmedName = rawName.trim();
-  if (!trimmedName) {
-    return {
-      trimmedName: null,
-      nextParticipants: participantList,
-    };
-  }
-
-  return {
-    trimmedName,
-    nextParticipants: sortParticipants([
-      ...participantList.filter((participant) => participant.id !== slotId),
-      makeTrustedParticipant(slotId, trimmedName),
-    ]),
-  };
-};
-
-export const applyTrustedMessageSend = (
-  messages: readonly TrustedChatMessage[],
-  participants: readonly TrustedParticipant[],
-  slotId: SlotId,
-  rawBody: string,
-): {
-  trimmedBody: string | null;
-  nextMessages: TrustedChatMessage[];
-} => {
-  const messageList = Array.from(messages);
-  const { trimmedBody, message } = prepareTrustedMessageSend(
-    participants,
-    slotId,
-    rawBody,
-  );
-  if (!trimmedBody || !message) {
-    return {
-      trimmedBody: null,
-      nextMessages: messageList,
-    };
-  }
-
-  return {
-    trimmedBody,
-    nextMessages: [
-      ...messageList,
-      message,
-    ],
-  };
-};
-
-export const createRandomInvalidClaimedMessages = (
-  existingMessages: readonly DisplayChatMessage[],
-  participants: readonly TrustedParticipant[],
-): InvalidClaimedChatMessage[] => {
+export const createRandomImportedClaimedMessages = (
+  existingMessages: readonly PlainChatMessage[],
+  participants: readonly Participant[],
+): ImportedClaimedChatMessage[] => {
   const authorPool = Array.from(participants);
   const workingMessages = sortDisplayMessages(existingMessages);
   const insertCount = Math.min(3, workingMessages.length);
@@ -394,12 +317,12 @@ export const createRandomInvalidClaimedMessages = (
 
   return Array.from({ length: insertCount }, () => {
     const author = chooseRandom(authorPool);
-    const body = chooseRandom(RANDOM_INVALID_BODIES);
+    const body = chooseRandom(RANDOM_IMPORTED_BODIES);
     if (!author || !body) {
       return null;
     }
 
-    const message = makeInvalidClaimedMessage(
+    const message = createImportedClaimedMessage(
       author,
       body,
       randomInsertTimestamp(workingMessages),

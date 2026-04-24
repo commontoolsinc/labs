@@ -83,8 +83,19 @@ export function createBindingIdentityHelperSource(
     JSON.stringify(metadataField) +
     ", {",
     "      value: metadata,",
-    "      configurable: true,",
+    "      configurable: true",
     "    });",
+    "  }",
+    '  if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {',
+    "    var implementation = value.implementation;",
+    '    if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {',
+    "      Object.defineProperty(implementation, " +
+    JSON.stringify(metadataField) +
+    ", {",
+    "        value: metadata,",
+    "        configurable: true",
+    "      });",
+    "    }",
     "  }",
     "  return value;",
     "}",

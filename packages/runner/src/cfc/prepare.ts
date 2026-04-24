@@ -25,6 +25,7 @@ import {
 } from "../link-utils.ts";
 import { getValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
@@ -36,6 +37,7 @@ import {
   type WritePolicyInput,
 } from "./types.ts";
 import {
+  pathPatternMatches,
   recordedTrustedEventProvenanceMatchesUiContract,
   uiContractsFromSchema,
 } from "./ui-contract.ts";
@@ -574,30 +576,56 @@ const walkIfcSchema = (
   entries: Array<
     { path: readonly string[]; label: IFCLabel; schema: JSONSchema }
   > = [],
+  root: JSONSchema = schema,
+  seen: Set<JSONSchema> = new Set(),
 ): typeof entries => {
   if (typeof schema === "boolean") {
     return entries;
   }
-  if (schema.ifc !== undefined) {
+  if (seen.has(schema)) {
+    return entries;
+  }
+  seen.add(schema);
+
+  const schemaRoot = schema.$defs !== undefined ? schema : root;
+  const resolved = typeof schema.$ref === "string"
+    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot) ?? schema
+    : schema;
+  if (typeof resolved === "boolean") {
+    return entries;
+  }
+
+  const childRoot = resolved.$defs !== undefined ? resolved : schemaRoot;
+  if (resolved.ifc !== undefined) {
     entries.push({
       path,
       label: {
-        integrity: schema.ifc.integrity ? [...schema.ifc.integrity] : undefined,
-        confidentiality: schema.ifc.confidentiality
-          ? [...schema.ifc.confidentiality]
+        integrity: resolved.ifc.integrity
+          ? [...resolved.ifc.integrity]
+          : undefined,
+        confidentiality: resolved.ifc.confidentiality
+          ? [...resolved.ifc.confidentiality]
           : undefined,
       },
-      schema,
+      schema: resolved,
     });
   }
 
-  if (schema.properties) {
-    for (const [key, child] of Object.entries(schema.properties)) {
-      walkIfcSchema(child, [...path, key], entries);
+  if (resolved.properties) {
+    for (const [key, child] of Object.entries(resolved.properties)) {
+      walkIfcSchema(child, [...path, key], entries, childRoot, seen);
     }
   }
-  if (typeof schema.items === "object" && schema.items !== null) {
-    walkIfcSchema(schema.items, [...path, "*"], entries);
+  const compound = [
+    ...(resolved.anyOf ?? []),
+    ...(resolved.oneOf ?? []),
+    ...(resolved.allOf ?? []),
+  ];
+  for (const child of compound) {
+    walkIfcSchema(child, path, entries, childRoot, seen);
+  }
+  if (typeof resolved.items === "object" && resolved.items !== null) {
+    walkIfcSchema(resolved.items, [...path, "*"], entries, childRoot, seen);
   }
   return entries;
 };
@@ -718,6 +746,56 @@ const writeValueForTarget = (
   return getValueAtPath(value, targetPath.slice(matchingWritePath.length));
 };
 
+const valuesAtPatternPath = (
+  value: unknown,
+  path: readonly string[],
+): unknown[] => {
+  if (path.length === 0) {
+    return [value];
+  }
+
+  const [head, ...rest] = path;
+  if (head === "*") {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.flatMap((item, index) =>
+      index in value ? valuesAtPatternPath(item, rest) : []
+    );
+  }
+
+  if (value === null || value === undefined || typeof value !== "object") {
+    return [];
+  }
+  if (!(head in value)) {
+    return [];
+  }
+  return valuesAtPatternPath((value as Record<string, unknown>)[head], rest);
+};
+
+const ifcEntryAppliesToAttemptedWrite = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    type: MediaType;
+  },
+  path: readonly string[],
+): boolean => {
+  const wildcardIndex = path.indexOf("*");
+  if (wildcardIndex === -1) {
+    return true;
+  }
+
+  const prefix = path.slice(0, wildcardIndex);
+  const value = writeValueForTarget(tx, { ...target, path: prefix });
+  if (value === undefined) {
+    return false;
+  }
+  const matches = valuesAtPatternPath(value, path.slice(wildcardIndex));
+  return matches.some((match) => !isPrimitiveCellLink(match));
+};
+
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -725,6 +803,7 @@ const verifyInputRequirements = (
     space: MemorySpace;
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
+    type: MediaType;
   },
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
@@ -745,6 +824,9 @@ const verifyInputRequirements = (
   })).filter((read) => read.label !== undefined);
 
   for (const entry of walkIfcSchema(schema)) {
+    if (!ifcEntryAppliesToAttemptedWrite(tx, target, entry.path)) {
+      continue;
+    }
     const ifc = isRecord(entry.schema) ? entry.schema.ifc : undefined;
     const unsupportedTrustSensitive = unsupportedTrustSensitiveReason(
       entry.schema,
@@ -801,10 +883,14 @@ const verifyTrustedEventRequirements = (
     space: MemorySpace;
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
+    type: MediaType;
   },
   schema: JSONSchema,
 ): string | undefined => {
   for (const entry of uiContractsFromSchema(schema)) {
+    if (!ifcEntryAppliesToAttemptedWrite(tx, target, entry.path)) {
+      continue;
+    }
     if (setupProjectionSourceMatchesValue(tx, target, entry.path)) {
       continue;
     }
@@ -813,7 +899,8 @@ const verifyTrustedEventRequirements = (
       input.target.space === target.space &&
       input.target.id === target.id &&
       input.target.scope === target.scope &&
-      arraysEqual(input.target.path, entry.path) &&
+      input.target.type === target.type &&
+      pathPatternMatches(entry.path, input.target.path) &&
       recordedTrustedEventProvenanceMatchesUiContract(
         input.provenance,
         entry.contract,
@@ -834,6 +921,7 @@ const verifyExactCopyRequirements = (
     space: MemorySpace;
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
+    type: MediaType;
   },
   schema: JSONSchema,
 ): string | undefined => {
@@ -1211,6 +1299,9 @@ export const prepareBoundaryCommit = (
       ]),
     );
     const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
+      if (!ifcEntryAppliesToAttemptedWrite(tx, target, entry.path)) {
+        return [];
+      }
       const label = derivePersistedLabel(
         entry.schema,
         entry.label,

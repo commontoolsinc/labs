@@ -1,31 +1,41 @@
 import { action, computed, Default, pattern, Writable } from "commonfabric";
 import {
+  createRandomImportedClaimedMessages,
+  sortDisplayMessages,
+} from "./logic.ts";
+import {
   applyTrustedMessageSend,
   applyTrustedProfileSave,
-  createRandomInvalidClaimedMessages,
-  type DisplayChatMessage,
-  type InvalidClaimedChatMessage,
-  sortDisplayMessages,
-  type TrustedChatMessage,
+  type SharedChatMessage,
+  type SharedMessagesValue,
+  type SharedParticipantsValue,
   type TrustedParticipant,
-} from "./logic.ts";
+} from "./trusted.tsx";
+import { ParticipantRoom } from "./main.tsx";
 
 export default pattern(() => {
   const participants = Writable.of<TrustedParticipant[] | Default<[]>>(
     [] as Default<[]>,
   );
-  const messages = Writable.of<TrustedChatMessage[] | Default<[]>>(
-    [] as Default<[]>,
-  );
-  const invalidMessages = Writable.of<
-    InvalidClaimedChatMessage[] | Default<[]>
-  >(
+  const messages = Writable.of<SharedChatMessage[] | Default<[]>>(
     [] as Default<[]>,
   );
   const profileDraftOne = Writable.of("");
   const profileDraftTwo = Writable.of("");
   const messageDraftOne = Writable.of("");
   const messageDraftTwo = Writable.of("");
+  const roomParticipants = Writable.of<SharedParticipantsValue>(
+    [] as SharedParticipantsValue,
+  );
+  const roomMessages = Writable.of<SharedMessagesValue>(
+    [] as SharedMessagesValue,
+  );
+  const room = ParticipantRoom({
+    slotId: "participant-1",
+    participants: roomParticipants,
+    messages: roomMessages,
+    lobbyPiece: null,
+  });
 
   const action_set_profile_one = action(() => {
     profileDraftOne.set("Alice");
@@ -46,12 +56,12 @@ export default pattern(() => {
   });
   const action_send_message_one = action(() => {
     const { trimmedBody, nextMessages } = applyTrustedMessageSend(
-      messages.get() as TrustedChatMessage[],
+      messages.get() as SharedChatMessage[],
       participants.get() as TrustedParticipant[],
       "participant-1",
       messageDraftOne.get(),
     );
-    messages.set(nextMessages as TrustedChatMessage[] | Default<[]>);
+    messages.set(nextMessages as SharedChatMessage[] | Default<[]>);
     if (trimmedBody) {
       messageDraftOne.set("");
     }
@@ -89,44 +99,44 @@ export default pattern(() => {
   });
   const action_send_message_two = action(() => {
     const { trimmedBody, nextMessages } = applyTrustedMessageSend(
-      messages.get() as TrustedChatMessage[],
+      messages.get() as SharedChatMessage[],
       participants.get() as TrustedParticipant[],
       "participant-2",
       messageDraftTwo.get(),
     );
-    messages.set(nextMessages as TrustedChatMessage[] | Default<[]>);
+    messages.set(nextMessages as SharedChatMessage[] | Default<[]>);
     if (trimmedBody) {
       messageDraftTwo.set("");
     }
   });
-  const action_add_random_invalid = action(() => {
-    const trustedMessages = Array.from(
-      messages.get() as TrustedChatMessage[],
-    );
-    const existingInvalidMessages = Array.from(
-      invalidMessages.get() as InvalidClaimedChatMessage[],
-    );
-    const nextInvalidMessages = createRandomInvalidClaimedMessages(
-      [
-        ...trustedMessages.map((message) => message as DisplayChatMessage),
-        ...existingInvalidMessages.map((message) =>
-          message as DisplayChatMessage
-        ),
-      ],
+  const action_add_random_imported = action(() => {
+    const nextImportedMessages = createRandomImportedClaimedMessages(
+      messages.get() as SharedChatMessage[],
       participants.get() as TrustedParticipant[],
     );
-    invalidMessages.set(
+    messages.set(
       [
-        ...existingInvalidMessages,
-        ...nextInvalidMessages,
-      ] as InvalidClaimedChatMessage[] | Default<[]>,
+        ...(messages.get() as SharedChatMessage[]),
+        ...nextImportedMessages,
+      ] as SharedChatMessage[] | Default<[]>,
     );
+  });
+  const action_room_set_profile = action(() => {
+    room.setProfileDraft.send("Room Alice");
+  });
+  const action_room_save_profile = action(() => {
+    room.saveProfile.send();
+  });
+  const action_room_set_message = action(() => {
+    room.setMessageDraft.send("Room hello");
+  });
+  const action_room_send_message = action(() => {
+    room.sendTrustedMessage.send();
   });
 
   const assert_initially_empty = computed(() =>
     (participants.get()?.length ?? 0) === 0 &&
-    (messages.get()?.length ?? 0) === 0 &&
-    (invalidMessages.get()?.length ?? 0) === 0
+    (messages.get()?.length ?? 0) === 0
   );
   const assert_profile_one_upserted = computed(() =>
     participants.get().length === 1 &&
@@ -135,6 +145,7 @@ export default pattern(() => {
   );
   const assert_message_one_sent = computed(() =>
     messages.get().length === 1 &&
+    messages.get()[0]?.origin === "sent" &&
     messages.get()[0]?.author.id === "participant-1" &&
     messages.get()[0]?.author.name === "Alice" &&
     messages.get()[0]?.body === "Hello from Alice"
@@ -154,34 +165,41 @@ export default pattern(() => {
   );
   const assert_message_order_deterministic = computed(() =>
     messages.get().length === 2 &&
+    messages.get()[0]?.origin === "sent" &&
+    messages.get()[1]?.origin === "sent" &&
     messages.get()[0]?.body === "Hello from Alice" &&
     messages.get()[1]?.body === "Hello from Bob" &&
     messages.get()[1]?.author.name === "Bob"
   );
-  const assert_invalid_messages_injected = computed(() =>
-    invalidMessages.get().length === 2 &&
-    invalidMessages.get().every((message) =>
-      ["participant-1", "participant-2"].includes(message.author.id) &&
-      ["Alice Renamed", "Bob"].includes(message.author.name) &&
-      message.body.length > 0
-    )
-  );
+  const assert_imported_messages_injected = computed(() => {
+    const messageList = Array.from(messages.get() as SharedChatMessage[]);
+    const importedMessages = messageList.filter((message) =>
+      message.origin === "imported"
+    );
+    return messageList.length === 4 &&
+      importedMessages.length === 2 &&
+      importedMessages.every((message) =>
+        ["participant-1", "participant-2"].includes(message.author.id) &&
+        ["Alice Renamed", "Bob"].includes(message.author.name) &&
+        message.body.length > 0
+      );
+  });
   const assert_thread_order_sortable = computed(() => {
-    const trustedMessages = Array.from(
-      messages.get() as TrustedChatMessage[],
-    );
-    const claimedMessages = Array.from(
-      invalidMessages.get() as InvalidClaimedChatMessage[],
-    );
-    const ordered = sortDisplayMessages([
-      ...trustedMessages.map((message) => message as DisplayChatMessage),
-      ...claimedMessages.map((message) => message as DisplayChatMessage),
-    ]);
+    const ordered = sortDisplayMessages(messages.get() as SharedChatMessage[]);
     return ordered.length === 4 &&
       ordered.every((message, index) =>
         index === 0 || ordered[index - 1]!.timestamp <= message.timestamp
       );
   });
+  const assert_room_profile_saved = computed(() =>
+    roomParticipants.get().length === 1 &&
+    roomParticipants.get()[0]?.name === "Room Alice"
+  );
+  const assert_room_message_sent = computed(() =>
+    roomMessages.get().length === 1 &&
+    roomMessages.get()[0]?.body === "Room hello" &&
+    roomMessages.get()[0]?.author.name === "Room Alice"
+  );
 
   return {
     tests: [
@@ -202,9 +220,15 @@ export default pattern(() => {
       { action: action_set_message_two },
       { action: action_send_message_two },
       { assertion: assert_message_order_deterministic },
-      { action: action_add_random_invalid },
-      { assertion: assert_invalid_messages_injected },
+      { action: action_add_random_imported },
+      { assertion: assert_imported_messages_injected },
       { assertion: assert_thread_order_sortable },
+      { action: action_room_set_profile },
+      { action: action_room_save_profile },
+      { assertion: assert_room_profile_saved },
+      { action: action_room_set_message },
+      { action: action_room_send_message },
+      { assertion: assert_room_message_sent },
     ],
   };
 });
