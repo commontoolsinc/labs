@@ -1,8 +1,6 @@
 import { isObject, isRecord, Mutable } from "@commonfabric/utils/types";
-import {
-  cloneSchemaMutable,
-  toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { cloneSchemaMutable } from "@commonfabric/data-model/schema-utils";
 import {
   type Cell,
   createJsonSchema,
@@ -257,24 +255,25 @@ export function scrub(data: unknown): unknown {
       const value = data.asSchema().get();
       if (isObject(value)) {
         // Generate a new schema for all properties except $UI and $NAME and streams
-        const scrubbed = toDeepFrozenSchema(
-          {
-            type: "object",
-            properties: Object.fromEntries(
-              Object.keys(value).filter(([key, value]) =>
-                !key.startsWith("$") && !isStream(value)
-              ).map(
-                (key) => [key, {}],
-              ),
-            ),
-            additionalProperties: false,
-          },
+        const scrubbedProperties = Object.fromEntries(
+          Object.keys(value).filter(([key, value]) =>
+            !key.startsWith("$") && !isStream(value)
+          ).map(
+            (key) => [key, {}],
+          ),
         );
-        console.log("scrubbed generated schema", scrubbed);
-        // Only if we found any properties, return the scrubbed schema
-        return Object.keys(scrubbed).length > 0
-          ? data.asSchema(scrubbed)
-          : data;
+        if (Object.keys(scrubbedProperties).length > 0) {
+          const scrubbed = internSchema({
+            type: "object",
+            properties: scrubbedProperties,
+            additionalProperties: false,
+          });
+          console.log("scrubbed generated schema", scrubbed);
+          return data.asSchema(scrubbed);
+        } else {
+          console.log("scrubbed generated schema: <no properties>");
+          return data;
+        }
       } else return data;
     }
   } else if (Array.isArray(data)) {
