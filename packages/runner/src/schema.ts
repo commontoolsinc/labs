@@ -14,7 +14,6 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
   schemaWithProperties,
-  toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
@@ -877,7 +876,7 @@ export function generateHandlerSchema(
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  return toDeepFrozenSchema({
+  return internSchema({
     type: "object",
     properties: {
       "$event": eventSchema ?? true,
@@ -887,7 +886,7 @@ export function generateHandlerSchema(
     ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
     ...(Object.keys(mergedDefinitions).length &&
       { definitions: mergedDefinitions }),
-  }, true);
+  });
 }
 
 function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
