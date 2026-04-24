@@ -321,6 +321,7 @@ export const commitTrustedMessageSend = handler<
   }
 
   sharedMessages.push(message as SharedChatMessage);
+  messageDraft.set("");
 });
 
 export type SharedParticipantsValue = TrustedParticipant[] | Default<[]>;

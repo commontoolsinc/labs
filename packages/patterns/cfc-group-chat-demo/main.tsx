@@ -162,6 +162,10 @@ const SharedTranscript = pattern<
             display: "flex",
             flexDirection: "column",
             gap: "0.75rem",
+            maxHeight: "min(52vh, 32rem)",
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+            paddingRight: "0.25rem",
           }}
         >
           <div style={rowZeroStyle}>
