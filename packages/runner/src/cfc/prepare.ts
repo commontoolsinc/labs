@@ -1,4 +1,5 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
@@ -1026,7 +1027,7 @@ export const prepareBoundaryCommit = (
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
   for (const key of targetKeys) {
-    const schema = candidates.get(key);
+    const schema = candidates.get(key) ?? emptySchemaObject();
     const [space, id, type] = key.split("\u0000") as [
       MemorySpace,
       URI,
@@ -1069,10 +1070,10 @@ export const prepareBoundaryCommit = (
       ? schema === undefined
         ? storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
         : mergeCfcSchemaEnvelopes(
-          frozen,
+          schema,
           storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
         )
-      : frozen;
+      : schema;
 
     const requirementFailure = verifyInputRequirements(
       tx,
