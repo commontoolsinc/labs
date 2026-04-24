@@ -617,8 +617,22 @@ export class LLMClient {
               } else if (event.type === "finish") {
                 // Stream finished
                 break;
+              } else if (event.type === "error") {
+                throw new Error(event.error ?? "LLM stream error");
               }
             } catch (error) {
+              let parsedLine: unknown;
+              try {
+                parsedLine = JSON.parse(line);
+              } catch {
+                parsedLine = undefined;
+              }
+              if (
+                parsedLine && typeof parsedLine === "object" &&
+                (parsedLine as { type?: unknown }).type === "error"
+              ) {
+                throw error;
+              }
               console.error("Failed to parse JSON line:", line, error);
             }
           }
@@ -633,8 +647,22 @@ export class LLMClient {
         if (typeof event === "string") {
           text += event;
           if (callback) callback(text);
+        } else if (event.type === "error") {
+          throw new Error(event.error ?? "LLM stream error");
         }
       } catch (error) {
+        let parsedLine: unknown;
+        try {
+          parsedLine = JSON.parse(buffer.trim());
+        } catch {
+          parsedLine = undefined;
+        }
+        if (
+          parsedLine && typeof parsedLine === "object" &&
+          (parsedLine as { type?: unknown }).type === "error"
+        ) {
+          throw error;
+        }
         console.error("Failed to parse final JSON line:", buffer, error);
       }
     }

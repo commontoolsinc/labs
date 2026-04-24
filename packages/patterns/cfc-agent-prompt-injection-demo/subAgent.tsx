@@ -1,11 +1,11 @@
 import {
   type BuiltInLLMContent,
+  type BuiltInLLMMessage,
   type BuiltInLLMTool,
   generateObject,
   type ImmutableJSONValue,
   lift,
   pattern,
-  patternTool,
 } from "commonfabric";
 import type { JSONSchema } from "commonfabric";
 
@@ -13,6 +13,7 @@ type ResultSchemaInput = any;
 
 type SubAgentInput = {
   prompt: BuiltInLLMContent;
+  messages?: BuiltInLLMMessage[];
   context?: Record<string, any>;
   resultSchema: ResultSchemaInput;
   system?: string;
@@ -22,10 +23,6 @@ type SubAgentInput = {
   observationMaxConfidentiality?: readonly ImmutableJSONValue[];
   schemaSanitizePromptInjection?: boolean;
 };
-
-const structuredOutputOnlyTool = pattern<Record<string, never>, { ok: true }>(
-  () => ({ ok: true }),
-);
 
 const parseResultSchema = lift<
   { resultSchema: ResultSchemaInput },
@@ -44,9 +41,18 @@ const parseResultSchema = lift<
   return true;
 });
 
+const appendPromptMessage = lift<
+  { messages?: BuiltInLLMMessage[]; prompt: BuiltInLLMContent },
+  BuiltInLLMMessage[]
+>(({ messages, prompt }) => [
+  ...(messages ?? []),
+  { role: "user" as const, content: prompt },
+]);
+
 export const subAgentPattern = pattern<SubAgentInput, any>((
   {
     prompt,
+    messages,
     context,
     resultSchema,
     system,
@@ -58,20 +64,13 @@ export const subAgentPattern = pattern<SubAgentInput, any>((
   },
 ) => {
   const parsedResultSchema = parseResultSchema({ resultSchema });
-  const fallbackTools = {
-    structuredOutputOnly: {
-      description:
-        "Private implementation detail. Do not call this tool; call presentResult with the final structured result instead.",
-      ...patternTool(structuredOutputOnlyTool),
-    },
-  };
-  const effectiveTools = tools ? tools : fallbackTools;
+  const requestMessages = appendPromptMessage({ messages, prompt });
 
   const response = generateObject({
-    prompt,
+    messages: requestMessages,
     context,
     system,
-    tools: effectiveTools,
+    tools,
     model,
     maxTokens,
     observationMaxConfidentiality,

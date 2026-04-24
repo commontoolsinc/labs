@@ -3294,7 +3294,20 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     })
     .catch((error: unknown) => {
       console.error("Error generating data", error);
+      const errorMessageText = error instanceof Error
+        ? error.message
+        : String(error);
+      const errorMessage = {
+        [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
+        role: "assistant",
+        content:
+          `I encountered an error generating a response: ${errorMessageText}`,
+      } satisfies BuiltInLLMMessage & { [ID]: unknown };
+
       safelyPerformUpdate(runtime, pending, internal, requestId, (tx) => {
+        messagesCell.withTx(tx).push(
+          errorMessage as Schema<typeof LLMMessageSchema>,
+        );
         pending.withTx(tx).set(false);
       });
     });
