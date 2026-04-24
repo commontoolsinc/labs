@@ -1591,6 +1591,7 @@ export type BuiltInGenerateObjectParams =
     cache?: boolean;
     maxTokens?: number;
     observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
     queue?: string;
@@ -1605,6 +1606,7 @@ export type BuiltInGenerateObjectParams =
     cache?: boolean;
     maxTokens?: number;
     observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
     queue?: string;

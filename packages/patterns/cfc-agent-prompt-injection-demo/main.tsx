@@ -331,6 +331,7 @@ export default pattern<Record<string, never>>(() => {
           "unsafe-parent:subagent",
         ),
         observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
+        schemaSanitizePromptInjection: true,
       },
     ),
   } satisfies DemoTool;
@@ -349,6 +350,7 @@ export default pattern<Record<string, never>>(() => {
           "safe-parent:subagent",
         ),
         observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
+        schemaSanitizePromptInjection: true,
       },
     ),
   } satisfies DemoTool;

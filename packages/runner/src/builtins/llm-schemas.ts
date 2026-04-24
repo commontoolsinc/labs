@@ -175,6 +175,7 @@ export const GenerateObjectParamsSchema = internSchema(
         type: "array",
         items: {},
       },
+      schemaSanitizePromptInjection: { type: "boolean" },
       cache: { type: "boolean" },
       metadata: { type: "object" },
       tools: { type: "object", additionalProperties: LLMToolSchema },

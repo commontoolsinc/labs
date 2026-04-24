@@ -17,6 +17,10 @@ import {
 import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import {
+  schemaWithInjectionSafeAnnotations,
+  validateAgainstSchema,
+} from "../cfc/schema-sanitization.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { type Cell, isCell } from "../cell.ts";
@@ -884,6 +888,7 @@ export function generateObject<T extends Record<string, unknown>>(
       cache,
       tools,
       metadata,
+      schemaSanitizePromptInjection,
     } = inputs.withTx(tx).get() ?? {};
     const context = inputs.key("context").withTx(tx).get() as
       | Record<string, unknown>
@@ -943,6 +948,26 @@ export function generateObject<T extends Record<string, unknown>>(
 
     // Determine whether to use the tool-calling path or the direct generateObject path
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const resultSchemaForObserved = (
+      observedConfidentiality: readonly unknown[],
+    ) =>
+      schemaSanitizePromptInjection
+        ? schemaWithInjectionSafeAnnotations(
+          schema as any,
+          observedConfidentiality,
+        )
+        : undefined;
+    const validateResultForSchemaSanitization = (value: unknown): void => {
+      if (!schemaSanitizePromptInjection) {
+        return;
+      }
+      const failure = validateAgainstSchema(schema as any, value);
+      if (failure !== undefined) {
+        throw new Error(
+          `generateObject result failed schema sanitization validation: ${failure}`,
+        );
+      }
+    };
 
     if (hasTools) {
       // Use tool-calling path with presentResult builtin tool
@@ -990,7 +1015,13 @@ export function generateObject<T extends Record<string, unknown>>(
         tools: toolCatalog.llmTools,
       };
       const requestSnapshot = createFrozenRequestSnapshot(
-        JSON.parse(JSON.stringify({ ...llmParamsWithTools, schema })),
+        JSON.parse(
+          JSON.stringify({
+            ...llmParamsWithTools,
+            schema,
+            schemaSanitizePromptInjection,
+          }),
+        ),
       );
       const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
@@ -1085,6 +1116,8 @@ export function generateObject<T extends Record<string, unknown>>(
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
               let finalMessages: readonly BuiltInLLMMessage[] = requestMessages;
+              let finalObservedConfidentiality: readonly unknown[] =
+                liveContextDocs.observedConfidentiality;
 
               // Custom execution loop for generateObject with presentResult extraction
               const executeRecursive = async (
@@ -1161,6 +1194,9 @@ export function generateObject<T extends Record<string, unknown>>(
                         result.observedConfidentiality ?? []
                       ),
                     ]);
+                  if (presentResultPart) {
+                    finalObservedConfidentiality = nextObservedConfidentiality;
+                  }
 
                   // Continue if presentResult wasn't called yet
                   if (!presentResultPart) {
@@ -1185,10 +1221,14 @@ export function generateObject<T extends Record<string, unknown>>(
                 if (finalResult === undefined) {
                   throw new Error("presentResult was never called");
                 }
+                validateResultForSchemaSanitization(finalResult);
 
                 return {
                   object: finalResult,
                   messages: finalMessages,
+                  resultSchema: resultSchemaForObserved(
+                    finalObservedConfidentiality,
+                  ),
                 };
               };
 
@@ -1202,7 +1242,12 @@ export function generateObject<T extends Record<string, unknown>>(
 
               await runtime.editWithRetry((tx) => {
                 resultCell.key("pending").withTx(tx).set(false);
-                resultCell.key("result").withTx(tx).set(objectResponse.object);
+                const resultTarget = objectResponse.resultSchema === undefined
+                  ? resultCell.key("result")
+                  : resultCell.key("result").asSchema(
+                    objectResponse.resultSchema,
+                  );
+                resultTarget.withTx(tx).set(objectResponse.object);
                 resultCell.key("messages").withTx(tx).set(
                   JSON.parse(JSON.stringify(objectResponse.messages)) as any,
                 );
@@ -1256,7 +1301,10 @@ export function generateObject<T extends Record<string, unknown>>(
         ((system ?? "") + contextDocs.docs).trim() ||
         "You are a helpful assistant.";
 
-      const requestSnapshot = createFrozenRequestSnapshot(generateObjectParams);
+      const requestSnapshot = createFrozenRequestSnapshot({
+        ...generateObjectParams,
+        schemaSanitizePromptInjection,
+      });
       const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
@@ -1336,12 +1384,19 @@ export function generateObject<T extends Record<string, unknown>>(
                 docs: "",
                 observedConfidentiality: [],
               };
-            return await client.generateObject({
+            const response = await client.generateObject({
               ...generateObjectParams,
               system: ((system ?? "") + liveContextDocs.docs).trim() ||
                 "You are a helpful assistant.",
             }) as {
               object: T;
+            };
+            validateResultForSchemaSanitization(response.object);
+            return {
+              ...response,
+              resultSchema: resultSchemaForObserved(
+                liveContextDocs.observedConfidentiality,
+              ),
             };
           };
 
@@ -1361,7 +1416,10 @@ export function generateObject<T extends Record<string, unknown>>(
                   content: JSON.stringify(response.object, null, 2),
                 };
                 resultCell.key("pending").withTx(tx).set(false);
-                resultCell.key("result").withTx(tx).set(response.object);
+                const resultTarget = response.resultSchema === undefined
+                  ? resultCell.key("result")
+                  : resultCell.key("result").asSchema(response.resultSchema);
+                resultTarget.withTx(tx).set(response.object);
                 resultCell.key("messages").withTx(tx).set([
                   ...JSON.parse(JSON.stringify(requestMessages)),
                   JSON.parse(JSON.stringify(assistantMessage)),

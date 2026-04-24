@@ -22,6 +22,8 @@ import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -1766,6 +1768,118 @@ describe("generateObject with tools", () => {
     expect(capturedSystem).toContain('"public": "visible"');
     expect(capturedSystem).toContain('"@link"');
     expect(capturedSystem).not.toContain("classified");
+  });
+
+  it("writes InjectionSafe labels only for instruction-inert result paths", async () => {
+    clearMockResponses();
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const tx = runtime.edit();
+    const { commonfabric } = createTrustedBuilder(runtime);
+
+    const promptRisk = {
+      type: "https://commonfabric.org/cfc/atom/Caveat",
+      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      source: "of:hostile",
+    } as const;
+    const promptInfluence = {
+      type: "https://commonfabric.org/cfc/atom/Caveat",
+      kind: "https://commonfabric.org/cfc/concepts/prompt-influence",
+      source: "of:hostile",
+    } as const;
+    const resultSchema = {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["approve", "reject"] },
+        confidence: { type: "number" },
+        reason: { type: "string" },
+      },
+      required: ["action", "confidence", "reason"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    addMockObjectResponse(
+      (req) =>
+        req.messages.some((message) =>
+          typeof message.content === "string" &&
+          message.content.includes("schema-sanitize-generateObject")
+        ),
+      {
+        object: {
+          action: "reject",
+          confidence: 0.91,
+          reason: "The briefing was not approved.",
+        },
+        id: "mock-schema-sanitize-generateObject",
+      },
+    );
+
+    const testPattern = commonfabric.pattern<Record<string, never>>(() => {
+      const briefing = commonfabric.Cell.of("hostile briefing", {
+        type: "string",
+        ifc: { confidentiality: [promptRisk, promptInfluence] },
+      });
+      return commonfabric.generateObject({
+        prompt: "schema-sanitize-generateObject",
+        schema: resultSchema,
+        context: { briefing: briefing as any },
+        observationMaxConfidentiality: [promptRisk, promptInfluence],
+        schemaSanitizePromptInjection: true,
+      } as any);
+    });
+
+    try {
+      const resultCell = runtime.getCell(
+        space,
+        "generateObject-schema-sanitize-labels-test",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      await expect(waitForPendingToBecomeFalse(result)).resolves
+        .toBeUndefined();
+      await runtime.idle();
+
+      expect(result.key("result").get()).toEqual({
+        action: "reject",
+        confidence: 0.91,
+        reason: "The briefing was not approved.",
+      });
+      expect(cfcLabelViewForCell(result.key("result"))).toMatchObject({
+        entries: expect.arrayContaining([
+          {
+            path: ["action"],
+            label: {
+              confidentiality: [promptInfluence],
+              integrity: [INJECTION_SAFE_ATOM],
+            },
+          },
+          {
+            path: ["confidence"],
+            label: {
+              confidentiality: [promptInfluence],
+              integrity: [INJECTION_SAFE_ATOM],
+            },
+          },
+          {
+            path: ["reason"],
+            label: {
+              confidentiality: [promptRisk, promptInfluence],
+            },
+          },
+        ]),
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 });
 
