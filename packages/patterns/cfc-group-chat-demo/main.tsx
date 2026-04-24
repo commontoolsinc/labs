@@ -6,6 +6,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  SELF,
   Stream,
   UI,
   type VNode,
@@ -39,7 +40,7 @@ import {
   VerifiedChatBubble7,
 } from "./trusted.tsx";
 
-type LobbyPiece = { [NAME]?: string };
+type LobbyPiece = Writable<{ [NAME]?: string }>;
 
 const writeDraftText = handler<string, { value: Writable<string> }>(
   (nextValue, { value }) => {
@@ -54,6 +55,31 @@ const sharedWritableOf = <Value,>(
   value: Value,
   name: string,
 ): Writable<Value> => Writable.of<Value>(value).for(name);
+
+const enterGroupChatRoom = handler<
+  void,
+  {
+    slotId: SlotId;
+    roomRef: Writable<ParticipantRoomOutput | null>;
+    participants: SharedParticipantsCell;
+    messages: SharedMessagesCell;
+    lobbyPiece: LobbyPiece;
+  }
+>((_, { slotId, roomRef, participants, messages, lobbyPiece }) => {
+  const existingRoom = roomRef.get();
+  if (existingRoom) {
+    return navigateTo(existingRoom);
+  }
+
+  const createdRoom = ParticipantRoom({
+    slotId,
+    participants,
+    messages,
+    lobbyPiece,
+  });
+  roomRef.set(createdRoom);
+  return navigateTo(createdRoom);
+});
 
 const transcriptRowStyle = (
   messageList: readonly SharedChatMessage[],
@@ -335,9 +361,11 @@ export const ParticipantRoom = pattern<
 export interface GroupChatDemoOutput {
   [NAME]: string;
   [UI]: VNode;
+  participants: SharedParticipantsValue;
+  messages: SharedMessagesValue;
 }
 
-export default pattern<unknown, GroupChatDemoOutput>(() => {
+export default pattern<unknown, GroupChatDemoOutput>(({ [SELF]: self }) => {
   const participants = sharedWritableOf<SharedParticipantsValue>(
     [] as SharedParticipantsValue,
     "participants",
@@ -346,23 +374,39 @@ export default pattern<unknown, GroupChatDemoOutput>(() => {
     [] as SharedMessagesValue,
     "messages",
   ) as SharedMessagesCell;
-  const participantOneRoom = ParticipantRoom({
+  const participantOneRoom = sharedWritableOf<ParticipantRoomOutput | null>(
+    null,
+    "participant-one-room",
+  );
+  const participantTwoRoom = sharedWritableOf<ParticipantRoomOutput | null>(
+    null,
+    "participant-two-room",
+  );
+  const participantThreeRoom = sharedWritableOf<ParticipantRoomOutput | null>(
+    null,
+    "participant-three-room",
+  );
+
+  const openParticipantOne = enterGroupChatRoom({
     slotId: "participant-1",
     participants,
     messages,
-    lobbyPiece: null,
+    roomRef: participantOneRoom,
+    lobbyPiece: self,
   });
-  const participantTwoRoom = ParticipantRoom({
+  const openParticipantTwo = enterGroupChatRoom({
     slotId: "participant-2",
     participants,
     messages,
-    lobbyPiece: null,
+    roomRef: participantTwoRoom,
+    lobbyPiece: self,
   });
-  const participantThreeRoom = ParticipantRoom({
+  const openParticipantThree = enterGroupChatRoom({
     slotId: "participant-3",
     participants,
     messages,
-    lobbyPiece: null,
+    roomRef: participantThreeRoom,
+    lobbyPiece: self,
   });
 
   return {
@@ -402,6 +446,12 @@ export default pattern<unknown, GroupChatDemoOutput>(() => {
                   participants,
                   slotId: "participant-1",
                 })}
+                <cf-button
+                  id="open-room-participant-1"
+                  onClick={openParticipantOne}
+                >
+                  Open room
+                </cf-button>
               </cf-vstack>
             </cf-card>
             <cf-card id="lobby-slot-participant-2">
@@ -411,6 +461,12 @@ export default pattern<unknown, GroupChatDemoOutput>(() => {
                   participants,
                   slotId: "participant-2",
                 })}
+                <cf-button
+                  id="open-room-participant-2"
+                  onClick={openParticipantTwo}
+                >
+                  Open room
+                </cf-button>
               </cf-vstack>
             </cf-card>
             <cf-card id="lobby-slot-participant-3">
@@ -420,16 +476,19 @@ export default pattern<unknown, GroupChatDemoOutput>(() => {
                   participants,
                   slotId: "participant-3",
                 })}
+                <cf-button
+                  id="open-room-participant-3"
+                  onClick={openParticipantThree}
+                >
+                  Open room
+                </cf-button>
               </cf-vstack>
             </cf-card>
-          </cf-grid>
-          <cf-grid columns="3" gap="4">
-            {participantOneRoom}
-            {participantTwoRoom}
-            {participantThreeRoom}
           </cf-grid>
         </cf-vstack>
       </cf-screen>
     ),
+    participants,
+    messages,
   };
 });
