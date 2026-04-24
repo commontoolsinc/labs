@@ -47,7 +47,9 @@ const isPrefix = (
   path: readonly string[],
 ): boolean =>
   prefix.length <= path.length &&
-  prefix.every((segment, index) => segment === path[index]);
+  prefix.every((segment, index) =>
+    segment === path[index] || segment === "*" || path[index] === "*"
+  );
 
 const labelAtPath = (
   metadata: CfcMetadata | undefined,

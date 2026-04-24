@@ -84,9 +84,6 @@ current implementation shape:
   persistence and code identity; phase 1 persists canonical schemas as regular
   v2 entities addressed by `cid:<hash>` so the boundary model does not depend
   on new blob APIs landing first
-- `docs/specs/cfc/RUNNER_CELL_LINK_LABEL_GUIDANCE.md` records the runner-
-  specific cell/link label guidance for link-following reads, raw link-field
-  reads, dereference traces, and persisted link-write provenance
 
 This plan adds the boundary substrate that those specs require:
 
@@ -970,11 +967,9 @@ Acceptance:
 
 ### 13. Cell Link Label Following and Stored-Link Provenance
 
-This slice implements the runner-specific guidance in
-`~/src/specs/cfc/RUNNER_CELL_LINK_LABEL_GUIDANCE.md`. The goal is to keep the
-existing conservative consumed-read taint behavior while making link-following
-structure explicit enough for first-class cell-view labels, stored link-field
-labels, diagnostics, and persisted link metadata.
+This slice keeps the existing conservative consumed-read taint behavior while
+making link-following structure explicit enough for first-class cell-view
+labels, stored link-field labels, diagnostics, and persisted link metadata.
 
 Primary files:
 
@@ -991,63 +986,63 @@ Primary files:
 
 Tasks:
 
-- [ ] Add a transaction-local dereference trace representation that records
+- [x] Add a transaction-local dereference trace representation that records
       each followed hop's source link slot, resolved target, link kind, and
       whether the final slot was followed as a value or only as a
       write-redirect
-- [ ] Emit dereference trace entries from `resolveLink(...)` or a focused
+- [x] Emit dereference trace entries from `resolveLink(...)` or a focused
       wrapper used by `Cell.get()`, `Cell.pull()`, query-result proxies, schema
       traversal, and render-time label-view reads
-- [ ] Keep ordinary read logging intact so conservative all-consumed-reads
+- [x] Keep ordinary read logging intact so conservative all-consumed-reads
       write taint remains sound before any future `followRef` activity kind
-- [ ] Extend `cfcLabelViewForCell(...)` and related helpers so cell-view labels
+- [x] Extend `cfcLabelViewForCell(...)` and related helpers so cell-view labels
       are computed from stored metadata on consumed link slots, stored metadata
       on consumed targets, and the dereference trace rather than from final
       target reads alone
-- [ ] Add a write-policy input kind for persisted link writes that captures the
+- [x] Add a write-policy input kind for persisted link writes that captures the
       target path, normalized target reference, source cell/source metadata when
       available, link-local endorsement integrity, and optional link schema
-- [ ] Emit persisted link-write policy input from `normalizeAndDiff(...)` only
+- [x] Emit persisted link-write policy input from `normalizeAndDiff(...)` only
       on the branch that returns a stored link write; do not emit it from
       `convertCellsToLinks(...)`, and do not emit it when the diff collapses a
       link to an inline snapshot
-- [ ] Teach `prepare.ts` to derive stored link-field labels from source-cell
+- [x] Teach `prepare.ts` to derive stored link-field labels from source-cell
       metadata, the link relationship, link-local endorsement integrity, and
       any explicit schema carried by the stored link
-- [ ] Fail closed in enforcing modes when a CFC-relevant stored link write is
+- [x] Fail closed in enforcing modes when a CFC-relevant stored link write is
       missing required source metadata, link-write provenance, or readable
       target/source metadata; observe mode should emit diagnostics without
       silently treating the link as public
-- [ ] Preserve the write semantics distinction: final-slot ordinary links are
+- [x] Preserve the write semantics distinction: final-slot ordinary links are
       persisted as values, while only write-redirect links are followed for
       writes
-- [ ] Include dereference-trace and link-write inputs in canonical prepare
+- [x] Include dereference-trace and link-write inputs in canonical prepare
       hashing so post-prepare link changes invalidate prepare deterministically
-- [ ] Add diagnostics that can explain which link hops and target reads
+- [x] Add diagnostics that can explain which link hops and target reads
       contributed to a dereferenced cell-view label
 
 Acceptance:
 
-- [ ] `Cell.get()`, `Cell.pull()`, query-result proxies, traversal, and
+- [x] `Cell.get()`, `Cell.pull()`, query-result proxies, traversal, and
       `cfcLabelViewForCell(...)` expose a cell-view label that includes both
       link-slot and dereferenced target labels
-- [ ] `getRawUntyped()` at a final stored link slot exposes the stored
+- [x] `getRawUntyped()` at a final stored link slot exposes the stored
       link-field label and does not read or label the target content as an
       inline copy
-- [ ] Two links to the same target preserve the same target-content taint while
+- [x] Two links to the same target preserve the same target-content taint while
       differing in link-local integrity/provenance when their endorsements
       differ
-- [ ] Cross-space linked reads produce a cell-view label that reflects both the
+- [x] Cross-space linked reads produce a cell-view label that reflects both the
       source-side link relationship and target-side content read
-- [ ] Prepared writes that persist sigil links also persist CFC metadata for
+- [x] Prepared writes that persist sigil links also persist CFC metadata for
       the stored link path, even when the sigil link omits schema
-- [ ] Same-document parent/self links collapsed to snapshots by
+- [x] Same-document parent/self links collapsed to snapshots by
       `normalizeAndDiff(...)` do not persist link-style provenance metadata
-- [ ] `cfcLabelViewForCell(...)` continues to reflect labels behind linked
+- [x] `cfcLabelViewForCell(...)` continues to reflect labels behind linked
       cells and uses the dereference trace when available
-- [ ] Enforcing modes fail closed for missing link-source metadata or missing
+- [x] Enforcing modes fail closed for missing link-source metadata or missing
       link-write provenance; observe mode records actionable diagnostics
-- [ ] Tests prove ordinary final-slot links are not write-through aliases while
+- [x] Tests prove ordinary final-slot links are not write-through aliases while
       write-redirect links still are
 
 ## Test Strategy

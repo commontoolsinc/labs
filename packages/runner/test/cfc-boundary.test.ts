@@ -1939,6 +1939,106 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("validates link writes against wildcard array item stored schema claims", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const sourceSeed = runtime.edit();
+      sourceSeed.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-link-write-array-source",
+        {
+          type: "object",
+          ifc: {
+            confidentiality: ["array-source"],
+            integrity: ["array-source-integrity"],
+          },
+          properties: {
+            title: { type: "string" },
+          },
+        },
+        sourceSeed,
+      );
+      source.set({ title: "array guarded" });
+      sourceSeed.prepareCfc();
+      expect((await sourceSeed.commit()).ok).toBeDefined();
+
+      const targetSeed = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-link-write-array-target",
+        undefined,
+        targetSeed,
+      );
+      const targetLink = target.getAsNormalizedFullLink();
+      const guardedSchema = internSchema(
+        {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+      targetSeed.writeOrThrow({
+        space: signer.did(),
+        id: targetLink.id,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { items: [null] },
+        cfc: {
+          version: 1,
+          schemaHash: guardedSchema.hashString,
+          labelMap: {
+            version: 1,
+            entries: [{ path: ["items", "*"], label: {} }],
+          },
+        },
+      });
+      targetSeed.writeOrThrow({
+        space: signer.did(),
+        id: `cid:${guardedSchema.hashString}`,
+        type: "application/json",
+        path: [],
+      }, {
+        value: guardedSchema.schema,
+      });
+      expect((await targetSeed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const linkedSource = runtime.getCell(
+        signer.did(),
+        "cfc-link-write-array-source",
+        undefined,
+        tx,
+      );
+      const guardedTarget = runtime.getCell(
+        signer.did(),
+        "cfc-link-write-array-target",
+        undefined,
+        tx,
+      );
+      guardedTarget.key("items").key("0").set(linkedSource as never);
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity at /items/*",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("preserves prior stored link-field labels across unrelated metadata rewrites", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
