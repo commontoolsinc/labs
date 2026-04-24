@@ -380,11 +380,15 @@ async function main() {
     }
   };
   const KIND_ORDER = ["Jobs", "Steps", "Test files", "Subtests", "Benchmarks"];
+  // Sort order within each kind: most at-risk of failing the check first.
+  // `ovrd` sits below `OK` because an override-protected metric is at strictly
+  // lower risk of tripping the check than an unguarded OK metric — the author
+  // has already authorized its current level.
   const STATUS_ORDER: Record<Status, number> = {
     OVER: 5,
     CLOSE: 4,
-    ovrd: 3,
-    OK: 2,
+    OK: 3,
+    ovrd: 2,
     excl: 1,
     "n/a": 0,
   };
