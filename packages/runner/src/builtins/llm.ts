@@ -134,6 +134,8 @@ async function executeWithToolsLoop(params: {
   toolCatalog?:
     | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
     | undefined;
+  initialObservedConfidentiality?: readonly unknown[];
+  observationMaxConfidentiality?: readonly unknown[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
   space: any;
@@ -144,6 +146,8 @@ async function executeWithToolsLoop(params: {
   const {
     llmParams,
     toolCatalog,
+    initialObservedConfidentiality = [],
+    observationMaxConfidentiality,
     updatePartial,
     runtime,
     space,
@@ -154,6 +158,7 @@ async function executeWithToolsLoop(params: {
 
   const executeRecursive = async (
     currentMessages: readonly BuiltInLLMMessage[],
+    observedConfidentiality: readonly unknown[],
   ): Promise<void> => {
     if (thisRun !== getCurrentRun()) return;
 
@@ -185,6 +190,9 @@ async function executeWithToolsLoop(params: {
         space,
         toolCatalog,
         toolCallParts,
+        undefined,
+        observedConfidentiality,
+        observationMaxConfidentiality,
       );
 
       const toolResultMessages = llmToolExecutionHelpers
@@ -196,14 +204,24 @@ async function executeWithToolsLoop(params: {
         ...toolResultMessages,
       ];
 
-      await executeRecursive(updatedMessages);
+      const nextObservedConfidentiality = ContextualFlowControl.uniqueAtoms([
+        ...observedConfidentiality,
+        ...toolResults.flatMap((result) =>
+          result.observedConfidentiality ?? []
+        ),
+      ]);
+
+      await executeRecursive(updatedMessages, nextObservedConfidentiality);
     } else {
       // No more tool calls, finish
       await onComplete(llmResult);
     }
   };
 
-  await executeRecursive(params.initialMessages);
+  await executeRecursive(
+    params.initialMessages,
+    initialObservedConfidentiality,
+  );
 }
 
 /**
@@ -505,6 +523,13 @@ export function llm(
                     [],
                 llmParams: requestSnapshot,
                 toolCatalog,
+                initialObservedConfidentiality:
+                  contextDocs.observedConfidentiality,
+                observationMaxConfidentiality: inputs.key(
+                  "observationMaxConfidentiality",
+                ).get() as
+                  | readonly unknown[]
+                  | undefined,
                 updatePartial,
                 runtime,
                 space: parentCell.space,
@@ -735,6 +760,13 @@ export function generateText(
                 initialMessages: requestMessages,
                 llmParams: requestSnapshot,
                 toolCatalog,
+                initialObservedConfidentiality:
+                  contextDocs.observedConfidentiality,
+                observationMaxConfidentiality: inputs.key(
+                  "observationMaxConfidentiality",
+                ).get() as
+                  | readonly unknown[]
+                  | undefined,
                 updatePartial,
                 runtime,
                 space: parentCell.space,
