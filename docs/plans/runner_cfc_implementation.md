@@ -84,7 +84,7 @@ current implementation shape:
   persistence and code identity; phase 1 persists canonical schemas as regular
   v2 entities addressed by `cid:<hash>` so the boundary model does not depend
   on new blob APIs landing first
-- `~/src/specs/cfc/RUNNER_CELL_LINK_LABEL_GUIDANCE.md` records the runner-
+- `docs/specs/cfc/RUNNER_CELL_LINK_LABEL_GUIDANCE.md` records the runner-
   specific cell/link label guidance for link-following reads, raw link-field
   reads, dereference traces, and persisted link-write provenance
 
