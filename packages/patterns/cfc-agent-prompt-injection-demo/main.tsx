@@ -273,22 +273,6 @@ const buildSendMailTool = (
     handler,
   }) satisfies DemoTool;
 
-const buildNestedSubAgentTools = (
-  body: any,
-  emails: Writable<SentEmail[]>,
-  route: string,
-) =>
-  ({
-    readRawBriefing: buildReadRawBriefingTool(
-      readRawBriefing({
-        title: HOSTILE_BRIEFING_TITLE,
-        source: HOSTILE_BRIEFING_SOURCE,
-        body,
-      }),
-    ),
-    sendMail: buildSendMailTool(logEmail({ emails, route })),
-  }) satisfies Record<string, DemoTool>;
-
 export default pattern<Record<string, never>>(() => {
   const hostileBody = makePromptInfluenceDocument({
     id: HOSTILE_BRIEFING_DOCUMENT_ID,
@@ -319,7 +303,7 @@ export default pattern<Record<string, never>>(() => {
 
   const unsafeSubAgentTool = {
     description:
-      "Run a higher-clearance worker with the same task tools except recursive subAgent. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
+      "Run a higher-clearance worker with the raw briefing in context. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
     ...patternTool(
       subAgentPattern,
       {
@@ -328,11 +312,6 @@ export default pattern<Record<string, never>>(() => {
         context: {
           briefing: hostileBody,
         },
-        tools: buildNestedSubAgentTools(
-          hostileBody,
-          emails,
-          "unsafe-parent:subagent",
-        ),
         observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
         schemaSanitizePromptInjection: true,
       },
@@ -341,7 +320,7 @@ export default pattern<Record<string, never>>(() => {
 
   const safeSubAgentTool = {
     description:
-      "Run a higher-clearance worker with the same task tools except recursive subAgent. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
+      "Run a higher-clearance worker with the raw briefing in context. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
     ...patternTool(
       subAgentPattern,
       {
@@ -350,11 +329,6 @@ export default pattern<Record<string, never>>(() => {
         context: {
           briefing: hostileBody,
         },
-        tools: buildNestedSubAgentTools(
-          hostileBody,
-          emails,
-          "safe-parent:subagent",
-        ),
         observationMaxConfidentiality: [PROMPT_INFLUENCE_ATOM],
         schemaSanitizePromptInjection: true,
       },
