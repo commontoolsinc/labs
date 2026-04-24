@@ -1027,7 +1027,9 @@ export const prepareBoundaryCommit = (
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
   for (const key of targetKeys) {
-    const schema = candidates.get(key) ?? emptySchemaObject();
+    const candidateSchema = candidates.get(key);
+    const schema = candidateSchema ?? emptySchemaObject();
+    const undefinedCandidate = candidateSchema === undefined;
     const [space, id, type] = key.split("\u0000") as [
       MemorySpace,
       URI,
@@ -1038,7 +1040,7 @@ export const prepareBoundaryCommit = (
     const existing = storedMetadataFor(tx, space, id, type);
     let storedSchema: JSONSchema | undefined;
     let mergedSchema = schema;
-    if (existing !== undefined && schema === undefined) {
+    if (existing !== undefined && undefinedCandidate) {
       try {
         storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
         mergedSchema = storedSchema;
@@ -1067,7 +1069,7 @@ export const prepareBoundaryCommit = (
     const linkWriteInputs = linkWrites.get(key) ?? [];
     const verificationSchema = storedSchema !== undefined &&
         linkWriteInputs.length > 0
-      ? schema === undefined
+      ? undefinedCandidate
         ? storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
         : mergeCfcSchemaEnvelopes(
           schema,
