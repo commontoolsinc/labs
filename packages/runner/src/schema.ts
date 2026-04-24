@@ -105,15 +105,37 @@ const labelViewForLink = (
   return rebaseCfcLabelView(baseView, link.path);
 };
 
+const containsLocalRef = (
+  schema: JSONSchema,
+  seen: Set<JSONSchema> = new Set(),
+): boolean => {
+  if (!isRecord(schema) || seen.has(schema)) {
+    return false;
+  }
+  seen.add(schema);
+  if (typeof schema.$ref === "string" && schema.$ref.startsWith("#/")) {
+    return true;
+  }
+  return Object.entries(schema).some(([key, value]) => {
+    if (key === "$defs" || key === "definitions") {
+      return false;
+    }
+    if (Array.isArray(value)) {
+      return value.some((item) => containsLocalRef(item as JSONSchema, seen));
+    }
+    return containsLocalRef(value as JSONSchema, seen);
+  });
+};
+
 const branchWithParentDefs = (
   parent: JSONSchemaObj,
   branch: JSONSchema,
 ): JSONSchema => {
   if (
     !isRecord(branch) ||
-    typeof branch.$ref !== "string" ||
     branch.$defs !== undefined ||
-    !isRecord(parent.$defs)
+    !isRecord(parent.$defs) ||
+    !containsLocalRef(branch)
   ) {
     return branch;
   }
