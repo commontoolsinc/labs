@@ -66,11 +66,7 @@ const EXCLUDED_METRIC_PATTERNS = [
 async function main() {
   const runId = Deno.env.get("GITHUB_RUN_ID");
   const rawPrNumber = Deno.env.get("PR_NUMBER");
-
-  // For testing.
-  const prNumber = (rawPrNumber === "never123") ? rawPrNumber : null;
-  //const prNumber = (rawPrNumber === "") ? null : rawPrNumber;
-
+  const prNumber = (rawPrNumber === "") ? null : rawPrNumber;
   const informationalOnly = prNumber === null;
 
   if (!TOKEN) {
