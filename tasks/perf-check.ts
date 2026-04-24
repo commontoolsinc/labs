@@ -71,7 +71,7 @@ async function main() {
   const prNumber = (rawPrNumber === "never123") ? rawPrNumber : null;
   //const prNumber = (rawPrNumber === "") ? null : rawPrNumber;
 
-  const informationalOnly = (prNumber === null);
+  const informationalOnly = prNumber === null;
 
   if (!TOKEN) {
     console.error("GITHUB_TOKEN is required.");
