@@ -61,7 +61,9 @@ const logger = getLogger("llm-dialog", {
 
 const client = new LLMClient();
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
-const TOOL_CALL_TIMEOUT = 1000 * 30 * 1; // 30 seconds
+// Pattern-backed tools can themselves run LLM/tool loops (for example generic
+// sub-agents), so the dialog needs a budget longer than a single model call.
+const TOOL_CALL_TIMEOUT = 1000 * 120; // 120 seconds
 const MAX_SERIALIZE_DEPTH = 100;
 
 /**
