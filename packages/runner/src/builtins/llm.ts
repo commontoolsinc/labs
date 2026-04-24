@@ -56,6 +56,32 @@ const client = new LLMClient();
 /** Batch interval for partial streaming updates (~15fps). */
 const PARTIAL_BATCH_MS = 66;
 
+function logGenerateObject(stage: string, details: Record<string, unknown>) {
+  console.warn("[generateObject]", stage, details);
+}
+
+function summarizeGenerateObjectRequest(details: {
+  hash: string;
+  path: "direct" | "tools";
+  model?: string;
+  hasTools: boolean;
+  toolNames?: string[];
+  messageCount: number;
+  contextKeys?: string[];
+  queueName?: string;
+}) {
+  return {
+    hash: details.hash.slice(0, 12),
+    path: details.path,
+    model: details.model,
+    hasTools: details.hasTools,
+    toolNames: details.toolNames ?? [],
+    messageCount: details.messageCount,
+    contextKeys: details.contextKeys ?? [],
+    queueName: details.queueName,
+  };
+}
+
 /**
  * Creates an updatePartial callback that safely updates the partial cell
  * during streaming. Uses batched updates to reduce transaction overhead
@@ -1030,6 +1056,16 @@ export function generateObject<T extends Record<string, unknown>>(
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
+      const toolsRequestSummary = summarizeGenerateObjectRequest({
+        hash,
+        path: "tools",
+        model: llmParamsWithTools.model,
+        hasTools: true,
+        toolNames: Object.keys(toolCatalog.llmTools),
+        messageCount: requestMessages.length,
+        contextKeys: context ? Object.keys(context) : [],
+        queueName,
+      });
 
       // Return if the same request is being made again
       // Also return if there's an error for this request (don't retry automatically)
@@ -1037,10 +1073,12 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        logGenerateObject("skip-cached", toolsRequestSummary);
         return;
       }
 
       if (hash === previousCallHash) {
+        logGenerateObject("skip-inflight", toolsRequestSummary);
         return;
       }
 
@@ -1078,6 +1116,8 @@ export function generateObject<T extends Record<string, unknown>>(
         ? () => false
         : () => thisRun !== currentRun;
 
+      logGenerateObject("enqueue", toolsRequestSummary);
+
       enqueuePostCommitLLMWork(
         tx,
         "generateObject",
@@ -1085,6 +1125,7 @@ export function generateObject<T extends Record<string, unknown>>(
         "generateObject-start",
         requestSnapshot,
         () => {
+          logGenerateObject("post-commit-start", toolsRequestSummary);
           const resultPromise = (async () => {
             try {
               await inputs.pull();
@@ -1213,6 +1254,7 @@ export function generateObject<T extends Record<string, unknown>>(
               };
 
               const doWork = async () => {
+                logGenerateObject("tools-loop-start", toolsRequestSummary);
                 await executeRecursive(
                   requestMessages,
                   liveContextDocs.observedConfidentiality,
@@ -1236,7 +1278,18 @@ export function generateObject<T extends Record<string, unknown>>(
                 ? await runtime.getOrCreateQueue(queueName).enqueue(doWork)
                 : await doWork();
 
-              if (isRunCancelled()) return;
+              logGenerateObject("tools-loop-complete", {
+                ...toolsRequestSummary,
+                objectKeys: Object.keys(objectResponse.object ?? {}),
+              });
+
+              if (isRunCancelled()) {
+                logGenerateObject(
+                  "write-skipped-cancelled",
+                  toolsRequestSummary,
+                );
+                return;
+              }
 
               await runtime.idle();
 
@@ -1254,13 +1307,18 @@ export function generateObject<T extends Record<string, unknown>>(
                 resultCell.key("error").withTx(tx).set(undefined);
                 resultCell.key("requestHash").withTx(tx).set(hash);
               });
+              logGenerateObject("write-complete", toolsRequestSummary);
             } finally {
               cleanupPartial();
             }
           })();
 
-          resultPromise.catch((e) =>
-            handleLLMError(
+          resultPromise.catch((e) => {
+            logGenerateObject("error", {
+              ...toolsRequestSummary,
+              error: e instanceof Error ? e.message : String(e),
+            });
+            return handleLLMError(
               e,
               runtime,
               resultCell.key("pending"),
@@ -1274,8 +1332,8 @@ export function generateObject<T extends Record<string, unknown>>(
               () => {
                 previousCallHash = undefined;
               },
-            )
-          );
+            );
+          });
         },
       );
     } else {
@@ -1312,6 +1370,15 @@ export function generateObject<T extends Record<string, unknown>>(
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
+      const directRequestSummary = summarizeGenerateObjectRequest({
+        hash,
+        path: "direct",
+        model: generateObjectParams.model,
+        hasTools: false,
+        messageCount: requestMessages.length,
+        contextKeys: context ? Object.keys(context) : [],
+        queueName,
+      });
 
       // Return if the same request is being made again
       // Also return if there's an error for this request (don't retry automatically)
@@ -1319,11 +1386,13 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        logGenerateObject("skip-cached", directRequestSummary);
         return;
       }
 
       // Also skip if this is the same request in the current transaction
       if (hash === previousCallHash) {
+        logGenerateObject("skip-inflight", directRequestSummary);
         return;
       }
 
@@ -1354,6 +1423,8 @@ export function generateObject<T extends Record<string, unknown>>(
         ? () => false
         : () => thisRun !== currentRun;
 
+      logGenerateObject("enqueue", directRequestSummary);
+
       enqueuePostCommitLLMWork(
         tx,
         "generateObject",
@@ -1361,7 +1432,9 @@ export function generateObject<T extends Record<string, unknown>>(
         "generateObject-start",
         requestSnapshot,
         () => {
+          logGenerateObject("post-commit-start", directRequestSummary);
           const doWork = async () => {
+            logGenerateObject("direct-work-start", directRequestSummary);
             await inputs.pull();
             const liveContext = inputs.key("context").get() as
               | Record<string, unknown>
@@ -1384,6 +1457,11 @@ export function generateObject<T extends Record<string, unknown>>(
                 docs: "",
                 observedConfidentiality: [],
               };
+            logGenerateObject("client-generateObject-start", {
+              ...directRequestSummary,
+              observedConfidentialityCount:
+                liveContextDocs.observedConfidentiality.length,
+            });
             const response = await client.generateObject({
               ...generateObjectParams,
               system: ((system ?? "") + liveContextDocs.docs).trim() ||
@@ -1391,6 +1469,10 @@ export function generateObject<T extends Record<string, unknown>>(
             }) as {
               object: T;
             };
+            logGenerateObject("client-generateObject-complete", {
+              ...directRequestSummary,
+              objectKeys: Object.keys(response.object ?? {}),
+            });
             validateResultForSchemaSanitization(response.object);
             return {
               ...response,
@@ -1406,7 +1488,13 @@ export function generateObject<T extends Record<string, unknown>>(
 
           resultPromise
             .then(async (response) => {
-              if (isRunCancelled()) return;
+              if (isRunCancelled()) {
+                logGenerateObject(
+                  "write-skipped-cancelled",
+                  directRequestSummary,
+                );
+                return;
+              }
 
               await runtime.idle();
 
@@ -1427,9 +1515,14 @@ export function generateObject<T extends Record<string, unknown>>(
                 resultCell.key("error").withTx(tx).set(undefined);
                 resultCell.key("requestHash").withTx(tx).set(hash);
               });
+              logGenerateObject("write-complete", directRequestSummary);
             })
-            .catch((e) =>
-              handleLLMError(
+            .catch((e) => {
+              logGenerateObject("error", {
+                ...directRequestSummary,
+                error: e instanceof Error ? e.message : String(e),
+              });
+              return handleLLMError(
                 e,
                 runtime,
                 resultCell.key("pending"),
@@ -1443,8 +1536,8 @@ export function generateObject<T extends Record<string, unknown>>(
                 () => {
                   previousCallHash = undefined;
                 },
-              )
-            );
+              );
+            });
         },
       );
     }
