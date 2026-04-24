@@ -53,6 +53,9 @@ At the end of this work:
 - commit-time enforcement will apply uniformly at the transaction boundary,
   regardless of whether the transaction came from the scheduler,
   `runtime.editWithRetry()`, or another runtime-owned caller
+- cell reads that follow stored links will expose a dereferenced cell-view label
+  that reflects both the stored link relationship and the target content, while
+  raw reads of stored link fields keep distinct link-field label semantics
 - external side effects will be gated on successful commit
 - trust-sensitive relaxations will be explicit, deterministic, and fail closed
 
@@ -81,6 +84,9 @@ current implementation shape:
   persistence and code identity; phase 1 persists canonical schemas as regular
   v2 entities addressed by `cid:<hash>` so the boundary model does not depend
   on new blob APIs landing first
+- `~/src/specs/cfc/RUNNER_CELL_LINK_LABEL_GUIDANCE.md` records the runner-
+  specific cell/link label guidance for link-following reads, raw link-field
+  reads, dereference traces, and persisted link-write provenance
 
 This plan adds the boundary substrate that those specs require:
 
@@ -162,9 +168,48 @@ Examples:
 - provenance claims needed for `projection`, `exactCopyOf`, or collection rules
 - trusted-event provenance
 - immutable sink request snapshots
+- persisted link-write provenance for paths where the diff layer has decided
+  the stored value will remain a sigil link
 
 These inputs must be recorded explicitly in tx CFC state at mutation time,
 canonicalized deterministically, and hashed into prepare.
+
+### Dereference Trace
+
+A dereference trace records the link hops followed while resolving a cell view.
+It is separate from the ordinary consumed-read list. Ordinary read logging is
+still sufficient for conservative downstream write taint, but the trace is
+needed to explain which stored link slots and target reads contributed to a
+dereferenced label, to preserve link-path provenance, and to distinguish raw
+stored-link reads from dereferenced cell-view reads.
+
+The first representation should be lightweight and transaction-local: metadata
+on target reads, a CFC state side trace, or a nearby wrapper around
+`resolveLink(...)` are all acceptable. Introducing a future explicit
+`followRef` activity kind is a cleanup, not a prerequisite.
+
+### Cell-View Label
+
+A cell-view label is the label exposed by APIs that materialize dereferenced
+cell content: `Cell.get()`, `Cell.pull()`, query-result proxies, schema
+traversal, and render-time label helpers such as `cfcLabelViewForCell(...)`.
+
+It includes the labels of reads actually consumed to materialize the value. If a
+link hop is followed, the resulting view includes both the stored link-slot
+observation and the target value observation reached through the hop. For
+cross-space links this remains conjunctive in practice: the reader must satisfy
+the source-side link relationship and the target-side content.
+
+### Stored Link-Field Label
+
+A stored link-field label describes the path where a sigil link is stored as
+data, including raw final-slot reads such as `getRawUntyped()`.
+
+It labels the fact that "this path references that target" rather than treating
+the target bytes as if they were stored inline. It must preserve the source-cell
+confidentiality/integrity relationship, add link-local endorsement integrity
+for storing or selecting the reference, and avoid collapsing raw-link reads into
+the same semantics as dereferenced reads.
 
 ### Prepare
 
@@ -403,6 +448,14 @@ These must hold once enforcement is enabled:
 - retries always run in a fresh transaction and recompute prepare
 - persisted CFC metadata is system-controlled, not user-editable JSON content
 - no `application/label+json` compatibility path participates in enforcement
+- dereferenced cell-view labels keep link-slot observations coupled to the
+  target reads reached through those links
+- raw final-slot link reads and dereferenced reads intentionally produce
+  different CFC label surfaces
+- ordinary final-slot links are values, not write-through aliases; only
+  write-redirect links are followed for writes
+- persisted link-write provenance is emitted only after the diffing layer has
+  decided that the stored value at the target path will actually be a link
 - unlabeled paths remain permissive in phase 1; changing that default is a
   separate rollout step, not an implicit side effect of the first enforcement
   launch
@@ -915,6 +968,88 @@ Acceptance:
 - [x] Keep public causal reads limited to explicit embedded hashes and regular
       entity reads in phase 1
 
+### 13. Cell Link Label Following and Stored-Link Provenance
+
+This slice implements the runner-specific guidance in
+`~/src/specs/cfc/RUNNER_CELL_LINK_LABEL_GUIDANCE.md`. The goal is to keep the
+existing conservative consumed-read taint behavior while making link-following
+structure explicit enough for first-class cell-view labels, stored link-field
+labels, diagnostics, and persisted link metadata.
+
+Primary files:
+
+- `packages/runner/src/link-resolution.ts`
+- `packages/runner/src/cell.ts`
+- `packages/runner/src/query-result-proxy.ts`
+- `packages/runner/src/schema.ts`
+- `packages/runner/src/data-updating.ts`
+- `packages/runner/src/cfc/types.ts`
+- `packages/runner/src/cfc/canonical.ts`
+- `packages/runner/src/cfc/label-view.ts`
+- `packages/runner/src/cfc/prepare.ts`
+- `packages/runner/src/storage/extended-storage-transaction.ts`
+
+Tasks:
+
+- [ ] Add a transaction-local dereference trace representation that records
+      each followed hop's source link slot, resolved target, link kind, and
+      whether the final slot was followed as a value or only as a
+      write-redirect
+- [ ] Emit dereference trace entries from `resolveLink(...)` or a focused
+      wrapper used by `Cell.get()`, `Cell.pull()`, query-result proxies, schema
+      traversal, and render-time label-view reads
+- [ ] Keep ordinary read logging intact so conservative all-consumed-reads
+      write taint remains sound before any future `followRef` activity kind
+- [ ] Extend `cfcLabelViewForCell(...)` and related helpers so cell-view labels
+      are computed from stored metadata on consumed link slots, stored metadata
+      on consumed targets, and the dereference trace rather than from final
+      target reads alone
+- [ ] Add a write-policy input kind for persisted link writes that captures the
+      target path, normalized target reference, source cell/source metadata when
+      available, link-local endorsement integrity, and optional link schema
+- [ ] Emit persisted link-write policy input from `normalizeAndDiff(...)` only
+      on the branch that returns a stored link write; do not emit it from
+      `convertCellsToLinks(...)`, and do not emit it when the diff collapses a
+      link to an inline snapshot
+- [ ] Teach `prepare.ts` to derive stored link-field labels from source-cell
+      metadata, the link relationship, link-local endorsement integrity, and
+      any explicit schema carried by the stored link
+- [ ] Fail closed in enforcing modes when a CFC-relevant stored link write is
+      missing required source metadata, link-write provenance, or readable
+      target/source metadata; observe mode should emit diagnostics without
+      silently treating the link as public
+- [ ] Preserve the write semantics distinction: final-slot ordinary links are
+      persisted as values, while only write-redirect links are followed for
+      writes
+- [ ] Include dereference-trace and link-write inputs in canonical prepare
+      hashing so post-prepare link changes invalidate prepare deterministically
+- [ ] Add diagnostics that can explain which link hops and target reads
+      contributed to a dereferenced cell-view label
+
+Acceptance:
+
+- [ ] `Cell.get()`, `Cell.pull()`, query-result proxies, traversal, and
+      `cfcLabelViewForCell(...)` expose a cell-view label that includes both
+      link-slot and dereferenced target labels
+- [ ] `getRawUntyped()` at a final stored link slot exposes the stored
+      link-field label and does not read or label the target content as an
+      inline copy
+- [ ] Two links to the same target preserve the same target-content taint while
+      differing in link-local integrity/provenance when their endorsements
+      differ
+- [ ] Cross-space linked reads produce a cell-view label that reflects both the
+      source-side link relationship and target-side content read
+- [ ] Prepared writes that persist sigil links also persist CFC metadata for
+      the stored link path, even when the sigil link omits schema
+- [ ] Same-document parent/self links collapsed to snapshots by
+      `normalizeAndDiff(...)` do not persist link-style provenance metadata
+- [ ] `cfcLabelViewForCell(...)` continues to reflect labels behind linked
+      cells and uses the dereference trace when available
+- [ ] Enforcing modes fail closed for missing link-source metadata or missing
+      link-write provenance; observe mode records actionable diagnostics
+- [ ] Tests prove ordinary final-slot links are not write-through aliases while
+      write-redirect links still are
+
 ## Test Strategy
 
 The test matrix should be built in the same order as the implementation:
@@ -936,6 +1071,20 @@ The test matrix should be built in the same order as the implementation:
 - [x] fresh-runtime restart tests for persisted metadata and schema hashes;
       trust snapshots are recomputed per transaction and covered by retry
       tests
+- [ ] link-resolution tests for dereference trace shape, including nested links,
+      final-slot raw reads, write-redirect resolution, and cross-space hops
+- [ ] label-view tests proving dereferenced cell-view labels join link-slot and
+      target labels, while raw link-field reads surface only the stored
+      link-field label
+- [ ] boundary/prepare tests for persisted link-write policy inputs, missing
+      source metadata fail-closed behavior, and observe-mode diagnostics
+- [ ] data-updating tests proving link-write provenance is emitted only for
+      actually persisted links, not for links collapsed to snapshots by
+      `normalizeAndDiff(...)`
+- [ ] integration tests mirroring the spec's personal-workspace-to-shared-
+      material scenario: a personal-space entry links to shared content, reading
+      through the entry requires both sides, and the view gains personal
+      selection integrity plus the shared target integrity
 
 Sink-result replay across restart is deferred to a later phase.
 
@@ -989,6 +1138,11 @@ Land the work in mergeable vertical slices:
 12. [x] UI provenance and trusted-event path
 13. [x] Content-addressed side-path hardening is deferred behind the missing
         v2 adjunct API surface
+14. [ ] Cell link label-following and stored-link provenance:
+        first land failing tests for dereference trace capture, cell-view versus
+        stored-link-field labels, and persisted link writes; then implement the
+        smallest trace, policy-input, prepare, and label-view changes needed to
+        make each slice green
 
 Step 8 is the first safe enablement point for non-trust-sensitive,
 state-only transactions that do not issue external effects. Step 9 is the first
@@ -1012,5 +1166,9 @@ This plan is complete when all of the following are true:
 - stable policy-facing code identities align supported identity classes with
   bundle/path/location/hash provenance rather than relying on bare `codeCID`
 - trust-sensitive relaxations are deterministic and fail closed
+- linked cell-view labels can explain the link hops and target reads that
+  contributed to their confidentiality and integrity
+- stored link fields persist link-field CFC metadata without pretending raw
+  link reads are dereferenced target-content reads
 - tests cover warm-runtime and fresh-runtime behavior
 - the feature can be enabled incrementally with clear observability
