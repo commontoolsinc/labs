@@ -6,7 +6,6 @@ import {
   NAME,
   navigateTo,
   pattern,
-  SELF,
   Stream,
   UI,
   type VNode,
@@ -40,8 +39,7 @@ import {
   VerifiedChatBubble7,
 } from "./trusted.tsx";
 
-type LobbyPiece = Writable<{ [NAME]?: string }>;
-type RoomRefCell = Writable<{ piece: any }>;
+type LobbyPiece = any;
 
 const writeDraftText = handler<string, { value: Writable<string> }>(
   (nextValue, { value }) => {
@@ -52,35 +50,32 @@ const writeDraftText = handler<string, { value: Writable<string> }>(
 const messageCountText = (count: number): string =>
   count === 0 ? "No messages yet" : `${count} message${count === 1 ? "" : "s"}`;
 
+const nativeButtonStyle = {
+  appearance: "none",
+  border: "0",
+  borderRadius: "0.5rem",
+  background: "#4979fa",
+  color: "white",
+  cursor: "pointer",
+  display: "inline-block",
+  font: "inherit",
+  fontWeight: 600,
+  padding: "0.625rem 1rem",
+  textAlign: "center",
+  textDecoration: "none",
+};
+
+const nativeGhostButtonStyle = {
+  ...nativeButtonStyle,
+  background: "transparent",
+  color: "#404349",
+  border: "1px solid #d5d7dd",
+};
+
 const sharedWritableOf = <Value,>(
   value: Value,
   name: string,
 ): Writable<Value> => Writable.of<Value>(value).for(name);
-
-const enterGroupChatRoom = handler<
-  void,
-  {
-    slotId: SlotId;
-    roomRef: RoomRefCell;
-    participants: SharedParticipantsCell;
-    messages: SharedMessagesCell;
-    lobbyPiece: LobbyPiece;
-  }
->((_, { slotId, roomRef, participants, messages, lobbyPiece }) => {
-  const existingRoom = roomRef.get()?.piece;
-  if (existingRoom) {
-    return navigateTo(existingRoom);
-  }
-
-  const createdRoom = ParticipantRoom({
-    slotId,
-    participants,
-    messages,
-    lobbyPiece,
-  });
-  roomRef.set({ piece: createdRoom });
-  return navigateTo(createdRoom);
-});
 
 const transcriptRowStyle = (
   messageList: readonly SharedChatMessage[],
@@ -214,6 +209,9 @@ export interface ParticipantRoomInput {
   participants: SharedParticipantsCell;
   messages: SharedMessagesCell;
   lobbyPiece: LobbyPiece | null | Default<null>;
+  backToLobby?: Stream<unknown> | null;
+  backHref?: string | null;
+  backTargetId?: string | null;
 }
 
 export interface ParticipantRoomOutput {
@@ -230,7 +228,15 @@ export const ParticipantRoom = pattern<
   ParticipantRoomInput,
   ParticipantRoomOutput
 >((
-  { slotId, participants, messages, lobbyPiece }: ParticipantRoomInput,
+  {
+    slotId,
+    participants,
+    messages,
+    lobbyPiece,
+    backToLobby,
+    backHref,
+    backTargetId,
+  }: ParticipantRoomInput,
 ): ParticipantRoomOutput => {
   const meta = metaForSlot(slotId);
   const profileDraft = Writable.of("");
@@ -283,6 +289,10 @@ export const ParticipantRoom = pattern<
       return navigateTo(lobbyPiece);
     }
   });
+  const closeRoom = backToLobby ?? goBackToLobby;
+  const shouldShowBackButton = Boolean(
+    lobbyPiece || backToLobby || backHref || backTargetId,
+  );
 
   return {
     [NAME]: computed(() => `${meta.label} room`),
@@ -294,15 +304,36 @@ export const ParticipantRoom = pattern<
               <cf-heading level={2}>{meta.label}</cf-heading>
               <cf-label>Current name: {currentProfileLabel}</cf-label>
             </cf-vstack>
-            {lobbyPiece
+            {backTargetId
               ? (
-                <cf-button
+                <label
                   id={`back-to-lobby-${slotId}`}
-                  variant="ghost"
-                  onClick={goBackToLobby}
+                  htmlFor={backTargetId}
+                  style={nativeGhostButtonStyle}
                 >
                   Back to lobby
-                </cf-button>
+                </label>
+              )
+              : backHref
+              ? (
+                <a
+                  id={`back-to-lobby-${slotId}`}
+                  href={backHref}
+                  style={nativeGhostButtonStyle}
+                >
+                  Back to lobby
+                </a>
+              )
+              : shouldShowBackButton
+              ? (
+                <button
+                  id={`back-to-lobby-${slotId}`}
+                  type="button"
+                  style={nativeGhostButtonStyle}
+                  onClick={closeRoom}
+                >
+                  Back to lobby
+                </button>
               )
               : null}
           </cf-hstack>
@@ -364,7 +395,7 @@ export interface GroupChatDemoOutput {
   [UI]: VNode;
 }
 
-export default pattern<unknown, GroupChatDemoOutput>(({ [SELF]: self }) => {
+export default pattern<unknown, GroupChatDemoOutput>(() => {
   const participants = sharedWritableOf<SharedParticipantsValue>(
     [] as SharedParticipantsValue,
     "participants",
@@ -373,115 +404,167 @@ export default pattern<unknown, GroupChatDemoOutput>(({ [SELF]: self }) => {
     [] as SharedMessagesValue,
     "messages",
   ) as SharedMessagesCell;
-  const participantOneRoom = Writable.of<{ piece: any }>(
-    { piece: null },
-  );
-  const participantTwoRoom = Writable.of<{ piece: any }>(
-    { piece: null },
-  );
-  const participantThreeRoom = Writable.of<{ piece: any }>(
-    { piece: null },
-  );
-  const openParticipantOne = enterGroupChatRoom({
+  const participantOneRoom = ParticipantRoom({
     slotId: "participant-1",
     participants,
     messages,
-    roomRef: participantOneRoom,
-    lobbyPiece: self,
+    lobbyPiece: null,
+    backTargetId: "chat-view-lobby",
   });
-  const openParticipantTwo = enterGroupChatRoom({
+  const participantTwoRoom = ParticipantRoom({
     slotId: "participant-2",
     participants,
     messages,
-    roomRef: participantTwoRoom,
-    lobbyPiece: self,
+    lobbyPiece: null,
+    backTargetId: "chat-view-lobby",
   });
-  const openParticipantThree = enterGroupChatRoom({
+  const participantThreeRoom = ParticipantRoom({
     slotId: "participant-3",
     participants,
     messages,
-    roomRef: participantThreeRoom,
-    lobbyPiece: self,
+    lobbyPiece: null,
+    backTargetId: "chat-view-lobby",
   });
 
   return {
     [NAME]: "CFC group chat demo",
     [UI]: (
-      <cf-screen title="CFC group chat demo">
-        <cf-vstack gap="4" style={{ padding: "1rem" }}>
-          <cf-card>
-            <cf-vstack slot="content" gap="2">
-              <cf-heading level={2}>Group chat</cf-heading>
-              <cf-label>
-                The chat shell is ordinary pattern code. Small reviewed
-                components save profiles, send messages, and render verified
-                author bubbles.
-              </cf-label>
-              <cf-hstack gap="2" wrap>
-                <cf-chip
-                  label={computed(() =>
-                    `${participantsValue(participants).length} profile${
-                      participantsValue(participants).length === 1 ? "" : "s"
-                    }`
-                  )}
-                />
-                <cf-chip
-                  label={computed(() =>
-                    messageCountText(messagesValue(messages).length)
-                  )}
-                />
-              </cf-hstack>
+      <div id="group-chat-demo-root">
+        <style>
+          {`
+            .chat-view-state {
+              position: absolute;
+              inline-size: 1px;
+              block-size: 1px;
+              opacity: 0;
+            }
+            #room-participant-1,
+            #room-participant-2,
+            #room-participant-3 {
+              display: none;
+            }
+            #chat-view-participant-1:checked ~ #group-chat-lobby,
+            #chat-view-participant-2:checked ~ #group-chat-lobby,
+            #chat-view-participant-3:checked ~ #group-chat-lobby {
+              display: none;
+            }
+            #chat-view-participant-1:checked ~ #room-participant-1,
+            #chat-view-participant-2:checked ~ #room-participant-2,
+            #chat-view-participant-3:checked ~ #room-participant-3 {
+              display: block;
+            }
+          `}
+        </style>
+        <input
+          id="chat-view-lobby"
+          className="chat-view-state"
+          type="radio"
+          name="chat-view"
+        />
+        <input
+          id="chat-view-participant-1"
+          className="chat-view-state"
+          type="radio"
+          name="chat-view"
+        />
+        <input
+          id="chat-view-participant-2"
+          className="chat-view-state"
+          type="radio"
+          name="chat-view"
+        />
+        <input
+          id="chat-view-participant-3"
+          className="chat-view-state"
+          type="radio"
+          name="chat-view"
+        />
+        <div id="group-chat-lobby">
+          <cf-screen title="CFC group chat demo">
+            <cf-vstack gap="4" style={{ padding: "1rem" }}>
+              <cf-card>
+                <cf-vstack slot="content" gap="2">
+                  <cf-heading level={2}>Group chat</cf-heading>
+                  <cf-label>
+                    The chat shell is ordinary pattern code. Small reviewed
+                    components save profiles, send messages, and render verified
+                    author bubbles.
+                  </cf-label>
+                  <cf-hstack gap="2" wrap>
+                    <cf-chip
+                      label={computed(() =>
+                        `${participantsValue(participants).length} profile${
+                          participantsValue(participants).length === 1
+                            ? ""
+                            : "s"
+                        }`
+                      )}
+                    />
+                    <cf-chip
+                      label={computed(() =>
+                        messageCountText(messagesValue(messages).length)
+                      )}
+                    />
+                  </cf-hstack>
+                </cf-vstack>
+              </cf-card>
+              <cf-grid columns="3" gap="4">
+                <cf-card id="lobby-slot-participant-1">
+                  <cf-vstack slot="content" gap="3">
+                    <cf-heading level={3}>Participant 1</cf-heading>
+                    {ParticipantStatusChip({
+                      participants,
+                      slotId: "participant-1",
+                    })}
+                    <label
+                      id="open-room-participant-1"
+                      htmlFor="chat-view-participant-1"
+                      style={nativeButtonStyle}
+                    >
+                      Open room
+                    </label>
+                  </cf-vstack>
+                </cf-card>
+                <cf-card id="lobby-slot-participant-2">
+                  <cf-vstack slot="content" gap="3">
+                    <cf-heading level={3}>Participant 2</cf-heading>
+                    {ParticipantStatusChip({
+                      participants,
+                      slotId: "participant-2",
+                    })}
+                    <label
+                      id="open-room-participant-2"
+                      htmlFor="chat-view-participant-2"
+                      style={nativeButtonStyle}
+                    >
+                      Open room
+                    </label>
+                  </cf-vstack>
+                </cf-card>
+                <cf-card id="lobby-slot-participant-3">
+                  <cf-vstack slot="content" gap="3">
+                    <cf-heading level={3}>Participant 3</cf-heading>
+                    {ParticipantStatusChip({
+                      participants,
+                      slotId: "participant-3",
+                    })}
+                    <label
+                      id="open-room-participant-3"
+                      htmlFor="chat-view-participant-3"
+                      style={nativeButtonStyle}
+                    >
+                      Open room
+                    </label>
+                  </cf-vstack>
+                </cf-card>
+              </cf-grid>
             </cf-vstack>
-          </cf-card>
-          <cf-grid columns="3" gap="4">
-            <cf-card id="lobby-slot-participant-1">
-              <cf-vstack slot="content" gap="3">
-                <cf-heading level={3}>Participant 1</cf-heading>
-                {ParticipantStatusChip({
-                  participants,
-                  slotId: "participant-1",
-                })}
-                <cf-button
-                  id="open-room-participant-1"
-                  onClick={openParticipantOne}
-                >
-                  Open room
-                </cf-button>
-              </cf-vstack>
-            </cf-card>
-            <cf-card id="lobby-slot-participant-2">
-              <cf-vstack slot="content" gap="3">
-                <cf-heading level={3}>Participant 2</cf-heading>
-                {ParticipantStatusChip({
-                  participants,
-                  slotId: "participant-2",
-                })}
-                <cf-button
-                  id="open-room-participant-2"
-                  onClick={openParticipantTwo}
-                >
-                  Open room
-                </cf-button>
-              </cf-vstack>
-            </cf-card>
-            <cf-card id="lobby-slot-participant-3">
-              <cf-vstack slot="content" gap="3">
-                <cf-heading level={3}>Participant 3</cf-heading>
-                {ParticipantStatusChip({
-                  participants,
-                  slotId: "participant-3",
-                })}
-                <cf-button
-                  id="open-room-participant-3"
-                  onClick={openParticipantThree}
-                >
-                  Open room
-                </cf-button>
-              </cf-vstack>
-            </cf-card>
-          </cf-grid>
-        </cf-vstack>
-      </cf-screen>
+          </cf-screen>
+        </div>
+        <div id="room-participant-1">{participantOneRoom}</div>
+        <div id="room-participant-2">{participantTwoRoom}</div>
+        <div id="room-participant-3">{participantThreeRoom}</div>
+      </div>
     ),
   };
 });
