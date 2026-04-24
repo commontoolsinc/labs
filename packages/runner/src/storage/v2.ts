@@ -1,4 +1,5 @@
 import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -1406,13 +1407,21 @@ class SpaceReplica implements ISpaceReplica {
       : undefined;
 
     for (const upsert of sync.upserts) {
-      const record = this.record(upsert.id as URI);
-      record.confirmed = confirmedVersion(
-        upsert.seq,
-        upsert.deleted === true ? undefined : upsert.doc,
-      );
+      const id = upsert.id as URI;
+      const record = this.record(id);
+      const incoming = upsert.deleted === true ? undefined : upsert.doc;
+      // Deep-freeze any document identified by a content-hash. TODO(danfuzz):
+      // Once we can rely on `incoming` being consistently deep-frozen (which
+      // would mean that `upsert.doc` would probably also be typed as an
+      // immutable value), then we won't have to do this anymore as it would be
+      // redundant. See also `decodeMemoryV2Boundary()` in `memory/v2.ts`, which
+      // forces mutability as of this writing.
+      const value = incoming !== undefined && id.startsWith("cid:")
+        ? deepFreeze(incoming)
+        : incoming;
+      record.confirmed = confirmedVersion(upsert.seq, value);
       record.materialized = undefined;
-      this.#watchedIds.add(upsert.id as URI);
+      this.#watchedIds.add(id);
     }
     for (const remove of sync.removes) {
       const id = remove.id as URI;
