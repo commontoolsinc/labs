@@ -14,6 +14,7 @@ type SubAgentInput = {
   system?: string;
   tools?: Record<string, BuiltInLLMTool>;
   model?: string;
+  maxTokens?: number;
   observationMaxConfidentiality?: readonly ImmutableJSONValue[];
   schemaSanitizePromptInjection?: boolean;
 };
@@ -26,6 +27,7 @@ export const subAgentPattern = pattern<SubAgentInput, any>((
     system,
     tools,
     model,
+    maxTokens,
     observationMaxConfidentiality,
     schemaSanitizePromptInjection,
   },
@@ -36,6 +38,7 @@ export const subAgentPattern = pattern<SubAgentInput, any>((
     system,
     tools,
     model,
+    maxTokens,
     observationMaxConfidentiality,
     schemaSanitizePromptInjection,
     schema: resultSchema,
