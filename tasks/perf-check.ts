@@ -69,13 +69,12 @@ async function main() {
   const isPullRequest = Deno.env.get("IS_PULL_REQUEST") !== "false";
   const informationalOnly = !isPullRequest;
 
-
   // For testing.
-  const zonk = Deno.env.get("TEST_OF_UNDEFINED_GH_VAR")
+  const zonk = Deno.env.get("TEST_OF_UNDEFINED_GH_VAR");
   console.log("####### PR NUMBER", prNumber);
   console.log("####### IS PULL REQUEST", isPullRequest);
   console.log("####### TEST %o", zonk);
-  if (Math.random() !== -10) { Deno.exit(1); }
+  if (Math.random() !== -10) Deno.exit(1);
 
   if (!TOKEN) {
     console.error("GITHUB_TOKEN is required.");
