@@ -10,7 +10,7 @@ import type { JSONSchema } from "commonfabric";
 type SubAgentInput = {
   prompt: BuiltInLLMContent;
   context?: Record<string, any>;
-  resultSchema: JSONSchema;
+  resultSchema: JSONSchema | string;
   system?: string;
   tools?: Record<string, BuiltInLLMTool>;
   model?: string;
@@ -31,16 +31,22 @@ export const subAgentPattern = pattern<SubAgentInput, any>((
     observationMaxConfidentiality,
     schemaSanitizePromptInjection,
   },
-) =>
-  generateObject({
-    prompt,
-    context,
-    system,
-    tools,
-    model,
-    maxTokens,
-    observationMaxConfidentiality,
-    schemaSanitizePromptInjection,
-    schema: resultSchema,
-  }).result
-);
+) => {
+  const parsedResultSchema = typeof resultSchema === "string"
+    ? JSON.parse(resultSchema)
+    : resultSchema;
+
+  return (
+    generateObject({
+      prompt,
+      context,
+      system,
+      tools,
+      model,
+      maxTokens,
+      observationMaxConfidentiality,
+      schemaSanitizePromptInjection,
+      schema: parsedResultSchema,
+    }).result
+  );
+});
