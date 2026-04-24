@@ -66,6 +66,11 @@ const EXCLUDED_METRIC_PATTERNS = [
 async function main() {
   const runId = Deno.env.get("GITHUB_RUN_ID");
   const prNumber = Deno.env.get("PR_NUMBER");
+  const isPullRequest = Deno.env.get("IS_PULL_REQUEST");
+
+  console.log("####### PR NUMBER", prNumber);
+  console.log("####### IS PULL REQUEST", isPullRequest);
+  Deno.exit(1);
 
   if (!TOKEN) {
     console.error("GITHUB_TOKEN is required.");
