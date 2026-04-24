@@ -309,9 +309,14 @@ JSON Pointer string derived from the segment array.
 
 ### Schema Hash and Frozen Schema
 
-Use the existing frozen-schema pipeline for canonical schema identity:
-`toDeepFrozenSchema()` for canonical deep-frozen form and
-`internSchema(..., true)` for `SchemaAndHash`.
+Use the existing frozen-schema pipeline for canonical schema identity. Prefer
+interning _unless_ there is strong evidence that it causes performance problems.
+`internSchema(...)` returns an interned value, and `internSchema(..., true)`
+returns a `SchemaAndHash` with both the interned value and its hash. If not
+interning, deep-freezing via `toDeepFrozenSchema()` is the best fallback choice.
+**Note:** There is never a need to pre-freeze the input to `internSchema()`, as
+it will do the freezing step itself; it is documented to "take ownership" of
+its argument and will freeze it directly.
 
 `schemaHash` is the persisted `SchemaAndHash.hashString` for the canonical
 merged schema envelope for the entity, not the hash of any one effective
@@ -346,9 +351,8 @@ Phase-1 merge rules:
   valid
 - a merge may add a required field only when the merged schema also provides a
   default that preserves validity/materialization for existing documents
-- every merged result is canonicalized with `toDeepFrozenSchema()` and
-  `internSchema(..., true)` before persistence to its `cid:<hash>` schema
-  document
+- every merged result is canonicalized with `internSchema(..., true)` before
+  persistence to its `cid:<hash>` schema document
 
 Phase-1 behavior:
 
