@@ -74,6 +74,7 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -117,6 +118,129 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: { confidentiality: ["prompt-influence"] },
+        }],
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("distinguishes stored link-field labels from dereferenced cell-view labels", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cfc label view stored link field",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-shared-source",
+        undefined,
+        tx,
+      );
+      const sourceLink = parseLink(source.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: sourceLink.id!,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { title: "shared", details: "restricted" },
+        cfc: {
+          version: 1,
+          schemaHash: "source-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: ["shared-space"],
+                integrity: ["authored-by-bob"],
+              },
+            }, {
+              path: ["details"],
+              label: { confidentiality: ["target-detail"] },
+            }],
+          },
+        },
+      });
+
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-personal-link",
+        undefined,
+        tx,
+      );
+      const targetLink = parseLink(target.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: targetLink.id!,
+        type: "application/json",
+        path: [],
+      }, {
+        value: source.getAsLink(),
+        cfc: {
+          version: 1,
+          schemaHash: "target-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: ["personal-space"],
+                integrity: ["selected-by-alice"],
+              },
+            }],
+          },
+        },
+      });
+      await tx.commit();
+
+      const storedLinkField = cfcLabelViewFromMetadata(
+        {
+          version: 1,
+          schemaHash: "target-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: ["personal-space"],
+                integrity: ["selected-by-alice"],
+              },
+            }],
+          },
+        },
+        [],
+      );
+      expect(storedLinkField).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: ["personal-space"],
+            integrity: ["selected-by-alice"],
+          },
+        }],
+      });
+
+      expect(cfcLabelViewForCell(target)).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: ["personal-space", "shared-space"],
+            integrity: ["selected-by-alice", "authored-by-bob"],
+          },
+        }, {
+          path: ["details"],
+          label: { confidentiality: ["target-detail"] },
         }],
       });
     } finally {

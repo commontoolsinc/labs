@@ -36,6 +36,57 @@ describe("link-resolution", () => {
   });
 
   describe("followWriteRedirects", () => {
+    it("records dereference traces for followed value links but not raw final-slot reads", async () => {
+      const sourceCell = runtime.getCell<string>(
+        space,
+        "dereference-trace-source",
+        undefined,
+        tx,
+      );
+      sourceCell.set("linked content");
+      const targetCell = runtime.getCell<string>(
+        space,
+        "dereference-trace-target",
+        undefined,
+        tx,
+      );
+      targetCell.set(sourceCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const readTx = runtime.edit();
+      const linked = runtime.getCell<string>(
+        space,
+        "dereference-trace-target",
+        undefined,
+        readTx,
+      );
+      expect(linked.get()).toBe("linked content");
+      expect(readTx.getCfcState().dereferenceTraces).toContainEqual({
+        source: expect.objectContaining({
+          id: targetCell.getAsNormalizedFullLink().id,
+          path: [],
+        }),
+        target: expect.objectContaining({
+          id: sourceCell.getAsNormalizedFullLink().id,
+          path: [],
+        }),
+        kind: "value",
+      });
+      readTx.abort();
+
+      const rawTx = runtime.edit();
+      const rawLinked = runtime.getCell<string>(
+        space,
+        "dereference-trace-target",
+        undefined,
+        rawTx,
+      );
+      expect(rawLinked.getRawUntyped()).toEqual(sourceCell.getAsLink());
+      expect(rawTx.getCfcState().dereferenceTraces).toEqual([]);
+      rawTx.abort();
+    });
+
     it("should follow a simple alias", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,

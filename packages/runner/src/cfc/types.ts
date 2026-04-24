@@ -50,6 +50,12 @@ export type ConsumedRead = CfcAddress & {
 
 export type AttemptedWrite = CfcAddress;
 
+export type CfcDereferenceTrace = {
+  source: CfcAddress;
+  target: CfcAddress;
+  kind: "value" | "write-redirect";
+};
+
 export type ImplementationIdentity =
   | { kind: "builtin"; builtinId: string }
   | {
@@ -88,6 +94,12 @@ export type WritePolicyInput =
     provenance?: FabricValue;
   }
   | {
+    kind: "link-write";
+    target: CfcAddress;
+    source: CfcAddress;
+    linkSchema?: JSONSchema;
+  }
+  | {
     kind: "sink-request";
     effectId: string;
     sink: string;
@@ -104,6 +116,7 @@ export type PreparedDigestInput = {
   consumedReads: ConsumedRead[];
   potentialWrites: AttemptedWrite[];
   writes: AttemptedWrite[];
+  dereferenceTraces: CfcDereferenceTrace[];
   writePolicyInputs: WritePolicyInput[];
   implementationIdentity?: ImplementationIdentity;
   trustSnapshot?: TrustSnapshot;
@@ -125,6 +138,7 @@ export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
   prepare: CfcPrepareState;
+  dereferenceTraces: CfcDereferenceTrace[];
   writePolicyInputs: WritePolicyInput[];
   trustSnapshot?: TrustSnapshot;
   implementationIdentity?: ImplementationIdentity;
