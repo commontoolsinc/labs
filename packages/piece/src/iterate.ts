@@ -256,10 +256,10 @@ export function scrub(data: unknown): unknown {
       if (isObject(value)) {
         // Generate a new schema for all properties except $UI and $NAME and streams
         const scrubbedProperties = Object.fromEntries(
-          Object.keys(value).filter(([key, value]) =>
+          Object.entries(value).filter(([key, value]) =>
             !key.startsWith("$") && !isStream(value)
           ).map(
-            (key) => [key, {}],
+            ([key]) => [key, {}],
           ),
         );
         if (Object.keys(scrubbedProperties).length > 0) {
