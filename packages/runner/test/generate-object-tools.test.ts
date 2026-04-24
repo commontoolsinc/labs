@@ -1795,10 +1795,11 @@ describe("generateObject with tools", () => {
       type: "object",
       properties: {
         action: { type: "string", enum: ["approve", "reject"] },
+        approved: { type: "boolean" },
         confidence: { type: "number" },
-        reason: { type: "string" },
+        reasoning: { type: "string" },
       },
-      required: ["action", "confidence", "reason"],
+      required: ["action", "approved", "confidence", "reasoning"],
       additionalProperties: false,
     } as const satisfies JSONSchema;
 
@@ -1811,8 +1812,9 @@ describe("generateObject with tools", () => {
       {
         object: {
           action: "reject",
+          approved: false,
           confidence: 0.91,
-          reason: "The briefing was not approved.",
+          reasoning: "The briefing was not approved.",
         },
         id: "mock-schema-sanitize-generateObject",
       },
@@ -1849,13 +1851,21 @@ describe("generateObject with tools", () => {
 
       expect(result.key("result").get()).toEqual({
         action: "reject",
+        approved: false,
         confidence: 0.91,
-        reason: "The briefing was not approved.",
+        reasoning: "The briefing was not approved.",
       });
       expect(cfcLabelViewForCell(result.key("result"))).toMatchObject({
         entries: expect.arrayContaining([
           {
             path: ["action"],
+            label: {
+              confidentiality: [promptInfluence],
+              integrity: [INJECTION_SAFE_ATOM],
+            },
+          },
+          {
+            path: ["approved"],
             label: {
               confidentiality: [promptInfluence],
               integrity: [INJECTION_SAFE_ATOM],
@@ -1869,7 +1879,7 @@ describe("generateObject with tools", () => {
             },
           },
           {
-            path: ["reason"],
+            path: ["reasoning"],
             label: {
               confidentiality: [promptRisk, promptInfluence],
             },

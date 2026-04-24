@@ -2,6 +2,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
+import { schemaWithInjectionSafeAnnotations } from "../src/cfc/schema-sanitization.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 const {
@@ -318,6 +319,52 @@ Deno.test("serializeForLLMObservation redacts above-ceiling fields to links", ()
     secret: { "@link": "/of:test-redacted/secret" },
   });
   assertEquals(result.observedConfidentiality, []);
+});
+
+Deno.test("serializeForLLMObservation exposes injection-safe booleans but links free strings", () => {
+  const promptRisk = {
+    type: "https://commonfabric.org/cfc/atom/Caveat",
+    kind:
+      "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
+    source: "of:hostile",
+  } as const;
+  const promptInfluence = {
+    type: "https://commonfabric.org/cfc/atom/Caveat",
+    kind: "https://commonfabric.org/cfc/concepts/prompt-influence",
+    source: "of:hostile",
+  } as const;
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-assessment",
+    space: "did:test:assessment",
+    type: "application/json",
+    path: [],
+  };
+  const schema = schemaWithInjectionSafeAnnotations({
+    type: "object",
+    properties: {
+      approved: { type: "boolean" },
+      reasoning: { type: "string" },
+    },
+    required: ["approved", "reasoning"],
+    additionalProperties: false,
+  }, [promptRisk, promptInfluence]);
+
+  const result = serializeForLLMObservation({
+    value: {
+      approved: false,
+      reasoning: "The briefing includes untrusted free-form text.",
+    },
+    schema,
+    contextSpace: "did:test:assessment",
+    rootLink,
+    observationMaxConfidentiality: [promptInfluence],
+  });
+
+  assertEquals(result.value, {
+    approved: false,
+    reasoning: { "@link": "/of:test-assessment/reasoning" },
+  });
+  assertEquals(result.observedConfidentiality, [promptInfluence]);
 });
 
 Deno.test("serializeForLLMObservation does not taint from redacted nested values", () => {

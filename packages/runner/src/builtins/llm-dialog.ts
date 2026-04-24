@@ -900,10 +900,6 @@ function collectToolEntries(
   return { legacy, pieces };
 }
 
-const TOOL_CATALOG_SCHEMA = internSchema({
-  type: "object",
-  additionalProperties: LLMToolSchema,
-});
 const READ_TOOL_NAME = "read";
 const INVOKE_TOOL_NAME = "invoke";
 const SCHEMA_TOOL_NAME = "schema";
