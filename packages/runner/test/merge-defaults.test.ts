@@ -5,6 +5,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import {
+  internSchema,
+  isInternedSchema,
+} from "@commonfabric/data-model/schema-hash";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { mergeDefaults } from "../src/schema.ts";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
@@ -284,6 +288,20 @@ describe("mergeDefaults", () => {
       const result = mergeDefaults(schema, [1, 2, 3]);
       expect(isDeepFrozen(result)).toBe(true);
     });
+  });
+
+  describe("intern contagion", () => {
+    it("should return an interned result when the given `schema` is interned", () => {
+      const schema = internSchema({ type: "array", title: "muffins" });
+      const result = mergeDefaults(schema, ["blueberry", "corn"]);
+      expect(isInternedSchema(result)).toBe(true);
+    });
+  });
+
+  it("should return an uninterned result when the given `schema` is uninterned", () => {
+    const schema: JSONSchema = { type: "array", title: "muffins" };
+    const result = mergeDefaults(schema, ["blueberry", "corn"]);
+    expect(isInternedSchema(result)).toBe(false);
   });
 
   describe("edge cases", () => {

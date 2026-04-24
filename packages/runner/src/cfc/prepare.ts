@@ -1,5 +1,5 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
@@ -302,6 +302,9 @@ const storedMetadataFor = (
     : undefined;
 };
 
+/**
+ * This returns a map whose values are always interned schemas.
+ */
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
   implementationIdentity?: ImplementationIdentity,
@@ -325,8 +328,8 @@ const candidateSchemasByTarget = (
     result.set(
       key,
       existing === undefined
-        ? candidate
-        : mergeCfcSchemaEnvelopes(existing, candidate),
+        ? internSchema(candidate)
+        : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
     );
   }
   return result;
@@ -1024,19 +1027,20 @@ export const prepareBoundaryCommit = (
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
   for (const key of targetKeys) {
-    const schema = candidates.get(key);
+    const candidateSchema = candidates.get(key);
+    const schema = candidateSchema ?? emptySchemaObject();
+    const undefinedCandidate = candidateSchema === undefined;
     const [space, id, type] = key.split("\u0000") as [
       MemorySpace,
       URI,
       MediaType,
     ];
-    const frozen = toDeepFrozenSchema(schema ?? {}, true) as JSONSchema;
 
     const target = { space, id, type };
     const existing = storedMetadataFor(tx, space, id, type);
     let storedSchema: JSONSchema | undefined;
-    let mergedSchema = frozen;
-    if (existing !== undefined && schema === undefined) {
+    let mergedSchema = schema;
+    if (existing !== undefined && undefinedCandidate) {
       try {
         storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
         mergedSchema = storedSchema;
@@ -1051,7 +1055,7 @@ export const prepareBoundaryCommit = (
     } else if (existing !== undefined) {
       try {
         storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
-        mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, frozen);
+        mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, schema);
       } catch (error) {
         reasons.push(
           error instanceof Error
@@ -1065,13 +1069,13 @@ export const prepareBoundaryCommit = (
     const linkWriteInputs = linkWrites.get(key) ?? [];
     const verificationSchema = storedSchema !== undefined &&
         linkWriteInputs.length > 0
-      ? schema === undefined
+      ? undefinedCandidate
         ? storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
         : mergeCfcSchemaEnvelopes(
-          frozen,
+          schema,
           storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
         )
-      : frozen;
+      : schema;
 
     const requirementFailure = verifyInputRequirements(
       tx,
@@ -1103,7 +1107,7 @@ export const prepareBoundaryCommit = (
     }
 
     const schemaAndHash = internSchema(mergedSchema, true);
-    const mergedSchemaEntries = walkIfcSchema(mergedSchema);
+    const mergedSchemaEntries = walkIfcSchema(schemaAndHash.schema);
     const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
       mergedSchemaEntries.map((entry) => [
         pathKey(entry.path),

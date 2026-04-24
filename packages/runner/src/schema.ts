@@ -13,7 +13,7 @@ import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
-  toDeepFrozenSchema,
+  schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
@@ -475,7 +475,7 @@ export function mergeDefaults(
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 
-  return toDeepFrozenSchema({ ...base, default: mergedDefault }, true);
+  return schemaWithProperties(base, { default: mergedDefault });
 }
 
 /**
@@ -876,7 +876,7 @@ export function generateHandlerSchema(
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  return toDeepFrozenSchema({
+  return internSchema({
     type: "object",
     properties: {
       "$event": eventSchema ?? true,
@@ -886,7 +886,7 @@ export function generateHandlerSchema(
     ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
     ...(Object.keys(mergedDefinitions).length &&
       { definitions: mergedDefinitions }),
-  }, true);
+  });
 }
 
 function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
