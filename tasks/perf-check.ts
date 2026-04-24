@@ -66,13 +66,12 @@ const EXCLUDED_METRIC_PATTERNS = [
 async function main() {
   const runId = Deno.env.get("GITHUB_RUN_ID");
   const rawPrNumber = Deno.env.get("PR_NUMBER");
-  const isPullRequest = Deno.env.get("IS_PULL_REQUEST") !== "false";
-
-  const informationalOnly = !isPullRequest;
 
   // For testing.
   const prNumber = (rawPrNumber === "never123") ? rawPrNumber : null;
   //const prNumber = (rawPrNumber === "") ? null : rawPrNumber;
+
+  const informationalOnly = (prNumber === null);
 
   if (!TOKEN) {
     console.error("GITHUB_TOKEN is required.");
@@ -458,6 +457,10 @@ async function main() {
   }
 
   // 6c. Pass/fail outcome + override copy-paste block pinned at the bottom.
+  if (informationalOnly) {
+    console.log("\nInformational Only:");
+  }
+
   if (failures.length === 0) {
     console.log("\nAll metrics within normal range.");
     Deno.exit(0);
