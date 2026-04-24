@@ -1,16 +1,53 @@
-import { Browser, ConsoleEvent, launch, Page } from "@astral/astral";
+import {
+  Browser as AstralBrowser,
+  ConsoleEvent,
+  launch,
+  LaunchOptions,
+  Page,
+} from "@astral/astral";
 import { Manifest } from "./manifest.ts";
 import { tsToJs } from "./utils.ts";
 import { TestResult } from "./interface.ts";
 import { extractAstralConfig } from "./config.ts";
 import { sleep } from "@commonfabric/utils/sleep";
 
+const LAUNCH_RETRY_ATTEMPTS = 5;
+const LAUNCH_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
+
+type LaunchFn = (options: LaunchOptions) => Promise<AstralBrowser>;
+type SleepFn = (ms: number) => Promise<unknown>;
+
+export function isRetryableAstralLaunchError(error: unknown): boolean {
+  return String(error).includes(LAUNCH_RETRYABLE_ETXTBSY);
+}
+
+export async function launchWithRetry(
+  options: LaunchOptions,
+  launchImpl: LaunchFn = launch,
+  sleepImpl: SleepFn = sleep,
+): Promise<AstralBrowser> {
+  for (let attempt = 1; attempt <= LAUNCH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await launchImpl(options);
+    } catch (error) {
+      if (
+        attempt === LAUNCH_RETRY_ATTEMPTS ||
+        !isRetryableAstralLaunchError(error)
+      ) {
+        throw error;
+      }
+      await sleepImpl(250 * 2 ** (attempt - 1));
+    }
+  }
+  throw new Error("unreachable");
+}
+
 export class BrowserController extends EventTarget {
   private static readonly HARNESS_READY_TIMEOUT_MS = 10_000;
   private static readonly HARNESS_READY_POLL_MS = 200;
   private manifest: Manifest;
   private page: Page | null;
-  private browser: Browser | null;
+  private browser: AstralBrowser | null;
   private serverPort: number;
 
   constructor(manifest: Manifest, serverPort: number) {
@@ -30,7 +67,7 @@ export class BrowserController extends EventTarget {
     if (this.page) {
       await this.page.goto(testUrl);
     } else {
-      this.browser = await launch(extractAstralConfig(config));
+      this.browser = await launchWithRetry(extractAstralConfig(config));
       this.page = await this.browser.newPage(testUrl);
       this.page.addEventListener("console", (e) => {
         // Not sure why this event needs reconstructed in order
