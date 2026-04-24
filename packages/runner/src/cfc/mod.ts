@@ -3,6 +3,7 @@ export { cfcLabelViewForCell, cfcLabelViewFromMetadata } from "./label-view.ts";
 export type {
   AttemptedWrite,
   CfcAddress,
+  CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcMetadata,
   CfcPrepareState,
@@ -19,6 +20,7 @@ export type {
 export { DEFAULT_CFC_ENFORCEMENT_MODE } from "./types.ts";
 export {
   canonicalizeCfcMetadata,
+  canonicalizeDereferenceTrace,
   canonicalizeLogicalPath,
   canonicalizePreparedDigestInput,
   canonicalizeWritePolicyInput,

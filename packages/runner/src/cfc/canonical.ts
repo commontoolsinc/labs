@@ -4,6 +4,7 @@ import { stableHash } from "../traverse.ts";
 import type {
   AttemptedWrite,
   CfcAddress,
+  CfcDereferenceTrace,
   CfcMetadata,
   ConsumedRead,
   PreparedDigestInput,
@@ -40,6 +41,14 @@ export const canonicalizeAttemptedWrite = (
   path: canonicalizeLogicalPath(write.path),
 });
 
+export const canonicalizeDereferenceTrace = (
+  trace: CfcDereferenceTrace,
+): CfcDereferenceTrace => ({
+  ...trace,
+  source: canonicalizeAttemptedWrite(trace.source),
+  target: canonicalizeAttemptedWrite(trace.target),
+});
+
 export const canonicalizeWritePolicyInput = (
   input: WritePolicyInput,
 ): WritePolicyInput => {
@@ -56,6 +65,12 @@ export const canonicalizeWritePolicyInput = (
       };
     case "trusted-event":
       return { ...input, target: canonicalizeAttemptedWrite(input.target) };
+    case "link-write":
+      return {
+        ...input,
+        target: canonicalizeAttemptedWrite(input.target),
+        source: canonicalizeAttemptedWrite(input.source),
+      };
     case "custom":
       return input.target === undefined
         ? input
@@ -94,6 +109,18 @@ export const canonicalizePreparedDigestInput = (
   writes: [...input.writes].map(canonicalizeAttemptedWrite).sort(
     compareAddress,
   ),
+  dereferenceTraces: [...input.dereferenceTraces].map(
+    canonicalizeDereferenceTrace,
+  ).sort((left, right) => {
+    const sourceCompare = compareAddress(left.source, right.source);
+    if (sourceCompare !== 0) {
+      return sourceCompare;
+    }
+    const targetCompare = compareAddress(left.target, right.target);
+    return targetCompare !== 0
+      ? targetCompare
+      : left.kind.localeCompare(right.kind);
+  }),
   writePolicyInputs: [...input.writePolicyInputs].map(
     canonicalizeWritePolicyInput,
   ).sort((left, right) => stableHash(left).localeCompare(stableHash(right))),
