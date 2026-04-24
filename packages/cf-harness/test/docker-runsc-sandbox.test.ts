@@ -44,11 +44,12 @@ Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () =
     stderr: "",
     exitCode: 0,
   });
+  const config = resolveDockerRunscSandboxConfig({
+    workspaceHostPath: "/host/project",
+    image: "sandbox:latest",
+  });
   const runtime = new DockerRunscSandboxRuntime(
-    resolveDockerRunscSandboxConfig({
-      workspaceHostPath: "/host/project",
-      image: "sandbox:latest",
-    }),
+    config,
     runner,
   );
 
@@ -71,6 +72,9 @@ Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () =
       "runsc-cfc",
       "--network",
       "none",
+      ...(config.containerUser !== undefined
+        ? ["--user", config.containerUser]
+        : []),
       "--mount",
       "type=bind,src=/host/project,dst=/workspace",
       "-w",
