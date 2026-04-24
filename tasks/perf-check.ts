@@ -67,6 +67,7 @@ async function main() {
   const runId = Deno.env.get("GITHUB_RUN_ID");
   const prNumber = Deno.env.get("PR_NUMBER");
   const isPullRequest = Deno.env.get("IS_PULL_REQUEST");
+  const informationalOnly = !isPullRequest;
 
   console.log("####### PR NUMBER", prNumber);
   console.log("####### IS PULL REQUEST", isPullRequest);
@@ -457,6 +458,10 @@ async function main() {
   // 6c. Pass/fail outcome + override copy-paste block pinned at the bottom.
   if (failures.length === 0) {
     console.log("\nAll metrics within normal range.");
+    Deno.exit(0);
+  } else if (informationalOnly) {
+    console.log("\nOne or more metrics are out-of-range.");
+    console.log("This build would fail if it were a PR.");
     Deno.exit(0);
   }
 
