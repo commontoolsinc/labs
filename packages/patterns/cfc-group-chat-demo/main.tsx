@@ -41,6 +41,7 @@ import {
 } from "./trusted.tsx";
 
 type LobbyPiece = Writable<{ [NAME]?: string }>;
+type RoomRefCell = Writable<{ piece: any }>;
 
 const writeDraftText = handler<string, { value: Writable<string> }>(
   (nextValue, { value }) => {
@@ -60,13 +61,13 @@ const enterGroupChatRoom = handler<
   void,
   {
     slotId: SlotId;
-    roomRef: Writable<ParticipantRoomOutput | null>;
+    roomRef: RoomRefCell;
     participants: SharedParticipantsCell;
     messages: SharedMessagesCell;
     lobbyPiece: LobbyPiece;
   }
 >((_, { slotId, roomRef, participants, messages, lobbyPiece }) => {
-  const existingRoom = roomRef.get();
+  const existingRoom = roomRef.get()?.piece;
   if (existingRoom) {
     return navigateTo(existingRoom);
   }
@@ -77,7 +78,7 @@ const enterGroupChatRoom = handler<
     messages,
     lobbyPiece,
   });
-  roomRef.set(createdRoom);
+  roomRef.set({ piece: createdRoom });
   return navigateTo(createdRoom);
 });
 
@@ -361,8 +362,6 @@ export const ParticipantRoom = pattern<
 export interface GroupChatDemoOutput {
   [NAME]: string;
   [UI]: VNode;
-  participants: SharedParticipantsValue;
-  messages: SharedMessagesValue;
 }
 
 export default pattern<unknown, GroupChatDemoOutput>(({ [SELF]: self }) => {
@@ -374,19 +373,15 @@ export default pattern<unknown, GroupChatDemoOutput>(({ [SELF]: self }) => {
     [] as SharedMessagesValue,
     "messages",
   ) as SharedMessagesCell;
-  const participantOneRoom = sharedWritableOf<ParticipantRoomOutput | null>(
-    null,
-    "participant-one-room",
+  const participantOneRoom = Writable.of<{ piece: any }>(
+    { piece: null },
   );
-  const participantTwoRoom = sharedWritableOf<ParticipantRoomOutput | null>(
-    null,
-    "participant-two-room",
+  const participantTwoRoom = Writable.of<{ piece: any }>(
+    { piece: null },
   );
-  const participantThreeRoom = sharedWritableOf<ParticipantRoomOutput | null>(
-    null,
-    "participant-three-room",
+  const participantThreeRoom = Writable.of<{ piece: any }>(
+    { piece: null },
   );
-
   const openParticipantOne = enterGroupChatRoom({
     slotId: "participant-1",
     participants,
@@ -488,7 +483,5 @@ export default pattern<unknown, GroupChatDemoOutput>(({ [SELF]: self }) => {
         </cf-vstack>
       </cf-screen>
     ),
-    participants,
-    messages,
   };
 });

@@ -64,6 +64,8 @@ describe("cfc group chat demo integration test", () => {
     });
     await waitForRuntimeIdle(page);
 
+    await clickCfButton(page, "#open-room-participant-1");
+    await waitForRuntimeIdle(page);
     await waitForDisabled(page, "#trusted-send-button-participant-1", true);
 
     await fillCfInput(
@@ -110,6 +112,11 @@ describe("cfc group chat demo integration test", () => {
       "Hello from Alice",
       "#trusted-conversation-preview-participant-1",
     );
+
+    await clickCfButton(page, "#back-to-lobby-participant-1");
+    await waitForRuntimeIdle(page);
+    await clickCfButton(page, "#open-room-participant-2");
+    await waitForRuntimeIdle(page);
 
     await waitForText(
       page,
