@@ -26,6 +26,9 @@ The current design direction is:
 What works today:
 
 - shell-centric execution against the local `runsc-cfc` sandbox path
+- default sandbox image aligned with the public CFC kitchen-sink image published
+  from the sibling `gvisor` repo:
+  - `us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest`
 - built-in tools:
   - `bash`
   - `read_file`
@@ -130,6 +133,8 @@ deno task test:integration
 ```
 
 The integration suite requires a working local Docker + `runsc-cfc` environment.
+By default it also uses the published kitchen-sink image above, unless you
+override `CF_HARNESS_INTEGRATION_IMAGE`.
 
 ## Related Docs
 
