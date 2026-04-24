@@ -26,7 +26,9 @@ function isDirectCallableCapture(
   node: CaptureTreeNode,
   checker: ts.TypeChecker,
 ): boolean {
-  if (!node.expression || node.path.length !== 0 || node.properties.size !== 0) {
+  if (
+    !node.expression || node.path.length !== 0 || node.properties.size !== 0
+  ) {
     return false;
   }
 

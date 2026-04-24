@@ -328,7 +328,10 @@ export function transformArrayMethodCallback(
 
   const collector = new CaptureCollector(checker);
   const { captureTree } = collector.analyzeCurrentAndOriginal(callback);
-  const explicitCaptureTree = filterDirectCallableCaptures(captureTree, checker);
+  const explicitCaptureTree = filterDirectCallableCaptures(
+    captureTree,
+    checker,
+  );
   const containsLexicalCallableCaptures =
     explicitCaptureTree.size !== captureTree.size;
   if (containsLexicalCallableCaptures) {

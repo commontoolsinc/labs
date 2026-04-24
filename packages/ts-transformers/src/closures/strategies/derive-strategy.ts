@@ -327,7 +327,10 @@ export function transformDeriveCall(
   const { captures: captureExpressions, captureTree } = collector.analyze(
     callback,
   );
-  const explicitCaptureTree = filterDirectCallableCaptures(captureTree, checker);
+  const explicitCaptureTree = filterDirectCallableCaptures(
+    captureTree,
+    checker,
+  );
   if (explicitCaptureTree.size !== captureTree.size) {
     markCallbackAndAncestorsNonHoistable(callback, context);
   }
