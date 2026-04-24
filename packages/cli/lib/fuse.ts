@@ -289,6 +289,7 @@ export function buildDenoArgs(opts: {
   identity: string;
   execCli: string;
   logFile?: string;
+  allowOther?: boolean;
 }): string[] {
   const args = [
     "run",
@@ -306,6 +307,7 @@ export function buildDenoArgs(opts: {
   if (opts.identity) args.push("--identity", opts.identity);
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
+  if (opts.allowOther) args.push("--allow-other");
 
   return args;
 }

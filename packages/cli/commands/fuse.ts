@@ -118,6 +118,10 @@ export const fuse = new Command()
   .option("--background", "Run in the background (detached).")
   .option("--debug", "Enable FUSE debug output.")
   .option(
+    "--allow-other",
+    "Linux only: export the mount to other users such as Docker daemon. Requires user_allow_other in /etc/fuse.conf.",
+  )
+  .option(
     "-s, --space <name:string>",
     "Space(s) to connect (repeatable, default: home).",
     { collect: true },
@@ -135,6 +139,12 @@ export const fuse = new Command()
   .example(
     cliText("cf fuse mount /tmp/cf-fuse --background"),
     cliText("Mount in background; use 'cf fuse status' to check."),
+  )
+  .example(
+    cliText("cf fuse mount /tmp/cf-fuse --allow-other"),
+    cliText(
+      "Linux only: export the mount to Docker or other users.",
+    ),
   )
   .action(async (options, mountpoint) => {
     // globalEnv merges CF_API_URL / CF_IDENTITY into options automatically
@@ -174,6 +184,7 @@ export const fuse = new Command()
       spawnArgs = ["fuse-daemon", absMountpoint];
       if (apiUrl) spawnArgs.push("--api-url", apiUrl);
       if (identity) spawnArgs.push("--identity", identity);
+      if (options.allowOther) spawnArgs.push("--allow-other");
       if (execCli) spawnArgs.push("--exec-cli", execCli);
       for (const s of options.space ?? []) spawnArgs.push("--space", s);
     } else {
@@ -185,6 +196,7 @@ export const fuse = new Command()
         apiUrl,
         identity,
         execCli,
+        allowOther: options.allowOther,
       });
       for (const s of options.space ?? []) spawnArgs.push("--space", s);
     }
