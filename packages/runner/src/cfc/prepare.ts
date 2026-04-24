@@ -1,5 +1,4 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
@@ -295,6 +294,9 @@ const storedMetadataFor = (
     : undefined;
 };
 
+/**
+ * This returns a map whose values are always interned schemas.
+ */
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
   implementationIdentity?: ImplementationIdentity,
@@ -318,8 +320,8 @@ const candidateSchemasByTarget = (
     result.set(
       key,
       existing === undefined
-        ? candidate
-        : mergeCfcSchemaEnvelopes(existing, candidate),
+        ? internSchema(candidate)
+        : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
     );
   }
   return result;
@@ -796,10 +798,9 @@ export const prepareBoundaryCommit = (
       URI,
       MediaType,
     ];
-    const frozen = toDeepFrozenSchema(schema, true) as JSONSchema;
 
     const target = { space, id, type };
-    const requirementFailure = verifyInputRequirements(tx, frozen, target);
+    const requirementFailure = verifyInputRequirements(tx, schema, target);
     if (requirementFailure) {
       reasons.push(requirementFailure);
       continue;
@@ -807,25 +808,25 @@ export const prepareBoundaryCommit = (
     const trustedEventFailure = verifyTrustedEventRequirements(
       tx,
       target,
-      frozen,
+      schema,
     );
     if (trustedEventFailure) {
       reasons.push(trustedEventFailure);
       continue;
     }
 
-    const exactCopyFailure = verifyExactCopyRequirements(tx, target, frozen);
+    const exactCopyFailure = verifyExactCopyRequirements(tx, target, schema);
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);
       continue;
     }
 
     const existing = storedMetadataFor(tx, space, id, type);
-    let mergedSchema = frozen;
+    let mergedSchema = schema;
     if (existing !== undefined) {
       try {
         const storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
-        mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, frozen);
+        mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, schema);
       } catch (error) {
         reasons.push(
           error instanceof Error
@@ -836,7 +837,7 @@ export const prepareBoundaryCommit = (
       }
     }
     const schemaAndHash = internSchema(mergedSchema, true);
-    const mergedSchemaEntries = walkIfcSchema(mergedSchema);
+    const mergedSchemaEntries = walkIfcSchema(schemaAndHash.schema);
     const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
       mergedSchemaEntries.map((entry) => [
         canonicalizeLogicalPath(entry.path).join("\u0000"),
