@@ -65,16 +65,14 @@ const EXCLUDED_METRIC_PATTERNS = [
 
 async function main() {
   const runId = Deno.env.get("GITHUB_RUN_ID");
-  const prNumber = Deno.env.get("PR_NUMBER");
+  const rawPrNumber = Deno.env.get("PR_NUMBER");
   const isPullRequest = Deno.env.get("IS_PULL_REQUEST") !== "false";
+
   const informationalOnly = !isPullRequest;
 
   // For testing.
-  const zonk = Deno.env.get("TEST_OF_UNDEFINED_GH_VAR");
-  console.log("####### PR NUMBER", prNumber);
-  console.log("####### IS PULL REQUEST", isPullRequest);
-  console.log("####### TEST %o", zonk);
-  if (Math.random() !== -10) Deno.exit(1);
+  const prNumber = (rawPrNumber === "never123") ? rawPrNumber : null;
+  //const prNumber = (rawPrNumber === "") ? null : rawPrNumber;
 
   if (!TOKEN) {
     console.error("GITHUB_TOKEN is required.");
@@ -85,7 +83,7 @@ async function main() {
     Deno.exit(1);
   }
 
-  // 1. Check PR description for overrides
+  // 1. Check PR description for overrides, if there's a PR to check.
   let prOverrides;
   if (prNumber) {
     console.log(`Fetching PR #${prNumber} description...`);
