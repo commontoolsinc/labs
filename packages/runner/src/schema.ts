@@ -238,8 +238,9 @@ function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
     // to disambiguate with no-entry.
     const cached = _filterAsCellCache.get(schema);
     if (cached) return (cached === "<undefined>") ? undefined : cached;
-    const result = makeRawResult();
-    if (result) {
+    const rawResult = makeRawResult();
+    if (rawResult) {
+      const result = internSchema(rawResult);
       _filterAsCellCache.set(schema, result);
       return result;
     } else {
