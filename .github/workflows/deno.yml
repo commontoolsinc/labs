@@ -374,7 +374,7 @@ jobs:
 
   perf-check:
     name: "Performance Check"
-    if: github.event_name == 'pull_request'
+    if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
     runs-on: ubuntu-latest
     needs:
       - check
