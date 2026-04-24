@@ -70,7 +70,7 @@ async function main() {
 
   console.log("####### PR NUMBER", prNumber);
   console.log("####### IS PULL REQUEST", isPullRequest);
-  Deno.exit(1);
+  if (Math.random() !== -10) Deno.exit(1);
 
   if (!TOKEN) {
     console.error("GITHUB_TOKEN is required.");
