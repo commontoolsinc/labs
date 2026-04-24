@@ -926,7 +926,10 @@ export function generateObject<T extends Record<string, unknown>>(
       | undefined;
 
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
-    if ((!hasPrompt && (!messages || messages.length === 0)) || !schema) {
+    if (
+      (!hasPrompt && (!messages || messages.length === 0)) ||
+      schema === undefined
+    ) {
       resultWithLog.set(undefined);
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);

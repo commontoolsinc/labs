@@ -100,6 +100,13 @@ const LLMContextEntrySchema = {
   ],
 } as const;
 
+const JSONSchemaValueSchema = {
+  anyOf: [
+    { type: "object", additionalProperties: true },
+    { type: "boolean" },
+  ],
+} as const;
+
 /** Runtime schema for {@link BuiltInLLMParams} (packages/api/index.ts). */
 export const LLMParamsSchema = internSchema(
   {
@@ -125,7 +132,7 @@ export const LLMParamsSchema = internSchema(
         additionalProperties: LLMContextEntrySchema,
         default: {},
       },
-      resultSchema: { type: "object" },
+      resultSchema: JSONSchemaValueSchema,
     },
     required: ["messages"],
   } as const,
@@ -167,7 +174,7 @@ export const GenerateObjectParamsSchema = internSchema(
         additionalProperties: LLMContextEntrySchema,
         default: {},
       },
-      schema: { type: "object" },
+      schema: JSONSchemaValueSchema,
       system: { type: "string" },
       model: { type: "string" },
       maxTokens: { type: "number" },

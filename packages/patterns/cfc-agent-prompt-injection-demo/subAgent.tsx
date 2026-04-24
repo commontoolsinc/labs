@@ -3,15 +3,18 @@ import {
   type BuiltInLLMTool,
   generateObject,
   type ImmutableJSONValue,
+  lift,
   pattern,
   patternTool,
 } from "commonfabric";
 import type { JSONSchema } from "commonfabric";
 
+type ResultSchemaInput = any;
+
 type SubAgentInput = {
   prompt: BuiltInLLMContent;
   context?: Record<string, any>;
-  resultSchema: JSONSchema | string;
+  resultSchema: ResultSchemaInput;
   system?: string;
   tools?: Record<string, BuiltInLLMTool>;
   model?: string;
@@ -23,6 +26,23 @@ type SubAgentInput = {
 const structuredOutputOnlyTool = pattern<Record<string, never>, { ok: true }>(
   () => ({ ok: true }),
 );
+
+const parseResultSchema = lift<
+  { resultSchema: ResultSchemaInput },
+  JSONSchema
+>(({ resultSchema }) => {
+  if (typeof resultSchema === "string") {
+    return JSON.parse(resultSchema);
+  }
+  if (
+    typeof resultSchema === "boolean" ||
+    (resultSchema !== null && typeof resultSchema === "object" &&
+      !Array.isArray(resultSchema))
+  ) {
+    return resultSchema as JSONSchema;
+  }
+  return true;
+});
 
 export const subAgentPattern = pattern<SubAgentInput, any>((
   {
@@ -37,9 +57,7 @@ export const subAgentPattern = pattern<SubAgentInput, any>((
     schemaSanitizePromptInjection,
   },
 ) => {
-  const parsedResultSchema = typeof resultSchema === "string"
-    ? JSON.parse(resultSchema)
-    : resultSchema;
+  const parsedResultSchema = parseResultSchema({ resultSchema });
   const fallbackTools = {
     structuredOutputOnly: {
       description:
