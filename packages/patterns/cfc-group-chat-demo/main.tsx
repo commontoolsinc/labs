@@ -29,10 +29,14 @@ import {
   type SharedParticipantsValue,
   TrustedChatSendSurface,
   TrustedProfileSaveSurface,
-  VerifiedChatBubble,
+  VerifiedChatBubble0,
   VerifiedChatBubble1,
   VerifiedChatBubble2,
   VerifiedChatBubble3,
+  VerifiedChatBubble4,
+  VerifiedChatBubble5,
+  VerifiedChatBubble6,
+  VerifiedChatBubble7,
 } from "./trusted.tsx";
 
 type LobbyPiece = { [NAME]?: string };
@@ -50,6 +54,22 @@ const sharedWritableOf = <Value,>(
   value: Value,
   name: string,
 ): Writable<Value> => Writable.of<Value>(value).for(name);
+
+const transcriptRowStyle = (
+  messageList: readonly SharedChatMessage[],
+  viewerSlotId: SlotId,
+  index: number,
+) => {
+  const message = messageList[index];
+  const orderedIds = sortDisplayMessages(messageList).map((entry) => entry.id);
+  const order = message ? orderedIds.indexOf(message.id) : index;
+  return {
+    display: message ? "block" : "none",
+    order: order < 0 ? orderedIds.length : order,
+    alignSelf: message?.author.id === viewerSlotId ? "flex-end" : "flex-start",
+    width: "min(34rem, 100%)",
+  };
+};
 
 interface ParticipantStatusChipInput {
   participants: SharedParticipantsCell;
@@ -91,66 +111,30 @@ const SharedTranscript = pattern<
   const messageCountLabel = computed(() =>
     messageCountText(messagesValue(messages).length)
   );
-  const rowZeroStyle = computed(() => {
-    const message = messagesValue(messages)[0];
-    const orderedIds = sortDisplayMessages(messagesValue(messages)).map(
-      (entry) => entry.id,
-    );
-    const order = message ? orderedIds.indexOf(message.id) : 0;
-    return {
-      display: message ? "block" : "none",
-      order: order < 0 ? 0 : order,
-      alignSelf: message?.author.id === viewerSlotId
-        ? "flex-end"
-        : "flex-start",
-      width: "min(34rem, 100%)",
-    };
-  });
-  const rowOneStyle = computed(() => {
-    const message = messagesValue(messages)[1];
-    const orderedIds = sortDisplayMessages(messagesValue(messages)).map(
-      (entry) => entry.id,
-    );
-    const order = message ? orderedIds.indexOf(message.id) : 1;
-    return {
-      display: message ? "block" : "none",
-      order: order < 0 ? 1 : order,
-      alignSelf: message?.author.id === viewerSlotId
-        ? "flex-end"
-        : "flex-start",
-      width: "min(34rem, 100%)",
-    };
-  });
-  const rowTwoStyle = computed(() => {
-    const message = messagesValue(messages)[2];
-    const orderedIds = sortDisplayMessages(messagesValue(messages)).map(
-      (entry) => entry.id,
-    );
-    const order = message ? orderedIds.indexOf(message.id) : 2;
-    return {
-      display: message ? "block" : "none",
-      order: order < 0 ? 2 : order,
-      alignSelf: message?.author.id === viewerSlotId
-        ? "flex-end"
-        : "flex-start",
-      width: "min(34rem, 100%)",
-    };
-  });
-  const rowThreeStyle = computed(() => {
-    const message = messagesValue(messages)[3];
-    const orderedIds = sortDisplayMessages(messagesValue(messages)).map(
-      (entry) => entry.id,
-    );
-    const order = message ? orderedIds.indexOf(message.id) : 3;
-    return {
-      display: message ? "block" : "none",
-      order: order < 0 ? 3 : order,
-      alignSelf: message?.author.id === viewerSlotId
-        ? "flex-end"
-        : "flex-start",
-      width: "min(34rem, 100%)",
-    };
-  });
+  const rowStyle0 = computed(() =>
+    transcriptRowStyle(messagesValue(messages), viewerSlotId, 0)
+  );
+  const rowStyle1 = computed(() =>
+    transcriptRowStyle(messagesValue(messages), viewerSlotId, 1)
+  );
+  const rowStyle2 = computed(() =>
+    transcriptRowStyle(messagesValue(messages), viewerSlotId, 2)
+  );
+  const rowStyle3 = computed(() =>
+    transcriptRowStyle(messagesValue(messages), viewerSlotId, 3)
+  );
+  const rowStyle4 = computed(() =>
+    transcriptRowStyle(messagesValue(messages), viewerSlotId, 4)
+  );
+  const rowStyle5 = computed(() =>
+    transcriptRowStyle(messagesValue(messages), viewerSlotId, 5)
+  );
+  const rowStyle6 = computed(() =>
+    transcriptRowStyle(messagesValue(messages), viewerSlotId, 6)
+  );
+  const rowStyle7 = computed(() =>
+    transcriptRowStyle(messagesValue(messages), viewerSlotId, 7)
+  );
 
   return {
     [NAME]: computed(() => `${id} transcript`),
@@ -168,17 +152,29 @@ const SharedTranscript = pattern<
             paddingRight: "0.25rem",
           }}
         >
-          <div style={rowZeroStyle}>
-            {VerifiedChatBubble({ messages, viewerSlotId })}
+          <div style={rowStyle0}>
+            {VerifiedChatBubble0({ messages, viewerSlotId })}
           </div>
-          <div style={rowOneStyle}>
+          <div style={rowStyle1}>
             {VerifiedChatBubble1({ messages, viewerSlotId })}
           </div>
-          <div style={rowTwoStyle}>
+          <div style={rowStyle2}>
             {VerifiedChatBubble2({ messages, viewerSlotId })}
           </div>
-          <div style={rowThreeStyle}>
+          <div style={rowStyle3}>
             {VerifiedChatBubble3({ messages, viewerSlotId })}
+          </div>
+          <div style={rowStyle4}>
+            {VerifiedChatBubble4({ messages, viewerSlotId })}
+          </div>
+          <div style={rowStyle5}>
+            {VerifiedChatBubble5({ messages, viewerSlotId })}
+          </div>
+          <div style={rowStyle6}>
+            {VerifiedChatBubble6({ messages, viewerSlotId })}
+          </div>
+          <div style={rowStyle7}>
+            {VerifiedChatBubble7({ messages, viewerSlotId })}
           </div>
         </div>
       </cf-vstack>

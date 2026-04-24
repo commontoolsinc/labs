@@ -176,6 +176,24 @@ describe("cfc group chat demo integration test", () => {
       page,
       "#trusted-conversation-preview-participant-2",
     );
+
+    await fillCfInput(
+      page,
+      "#trusted-message-draft-participant-2",
+      "Bob after imported claims",
+    );
+    await waitForRuntimeIdle(page);
+    await clickCfButton(page, "#trusted-send-button-participant-2");
+    await waitForText(
+      page,
+      "#trusted-conversation-preview-participant-2",
+      "5 messages",
+    );
+    await waitForAuthorshipState(
+      page,
+      "Bob after imported claims",
+      "#trusted-conversation-preview-participant-2",
+    );
   });
 });
 
