@@ -360,6 +360,30 @@ const pathsOverlap = (
   right: readonly string[],
 ): boolean => isPrefix(left, right) || isPrefix(right, left);
 
+const linkWriteCoversAffectedPath = (
+  writePath: readonly string[],
+  entryPath: readonly string[],
+  inputs: readonly LinkWritePolicyInput[],
+): boolean =>
+  inputs.some((input) => {
+    const linkPath = canonicalizeLogicalPath(input.target.path);
+    return pathsOverlap(linkPath, writePath) &&
+      pathsOverlap(linkPath, entryPath);
+  });
+
+const linkWritesCoverCfcAffectedPaths = (
+  metadata: CfcMetadata,
+  writePaths: readonly string[][],
+  inputs: readonly LinkWritePolicyInput[],
+): boolean =>
+  writePaths.every((writePath) =>
+    metadata.labelMap.entries.every((entry) => {
+      const entryPath = canonicalizeLogicalPath(entry.path);
+      return !pathsOverlap(entryPath, writePath) ||
+        linkWriteCoversAffectedPath(writePath, entryPath, inputs);
+    })
+  );
+
 const rebindWriteAuthorizedByClaims = (
   schema: JSONSchema,
   identity: ImplementationIdentity | undefined,
@@ -442,10 +466,13 @@ const schemaEnvelopeForTargetPath = (
 
 const valueWriteTargets = (
   tx: IExtendedStorageTransaction,
-): Map<string, { space: MemorySpace; id: URI; type: MediaType }> => {
+): Map<
+  string,
+  { space: MemorySpace; id: URI; type: MediaType; paths: string[][] }
+> => {
   const result = new Map<
     string,
-    { space: MemorySpace; id: URI; type: MediaType }
+    { space: MemorySpace; id: URI; type: MediaType; paths: string[][] }
   >();
   const log = tx.getReactivityLog?.();
   const seenWriteSpaces = new Set<MemorySpace>(
@@ -468,11 +495,17 @@ const valueWriteTargets = (
         continue;
       }
       const key = targetKey(write.address);
-      result.set(key, {
-        space: write.address.space,
-        id: write.address.id as URI,
-        type: write.address.type as MediaType,
-      });
+      const existing = result.get(key);
+      if (existing !== undefined) {
+        existing.paths.push(writePath);
+      } else {
+        result.set(key, {
+          space: write.address.space,
+          id: write.address.id as URI,
+          type: write.address.type as MediaType,
+          paths: [writePath],
+        });
+      }
     }
   }
   return result;
@@ -785,6 +818,43 @@ const derivePersistedLabel = (
   };
 };
 
+const persistedLabelFromSchemaAtPath = (
+  schema: JSONSchema,
+  path: readonly string[],
+): IFCLabel | undefined => {
+  const logicalPath = canonicalizeLogicalPath(path);
+  const entries = walkIfcSchema(schema);
+  let match:
+    | { path: string[]; label: IFCLabel; schema: JSONSchema }
+    | undefined;
+  for (const entry of entries) {
+    if (!isPrefix(entry.path, logicalPath)) {
+      continue;
+    }
+    if (match === undefined || match.path.length < entry.path.length) {
+      match = entry;
+    }
+  }
+  if (match === undefined) {
+    return undefined;
+  }
+  const entryLabels = new Map<string, IFCLabel>(
+    entries.map((entry) => [pathKey(entry.path), entry.label]),
+  );
+  return derivePersistedLabel(match.schema, match.label, entryLabels);
+};
+
+const mergeLabels = (
+  left: IFCLabel | undefined,
+  right: IFCLabel | undefined,
+): IFCLabel => ({
+  confidentiality: mergeLabelValues(
+    left?.confidentiality,
+    right?.confidentiality,
+  ),
+  integrity: mergeLabelValues(left?.integrity, right?.integrity),
+});
+
 const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
   type: "https://commonfabric.org/cfc/atom/LinkReference",
   source: {
@@ -812,6 +882,7 @@ const rootLabelFromSchema = (schema: JSONSchema | undefined): IFCLabel => {
 const derivePersistedLinkLabel = (
   tx: IExtendedStorageTransaction,
   input: LinkWritePolicyInput,
+  candidateSchemas: ReadonlyMap<string, JSONSchema>,
 ): { label?: IFCLabel; reason?: string } => {
   const sourceMetadata = storedMetadataFor(
     tx,
@@ -819,17 +890,27 @@ const derivePersistedLinkLabel = (
     input.source.id as URI,
     input.source.type as MediaType,
   );
-  if (sourceMetadata === undefined) {
+  const pendingSourceLabel = candidateSchemas.get(targetKey(input.source)) !==
+      undefined
+    ? persistedLabelFromSchemaAtPath(
+      candidateSchemas.get(targetKey(input.source))!,
+      input.source.path,
+    )
+    : undefined;
+  if (sourceMetadata === undefined && pendingSourceLabel === undefined) {
     return {
       reason: `missing link source metadata for ${input.target.id} at /${
         input.target.path.join("/")
       }`,
     };
   }
-  const sourceLabel = labelAtPath(
-    sourceMetadata,
-    canonicalizeLogicalPath(input.source.path),
-  ) ?? {};
+  const sourceLabel = mergeLabels(
+    sourceMetadata === undefined ? undefined : labelAtPath(
+      sourceMetadata,
+      canonicalizeLogicalPath(input.source.path),
+    ) ?? {},
+    pendingSourceLabel,
+  );
   const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
   const label: IFCLabel = {
     confidentiality: mergeLabelValues(
@@ -912,11 +993,26 @@ export const prepareBoundaryCommit = (
   );
   const linkWrites = linkWritesByTarget(tx.getCfcState().writePolicyInputs);
   for (const [key, target] of valueWriteTargets(tx)) {
-    if (candidates.has(key) || linkWrites.has(key)) {
+    if (candidates.has(key)) {
       continue;
     }
+    const existing = storedMetadataFor(
+      tx,
+      target.space,
+      target.id,
+      target.type,
+    );
+    if (existing === undefined) {
+      continue;
+    }
+    const linkWriteInputs = linkWrites.get(key) ?? [];
     if (
-      storedMetadataFor(tx, target.space, target.id, target.type) === undefined
+      linkWriteInputs.length > 0 &&
+      linkWritesCoverCfcAffectedPaths(
+        existing,
+        target.paths,
+        linkWriteInputs,
+      )
     ) {
       continue;
     }
@@ -1042,7 +1138,7 @@ export const prepareBoundaryCommit = (
       }
     }
     for (const input of linkWriteInputs) {
-      const result = derivePersistedLinkLabel(tx, input);
+      const result = derivePersistedLinkLabel(tx, input, candidates);
       if (result.reason !== undefined) {
         reasons.push(result.reason);
         continue;

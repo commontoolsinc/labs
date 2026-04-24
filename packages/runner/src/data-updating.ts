@@ -37,6 +37,7 @@ import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
 } from "./cfc/metadata.ts";
+import { canonicalizeLogicalPath } from "./cfc/canonical.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
@@ -54,14 +55,111 @@ const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   path: [...link.path],
 });
 
+const isPrefix = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+const pathsOverlap = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean => isPrefix(left, right) || isPrefix(right, left);
+
+const pathSegmentMatches = (left: string, right: string): boolean =>
+  left === right || left === "*" || right === "*";
+
+const pathPrefixMatches = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => pathSegmentMatches(segment, path[index]));
+
+const schemaPathsOverlap = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean => pathPrefixMatches(left, right) || pathPrefixMatches(right, left);
+
+const labelHasValues = (
+  label: {
+    confidentiality?: readonly unknown[];
+    integrity?: readonly unknown[];
+  },
+): boolean =>
+  (label.confidentiality?.length ?? 0) > 0 ||
+  (label.integrity?.length ?? 0) > 0;
+
+const schemaIfcOverlapsPath = (
+  schema: JSONSchema | undefined,
+  basePath: readonly string[],
+  sourcePath: readonly string[],
+): boolean => {
+  if (schema === undefined || typeof schema === "boolean") {
+    return false;
+  }
+  const visit = (
+    current: JSONSchema,
+    path: readonly string[],
+  ): boolean => {
+    if (typeof current === "boolean") {
+      return false;
+    }
+    if (
+      isRecord(current.ifc) &&
+      labelHasValues(current.ifc) &&
+      schemaPathsOverlap(path, sourcePath)
+    ) {
+      return true;
+    }
+    if (current.type === "object" && isRecord(current.properties)) {
+      for (const [key, child] of Object.entries(current.properties)) {
+        if (visit(child as JSONSchema, [...path, key])) {
+          return true;
+        }
+      }
+    }
+    if (current.type === "array" && current.items !== undefined) {
+      return visit(current.items, [...path, "*"]);
+    }
+    return false;
+  };
+  return visit(schema, basePath);
+};
+
+const hasPendingSourcePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  source: NormalizedFullLink,
+): boolean => {
+  const sourcePath = canonicalizeLogicalPath(source.path);
+  return tx.getCfcState().writePolicyInputs.some((input) =>
+    input.kind === "schema" &&
+    input.target.space === source.space &&
+    input.target.id === source.id &&
+    input.target.type === source.type &&
+    pathsOverlap(canonicalizeLogicalPath(input.target.path), sourcePath) &&
+    schemaIfcOverlapsPath(
+      input.schema,
+      canonicalizeLogicalPath(input.target.path),
+      sourcePath,
+    )
+  );
+};
+
 const recordLinkWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   target: NormalizedFullLink,
   source: NormalizedFullLink,
 ): void => {
+  if (tx.getCfcState().enforcementMode === "disabled") {
+    return;
+  }
   const sourceMetadata = readStoredCfcMetadata(tx, source);
+  const sourceRelevant = sourceMetadata !== undefined ||
+    hasPendingSourcePolicyInput(tx, source);
   const targetRelevant = storedCfcMetadataAppliesToPath(tx, target);
-  if (sourceMetadata === undefined && !targetRelevant) {
+  if (!sourceRelevant && !targetRelevant) {
     return;
   }
 
@@ -308,11 +406,12 @@ export function normalizeAndDiff(
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {
+    const parsedLink = parseLink(newValue, link);
     if (
       isWriteRedirectLink(currentValue) &&
       areNormalizedLinksSame(
         parseLink(currentValue, link),
-        parseLink(newValue, link),
+        parsedLink,
       )
     ) {
       diffLogger.debug(
@@ -326,6 +425,7 @@ export function normalizeAndDiff(
         () =>
           `[BRANCH_WRITE_REDIRECT] Different redirect, updating at path=${pathStr}`,
       );
+      recordLinkWritePolicyInput(tx, link, parsedLink);
       changes.push({ location: link, value: newValue as FabricValue });
       return changes;
     }
