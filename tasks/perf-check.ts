@@ -217,110 +217,242 @@ async function main() {
   }
 
   // 5. Compare current metrics against baseline
-  const failures: {
+  type Status = "OVER" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
+  interface Row {
     metric: string;
+    status: Status;
     current: number;
-    median: number;
-    variance: number;
-    stddev: number;
-    threshold: number;
-    pctIncrease: number;
-  }[] = [];
+    median?: number;
+    variance?: number;
+    stddev?: number;
+    threshold?: number;
+    n: number;
+    pctIncrease?: number;
+    /**
+     * How much of the median→threshold margin the current value has consumed,
+     * as a percentage. 0% = at median; 100% = at threshold; >100% = over.
+     */
+    headroomPct?: number;
+  }
+
+  const rows: Row[] = [];
+  const failures: Row[] = [];
 
   for (const [metric, currentSample] of currentMetrics) {
-    // Skip metrics whose aggregate values grow as tests are added
+    const current = currentSample.durationSeconds;
+    const timeline = timelines.get(metric);
+    const n = timeline?.samples.length ?? 0;
+    const baseline = timeline && n >= MIN_SAMPLES
+      ? computeBaseline(
+        timeline.samples.map((s) => s.durationSeconds),
+        metric.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
+      )
+      : null;
+
+    const stats = baseline && {
+      median: baseline.median,
+      variance: baseline.variance,
+      stddev: baseline.stddev,
+      threshold: baseline.threshold,
+      pctIncrease: ((current - baseline.median) / baseline.median) * 100,
+      headroomPct: baseline.threshold > baseline.median
+        ? ((current - baseline.median) /
+          (baseline.threshold - baseline.median)) * 100
+        : 0,
+    };
+
+    // Metrics whose aggregate values grow as tests are added — never fail,
+    // but still shown so the log has full context.
     if (EXCLUDED_METRIC_PATTERNS.some((re) => re.test(metric))) {
+      rows.push({ metric, status: "excl", current, n, ...(stats ?? {}) });
       continue;
     }
 
-    // Skip if the PR has a specific override for this metric
+    // Not enough baseline data — show anyway.
+    if (!baseline) {
+      rows.push({ metric, status: "n/a", current, n });
+      continue;
+    }
+
+    // PR has an override saving this metric.
     if (prOverrides.metrics.has(metric)) {
       const override = prOverrides.metrics.get(metric)!;
-      if (currentSample.durationSeconds <= override) {
-        console.log(
-          `  ${metric}: ${
-            formatMetricValue(metric, currentSample.durationSeconds)
-          } (override: ${formatMetricValue(metric, override)}) — OK`,
-        );
+      if (current <= override) {
+        rows.push({ metric, status: "ovrd", current, n, ...stats! });
         continue;
       }
     }
 
-    const timeline = timelines.get(metric);
-    if (!timeline || timeline.samples.length < MIN_SAMPLES) {
-      // Not enough baseline data for this metric
-      continue;
-    }
-
-    const baseline = computeBaseline(
-      timeline.samples.map((s) => s.durationSeconds),
-      metric.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
-    );
-    if (!baseline) continue;
-
-    if (currentSample.durationSeconds > baseline.threshold) {
-      const pctIncrease =
-        ((currentSample.durationSeconds - baseline.median) / baseline.median) *
-        100;
-      failures.push({
-        metric,
-        current: currentSample.durationSeconds,
-        median: baseline.median,
-        variance: baseline.variance,
-        stddev: baseline.stddev,
-        threshold: baseline.threshold,
-        pctIncrease,
-      });
+    if (current > baseline.threshold) {
+      const row: Row = { metric, status: "OVER", current, n, ...stats! };
+      rows.push(row);
+      failures.push(row);
+    } else if ((stats!.headroomPct ?? 0) >= 50) {
+      rows.push({ metric, status: "CLOSE", current, n, ...stats! });
+    } else {
+      rows.push({ metric, status: "OK", current, n, ...stats! });
     }
   }
 
   // 6. Report results
+
+  // 6a. Prominent failure callout up top, so it's unmissable.
+  if (failures.length > 0) {
+    failures.sort((a, b) => (b.pctIncrease ?? 0) - (a.pctIncrease ?? 0));
+
+    console.log(
+      `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!\n`,
+    );
+    console.log(
+      "| Metric | Current | Baseline (median) | Threshold | Change |",
+    );
+    console.log(
+      "|--------|---------|-------------------|-----------|--------|",
+    );
+    for (const f of failures) {
+      const fmt = (v: number) => formatMetricValue(f.metric, v);
+      console.log(
+        `| ${f.metric} | ${fmt(f.current)} | ${fmt(f.median!)} | ${
+          fmt(f.threshold!)
+        } | +${f.pctIncrease!.toFixed(0)}% |`,
+      );
+    }
+
+    console.log("\nBaseline sample breakdown:\n");
+    for (const f of failures) {
+      const timeline = timelines.get(f.metric);
+      if (!timeline) continue;
+
+      const fmt = (v: number) => formatMetricValue(f.metric, v);
+      console.log(
+        `  ${f.metric} (n=${timeline.samples.length}, median=${
+          fmt(f.median!)
+        }, variance=${fmt(f.variance!)}, stddev=${fmt(f.stddev!)}):`,
+      );
+      for (const s of timeline.samples) {
+        const pr = prInfoBySha.get(s.sha);
+        const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
+        console.log(
+          `    ${fmt(s.durationSeconds)} — ${prStr} (${
+            s.createdAt.slice(0, 10)
+          })`,
+        );
+      }
+    }
+  }
+
+  // 6b. Full metric table — always emitted, grouped by metric kind.
+  console.log(
+    `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
+      MIN_REGRESSION_PCT * 100
+    }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
+  );
+  console.log(
+    "Status key: OVER = over threshold (fails); CLOSE = ≥50% of margin consumed;",
+  );
+  console.log(
+    "  OK = <50% consumed; ovrd = saved by a PR override; excl = metric excluded from the check;",
+  );
+  console.log(
+    `  n/a = fewer than ${MIN_SAMPLES} baseline samples.`,
+  );
+  console.log(
+    `  head% = fraction of the median→threshold margin currently consumed.`,
+  );
+
+  const kindOf = (metric: string): string => {
+    const colon = metric.indexOf(":");
+    if (colon < 0) return "other";
+    const prefix = metric.slice(0, colon);
+    switch (prefix) {
+      case "job":
+        return "Jobs";
+      case "step":
+        return "Steps";
+      case "test":
+        return "Test files";
+      case "subtest":
+        return "Subtests";
+      case "bench":
+        return "Benchmarks";
+      default:
+        return prefix;
+    }
+  };
+  const KIND_ORDER = ["Jobs", "Steps", "Test files", "Subtests", "Benchmarks"];
+  // Sort order within each kind: most at-risk of failing the check first.
+  // `ovrd` sits below `OK` because an override-protected metric is at strictly
+  // lower risk of tripping the check than an unguarded OK metric — the author
+  // has already authorized its current level.
+  const STATUS_ORDER: Record<Status, number> = {
+    OVER: 5,
+    CLOSE: 4,
+    OK: 3,
+    ovrd: 2,
+    excl: 1,
+    "n/a": 0,
+  };
+
+  const byKind = new Map<string, Row[]>();
+  for (const r of rows) {
+    const k = kindOf(r.metric);
+    if (!byKind.has(k)) byKind.set(k, []);
+    byKind.get(k)!.push(r);
+  }
+  const kindsSeen = [
+    ...KIND_ORDER.filter((k) => byKind.has(k)),
+    ...[...byKind.keys()].filter((k) => !KIND_ORDER.includes(k)).sort(),
+  ];
+
+  const counts = {
+    OVER: 0,
+    CLOSE: 0,
+    OK: 0,
+    ovrd: 0,
+    excl: 0,
+    "n/a": 0,
+  } as Record<Status, number>;
+  for (const r of rows) counts[r.status]++;
+
+  console.log(
+    `\n## All metrics checked  (${rows.length} total — OVER: ${counts.OVER}, CLOSE: ${counts.CLOSE}, OK: ${counts.OK}, ovrd: ${counts.ovrd}, excl: ${counts.excl}, n/a: ${
+      counts["n/a"]
+    })`,
+  );
+
+  for (const kind of kindsSeen) {
+    const rs = byKind.get(kind)!;
+    rs.sort((a, b) => {
+      const s = STATUS_ORDER[b.status] - STATUS_ORDER[a.status];
+      if (s !== 0) return s;
+      return (b.headroomPct ?? -Infinity) - (a.headroomPct ?? -Infinity);
+    });
+    console.log(`\n### ${kind}  (${rs.length})`);
+    console.log(
+      "| status | head% | Δ% | current | baseline median | threshold | n | metric |",
+    );
+    console.log("|:---|---:|---:|---:|---:|---:|---:|:--|");
+    for (const r of rs) {
+      const fmt = (v: number | undefined) =>
+        v === undefined ? "—" : formatMetricValue(r.metric, v);
+      const pct = r.pctIncrease === undefined
+        ? "—"
+        : `${r.pctIncrease >= 0 ? "+" : ""}${r.pctIncrease.toFixed(1)}%`;
+      const head = r.headroomPct === undefined
+        ? "—"
+        : `${r.headroomPct.toFixed(0)}%`;
+      console.log(
+        `| ${r.status} | ${head} | ${pct} | ${fmt(r.current)} | ${
+          fmt(r.median)
+        } | ${fmt(r.threshold)} | ${r.n} | ${r.metric} |`,
+      );
+    }
+  }
+
+  // 6c. Pass/fail outcome + override copy-paste block pinned at the bottom.
   if (failures.length === 0) {
     console.log("\nAll metrics within normal range.");
     Deno.exit(0);
-  }
-
-  failures.sort((a, b) => b.pctIncrease - a.pctIncrease);
-
-  console.log(
-    `\nPerformance regression detected in ${failures.length} metric(s):\n`,
-  );
-  console.log(
-    "| Metric | Current | Baseline (median) | Threshold | Change |",
-  );
-  console.log(
-    "|--------|---------|-------------------|-----------|--------|",
-  );
-
-  for (const f of failures) {
-    const fmt = (v: number) => formatMetricValue(f.metric, v);
-    console.log(
-      `| ${f.metric} | ${fmt(f.current)} | ${fmt(f.median)} | ${
-        fmt(f.threshold)
-      } | +${f.pctIncrease.toFixed(0)}% |`,
-    );
-  }
-
-  console.log("\nBaseline sample breakdown:\n");
-  for (const f of failures) {
-    const timeline = timelines.get(f.metric);
-    if (!timeline) continue;
-
-    const fmt = (v: number) => formatMetricValue(f.metric, v);
-    console.log(
-      `  ${f.metric} (n=${timeline.samples.length}, median=${
-        fmt(f.median)
-      }, variance=${fmt(f.variance)}, stddev=${fmt(f.stddev)}):`,
-    );
-    for (const s of timeline.samples) {
-      const pr = prInfoBySha.get(s.sha);
-      const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
-      console.log(
-        `    ${fmt(s.durationSeconds)} — ${prStr} (${
-          s.createdAt.slice(0, 10)
-        })`,
-      );
-    }
   }
 
   console.log(
@@ -332,12 +464,6 @@ async function main() {
     console.log(`NEW_PERF_BASELINE: ${f.metric} = ${suggested}`);
   }
   console.log("---END COPY-PASTE---");
-
-  console.log(
-    `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
-      MIN_REGRESSION_PCT * 100
-    }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
-  );
 
   Deno.exit(1);
 }
