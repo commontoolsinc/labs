@@ -42,6 +42,10 @@ export const test = new Command()
     "Show detailed execution logs.",
   )
   .option(
+    "--perf-json",
+    "Emit one machine-readable JSON metrics line per test file.",
+  )
+  .option(
     "--root <dir:string>",
     "Root directory for resolving imports. Enables imports like '../shared/utils.tsx'.",
   )
@@ -163,6 +167,7 @@ export const test = new Command()
     const { failed } = await runTests(uniqueTestFiles, {
       timeout: options.timeout,
       verbose: options.verbose,
+      perfJson: options.perfJson,
       root,
       memoryVersion: options.memoryVersion,
       statsThreshold: options.statsThreshold,

@@ -39,6 +39,7 @@ import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { OpaqueRef } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { cpuUsage, memoryUsage } from "node:process";
 import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
@@ -161,6 +162,7 @@ export interface TestRunResult {
   path: string;
   results: TestResult[];
   totalDurationMs: number;
+  cpuMetrics?: TestRunCpuMetrics;
   error?: string;
   /** Navigation events recorded during the test run */
   navigations: NavigationEvent[];
@@ -174,9 +176,21 @@ export interface TestRunResult {
   expectNonIdempotent?: boolean;
 }
 
+export interface TestRunCpuMetrics {
+  userCpuMicros: number;
+  systemCpuMicros: number;
+  totalCpuMicros: number;
+  rssBytes: number;
+  heapTotalBytes: number;
+  heapUsedBytes: number;
+  externalBytes: number;
+}
+
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
+  /** Emit machine-readable CPU/resource metrics for each completed test file. */
+  perfJson?: boolean;
   /** Root directory for resolving imports. If not provided, uses the test file's directory. */
   root?: string;
   /** Force the storage/runtime memory implementation used by the test harness. */
@@ -240,6 +254,33 @@ function fmtMs(ms: number): string {
   if (ms >= 10) return `${Math.round(ms)}ms`;
   if (ms >= 1) return `${ms.toFixed(1)}ms`;
   return `${ms.toFixed(2)}ms`;
+}
+
+function collectCpuMetrics(
+  startCpu = cpuUsage(),
+): TestRunCpuMetrics {
+  const cpu = cpuUsage(startCpu);
+  const memory = memoryUsage();
+  return {
+    userCpuMicros: cpu.user,
+    systemCpuMicros: cpu.system,
+    totalCpuMicros: cpu.user + cpu.system,
+    rssBytes: memory.rss,
+    heapTotalBytes: memory.heapTotal,
+    heapUsedBytes: memory.heapUsed,
+    externalBytes: memory.external,
+  };
+}
+
+function printPerfJson(result: TestRunResult): void {
+  console.log(JSON.stringify({
+    kind: "cf-test-metrics",
+    version: 1,
+    path: result.path,
+    totalDurationMs: result.totalDurationMs,
+    cpuMetrics: result.cpuMetrics,
+    passed: !result.error,
+  }));
 }
 
 function printSettleStats(stats: SettleStats | null): void {
@@ -796,6 +837,7 @@ export async function runTestPattern(
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
   const startTime = performance.now();
+  const startCpu = cpuUsage();
   performance.clearMarks();
   performance.clearMeasures();
   resetAllLoggerCounts();
@@ -1422,6 +1464,7 @@ export async function runTestPattern(
       path: testPath,
       results,
       totalDurationMs: performance.now() - startTime,
+      cpuMetrics: collectCpuMetrics(startCpu),
       navigations,
       runtimeErrors: errorMessages,
       allowRuntimeErrors,
@@ -1446,6 +1489,7 @@ export async function runTestPattern(
       path: testPath,
       results: [],
       totalDurationMs: performance.now() - startTime,
+      cpuMetrics: collectCpuMetrics(startCpu),
       navigations,
       runtimeErrors: errorMessages,
       nonIdempotent: [],
@@ -1486,6 +1530,10 @@ export async function runTests(
 
     const result = await runTestPattern(testPath, options);
     allResults.push(result);
+
+    if (options.perfJson && result.cpuMetrics) {
+      printPerfJson(result);
+    }
 
     if (result.error) {
       console.log(`  ✗ Error: ${result.error}`);

@@ -19,6 +19,65 @@
 import * as path from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 
+type PatternTestTiming = {
+  file: string;
+  durationMs: number;
+  passed: boolean;
+  cpuMetrics?: {
+    userCpuMicros: number;
+    systemCpuMicros: number;
+    totalCpuMicros: number;
+    rssBytes: number;
+    heapTotalBytes: number;
+    heapUsedBytes: number;
+    externalBytes: number;
+  };
+};
+
+type CfTestPerfJson = {
+  kind: "cf-test-metrics";
+  version: number;
+  path: string;
+  totalDurationMs: number;
+  cpuMetrics?: PatternTestTiming["cpuMetrics"];
+  passed: boolean;
+};
+
+function parseCfTestPerfJson(
+  stdout: string | undefined,
+): CfTestPerfJson | undefined {
+  if (!stdout) return undefined;
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{"kind":"cf-test-metrics"')) continue;
+    try {
+      return JSON.parse(trimmed) as CfTestPerfJson;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+function buildPatternCpuMetricsJson(
+  timings: PatternTestTiming[],
+): string {
+  return JSON.stringify(
+    {
+      kind: "pattern-test-metrics",
+      version: 1,
+      metrics: timings.map((timing) => ({
+        file: timing.file,
+        durationMs: timing.durationMs,
+        passed: timing.passed,
+        cpuMetrics: timing.cpuMetrics,
+      })),
+    },
+    null,
+    2,
+  );
+}
+
 // Packages with integration tests that need a running server by default.
 const DEFAULT_PACKAGES_WITH_SERVER = [
   "runner",
@@ -198,6 +257,9 @@ async function runPatternTests(
   const testFiles = await findPatternTests(rootDir, patternsDir, filter);
   const memoryVersion = Deno.env.get("CF_TEST_MEMORY_VERSION") ??
     Deno.env.get("CF_INTEGRATION_MEMORY_VERSION");
+  const perfJsonEnabled = ["1", "true", "yes", "on"].includes(
+    (Deno.env.get("CF_INTEGRATION_PERF_JSON") ?? "").toLowerCase(),
+  );
 
   if (testFiles.length === 0) {
     console.log("No pattern test files found.");
@@ -213,8 +275,7 @@ async function runPatternTests(
   }
 
   const failed: string[] = [];
-  const testTimings: { file: string; durationMs: number; passed: boolean }[] =
-    [];
+  const testTimings: PatternTestTiming[] = [];
 
   // Run as a pool: always keep `concurrency` tests in flight
   let nextIndex = 0;
@@ -233,6 +294,7 @@ async function runPatternTests(
             "180000",
             "--root",
             patternsDir,
+            ...(perfJsonEnabled ? ["--perf-json"] : []),
             ...(memoryVersion === "v1" || memoryVersion === "v2"
               ? ["--memory-version", memoryVersion]
               : []),
@@ -241,11 +303,13 @@ async function runPatternTests(
           { cwd: rootDir },
         );
         const durationMs = performance.now() - startMs;
+        const perfMetrics = parseCfTestPerfJson(result.stdout);
 
         testTimings.push({
           file: testFile,
           durationMs,
           passed: result.success,
+          cpuMetrics: perfMetrics?.cpuMetrics,
         });
 
         if (result.success) {
@@ -260,6 +324,7 @@ async function runPatternTests(
         }
         if (result.stdout) {
           for (const line of result.stdout.trimEnd().split("\n")) {
+            if (line.trim().startsWith('{"kind":"cf-test-metrics"')) continue;
             console.log(`   ${line}`);
           }
         }
@@ -299,6 +364,15 @@ async function runPatternTests(
     const junitPath = path.join(junitDir, "pattern-unit-tests.xml");
     await Deno.writeTextFile(junitPath, xml);
     console.log(`Wrote JUnit timing to ${junitPath}`);
+
+    if (perfJsonEnabled) {
+      const perfJsonPath = path.join(junitDir, "pattern-unit-metrics.json");
+      await Deno.writeTextFile(
+        perfJsonPath,
+        buildPatternCpuMetricsJson(testTimings),
+      );
+      console.log(`Wrote pattern-unit metrics to ${perfJsonPath}`);
+    }
   }
 
   return failed.length === 0;
