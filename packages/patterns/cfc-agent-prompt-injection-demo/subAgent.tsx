@@ -36,17 +36,17 @@ export const subAgentPattern = pattern<SubAgentInput, any>((
     ? JSON.parse(resultSchema)
     : resultSchema;
 
-  return (
-    generateObject({
-      prompt,
-      context,
-      system,
-      tools,
-      model,
-      maxTokens,
-      observationMaxConfidentiality,
-      schemaSanitizePromptInjection,
-      schema: parsedResultSchema,
-    }).result
-  );
+  const response = generateObject({
+    prompt,
+    context,
+    system,
+    tools,
+    model,
+    maxTokens,
+    observationMaxConfidentiality,
+    schemaSanitizePromptInjection,
+    schema: parsedResultSchema,
+  });
+
+  return response.error ? { error: response.error } : response.result;
 });
