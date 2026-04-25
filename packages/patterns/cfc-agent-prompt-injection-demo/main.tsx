@@ -194,6 +194,25 @@ const SUB_AGENT_BRIEFING_MESSAGES_SCHEMA = {
   },
 } as const satisfies JSONSchema;
 const AGENT_PANEL_HEIGHT = "clamp(30rem, 68vh, 42rem)";
+const AGENT_PANEL_STYLE = {
+  boxSizing: "border-box",
+  display: "flex",
+  flexDirection: "column",
+  height: AGENT_PANEL_HEIGHT,
+  minHeight: "0",
+  overflow: "hidden",
+  border: "1px solid var(--cf-color-gray-200, #eaecf0)",
+  borderRadius: "12px",
+  background: "var(--cf-color-background, #fff)",
+  padding: "1rem",
+};
+const AGENT_PANEL_STACK_STYLE = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.75rem",
+  height: "100%",
+  minHeight: "0",
+};
 
 const PRIMARY_CONTROL_STYLE = {
   border: "0",
@@ -458,15 +477,8 @@ Your job in this half is to fail visibly when the document tries to seize contro
     unsafeMessages.set([]);
   });
   const unsafeAgentUi = (
-    <cf-card style={{ height: AGENT_PANEL_HEIGHT }}>
-      <cf-vstack
-        slot="content"
-        gap="3"
-        style={{
-          minHeight: "0",
-          height: "100%",
-        }}
-      >
+    <section style={AGENT_PANEL_STYLE}>
+      <div style={AGENT_PANEL_STACK_STYLE}>
         <cf-vstack gap="1">
           <cf-heading level={3}>{unsafeTitle}</cf-heading>
           <cf-label>{unsafeSubtitle}</cf-label>
@@ -526,8 +538,8 @@ Your job in this half is to fail visibly when the document tries to seize contro
           oncf-send={sendMessage({ addMessage: unsafeAddMessage })}
           oncf-stop={unsafeCancelGeneration}
         />
-      </cf-vstack>
-    </cf-card>
+      </div>
+    </section>
   );
 
   const safeTitle = "Safe generic subAgent path";
@@ -586,15 +598,8 @@ If readRawBriefing gives you a body you cannot directly inspect, your next move 
     safeMessages.set([]);
   });
   const safeAgentUi = (
-    <cf-card style={{ height: AGENT_PANEL_HEIGHT }}>
-      <cf-vstack
-        slot="content"
-        gap="3"
-        style={{
-          minHeight: "0",
-          height: "100%",
-        }}
-      >
+    <section style={AGENT_PANEL_STYLE}>
+      <div style={AGENT_PANEL_STACK_STYLE}>
         <cf-vstack gap="1">
           <cf-heading level={3}>{safeTitle}</cf-heading>
           <cf-label>{safeSubtitle}</cf-label>
@@ -654,8 +659,8 @@ If readRawBriefing gives you a body you cannot directly inspect, your next move 
           oncf-send={sendMessage({ addMessage: safeAddMessage })}
           oncf-stop={safeCancelGeneration}
         />
-      </cf-vstack>
-    </cf-card>
+      </div>
+    </section>
   );
 
   return {
