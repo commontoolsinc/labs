@@ -1,6 +1,9 @@
-import { createJsonSchema, type JSONSchema } from "@commonfabric/runner";
-import { compileAndRunPattern } from "./iterate.ts";
-import type { PieceManager } from "./manager.ts";
+import {
+  compileAndSavePattern,
+  createJsonSchema,
+  type JSONSchema,
+} from "@commonfabric/runner";
+import type { PieceManager } from "@commonfabric/piece";
 
 export const createDataPiece = (
   pieceManager: PieceManager,
@@ -33,10 +36,8 @@ export const createDataPiece = (
     ${result}
   }), schema, schema);`;
 
-  return compileAndRunPattern(
-    pieceManager,
-    dataPatternSrc,
-    name ?? "Data Import",
-    data,
-  );
+  return compileAndSavePattern(pieceManager.runtime, dataPatternSrc, {
+    spec: name ?? "Data Import",
+    space: pieceManager.getSpace(),
+  }).then((pattern) => pieceManager.runPersistent(pattern, data));
 };
