@@ -1,6 +1,15 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
+import {
+  classifyFileToolShellFailure,
+  classifyPathResolutionError,
+  createStructuredFileToolErrorOutput,
+  detailFromShellFailure,
+  detailFromUnknownError,
+  type StructuredFileToolErrorOutput,
+  structuredFileToolErrorOutputSchema,
+} from "./file-errors.ts";
 
 export type WriteFileMode = "replace" | "append";
 
@@ -11,11 +20,15 @@ export interface WriteFileToolInput {
   createParents?: boolean;
 }
 
-export interface WriteFileToolOutput {
+export interface WriteFileToolSuccessOutput {
   outputId: string;
   path: string;
   mode: WriteFileMode;
 }
+
+export type WriteFileToolOutput =
+  | WriteFileToolSuccessOutput
+  | StructuredFileToolErrorOutput;
 
 export const WRITE_FILE_MODES: readonly WriteFileMode[] = [
   "replace",
@@ -40,14 +53,16 @@ export const writeFileToolDescriptor: HarnessToolDescriptor = {
     additionalProperties: false,
   } satisfies JSONSchema,
   outputSchema: {
-    type: "object",
-    properties: {
-      outputId: { type: "string" },
-      path: { type: "string" },
-      mode: { type: "string", enum: [...WRITE_FILE_MODES] },
-    },
-    required: ["outputId", "path", "mode"],
-    additionalProperties: false,
+    oneOf: [{
+      type: "object",
+      properties: {
+        outputId: { type: "string" },
+        path: { type: "string" },
+        mode: { type: "string", enum: [...WRITE_FILE_MODES] },
+      },
+      required: ["outputId", "path", "mode"],
+      additionalProperties: false,
+    }, structuredFileToolErrorOutputSchema],
   } satisfies JSONSchema,
   tags: ["file", "write", "vm"],
 };
@@ -58,7 +73,16 @@ export const writeFileTool: HarnessToolDefinition<
 > = {
   descriptor: writeFileToolDescriptor,
   async invoke(context, input) {
-    const resolvedPath = context.resolvePath(input.path);
+    let resolvedPath: string;
+    try {
+      resolvedPath = context.resolvePath(input.path);
+    } catch (error) {
+      return createStructuredFileToolErrorOutput(context, "write_file", {
+        path: input.path,
+        code: classifyPathResolutionError(error),
+        detail: detailFromUnknownError(error),
+      });
+    }
     const mode = input.mode ?? "replace";
     const result = await context.sandbox.runShell({
       command: [
@@ -66,8 +90,16 @@ export const writeFileTool: HarnessToolDefinition<
         'path="$1"',
         'mode="$2"',
         'create_parents="$3"',
+        'parent="$(dirname "$path")"',
         'if [ "$create_parents" = "true" ]; then',
-        '  mkdir -p "$(dirname "$path")"',
+        '  mkdir -p "$parent"',
+        'elif [ ! -d "$parent" ]; then',
+        '  echo "file not found: parent directory $parent" >&2',
+        "  exit 10",
+        "fi",
+        'if [ -e "$path" ] && [ ! -f "$path" ]; then',
+        '  echo "not a file: $path" >&2',
+        "  exit 11",
         "fi",
         'case "$mode" in',
         "  replace)",
@@ -78,7 +110,7 @@ export const writeFileTool: HarnessToolDefinition<
         "    ;;",
         "  *)",
         '    echo "unsupported write mode: $mode" >&2',
-        "    exit 2",
+        "    exit 12",
         "    ;;",
         "esac",
       ].join("\n"),
@@ -86,9 +118,12 @@ export const writeFileTool: HarnessToolDefinition<
       stdinText: input.content,
     });
     if (result.exitCode !== 0) {
-      const detail = result.stderr.trim() || result.stdout.trim() ||
-        `shell exited with code ${result.exitCode}`;
-      throw new Error(`write_file failed for ${resolvedPath}: ${detail}`);
+      return createStructuredFileToolErrorOutput(context, "write_file", {
+        path: resolvedPath,
+        code: classifyFileToolShellFailure(result),
+        detail: detailFromShellFailure(result),
+        exitCode: result.exitCode,
+      });
     }
     return {
       outputId: context.nextOutputId("write_file"),
