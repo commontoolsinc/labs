@@ -107,6 +107,7 @@ import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { MetaField } from "@commonfabric/api";
+import { deriveCause } from "./derive-cause.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -121,7 +122,10 @@ let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
-const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
+const cellNodes = new WeakMap<
+  OpaqueCell<unknown>,
+  Set<NodeRef<unknown, unknown>>
+>();
 
 const recordSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
@@ -315,12 +319,12 @@ declare module "@commonfabric/api" {
     freeze(reason: string): void;
     isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
-    connect(node: NodeRef): void;
+    connect(node: NodeRef<unknown, unknown>): void;
     export(): {
       cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
       schema?: JSONSchema;
-      nodes: Set<NodeRef>;
+      nodes: Set<NodeRef<unknown, unknown>>;
       frame: Frame;
       value?: Opaque<T> | T;
       name?: unknown;
@@ -558,6 +562,13 @@ export class CellImpl<T extends FabricValue>
     return this as unknown as Cell<T>;
   }
 
+  private deriveCause(): unknown {
+    return deriveCause(
+      this._frame?.cause,
+      cellNodes.get(this._causeContainer.cell),
+    );
+  }
+
   /**
    * Force creation of a full link for this cell from the stored cause.
    * This method populates id if it doesn't exist, using information from:
@@ -605,6 +616,7 @@ export class CellImpl<T extends FabricValue>
     // Used passed in cause (via .for()), for events fall back to per-frame
     // counter.
     const cause = this._causeContainer.cause ??
+      this.deriveCause() ??
       (this._frame.inHandler
         ? { count: this._frame.generatedIdCounter++ }
         : undefined);
@@ -617,7 +629,9 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Create an entity ID from the cause, including the frame's
-    const id = toURI(createRef({ frame: cause }, this._frame.cause));
+    const id = toURI(
+      createRef({ frame: cause }, this._frame.cause ?? "derived cell"),
+    );
 
     // Populate the id in the shared causeContainer
     // All siblings will see this update
@@ -1510,7 +1524,7 @@ export class CellImpl<T extends FabricValue>
    * This stores the node in a set of connected nodes, which is used during pattern construction.
    * @param node - The node to connect to
    */
-  connect(node: NodeRef): void {
+  connect(node: NodeRef<unknown, unknown>): void {
     // For cells created during pattern construction, we need to track which nodes
     // they're connected to. Since Cell doesn't have a nodes set like OpaqueRef's store,
     // we'll store this in a WeakMap keyed by the cell instance.
@@ -1535,7 +1549,7 @@ export class CellImpl<T extends FabricValue>
     cell: OpaqueCell<unknown>;
     path: readonly PropertyKey[];
     schema?: JSONSchema;
-    nodes: Set<NodeRef>;
+    nodes: Set<NodeRef<unknown, unknown>>;
     frame: Frame;
     value?: Opaque<T> | T;
     name?: unknown;

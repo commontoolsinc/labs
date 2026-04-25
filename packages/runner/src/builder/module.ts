@@ -28,6 +28,7 @@ import {
   hardenVerifiedFunction,
   registerVerifiedFunctionImplementation,
 } from "../sandbox/function-hardening.ts";
+import { Unit } from "../storage/interface.ts";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
   enabled: false,
@@ -111,7 +112,12 @@ export function createNodeFactory<T = any, R = any>(
   );
   return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
-    const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
+    const node: NodeRef<T, R> = {
+      module,
+      inputs,
+      outputs,
+      frame: getTopFrame(),
+    };
 
     connectInputAndOutputs(node);
     (outputs as OpaqueCell<R>).connect(node);
@@ -388,7 +394,7 @@ function handlerInternal<E, T>(
     const eventStream = stream<E>(flexibleEventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
-    const node: NodeRef = {
+    const node: NodeRef<{ $ctx: Opaque<StripCell<T>>; $event: E }, Unit> = {
       module,
       inputs: { $ctx: props, $event: eventStream },
       outputs: {},

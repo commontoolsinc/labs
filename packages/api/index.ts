@@ -237,7 +237,8 @@ export interface IReadable<T> {
 export type MetaField =
   | "pattern"
   | "argument"
-  | "internal";
+  | "internal"
+  | "process";
 
 export interface IMetaCell {
   getMetaRaw(metaField: MetaField): FabricValue;

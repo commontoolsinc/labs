@@ -8,7 +8,7 @@ import {
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
 
-export function connectInputAndOutputs(node: NodeRef) {
+export function connectInputAndOutputs<T, R>(node: NodeRef<T, R>) {
   function connect(value: any): any {
     if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
     if (isCell(value)) {

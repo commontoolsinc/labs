@@ -330,4 +330,79 @@ describe("Pattern Runner - Regressions", () => {
       resultRecipe: { name: "result recipe" },
     });
   });
+
+  it("persists process snapshots on running results", async () => {
+    const snapshotPattern = pattern<{ value: number; items: number[] }>(({
+      value,
+      items,
+    }) => ({
+      doubled: derive(value, (n: number) => n * 2),
+      itemLabels: items.map((item) => derive(item, (n: number) => `item:${n}`)),
+    }));
+
+    const resultCell = runtime.getCell<{
+      doubled: number;
+      itemLabels: string[];
+    }>(
+      space,
+      "process-snapshot-regression",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(
+      tx,
+      snapshotPattern,
+      { value: 5, items: [1, 2, 3] },
+      resultCell,
+    );
+    await commitTx();
+    await result.pull();
+
+    const snapshot = result.getMetaRaw("process") as {
+      version?: number;
+      generation?: number;
+      cells?: Array<{
+        link?: { baseCell?: string };
+        module?: { type?: string; ref?: string };
+        arguments?: Array<{ baseCell?: string }>;
+        inputBindings?: {
+          list?: { baseCell?: string };
+          op?: {
+            result?: { baseCell?: string };
+            nodes?: Array<{
+              module?: { type?: string; implementationRef?: string };
+            }>;
+          };
+        };
+      }>;
+    } | undefined;
+
+    expect(snapshot?.version).toBe(1);
+    expect(snapshot?.generation).toBe(1);
+    expect(snapshot?.cells?.length).toBeGreaterThan(0);
+    expect(snapshot?.cells?.[0]?.module?.type).toBe("javascript");
+    expect(snapshot?.cells?.[0]?.arguments?.length).toBeGreaterThan(0);
+    const mapEntry = snapshot?.cells?.find((cell) =>
+      cell.module?.type === "ref" && cell.module.ref === "map"
+    );
+    expect(mapEntry?.link?.baseCell).toBe("#");
+    expect(mapEntry?.arguments?.length).toBeGreaterThan(0);
+    expect(
+      mapEntry?.arguments?.some((argument) =>
+        argument.baseCell === "#/cells/1/inputBindings/op"
+      ),
+    ).toBe(true);
+    expect(mapEntry?.inputBindings?.list?.baseCell).toBe("#");
+    expect(mapEntry?.inputBindings?.op?.result?.baseCell).toBe(
+      "#/cells/1/inputBindings/op",
+    );
+    expect(mapEntry?.inputBindings?.op?.nodes?.length).toBeGreaterThan(0);
+    expect(mapEntry?.inputBindings?.op?.nodes?.[0]?.module?.type).toBe(
+      "javascript",
+    );
+    expect(
+      typeof mapEntry?.inputBindings?.op?.nodes?.[0]?.module?.implementationRef,
+    ).toBe("string");
+  });
 });

@@ -81,6 +81,14 @@ import {
   type ImplementationIdentity,
 } from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
+import {
+  createHandlerSnapshotEntry,
+  createProcessSnapshotLink,
+  createProcessSnapshotV1,
+  createReactiveSnapshotEntries,
+  type GeneratedCell,
+  type ProcessSnapshotV1,
+} from "./process-snapshot.ts";
 export {
   cellAwareDeepCopy,
   extractDefaultValues,
@@ -106,6 +114,8 @@ type ProcessCellData<T> = {
   internal?: FabricValue;
   resultRef: SigilLink;
 };
+
+type ProcessSnapshotRecorder = (entry: GeneratedCell) => void;
 
 const processCellSetupSchema = (pattern: Pattern): JSONSchema => ({
   type: "object",
@@ -292,6 +302,7 @@ type JavaScriptNodeContext = BoundNodeIO & {
   processCell: Cell<any>;
   addCancel: AddCancel;
   pattern: Pattern;
+  recordSnapshotEntry: ProcessSnapshotRecorder;
   fn: (...args: any[]) => any;
   name: string | undefined;
   verifiedLoadId: string | undefined;
@@ -785,6 +796,10 @@ export class Runner {
       this.discoverAndCacheFunctions(pattern, new Set());
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
+      const snapshotEntries: GeneratedCell[] = [];
+      const recordSnapshotEntry: ProcessSnapshotRecorder = (entry) => {
+        snapshotEntries.push(entry);
+      };
       try {
         for (const node of pattern.nodes) {
           this.instantiateNode(
@@ -795,8 +810,15 @@ export class Runner {
             processCell.withTx(actualTx),
             addNodeCancel,
             pattern,
+            recordSnapshotEntry,
           );
         }
+        this.persistProcessSnapshot(
+          actualTx,
+          resultCell.withTx(actualTx),
+          pattern,
+          snapshotEntries,
+        );
       } finally {
         if (shouldCommit) {
           this.runtime.prepareTxForCommit(actualTx);
@@ -1527,6 +1549,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    recordSnapshotEntry: ProcessSnapshotRecorder,
     moduleRefName?: string,
   ) {
     if (isModule(module)) {
@@ -1543,6 +1566,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            recordSnapshotEntry,
             refName,
           );
           break;
@@ -1556,6 +1580,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            recordSnapshotEntry,
           );
           break;
         case "raw":
@@ -1567,6 +1592,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            recordSnapshotEntry,
             moduleRefName,
           );
           break;
@@ -1579,6 +1605,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            recordSnapshotEntry,
           );
           break;
         case "pattern":
@@ -1590,6 +1617,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            recordSnapshotEntry,
           );
           break;
         default:
@@ -1990,8 +2018,17 @@ export class Runner {
       writes,
       verifiedLoadId,
       streamLink,
+      recordSnapshotEntry,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
+    recordSnapshotEntry(
+      createHandlerSnapshotEntry(
+        processCell,
+        module,
+        streamLink,
+        reads,
+      ),
+    );
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
       if (event?.preventDefault) event.preventDefault();
 
@@ -2156,8 +2193,19 @@ export class Runner {
       reads,
       writes,
       verifiedLoadId,
+      recordSnapshotEntry,
     }: JavaScriptNodeContext,
   ): void {
+    for (
+      const entry of createReactiveSnapshotEntries(
+        processCell,
+        module,
+        reads,
+        writes,
+      )
+    ) {
+      recordSnapshotEntry(entry);
+    }
     if (isRecord(inputs) && "$event" in inputs) {
       throw new Error(
         "Handler used as lift, because $stream: true was overwritten",
@@ -2357,6 +2405,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    recordSnapshotEntry: ProcessSnapshotRecorder,
   ) {
     const io = this.bindNodeIO(inputBindings, outputBindings, processCell);
     const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
@@ -2369,6 +2418,7 @@ export class Runner {
       processCell,
       addCancel,
       pattern,
+      recordSnapshotEntry,
       fn,
       name,
       verifiedLoadId,
@@ -2454,6 +2504,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    recordSnapshotEntry: ProcessSnapshotRecorder,
     moduleRefName?: string,
   ) {
     if (typeof module.implementation !== "function") {
@@ -2496,6 +2547,20 @@ export class Runner {
       mappedOutputBindings,
       processCell,
     );
+    const snapshotModule: Module = moduleRefName
+      ? { type: "ref", implementation: moduleRefName }
+      : module;
+    for (
+      const entry of createReactiveSnapshotEntries(
+        processCell,
+        snapshotModule,
+        inputCells,
+        outputCells,
+        { inputBindings: mappedInputBindings },
+      )
+    ) {
+      recordSnapshotEntry(entry);
+    }
 
     const inputsCell = this.runtime.getImmutableCell(
       processCell.space,
@@ -2617,14 +2682,27 @@ export class Runner {
 
   private instantiatePassthroughNode(
     tx: IExtendedStorageTransaction,
-    _module: Module,
+    module: Module,
     inputBindings: FabricValue,
     outputBindings: FabricValue,
     processCell: Cell<any>,
     _addCancel: AddCancel,
     _pattern: Pattern,
+    recordSnapshotEntry: ProcessSnapshotRecorder,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
+    const writes = findAllWriteRedirectCells(outputBindings, processCell);
+    const reads = findAllWriteRedirectCells(inputs, processCell);
+    for (
+      const entry of createReactiveSnapshotEntries(
+        processCell,
+        module,
+        reads,
+        writes,
+      )
+    ) {
+      recordSnapshotEntry(entry);
+    }
 
     sendValueToBinding(tx, processCell, outputBindings, inputs);
   }
@@ -2637,6 +2715,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     _pattern: Pattern,
+    recordSnapshotEntry: ProcessSnapshotRecorder,
   ) {
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindtoDoc(
@@ -2682,6 +2761,25 @@ export class Runner {
 
     this.run(tx, patternImpl, inputs, resultCell);
 
+    recordSnapshotEntry({
+      link: createProcessSnapshotLink(
+        processCell,
+        resultCell.getAsNormalizedFullLink(),
+      ),
+      ...(module.implementation && isPattern(module.implementation) &&
+          module.implementation.program
+        ? {
+          module: {
+            type: "program",
+            program: module.implementation.program,
+          } as const,
+        }
+        : {}),
+      arguments: findAllWriteRedirectCells(inputs, processCell).map((link) =>
+        createProcessSnapshotLink(processCell, link)
+      ),
+    });
+
     if (sendToBindings) {
       sendValueToBinding(
         tx,
@@ -2695,6 +2793,19 @@ export class Runner {
     // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
     addCancel(() => this.stop(resultCell));
+  }
+
+  private persistProcessSnapshot(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<any>,
+    pattern: Pattern,
+    cells: GeneratedCell[],
+  ): void {
+    const previous = resultCell.getMetaRaw("process") as
+      | ProcessSnapshotV1
+      | undefined;
+    const snapshot = createProcessSnapshotV1(previous, pattern, cells);
+    resultCell.setMetaRaw("process", snapshot as FabricValue);
   }
 }
 

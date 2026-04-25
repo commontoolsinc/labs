@@ -157,10 +157,10 @@ export function isOpaqueRef<T = any>(
       "boolean";
 }
 
-export type NodeRef = {
-  module: Module | Pattern | OpaqueRef<Module | Pattern>;
-  inputs: Opaque<any>;
-  outputs: OpaqueRef<any>;
+export type NodeRef<T, R> = {
+  module: Module | Pattern;
+  inputs: Opaque<T>;
+  outputs: R;
   frame: Frame | undefined;
 };
 

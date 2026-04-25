@@ -196,7 +196,7 @@ function factoryFromPattern<T, R>(
 
   // Traverse the value, collect all mentioned nodes and cells
   const allCells = new Set<ICell<unknown>>();
-  const allNodes = new Set<NodeRef>();
+  const allNodes = new Set<NodeRef<unknown, unknown>>();
 
   const collectCellsAndNodes = (value: Opaque<unknown>) =>
     traverseValue(value, (value) => {
@@ -210,7 +210,7 @@ function factoryFromPattern<T, R>(
           );
         }
         allCells.add(value);
-        nodes.forEach((node: NodeRef) => {
+        nodes.forEach((node: NodeRef<unknown, unknown>) => {
           if (!allNodes.has(node)) {
             allNodes.add(node);
             node.inputs = collectCellsAndNodes(node.inputs);
@@ -253,7 +253,7 @@ function factoryFromPattern<T, R>(
   // Then from assignments in nodes
   allCells.forEach((cell) => {
     if (cell.export().path.length) return;
-    cell.export().nodes.forEach((node: NodeRef) => {
+    cell.export().nodes.forEach((node: NodeRef<unknown, unknown>) => {
       if (isRecord(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
@@ -382,7 +382,7 @@ function factoryFromPattern<T, R>(
     };
 
     const outputs = opaqueRef<R>();
-    const node: NodeRef = {
+    const node: NodeRef<T, R> = {
       module,
       inputs,
       outputs,

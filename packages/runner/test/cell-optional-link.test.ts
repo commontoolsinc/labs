@@ -7,7 +7,9 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { createNodeFactory, lift } from "../src/builder/module.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getCellOrThrow } from "../src/query-result-proxy.ts";
 
 const signer = await Identity.fromPassphrase("test operator optional link");
 const space = signer.did();
@@ -205,6 +207,65 @@ describe("Cell with Optional Link", () => {
         // With frame cause and space, link should be created automatically
         expect(cell.space).toBe(space);
         expect(cell.path).toEqual([]);
+      } finally {
+        popFrame();
+      }
+    });
+
+    it("should derive a stable cause for node outputs outside handler context", () => {
+      pushFrame({
+        cause: { type: "lift-cause" },
+        runtime,
+        tx,
+        space,
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      });
+
+      try {
+        const input = new CellImpl<number>(runtime, tx, { path: [], space }, false);
+        input.for("input");
+
+        const factory = createNodeFactory<{ list: number }, number>({
+          type: "ref",
+          implementation: "map",
+        });
+
+        const first = getCellOrThrow(
+          factory({ list: input.getAsOpaqueRefProxy() }),
+        );
+        const second = getCellOrThrow(
+          factory({ list: input.getAsOpaqueRefProxy() }),
+        );
+
+        expect(first.entityId).toEqual(second.entityId);
+      } finally {
+        popFrame();
+      }
+    });
+
+    it("should include implementation identity in derived node causes", () => {
+      pushFrame({
+        cause: { type: "lift-cause" },
+        runtime,
+        tx,
+        space,
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      });
+
+      try {
+        const input = new CellImpl<number>(runtime, tx, { path: [], space }, false);
+        input.for("input");
+
+        const plusOne = getCellOrThrow(
+          lift((value: number) => value + 1)(input.getAsOpaqueRefProxy()),
+        );
+        const plusTwo = getCellOrThrow(
+          lift((value: number) => value + 2)(input.getAsOpaqueRefProxy()),
+        );
+
+        expect(plusOne.entityId).not.toEqual(plusTwo.entityId);
       } finally {
         popFrame();
       }
