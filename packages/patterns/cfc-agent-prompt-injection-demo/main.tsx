@@ -253,24 +253,6 @@ const makeUserPromptMessage = (prompt: string): BuiltInLLMMessage => ({
   content: [{ type: "text" as const, text: prompt }],
 });
 
-const startDemoPrompt = handler<
-  void,
-  { addMessage: Stream<BuiltInLLMMessage> }
->((_, { addMessage }) => {
-  addMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-});
-
-const startBothDemoPrompts = handler<
-  void,
-  {
-    unsafeAddMessage: Stream<BuiltInLLMMessage>;
-    safeAddMessage: Stream<BuiltInLLMMessage>;
-  }
->((_, { unsafeAddMessage, safeAddMessage }) => {
-  unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-  safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-});
-
 const logEmail = handler<
   SendMailArgs & {
     result: Writable<SendMailResult>;
@@ -472,9 +454,6 @@ Your job in this half is to fail visibly when the document tries to seize contro
       PROMPT_INFLUENCE_ATOM,
     ],
   });
-  const runUnsafeAgent = startDemoPrompt({
-    addMessage: unsafeAddMessage,
-  });
   const unsafeClearChat = action(() => {
     unsafeMessages.set([]);
   });
@@ -590,12 +569,15 @@ If readRawBriefing gives you a body you cannot directly inspect, your next move 
     builtinTools: false,
     observationMaxConfidentiality: ["internal", PROMPT_INFLUENCE_ATOM],
   });
-  const runSafeAgent = startDemoPrompt({
-    addMessage: safeAddMessage,
+  const runUnsafeAgent = action(() => {
+    unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
   });
-  const runBothAgents = startBothDemoPrompts({
-    unsafeAddMessage,
-    safeAddMessage,
+  const runSafeAgent = action(() => {
+    safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+  });
+  const runBothAgents = action(() => {
+    unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+    safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
   });
   const clearEmails = action(() => {
     emails.set([]);
@@ -724,54 +706,48 @@ If readRawBriefing gives you a body you cannot directly inspect, your next move 
                   </cf-vstack>
                 </cf-hstack>
                 <cf-hstack align="center" gap="1" style={{ flexWrap: "wrap" }}>
-                  <cf-button
+                  <button
                     type="button"
-                    variant="primary"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={() => runBothAgents.send()}
+                    onClick={runBothAgents}
                   >
                     Run both agents
-                  </cf-button>
-                  <cf-button
+                  </button>
+                  <button
                     type="button"
-                    variant="primary"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={() => runUnsafeAgent.send()}
+                    onClick={runUnsafeAgent}
                   >
                     Run unsafe only
-                  </cf-button>
-                  <cf-button
+                  </button>
+                  <button
                     type="button"
-                    variant="primary"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={() => runSafeAgent.send()}
+                    onClick={runSafeAgent}
                   >
                     Run safe only
-                  </cf-button>
-                  <cf-button
+                  </button>
+                  <button
                     type="button"
-                    variant="secondary"
                     style={SECONDARY_CONTROL_STYLE}
                     onClick={clearEmails}
                   >
                     Clear emails
-                  </cf-button>
-                  <cf-button
+                  </button>
+                  <button
                     type="button"
-                    variant="secondary"
                     style={SECONDARY_CONTROL_STYLE}
                     onClick={unsafeClearChat}
                   >
                     Clear unsafe
-                  </cf-button>
-                  <cf-button
+                  </button>
+                  <button
                     type="button"
-                    variant="secondary"
                     style={SECONDARY_CONTROL_STYLE}
                     onClick={safeClearChat}
                   >
                     Clear safe
-                  </cf-button>
+                  </button>
                 </cf-hstack>
               </cf-vstack>
             </cf-card>
