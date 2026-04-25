@@ -1,8 +1,10 @@
-import { DEFAULT_MODEL, pieceId, PieceManager } from "@commonfabric/piece";
+import { pieceId, PieceManager } from "./manager.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { Cell, NAME } from "@commonfabric/runner";
 import { extractTextFromLLMResponse, LLMClient } from "@commonfabric/llm";
 import { isRecord } from "@commonfabric/utils/types";
+
+const DEFAULT_MODEL = "anthropic:claude-sonnet-4-5";
 
 export type PieceSearchResult = {
   piece: Cell<unknown>;

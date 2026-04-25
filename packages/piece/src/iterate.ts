@@ -1,15 +1,15 @@
-import { isObject, isRecord, Mutable } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { cloneSchemaMutable } from "@commonfabric/data-model/schema-utils";
 import {
   type Cell,
+  compileAndSavePattern,
   createJsonSchema,
   isCell,
   isStream,
   type JSONSchema,
   type JSONSchemaObjMutable,
   type MemorySpace,
-  type PatternMeta,
   type Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -27,7 +27,8 @@ import {
   LLMClient,
 } from "@commonfabric/llm";
 import { injectUserCode } from "./iframe/static.ts";
-import { IFramePattern, WorkflowForm } from "./index.ts";
+import type { IFramePattern } from "./iframe/pattern.ts";
+import type { WorkflowForm } from "./workflow.ts";
 import { console } from "./conditional-console.ts";
 import { StaticCache } from "@commonfabric/static";
 
@@ -558,25 +559,11 @@ export async function compilePattern(
   space: MemorySpace,
   parents?: string[],
 ) {
-  const pattern = await runtime.patternManager.compilePattern(patternSrc);
-
-  if (!pattern) {
-    throw new Error("No default pattern found in the compiled exports.");
-  }
-  const parentsIds = parents?.map((id) => id.toString());
-  const patternId = runtime.patternManager.registerPattern(pattern, patternSrc);
-
-  // Record metadata fields (spec, parents) for this pattern
-  await runtime.patternManager.setPatternMetaFields(patternId, {
+  return await compileAndSavePattern(runtime, patternSrc, {
     spec,
-    parents: parentsIds,
-  } as Partial<Mutable<PatternMeta>>);
-  await runtime.patternManager.saveAndSyncPattern({
-    patternId,
+    parents,
     space,
   });
-
-  return pattern;
 }
 
 export async function compileAndRunPattern(

@@ -2,7 +2,7 @@ import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 import type { JSONSchema, JSONSchemaObjMutable } from "@commonfabric/runner";
-import { WorkflowForm } from "@commonfabric/piece";
+import type { PromptWorkflowForm } from "./workflow-types.ts";
 import { JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 
@@ -222,7 +222,7 @@ IMPORTANT:
 `,
 );
 
-export function formatForm(form: WorkflowForm) {
+export function formatForm(form: PromptWorkflowForm) {
   return `
 <goal>${form.input.processedInput}</goal>
 ${
@@ -246,7 +246,7 @@ ${
  * @returns Object containing title, description, specification, schema
  */
 export async function generateSpecAndSchema(
-  form: WorkflowForm,
+  form: PromptWorkflowForm,
   existingSchema?: JSONSchema,
   model: string = "anthropic:claude-sonnet-4-5",
 ): Promise<{
@@ -312,7 +312,7 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
-      space: form.meta.pieceManager.getSpaceName(),
+      space: form.meta.pieceManager?.getSpaceName(),
     },
   });
 
@@ -388,7 +388,7 @@ Based on this goal and the existing schema, please provide a title, description,
  * @returns Object containing title, description, specification, schema
  */
 export async function generateSpecAndSchemaAndCode(
-  form: WorkflowForm,
+  form: PromptWorkflowForm,
   existingSchema?: JSONSchema,
   model: string = DEFAULT_MODEL_NAME,
 ): Promise<{
@@ -452,7 +452,7 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
-      space: form.meta.pieceManager.getSpaceName(),
+      space: form.meta.pieceManager?.getSpaceName(),
     },
     cache: form.meta.cache,
   });

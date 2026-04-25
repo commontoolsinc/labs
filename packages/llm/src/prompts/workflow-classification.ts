@@ -5,7 +5,10 @@ import {
 } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import type { JSONSchema } from "@commonfabric/runner";
-import { WorkflowForm, WorkflowType } from "@commonfabric/piece";
+import type {
+  PromptWorkflowForm,
+  PromptWorkflowType,
+} from "./workflow-types.ts";
 import { llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 
@@ -178,14 +181,14 @@ function generatePieceContext(
  * @throws Error if the classified workflow type is not in the permitted workflows list
  */
 export async function classifyWorkflow(
-  form: WorkflowForm,
+  form: PromptWorkflowForm,
   options?: {
     existingSpec?: string;
     existingSchema?: JSONSchema;
     existingCode?: string;
   },
 ): Promise<{
-  workflowType: WorkflowType;
+  workflowType: PromptWorkflowType;
   confidence: number;
   reasoning: string;
   enhancedPrompt?: string;
@@ -205,7 +208,7 @@ export async function classifyWorkflow(
   // Build workflows description, filtering to only include permitted workflows if specified
   let workflowsDescription = "";
   // Define workflow descriptions once to avoid repetition
-  const workflowDescriptions: Partial<Record<WorkflowType, string>> = {
+  const workflowDescriptions: Partial<Record<PromptWorkflowType, string>> = {
     edit:
       `\`edit\`: Add features or modify functionality while preserving core data structure
    - Example: "Add dark mode support" or "Include a search feature"
@@ -259,7 +262,7 @@ export async function classifyWorkflow(
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: prompt.version,
-      space: form.meta.pieceManager.getSpaceName(),
+      space: form.meta.pieceManager?.getSpaceName(),
     },
   });
 
@@ -268,7 +271,7 @@ export async function classifyWorkflow(
       extractTextFromLLMResponse(response),
       "workflow",
     )
-      .toLowerCase() as WorkflowType;
+      .toLowerCase() as PromptWorkflowType;
     const confidence = parseFloat(
       parseTagFromResponse(extractTextFromLLMResponse(response), "confidence"),
     );
@@ -344,7 +347,7 @@ export async function classifyWorkflow(
  * @returns A promise resolving to an object containing the generation steps and schema specification.
  */
 export async function generateWorkflowPlan(
-  form: WorkflowForm,
+  form: PromptWorkflowForm,
   options?: {
     existingSpec?: string;
     existingSchema?: JSONSchema;
@@ -378,7 +381,7 @@ export async function generateWorkflowPlan(
       context: "workflow",
       workflow: form.classification.workflowType.toLowerCase(),
       generationId: form.meta.generationId,
-      space: form.meta.pieceManager.getSpaceName(),
+      space: form.meta.pieceManager?.getSpaceName(),
       systemPrompt: system.version,
     },
   });

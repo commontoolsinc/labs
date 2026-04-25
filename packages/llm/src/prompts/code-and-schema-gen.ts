@@ -1,7 +1,7 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import type { JSONSchema, JSONSchemaObjMutable } from "@commonfabric/runner";
-import { WorkflowForm } from "@commonfabric/piece";
+import type { PromptWorkflowForm } from "./workflow-types.ts";
 import { systemMdConcise } from "../../../piece/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
 import { llmPrompt } from "../index.ts";
@@ -200,7 +200,7 @@ Return ONLY the requested XML tags, no other commentary.
  * @returns Object containing title, description, specification, schema
  */
 export async function generateCodeAndSchema(
-  form: WorkflowForm,
+  form: PromptWorkflowForm,
   existingSchema?: JSONSchema,
   model: string = DEFAULT_MODEL_NAME,
 ): Promise<{
@@ -267,7 +267,7 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
-      space: form.meta.pieceManager.getSpaceName(),
+      space: form.meta.pieceManager?.getSpaceName(),
     },
   });
 

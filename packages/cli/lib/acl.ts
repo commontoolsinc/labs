@@ -1,6 +1,6 @@
 import { createSession, isDID, Session } from "@commonfabric/identity";
 import { loadIdentity } from "./identity.ts";
-import { Runtime } from "@commonfabric/runner";
+import { ACLManager, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   ACL,
@@ -8,7 +8,6 @@ import {
   type Capability,
   isACLUser,
 } from "@commonfabric/memory/acl";
-import { ACLManager } from "@commonfabric/piece/ops";
 import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 
 export interface SpaceConfig {

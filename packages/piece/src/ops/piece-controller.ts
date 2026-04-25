@@ -1,14 +1,16 @@
 import {
   Cell,
+  type CellPath,
+  getPatternIdFromResultCell,
   NAME,
   Pattern,
   PatternMeta,
+  resolveCellPath,
   RuntimeProgram,
-  TYPE,
 } from "@commonfabric/runner";
 import { pieceId, PieceManager } from "../manager.ts";
-import { nameSchema, processSchema } from "@commonfabric/runner/schemas";
-import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
+import { nameSchema } from "@commonfabric/runner/schemas";
+import { compileProgram } from "./utils.ts";
 import { injectUserCode } from "../iframe/static.ts";
 import {
   buildFullPattern,
@@ -181,7 +183,7 @@ async function execute(
 }
 
 export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
-  const sourceCell = piece.getSourceCell(processSchema);
-  if (!sourceCell) throw new Error("piece missing source cell");
-  return sourceCell.get()?.[TYPE];
+  const patternId = getPatternIdFromResultCell(piece);
+  if (!patternId) throw new Error("piece missing pattern ID");
+  return patternId;
 };
