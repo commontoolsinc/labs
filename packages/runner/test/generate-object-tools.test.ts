@@ -1843,21 +1843,24 @@ describe("generateObject with tools", () => {
         testPattern.resultSchema,
         tx,
       );
-      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.run(tx, testPattern, {}, resultCell);
       runtime.prepareTxForCommit(tx);
       await tx.commit();
 
-      await expect(waitForPendingToBecomeFalse(result)).resolves
+      const generatedResult = patternOutputCell(resultCell, testPattern);
+      await expect(waitForPendingToBecomeFalse(generatedResult)).resolves
         .toBeUndefined();
       await runtime.idle();
 
-      expect(result.key("result").get()).toEqual({
+      const liveResult = generatedResult.withTx();
+      await liveResult.sync();
+      expect(liveResult.key("result").get()).toEqual({
         action: "reject",
         approved: false,
         confidence: 0.91,
         reasoning: "The briefing was not approved.",
       });
-      expect(cfcLabelViewForCell(result.key("result"))).toMatchObject({
+      expect(cfcLabelViewForCell(liveResult.key("result"))).toMatchObject({
         entries: expect.arrayContaining([
           {
             path: ["action"],
@@ -2090,11 +2093,12 @@ describe("generateObject with tools", () => {
       testPattern.resultSchema,
       tx,
     );
-    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.run(tx, testPattern, {}, resultCell);
     runtime.prepareTxForCommit(tx);
     await tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves
+    const generatedResult = patternOutputCell(resultCell, testPattern);
+    await expect(waitForPendingToBecomeFalse(generatedResult)).resolves
       .toBeUndefined();
     await runtime.idle();
 
@@ -2102,32 +2106,43 @@ describe("generateObject with tools", () => {
       approved: false,
       reasoning: expect.objectContaining({ "@link": expect.any(String) }),
     });
-    expect(result.key("result").get()).toEqual({ ok: true });
+    const liveResult = generatedResult.withTx();
+    await liveResult.sync();
+    expect(liveResult.key("result").get()).toEqual({ ok: true });
   });
 });
 
+function patternOutputCell(resultCell: Cell<any>, testPattern: any): Cell<any> {
+  const sourceCell = resultCell.withTx().getSourceCell();
+  const path = testPattern.result?.$alias?.path;
+  if (!sourceCell || !Array.isArray(path)) {
+    return resultCell.withTx();
+  }
+  return path.reduce(
+    (cell: Cell<any>, segment: PropertyKey) => cell.key(segment as any),
+    sourceCell.withTx(),
+  );
+}
+
 function waitForPendingToBecomeFalse(result: Cell<any>) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
+  const liveResult = result.withTx();
+  const timeoutMs = 1000;
   return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error("Timeout waiting for pending to become false"));
-    }, 1000);
-    cancel = result.asSchema({
-      type: "object",
-      properties: {
-        pending: { type: "boolean" },
-        error: true,
-        result: true,
-      },
-    }).sink(({ pending, error, result } = {}) => {
-      if (pending === false && (error !== undefined || result !== undefined)) {
+    const start = Date.now();
+    const tick = async () => {
+      await liveResult.sync();
+      const pending = liveResult.key("pending").get() as unknown;
+      if (pending === false) {
         resolve();
+        return;
       }
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
+      if (Date.now() - start > timeoutMs) {
+        reject(new Error("Timeout waiting for pending to become false"));
+        return;
+      }
+      setTimeout(tick, 10);
+    };
+    tick().catch(reject);
   });
 }
 

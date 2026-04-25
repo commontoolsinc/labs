@@ -168,4 +168,30 @@ describe("mergeCfcSchemaEnvelopes", () => {
 
     expect((merged as JSONSchemaObj).ifc?.confidentiality).toEqual(["secret"]);
   });
+
+  it("treats true schema nodes as permissive when merging envelopes", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {
+        result: true,
+      },
+    }, {
+      type: "object",
+      properties: {
+        result: {
+          type: "object",
+          properties: {
+            approved: { type: "boolean" },
+          },
+        },
+      },
+    });
+
+    expect((merged as JSONSchemaObj).properties?.result).toMatchObject({
+      type: "object",
+      properties: {
+        approved: { type: "boolean" },
+      },
+    });
+  });
 });

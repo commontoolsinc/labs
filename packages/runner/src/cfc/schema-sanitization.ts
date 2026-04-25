@@ -119,6 +119,17 @@ const primitiveTypeIsInstructionInert = (
     );
 };
 
+const schemaDeclaresObjectShape = (schema: Record<string, unknown>): boolean =>
+  asTypeArray(schema.type).includes("object") ||
+  schema.properties !== undefined ||
+  schema.required !== undefined ||
+  schema.additionalProperties !== undefined;
+
+const objectSchemaIsClosed = (schema: Record<string, unknown>): boolean =>
+  schemaDeclaresObjectShape(schema) &&
+  schema.additionalProperties !== true &&
+  typeof schema.additionalProperties !== "object";
+
 const resolveSchema = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
@@ -222,7 +233,7 @@ const annotateSchema = (
       annotatedProperties[key] = annotated.schema;
       return annotated;
     });
-    const closedObject = schema.additionalProperties === false;
+    const closedObject = objectSchemaIsClosed(schema);
     const allChildrenInert = childResults.every((child) =>
       child.instructionInert
     );
@@ -364,7 +375,7 @@ export const validateAgainstSchema = (
         if (failure !== undefined) return `${key}: ${failure}`;
       }
     }
-    if (schema.additionalProperties === false) {
+    if (objectSchemaIsClosed(schema)) {
       const known = new Set(Object.keys(schema.properties ?? {}));
       const extra = Object.keys(value).find((key) => !known.has(key));
       if (extra !== undefined) return `additional property ${extra}`;

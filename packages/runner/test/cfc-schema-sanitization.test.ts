@@ -66,7 +66,6 @@ describe("schema-based prompt injection sanitization", () => {
         confidence: { type: "integer" },
       },
       required: ["action", "confidence"],
-      additionalProperties: false,
     } as const satisfies JSONSchema;
 
     const sanitized = schemaWithInjectionSafeAnnotations(schema, [
@@ -85,6 +84,7 @@ describe("schema-based prompt injection sanitization", () => {
       properties: {
         confidence: { type: "number" },
       },
+      additionalProperties: true,
     } as const satisfies JSONSchema;
 
     const sanitized = schemaWithInjectionSafeAnnotations(schema, [
@@ -104,7 +104,6 @@ describe("schema-based prompt injection sanitization", () => {
         action: { type: "string", enum: ["approve", "reject"] },
       },
       required: ["action"],
-      additionalProperties: false,
     } as const satisfies JSONSchema;
 
     expect(validateAgainstSchema(schema, { action: "approve" }))
@@ -116,6 +115,16 @@ describe("schema-based prompt injection sanitization", () => {
       action: "approve",
       body: "extra",
     })).toContain("additional property body");
+  });
+
+  it("leaves empty schemas permissive while closing object-shaped schemas", () => {
+    expect(validateAgainstSchema({}, { body: "extra" })).toBeUndefined();
+    expect(validateAgainstSchema(true, { body: "extra" })).toBeUndefined();
+    expect(validateAgainstSchema({
+      properties: { approved: { type: "boolean" } },
+    }, { approved: true, body: "extra" })).toContain(
+      "additional property body",
+    );
   });
 
   it("recognizes material-risk caveats without treating prompt influence as clearable", () => {

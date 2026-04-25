@@ -902,7 +902,20 @@ const derivePersistedLinkLabel = (
       input.source.path,
     )
     : undefined;
-  if (sourceMetadata === undefined && pendingSourceLabel === undefined) {
+  const pendingTargetLabel = candidateSchemas.get(targetKey(input.target)) !==
+      undefined
+    ? persistedLabelFromSchemaAtPath(
+      candidateSchemas.get(targetKey(input.target))!,
+      input.target.path,
+    )
+    : undefined;
+  // A target schema can label a link slot even when the linked document is
+  // otherwise unlabeled. In that case the source contributes no labels, but the
+  // target label still needs to persist with link-reference integrity.
+  if (
+    sourceMetadata === undefined && pendingSourceLabel === undefined &&
+    !hasLabelValues(pendingTargetLabel ?? {})
+  ) {
     return {
       reason: `missing link source metadata for ${input.target.id} at /${
         input.target.path.join("/")

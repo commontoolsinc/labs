@@ -191,6 +191,84 @@ const recordOutputSchemaPolicyInputs = (
   }
 };
 
+const recordSchemaPolicyInputForLink = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void => {
+  if (schema === undefined) {
+    return;
+  }
+  tx.recordCfcWritePolicyInput({
+    kind: "schema",
+    target: {
+      space: link.space,
+      id: link.id,
+      type: link.type,
+      path: [...link.path],
+    },
+    schema,
+  });
+};
+
+const recordRawBuiltinBindingSchemaPolicyInputs = (
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  processCell: Cell<any>,
+  outputBinding: unknown,
+): void => {
+  if (isWriteRedirectLink(outputBinding)) {
+    const bindingLink = parseLink(outputBinding, processCell);
+    const link = resolveLink(
+      runtime,
+      tx,
+      bindingLink,
+      "writeRedirect",
+    );
+    const schema = bindingLink.schema ?? link.schema;
+    recordSchemaPolicyInputForLink(tx, bindingLink, schema);
+    recordSchemaPolicyInputForLink(tx, link, schema);
+    return;
+  }
+
+  if (Array.isArray(outputBinding)) {
+    outputBinding.forEach((child) =>
+      recordRawBuiltinBindingSchemaPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        child,
+      )
+    );
+    return;
+  }
+
+  if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
+    for (const child of Object.values(outputBinding)) {
+      recordRawBuiltinBindingSchemaPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        child,
+      );
+    }
+  }
+};
+
+const recordRawBuiltinResultSchemaPolicyInput = (
+  tx: IExtendedStorageTransaction,
+  result: unknown,
+): void => {
+  if (!isCell(result)) {
+    return;
+  }
+  recordSchemaPolicyInputForLink(
+    tx,
+    result.getAsNormalizedFullLink(),
+    result.schema,
+  );
+};
+
 const recordSetupProjectionPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -2511,6 +2589,13 @@ export class Runner {
       builtinResult = module.implementation(
         inputsCell,
         (tx: IExtendedStorageTransaction, result: any) => {
+          recordRawBuiltinBindingSchemaPolicyInputs(
+            tx,
+            this.runtime,
+            processCell,
+            mappedOutputBindings,
+          );
+          recordRawBuiltinResultSchemaPolicyInput(tx, result);
           sendValueToBinding(
             tx,
             processCell,
