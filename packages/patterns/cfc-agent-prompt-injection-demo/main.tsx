@@ -186,6 +186,13 @@ const SUB_AGENT_BRIEFING_MESSAGES: BuiltInLLMMessage[] = [{
 ${HOSTILE_BRIEFING_BODY}`,
   }],
 }];
+const SUB_AGENT_BRIEFING_MESSAGES_SCHEMA = {
+  type: "array",
+  items: { type: "object", additionalProperties: true },
+  ifc: {
+    confidentiality: [PROMPT_INJECTION_RISK_ATOM, PROMPT_INFLUENCE_ATOM],
+  },
+} as const satisfies JSONSchema;
 const AGENT_PANEL_HEIGHT = "clamp(30rem, 68vh, 42rem)";
 
 const PRIMARY_CONTROL_STYLE = {
@@ -320,6 +327,10 @@ export default pattern<Record<string, never>>(() => {
   const safeMessages = Writable.of<BuiltInLLMMessage[]>([]);
   const parentModel = Writable.of<string>(DEFAULT_PARENT_MODEL);
   const subAgentModel = Writable.of<string>(DEFAULT_SUB_AGENT_MODEL);
+  const subAgentBriefingMessages = Cell.of(
+    SUB_AGENT_BRIEFING_MESSAGES,
+    SUB_AGENT_BRIEFING_MESSAGES_SCHEMA,
+  );
   const { result: modelDirectory } = fetchData({
     url: "/api/ai/llm/models",
     mode: "json",
@@ -366,7 +377,7 @@ export default pattern<Record<string, never>>(() => {
         model: subAgentModel,
         maxTokens: 512,
         system: SUB_AGENT_SYSTEM_PROMPT,
-        messages: SUB_AGENT_BRIEFING_MESSAGES,
+        messages: subAgentBriefingMessages,
         observationMaxConfidentiality: [
           PROMPT_INJECTION_RISK_ATOM,
           PROMPT_INFLUENCE_ATOM,
@@ -385,7 +396,7 @@ export default pattern<Record<string, never>>(() => {
         model: subAgentModel,
         maxTokens: 512,
         system: SUB_AGENT_SYSTEM_PROMPT,
-        messages: SUB_AGENT_BRIEFING_MESSAGES,
+        messages: subAgentBriefingMessages,
         observationMaxConfidentiality: [
           PROMPT_INJECTION_RISK_ATOM,
           PROMPT_INFLUENCE_ATOM,

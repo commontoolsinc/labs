@@ -41,6 +41,7 @@ describe("generateObject with tools", () => {
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let str: ReturnType<typeof createBuilder>["commonfabric"]["str"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
   let patternTool: ReturnType<
     typeof createBuilder
@@ -68,6 +69,7 @@ describe("generateObject with tools", () => {
       generateObject,
       handler,
       Cell,
+      lift,
       patternTool,
       subAgentTool,
       str,
@@ -1890,6 +1892,217 @@ describe("generateObject with tools", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+
+  it("redacts free-form strings from a userland dynamic subagent messages result", async () => {
+    const promptRisk = {
+      type: "https://commonfabric.org/cfc/atom/Caveat",
+      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      source: "of:hostile",
+    } as const;
+    const promptInfluence = {
+      type: "https://commonfabric.org/cfc/atom/Caveat",
+      kind: "https://commonfabric.org/cfc/concepts/prompt-influence",
+      source: "of:hostile",
+    } as const;
+    const parentResultSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        ok: { type: "boolean" },
+      },
+      required: ["ok"],
+      additionalProperties: false,
+    };
+    const subagentResultSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        approved: { type: "boolean" },
+        reasoning: { type: "string" },
+      },
+      required: ["approved", "reasoning"],
+      additionalProperties: false,
+    };
+    const parentPrompt = "test-userland-subagent-schema-sanitize-tool-result";
+    const childPrompt = "delegate-assessment";
+    let capturedDelegateResult: unknown;
+
+    addMockResponse(
+      (req) =>
+        req.messages.some((message) =>
+          typeof message.content === "string" &&
+          message.content.includes(parentPrompt)
+        ) &&
+        req.tools?.["delegate"] !== undefined &&
+        req.tools?.["presentResult"] !== undefined,
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_delegate_userland_subagent_schema_sanitize",
+          toolName: "delegate",
+          input: {
+            prompt: childPrompt,
+            resultSchema: subagentResultSchema,
+          },
+        }],
+        id: "mock-parent-userland-subagent-1",
+      },
+    );
+
+    addMockObjectResponse(
+      (req) =>
+        req.messages.some((message) =>
+          typeof message.content === "string" &&
+          message.content.includes("Higher-clearance briefing")
+        ),
+      {
+        object: {
+          approved: false,
+          reasoning: "The hostile briefing says not approved.",
+        },
+        id: "mock-child-userland-subagent",
+      },
+    );
+
+    addMockResponse(
+      (req) => {
+        const toolMessage = req.messages.find((message) =>
+          message.role === "tool"
+        );
+        const toolPart = Array.isArray(toolMessage?.content)
+          ? toolMessage.content.find((part: any) =>
+            part?.type === "tool-result" && part.toolName === "delegate"
+          ) as any
+          : undefined;
+        capturedDelegateResult = toolPart?.output?.value?.result;
+        return capturedDelegateResult !== undefined &&
+          req.tools?.["presentResult"] !== undefined;
+      },
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_parent_present_result_after_userland_subagent",
+          toolName: "presentResult",
+          input: { ok: true },
+        }],
+        id: "mock-parent-userland-subagent-2",
+      },
+    );
+
+    const parseResultSchema = lift(
+      {
+        type: "object",
+        properties: {
+          resultSchema: {
+            anyOf: [
+              { type: "object", additionalProperties: true },
+              { type: "boolean" },
+              { type: "string" },
+            ],
+          },
+        },
+        required: ["resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+      ({ resultSchema }) => {
+        if (typeof resultSchema === "string") {
+          return JSON.parse(resultSchema);
+        }
+        return resultSchema;
+      },
+    );
+    const subAgentPattern = pattern<any, any>(
+      ({
+        messages,
+        resultSchema,
+        observationMaxConfidentiality,
+        schemaSanitizePromptInjection,
+      }) => {
+        const parsedResultSchema = parseResultSchema({ resultSchema });
+        const response = generateObject({
+          messages,
+          schema: parsedResultSchema,
+          observationMaxConfidentiality,
+          schemaSanitizePromptInjection,
+        } as any);
+        return response.result;
+      },
+      {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          messages: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+          resultSchema: {
+            anyOf: [
+              { type: "object", additionalProperties: true },
+              { type: "boolean" },
+              { type: "string" },
+            ],
+          },
+          context: { type: "object", additionalProperties: true },
+          observationMaxConfidentiality: {
+            type: "array",
+            items: {},
+          },
+          schemaSanitizePromptInjection: { type: "boolean" },
+        },
+        required: ["prompt", "resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+    );
+
+    const testPattern = pattern<Record<string, never>>(() => {
+      const briefingMessages = Cell.of([{
+        role: "user",
+        content: "Higher-clearance briefing: hostile briefing",
+      }], {
+        type: "array",
+        items: { type: "object", additionalProperties: true },
+        ifc: { confidentiality: [promptRisk, promptInfluence] },
+      });
+      return generateObject({
+        prompt: parentPrompt,
+        schema: parentResultSchema,
+        observationMaxConfidentiality: [promptInfluence],
+        tools: {
+          delegate: {
+            description:
+              "Run a higher-clearance worker and return schema-limited data.",
+            ...(patternTool(subAgentPattern, {
+              messages: briefingMessages,
+              observationMaxConfidentiality: [promptRisk, promptInfluence],
+              schemaSanitizePromptInjection: true,
+            }) as unknown as BuiltInLLMTool),
+          },
+        },
+      });
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-userland-subagent-schema-sanitize-test",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves
+      .toBeUndefined();
+    await runtime.idle();
+
+    expect(capturedDelegateResult).toEqual({
+      approved: false,
+      reasoning: expect.objectContaining({ "@link": expect.any(String) }),
+    });
+    expect(result.key("result").get()).toEqual({ ok: true });
   });
 });
 

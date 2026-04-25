@@ -41,13 +41,15 @@ const parseResultSchema = lift<
   return true;
 });
 
-const appendPromptMessage = lift<
-  { messages?: BuiltInLLMMessage[]; prompt: BuiltInLLMContent },
-  BuiltInLLMMessage[]
->(({ messages, prompt }) => [
-  ...(messages ?? []),
-  { role: "user" as const, content: prompt },
-]);
+const appendTaskToSystem = lift<
+  { system?: string; prompt: BuiltInLLMContent },
+  string
+>(({ system, prompt }) => {
+  const promptText = typeof prompt === "string"
+    ? prompt
+    : JSON.stringify(prompt);
+  return `${system ?? ""}\n\nSub-agent task:\n${promptText}`.trim();
+});
 
 export const subAgentPattern = pattern<SubAgentInput, any>((
   {
@@ -64,19 +66,20 @@ export const subAgentPattern = pattern<SubAgentInput, any>((
   },
 ) => {
   const parsedResultSchema = parseResultSchema({ resultSchema });
-  const requestMessages = appendPromptMessage({ messages, prompt });
+  const requestSystem = appendTaskToSystem({ system, prompt });
 
   const response = generateObject({
-    messages: requestMessages,
+    prompt,
+    messages,
     context,
-    system,
+    system: requestSystem,
     tools,
     model,
     maxTokens,
     observationMaxConfidentiality,
     schemaSanitizePromptInjection,
     schema: parsedResultSchema,
-  });
+  } as any);
 
   return response.error ? { error: response.error } : response.result;
 });

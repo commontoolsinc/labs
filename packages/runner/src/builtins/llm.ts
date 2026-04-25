@@ -13,10 +13,12 @@ import {
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
+  JSONSchema,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { cfcLabelViewForCell } from "../cfc/label-view.ts";
 import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
@@ -80,6 +82,27 @@ function summarizeGenerateObjectRequest(details: {
     contextKeys: details.contextKeys ?? [],
     queueName: details.queueName,
   };
+}
+
+function collectCellConfidentiality(cell: Cell<any>): readonly unknown[] {
+  const labelView = cfcLabelViewForCell(cell);
+  if (labelView === undefined) {
+    return [];
+  }
+
+  return ContextualFlowControl.uniqueAtoms(
+    labelView.entries.flatMap((entry) => entry.label.confidentiality ?? []),
+  );
+}
+
+function collectGenerateObjectPromptConfidentiality(
+  inputs: Cell<any>,
+): readonly unknown[] {
+  return ContextualFlowControl.uniqueAtoms([
+    ...collectCellConfidentiality(inputs.key("prompt")),
+    ...collectCellConfidentiality(inputs.key("messages")),
+    ...collectCellConfidentiality(inputs.key("system")),
+  ]);
 }
 
 /**
@@ -974,23 +997,25 @@ export function generateObject<T extends Record<string, unknown>>(
         docs: "",
         observedConfidentiality: [],
       };
-
     // Determine whether to use the tool-calling path or the direct generateObject path
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const validationSchema = schemaSanitizePromptInjection
+      ? JSON.parse(JSON.stringify(schema)) as JSONSchema
+      : undefined;
     const resultSchemaForObserved = (
       observedConfidentiality: readonly unknown[],
     ) =>
       schemaSanitizePromptInjection
         ? schemaWithInjectionSafeAnnotations(
-          schema as any,
+          validationSchema as any,
           observedConfidentiality,
         )
         : undefined;
     const validateResultForSchemaSanitization = (value: unknown): void => {
-      if (!schemaSanitizePromptInjection) {
+      if (validationSchema === undefined) {
         return;
       }
-      const failure = validateAgainstSchema(schema as any, value);
+      const failure = validateAgainstSchema(validationSchema, value);
       if (failure !== undefined) {
         throw new Error(
           `generateObject result failed schema sanitization validation: ${failure}`,
@@ -1156,12 +1181,19 @@ export function generateObject<T extends Record<string, unknown>>(
               const liveSystem =
                 ((system ?? "") + liveContextDocs.docs).trim() ||
                 "You are a helpful assistant.";
+              const livePromptObservedConfidentiality =
+                collectGenerateObjectPromptConfidentiality(inputs);
+              const liveInitialObservedConfidentiality = ContextualFlowControl
+                .uniqueAtoms([
+                  ...livePromptObservedConfidentiality,
+                  ...liveContextDocs.observedConfidentiality,
+                ]);
 
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
               let finalMessages: readonly BuiltInLLMMessage[] = requestMessages;
               let finalObservedConfidentiality: readonly unknown[] =
-                liveContextDocs.observedConfidentiality;
+                liveInitialObservedConfidentiality;
 
               // Custom execution loop for generateObject with presentResult extraction
               const executeRecursive = async (
@@ -1260,7 +1292,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 logGenerateObject("tools-loop-start", toolsRequestSummary);
                 await executeRecursive(
                   requestMessages,
-                  liveContextDocs.observedConfidentiality,
+                  liveInitialObservedConfidentiality,
                 );
 
                 if (finalResult === undefined) {
@@ -1462,8 +1494,10 @@ export function generateObject<T extends Record<string, unknown>>(
               };
             logGenerateObject("client-generateObject-start", {
               ...directRequestSummary,
-              observedConfidentialityCount:
-                liveContextDocs.observedConfidentiality.length,
+              observedConfidentialityCount: ContextualFlowControl.uniqueAtoms([
+                ...collectGenerateObjectPromptConfidentiality(inputs),
+                ...liveContextDocs.observedConfidentiality,
+              ]).length,
             });
             const response = await client.generateObject({
               ...generateObjectParams,
@@ -1477,10 +1511,15 @@ export function generateObject<T extends Record<string, unknown>>(
               objectKeys: Object.keys(response.object ?? {}),
             });
             validateResultForSchemaSanitization(response.object);
+            const livePromptObservedConfidentiality =
+              collectGenerateObjectPromptConfidentiality(inputs);
             return {
               ...response,
               resultSchema: resultSchemaForObserved(
-                liveContextDocs.observedConfidentiality,
+                ContextualFlowControl.uniqueAtoms([
+                  ...livePromptObservedConfidentiality,
+                  ...liveContextDocs.observedConfidentiality,
+                ]),
               ),
             };
           };
