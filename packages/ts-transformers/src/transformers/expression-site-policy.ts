@@ -312,6 +312,60 @@ function isSharedPostClosureCallRootKind(
   return kind === "ordinary-call" || kind === "parameterized-inline-call";
 }
 
+const STRUCTURAL_NESTED_CONTAINER_KINDS = new Set<ExpressionContainerKind>([
+  "call-argument",
+  "object-property",
+  "array-element",
+]);
+
+const ARRAY_METHOD_SHARED_CALL_ROOT_CONTAINER_KINDS = new Set<
+  ExpressionContainerKind
+>([
+  "return-expression",
+  "object-property",
+  "array-element",
+]);
+
+export function shouldPreferArrayMethodSharedCallRootSite(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  const siteInfo = getExpressionSiteCallRootPolicyInfo(
+    expression,
+    context,
+    analyze,
+  );
+  return siteInfo.arrayMethodOwned &&
+    isSharedPostClosureCallRootKind(siteInfo.callRootKind) &&
+    !isControlFlowRewriteExpression(expression);
+}
+
+function hasEnclosingArrayMethodSharedCallRootOwner(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  let current: ts.Node | undefined = expression.parent;
+
+  while (current) {
+    if (ts.isFunctionLike(current)) {
+      return false;
+    }
+
+    if (
+      ts.isCallExpression(current) &&
+      shouldPreferArrayMethodSharedCallRootSite(current, context, analyze)
+    ) {
+      return true;
+    }
+
+    current = current.parent;
+  }
+
+  return false;
+}
+
 function isEligiblePatternOwnedWrapperCallbackSite(
   expression: ts.Expression,
   context: TransformationContext,
@@ -887,6 +941,13 @@ export function classifyExpressionSiteHandling(
     return { kind: "skip", reason: "non-pattern-context" };
   }
 
+  if (
+    STRUCTURAL_NESTED_CONTAINER_KINDS.has(containerKind) &&
+    hasEnclosingArrayMethodSharedCallRootOwner(expression, context, analyze)
+  ) {
+    return { kind: "skip", reason: "not-lowerable" };
+  }
+
   if (containerKind === "jsx-expression") {
     if (siteInfo.arrayMethodOwned) {
       return ownedDecision(
@@ -979,10 +1040,8 @@ export function classifyExpressionSiteHandling(
   }
 
   if (
-    siteInfo.arrayMethodOwned &&
-    isSharedPostClosureCallRootKind(siteInfo.callRootKind) &&
-    !siteInfo.controlFlowRewriteRoot &&
-    containerKind === "return-expression"
+    ARRAY_METHOD_SHARED_CALL_ROOT_CONTAINER_KINDS.has(containerKind) &&
+    shouldPreferArrayMethodSharedCallRootSite(expression, context, analyze)
   ) {
     return sharedDecision();
   }
@@ -1099,6 +1158,17 @@ export function findLowerableExpressionSite(
             containerKind: site.containerKind,
           };
         }
+
+        if (
+          decision.kind === "skip" &&
+          containerKind === "variable-initializer" &&
+          shouldPreferArrayMethodSharedCallRootSite(current, context, analyze)
+        ) {
+          return {
+            expression: current,
+            containerKind,
+          };
+        }
       }
     }
 
@@ -1107,12 +1177,6 @@ export function findLowerableExpressionSite(
 
   return deferredArrayMethodReceiverSite;
 }
-
-const STRUCTURAL_NESTED_CONTAINER_KINDS = new Set<ExpressionContainerKind>([
-  "call-argument",
-  "object-property",
-  "array-element",
-]);
 
 export function findPreferredNestedLowerableExpressionSite(
   expression: ts.Expression,
