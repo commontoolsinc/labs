@@ -180,6 +180,61 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
   assertEquals(engine.getRunState().primaryFailure?.kind, "unknown");
 });
 
+Deno.test("CfHarnessEngine records recoverable file-tool failures without failing the run", async () => {
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime([{
+      stdout: "",
+      stderr: "file not found: /workspace/notes/missing.txt",
+      exitCode: 10,
+    }]),
+    runId: "run-file-missing",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-04-15T19:15:00.000Z",
+        "2026-04-15T19:15:01.000Z",
+        "2026-04-15T19:15:02.000Z",
+        "2026-04-15T19:15:03.000Z",
+        "2026-04-15T19:15:04.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-15T19:15:05.000Z";
+    })(),
+  });
+
+  const result = await engine.invokeBuiltinTool("read_file", {
+    path: "notes/missing.txt",
+  });
+
+  assertEquals(result.output, {
+    outputId: createToolOutputId("run-file-missing", "read_file", 1),
+    path: "/workspace/notes/missing.txt",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "file_not_found",
+      message: "file not found: /workspace/notes/missing.txt",
+      path: "/workspace/notes/missing.txt",
+      detail: "file not found: /workspace/notes/missing.txt",
+      exitCode: 10,
+    },
+  });
+  assertEquals(engine.getRunState().status, "completed");
+  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().toolOutputs, [result.resultRef]);
+  assertEquals(engine.getRunState().failureRecords?.length, 1);
+  assertEquals(
+    engine.getRunState().failureRecords?.[0]?.kind,
+    "file_not_found",
+  );
+  assertEquals(engine.getRunState().failureRecords?.[0]?.source, "tool_output");
+  assertEquals(engine.getRunState().failureRecords?.[0]?.toolId, "read_file");
+  assertEquals(
+    engine.getRunState().failureRecords?.[0]?.outputId,
+    createToolOutputId("run-file-missing", "read_file", 1),
+  );
+  assertEquals(engine.getRunState().primaryFailure?.kind, "file_not_found");
+});
+
 Deno.test("CfHarnessEngine terminalizes interrupted runs even after an intermediate tool completion", async () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime([

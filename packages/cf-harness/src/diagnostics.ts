@@ -3,6 +3,10 @@ import type { SandboxRuntime } from "./sandbox/types.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { BashToolInput, BashToolOutput } from "./tools/bash.ts";
+import {
+  isStructuredFileToolErrorOutput,
+  type StructuredFileToolErrorCode,
+} from "./tools/file-errors.ts";
 
 export const HARNESS_CAPABILITY_COMMANDS = [
   "bash",
@@ -30,7 +34,10 @@ export interface HarnessCapabilitySnapshot {
 }
 
 export type HarnessFailureKind =
+  | "file_not_found"
   | "missing_binary"
+  | "not_a_file"
+  | "permission_denied"
   | "tool_not_allowed"
   | "workspace_path_confusion"
   | "timeout"
@@ -322,9 +329,50 @@ export const classifyBuiltinToolFailure = (
         at,
         capabilitySnapshot,
       );
+    case "read_file":
+    case "write_file":
+      return classifyStructuredFileToolFailure(toolId, output, at);
     default:
       return undefined;
   }
+};
+
+const fileFailureKindForCode = (
+  code: StructuredFileToolErrorCode,
+): HarnessFailureKind => {
+  switch (code) {
+    case "file_not_found":
+      return "file_not_found";
+    case "not_a_file":
+      return "not_a_file";
+    case "permission_denied":
+      return "permission_denied";
+    case "path_outside_workspace":
+      return "workspace_path_confusion";
+    case "unknown":
+      return "unknown";
+  }
+};
+
+const classifyStructuredFileToolFailure = (
+  toolId: "read_file" | "write_file",
+  output: unknown,
+  at: string,
+): HarnessFailureRecord | undefined => {
+  if (!isStructuredFileToolErrorOutput(output)) {
+    return undefined;
+  }
+  return createHarnessFailureRecord({
+    kind: fileFailureKindForCode(output.error.code),
+    source: "tool_output",
+    detail: output.error.message,
+    at,
+    toolId,
+    outputId: output.outputId as ToolOutputId,
+    ...(output.error.exitCode !== undefined
+      ? { exitCode: output.error.exitCode }
+      : {}),
+  });
 };
 
 export const classifyHarnessRunError = (
@@ -394,7 +442,10 @@ const FAILURE_PRIORITY: Record<HarnessFailureKind, number> = {
   tool_not_allowed: 60,
   timeout: 50,
   workspace_path_confusion: 40,
+  permission_denied: 35,
   missing_binary: 30,
+  not_a_file: 25,
+  file_not_found: 25,
   sandbox_exec_mismatch: 20,
   harness_error: 10,
   unknown: 0,
