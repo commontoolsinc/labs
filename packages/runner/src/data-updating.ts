@@ -156,7 +156,8 @@ const recordLinkWritePolicyInput = (
     return;
   }
   const sourceMetadata = readStoredCfcMetadata(tx, source);
-  const sourceRelevant = sourceMetadata !== undefined ||
+  const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
+    sourceMetadata !== undefined ||
     hasPendingSchemaPolicyInput(tx, source);
   const targetRelevant = storedCfcMetadataAppliesToPath(tx, target) ||
     hasPendingSchemaPolicyInput(tx, target);

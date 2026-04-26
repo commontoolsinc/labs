@@ -255,6 +255,43 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
   }
 };
 
+const schemaForRawBuiltinRootOutputBinding = (
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  processCell: Cell<any>,
+  outputBinding: unknown,
+): JSONSchema | undefined => {
+  if (!isWriteRedirectLink(outputBinding)) {
+    return undefined;
+  }
+  const bindingLink = parseLink(outputBinding, processCell);
+  const link = resolveLink(
+    runtime,
+    tx,
+    bindingLink,
+    "writeRedirect",
+  );
+  return bindingLink.schema ?? link.schema;
+};
+
+const resultForRawBuiltinOutputBinding = (
+  result: unknown,
+  outputBindingSchema: JSONSchema | undefined,
+  builtinIdentity: ImplementationIdentity | undefined,
+): unknown => {
+  if (
+    !isCell(result) ||
+    outputBindingSchema === undefined ||
+    builtinIdentity?.kind !== "builtin" ||
+    builtinIdentity.builtinId !== "generateObject"
+  ) {
+    return result;
+  }
+  return result.asSchema(outputBindingSchema).getAsLink({
+    includeSchema: true,
+  });
+};
+
 const recordRawBuiltinResultSchemaPolicyInput = (
   tx: IExtendedStorageTransaction,
   result: unknown,
@@ -2589,18 +2626,31 @@ export class Runner {
       builtinResult = module.implementation(
         inputsCell,
         (tx: IExtendedStorageTransaction, result: any) => {
+          const outputBindingSchema = schemaForRawBuiltinRootOutputBinding(
+            tx,
+            this.runtime,
+            processCell,
+            mappedOutputBindings,
+          );
           recordRawBuiltinBindingSchemaPolicyInputs(
             tx,
             this.runtime,
             processCell,
             mappedOutputBindings,
           );
-          recordRawBuiltinResultSchemaPolicyInput(tx, result);
+          recordRawBuiltinResultSchemaPolicyInput(
+            tx,
+            result,
+          );
           sendValueToBinding(
             tx,
             processCell,
             mappedOutputBindings,
-            result,
+            resultForRawBuiltinOutputBinding(
+              result,
+              outputBindingSchema,
+              builtinIdentity,
+            ),
           );
         },
         addCancel,

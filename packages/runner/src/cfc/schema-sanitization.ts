@@ -288,7 +288,40 @@ export const schemaWithInjectionSafeAnnotations = (
   observedConfidentiality: readonly unknown[] = [],
 ): JSONSchema => {
   const clone = cloneJson(schema);
-  return annotateSchema(clone, observedConfidentiality, clone).schema;
+  return stripRequiredFields(
+    annotateSchema(clone, observedConfidentiality, clone).schema,
+  );
+};
+
+const stripRequiredFields = (schema: JSONSchema): JSONSchema => {
+  if (typeof schema === "boolean") {
+    return schema;
+  }
+
+  const { required: _required, ...rest } = schema as any;
+  const result: Record<string, unknown> = { ...rest };
+
+  if (isRecord(result.properties)) {
+    result.properties = Object.fromEntries(
+      Object.entries(result.properties).map(([key, value]) => [
+        key,
+        stripRequiredFields(value as JSONSchema),
+      ]),
+    );
+  }
+  if (typeof result.items === "object" && result.items !== null) {
+    result.items = stripRequiredFields(result.items as JSONSchema);
+  }
+  for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+    if (Array.isArray(result[key])) {
+      result[key] = (result[key] as JSONSchema[]).map(stripRequiredFields);
+    }
+  }
+  if (typeof result.not === "object" && result.not !== null) {
+    result.not = stripRequiredFields(result.not as JSONSchema);
+  }
+
+  return result as JSONSchema;
 };
 
 const typeMatches = (value: unknown, type: string): boolean => {
