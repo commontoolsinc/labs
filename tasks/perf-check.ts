@@ -22,7 +22,9 @@ import {
   type BaselineOverrides,
   computeBaseline,
   downloadAndParseJUnit,
+  downloadAndParsePatternTestMetrics,
   extractMetrics,
+  extractPatternTestCpuMetrics,
   extractTestFileMetrics,
   fetchArtifactsForRun,
   fetchJobsForRun,
@@ -31,14 +33,18 @@ import {
   formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
+  isPatternUnitWallMetric,
+  isVeryLargePatternUnitWallRegression,
   mapConcurrent,
   type MetricTimeline,
   MIN_ABSOLUTE_DELTA,
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   parseBaselineOverrides,
+  patternUnitCpuMetricForWallMetric,
   type PRInfo,
   REPO,
+  shouldGatePatternUnitWallRegression,
   STDDEV_FACTOR,
   type TimingSample,
   TOKEN,
@@ -57,6 +63,7 @@ const BASELINE_RUNS = 20;
 const EXCLUDED_METRIC_PATTERNS = [
   /^job: Pattern Unit Tests/,
   /^step: pattern unit tests$/,
+  /^cpu: pattern-unit-\d+\/pattern-unit-tests/,
 ];
 
 // ---------------------------------------------------------------------------
@@ -117,14 +124,31 @@ async function main() {
       (a) => a.name.startsWith("test-timing-") && !a.expired,
     );
     for (const artifact of timingArtifacts) {
+      const artifactName = artifact.name.replace("test-timing-", "");
       const suites = await downloadAndParseJUnit(artifact.id);
       const testMetrics = extractTestFileMetrics(
         currentRunInfo,
-        artifact.name.replace("test-timing-", ""),
+        artifactName,
         suites,
       );
       for (const [name, sample] of testMetrics) {
         currentMetrics.set(name, sample);
+      }
+
+      if (artifactName.startsWith("pattern-unit-")) {
+        const patternMetricArtifacts = await downloadAndParsePatternTestMetrics(
+          artifact.id,
+        );
+        for (const patternMetricArtifact of patternMetricArtifacts) {
+          const cpuMetrics = extractPatternTestCpuMetrics(
+            currentRunInfo,
+            artifactName,
+            patternMetricArtifact,
+          );
+          for (const [name, sample] of cpuMetrics) {
+            currentMetrics.set(name, sample);
+          }
+        }
       }
     }
   } catch (e) {
@@ -181,15 +205,33 @@ async function main() {
         (a) => a.name.startsWith("test-timing-") && !a.expired,
       );
       for (const artifact of timingArtifacts) {
+        const artifactName = artifact.name.replace("test-timing-", "");
         const suites = await downloadAndParseJUnit(artifact.id);
         if (suites.length > 0) {
           const testMetrics = extractTestFileMetrics(
             run,
-            artifact.name.replace("test-timing-", ""),
+            artifactName,
             suites,
           );
           for (const [name, sample] of testMetrics) {
             addSample(timelines, name, sample);
+          }
+        }
+
+        if (artifactName.startsWith("pattern-unit-")) {
+          const patternMetricArtifacts =
+            await downloadAndParsePatternTestMetrics(
+              artifact.id,
+            );
+          for (const patternMetricArtifact of patternMetricArtifacts) {
+            const cpuMetrics = extractPatternTestCpuMetrics(
+              run,
+              artifactName,
+              patternMetricArtifact,
+            );
+            for (const [name, sample] of cpuMetrics) {
+              addSample(timelines, name, sample);
+            }
           }
         }
       }
@@ -220,7 +262,7 @@ async function main() {
   }
 
   // 5. Compare current metrics against baseline
-  type Status = "OVER" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
+  type Status = "OVER" | "WATCH" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
   interface Row {
     metric: string;
     status: Status;
@@ -236,12 +278,27 @@ async function main() {
      * as a percentage. 0% = at median; 100% = at threshold; >100% = over.
      */
     headroomPct?: number;
+    note?: string;
   }
 
-  const rows: Row[] = [];
-  const failures: Row[] = [];
+  interface MetricEvaluation {
+    current: number;
+    n: number;
+    baseline: ReturnType<typeof computeBaseline>;
+    stats?: {
+      median: number;
+      variance: number;
+      stddev: number;
+      threshold: number;
+      pctIncrease: number;
+      headroomPct: number;
+    };
+  }
 
-  for (const [metric, currentSample] of currentMetrics) {
+  const evaluateMetric = (
+    metric: string,
+    currentSample: TimingSample,
+  ): MetricEvaluation => {
     const current = currentSample.durationSeconds;
     const timeline = timelines.get(metric);
     const n = timeline?.samples.length ?? 0;
@@ -252,22 +309,39 @@ async function main() {
       )
       : null;
 
-    const stats = baseline && {
-      median: baseline.median,
-      variance: baseline.variance,
-      stddev: baseline.stddev,
-      threshold: baseline.threshold,
-      pctIncrease: ((current - baseline.median) / baseline.median) * 100,
-      headroomPct: baseline.threshold > baseline.median
-        ? ((current - baseline.median) /
-          (baseline.threshold - baseline.median)) * 100
-        : 0,
-    };
+    const stats = baseline
+      ? {
+        median: baseline.median,
+        variance: baseline.variance,
+        stddev: baseline.stddev,
+        threshold: baseline.threshold,
+        pctIncrease: ((current - baseline.median) / baseline.median) * 100,
+        headroomPct: baseline.threshold > baseline.median
+          ? ((current - baseline.median) /
+            (baseline.threshold - baseline.median)) * 100
+          : 0,
+      }
+      : undefined;
+
+    return { current, n, baseline, stats };
+  };
+
+  const rows: Row[] = [];
+  const failures: Row[] = [];
+
+  for (const [metric, currentSample] of currentMetrics) {
+    const { current, n, baseline, stats } = evaluateMetric(
+      metric,
+      currentSample,
+    );
 
     // Metrics whose aggregate values grow as tests are added — never fail,
     // but still shown so the log has full context.
     if (EXCLUDED_METRIC_PATTERNS.some((re) => re.test(metric))) {
-      rows.push({ metric, status: "excl", current, n, ...(stats ?? {}) });
+      const note = metric.startsWith("cpu: pattern-unit-")
+        ? "used to corroborate pattern-unit wall-clock outliers"
+        : undefined;
+      rows.push({ metric, status: "excl", current, n, ...(stats ?? {}), note });
       continue;
     }
 
@@ -288,6 +362,40 @@ async function main() {
 
     if (current > baseline.threshold) {
       const row: Row = { metric, status: "OVER", current, n, ...stats! };
+      if (isPatternUnitWallMetric(metric)) {
+        const cpuMetric = patternUnitCpuMetricForWallMetric(metric);
+        const cpuSample = cpuMetric ? currentMetrics.get(cpuMetric) : undefined;
+        const cpuEvaluation = cpuMetric && cpuSample
+          ? evaluateMetric(cpuMetric, cpuSample)
+          : undefined;
+        const cpuFailed = Boolean(
+          cpuEvaluation?.baseline &&
+            cpuEvaluation.current > cpuEvaluation.baseline.threshold,
+        );
+        const gatePatternWallMetric = shouldGatePatternUnitWallRegression({
+          wallFailed: true,
+          wallCurrentSeconds: current,
+          wallBaselineMedianSeconds: baseline.median,
+          cpuFailed,
+        });
+
+        if (!gatePatternWallMetric) {
+          rows.push({
+            ...row,
+            status: "WATCH",
+            note: cpuMetric
+              ? `wall-clock over threshold; ${cpuMetric} did not corroborate`
+              : "wall-clock over threshold; CPU metric unavailable",
+          });
+          continue;
+        }
+
+        row.note = cpuFailed && cpuMetric
+          ? `CPU corroborated by ${cpuMetric}`
+          : isVeryLargePatternUnitWallRegression(current, baseline.median)
+          ? "very large wall-clock regression"
+          : undefined;
+      }
       rows.push(row);
       failures.push(row);
     } else if ((stats!.headroomPct ?? 0) >= 50) {
@@ -307,17 +415,19 @@ async function main() {
       `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!\n`,
     );
     console.log(
-      "| Metric | Current | Baseline (median) | Threshold | Change |",
+      "| Metric | Current | Baseline (median) | Threshold | Change | Reason |",
     );
     console.log(
-      "|--------|---------|-------------------|-----------|--------|",
+      "|--------|---------|-------------------|-----------|--------|--------|",
     );
     for (const f of failures) {
       const fmt = (v: number) => formatMetricValue(f.metric, v);
       console.log(
         `| ${f.metric} | ${fmt(f.current)} | ${fmt(f.median!)} | ${
           fmt(f.threshold!)
-        } | +${f.pctIncrease!.toFixed(0)}% |`,
+        } | +${f.pctIncrease!.toFixed(0)}% | ${
+          f.note ?? "threshold exceeded"
+        } |`,
       );
     }
 
@@ -351,7 +461,7 @@ async function main() {
     }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
   );
   console.log(
-    "Status key: OVER = over threshold (fails); CLOSE = ≥50% of margin consumed;",
+    "Status key: OVER = over threshold (fails); WATCH = over pattern-unit wall-clock threshold without CPU corroboration; CLOSE = ≥50% of margin consumed;",
   );
   console.log(
     "  OK = <50% consumed; ovrd = saved by a PR override; excl = metric excluded from the check;",
@@ -376,23 +486,33 @@ async function main() {
         return "Test files";
       case "subtest":
         return "Subtests";
+      case "cpu":
+        return "CPU";
       case "bench":
         return "Benchmarks";
       default:
         return prefix;
     }
   };
-  const KIND_ORDER = ["Jobs", "Steps", "Test files", "Subtests", "Benchmarks"];
+  const KIND_ORDER = [
+    "Jobs",
+    "Steps",
+    "Test files",
+    "Subtests",
+    "CPU",
+    "Benchmarks",
+  ];
   // Sort order within each kind: most at-risk of failing the check first.
   // `ovrd` sits below `OK` because an override-protected metric is at strictly
   // lower risk of tripping the check than an unguarded OK metric — the author
   // has already authorized its current level.
   const STATUS_ORDER: Record<Status, number> = {
     OVER: 5,
-    CLOSE: 4,
-    OK: 3,
-    ovrd: 2,
-    excl: 1,
+    WATCH: 4,
+    CLOSE: 3,
+    OK: 2,
+    ovrd: 1,
+    excl: 0,
     "n/a": 0,
   };
 
@@ -409,6 +529,7 @@ async function main() {
 
   const counts = {
     OVER: 0,
+    WATCH: 0,
     CLOSE: 0,
     OK: 0,
     ovrd: 0,
@@ -418,7 +539,7 @@ async function main() {
   for (const r of rows) counts[r.status]++;
 
   console.log(
-    `\n## All metrics checked  (${rows.length} total — OVER: ${counts.OVER}, CLOSE: ${counts.CLOSE}, OK: ${counts.OK}, ovrd: ${counts.ovrd}, excl: ${counts.excl}, n/a: ${
+    `\n## All metrics checked  (${rows.length} total — OVER: ${counts.OVER}, WATCH: ${counts.WATCH}, CLOSE: ${counts.CLOSE}, OK: ${counts.OK}, ovrd: ${counts.ovrd}, excl: ${counts.excl}, n/a: ${
       counts["n/a"]
     })`,
   );
@@ -432,9 +553,9 @@ async function main() {
     });
     console.log(`\n### ${kind}  (${rs.length})`);
     console.log(
-      "| status | head% | Δ% | current | baseline median | threshold | n | metric |",
+      "| status | head% | Δ% | current | baseline median | threshold | n | metric | note |",
     );
-    console.log("|:---|---:|---:|---:|---:|---:|---:|:--|");
+    console.log("|:---|---:|---:|---:|---:|---:|---:|:--|:--|");
     for (const r of rs) {
       const fmt = (v: number | undefined) =>
         v === undefined ? "—" : formatMetricValue(r.metric, v);
@@ -447,7 +568,7 @@ async function main() {
       console.log(
         `| ${r.status} | ${head} | ${pct} | ${fmt(r.current)} | ${
           fmt(r.median)
-        } | ${fmt(r.threshold)} | ${r.n} | ${r.metric} |`,
+        } | ${fmt(r.threshold)} | ${r.n} | ${r.metric} | ${r.note ?? ""} |`,
       );
     }
   }

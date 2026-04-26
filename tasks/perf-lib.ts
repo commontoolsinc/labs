@@ -116,6 +116,29 @@ export interface JUnitTestSuite {
   tests: { name: string; time: number }[];
 }
 
+export interface PatternTestCpuMetrics {
+  userCpuMicros: number;
+  systemCpuMicros: number;
+  totalCpuMicros: number;
+  rssBytes: number;
+  heapTotalBytes: number;
+  heapUsedBytes: number;
+  externalBytes: number;
+}
+
+export interface PatternTestMetric {
+  file: string;
+  durationMs: number;
+  passed: boolean;
+  cpuMetrics?: PatternTestCpuMetrics;
+}
+
+export interface PatternTestMetricsArtifact {
+  kind: "pattern-test-metrics";
+  version: number;
+  metrics: PatternTestMetric[];
+}
+
 /** Structured output from `deno bench --json`. */
 export interface DenoBenchResult {
   version: number;
@@ -291,7 +314,9 @@ export async function downloadAndParseJUnit(
   } finally {
     try {
       await Deno.remove(tmpDir, { recursive: true });
-    } catch { /* ignore cleanup errors */ }
+    } catch (error) {
+      console.warn(`Warning: could not remove ${tmpDir}: ${error}`);
+    }
   }
 }
 
@@ -332,6 +357,122 @@ export function parseJUnitXml(xml: string): JUnitTestSuite[] {
   }
 
   return suites;
+}
+
+export async function downloadAndParsePatternTestMetrics(
+  artifactId: number,
+): Promise<PatternTestMetricsArtifact[]> {
+  const resp = await fetch(
+    `https://api.github.com/repos/${REPO}/actions/artifacts/${artifactId}/zip`,
+    { headers: apiHeaders() },
+  );
+  if (!resp.ok) return [];
+
+  const tmpDir = await Deno.makeTempDir({ prefix: "perf-pattern-metrics-" });
+  const zipPath = `${tmpDir}/artifact.zip`;
+
+  try {
+    const data = new Uint8Array(await resp.arrayBuffer());
+    await Deno.writeFile(zipPath, data);
+
+    const unzip = new Deno.Command("unzip", {
+      args: ["-o", zipPath, "-d", tmpDir],
+      stdout: "null",
+      stderr: "null",
+    });
+    const result = await unzip.output();
+    if (!result.success) return [];
+
+    const artifacts: PatternTestMetricsArtifact[] = [];
+    for await (const entry of walkFiles(tmpDir)) {
+      if (!entry.endsWith("pattern-unit-metrics.json")) continue;
+      const content = await Deno.readTextFile(entry);
+      const parsed = parsePatternTestMetricsJson(content);
+      if (parsed) artifacts.push(parsed);
+    }
+    return artifacts;
+  } finally {
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch (error) {
+      console.warn(`Warning: could not remove ${tmpDir}: ${error}`);
+    }
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function numberField(
+  record: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parsePatternTestCpuMetrics(
+  value: unknown,
+): PatternTestCpuMetrics | undefined {
+  if (!isRecord(value)) return undefined;
+  const userCpuMicros = numberField(value, "userCpuMicros");
+  const systemCpuMicros = numberField(value, "systemCpuMicros");
+  const totalCpuMicros = numberField(value, "totalCpuMicros");
+  const rssBytes = numberField(value, "rssBytes");
+  const heapTotalBytes = numberField(value, "heapTotalBytes");
+  const heapUsedBytes = numberField(value, "heapUsedBytes");
+  const externalBytes = numberField(value, "externalBytes");
+  if (
+    userCpuMicros === null || systemCpuMicros === null ||
+    totalCpuMicros === null || rssBytes === null ||
+    heapTotalBytes === null || heapUsedBytes === null || externalBytes === null
+  ) {
+    return undefined;
+  }
+  return {
+    userCpuMicros,
+    systemCpuMicros,
+    totalCpuMicros,
+    rssBytes,
+    heapTotalBytes,
+    heapUsedBytes,
+    externalBytes,
+  };
+}
+
+export function parsePatternTestMetricsJson(
+  json: string,
+): PatternTestMetricsArtifact | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(parsed)) return null;
+  if (parsed.kind !== "pattern-test-metrics") return null;
+  const version = numberField(parsed, "version");
+  if (version === null || !Array.isArray(parsed.metrics)) return null;
+
+  const metrics: PatternTestMetric[] = [];
+  for (const value of parsed.metrics) {
+    if (!isRecord(value)) continue;
+    const file = value.file;
+    const durationMs = numberField(value, "durationMs");
+    const passed = value.passed;
+    if (
+      typeof file !== "string" || durationMs === null ||
+      typeof passed !== "boolean"
+    ) {
+      continue;
+    }
+    const cpuMetrics = parsePatternTestCpuMetrics(value.cpuMetrics);
+    metrics.push({ file, durationMs, passed, cpuMetrics });
+  }
+
+  return { kind: "pattern-test-metrics", version, metrics };
 }
 
 // ---------------------------------------------------------------------------
@@ -702,6 +843,97 @@ export function extractTestFileMetrics(
       const testKey = `subtest: ${artifactName}/${suite.name} > ${test.name}`;
       metrics.set(testKey, makeSample(test.time));
     }
+  }
+
+  return metrics;
+}
+
+const PATTERN_UNIT_TEST_SUITE_NAME = "pattern-unit-tests";
+
+export const PATTERN_UNIT_LARGE_WALL_REGRESSION_PCT = 0.40;
+export const PATTERN_UNIT_LARGE_WALL_REGRESSION_SECONDS = 2;
+
+export function patternUnitCpuMetricForWallMetric(
+  metric: string,
+): string | null {
+  const aggregateMatch = metric.match(
+    /^test: (pattern-unit-\d+)\/pattern-unit-tests$/,
+  );
+  if (aggregateMatch) {
+    return `cpu: ${aggregateMatch[1]}/${PATTERN_UNIT_TEST_SUITE_NAME}`;
+  }
+
+  const fileMatch = metric.match(
+    /^subtest: (pattern-unit-\d+)\/pattern-unit-tests > (.+)$/,
+  );
+  if (fileMatch) {
+    return `cpu: ${fileMatch[1]}/${PATTERN_UNIT_TEST_SUITE_NAME} > ${
+      fileMatch[2]
+    }`;
+  }
+
+  return null;
+}
+
+export function isPatternUnitWallMetric(metric: string): boolean {
+  return patternUnitCpuMetricForWallMetric(metric) !== null;
+}
+
+export function isVeryLargePatternUnitWallRegression(
+  currentSeconds: number,
+  baselineMedianSeconds: number,
+): boolean {
+  return currentSeconds > Math.max(
+    baselineMedianSeconds * (1 + PATTERN_UNIT_LARGE_WALL_REGRESSION_PCT),
+    baselineMedianSeconds + PATTERN_UNIT_LARGE_WALL_REGRESSION_SECONDS,
+  );
+}
+
+export function shouldGatePatternUnitWallRegression(args: {
+  wallFailed: boolean;
+  wallCurrentSeconds: number;
+  wallBaselineMedianSeconds: number;
+  cpuFailed: boolean;
+}): boolean {
+  return args.wallFailed &&
+    (args.cpuFailed ||
+      isVeryLargePatternUnitWallRegression(
+        args.wallCurrentSeconds,
+        args.wallBaselineMedianSeconds,
+      ));
+}
+
+export function extractPatternTestCpuMetrics(
+  run: WorkflowRun,
+  artifactName: string,
+  artifact: PatternTestMetricsArtifact,
+): Map<string, TimingSample> {
+  const metrics = new Map<string, TimingSample>();
+
+  const makeSample = (totalCpuMicros: number): TimingSample => ({
+    runId: run.id,
+    runUrl: run.html_url,
+    sha: run.head_sha,
+    createdAt: run.created_at,
+    durationSeconds: totalCpuMicros / 1_000_000,
+  });
+
+  let aggregateCpuMicros = 0;
+  for (const metric of artifact.metrics) {
+    const totalCpuMicros = metric.cpuMetrics?.totalCpuMicros;
+    if (totalCpuMicros === undefined || totalCpuMicros <= 0) continue;
+    aggregateCpuMicros += totalCpuMicros;
+    metrics.set(
+      `cpu: ${artifactName}/${PATTERN_UNIT_TEST_SUITE_NAME} > ${metric.file}`,
+      makeSample(totalCpuMicros),
+    );
+  }
+
+  if (aggregateCpuMicros > 0) {
+    metrics.set(
+      `cpu: ${artifactName}/${PATTERN_UNIT_TEST_SUITE_NAME}`,
+      makeSample(aggregateCpuMicros),
+    );
   }
 
   return metrics;
