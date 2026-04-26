@@ -8,7 +8,7 @@ import { h } from "@commonfabric/html";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { NAME, type Pattern, UI } from "../builder/types.ts";
@@ -16,6 +16,8 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { toMemorySpaceAddress } from "../link-utils.ts";
+import { setRunnableName } from "../runner-utils.ts";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
@@ -204,6 +206,16 @@ type BaseResolution = {
   cell: Cell<unknown>;
   pathPrefix?: readonly string[];
 };
+
+type SharedHashtagResolver = {
+  cell: Cell<WishState<unknown>>;
+  cancel: () => void;
+};
+
+const sharedHashtagResolvers = new WeakMap<
+  Runtime,
+  Map<string, SharedHashtagResolver>
+>();
 
 function getSpaceCell(ctx: WishContext): Cell<unknown> {
   if (!ctx.spaceCell) {
@@ -711,6 +723,197 @@ function resolveBase(
   throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
 }
 
+function isSharedHashtagSearchTarget(parsed: ParsedWishTarget): boolean {
+  if (!parsed.key.startsWith("#")) return false;
+  return getResolutionKind(parsed) === "hashtag-search";
+}
+
+function canUseSharedHashtagResult(
+  parsed: ParsedWishTarget,
+  options: { headless?: boolean; schema?: unknown },
+): boolean {
+  return isSharedHashtagSearchTarget(parsed) &&
+    options.headless === true &&
+    options.schema === undefined;
+}
+
+function sharedHashtagResolverKey(
+  parentSpace: string,
+  parsed: ParsedWishTarget,
+  scope?: ("~" | "." | string)[],
+): string {
+  return JSON.stringify({
+    space: parentSpace,
+    query: formatTarget(parsed),
+    scope: scope ?? null,
+  });
+}
+
+function getRuntimeSharedHashtagResolvers(
+  runtime: Runtime,
+): Map<string, SharedHashtagResolver> {
+  let resolvers = sharedHashtagResolvers.get(runtime);
+  if (!resolvers) {
+    resolvers = new Map();
+    sharedHashtagResolvers.set(runtime, resolvers);
+  }
+  return resolvers;
+}
+
+function createSharedHashtagResolver(
+  ctx: WishContext,
+  parsed: ParsedWishTarget,
+): SharedHashtagResolver {
+  const sharedParsed: ParsedWishTarget = {
+    key: parsed.key,
+    path: [...parsed.path],
+  };
+  const sharedScope = ctx.scope ? [...ctx.scope] : undefined;
+  const query = formatTarget(sharedParsed);
+  const sharedCell = ctx.runtime.getCell<WishState<unknown>>(
+    ctx.parentCell.space,
+    {
+      wish: {
+        kind: "hashtag",
+        space: ctx.parentCell.space,
+        scope: sharedScope ?? null,
+        query,
+      },
+    },
+    undefined,
+    ctx.tx,
+  );
+
+  const action: Action = (tx: IExtendedStorageTransaction) => {
+    const stateCell = sharedCell.withTx(tx);
+    const queryKey = sanitizeQueryKey(query);
+    const sourceBucket = sanitizeSourceKey(getTxDebugActionId(tx) ?? "none");
+    try {
+      const resolveStartedAt = performance.now();
+      const baseResolutions = searchByHashtag(sharedParsed, {
+        runtime: ctx.runtime,
+        tx,
+        parentCell: ctx.parentCell,
+        scope: sharedScope,
+      });
+      if (baseResolutions.length === 0) {
+        stateCell.set({
+          result: undefined,
+          candidates: [],
+          [UI]: undefined,
+        });
+        return;
+      }
+
+      const resultCells = measureWishPhase(
+        "shared-resolve-paths",
+        queryKey,
+        () =>
+          baseResolutions.map((baseResolution) => {
+            const combinedPath = baseResolution.pathPrefix
+              ? [...baseResolution.pathPrefix, ...sharedParsed.path]
+              : sharedParsed.path;
+            return resolvePath(baseResolution.cell, combinedPath);
+          }),
+        sourceBucket,
+      );
+      const uniqueResultCells = measureWishPhase(
+        "shared-dedupe-results",
+        queryKey,
+        () =>
+          resultCells.filter(
+            (cell, index) =>
+              resultCells.findIndex((candidate) => candidate.equals(cell)) ===
+                index,
+          ),
+        sourceBucket,
+      );
+      const candidatesCell = measureWishPhase(
+        "shared-candidates-cell",
+        queryKey,
+        () =>
+          ctx.runtime.getImmutableCell(
+            sharedCell.space,
+            uniqueResultCells,
+            undefined,
+            tx,
+          ),
+        sourceBucket,
+      );
+      const resultUI = measureWishPhase(
+        "shared-result-ui-get",
+        queryKey,
+        () => uniqueResultCells[0].key(UI).get(),
+        sourceBucket,
+      ) as VNode | undefined;
+      const resolveMs = Number(
+        (performance.now() - resolveStartedAt).toFixed(3),
+      );
+
+      wishFlowLogger.debug(`wish/resolve/${queryKey}`, () =>
+        [
+          `[WISH RESOLVE] source=${getTxDebugActionId(tx) ?? "none"}`,
+          `query=${query}`,
+          `kind=shared-hashtag-search`,
+          `baseResolutions=${baseResolutions.length}`,
+          `uniqueResults=${uniqueResultCells.length}`,
+          `resolveMs=${resolveMs}`,
+          uniqueResultCells.length > 0
+            ? `results=${
+              uniqueResultCells.slice(0, 5).map((cell) => describeCell(cell))
+                .join(", ")
+            }`
+            : undefined,
+        ].filter(Boolean));
+
+      stateCell.set({
+        result: uniqueResultCells[0],
+        candidates: candidatesCell,
+        [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
+      stateCell.set({
+        result: undefined,
+        candidates: [],
+        error: errorMessage,
+        [UI]: errorUI(errorMessage),
+      });
+    }
+  };
+
+  const actionName = `wish:hashtag:${ctx.parentCell.space}:${query}`;
+  setRunnableName(action, actionName, { setSrc: true });
+  Object.assign(action, {
+    writes: [sharedCell.getAsNormalizedFullLink()],
+  });
+
+  const initialLog: ReactivityLog = {
+    reads: [],
+    shallowReads: [],
+    writes: [toMemorySpaceAddress(sharedCell.getAsNormalizedFullLink())],
+  };
+  const cancel = ctx.runtime.scheduler.subscribe(action, initialLog);
+
+  return { cell: sharedCell, cancel };
+}
+
+function getOrCreateSharedHashtagResolver(
+  ctx: WishContext,
+  parsed: ParsedWishTarget,
+): SharedHashtagResolver {
+  const key = sharedHashtagResolverKey(ctx.parentCell.space, parsed, ctx.scope);
+  const resolvers = getRuntimeSharedHashtagResolvers(ctx.runtime);
+  const existing = resolvers.get(key);
+  if (existing) return existing;
+
+  const resolver = createSharedHashtagResolver(ctx, parsed);
+  resolvers.set(key, resolver);
+  return resolver;
+}
+
 // fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
 let suggestionPatternFetchPromise: Promise<Pattern | undefined> | undefined;
 let suggestionPattern: Pattern | undefined;
@@ -967,6 +1170,17 @@ export function wish(
               scope,
               nowCell,
             };
+            if (canUseSharedHashtagResult(parsed, { headless, schema })) {
+              const shared = getOrCreateSharedHashtagResolver(ctx, parsed);
+              measureWishPhase(
+                "send-shared-hashtag",
+                queryKey,
+                () => sendResult(tx, shared.cell),
+                sourceBucket,
+              );
+              return;
+            }
+
             const baseResolutions = measureWishPhase(
               "resolve-base",
               queryKey,
