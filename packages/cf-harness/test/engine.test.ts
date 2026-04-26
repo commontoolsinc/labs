@@ -180,6 +180,44 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
   assertEquals(engine.getRunState().primaryFailure?.kind, "unknown");
 });
 
+Deno.test("CfHarnessEngine terminalizes interrupted runs even after an intermediate tool completion", async () => {
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime([
+      { stdout: "done\n", stderr: "", exitCode: 0 },
+    ]),
+    runId: "run-interrupted",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-04-15T19:20:00.000Z",
+        "2026-04-15T19:20:01.000Z",
+        "2026-04-15T19:20:02.000Z",
+        "2026-04-15T19:20:03.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-15T19:20:04.000Z";
+    })(),
+  });
+
+  await engine.invokeBuiltinTool("bash", { command: "echo done" });
+  assertEquals(engine.getRunState().status, "completed");
+  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+
+  await engine.terminalizeInterruptedRun("SIGTERM");
+
+  assertEquals(engine.getRunState().status, "failed");
+  assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:20:04.000Z");
+  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:20:04.000Z");
+  assertEquals(engine.getRunState().terminalReason, "process_interrupted");
+  assertEquals(engine.getRunState().failureRecords?.at(-1), {
+    type: "cf-harness.failure-record",
+    kind: "harness_error",
+    source: "run_error",
+    detail: "process received SIGTERM before the prompt loop completed",
+    at: "2026-04-15T19:20:04.000Z",
+  });
+  assertEquals(engine.getRunState().primaryFailure?.kind, "harness_error");
+});
+
 Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime(),

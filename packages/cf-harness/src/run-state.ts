@@ -18,7 +18,8 @@ export type HarnessRunTerminalReason =
   | "tool_completed"
   | "tool_error"
   | "max_model_turns"
-  | "prompt_loop_error";
+  | "prompt_loop_error"
+  | "process_interrupted";
 
 export interface HarnessRunState {
   runId: string;

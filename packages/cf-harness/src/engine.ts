@@ -25,6 +25,7 @@ import {
   classifyHarnessRunError,
   type ClassifyHarnessRunErrorOptions,
   collectHarnessCapabilitySnapshot,
+  createHarnessFailureRecord,
   type HarnessFailureRecord,
 } from "./diagnostics.ts";
 import {
@@ -244,6 +245,38 @@ export class CfHarnessEngine {
 
   async persistRunState(): Promise<string | undefined> {
     return await this.artifactStore?.persistRunState(this.#runState);
+  }
+
+  async terminalizeInterruptedRun(
+    signalName: string,
+  ): Promise<HarnessRunState> {
+    const currentState = this.#runState;
+    if (
+      currentState.status === "failed" ||
+      currentState.terminalReason === "assistant_completed"
+    ) {
+      return this.getRunState();
+    }
+    const now = this.#now();
+    this.#runState = appendHarnessFailureRecord(
+      this.#runState,
+      createHarnessFailureRecord({
+        kind: "harness_error",
+        source: "run_error",
+        detail:
+          `process received ${signalName} before the prompt loop completed`,
+        at: now,
+      }),
+      now,
+    );
+    this.#runState = setHarnessRunStatus(
+      this.#runState,
+      "failed",
+      now,
+      "process_interrupted",
+    );
+    await this.persistRunState();
+    return this.getRunState();
   }
 
   async persistTranscript(

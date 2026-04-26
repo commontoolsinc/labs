@@ -2,14 +2,17 @@ import { assertEquals, assertRejects } from "@std/assert";
 import {
   buildCfHarnessOperatorSystemPrompt,
   type CfHarnessCliIO,
+  type CfHarnessCliSignalHandler,
   createCfHarnessBatchResult,
   formatCfHarnessCliResult,
   formatCfHarnessCliUsage,
   formatCfHarnessTranscriptEvent,
+  installCfHarnessSignalHandlers,
   parseCfHarnessCliArgs,
   resolveCfHarnessCliSystemPrompt,
   runCfHarnessCli,
 } from "../src/cli.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
 import type {
   HarnessPromptLoopResult,
   RunHarnessPromptOptions,
@@ -312,6 +315,126 @@ Deno.test("runCfHarnessCli prints usage for help", async () => {
   assertEquals(exitCode, 0);
   assertEquals(stdout, [formatCfHarnessCliUsage()]);
   assertEquals(stderr, []);
+});
+
+Deno.test("installCfHarnessSignalHandlers terminalizes the active run before exiting", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/tmp/project",
+    runId: "run-signal",
+    now: (() => {
+      const timestamps = [
+        "2026-04-16T20:00:00.000Z",
+        "2026-04-16T20:00:01.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-16T20:00:02.000Z";
+    })(),
+  });
+  engine.setRunStatus("running");
+  let handler: CfHarnessCliSignalHandler | undefined;
+  let disposed = false;
+  let exitCode: number | undefined;
+
+  const cleanup = installCfHarnessSignalHandlers(() => engine, {
+    registerSignalHandler: (signals, registeredHandler) => {
+      assertEquals(signals, ["SIGINT", "SIGTERM"]);
+      handler = registeredHandler;
+      return () => {
+        disposed = true;
+      };
+    },
+    exit: (code) => {
+      exitCode = code;
+      throw new Error("exit");
+    },
+  });
+
+  await assertRejects(
+    () => Promise.resolve(handler?.("SIGTERM")),
+    Error,
+    "exit",
+  );
+  cleanup();
+
+  assertEquals(disposed, true);
+  assertEquals(exitCode, 143);
+  assertEquals(engine.getRunState().status, "failed");
+  assertEquals(engine.getRunState().terminalReason, "process_interrupted");
+  assertEquals(engine.getRunState().endedAt, "2026-04-16T20:00:02.000Z");
+  assertEquals(
+    engine.getRunState().failureRecords?.at(-1)?.detail,
+    "process received SIGTERM before the prompt loop completed",
+  );
+});
+
+Deno.test("runCfHarnessCli registers and disposes signal handlers around a run", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  let registeredSignals: readonly string[] = [];
+  let disposed = false;
+  const exitCode = await runCfHarnessCli(
+    ["--prompt", "hello", "--gateway-auth-mode", "none"],
+    {
+      io,
+      env: {},
+      registerSignalHandler: (signals) => {
+        registeredSignals = signals;
+        return () => {
+          disposed = true;
+        };
+      },
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [
+                { role: "user", content: "hello" },
+                { role: "assistant", content: "Done." },
+              ],
+              modelTurns: 1,
+              runState: {
+                runId: "run-signal-cleanup",
+                status: "completed",
+                createdAt: "2026-04-16T20:10:00.000Z",
+                updatedAt: "2026-04-16T20:10:01.000Z",
+                cfcEnforcementMode: "disabled",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(registeredSignals, ["SIGINT", "SIGTERM"]);
+  assertEquals(disposed, true);
+  assertEquals(stderr, []);
+  assertEquals(stdout, [
+    formatCfHarnessCliResult({
+      model: "gpt-5.4",
+      finalAssistantText: "Done.",
+      transcript: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "Done." },
+      ],
+      modelTurns: 1,
+      runState: {
+        runId: "run-signal-cleanup",
+        status: "completed",
+        createdAt: "2026-04-16T20:10:00.000Z",
+        updatedAt: "2026-04-16T20:10:01.000Z",
+        cfcEnforcementMode: "disabled",
+        currentDir: "/workspace",
+        policyEvents: [],
+        toolOutputs: [],
+      },
+    }),
+  ]);
 });
 
 Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata", async () => {
