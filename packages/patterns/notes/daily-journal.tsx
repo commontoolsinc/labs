@@ -244,8 +244,9 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
 
     // Gather last 7 days of note content for the system prompt
     const recentNotesContext = computed(() => {
-      const today = new Date(safeDateNow());
-      const sevenDaysAgo = new Date(safeDateNow());
+      const now = safeDateNow();
+      const today = new Date(now);
+      const sevenDaysAgo = new Date(now);
       sevenDaysAgo.setDate(today.getDate() - 7);
       const cutoff = toLocalISODate(sevenDaysAgo);
 
