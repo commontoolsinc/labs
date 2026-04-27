@@ -287,9 +287,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     seen.delete(value as object);
 
-    // Apply `TAGS.object` escaping per Section 5.6.
+    // Apply `TAGS.object` escaping per Section 5.6: wrap any plain object
+    // that has at least one /-prefixed key, not just single-key objects.
     const keys = Object.keys(result);
-    if (keys.length === 1 && keys[0].startsWith("/")) {
+    if (keys.some((k) => k.startsWith("/"))) {
       return this.wrapTag(TAGS.object, result) as JsonWireValue;
     }
 

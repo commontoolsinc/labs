@@ -962,15 +962,36 @@ describe("json encoding", () => {
       expect(result["/Link@1"]).toBe("fake");
     });
 
-    it("does not wrap multi-key objects with / keys", () => {
+    it("wraps multi-key object with one /-prefixed key", () => {
       const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
       const result = toWireFormat(obj);
-      expect(result).toEqual({ a: 1, "/b": 2 });
+      expect(result).toEqual({ "/object": { a: 1, "/b": 2 } });
     });
 
-    it("deserializing multi-key object with /-prefixed key produces ProblematicValue", () => {
-      // ANY object containing a /-prefixed key is reserved per spec — must not
-      // be silently round-tripped as a plain object.
+    it("round-trips multi-key object with one /-prefixed key", () => {
+      const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result["a"]).toBe(1);
+      expect(result["/b"]).toBe(2);
+    });
+
+    it("wraps multi-key object with multiple /-prefixed keys", () => {
+      const obj = { "/a": 1, "/b": 2, c: 3 } as unknown as FabricValue;
+      const result = toWireFormat(obj);
+      expect(result).toEqual({ "/object": { "/a": 1, "/b": 2, c: 3 } });
+    });
+
+    it("round-trips multi-key object with multiple /-prefixed keys", () => {
+      const obj = { "/a": 1, "/b": 2, c: 3 } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result["/a"]).toBe(1);
+      expect(result["/b"]).toBe(2);
+      expect(result["c"]).toBe(3);
+    });
+
+    it("malformed wire: multi-key object with /-prefixed key produces ProblematicValue", () => {
+      // Wire data that was NOT encoded by this encoder (no /object wrapper) —
+      // the decoder must not silently round-trip it as a plain object.
       const data = { a: 1, "/b": 2 } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicValue);
