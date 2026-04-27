@@ -16,6 +16,7 @@ import { CfHarnessEngine } from "../src/engine.ts";
 import type {
   HarnessPromptLoopResult,
   RunHarnessPromptOptions,
+  RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 
 const createIoBuffers = (): {
@@ -480,6 +481,8 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
                   artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
                   transcriptPath:
                     "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                  runReportPath:
+                    "/tmp/project/.cf-harness-artifacts/run-cli/run-report.json",
                   policyEvents: [],
                   toolOutputs: [],
                 },
@@ -531,6 +534,8 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
           artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
           transcriptPath:
             "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+          runReportPath:
+            "/tmp/project/.cf-harness-artifacts/run-cli/run-report.json",
           policyEvents: [],
           toolOutputs: [],
         },
@@ -811,6 +816,8 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
                   "/tmp/project/.cf-harness-artifacts/run-cli-batch-json",
                 transcriptPath:
                   "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/transcript.json",
+                runReportPath:
+                  "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/run-report.json",
                 policyEvents: [{
                   type: "cf-harness.policy-event",
                   severity: "denied",
@@ -855,6 +862,8 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
         artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli-batch-json",
         transcriptPath:
           "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/transcript.json",
+        runReportPath:
+          "/tmp/project/.cf-harness-artifacts/run-cli-batch-json/run-report.json",
         policyEvents: [{
           type: "cf-harness.policy-event",
           severity: "denied",
@@ -1051,6 +1060,15 @@ Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", asyn
 
 Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () => {
   const { io, stdout, stderr } = createIoBuffers();
+  let runTranscriptOptions: RunHarnessTranscriptOptions | undefined;
+  const promptSlotBinding = {
+    type: "cf-harness.prompt-slot-binding",
+    role: "context",
+    kernelName: "cf-harness",
+    surface: "loom",
+    subject: "original-run",
+    eventId: "event-original",
+  } as const;
   const exitCode = await runCfHarnessCli(
     ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-1/run-state.json"],
     {
@@ -1073,6 +1091,7 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
             createdAt: "2026-04-15T22:10:00.000Z",
             updatedAt: "2026-04-15T22:10:01.000Z",
             cfcEnforcementMode: "disabled",
+            promptSlotBinding,
             currentDir: "/workspace",
             model: "gpt-5.4",
             artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
@@ -1088,8 +1107,10 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
       },
       createPromptLoop: () => ({
         runPrompt: () => Promise.reject(new Error("unexpected prompt path")),
-        runTranscript: ({ transcript, model }) =>
-          Promise.resolve(
+        runTranscript: (options) => {
+          runTranscriptOptions = options;
+          const { transcript, model } = options;
+          return Promise.resolve(
             ({
               model: model ?? "gpt-5.4",
               finalAssistantText: "Resumed.",
@@ -1113,12 +1134,14 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
                 toolOutputs: [],
               },
             }) satisfies HarnessPromptLoopResult,
-          ),
+          );
+        },
       }),
     },
   );
 
   assertEquals(exitCode, 0);
+  assertEquals(runTranscriptOptions?.promptSlotBinding, promptSlotBinding);
   assertEquals(stdout, [
     formatCfHarnessCliResult({
       model: "gpt-5.4",

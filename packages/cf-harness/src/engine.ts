@@ -15,7 +15,9 @@ import {
   type HarnessRunState,
   type HarnessRunTerminalReason,
   setHarnessCapabilitySnapshot,
+  setHarnessPromptSlotBinding,
   setHarnessRunCurrentDir,
+  setHarnessRunReportPath,
   setHarnessRunStatus,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
@@ -32,6 +34,8 @@ import {
   createHarnessPolicyEvent,
   type HarnessPolicyEvent,
 } from "./contracts/policy.ts";
+import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import type { HarnessRunReport } from "./contracts/run-report.ts";
 import {
   createToolResultRef,
   type ToolOutputId,
@@ -225,6 +229,17 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  setPromptSlotBinding(
+    promptSlotBinding: PromptSlotBinding,
+  ): HarnessRunState {
+    this.#runState = setHarnessPromptSlotBinding(
+      this.#runState,
+      promptSlotBinding,
+      this.#now(),
+    );
+    return this.getRunState();
+  }
+
   async recordPolicyEvent(
     event: Omit<HarnessPolicyEvent, "type" | "at">,
   ): Promise<HarnessRunState> {
@@ -294,6 +309,21 @@ export class CfHarnessEngine {
       await this.persistRunState();
     }
     return transcriptPath;
+  }
+
+  async persistRunReport(
+    report: HarnessRunReport,
+  ): Promise<string | undefined> {
+    const runReportPath = await this.artifactStore?.persistRunReport(report);
+    if (runReportPath !== undefined) {
+      this.#runState = setHarnessRunReportPath(
+        this.#runState,
+        runReportPath,
+        this.#now(),
+      );
+      await this.persistRunState();
+    }
+    return runReportPath;
   }
 
   async ensureDiagnosticsInitialized(): Promise<HarnessRunState> {

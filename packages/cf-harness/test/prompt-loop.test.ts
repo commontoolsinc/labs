@@ -11,6 +11,25 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import type { PromptSlotBinding } from "../src/contracts/prompt-slot.ts";
+
+const directPromptSlotBinding: PromptSlotBinding = {
+  type: "cf-harness.prompt-slot-binding",
+  role: "direct-command",
+  kernelName: "cf-harness",
+  surface: "test",
+  subject: "direct-test",
+  eventId: "event-direct",
+};
+
+const contextPromptSlotBinding: PromptSlotBinding = {
+  type: "cf-harness.prompt-slot-binding",
+  role: "context",
+  kernelName: "cf-harness",
+  surface: "test",
+  subject: "context-test",
+  eventId: "event-context",
+};
 
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly kind = "docker-runsc-cfc" as const;
@@ -82,6 +101,10 @@ class FailingArtifactStore implements HarnessArtifactStore {
 
   persistCapabilitySnapshot(): Promise<string> {
     return Promise.resolve(`${this.runRoot}/capabilities.json`);
+  }
+
+  persistRunReport(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/run-report.json`);
   }
 
   persistToolOutput(): Promise<string> {
@@ -414,9 +437,11 @@ Deno.test("CfHarnessPromptLoop completes a direct assistant response without too
 
   const result = await loop.runPrompt({
     prompt: "Say hi.",
+    promptSlotBinding: directPromptSlotBinding,
   });
 
   assertEquals(result.finalAssistantText, "No tool call needed.");
+  assertEquals(result.runState.promptSlotBinding, directPromptSlotBinding);
   assertEquals(result.runState.status, "completed");
   assertEquals(result.runState.policyEvents, []);
   assertEquals(result.runState.toolOutputs, []);
@@ -638,9 +663,21 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
     mode: "observe",
     toolId: "bash",
     toolCallId: "call-observe",
+    toolInputSummary: {
+      type: "cf-harness.tool-input-summary",
+      toolId: "bash",
+      commandBytes: 11,
+      commandDigest:
+        "sha256:17bc0d7e89ddefaf38bce5f3bedcd6309b9453c5d85dafd24d1243bb1e505e8c",
+    },
     detail: "bash would require direct-command authorization in enforce modes",
     at: "2026-04-15T22:30:04.000Z",
   }]);
+  assertEquals(
+    JSON.stringify(result.runState.policyEvents[0]?.toolInputSummary)
+      .includes("echo warned"),
+    false,
+  );
   assertEquals(result.runState.failureRecords, []);
   assertEquals(
     result.transcript.at(-2),
@@ -739,6 +776,15 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
     mode: "enforce-explicit",
     toolId: "write_file",
     toolCallId: "call-denied",
+    toolInputSummary: {
+      type: "cf-harness.tool-input-summary",
+      toolId: "write_file",
+      path: "notes/out.txt",
+      mode: "replace",
+      contentBytes: 4,
+      contentDigest:
+        "sha256:ca3704aa0b06f5954c79ee837faa152d84d6b2d42838f0637a15eda8337dbdce",
+    },
     detail:
       "write_file requires direct-command authorization in enforce-explicit",
     observationDenied: {
@@ -749,6 +795,11 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
     },
     at: "2026-04-15T22:40:04.000Z",
   }]);
+  assertEquals(
+    JSON.stringify(result.runState.policyEvents[0]?.toolInputSummary)
+      .includes("nope"),
+    false,
+  );
   assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
   assertEquals(
     result.transcript.at(-2),
@@ -836,6 +887,13 @@ Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlis
     mode: "disabled",
     toolId: "bash",
     toolCallId: "call-bash-denied",
+    toolInputSummary: {
+      type: "cf-harness.tool-input-summary",
+      toolId: "bash",
+      commandBytes: 3,
+      commandDigest:
+        "sha256:a1159e9df3670d549d04524532629f5477ceb7deec9b45e47e8c009506ecb2c8",
+    },
     detail: "bash is not allowed in this run",
     observationDenied: {
       type: "cf-harness.observation-denied",
@@ -857,5 +915,145 @@ Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlis
         detail: "bash is not allowed in this run",
       }),
     },
+  );
+});
+
+Deno.test("CfHarnessPromptLoop includes read_file input summaries on strict-mode denials", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-read-file-strict",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-strict",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-read-denied",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({
+                    path: "notes/private.txt",
+                    maxBytes: 512,
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Read denied.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read the private note.",
+  });
+
+  assertEquals(result.finalAssistantText, "Read denied.");
+  assertEquals(result.runState.toolOutputs, []);
+  assertEquals(result.runState.policyEvents[0]?.toolInputSummary, {
+    type: "cf-harness.tool-input-summary",
+    toolId: "read_file",
+    path: "notes/private.txt",
+    maxBytes: 512,
+  });
+  assertEquals(
+    result.runState.policyEvents[0]?.detail,
+    "read_file requires direct-command authorization in enforce-strict",
+  );
+});
+
+Deno.test("CfHarnessPromptLoop includes prompt slot context on policy events", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-policy-context",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-policy-context",
+                type: "function",
+                function: {
+                  name: "write_file",
+                  arguments: JSON.stringify({
+                    path: "notes/out.txt",
+                    content: "nope",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Denied with context.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Write the output file.",
+    promptSlotBinding: contextPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Denied with context.");
+  assertEquals(result.runState.promptSlotBinding, contextPromptSlotBinding);
+  assertEquals(
+    result.runState.policyEvents[0]?.promptSlot,
+    contextPromptSlotBinding,
+  );
+  assertEquals(result.runState.policyEvents[0]?.toolInputSummary, {
+    type: "cf-harness.tool-input-summary",
+    toolId: "write_file",
+    path: "notes/out.txt",
+    mode: "replace",
+    contentBytes: 4,
+    contentDigest:
+      "sha256:ca3704aa0b06f5954c79ee837faa152d84d6b2d42838f0637a15eda8337dbdce",
+  });
+  assertEquals(
+    result.runState.policyEvents[0]?.detail,
+    "write_file requires direct-command authorization in enforce-explicit",
   );
 });

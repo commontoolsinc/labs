@@ -9,6 +9,7 @@ import {
 } from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
+import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { HarnessCapabilitySnapshot } from "./diagnostics.ts";
@@ -63,6 +64,9 @@ export interface HarnessArtifactStore {
   persistCapabilitySnapshot(
     snapshot: HarnessCapabilitySnapshot,
   ): Promise<string>;
+  persistRunReport(
+    report: HarnessRunReport,
+  ): Promise<string>;
   persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,
@@ -106,6 +110,15 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     await ensureDir(this.runRoot);
     const path = join(this.runRoot, "capabilities.json");
     await writeJsonFile(path, snapshot);
+    return path;
+  }
+
+  async persistRunReport(
+    report: HarnessRunReport,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "run-report.json");
+    await writeJsonFile(path, report);
     return path;
   }
 
@@ -154,6 +167,11 @@ export const readHarnessTranscript = async (
   path: string,
 ): Promise<HarnessTranscriptMessage[]> =>
   JSON.parse(await Deno.readTextFile(path)) as HarnessTranscriptMessage[];
+
+export const readHarnessRunReport = async (
+  path: string,
+): Promise<HarnessRunReport> =>
+  JSON.parse(await Deno.readTextFile(path)) as HarnessRunReport;
 
 export interface HarnessRunArtifacts {
   runRoot: string;

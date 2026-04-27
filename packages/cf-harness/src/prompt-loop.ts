@@ -32,6 +32,13 @@ import type {
   BuiltinToolId,
   HarnessToolDescriptor,
 } from "./contracts/tool-descriptor.ts";
+import type { HarnessToolInputSummary } from "./contracts/policy.ts";
+import {
+  createHarnessRunReport,
+  type HarnessRunTimelineEntryInput,
+  type HarnessToolActivity,
+  type HarnessToolPolicyDecision,
+} from "./contracts/run-report.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -162,6 +169,139 @@ const parseToolArguments = (
     );
   }
   return parsed as Record<string, unknown>;
+};
+
+const tryParseToolArguments = (
+  toolCall: HarnessToolCall,
+): Record<string, unknown> | undefined => {
+  try {
+    return parseToolArguments(toolCall);
+  } catch {
+    return undefined;
+  }
+};
+
+const textBytes = (input: string): Uint8Array =>
+  new TextEncoder().encode(input);
+
+const sha256Digest = async (input: Uint8Array): Promise<string> => {
+  const digestInput = input.buffer.slice(
+    input.byteOffset,
+    input.byteOffset + input.byteLength,
+  ) as ArrayBuffer;
+  const digest = await crypto.subtle.digest("SHA-256", digestInput);
+  return `sha256:${
+    [...new Uint8Array(digest)].map((byte) =>
+      byte.toString(16).padStart(2, "0")
+    ).join("")
+  }`;
+};
+
+const summarizeSensitiveText = async (
+  input: string,
+): Promise<{ bytes: number; digest: string }> => {
+  const bytes = textBytes(input);
+  return {
+    bytes: bytes.byteLength,
+    digest: await sha256Digest(bytes),
+  };
+};
+
+const isSafeNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+const optionalPolicyEventIndexes = (
+  policyEventIndexes: readonly number[],
+): { policyEventIndexes?: number[] } =>
+  policyEventIndexes.length > 0
+    ? { policyEventIndexes: [...policyEventIndexes] }
+    : {};
+
+const transcriptTimelineEntry = (
+  message: HarnessTranscriptMessage,
+  transcriptIndex: number,
+  at: string,
+  modelTurn?: number,
+): HarnessRunTimelineEntryInput => ({
+  kind: "transcript_message",
+  at,
+  transcriptIndex,
+  role: message.role,
+  ...(modelTurn !== undefined ? { modelTurn } : {}),
+  ...(message.role === "assistant" && message.toolCalls !== undefined
+    ? { toolCallIds: message.toolCalls.map((toolCall) => toolCall.id) }
+    : {}),
+  ...(message.role === "tool"
+    ? { toolCallId: message.toolCallId, toolId: message.toolName }
+    : {}),
+});
+
+const toErrorDetail = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const summarizeToolInput = async (
+  toolId: BuiltinToolId,
+  input: Record<string, unknown>,
+): Promise<HarnessToolInputSummary> => {
+  switch (toolId) {
+    case "bash": {
+      const commandSummary = typeof input.command === "string"
+        ? await summarizeSensitiveText(input.command)
+        : undefined;
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
+        ...(isSafeNonNegativeInteger(input.timeoutMs)
+          ? { timeoutMs: input.timeoutMs }
+          : {}),
+        ...(commandSummary !== undefined
+          ? {
+            commandBytes: commandSummary.bytes,
+            commandDigest: commandSummary.digest,
+          }
+          : {}),
+      };
+    }
+    case "read_file":
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+        ...(isSafeNonNegativeInteger(input.maxBytes)
+          ? { maxBytes: input.maxBytes }
+          : {}),
+      };
+    case "write_file": {
+      const contentSummary = typeof input.content === "string"
+        ? await summarizeSensitiveText(input.content)
+        : undefined;
+      const mode = input.mode === "append" || input.mode === "replace"
+        ? input.mode
+        : input.mode === undefined
+        ? "replace"
+        : undefined;
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+        ...(mode !== undefined ? { mode } : {}),
+        ...(typeof input.createParents === "boolean"
+          ? { createParents: input.createParents }
+          : {}),
+        ...(contentSummary !== undefined
+          ? {
+            contentBytes: contentSummary.bytes,
+            contentDigest: contentSummary.digest,
+          }
+          : {}),
+      };
+    }
+  }
+  return {
+    type: "cf-harness.tool-input-summary",
+    toolId,
+  };
 };
 
 const createAssistantTranscriptMessage = (
@@ -312,8 +452,11 @@ export class CfHarnessPromptLoop {
   async runTranscript(
     options: RunHarnessTranscriptOptions,
   ): Promise<HarnessPromptLoopResult> {
-    const model = options.model ?? this.engine.getRunState().model ??
+    const initialRunState = this.engine.getRunState();
+    const model = options.model ?? initialRunState.model ??
       this.engine.config.model;
+    const promptSlotBinding = options.promptSlotBinding ??
+      initialRunState.promptSlotBinding;
     if (model === undefined) {
       throw new Error(
         "a model must be configured before running the prompt loop",
@@ -321,11 +464,38 @@ export class CfHarnessPromptLoop {
     }
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
+    const toolActivity: HarnessToolActivity[] = [];
+    const reportTimeline: HarnessRunTimelineEntryInput[] = [];
     let modelTurns = 0;
+    const persistRunReport = async (
+      finalAssistantText?: string,
+    ): Promise<void> => {
+      await this.engine.persistRunReport(
+        createHarnessRunReport({
+          runState: this.engine.getRunState(),
+          model,
+          modelTurns,
+          ...(finalAssistantText !== undefined ? { finalAssistantText } : {}),
+          timeline: reportTimeline,
+          toolActivity,
+        }),
+      );
+    };
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.setRunStatus("running");
+    if (options.promptSlotBinding !== undefined) {
+      this.engine.setPromptSlotBinding(options.promptSlotBinding);
+    }
     await this.engine.persistRunState();
     await this.engine.persistTranscript(transcript);
+    const initialTranscriptAt = this.engine.getRunState().updatedAt;
+    for (const [index, message] of transcript.entries()) {
+      reportTimeline.push(transcriptTimelineEntry(
+        message,
+        index,
+        initialTranscriptAt,
+      ));
+    }
     for (const message of transcript) {
       await options.onTranscriptEvent?.({ message, transcript });
     }
@@ -338,6 +508,12 @@ export class CfHarnessPromptLoop {
         const assistantMessage = createAssistantTranscriptMessage(response);
         transcript.push(assistantMessage);
         await this.engine.persistTranscript(transcript);
+        reportTimeline.push(transcriptTimelineEntry(
+          assistantMessage,
+          transcript.length - 1,
+          this.engine.getRunState().updatedAt,
+          modelTurns,
+        ));
         await options.onTranscriptEvent?.({
           message: assistantMessage,
           transcript,
@@ -346,6 +522,7 @@ export class CfHarnessPromptLoop {
         if (toolCalls.length === 0) {
           this.engine.setRunStatus("completed", "assistant_completed");
           await this.engine.persistRunState();
+          await persistRunReport(assistantMessage.content);
           return {
             model,
             finalAssistantText: assistantMessage.content,
@@ -357,10 +534,18 @@ export class CfHarnessPromptLoop {
         for (const toolCall of toolCalls) {
           const toolMessage = await this.#invokeToolCall(
             toolCall,
-            options.promptSlotBinding,
+            promptSlotBinding,
+            toolActivity.length + 1,
+            (activity) => toolActivity.push(activity),
           );
           transcript.push(toolMessage);
           await this.engine.persistTranscript(transcript);
+          reportTimeline.push(transcriptTimelineEntry(
+            toolMessage,
+            transcript.length - 1,
+            this.engine.getRunState().updatedAt,
+            modelTurns,
+          ));
           await options.onTranscriptEvent?.({
             message: toolMessage,
             transcript,
@@ -373,6 +558,7 @@ export class CfHarnessPromptLoop {
       try {
         await this.engine.persistRunState();
         await this.engine.persistTranscript(transcript);
+        await persistRunReport();
       } catch {
         // Preserve the original model/tool failure when cleanup persistence also fails.
       }
@@ -385,6 +571,7 @@ export class CfHarnessPromptLoop {
     this.engine.setRunStatus("failed", "max_model_turns");
     await this.engine.persistRunState();
     await this.engine.persistTranscript(transcript);
+    await persistRunReport();
     throw turnLimitError;
   }
 
@@ -403,6 +590,8 @@ export class CfHarnessPromptLoop {
   async #invokeToolCall(
     toolCall: HarnessToolCall,
     promptSlotBinding?: PromptSlotBinding,
+    sequence = 1,
+    recordActivity: (activity: HarnessToolActivity) => void = () => {},
   ): Promise<HarnessToolTranscriptMessage> {
     if (!isBuiltinToolId(toolCall.function.name)) {
       throw new Error(
@@ -415,6 +604,41 @@ export class CfHarnessPromptLoop {
         `unknown builtin tool requested: ${toolCall.function.name}`,
       );
     }
+    const parsedInputForDeniedTool = tryParseToolArguments(toolCall);
+    const deniedToolInputSummary = parsedInputForDeniedTool === undefined
+      ? undefined
+      : await summarizeToolInput(
+        toolCall.function.name,
+        parsedInputForDeniedTool,
+      );
+    const policyEventIndexes: number[] = [];
+    const activityStartedAt = this.engine.getRunState().updatedAt;
+    const activityEndedAt = (): string => this.engine.getRunState().updatedAt;
+    const baseActivity = (
+      policyDecision: HarnessToolPolicyDecision,
+      executionStatus: HarnessToolActivity["executionStatus"],
+    ): Omit<HarnessToolActivity, "type"> => ({
+      runId: this.engine.getRunState().runId,
+      sequence,
+      startedAt: activityStartedAt,
+      endedAt: activityEndedAt(),
+      toolCallId: toolCall.id,
+      toolId: toolCall.function.name,
+      effectClass: tool.descriptor.effectClass,
+      cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
+      policyDecision,
+      executionStatus,
+      ...(promptSlotBinding !== undefined
+        ? { promptSlot: promptSlotBinding }
+        : {}),
+    });
+    const recordPolicyEvent = async (
+      event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
+    ): Promise<void> => {
+      const index = this.engine.getRunState().policyEvents.length;
+      await this.engine.recordPolicyEvent(event);
+      policyEventIndexes.push(index);
+    };
     if (
       this.#allowedToolIds !== undefined &&
       !this.#allowedToolIds.has(toolCall.function.name)
@@ -422,13 +646,27 @@ export class CfHarnessPromptLoop {
       const denial = makeObservationDenied("not-authorized", {
         detail: `${toolCall.function.name} is not allowed in this run`,
       });
-      await this.engine.recordPolicyEvent({
+      await recordPolicyEvent({
         severity: "denied",
         mode: this.engine.getRunState().cfcEnforcementMode,
         toolId: toolCall.function.name,
         toolCallId: toolCall.id,
+        ...(promptSlotBinding !== undefined
+          ? { promptSlot: promptSlotBinding }
+          : {}),
+        ...(deniedToolInputSummary !== undefined
+          ? { toolInputSummary: deniedToolInputSummary }
+          : {}),
         detail: denial.detail ?? `${toolCall.function.name} is not allowed`,
         observationDenied: denial,
+      });
+      recordActivity({
+        type: "cf-harness.tool-activity",
+        ...baseActivity("denied", "not-run"),
+        ...(deniedToolInputSummary !== undefined
+          ? { toolInputSummary: deniedToolInputSummary }
+          : {}),
+        ...optionalPolicyEventIndexes(policyEventIndexes),
       });
       return {
         role: "tool",
@@ -437,34 +675,52 @@ export class CfHarnessPromptLoop {
         content: JSON.stringify(denial),
       };
     }
-    const input = parseToolArguments(toolCall);
+    const input = parsedInputForDeniedTool ?? parseToolArguments(toolCall);
+    const toolInputSummary = deniedToolInputSummary ??
+      await summarizeToolInput(toolCall.function.name, input);
     const decision = evaluateToolPolicy(
       this.engine.getRunState().cfcEnforcementMode,
       tool.descriptor,
       promptSlotBinding,
       input,
     );
+    let policyDecision: HarnessToolPolicyDecision = "allowed";
     if (decision.warningDetail !== undefined) {
-      await this.engine.recordPolicyEvent({
+      await recordPolicyEvent({
         severity: "warning",
         mode: this.engine.getRunState().cfcEnforcementMode,
         toolId: toolCall.function.name,
         toolCallId: toolCall.id,
+        ...(promptSlotBinding !== undefined
+          ? { promptSlot: promptSlotBinding }
+          : {}),
+        toolInputSummary,
         detail: decision.warningDetail,
       });
+      policyDecision = "warned";
     }
     if (!decision.allowed) {
       const denial = decision.denial ??
         makeObservationDenied("not-authorized", {
           detail: `${toolCall.function.name} was denied`,
         });
-      await this.engine.recordPolicyEvent({
+      await recordPolicyEvent({
         severity: "denied",
         mode: this.engine.getRunState().cfcEnforcementMode,
         toolId: toolCall.function.name,
         toolCallId: toolCall.id,
+        ...(promptSlotBinding !== undefined
+          ? { promptSlot: promptSlotBinding }
+          : {}),
+        toolInputSummary,
         detail: denial.detail ?? `${toolCall.function.name} was denied`,
         observationDenied: denial,
+      });
+      recordActivity({
+        type: "cf-harness.tool-activity",
+        ...baseActivity("denied", "not-run"),
+        toolInputSummary,
+        ...optionalPolicyEventIndexes(policyEventIndexes),
       });
       return {
         role: "tool",
@@ -473,10 +729,34 @@ export class CfHarnessPromptLoop {
         content: JSON.stringify(denial),
       };
     }
-    const result = await this.#invokeBuiltinTool(
-      toolCall.function.name,
-      input,
-    );
+    let result: {
+      output: Awaited<
+        ReturnType<CfHarnessEngine["invokeBuiltinTool"]>
+      >["output"];
+      resultRef: ToolResultRef;
+    };
+    try {
+      result = await this.#invokeBuiltinTool(
+        toolCall.function.name,
+        input,
+      );
+    } catch (error) {
+      recordActivity({
+        type: "cf-harness.tool-activity",
+        ...baseActivity(policyDecision, "failed"),
+        toolInputSummary,
+        ...optionalPolicyEventIndexes(policyEventIndexes),
+        errorDetail: toErrorDetail(error),
+      });
+      throw error;
+    }
+    recordActivity({
+      type: "cf-harness.tool-activity",
+      ...baseActivity(policyDecision, "completed"),
+      toolInputSummary,
+      ...optionalPolicyEventIndexes(policyEventIndexes),
+      resultRef: result.resultRef,
+    });
     return {
       role: "tool",
       toolCallId: toolCall.id,
