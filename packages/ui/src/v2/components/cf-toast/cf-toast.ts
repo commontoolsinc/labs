@@ -25,6 +25,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @csspart dismiss - Dismiss button (only present when dismissable)
  */
 export class CFToast extends BaseElement {
+  // deno-fmt-ignore
   static override styles = css`
     :host {
       --cf-toast-border-radius: var(
@@ -70,6 +71,21 @@ export class CFToast extends BaseElement {
       font-size: var(--cf-font-body-size, 0.875rem);
       font-family: inherit;
       border: var(--cf-toast-border);
+      --cf-toast-action-background: color-mix(
+        in srgb,
+        currentColor 10%,
+        transparent
+      );
+      --cf-toast-action-background-hover: color-mix(
+        in srgb,
+        currentColor 16%,
+        transparent
+      );
+      --cf-toast-action-border-color: color-mix(
+        in srgb,
+        currentColor 18%,
+        transparent
+      );
     }
 
     /* Default variant */
@@ -142,6 +158,26 @@ export class CFToast extends BaseElement {
     .message {
       flex: 1;
       min-width: 0;
+    }
+
+    .action {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .action ::slotted(cf-button) {
+      color: inherit;
+      --cf-button-color-secondary: var(--cf-toast-action-background);
+      --cf-button-color-secondary-foreground: currentColor;
+      --cf-button-color-surface-hover: var(--cf-toast-action-background-hover);
+      --cf-button-color-border: var(--cf-toast-action-border-color);
+      --cf-size-sm-height: 1.75rem;
+      --cf-size-sm-padding-v: 0;
+      --cf-size-sm-padding-h: 0.625rem;
+      --cf-size-sm-radius: var(--cf-theme-border-radius, 0.5rem);
+      --cf-size-sm-font-size: var(--cf-font-body-size, 0.875rem);
+      --cf-size-sm-line-height: var(--cf-font-body-line-height, 1.25rem);
     }
 
     .dismiss {
