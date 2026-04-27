@@ -1719,28 +1719,6 @@ export type PatternToolFunction = <
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
 
-export type SubAgentToolParams =
-  & Omit<BuiltInGenerateObjectParams, "schema">
-  & { schema?: never };
-
-export type SubAgentToolResultSchema<T> =
-  | JSONSchema
-  | ((
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
-  ) => Opaque<JSONSchema>);
-
-export type SubAgentToolFunction = <
-  T,
-  E extends object = Record<PropertyKey, never>,
->(
-  buildParams: (
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
-  ) => Opaque<SubAgentToolParams>,
-  argumentSchema: JSONSchema,
-  resultSchema: SubAgentToolResultSchema<T>,
-  extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
-) => PatternToolResult<E>;
-
 export interface LiftFunction {
   <T, R>(
     implementation: (input: T) => R,
@@ -2158,7 +2136,6 @@ export type EqualsFunction = (
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
 export declare const patternTool: PatternToolFunction;
-export declare const subAgentTool: SubAgentToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;

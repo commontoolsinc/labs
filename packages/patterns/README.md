@@ -53,7 +53,7 @@ keywords/features.
   raw prompt-influence taint versus a schema-limited subagent sanitization path
   - **Data types**: array of LLM messages, confidential string, decision log
     entries
-  - **Keywords**: llmDialog, subAgentTool, prompt-injection, confidentiality,
+  - **Keywords**: llmDialog, patternTool, prompt-injection, confidentiality,
     cf-chat, tool-calling
 
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments

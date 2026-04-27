@@ -26,7 +26,6 @@ import type {
   FetchOptions,
   PatternToolFunction,
   PatternToolResult,
-  SubAgentToolFunction,
   WishParams,
   WishState,
 } from "commonfabric";
@@ -436,51 +435,3 @@ export const patternTool = (<
     extraParams: (extraParams ?? {}) as E,
   };
 }) as PatternToolFunction;
-
-/**
- * Create an LLM tool backed by a nested generateObject() call.
- * The generated pattern returns only the subagent's structured result,
- * which keeps the tool boundary schema-limited.
- */
-export const subAgentTool = (<
-  T,
-  E extends object = Record<PropertyKey, never>,
->(
-  buildParams: (
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
-  ) => Opaque<Record<string, unknown>>,
-  argumentSchema: JSONSchema,
-  resultSchema:
-    | JSONSchema
-    | ((
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
-    ) => Opaque<JSONSchema>),
-  extraParams?: Opaque<E>,
-): PatternToolResult<E> => {
-  const hasDynamicResultSchema = typeof resultSchema === "function";
-  const resolvedPattern = pattern<T, unknown>(
-    (input) => {
-      const typedInput = input as OpaqueRef<RequireDefaults<T>> & {
-        [SELF]: OpaqueRef<any>;
-      };
-      const params = buildParams(typedInput) as BuiltInGenerateObjectParams;
-      const resolvedResultSchema = hasDynamicResultSchema
-        ? (resultSchema as (
-          input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
-        ) => Opaque<JSONSchema>)(typedInput)
-        : resultSchema;
-      return generateObject({
-        ...params,
-        schema: resolvedResultSchema,
-      } as BuiltInGenerateObjectParams).result;
-    },
-    argumentSchema,
-    hasDynamicResultSchema ? true : resultSchema,
-  );
-
-  return {
-    pattern: resolvedPattern,
-    extraParams: (extraParams ?? {}) as E,
-    useResultSchemaForObservation: !hasDynamicResultSchema,
-  };
-}) as SubAgentToolFunction;

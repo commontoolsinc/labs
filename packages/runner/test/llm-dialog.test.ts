@@ -37,6 +37,9 @@ describe("llmDialog", () => {
   >["commonfabric"]["patternTool"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
+  let generateObject: ReturnType<
+    typeof createBuilder
+  >["commonfabric"]["generateObject"];
 
   beforeEach(() => {
     clearMockResponses();
@@ -48,7 +51,8 @@ describe("llmDialog", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, llmDialog, Cell, handler, patternTool } = commonfabric);
+    ({ pattern, llmDialog, Cell, handler, patternTool, generateObject } =
+      commonfabric);
   });
 
   afterEach(async () => {
@@ -415,7 +419,7 @@ describe("llmDialog", () => {
     });
   });
 
-  it("should expose subAgentTool in llmDialog tool catalogs", async () => {
+  it("should expose a userland subagent in llmDialog tool catalogs", async () => {
     const childResultSchema = {
       type: "object",
       properties: {
@@ -513,7 +517,32 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const { subAgentTool } = createTrustedBuilder(runtime).commonfabric;
+    const subAgentPattern = pattern<any, any>(
+      ({ prompt, resultSchema }) => {
+        return generateObject({
+          prompt,
+          schema: resultSchema,
+          tools: {
+            helperTool: patternTool(
+              helperTool,
+            ) as unknown as BuiltInLLMTool,
+          },
+        } as any).result;
+      },
+      {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          resultSchema: {
+            type: "object",
+            additionalProperties: true,
+          },
+        },
+        required: ["prompt", "resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+    );
 
     const testPattern = pattern(
       () => {
@@ -523,29 +552,7 @@ describe("llmDialog", () => {
           tools: {
             delegate: {
               description: "Run a child agent and return schema-limited JSON.",
-              ...(subAgentTool(
-                ({ prompt }: any) => ({
-                  prompt,
-                  tools: {
-                    helperTool: patternTool(
-                      helperTool,
-                    ) as unknown as BuiltInLLMTool,
-                  },
-                }),
-                {
-                  type: "object",
-                  properties: {
-                    prompt: { type: "string" },
-                    resultSchema: {
-                      type: "object",
-                      additionalProperties: true,
-                    },
-                  },
-                  required: ["prompt", "resultSchema"],
-                  additionalProperties: false,
-                },
-                ({ resultSchema }: any) => resultSchema,
-              ) as unknown as BuiltInLLMTool),
+              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
             },
           },
         });
@@ -617,8 +624,6 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const { subAgentTool } = createTrustedBuilder(runtime).commonfabric;
-
     const readRawBriefing = handler(
       {
         type: "object",
@@ -674,6 +679,70 @@ describe("llmDialog", () => {
       },
     );
 
+    const subAgentPattern = pattern<any, any>(
+      ({ prompt, resultSchema, body, emails, route }) => {
+        return generateObject({
+          prompt,
+          system: "Child worker.",
+          schema: resultSchema,
+          tools: {
+            readRawBriefing: {
+              description: "Read the nested body.",
+              inputSchema: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              } as const satisfies JSONSchema,
+              handler: readRawBriefing({
+                title: "Briefing",
+                source: "https://example.invalid",
+                body,
+              }),
+            } as unknown as BuiltInLLMTool,
+            sendMail: {
+              description: "Send a nested email.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  recipient: { type: "string" },
+                  subject: { type: "string" },
+                  body: { type: "string" },
+                },
+                required: ["recipient", "subject", "body"],
+                additionalProperties: false,
+              } as const satisfies JSONSchema,
+              handler: sendMail({ sent: emails, route }),
+            } as unknown as BuiltInLLMTool,
+          },
+          observationMaxConfidentiality: ["internal"],
+        } as any).result;
+      },
+      {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          resultSchema: {
+            type: "object",
+            additionalProperties: true,
+          },
+          body: {
+            type: "object",
+            additionalProperties: true,
+            asCell: true,
+          },
+          emails: {
+            type: "object",
+            additionalProperties: true,
+            asCell: true,
+          },
+          route: { type: "string" },
+        },
+        required: ["prompt", "resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+    );
+
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
@@ -705,56 +774,11 @@ describe("llmDialog", () => {
             subAgent: {
               description:
                 "Run a higher-clearance worker and return schema-limited JSON.",
-              ...(subAgentTool(
-                ({ prompt, body, emails, route }: any) => ({
-                  prompt,
-                  system: "Child worker.",
-                  tools: {
-                    readRawBriefing: {
-                      description: "Read the nested body.",
-                      inputSchema: {
-                        type: "object",
-                        properties: {},
-                        additionalProperties: false,
-                      } as const satisfies JSONSchema,
-                      handler: readRawBriefing({
-                        title: "Briefing",
-                        source: "https://example.invalid",
-                        body,
-                      }),
-                    } as unknown as BuiltInLLMTool,
-                    sendMail: {
-                      description: "Send a nested email.",
-                      inputSchema: {
-                        type: "object",
-                        properties: {
-                          recipient: { type: "string" },
-                          subject: { type: "string" },
-                          body: { type: "string" },
-                        },
-                        required: ["recipient", "subject", "body"],
-                        additionalProperties: false,
-                      } as const satisfies JSONSchema,
-                      handler: sendMail({ sent: emails, route }),
-                    } as unknown as BuiltInLLMTool,
-                  },
-                  observationMaxConfidentiality: ["internal"],
-                }),
-                {
-                  type: "object",
-                  properties: {
-                    prompt: { type: "string" },
-                    resultSchema: {
-                      type: "object",
-                      additionalProperties: true,
-                    },
-                  },
-                  required: ["prompt", "resultSchema"],
-                  additionalProperties: false,
-                },
-                ({ resultSchema }: any) => resultSchema,
-                { body: hostileBody, emails, route: "safe-child" },
-              ) as unknown as BuiltInLLMTool),
+              ...(patternTool(subAgentPattern, {
+                body: hostileBody,
+                emails,
+                route: "safe-child",
+              }) as unknown as BuiltInLLMTool),
             },
             sendMail: {
               description: "Send an email.",

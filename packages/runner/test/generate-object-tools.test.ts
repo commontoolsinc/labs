@@ -46,9 +46,6 @@ describe("generateObject with tools", () => {
   let patternTool: ReturnType<
     typeof createBuilder
   >["commonfabric"]["patternTool"];
-  let subAgentTool: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["subAgentTool"];
   let generateObject: ReturnType<
     typeof createBuilder
   >["commonfabric"]["generateObject"];
@@ -71,7 +68,6 @@ describe("generateObject with tools", () => {
       Cell,
       lift,
       patternTool,
-      subAgentTool,
       str,
     } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
@@ -1265,7 +1261,7 @@ describe("generateObject with tools", () => {
     expect(link?.id).toBe(linkedCellId);
   });
 
-  it("should support a subagent tool with a higher observation ceiling", async () => {
+  it("should support a userland subagent tool with a higher observation ceiling", async () => {
     const parentResultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -1376,6 +1372,25 @@ describe("generateObject with tools", () => {
       },
     );
 
+    const subAgentPattern = pattern<{ prompt: string }, { verdict: string }>(
+      ({ prompt }) => {
+        return generateObject({
+          prompt,
+          schema: childResultSchema,
+          observationMaxConfidentiality: ["secret"],
+        }).result;
+      },
+      {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+        },
+        required: ["prompt"],
+        additionalProperties: false,
+      },
+      childResultSchema,
+    );
+
     const testPattern = pattern<Record<string, never>>(
       () => {
         return generateObject({
@@ -1386,22 +1401,11 @@ describe("generateObject with tools", () => {
             sanitizePage: {
               description:
                 "Analyze the hostile page with a higher ceiling and return a safe verdict.",
-              ...(subAgentTool(
-                ({ body }: any) => ({
-                  prompt: str`${childPrompt}\n\n${body}`,
-                  observationMaxConfidentiality: ["secret"],
-                }),
-                {
-                  type: "object",
-                  properties: {
-                    body: { type: "string" },
-                  },
-                  required: ["body"],
-                },
-                childResultSchema,
-                { body: hostileBody },
-              ) as unknown as BuiltInLLMTool),
-            },
+              ...(patternTool(subAgentPattern, {
+                prompt: str`${childPrompt}\n\n${hostileBody}`,
+              }) as unknown as Record<string, unknown>),
+              useResultSchemaForObservation: true,
+            } as unknown as BuiltInLLMTool,
             restrictedTool: {
               description: "Only callable after clean subagent output.",
               ...(patternTool(restrictedTool) as unknown as BuiltInLLMTool),
@@ -1430,7 +1434,7 @@ describe("generateObject with tools", () => {
     expect(result.key("result").get()).toEqual({ ok: true });
   });
 
-  it("should allow subAgentTool to use a call-provided result schema", async () => {
+  it("should allow a userland subagent to use a call-provided result schema", async () => {
     const parentResultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -1564,6 +1568,61 @@ describe("generateObject with tools", () => {
       },
     );
 
+    const parseResultSchema = lift(
+      {
+        type: "object",
+        properties: {
+          resultSchema: {
+            anyOf: [
+              { type: "object", additionalProperties: true },
+              { type: "boolean" },
+              { type: "string" },
+            ],
+          },
+        },
+        required: ["resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+      ({ resultSchema }) => {
+        if (typeof resultSchema === "string") {
+          return JSON.parse(resultSchema);
+        }
+        return resultSchema;
+      },
+    );
+
+    const subAgentPattern = pattern<any, any>(
+      ({ prompt, resultSchema }) => {
+        const parsedResultSchema = parseResultSchema({ resultSchema });
+        return generateObject({
+          prompt,
+          schema: parsedResultSchema,
+          tools: {
+            helperTool: patternTool(
+              childHelperTool,
+            ) as unknown as BuiltInLLMTool,
+          },
+        } as any).result;
+      },
+      {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          resultSchema: {
+            anyOf: [
+              { type: "object", additionalProperties: true },
+              { type: "boolean" },
+              { type: "string" },
+            ],
+          },
+        },
+        required: ["prompt", "resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+    );
+
     const testPattern = pattern<Record<string, never>>(
       () => {
         return generateObject({
@@ -1573,27 +1632,7 @@ describe("generateObject with tools", () => {
             delegate: {
               description:
                 "Run a child agent and require it to return data matching resultSchema.",
-              ...(subAgentTool(
-                ({ prompt }: any) => ({
-                  prompt,
-                  tools: {
-                    helperTool: patternTool(childHelperTool),
-                  },
-                }),
-                {
-                  type: "object",
-                  properties: {
-                    prompt: { type: "string" },
-                    resultSchema: {
-                      type: "object",
-                      additionalProperties: true,
-                    },
-                  },
-                  required: ["prompt", "resultSchema"],
-                  additionalProperties: false,
-                },
-                ({ resultSchema }: any) => resultSchema,
-              ) as unknown as BuiltInLLMTool),
+              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
             },
           },
         });
