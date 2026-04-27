@@ -2,7 +2,10 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CFLabel - Form field label with accessibility features
+ * CFLabel - Form field label with accessibility features.
+ *
+ * Use cf-text for generic captions, helper copy, metadata, or muted display
+ * text that does not label a specific control.
  *
  * @element cf-label
  *
@@ -39,9 +42,10 @@ export class CFLabel extends BaseElement {
       display: inline-flex;
       align-items: baseline;
       gap: 0.25rem;
-      font-size: 0.875rem;
-      font-weight: 500;
-      line-height: 1.25rem;
+      font-size: var(--cf-font-body-compact-size, 0.8125rem);
+      font-weight: var(--cf-font-body-compact-weight, 500);
+      line-height: var(--cf-font-body-compact-line-height, 1.25rem);
+      letter-spacing: var(--cf-font-body-compact-letter-spacing, 0);
       color: var(--cf-label-color-text, hsl(0, 0%, 9%));
       cursor: pointer;
       user-select: none;
@@ -54,8 +58,8 @@ export class CFLabel extends BaseElement {
 
     .required-indicator {
       color: var(--cf-label-color-required, hsl(0, 100%, 50%));
-      font-weight: 600;
-      line-height: 1;
+      font-weight: var(--cf-font-weight-semibold, 600);
+      line-height: var(--cf-line-height-none, 1);
       margin-left: 0.125rem;
     }
 

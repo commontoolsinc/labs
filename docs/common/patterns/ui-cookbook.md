@@ -88,7 +88,7 @@ tool form.
       <cf-vstack gap="4" padding="6">
         <cf-hstack justify="between" align="center">
           <cf-vstack gap="1">
-            <cf-label>Today</cf-label>
+            <cf-text variant="caption" tone="muted">Today</cf-text>
             <cf-heading level={2}>Spending overview</cf-heading>
           </cf-vstack>
           <cf-badge>Live</cf-badge>
@@ -96,7 +96,7 @@ tool form.
 
         <cf-card style="--cf-card-color-surface: var(--cf-theme-color-surface-hover);">
           <cf-vstack slot="content" gap="3">
-            <cf-label>Monthly budget</cf-label>
+            <cf-text variant="caption" tone="muted">Monthly budget</cf-text>
             <cf-heading level={1}>$2,480</cf-heading>
             <cf-button>Review categories</cf-button>
           </cf-vstack>
@@ -127,7 +127,7 @@ Use when the pattern centers on one record, note, recipe, or project.
     <cf-vstack gap="4" padding="4">
       <cf-card>
         <cf-vstack slot="content" gap="3">
-          <cf-label>Overview</cf-label>
+          <cf-text variant="caption" tone="muted">Overview</cf-text>
           <cf-heading level={2}>Primary details</cf-heading>
           {/* main fields */}
         </cf-vstack>
@@ -159,7 +159,7 @@ think.
     <cf-vstack slot="content" gap="3" align="center">
       <cf-badge variant="secondary">Start here</cf-badge>
       <cf-heading level={3}>No entries yet</cf-heading>
-      <cf-label>Add your first item to turn this into a live workspace.</cf-label>
+      <cf-text tone="muted">Add your first item to turn this into a live workspace.</cf-text>
       <cf-button>Create item</cf-button>
     </cf-vstack>
   </cf-card>

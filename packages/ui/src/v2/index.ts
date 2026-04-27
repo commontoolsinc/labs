@@ -90,6 +90,7 @@ export * from "./components/cf-markdown/index.ts";
 export * from "./components/cf-message-beads/index.ts";
 export * from "./components/cf-tags/index.ts";
 export * from "./components/cf-table/index.ts";
+export * from "./components/cf-text/index.ts";
 export * from "./components/cf-tile/index.ts";
 export * from "./components/cf-textarea/index.ts";
 export * from "./components/cf-toggle/index.ts";

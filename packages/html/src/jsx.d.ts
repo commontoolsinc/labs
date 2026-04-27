@@ -2962,6 +2962,7 @@ interface CFInputOTPElement extends CFHTMLElement {}
 interface CFLabelElement extends CFHTMLElement {}
 
 // Display components
+interface CFTextElement extends CFHTMLElement {}
 interface CFBadgeElement extends CFHTMLElement {}
 interface CFChipElement extends CFHTMLElement {}
 interface CFProgressElement extends CFHTMLElement {}
@@ -3286,6 +3287,10 @@ interface CTStackLegacyAttributes<T> extends CFHTMLAttributes<T> {
 interface CFMessageInputAttributes<T> extends CFHTMLAttributes<T> {
   "name"?: string;
   "placeholder"?: string;
+  "button-text"?: string;
+  "disabled"?: boolean | CellLike<boolean>;
+  "value"?: string | CellLike<string>;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "appearance"?: "rounded";
   "oncf-send"?: EventHandler<{ message: string }>;
 }
@@ -4125,6 +4130,46 @@ interface CFLabelAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 // Display component attributes
+interface CFTextAttributes<T> extends CFHTMLAttributes<T> {
+  "variant"?:
+    | "caption"
+    | "body-compact"
+    | "body"
+    | "body-large"
+    | "heading-sm"
+    | "heading-md"
+    | "heading-lg"
+    | CellLike<
+      | "caption"
+      | "body-compact"
+      | "body"
+      | "body-large"
+      | "heading-sm"
+      | "heading-md"
+      | "heading-lg"
+    >;
+  "tone"?:
+    | "default"
+    | "muted"
+    | "tertiary"
+    | "disabled"
+    | "primary"
+    | "success"
+    | "warning"
+    | "error"
+    | CellLike<
+      | "default"
+      | "muted"
+      | "tertiary"
+      | "disabled"
+      | "primary"
+      | "success"
+      | "warning"
+      | "error"
+    >;
+  "block"?: boolean | CellLike<boolean>;
+}
+
 interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?:
     | "default"
@@ -5154,6 +5199,10 @@ declare global {
       >;
 
       // Display components
+      "cf-text": CFDOM.DetailedHTMLProps<
+        CFTextAttributes<CFTextElement>,
+        CFTextElement
+      >;
       "cf-badge": CFDOM.DetailedHTMLProps<
         CFBadgeAttributes<CFBadgeElement>,
         CFBadgeElement

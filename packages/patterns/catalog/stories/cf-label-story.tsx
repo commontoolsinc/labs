@@ -21,14 +21,27 @@ export default pattern<LabelStoryInput, LabelStoryOutput>(() => {
           maxWidth: "320px",
         }}
       >
-        <cf-label>Default label</cf-label>
-        <cf-label required>Required label</cf-label>
-        <cf-label disabled>Disabled label</cf-label>
+        <cf-vstack gap="1">
+          <cf-label for="default-input">Default label</cf-label>
+          <cf-input id="default-input" placeholder="Labeled input" />
+        </cf-vstack>
+        <cf-vstack gap="1">
+          <cf-label for="required-input" required>Required label</cf-label>
+          <cf-input id="required-input" placeholder="Required field" />
+        </cf-vstack>
+        <cf-vstack gap="1">
+          <cf-label for="disabled-input" disabled>Disabled label</cf-label>
+          <cf-input id="disabled-input" disabled placeholder="Disabled field" />
+        </cf-vstack>
+        <cf-text variant="caption" tone="muted" block>
+          Use cf-text for captions, helper copy, metadata, and other generic
+          text.
+        </cf-text>
       </div>
     ),
     controls: (
       <div style={{ color: "#6b7280", fontSize: "13px", padding: "8px 12px" }}>
-        No interactive controls. Attributes: required, disabled.
+        No interactive controls. Attributes: for, required, disabled.
       </div>
     ),
   };
