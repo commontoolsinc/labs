@@ -872,6 +872,94 @@ export default pattern<State>(({ value }) => {
       cancel();
     });
 
+    it("commits click events through handler streams that capture another stream", async () => {
+      const clickPattern =
+        `import { handler, NAME, pattern, Stream, UI, Writable } from "commonfabric";
+
+type AddEvent = { value: number };
+
+const addValue = handler<AddEvent, { value: Writable<number> }>((event, { value }) => {
+  value.set(value.get() + event.value);
+});
+
+const runAddValue = handler<unknown, { add: Stream<AddEvent> }>((_, { add }) => {
+  add.send({ value: 1 });
+});
+
+export default pattern<Record<string, never>>(() => {
+  const value = Writable.of(0, {
+    type: "number",
+    ifc: { confidentiality: [{ kind: "secret" }] },
+  });
+  const add = addValue({ value });
+  const run = runAddValue({ add });
+  return {
+    [NAME]: "Nested Stream Click Test",
+    value,
+    [UI]: (
+      <div>
+        <button id="run" onClick={run}>Run</button>
+        <span id="value">{value}</span>
+      </div>
+    ),
+  };
+});`;
+
+      const clickProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: clickPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session, {
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: `principal:${identity.did()}`,
+          actingPrincipal: identity.did(),
+        },
+      });
+
+      const page = await rt.createPage(clickProgram, {
+        run: true,
+      });
+      const valueCell = (page.cell() as any).key("value").asSchema({
+        type: "number",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+      assertEquals(await valueCell.sync(), 0);
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        async () => await valueCell.sync() === 1,
+        { timeout: 5000 },
+      );
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.includes(">1</span>")),
+        { timeout: 5000 },
+      );
+
+      cancel();
+    });
+
     it("dispatches navigateTo from rendered handler streams", async () => {
       const navigatePattern =
         `import { Default, handler, NAME, navigateTo, pattern, UI } from "commonfabric";
@@ -1047,7 +1135,13 @@ async function createTestSession(): Promise<Session> {
   });
 }
 
-async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
+async function createRuntimeClient(
+  session: Session,
+  options: Pick<
+    Parameters<typeof RuntimeClient.initialize>[1],
+    "cfcEnforcementMode" | "trustSnapshot"
+  > = {},
+): Promise<RuntimeClient> {
   // If a space identity was created, replace it with a transferrable
   // key in Deno using the same derivation as Session
   if (session.spaceIdentity && session.spaceName) {
@@ -1064,6 +1158,7 @@ async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
     spaceDid: session.space,
     spaceName: session.spaceName,
     memoryVersion: INTEGRATION_MEMORY_VERSION,
+    ...options,
   });
 
   await worker.synced();
