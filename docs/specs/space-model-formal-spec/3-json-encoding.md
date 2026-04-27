@@ -144,9 +144,16 @@ round-trip correctly.
 
 ## 4. Detection
 
-Any plain object containing at least one key that starts with `/` is a
-**reserved form** — it is either a tagged value, a built-in escape, or an
-encoding error. Plain objects in the data model never carry `/`-prefixed keys.
+In the JSON wire format, any plain object containing at least one key that
+starts with `/` is a **reserved form** — it is either a tagged value, a
+built-in escape, or an encoding error.
+
+> **Data level vs. wire level.** User-data plain objects may carry any keys,
+> including `/`-prefixed ones. The `/object` and `/quote` escapes (Section 6)
+> exist precisely to represent such objects in encoded form without ambiguity.
+> A conforming encoder always wraps user-data objects that contain `/`-prefixed
+> keys via `/object` before they reach the wire, so bare `/`-prefixed keys in
+> the wire format are always encoding signals, never literal user-data keys.
 
 The common case — a **tagged value** — is a single-key object whose sole key
 starts with `/`:
@@ -159,7 +166,7 @@ Multi-key objects that contain one or more `/`-prefixed keys among their keys
 are also reserved (see Section 9). They are not treated as plain objects.
 
 This reservation provides maximum flexibility to evolve the encoding without
-ambiguity about what is user data and what is encoding structure.
+ambiguity about what is an encoding signal and what is user data.
 
 ## 5. Stateless Types
 
@@ -255,11 +262,14 @@ preserve it for round-tripping.
 
 ## 9. `/`-Key Reservation Rule
 
-The `/` prefix in key space is wholly owned by the encoding system. Any object
-containing **any** key that starts with `/` — regardless of how many other keys
-the object has — is a **reserved form**. Plain objects in the data model never
-have `/`-prefixed keys; the presence of any such key marks the object as a
-tagged or otherwise reserved encoding.
+The `/` prefix is wholly owned by the encoding system in the wire format. Any
+object containing **any** key that starts with `/` — regardless of how many
+other keys the object has — is a **reserved form** in the encoded
+representation. User-data plain objects may contain `/`-prefixed keys at the
+data level, but a conforming encoder always wraps them via `/object` (Section 6)
+before they reach the wire. The presence of a bare `/`-prefixed key in a
+wire-format object therefore always signals a tagged value, built-in escape, or
+encoding error — never a literal user-data key.
 
 Specifically:
 
