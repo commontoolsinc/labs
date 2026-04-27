@@ -234,10 +234,19 @@ export interface IReadable<T> {
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
+/**
+ * Some of these values may not stick around.
+ * The graph-snapshot doc adds the `process` field for a graph snapshot.
+ * The cfc code accesses the `cfc` field directly, but I include it here too.
+ * I didn't include `source`, since we have other methods that expose that,
+ * and I think we're going to eliminate the process cell.
+ */
 export type MetaField =
   | "pattern"
   | "argument"
-  | "internal";
+  | "internal"
+  | "cfc"
+  | "process";
 
 export interface IMetaCell {
   getMetaRaw(metaField: MetaField): FabricValue;
