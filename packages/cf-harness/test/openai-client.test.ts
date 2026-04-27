@@ -94,6 +94,64 @@ Deno.test("OpenAICompatibleGatewayClient parses successful chat completion JSON 
   assertEquals(response.choices[0]?.message.content, "ok");
 });
 
+Deno.test("OpenAICompatibleGatewayClient retries chat completion transport failures once by default", async () => {
+  let calls = 0;
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    apiKey: "test-key",
+    chatCompletionRetryDelayMs: 0,
+    fetchFn: () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.reject(new Error("connection error: timed out"));
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "ok" },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  const response = await client.createChatCompletionJson({
+    model: "gpt-5.4",
+    messages: [],
+  });
+
+  assertEquals(calls, 2);
+  assertEquals(response.choices[0]?.message.content, "ok");
+});
+
+Deno.test("OpenAICompatibleGatewayClient surfaces exhausted chat completion transport retries", async () => {
+  let calls = 0;
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    apiKey: "test-key",
+    chatCompletionRetryDelayMs: 0,
+    fetchFn: () => {
+      calls += 1;
+      return Promise.reject(new Error("connection error: timed out"));
+    },
+  });
+
+  await assertRejects(
+    () =>
+      client.createChatCompletionJson({
+        model: "gpt-5.4",
+        messages: [],
+      }),
+    Error,
+    "chat completion transport request failed after 2 attempts",
+  );
+  assertEquals(calls, 2);
+});
+
 Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with response text", async () => {
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",

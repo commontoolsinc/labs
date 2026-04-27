@@ -3,6 +3,8 @@ export interface OpenAICompatibleGatewayClientOptions {
   authMode?: "bearer" | "none";
   apiKey?: string;
   apiKeySource?: string;
+  chatCompletionTransportRetries?: number;
+  chatCompletionRetryDelayMs?: number;
   fetchFn?: typeof fetch;
 }
 
@@ -65,12 +67,44 @@ export interface OpenAIChatCompletionResponse {
   choices: readonly OpenAIChatCompletionChoice[];
 }
 
+const DEFAULT_CHAT_COMPLETION_TRANSPORT_RETRIES = 1;
+const DEFAULT_CHAT_COMPLETION_RETRY_DELAY_MS = 1_000;
+
+const nonNegativeIntegerOrDefault = (
+  input: number | undefined,
+  fallback: number,
+): number =>
+  input !== undefined && Number.isInteger(input) && input >= 0
+    ? input
+    : fallback;
+
+const sleep = (ms: number): Promise<void> =>
+  ms <= 0
+    ? Promise.resolve()
+    : new Promise((resolve) => setTimeout(resolve, ms));
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const transportErrorAfterRetries = (
+  endpoint: URL,
+  attempts: number,
+  error: unknown,
+): Error =>
+  new Error(
+    `chat completion transport request failed after ${attempts} ${
+      attempts === 1 ? "attempt" : "attempts"
+    } for ${endpoint.toString()}: ${errorMessage(error)}`,
+  );
+
 export class OpenAICompatibleGatewayClient {
   readonly baseUrl: URL;
   readonly authMode: "bearer" | "none";
   readonly apiKey?: string;
   readonly apiKeySource?: string;
   readonly #fetchFn: typeof fetch;
+  readonly #chatCompletionTransportRetries: number;
+  readonly #chatCompletionRetryDelayMs: number;
 
   constructor(options: OpenAICompatibleGatewayClientOptions) {
     this.baseUrl = new URL(options.baseUrl);
@@ -78,6 +112,14 @@ export class OpenAICompatibleGatewayClient {
     this.apiKey = options.apiKey;
     this.apiKeySource = options.apiKeySource;
     this.#fetchFn = options.fetchFn ?? fetch;
+    this.#chatCompletionTransportRetries = nonNegativeIntegerOrDefault(
+      options.chatCompletionTransportRetries,
+      DEFAULT_CHAT_COMPLETION_TRANSPORT_RETRIES,
+    );
+    this.#chatCompletionRetryDelayMs = nonNegativeIntegerOrDefault(
+      options.chatCompletionRetryDelayMs,
+      DEFAULT_CHAT_COMPLETION_RETRY_DELAY_MS,
+    );
   }
 
   #requireApiKey(): string {
@@ -122,11 +164,26 @@ export class OpenAICompatibleGatewayClient {
   async createChatCompletion(
     payload: OpenAIChatCompletionRequest,
   ): Promise<Response> {
-    return await this.#fetchFn(this.endpoint("/v1/chat/completions"), {
+    const endpoint = this.endpoint("/v1/chat/completions");
+    const init: RequestInit = {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(payload),
-    });
+    };
+    const maxAttempts = this.#chatCompletionTransportRetries + 1;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.#fetchFn(endpoint, init);
+      } catch (error) {
+        lastError = error;
+        if (attempt >= maxAttempts) {
+          throw transportErrorAfterRetries(endpoint, attempt, error);
+        }
+        await sleep(this.#chatCompletionRetryDelayMs * attempt);
+      }
+    }
+    throw transportErrorAfterRetries(endpoint, maxAttempts, lastError);
   }
 
   async createChatCompletionJson(
