@@ -1,8 +1,11 @@
 import {
   type Cell,
+  cellEntityIdString,
   cfcAtom,
   EntityId,
   getEntityId,
+  getPatternIdFromResultCell,
+  getResultCellWithSourceSchema,
   isCell,
   isLink,
   isStream,
@@ -41,10 +44,7 @@ const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
  * @returns The piece ID string, or undefined if no ID is found
  */
 export function pieceId(piece: Cell<unknown>): string | undefined {
-  const id = piece.entityId;
-  if (!id) return undefined;
-  const idValue = id["/"];
-  return typeof idValue === "string" ? idValue : undefined;
+  return cellEntityIdString(piece);
 }
 
 /**
@@ -306,16 +306,7 @@ export class PieceManager {
 
     // Otherwise, get result cell with schema from processCell.resultRef
     // The resultRef was created with includeSchema: true during setup
-    const processCell = piece.getSourceCell();
-    if (processCell) {
-      const resultRefCell = processCell.key("resultRef").resolveAsCell();
-      if (resultRefCell?.schema) {
-        return piece.asSchema<T>(resultRefCell.schema);
-      }
-    }
-
-    // Fallback: return piece without schema
-    return piece as Cell<T>;
+    return getResultCellWithSourceSchema(piece as Cell<T>);
   }
 
   getLineage(piece: Cell<unknown>) {
@@ -749,16 +740,7 @@ export class PieceManager {
   getResult<T = unknown>(
     piece: Cell<T>,
   ): Cell<T> {
-    // Get result cell with schema from processCell.resultRef
-    const processCell = piece.getSourceCell();
-    if (processCell) {
-      const resultRefCell = processCell.key("resultRef").resolveAsCell();
-      if (resultRefCell?.schema) {
-        return piece.asSchema<T>(resultRefCell.schema);
-      }
-    }
-    // Fallback: return piece without schema
-    return piece;
+    return getResultCellWithSourceSchema(piece);
   }
 
   // note: removing a piece doesn't clean up the piece's cells
@@ -1021,9 +1003,9 @@ export class PieceManager {
 }
 
 export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
-  const sourceCell = piece.getSourceCell(processSchema);
-  if (!sourceCell) throw new Error("piece missing source cell");
-  return sourceCell.get()?.[TYPE]!;
+  const patternId = getPatternIdFromResultCell(piece);
+  if (!patternId) throw new Error("piece missing pattern ID");
+  return patternId;
 };
 
 async function getCellByIdOrPiece(

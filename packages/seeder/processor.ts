@@ -7,7 +7,7 @@ import type {
 import { Verifier } from "./verifier.ts";
 import { PieceManager } from "@commonfabric/piece";
 import { CommandType } from "./interfaces.ts";
-import { createDataPiece, processWorkflow } from "@commonfabric/piece";
+import { createDataPiece } from "./data-piece.ts";
 import { isRecord } from "@commonfabric/utils/types";
 
 export class Processor {
@@ -105,67 +105,14 @@ export class Processor {
 
     switch (type) {
       case CommandType.New: {
-        console.log(`Adding: "${prompt}"`);
-        const form = await processWorkflow(prompt, this.pieceManager, {
-          cache: this.cache,
-          model: this.model,
-          prefill: {
-            classification: {
-              workflowType: "imagine",
-              confidence: 1.0,
-              reasoning: "hard coded",
-            },
-          },
-        });
-
-        const piece = form.generation?.piece;
-        if (piece) {
-          const id = piece.entityId;
-          if (id) {
-            return this.verify({ id: id["/"], prompt, name: this.name });
-          }
-        }
-
-        return {
-          id: null,
-          prompt,
-          status: "FAIL",
-          summary: `Piece not generated during 'New' workflow: ${prompt}`,
-        };
+        throw new Error(
+          `Seeder '${CommandType.New}' workflow generation has been removed: ${prompt}`,
+        );
       }
       case CommandType.Extend: {
-        console.log(`Extending: "${prompt}"`);
-        if (!prevPieceId) {
-          throw new Error("Previous piece ID is undefined.");
-        }
-        const piece = await this.pieceManager.get(prevPieceId);
-        const form = await processWorkflow(prompt, this.pieceManager, {
-          existingPiece: piece,
-          cache: this.cache,
-          model: this.model,
-          prefill: {
-            classification: {
-              workflowType: "imagine",
-              confidence: 1.0,
-              reasoning: "hard coded",
-            },
-          },
-        });
-
-        const newPiece = form.generation?.piece;
-        if (newPiece) {
-          const id = newPiece.entityId;
-          if (id) {
-            return this.verify({ id: id["/"], prompt, name: this.name });
-          }
-        }
-
-        return {
-          id: null,
-          prompt,
-          status: "FAIL",
-          summary: `Piece not generated during 'Extend' workflow: ${prompt}`,
-        };
+        throw new Error(
+          `Seeder '${CommandType.Extend}' workflow generation has been removed after ${prevPieceId}: ${prompt}`,
+        );
       }
       case CommandType.ImportJSON: {
         console.log(`Importing JSON for: "${prompt}"`);

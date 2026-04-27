@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { resolveCellPath } from "../src/ops/utils.ts";
+import { parseCellPath, resolveCellPath } from "../src/piece-helpers.ts";
 
 interface FakeCell {
   get(): unknown;
@@ -20,6 +20,19 @@ function makeCell(
     },
   };
 }
+
+describe("parseCellPath", () => {
+  it("parses slash paths and numeric array indexes", () => {
+    assertEquals(parseCellPath("users/0/name"), ["users", 0, "name"]);
+    assertEquals(parseCellPath("value/3.14/pi"), ["value", "3.14", "pi"]);
+    assertEquals(parseCellPath("values/-1/negative"), [
+      "values",
+      "-1",
+      "negative",
+    ]);
+    assertEquals(parseCellPath(""), []);
+  });
+});
 
 describe("resolveCellPath", () => {
   it("resolves schema-backed child cells when the parent object is sparse", () => {
