@@ -144,14 +144,22 @@ round-trip correctly.
 
 ## 4. Detection
 
-A value is a special type if:
+Any plain object containing at least one key that starts with `/` is a
+**reserved form** — it is either a tagged value, a built-in escape, or an
+encoding error. Plain objects in the data model never carry `/`-prefixed keys.
+
+The common case — a **tagged value** — is a single-key object whose sole key
+starts with `/`:
 
 1. It is a plain object.
 2. It has exactly one key.
 3. That key starts with `/`.
 
-This rule is quick to check and provides maximum flexibility to evolve the key
-format.
+Multi-key objects that contain one or more `/`-prefixed keys among their keys
+are also reserved (see Section 9). They are not treated as plain objects.
+
+This reservation provides maximum flexibility to evolve the encoding without
+ambiguity about what is user data and what is encoding structure.
 
 ## 5. Stateless Types
 
@@ -185,10 +193,9 @@ is stripped; inner keys are taken literally; inner values go through normal
 deserialization.
 
 **When the serializer emits `/object`:** During serialization, if a plain object
-has exactly one string key that starts with `/`, the serializer wraps it in
-`/object` to prevent the deserializer from misinterpreting it as a tagged type.
-If the object has multiple keys, no wrapping is needed (since tagged types
-always have exactly one key).
+has any string key that starts with `/` — regardless of how many other keys the
+object has — the serializer wraps it in `/object`. This prevents the
+deserializer from treating the object as a reserved form.
 
 ### `/quote` — Fully Literal
 
@@ -257,16 +264,18 @@ tagged or otherwise reserved encoding.
 Specifically:
 
 - **Objects with a bare `"/"` key** (i.e., the tag name is empty after
-  stripping the leading `/`) are always encoding errors. No valid tag has an
-  empty name.
+  stripping the leading `/`) are always encoding errors — produce
+  `ProblematicValue`. No valid tag has an empty name.
 - **Single-key objects** whose sole key starts with `/` are either a tagged
   value of a known type (e.g. `{ "/Error@1": ... }`), a built-in escape
-  (`/object`, `/quote`), or an encoding error. Unrecognized tags must be
-  treated as `ProblematicValue`.
-- **Multi-key objects** containing one or more `/`-prefixed keys are also
-  reserved — they are not valid plain objects. Implementations must not treat
-  such objects as plain data; they must be flagged as encoding errors or
-  treated as `ProblematicValue`.
+  (`/object`, `/quote`), or an unrecognized tag. A syntactically well-formed
+  but unrecognized tag (e.g. `{ "/Future@2": ... }`) must be treated as
+  `UnknownValue` (see Section 8) to preserve it for round-tripping. Structural
+  violations — e.g. a tag name that cannot be a valid type identifier — should
+  produce `ProblematicValue`.
+- **Multi-key objects** containing one or more `/`-prefixed keys are structural
+  encoding errors — produce `ProblematicValue`. They are not valid plain
+  objects.
 
 The `/object` escape (Section 6) ensures that legitimate plain objects with
 `/`-prefixed keys are always wrapped before reaching the wire, so a conforming
