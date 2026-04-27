@@ -51,15 +51,15 @@ function isQuoteSafe(v: JsonWireValue): boolean {
 }
 
 /**
- * Recursively unwraps /quote forms so they can be embedded inside a parent
- * /quote without double-wrapping. Non-/quote encoded instances are left as-is
- * (they should not appear after an isQuoteSafe check passes).
+ * Unwraps /quote forms one level so their literal content can be embedded
+ * directly inside a parent /quote. The inner content of a /quote is already
+ * literal and must not be recursed into.
  */
 function unquote(v: JsonWireValue): JsonWireValue {
   if (v === null || typeof v !== "object") return v;
   if (Array.isArray(v)) return v.map(unquote) as JsonWireValue;
   if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
-    return unquote((v as Record<string, JsonWireValue>)["/quote"]);
+    return (v as Record<string, JsonWireValue>)["/quote"];
   }
   return Object.fromEntries(
     Object.entries(v).map(([k, val]) => [k, unquote(val as JsonWireValue)]),
@@ -327,7 +327,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
     const keys = Object.keys(result);
     if (keys.some((k) => k.startsWith("/"))) {
       if (Object.values(result).every((v) => isQuoteSafe(v))) {
-        return this.wrapTag(TAGS.quote, unquote(result)) as JsonWireValue;
+        const unquoted = Object.fromEntries(
+          Object.entries(result).map(([k, v]) => [k, unquote(v)]),
+        );
+        return this.wrapTag(TAGS.quote, unquoted) as JsonWireValue;
       }
       return this.wrapTag(TAGS.object, result) as JsonWireValue;
     }

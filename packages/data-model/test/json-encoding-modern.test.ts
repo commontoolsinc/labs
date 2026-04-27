@@ -1115,6 +1115,27 @@ describe("json encoding", () => {
       expect(result).toBeInstanceOf(UnknownValue);
       expect((result as unknown as UnknownValue).typeTag).toBe("Future@7");
     });
+
+    it("unquote strips exactly one /quote layer — inner /quote is preserved as literal", () => {
+      // Wire form { "/quote": { "/quote": "x" } } is a /quote-wrapped literal
+      // whose content happens to be { "/quote": "x" }. Decoding must return
+      // { "/quote": "x" } as a frozen plain object — NOT recurse into it and
+      // return just "x".
+      const wire = { "/quote": { "/quote": "x" } } as JsonWireValue;
+      const result = fromWireFormat(wire) as Record<string, FabricValue>;
+      expect(result["/quote"]).toBe("x");
+    });
+
+    it("round-trips object whose value is a /quote-keyed literal", () => {
+      // { "/x": { "/quote": "inner" } } — the value at "/x" is user data that
+      // happens to have a /quote key. Must survive encode→decode intact.
+      const obj = { "/x": { "/quote": "inner" } } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<
+        string,
+        Record<string, FabricValue>
+      >;
+      expect(result["/x"]["/quote"]).toBe("inner");
+    });
   });
 
   // --------------------------------------------------------------------------
