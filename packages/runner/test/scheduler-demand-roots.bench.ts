@@ -1,6 +1,7 @@
 import type { Cell } from "../src/builder/types.ts";
 import type { Action, EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   benchOptions,
   benchSpace,
@@ -78,18 +79,18 @@ async function setupDemandGraph(
   runtime.scheduler.subscribe(
     intermediateAction,
     {
-      reads: [source.getAsNormalizedFullLink()],
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
       shallowReads: [],
-      writes: [intermediate.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
     },
     {},
   );
   runtime.scheduler.subscribe(
     outputAction,
     {
-      reads: [intermediate.getAsNormalizedFullLink()],
+      reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
       shallowReads: [],
-      writes: [output.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
     },
     {},
   );
@@ -103,9 +104,9 @@ async function setupDemandGraph(
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [output.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [effectOutput.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(effectOutput.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -321,9 +322,15 @@ Deno.bench(
               runtime.scheduler.subscribe(
                 childEffect,
                 {
-                  reads: [parentOutput.getAsNormalizedFullLink()],
+                  reads: [
+                    toMemorySpaceAddress(
+                      parentOutput.getAsNormalizedFullLink(),
+                    ),
+                  ],
                   shallowReads: [],
-                  writes: [childOutput.getAsNormalizedFullLink()],
+                  writes: [
+                    toMemorySpaceAddress(childOutput.getAsNormalizedFullLink()),
+                  ],
                 },
                 { isEffect: true },
               ),
@@ -334,9 +341,11 @@ Deno.bench(
         runtime.scheduler.subscribe(
           parentEffect,
           {
-            reads: [source.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [parentOutput.getAsNormalizedFullLink()],
+            writes: [
+              toMemorySpaceAddress(parentOutput.getAsNormalizedFullLink()),
+            ],
           },
           { isEffect: true },
         );

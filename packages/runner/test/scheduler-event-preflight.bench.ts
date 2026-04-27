@@ -1,6 +1,7 @@
 import type { Cell } from "../src/builder/types.ts";
 import type { Action, EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   benchOptions,
   benchSpace,
@@ -104,9 +105,9 @@ async function setupBroadGraph(
   runtime.scheduler.subscribe(
     sharedWriter,
     {
-      reads: [source.getAsNormalizedFullLink()],
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
       shallowReads: [],
-      writes: [shared.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(shared.getAsNormalizedFullLink())],
     },
     {},
   );
@@ -120,9 +121,9 @@ async function setupBroadGraph(
     runtime.scheduler.subscribe(
       fanWriter,
       {
-        reads: [shared.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(shared.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [fanCell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(fanCell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -138,9 +139,11 @@ async function setupBroadGraph(
   runtime.scheduler.subscribe(
     targetWriter,
     {
-      reads: fanCells.map((cell) => cell.getAsNormalizedFullLink()),
+      reads: fanCells.map((cell) =>
+        toMemorySpaceAddress(cell.getAsNormalizedFullLink())
+      ),
       shallowReads: [],
-      writes: [target.getAsNormalizedFullLink()],
+      writes: [toMemorySpaceAddress(target.getAsNormalizedFullLink())],
     },
     {},
   );
@@ -348,9 +351,9 @@ Deno.bench(
           runtime.scheduler.subscribe(
             writer,
             {
-              reads: [shared.getAsNormalizedFullLink()],
+              reads: [toMemorySpaceAddress(shared.getAsNormalizedFullLink())],
               shallowReads: [],
-              writes: [cell.getAsNormalizedFullLink()],
+              writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
             },
             {},
           );
@@ -365,9 +368,13 @@ Deno.bench(
           runtime.scheduler.subscribe(
             writer,
             {
-              reads: [shared.getAsNormalizedFullLink()],
+              reads: [toMemorySpaceAddress(shared.getAsNormalizedFullLink())],
               shallowReads: [],
-              writes: [cell.key("payload").getAsNormalizedFullLink()],
+              writes: [
+                toMemorySpaceAddress(
+                  cell.key("payload").getAsNormalizedFullLink(),
+                ),
+              ],
             },
             {},
           );

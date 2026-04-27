@@ -1,5 +1,6 @@
 import type { Cell } from "../src/builder/types.ts";
 import type { Action } from "../src/scheduler.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   benchOptions,
   benchSpace,
@@ -87,36 +88,36 @@ Deno.bench(
         runtime.scheduler.subscribe(
           actionA,
           {
-            reads: [source.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [a.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
           },
           {},
         );
         runtime.scheduler.subscribe(
           actionB,
           {
-            reads: [a.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [b.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
           },
           {},
         );
         runtime.scheduler.subscribe(
           actionC,
           {
-            reads: [b.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [c.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
           },
           {},
         );
         runtime.scheduler.subscribe(
           effect,
           {
-            reads: [c.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [sink.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
           },
           { isEffect: true },
         );
@@ -201,18 +202,18 @@ Deno.bench(
         runtime.scheduler.subscribe(
           leftAction,
           {
-            reads: [source.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [left.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(left.getAsNormalizedFullLink())],
           },
           {},
         );
         runtime.scheduler.subscribe(
           rightAction,
           {
-            reads: [source.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [right.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(right.getAsNormalizedFullLink())],
           },
           {},
         );
@@ -220,20 +221,20 @@ Deno.bench(
           mergeAction,
           {
             reads: [
-              left.getAsNormalizedFullLink(),
-              right.getAsNormalizedFullLink(),
+              toMemorySpaceAddress(left.getAsNormalizedFullLink()),
+              toMemorySpaceAddress(right.getAsNormalizedFullLink()),
             ],
             shallowReads: [],
-            writes: [merged.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(merged.getAsNormalizedFullLink())],
           },
           {},
         );
         runtime.scheduler.subscribe(
           effect,
           {
-            reads: [merged.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(merged.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [sink.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
           },
           { isEffect: true },
         );
@@ -302,9 +303,9 @@ Deno.bench(
         runtime.scheduler.subscribe(
           hubAction,
           {
-            reads: [source.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [hub.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(hub.getAsNormalizedFullLink())],
           },
           {},
         );
@@ -318,9 +319,9 @@ Deno.bench(
           runtime.scheduler.subscribe(
             leafAction,
             {
-              reads: [hub.getAsNormalizedFullLink()],
+              reads: [toMemorySpaceAddress(hub.getAsNormalizedFullLink())],
               shallowReads: [],
-              writes: [leaf.getAsNormalizedFullLink()],
+              writes: [toMemorySpaceAddress(leaf.getAsNormalizedFullLink())],
             },
             {},
           );
@@ -336,9 +337,11 @@ Deno.bench(
         runtime.scheduler.subscribe(
           effect,
           {
-            reads: leaves.map((leaf) => leaf.getAsNormalizedFullLink()),
+            reads: leaves.map((leaf) =>
+              toMemorySpaceAddress(leaf.getAsNormalizedFullLink())
+            ),
             shallowReads: [],
-            writes: [sink.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
           },
           { isEffect: true },
         );
@@ -417,20 +420,20 @@ Deno.bench(
           action,
           {
             reads: [
-              selector.getAsNormalizedFullLink(),
-              sourceA.getAsNormalizedFullLink(),
+              toMemorySpaceAddress(selector.getAsNormalizedFullLink()),
+              toMemorySpaceAddress(sourceA.getAsNormalizedFullLink()),
             ],
             shallowReads: [],
-            writes: [output.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
           },
           {},
         );
         runtime.scheduler.subscribe(
           effect,
           {
-            reads: [output.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [sink.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
           },
           { isEffect: true },
         );
@@ -497,18 +500,18 @@ Deno.bench(
         runtime.scheduler.subscribe(
           stableAction,
           {
-            reads: [source.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [stable.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(stable.getAsNormalizedFullLink())],
           },
           {},
         );
         runtime.scheduler.subscribe(
           effect,
           {
-            reads: [stable.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(stable.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [sink.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
           },
           { isEffect: true },
         );
