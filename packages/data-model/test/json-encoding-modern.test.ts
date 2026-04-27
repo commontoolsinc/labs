@@ -1001,13 +1001,12 @@ describe("json encoding", () => {
 
     // --- /object: any value requires encoding ---
 
-    it("emits /object for doubly-nested /-prefixed object (inner needs encoding)", () => {
+    it("emits /quote for doubly-nested /-prefixed literal object (whole subtree is literal)", () => {
       const obj = { "/x": { "/y": 123 } } as unknown as FabricValue;
       const wire = toWireFormat(obj);
-      // inner { "/y": 123 } is itself literal, so it emits /quote; outer has
-      // a /quote-wrapped value → not a plain literal → outer emits /object.
+      // Whole subtree is deep-literal → single /quote wrap of original structure.
       expect(wire).toEqual({
-        "/object": { "/x": { "/quote": { "/y": 123 } } },
+        "/quote": { "/x": { "/y": 123 } },
       });
       const result = roundTrip(obj) as Record<
         string,

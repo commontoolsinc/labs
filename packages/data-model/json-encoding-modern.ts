@@ -36,15 +36,34 @@ function isEncodedInstance(v: JsonWireValue): boolean {
 }
 
 /**
- * Returns true if `v` contains no encoded instances anywhere in its subtree,
- * meaning it is safe to embed directly inside a `/quote` wrapper without any
- * further decoding by the deserializer.
+ * Returns true if a serialized value `v` is quote-safe: it either needs no
+ * decoding (primitive or plain object/array free of tag-wrapped forms), or it
+ * is itself a /quote-wrapped literal that can be collapsed into a parent /quote.
  */
 function isQuoteSafe(v: JsonWireValue): boolean {
   if (v === null || typeof v !== "object") return true;
   if (Array.isArray(v)) return v.every((item) => isQuoteSafe(item));
-  if (isEncodedInstance(v)) return false;
-  return Object.values(v).every((item) => isQuoteSafe(item as JsonWireValue));
+  if (!isEncodedInstance(v)) {
+    return Object.values(v).every((item) => isQuoteSafe(item as JsonWireValue));
+  }
+  // It is an encoded instance: safe only if it is a /quote wrapper.
+  return Object.keys(v)[0] === "/quote";
+}
+
+/**
+ * Recursively unwrap any /quote-wrapped values inside a serialized result,
+ * restoring the original literal subtree so it can be re-wrapped by a parent
+ * /quote without nesting.
+ */
+function unquote(v: JsonWireValue): JsonWireValue {
+  if (v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return v.map(unquote) as JsonWireValue;
+  if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
+    return unquote((v as Record<string, JsonWireValue>)["/quote"]);
+  }
+  return Object.fromEntries(
+    Object.entries(v).map(([k, val]) => [k, unquote(val as JsonWireValue)]),
+  ) as JsonWireValue;
 }
 
 /**
@@ -303,15 +322,16 @@ export class JsonEncodingContext implements SerializationContext<string> {
     seen.delete(value as object);
 
     // Apply escaping per Section 5.6 for any plain object with a /-prefixed key.
-    // Use /quote when all serialized values are quote-safe (no tag-wrapped forms
-    // anywhere in their subtree); use /object when any value required encoding.
+    // Use /quote when all serialized values are quote-safe (primitives, plain
+    // objects/arrays, or /quote-wrapped literals that can be collapsed); use
+    // /object otherwise.
     const keys = Object.keys(result);
     if (keys.some((k) => k.startsWith("/"))) {
       const allQuoteSafe = Object.values(result).every((v) => isQuoteSafe(v));
-      return this.wrapTag(
-        allQuoteSafe ? TAGS.quote : TAGS.object,
-        result,
-      ) as JsonWireValue;
+      if (allQuoteSafe) {
+        return this.wrapTag(TAGS.quote, unquote(result)) as JsonWireValue;
+      }
+      return this.wrapTag(TAGS.object, result) as JsonWireValue;
     }
 
     return result as JsonWireValue;
