@@ -5,9 +5,9 @@
  */
 
 import { NAME, type Schema, UI } from "./shared.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 
-export const rendererVDOMSchema = toDeepFrozenSchema(
+export const rendererVDOMSchema = internSchema(
   {
     $id: "https://commonfabric.org/schemas/vdom.json",
     $defs: {
@@ -80,7 +80,6 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
     },
     $ref: "#/$defs/vdomRenderNode",
   },
-  true,
 );
 
 /**
@@ -88,7 +87,7 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
  * Children expand inline (no asCell) so the full tree is readable in one .get().
  * Props keep asCell since prop values can be large and aren't needed for structural debugging.
  */
-export const debugVDOMSchema = toDeepFrozenSchema(
+export const debugVDOMSchema = internSchema(
   {
     $id: "https://commonfabric.org/schemas/vdom-debug.json",
     $defs: {
@@ -125,10 +124,9 @@ export const debugVDOMSchema = toDeepFrozenSchema(
     },
     $ref: "#/$defs/vdomNode",
   },
-  true,
 );
 
-export const vnodeSchema = toDeepFrozenSchema(
+export const vnodeSchema = internSchema(
   {
     $id: "https://commonfabric.org/schemas/vnode.json",
     $ref: "#/$defs/VNode",
@@ -234,43 +232,39 @@ export const vnodeSchema = toDeepFrozenSchema(
       },
     },
   },
-  true,
 );
 
-export const nameSchema = toDeepFrozenSchema(
+export const nameSchema = internSchema(
   {
     type: "object",
     properties: { [NAME]: { type: "string" } },
     required: [NAME],
   },
-  true,
 );
 
 export type NameSchema = Schema<typeof nameSchema>;
 
-export const uiSchema = toDeepFrozenSchema(
+export const uiSchema = internSchema(
   {
     type: "object",
     properties: { [UI]: rendererVDOMSchema },
     required: [UI],
   },
-  true,
 );
 
 export type UISchema = Schema<typeof uiSchema>;
 
 // We specify type unknown for the items, since we don't want to recursively
 // load them
-export const pieceListSchema = toDeepFrozenSchema(
+export const pieceListSchema = internSchema(
   {
     type: "array",
     items: { type: "unknown", asCell: ["cell"] },
     default: [],
   },
-  true,
 );
 
-export const pieceLineageSchema = toDeepFrozenSchema(
+export const pieceLineageSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -280,11 +274,10 @@ export const pieceLineageSchema = toDeepFrozenSchema(
     },
     required: ["piece", "relation", "timestamp"],
   },
-  true,
 );
 export type PieceLineage = Schema<typeof pieceLineageSchema>;
 
-export const pieceSourceCellSchema = toDeepFrozenSchema(
+export const pieceSourceCellSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -297,10 +290,9 @@ export const pieceSourceCellSchema = toDeepFrozenSchema(
       llmRequestId: { type: "string" },
     },
   },
-  true,
 );
 
-export const processSchema = toDeepFrozenSchema(
+export const processSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -308,10 +300,9 @@ export const processSchema = toDeepFrozenSchema(
       pattern: { type: "object", asCell: ["readonly"] },
     },
   },
-  true,
 );
 
-export const processLinkSchema = toDeepFrozenSchema(
+export const processLinkSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -321,26 +312,21 @@ export const processLinkSchema = toDeepFrozenSchema(
       spell: { type: "object", asCell: ["readonly"] },
     },
   },
-  true,
 );
 
 // Primitive schemas for UI component cell bindings
-export const stringSchema = toDeepFrozenSchema(
+export const stringSchema = internSchema(
   { type: "string" },
-  true,
 );
-export const booleanSchema = toDeepFrozenSchema(
+export const booleanSchema = internSchema(
   { type: "boolean" },
-  true,
 );
-export const numberSchema = toDeepFrozenSchema(
+export const numberSchema = internSchema(
   { type: "number" },
-  true,
 );
-export const stringArraySchema = toDeepFrozenSchema(
+export const stringArraySchema = internSchema(
   {
     type: "array",
     items: { type: "string" },
   },
-  true,
 );

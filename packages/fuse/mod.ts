@@ -161,7 +161,12 @@ export async function main(argv: string[] = Deno.args) {
       "cfc-mode",
       "cfc-writeback-state",
     ],
-    boolean: ["debug", "cfc-annotations", "cfc-writeback-xattrs"],
+    boolean: [
+      "debug",
+      "cfc-annotations",
+      "cfc-writeback-xattrs",
+      "allow-other",
+    ],
     collect: ["space"],
     default: {
       "api-url": Deno.env.get("CF_API_URL") ?? "",
@@ -175,6 +180,7 @@ export async function main(argv: string[] = Deno.args) {
       debug: false,
       "cfc-annotations": false,
       "cfc-writeback-xattrs": false,
+      "allow-other": false,
     },
   });
 
@@ -2669,9 +2675,13 @@ export async function main(argv: string[] = Deno.args) {
   setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---
-  const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs([
-    "fuse_ct",
-  ]);
+  const fuseArgs = ["fuse_ct"];
+  if (Deno.build.os === "linux" && args["allow-other"]) {
+    fuseArgs.push("-o", "allow_other", "-o", "default_permissions");
+  }
+  const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs(
+    fuseArgs,
+  );
 
   const mountpointBuf = encoder.encode(mountpoint + "\0");
 

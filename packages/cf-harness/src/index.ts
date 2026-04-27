@@ -17,5 +17,6 @@ export * from "./sandbox/process-runner.ts";
 export * from "./sandbox/docker-runsc.ts";
 export * from "./tools/registry.ts";
 export * from "./tools/bash.ts";
+export * from "./tools/file-errors.ts";
 export * from "./tools/read-file.ts";
 export * from "./tools/write-file.ts";

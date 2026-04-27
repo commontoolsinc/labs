@@ -62,6 +62,12 @@ export interface CfHarnessCliIO {
   stderr(text: string): void;
 }
 
+export type CfHarnessCliSignal = "SIGINT" | "SIGTERM";
+
+export type CfHarnessCliSignalHandler = (
+  signal: CfHarnessCliSignal,
+) => void | Promise<void>;
+
 export interface RunCfHarnessCliDependencies {
   cwd?: string;
   env?: Record<string, string | undefined>;
@@ -72,12 +78,77 @@ export interface RunCfHarnessCliDependencies {
   createPromptLoop?: (
     options: CreateHarnessPromptLoopOptions,
   ) => Pick<CfHarnessPromptLoop, "runPrompt" | "runTranscript">;
+  registerSignalHandler?: (
+    signals: readonly CfHarnessCliSignal[],
+    handler: CfHarnessCliSignalHandler,
+  ) => () => void;
+  exit?: (code: number) => never | void;
 }
 
 const defaultCliIo = (): CfHarnessCliIO => ({
   stdout: (text) => Deno.stdout.writeSync(new TextEncoder().encode(text)),
   stderr: (text) => Deno.stderr.writeSync(new TextEncoder().encode(text)),
 });
+
+const signalExitCode = (signal: CfHarnessCliSignal): number =>
+  signal === "SIGINT" ? 130 : 143;
+
+const defaultRegisterSignalHandler = (
+  signals: readonly CfHarnessCliSignal[],
+  handler: CfHarnessCliSignalHandler,
+): () => void => {
+  const listeners = signals.map((signal) => {
+    const listener = () => {
+      void handler(signal);
+    };
+    Deno.addSignalListener(signal, listener);
+    return { signal, listener };
+  });
+  let disposed = false;
+  return () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    for (const { signal, listener } of listeners) {
+      Deno.removeSignalListener(signal, listener);
+    }
+  };
+};
+
+export const installCfHarnessSignalHandlers = (
+  getEngine: () => CfHarnessEngine | undefined,
+  deps: Pick<
+    RunCfHarnessCliDependencies,
+    "registerSignalHandler" | "exit"
+  > = {},
+): () => void => {
+  const registerSignalHandler = deps.registerSignalHandler ??
+    defaultRegisterSignalHandler;
+  const exit = deps.exit ?? ((code: number): never => Deno.exit(code));
+  let handlingSignal = false;
+  let cleanup = () => {};
+  let disposed = false;
+  cleanup = registerSignalHandler(["SIGINT", "SIGTERM"], async (signal) => {
+    if (handlingSignal) {
+      return;
+    }
+    handlingSignal = true;
+    cleanup();
+    try {
+      await getEngine()?.terminalizeInterruptedRun(signal);
+    } finally {
+      exit(signalExitCode(signal));
+    }
+  });
+  return () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    cleanup();
+  };
+};
 
 const usage = `Usage: deno run -A src/main.ts [options] [prompt text]
 
@@ -592,6 +663,15 @@ export const runCfHarnessCli = async (
   deps: RunCfHarnessCliDependencies = {},
 ): Promise<number> => {
   const io = deps.io ?? defaultCliIo();
+  let activeEngine: CfHarnessEngine | undefined;
+  let signalCleanup: (() => void) | undefined;
+  const activateEngine = (engine: CfHarnessEngine) => {
+    activeEngine = engine;
+    signalCleanup ??= installCfHarnessSignalHandlers(
+      () => activeEngine,
+      deps,
+    );
+  };
   try {
     const parsed = await parseCfHarnessCliArgs(argv, deps);
     if ("help" in parsed) {
@@ -625,17 +705,26 @@ export const runCfHarnessCli = async (
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
       const artifacts = await readRunArtifacts(parsed.resumeRun);
+      const engine = new CfHarnessEngine({
+        runState: artifacts.runState,
+        artifactRoot: parsed.artifactRoot,
+        workspaceHostPath: parsed.workspace,
+        model: parsed.model ?? artifacts.runState.model,
+        gatewayBaseUrl: parsed.gatewayBaseUrl,
+        gatewayAuthMode: parsed.gatewayAuthMode,
+        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
+        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+      });
+      activateEngine(engine);
       const loop = createPromptLoop({
-        engine: new CfHarnessEngine({
-          runState: artifacts.runState,
-          artifactRoot: parsed.artifactRoot,
-          workspaceHostPath: parsed.workspace,
-          model: parsed.model ?? artifacts.runState.model,
-          gatewayBaseUrl: parsed.gatewayBaseUrl,
-          gatewayAuthMode: parsed.gatewayAuthMode,
-          ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-          cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        }),
+        engine,
+        workspaceHostPath: parsed.workspace,
+        artifactRoot: parsed.artifactRoot,
+        model: parsed.model ?? artifacts.runState.model,
+        gatewayBaseUrl: parsed.gatewayBaseUrl,
+        gatewayAuthMode: parsed.gatewayAuthMode,
+        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
+        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         maxModelTurns: parsed.maxModelTurns,
@@ -656,7 +745,18 @@ export const runCfHarnessCli = async (
         onTranscriptEvent,
       });
     } else {
+      const engine = new CfHarnessEngine({
+        workspaceHostPath: parsed.workspace,
+        artifactRoot: parsed.artifactRoot,
+        model: parsed.model,
+        gatewayBaseUrl: parsed.gatewayBaseUrl,
+        gatewayAuthMode: parsed.gatewayAuthMode,
+        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
+        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+      });
+      activateEngine(engine);
       const loop = createPromptLoop({
+        engine,
         workspaceHostPath: parsed.workspace,
         artifactRoot: parsed.artifactRoot,
         model: parsed.model,
@@ -701,5 +801,7 @@ export const runCfHarnessCli = async (
   } catch (error) {
     io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
+  } finally {
+    signalCleanup?.();
   }
 };

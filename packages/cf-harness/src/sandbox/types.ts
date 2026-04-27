@@ -7,6 +7,7 @@ export interface DockerRunscSandboxConfig {
   dockerBinary: string;
   runtimeName: string;
   image: string;
+  containerUser?: string;
   workspaceHostPath: string;
   workspaceMountPath: string;
   shellPath: string;
@@ -20,6 +21,7 @@ export interface ResolveDockerRunscSandboxConfigOptions {
   dockerBinary?: string;
   runtimeName?: string;
   image?: string;
+  containerUser?: string;
   workspaceHostPath: string;
   workspaceMountPath?: string;
   shellPath?: string;

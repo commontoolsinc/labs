@@ -1,4 +1,4 @@
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "../builder/types.ts";
 import type { ImplementationIdentity } from "./types.ts";
 
@@ -16,8 +16,11 @@ type FlowPrecisionClaim = {
   claims: Array<{ type: FlowPrecisionClaimType }>;
 };
 
+const BUILTIN_IDS = ["map", "filter", "flatMap"] as const;
+type BuiltinId = (typeof BUILTIN_IDS)[number];
+
 const claimForBuiltin = (
-  builtinId: string,
+  builtinId: BuiltinId,
 ): FlowPrecisionClaim | undefined => {
   switch (builtinId) {
     case "map":
@@ -44,25 +47,30 @@ const claimForBuiltin = (
           { type: "StableRelativeOrder" },
         ],
       };
-    default:
-      return undefined;
   }
 };
 
-export const flowPrecisionSchemaForBuiltin = (
-  builtinId: string,
-): JSONSchema | undefined => {
+const internFlowPrecisionSchema = (builtinId: BuiltinId): JSONSchema => {
   const claim = claimForBuiltin(builtinId);
-  if (!claim) {
-    return undefined;
-  }
 
-  return toDeepFrozenSchema({
+  // Note: `as JSONSchema` required since `ifc.flowPrecisionClaim` is not
+  // defined as a property of `JSONSchema`.
+  return internSchema({
     type: "array",
     ifc: {
       flowPrecisionClaim: claim,
     },
-  } as JSONSchema, true);
+  } as JSONSchema);
+};
+
+const FLOW_PRECISION_SCHEMAS = new Map<string, JSONSchema>(
+  BUILTIN_IDS.map((id) => [id, internFlowPrecisionSchema(id)]),
+);
+
+export const flowPrecisionSchemaForBuiltin = (
+  builtinId: string,
+): JSONSchema | undefined => {
+  return FLOW_PRECISION_SCHEMAS.get(builtinId);
 };
 
 export const trustedFlowPrecisionSchemaForBuiltin = (

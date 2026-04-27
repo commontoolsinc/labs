@@ -566,6 +566,35 @@ Primary behaviors:
 - registers capability summaries for transformed callbacks/builders for
   downstream schema shrinking/wrapping
 
+#### 9.7.1 Current non-JSX expression-site split
+
+Current-main behavior distinguishes three buckets for non-JSX authored sites:
+
+1. **top-level pattern-owned ordinary call roots**
+   - when the authored site root is an ordinary call (for example
+     `identity(state.done ? "Done" : "Pending")`), the shared expression-site
+     path whole-wraps that call in `derive(...)`
+   - this applies across non-JSX container kinds such as
+     `variable-initializer`, `object-property`, `array-element`, and
+     `return-expression`
+2. **explicit compute callbacks**
+   - `computed` / `derive` / `action` / `lift` / `handler` callbacks remain the
+     explicit reactive boundary
+   - inside those callbacks, authored conditionals stay authored JS inside the
+     callback body rather than being rewritten to helper control flow
+3. **supported collection-callback locals**
+   - callback-local **ordinary call roots** now join the shared ordinary-call
+     slice across `variable-initializer`, `object-property`, `array-element`,
+     and direct `return-expression` sites, so the whole call lowers as a
+     callback-local `derive(...)`
+   - callback-local **plain structural control-flow sites** that are not under
+     an owning ordinary call root still lower directly (for example bare
+     conditional `object-property` / `array-element` / `variable-initializer`
+     expressions lowering to `ifElse(...)`)
+
+In other words, the split is now explicitly **call-root vs nested structural
+site ownership** rather than a special-case callback return-expression rule.
+
 ## 10. Schema Injection
 
 `SchemaInjectionTransformer` runs only when helper import is present. It injects

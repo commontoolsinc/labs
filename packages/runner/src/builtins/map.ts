@@ -1,7 +1,7 @@
 import { type Pattern } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 
-const MAP_INPUT_SCHEMA = toDeepFrozenSchema({
+const MAP_INPUT_SCHEMA = internSchema({
   type: "object",
   properties: {
     // type: "unknown" is ignored by the asCell code path (no type validation)

@@ -14,10 +14,8 @@ import type {
   JSONSchema,
 } from "commonfabric";
 import type { Schema } from "@commonfabric/api/schema";
-import {
-  isNontrivialSchema,
-  toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   LLMMessageSchema,
   LLMParamsSchema,
@@ -540,7 +538,7 @@ function traverseAndCellify(
   return value;
 }
 
-const resultSchema = toDeepFrozenSchema(
+const resultSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -572,10 +570,9 @@ const resultSchema = toDeepFrozenSchema(
     },
     required: ["pending", "addMessage", "cancelGeneration"],
   } as const,
-  true,
 );
 
-const internalSchema = toDeepFrozenSchema(
+const internalSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -584,7 +581,6 @@ const internalSchema = toDeepFrozenSchema(
     },
     required: ["requestId", "lastActivity"],
   },
-  true,
 );
 
 type LegacyToolEntry = {
@@ -645,7 +641,7 @@ function collectToolEntries(
   return { legacy, pieces };
 }
 
-const TOOL_CATALOG_SCHEMA = toDeepFrozenSchema({
+const TOOL_CATALOG_SCHEMA = internSchema({
   type: "object",
   additionalProperties: LLMToolSchema,
 });
@@ -657,7 +653,7 @@ const UNPIN_TOOL_NAME = "unpin";
 const PRESENT_RESULT_TOOL_NAME = "presentResult";
 const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
 
-const READ_INPUT_SCHEMA = toDeepFrozenSchema(
+const READ_INPUT_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
@@ -674,10 +670,9 @@ const READ_INPUT_SCHEMA = toDeepFrozenSchema(
     required: ["path"],
     additionalProperties: false,
   },
-  true,
 );
 
-const INVOKE_INPUT_SCHEMA = toDeepFrozenSchema(
+const INVOKE_INPUT_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
@@ -698,10 +693,9 @@ const INVOKE_INPUT_SCHEMA = toDeepFrozenSchema(
     required: ["path"],
     additionalProperties: true,
   },
-  true,
 );
 
-const SCHEMA_INPUT_SCHEMA = toDeepFrozenSchema(
+const SCHEMA_INPUT_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
@@ -718,10 +712,9 @@ const SCHEMA_INPUT_SCHEMA = toDeepFrozenSchema(
     required: ["path"],
     additionalProperties: false,
   },
-  true,
 );
 
-const PIN_INPUT_SCHEMA = toDeepFrozenSchema(
+const PIN_INPUT_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
@@ -742,10 +735,9 @@ const PIN_INPUT_SCHEMA = toDeepFrozenSchema(
     required: ["path", "name"],
     additionalProperties: false,
   },
-  true,
 );
 
-const UNPIN_INPUT_SCHEMA = toDeepFrozenSchema(
+const UNPIN_INPUT_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
@@ -762,10 +754,9 @@ const UNPIN_INPUT_SCHEMA = toDeepFrozenSchema(
     required: ["path"],
     additionalProperties: false,
   },
-  true,
 );
 
-const UPDATE_ARGUMENT_INPUT_SCHEMA = toDeepFrozenSchema(
+const UPDATE_ARGUMENT_INPUT_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
@@ -787,7 +778,6 @@ const UPDATE_ARGUMENT_INPUT_SCHEMA = toDeepFrozenSchema(
     required: ["path", "updates"],
     additionalProperties: false,
   },
-  true,
 );
 
 /**
@@ -961,13 +951,20 @@ function _toolsHaveChanged(
     // Compare description
     if (newTool.description !== oldTool.description) return true;
 
-    // Compare inputSchema (safe to stringify as it's a JSON Schema)
+    // Compare inputSchema via interned-schema identity. `internSchema()`
+    // returns the canonical reference, so structurally-equal schemas
+    // collapse to `===`. Handles non-JSON-compatible `FabricValue`s in
+    // schema `default` fields correctly, unlike plain `JSON.stringify`
+    // (which silently mis-encodes them and could hide real changes).
     try {
-      const newSchema = JSON.stringify(newTool.inputSchema);
-      const oldSchema = JSON.stringify(oldTool.inputSchema);
-      if (newSchema !== oldSchema) return true;
+      if (
+        internSchema(newTool.inputSchema) !== internSchema(oldTool.inputSchema)
+      ) {
+        return true;
+      }
     } catch {
-      // If schema has circular refs (unlikely), consider it changed
+      // Defensive: preserve the prior try/catch shape in case of
+      // unexpected input. Treat any failure as "changed."
       return true;
     }
 

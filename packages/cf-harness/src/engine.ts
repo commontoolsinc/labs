@@ -8,14 +8,26 @@ import {
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
+  appendHarnessFailureRecord,
   appendHarnessPolicyEvent,
   appendHarnessToolOutput,
   createHarnessRunState,
   type HarnessRunState,
+  type HarnessRunTerminalReason,
+  setHarnessCapabilitySnapshot,
   setHarnessRunCurrentDir,
   setHarnessRunStatus,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
+import {
+  classifyBuiltinToolFailure,
+  classifyHarnessPolicyEventFailure,
+  classifyHarnessRunError,
+  type ClassifyHarnessRunErrorOptions,
+  collectHarnessCapabilitySnapshot,
+  createHarnessFailureRecord,
+  type HarnessFailureRecord,
+} from "./diagnostics.ts";
 import {
   createHarnessPolicyEvent,
   type HarnessPolicyEvent,
@@ -179,8 +191,37 @@ export class CfHarnessEngine {
     return structuredClone(this.#runState);
   }
 
-  setRunStatus(status: HarnessRunState["status"]): HarnessRunState {
-    this.#runState = setHarnessRunStatus(this.#runState, status, this.#now());
+  appendFailureRecord(failure: HarnessFailureRecord): HarnessRunState {
+    this.#runState = appendHarnessFailureRecord(
+      this.#runState,
+      failure,
+      this.#now(),
+    );
+    return this.getRunState();
+  }
+
+  appendFailureFromError(
+    error: unknown,
+    options: Omit<ClassifyHarnessRunErrorOptions, "at"> = {},
+  ): HarnessRunState {
+    return this.appendFailureRecord(
+      classifyHarnessRunError(error, {
+        ...options,
+        at: this.#now(),
+      }),
+    );
+  }
+
+  setRunStatus(
+    status: HarnessRunState["status"],
+    terminalReason?: HarnessRunTerminalReason,
+  ): HarnessRunState {
+    this.#runState = setHarnessRunStatus(
+      this.#runState,
+      status,
+      this.#now(),
+      terminalReason,
+    );
     return this.getRunState();
   }
 
@@ -188,17 +229,54 @@ export class CfHarnessEngine {
     event: Omit<HarnessPolicyEvent, "type" | "at">,
   ): Promise<HarnessRunState> {
     const now = this.#now();
+    const policyEvent = createHarnessPolicyEvent({ ...event, at: now });
     this.#runState = appendHarnessPolicyEvent(
       this.#runState,
-      createHarnessPolicyEvent({ ...event, at: now }),
+      policyEvent,
       now,
     );
+    const failure = classifyHarnessPolicyEventFailure(policyEvent);
+    if (failure !== undefined) {
+      this.#runState = appendHarnessFailureRecord(this.#runState, failure, now);
+    }
     await this.persistRunState();
     return this.getRunState();
   }
 
   async persistRunState(): Promise<string | undefined> {
     return await this.artifactStore?.persistRunState(this.#runState);
+  }
+
+  async terminalizeInterruptedRun(
+    signalName: string,
+  ): Promise<HarnessRunState> {
+    const currentState = this.#runState;
+    if (
+      currentState.status === "failed" ||
+      currentState.terminalReason === "assistant_completed"
+    ) {
+      return this.getRunState();
+    }
+    const now = this.#now();
+    this.#runState = appendHarnessFailureRecord(
+      this.#runState,
+      createHarnessFailureRecord({
+        kind: "harness_error",
+        source: "run_error",
+        detail:
+          `process received ${signalName} before the prompt loop completed`,
+        at: now,
+      }),
+      now,
+    );
+    this.#runState = setHarnessRunStatus(
+      this.#runState,
+      "failed",
+      now,
+      "process_interrupted",
+    );
+    await this.persistRunState();
+    return this.getRunState();
   }
 
   async persistTranscript(
@@ -218,6 +296,51 @@ export class CfHarnessEngine {
     return transcriptPath;
   }
 
+  async ensureDiagnosticsInitialized(): Promise<HarnessRunState> {
+    if (this.#runState.capabilitySnapshot !== undefined) {
+      return this.getRunState();
+    }
+    const now = this.#now();
+    try {
+      const capabilitySnapshot = await collectHarnessCapabilitySnapshot(
+        this.sandbox,
+        this.#runState.currentDir,
+        now,
+      );
+      let capabilitiesPath: string | undefined;
+      try {
+        capabilitiesPath = await this.artifactStore?.persistCapabilitySnapshot(
+          capabilitySnapshot,
+        );
+      } catch (error) {
+        this.#runState = appendHarnessFailureRecord(
+          this.#runState,
+          classifyHarnessRunError(error, {
+            at: this.#now(),
+            source: "capability_snapshot",
+          }),
+          this.#now(),
+        );
+      }
+      this.#runState = setHarnessCapabilitySnapshot(
+        this.#runState,
+        capabilitySnapshot,
+        capabilitiesPath,
+        this.#now(),
+      );
+    } catch (error) {
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        classifyHarnessRunError(error, {
+          at: now,
+          source: "capability_snapshot",
+        }),
+        now,
+      );
+    }
+    return this.getRunState();
+  }
+
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
@@ -226,6 +349,7 @@ export class CfHarnessEngine {
     if (tool === undefined) {
       throw new Error(`unknown builtin tool: ${toolId}`);
     }
+    await this.ensureDiagnosticsInitialized();
     this.#runState = setHarnessRunStatus(
       this.#runState,
       "running",
@@ -250,11 +374,31 @@ export class CfHarnessEngine {
         this.#runState.runId,
         artifactPath,
       );
+      const completionTime = this.#now();
       this.#runState = appendHarnessToolOutput(
-        setHarnessRunStatus(this.#runState, "completed", this.#now()),
+        setHarnessRunStatus(
+          this.#runState,
+          "completed",
+          completionTime,
+          "tool_completed",
+        ),
         resultRef,
-        this.#now(),
+        completionTime,
       );
+      const failure = classifyBuiltinToolFailure(
+        toolId,
+        input,
+        output,
+        completionTime,
+        this.#runState.capabilitySnapshot,
+      );
+      if (failure !== undefined) {
+        this.#runState = appendHarnessFailureRecord(
+          this.#runState,
+          failure,
+          completionTime,
+        );
+      }
       await this.persistRunState();
       return {
         output,
@@ -262,10 +406,21 @@ export class CfHarnessEngine {
         runState: this.getRunState(),
       };
     } catch (error) {
+      const failureTime = this.#now();
       this.#runState = setHarnessRunStatus(
         this.#runState,
         "failed",
-        this.#now(),
+        failureTime,
+        "tool_error",
+      );
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        classifyHarnessRunError(error, {
+          at: failureTime,
+          toolId,
+          source: "run_error",
+        }),
+        failureTime,
       );
       await this.persistRunState();
       throw error;

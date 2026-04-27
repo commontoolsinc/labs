@@ -2,6 +2,7 @@ import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import type {
@@ -38,6 +39,21 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.shellRequests.push(request);
+    if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
+      return Promise.resolve({
+        stdout: [
+          "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
+          "sh\tpresent\t/bin/sh\tBusyBox v1.36.1",
+          "node\tmissing\t\t",
+          "deno\tpresent\t/usr/local/bin/deno\tdeno 2.2.0",
+          "python\tmissing\t\t",
+          "python3\tpresent\t/usr/bin/python3\tPython 3.11.9",
+          "git\tpresent\t/usr/bin/git\tgit version 2.45.1",
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0,
+      });
+    }
     if (this.shellError) {
       return Promise.reject(this.shellError);
     }
@@ -64,6 +80,7 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     currentDir: "/workspace",
     policyEvents: [],
     toolOutputs: [],
+    failureRecords: [],
   });
 });
 
@@ -105,16 +122,28 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
     toolId: "bash",
     runId: "run-1",
   });
-  assertEquals(engine.getRunState(), {
-    runId: "run-1",
-    status: "completed",
-    createdAt: "2026-04-15T19:00:00.000Z",
-    updatedAt: "2026-04-15T19:00:05.000Z",
-    cfcEnforcementMode: "observe",
-    currentDir: "/workspace",
-    policyEvents: [],
-    toolOutputs: [first.resultRef, second.resultRef],
-  });
+  assertEquals(engine.getRunState().runId, "run-1");
+  assertEquals(engine.getRunState().status, "completed");
+  assertEquals(engine.getRunState().createdAt, "2026-04-15T19:00:00.000Z");
+  assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:00:05.000Z");
+  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:00:05.000Z");
+  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().cfcEnforcementMode, "observe");
+  assertEquals(engine.getRunState().currentDir, "/workspace");
+  assertEquals(engine.getRunState().policyEvents, []);
+  assertEquals(engine.getRunState().toolOutputs, [
+    first.resultRef,
+    second.resultRef,
+  ]);
+  assertEquals(engine.getRunState().failureRecords, []);
+  assertEquals(
+    engine.getRunState().capabilitySnapshot?.commands.python.present,
+    false,
+  );
+  assertEquals(
+    engine.getRunState().capabilitySnapshot?.commands.python3.path,
+    "/usr/bin/python3",
+  );
 });
 
 Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors", async () => {
@@ -137,16 +166,111 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
     "sandbox boom",
   );
 
-  assertEquals(engine.getRunState(), {
-    runId: "run-fail",
-    status: "failed",
-    createdAt: "2026-04-15T19:10:00.000Z",
-    updatedAt: "2026-04-15T19:10:02.000Z",
+  assertEquals(engine.getRunState().runId, "run-fail");
+  assertEquals(engine.getRunState().status, "failed");
+  assertEquals(engine.getRunState().createdAt, "2026-04-15T19:10:00.000Z");
+  assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:10:02.000Z");
+  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:10:02.000Z");
+  assertEquals(engine.getRunState().terminalReason, "tool_error");
+  assertEquals(engine.getRunState().cfcEnforcementMode, "observe");
+  assertEquals(engine.getRunState().currentDir, "/workspace");
+  assertEquals(engine.getRunState().policyEvents, []);
+  assertEquals(engine.getRunState().toolOutputs, []);
+  assertEquals(engine.getRunState().failureRecords?.length, 1);
+  assertEquals(engine.getRunState().primaryFailure?.kind, "unknown");
+});
+
+Deno.test("CfHarnessEngine records recoverable file-tool failures without failing the run", async () => {
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime([{
+      stdout: "",
+      stderr: "file not found: /workspace/notes/missing.txt",
+      exitCode: 10,
+    }]),
+    runId: "run-file-missing",
     cfcEnforcementMode: "observe",
-    currentDir: "/workspace",
-    policyEvents: [],
-    toolOutputs: [],
+    now: (() => {
+      const timestamps = [
+        "2026-04-15T19:15:00.000Z",
+        "2026-04-15T19:15:01.000Z",
+        "2026-04-15T19:15:02.000Z",
+        "2026-04-15T19:15:03.000Z",
+        "2026-04-15T19:15:04.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-15T19:15:05.000Z";
+    })(),
   });
+
+  const result = await engine.invokeBuiltinTool("read_file", {
+    path: "notes/missing.txt",
+  });
+
+  assertEquals(result.output, {
+    outputId: createToolOutputId("run-file-missing", "read_file", 1),
+    path: "/workspace/notes/missing.txt",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "file_not_found",
+      message: "file not found: /workspace/notes/missing.txt",
+      path: "/workspace/notes/missing.txt",
+      detail: "file not found: /workspace/notes/missing.txt",
+      exitCode: 10,
+    },
+  });
+  assertEquals(engine.getRunState().status, "completed");
+  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().toolOutputs, [result.resultRef]);
+  assertEquals(engine.getRunState().failureRecords?.length, 1);
+  assertEquals(
+    engine.getRunState().failureRecords?.[0]?.kind,
+    "file_not_found",
+  );
+  assertEquals(engine.getRunState().failureRecords?.[0]?.source, "tool_output");
+  assertEquals(engine.getRunState().failureRecords?.[0]?.toolId, "read_file");
+  assertEquals(
+    engine.getRunState().failureRecords?.[0]?.outputId,
+    createToolOutputId("run-file-missing", "read_file", 1),
+  );
+  assertEquals(engine.getRunState().primaryFailure?.kind, "file_not_found");
+});
+
+Deno.test("CfHarnessEngine terminalizes interrupted runs even after an intermediate tool completion", async () => {
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime([
+      { stdout: "done\n", stderr: "", exitCode: 0 },
+    ]),
+    runId: "run-interrupted",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-04-15T19:20:00.000Z",
+        "2026-04-15T19:20:01.000Z",
+        "2026-04-15T19:20:02.000Z",
+        "2026-04-15T19:20:03.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-15T19:20:04.000Z";
+    })(),
+  });
+
+  await engine.invokeBuiltinTool("bash", { command: "echo done" });
+  assertEquals(engine.getRunState().status, "completed");
+  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+
+  await engine.terminalizeInterruptedRun("SIGTERM");
+
+  assertEquals(engine.getRunState().status, "failed");
+  assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:20:04.000Z");
+  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:20:04.000Z");
+  assertEquals(engine.getRunState().terminalReason, "process_interrupted");
+  assertEquals(engine.getRunState().failureRecords?.at(-1), {
+    type: "cf-harness.failure-record",
+    kind: "harness_error",
+    source: "run_error",
+    detail: "process received SIGTERM before the prompt loop completed",
+    at: "2026-04-15T19:20:04.000Z",
+  });
+  assertEquals(engine.getRunState().primaryFailure?.kind, "harness_error");
 });
 
 Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
@@ -157,6 +281,8 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
       status: "completed",
       createdAt: "2026-04-17T20:10:00.000Z",
       updatedAt: "2026-04-17T20:10:01.000Z",
+      endedAt: "2026-04-17T20:10:01.000Z",
+      terminalReason: "tool_completed",
       cfcEnforcementMode: "observe",
       currentDir: "/workspace",
       policyEvents: [createHarnessPolicyEvent({
@@ -173,6 +299,7 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
         runId: "run-clone",
         artifactPath: "/tmp/original.json",
       }],
+      failureRecords: [],
     },
   });
 
@@ -185,6 +312,8 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
     status: "completed",
     createdAt: "2026-04-17T20:10:00.000Z",
     updatedAt: "2026-04-17T20:10:01.000Z",
+    endedAt: "2026-04-17T20:10:01.000Z",
+    terminalReason: "tool_completed",
     cfcEnforcementMode: "observe",
     currentDir: "/workspace",
     policyEvents: [createHarnessPolicyEvent({
@@ -201,6 +330,7 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
       runId: "run-clone",
       artifactPath: "/tmp/original.json",
     }],
+    failureRecords: [],
   });
 });
 
@@ -217,6 +347,7 @@ Deno.test("CfHarnessEngine rejects legacy run state snapshots without currentDir
           cfcEnforcementMode: "observe",
           policyEvents: [],
           toolOutputs: [],
+          failureRecords: [],
         } as unknown as HarnessRunState,
       }),
     Error,

@@ -19,10 +19,11 @@ interface State {
     items: Item[];
 }
 // FIXTURE: computed-map-call-arg-conditional
-// Verifies: nested ternary inside a callback-local call argument within a
-//   computed-array .map() callback is lowered to ifElse().
+// Verifies: callback-local ordinary call roots within a computed-array .map()
+//   callback whole-wrap as callback-local derives rather than lowering only
+//   the nested ternary argument site.
 //   const label = identity(row.done ? "Done" : "Pending")
-//   → const label = identity(ifElse(row.done, "Done", "Pending"))
+//   → const label = derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))
 export default pattern((state) => {
     const rows = __cfHelpers.derive({
         type: "object",
@@ -75,15 +76,25 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const row = __cf_pattern_input.key("element");
-                const label = identity(__cfHelpers.ifElse({
-                    type: "boolean"
+                const label = __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        row: {
+                            type: "object",
+                            properties: {
+                                done: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["done"]
+                        }
+                    },
+                    required: ["row"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    "enum": ["Done", "Pending"]
-                } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for(["label", 0], true));
+                } as const satisfies __cfHelpers.JSONSchema, { row: {
+                        done: row.key("done")
+                    } }, ({ row }) => identity(row.done ? "Done" : "Pending")).for("label", true);
                 return <span>{label}</span>;
             }, {
                 type: "object",

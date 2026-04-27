@@ -54,6 +54,16 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
+class StrictFakeSandboxRuntime extends FakeSandboxRuntime {
+  override resolvePath(path: string, cwd = this.defaultWorkingDirectory()) {
+    const resolved = super.resolvePath(path, cwd);
+    if (!this.isPathWithinWorkspace(resolved)) {
+      throw new Error(`path escapes workspace root: ${resolved}`);
+    }
+    return resolved;
+  }
+}
+
 const createContext = (
   sandbox: SandboxRuntime,
   initialCurrentDir = "/workspace",
@@ -139,9 +149,13 @@ Deno.test("read_file tool resolves relative paths from the session currentDir", 
     request: {
       command: [
         "set -eu",
-        'if [ ! -f "$1" ]; then',
+        'if [ ! -e "$1" ]; then',
         '  echo "file not found: $1" >&2',
-        "  exit 1",
+        "  exit 10",
+        "fi",
+        'if [ ! -f "$1" ]; then',
+        '  echo "not a file: $1" >&2',
+        "  exit 11",
         "fi",
         'if [ -n "$2" ]; then',
         '  exec head -c "$2" "$1"',
@@ -169,6 +183,80 @@ Deno.test("read_file tool rejects non-integer maxBytes", async () => {
   assertEquals(sandbox.calls, []);
 });
 
+Deno.test("read_file tool returns a recoverable file_not_found result", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "",
+    stderr: "file not found: /workspace/notes/missing.txt",
+    exitCode: 10,
+  }]);
+
+  const output = await readFileTool.invoke(createContext(sandbox), {
+    path: "notes/missing.txt",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:read_file:1",
+    path: "/workspace/notes/missing.txt",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "file_not_found",
+      message: "file not found: /workspace/notes/missing.txt",
+      path: "/workspace/notes/missing.txt",
+      detail: "file not found: /workspace/notes/missing.txt",
+      exitCode: 10,
+    },
+  });
+});
+
+Deno.test("read_file tool returns a recoverable not_a_file result", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "",
+    stderr: "not a file: /workspace/notes",
+    exitCode: 11,
+  }]);
+
+  const output = await readFileTool.invoke(createContext(sandbox), {
+    path: "notes",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:read_file:1",
+    path: "/workspace/notes",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "not_a_file",
+      message: "not a file: /workspace/notes",
+      path: "/workspace/notes",
+      detail: "not a file: /workspace/notes",
+      exitCode: 11,
+    },
+  });
+});
+
+Deno.test("read_file tool returns a recoverable path_outside_workspace result", async () => {
+  const sandbox = new StrictFakeSandboxRuntime();
+
+  const output = await readFileTool.invoke(createContext(sandbox), {
+    path: "../outside.txt",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:read_file:1",
+    path: "../outside.txt",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "path_outside_workspace",
+      message: "path outside workspace: ../outside.txt",
+      path: "../outside.txt",
+      detail: "path escapes workspace root: /outside.txt",
+    },
+  });
+  assertEquals(sandbox.calls, []);
+});
+
 Deno.test("write_file tool supports append mode and passes content over stdin", async () => {
   const sandbox = new FakeSandboxRuntime();
   const output = await writeFileTool.invoke(createContext(sandbox), {
@@ -191,8 +279,16 @@ Deno.test("write_file tool supports append mode and passes content over stdin", 
         'path="$1"',
         'mode="$2"',
         'create_parents="$3"',
+        'parent="$(dirname "$path")"',
         'if [ "$create_parents" = "true" ]; then',
-        '  mkdir -p "$(dirname "$path")"',
+        '  mkdir -p "$parent"',
+        'elif [ ! -d "$parent" ]; then',
+        '  echo "file not found: parent directory $parent" >&2',
+        "  exit 10",
+        "fi",
+        'if [ -e "$path" ] && [ ! -f "$path" ]; then',
+        '  echo "not a file: $path" >&2',
+        "  exit 11",
         "fi",
         'case "$mode" in',
         "  replace)",
@@ -203,7 +299,7 @@ Deno.test("write_file tool supports append mode and passes content over stdin", 
         "    ;;",
         "  *)",
         '    echo "unsupported write mode: $mode" >&2',
-        "    exit 2",
+        "    exit 12",
         "    ;;",
         "esac",
       ].join("\n"),
@@ -238,8 +334,16 @@ Deno.test("write_file uses the cwd established by an earlier bash call", async (
         'path="$1"',
         'mode="$2"',
         'create_parents="$3"',
+        'parent="$(dirname "$path")"',
         'if [ "$create_parents" = "true" ]; then',
-        '  mkdir -p "$(dirname "$path")"',
+        '  mkdir -p "$parent"',
+        'elif [ ! -d "$parent" ]; then',
+        '  echo "file not found: parent directory $parent" >&2',
+        "  exit 10",
+        "fi",
+        'if [ -e "$path" ] && [ ! -f "$path" ]; then',
+        '  echo "not a file: $path" >&2',
+        "  exit 11",
         "fi",
         'case "$mode" in',
         "  replace)",
@@ -250,7 +354,7 @@ Deno.test("write_file uses the cwd established by an earlier bash call", async (
         "    ;;",
         "  *)",
         '    echo "unsupported write mode: $mode" >&2',
-        "    exit 2",
+        "    exit 12",
         "    ;;",
         "esac",
       ].join("\n"),
@@ -258,4 +362,54 @@ Deno.test("write_file uses the cwd established by an earlier bash call", async (
       stdinText: "line one\n",
     },
   });
+});
+
+Deno.test("write_file tool returns a recoverable permission_denied result", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "",
+    stderr: "permission denied",
+    exitCode: 13,
+  }]);
+
+  const output = await writeFileTool.invoke(createContext(sandbox), {
+    path: "notes/log.txt",
+    content: "line one\n",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:write_file:1",
+    path: "/workspace/notes/log.txt",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "permission_denied",
+      message: "permission denied: /workspace/notes/log.txt",
+      path: "/workspace/notes/log.txt",
+      detail: "permission denied",
+      exitCode: 13,
+    },
+  });
+});
+
+Deno.test("write_file tool returns a recoverable path_outside_workspace result", async () => {
+  const sandbox = new StrictFakeSandboxRuntime();
+
+  const output = await writeFileTool.invoke(createContext(sandbox), {
+    path: "../outside.txt",
+    content: "line one\n",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:write_file:1",
+    path: "../outside.txt",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "path_outside_workspace",
+      message: "path outside workspace: ../outside.txt",
+      path: "../outside.txt",
+      detail: "path escapes workspace root: /outside.txt",
+    },
+  });
+  assertEquals(sandbox.calls, []);
 });

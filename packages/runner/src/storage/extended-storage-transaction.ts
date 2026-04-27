@@ -50,6 +50,7 @@ import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
+  type CfcDereferenceTrace,
   type CfcEnforcementMode,
   type CfcTxState,
   type ConsumedRead,
@@ -92,6 +93,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     relevant: false,
     enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
     prepare: { status: "unprepared" },
+    dereferenceTraces: [],
     writePolicyInputs: [],
     outbox: [],
     diagnostics: [],
@@ -140,6 +142,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
     if (wasPrepared) {
       this.cfcInstrumentation.onDigestInvalidation?.(reason);
+    }
+  }
+
+  recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
+    this.cfcState.dereferenceTraces.push(trace);
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("dereference-trace-added");
     }
   }
 
@@ -213,6 +222,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       consumedReads,
       potentialWrites,
       writes,
+      dereferenceTraces: [...this.cfcState.dereferenceTraces],
       writePolicyInputs: [...this.cfcState.writePolicyInputs],
       implementationIdentity: this.cfcState.implementationIdentity,
       trustSnapshot: this.cfcState.trustSnapshot,
@@ -468,6 +478,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.cfcState.outbox = [];
     this.outboxIdempotencyKeys.clear();
     this.cfcState.prepare = { status: "unprepared" };
+    this.cfcState.dereferenceTraces = [];
     return this.tx.abort(reason);
   }
 
@@ -681,6 +692,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   invalidateCfc(reason: string): void {
     this.wrapped.invalidateCfc(reason);
+  }
+
+  recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
+    this.wrapped.recordCfcDereferenceTrace(trace);
   }
 
   prepareCfc(input?: PreparedDigestInput): string {

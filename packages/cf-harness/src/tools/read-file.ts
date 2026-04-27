@@ -1,6 +1,15 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
+import {
+  classifyFileToolShellFailure,
+  classifyPathResolutionError,
+  createStructuredFileToolErrorOutput,
+  detailFromShellFailure,
+  detailFromUnknownError,
+  type StructuredFileToolErrorOutput,
+  structuredFileToolErrorOutputSchema,
+} from "./file-errors.ts";
 
 export interface ReadFileToolInput {
   path: string;
@@ -8,11 +17,15 @@ export interface ReadFileToolInput {
   maxBytes?: number;
 }
 
-export interface ReadFileToolOutput {
+export interface ReadFileToolSuccessOutput {
   outputId: string;
   path: string;
   content: string;
 }
+
+export type ReadFileToolOutput =
+  | ReadFileToolSuccessOutput
+  | StructuredFileToolErrorOutput;
 
 export const readFileToolDescriptor: HarnessToolDescriptor = {
   toolId: "read_file",
@@ -31,14 +44,16 @@ export const readFileToolDescriptor: HarnessToolDescriptor = {
     additionalProperties: false,
   } satisfies JSONSchema,
   outputSchema: {
-    type: "object",
-    properties: {
-      outputId: { type: "string" },
-      path: { type: "string" },
-      content: { type: "string" },
-    },
-    required: ["outputId", "path", "content"],
-    additionalProperties: false,
+    oneOf: [{
+      type: "object",
+      properties: {
+        outputId: { type: "string" },
+        path: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["outputId", "path", "content"],
+      additionalProperties: false,
+    }, structuredFileToolErrorOutputSchema],
   } satisfies JSONSchema,
   tags: ["file", "read", "vm"],
 };
@@ -55,13 +70,26 @@ export const readFileTool: HarnessToolDefinition<
     ) {
       throw new Error("read_file maxBytes must be a non-negative integer");
     }
-    const resolvedPath = context.resolvePath(input.path);
+    let resolvedPath: string;
+    try {
+      resolvedPath = context.resolvePath(input.path);
+    } catch (error) {
+      return createStructuredFileToolErrorOutput(context, "read_file", {
+        path: input.path,
+        code: classifyPathResolutionError(error),
+        detail: detailFromUnknownError(error),
+      });
+    }
     const result = await context.sandbox.runShell({
       command: [
         "set -eu",
-        'if [ ! -f "$1" ]; then',
+        'if [ ! -e "$1" ]; then',
         '  echo "file not found: $1" >&2',
-        "  exit 1",
+        "  exit 10",
+        "fi",
+        'if [ ! -f "$1" ]; then',
+        '  echo "not a file: $1" >&2',
+        "  exit 11",
         "fi",
         'if [ -n "$2" ]; then',
         '  exec head -c "$2" "$1"',
@@ -73,6 +101,14 @@ export const readFileTool: HarnessToolDefinition<
         input.maxBytes !== undefined ? String(input.maxBytes) : "",
       ],
     });
+    if (result.exitCode !== 0) {
+      return createStructuredFileToolErrorOutput(context, "read_file", {
+        path: resolvedPath,
+        code: classifyFileToolShellFailure(result),
+        detail: detailFromShellFailure(result),
+        exitCode: result.exitCode,
+      });
+    }
     return {
       outputId: context.nextOutputId("read_file"),
       path: resolvedPath,

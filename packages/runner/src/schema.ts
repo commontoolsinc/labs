@@ -10,9 +10,10 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
-  toDeepFrozenSchema,
+  schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
@@ -69,6 +70,35 @@ const logger = getLogger("validateAndTransform", {
  * necessary when using the schedueler directly)
  */
 
+/**
+ * Resolve a schema to its canonical interned form, or `undefined` when the
+ * input carries no usable information.
+ *
+ * The return value is the **canonical interned reference** for the resolved
+ * schema's structural content — produced by `internSchema()`. Concrete
+ * consequences of that contract:
+ *
+ * - For structurally-equal schemas, `resolveSchema()` returns the same
+ *   reference across calls. Downstream identity-based caches
+ *   (`schemaHasIfc`'s memo, `standardizedSchemaCache`, hashSchema WeakMaps,
+ *   the `resolveLink`-exit canonicalization, etc.) hit O(1) on those
+ *   returns without needing to rehash.
+ * - The return value is **not** guaranteed to be the same reference as the
+ *   caller-supplied `schema`, even when the caller's schema is already
+ *   deep-frozen. A caller-frozen schema that happens to be content-equal
+ *   to an already-interned instance is replaced by the canonical one.
+ * - When the caller supplies a schema that **is** itself the canonical
+ *   interned instance, the same reference is returned (because
+ *   `internSchema()` short-circuits on WeakMap hit).
+ * - `undefined` is returned for trivial inputs (`undefined`, `null`, `{}`,
+ *   non-object) and for `$ref`-chains that resolve to a boolean or
+ *   trivial schema.
+ *
+ * Callers that need a stable reference across calls should therefore rely
+ * on structural canonicalization (same content yields same reference)
+ * rather than caller-identity preservation. This is the same contract the
+ * `resolveLink()` exit follows (see `link-resolution.ts`).
+ */
 export function resolveSchema(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
@@ -91,9 +121,11 @@ export function resolveSchema(
   }
 
   // Return no schema if all it said is that this was a reference or an
-  // object without properties.
+  // object without properties. Intern here (rather than just
+  // deep-freezing) so structurally-equal schemas collapse to a single
+  // canonical reference across calls — see the contract above.
   return isNontrivialSchema(resolvedSchema)
-    ? toDeepFrozenSchema(resolvedSchema)
+    ? internSchema(resolvedSchema)
     : undefined;
 }
 
@@ -186,14 +218,38 @@ function _schemaHasIfcUncached(
   return false;
 }
 
+const _filterAsCellCache = new WeakMap<
+  JSONSchemaObj,
+  JSONSchema | "<undefined>"
+>();
+
 function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
   if (!isNontrivialSchema(schema)) {
     return schema;
   }
-  const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
-  return isNontrivialSchema(restSchema)
-    ? toDeepFrozenSchema(restSchema)
-    : undefined;
+
+  const makeRawResult = () => {
+    const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
+    return isNontrivialSchema(restSchema) ? restSchema : undefined;
+  };
+
+  if (isDeepFrozen(schema)) {
+    // Note: We cache literal `<undefined>` when we are to return `undefined`,
+    // to disambiguate with no-entry.
+    const cached = _filterAsCellCache.get(schema);
+    if (cached) return (cached === "<undefined>") ? undefined : cached;
+    const rawResult = makeRawResult();
+    if (rawResult) {
+      const result = internSchema(rawResult);
+      _filterAsCellCache.set(schema, result);
+      return result;
+    } else {
+      _filterAsCellCache.set(schema, "<undefined>");
+      return undefined;
+    }
+  } else {
+    return makeRawResult();
+  }
 }
 
 /**
@@ -419,7 +475,7 @@ export function mergeDefaults(
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 
-  return toDeepFrozenSchema({ ...base, default: mergedDefault }, true);
+  return schemaWithProperties(base, { default: mergedDefault });
 }
 
 /**
@@ -820,7 +876,7 @@ export function generateHandlerSchema(
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  return toDeepFrozenSchema({
+  return internSchema({
     type: "object",
     properties: {
       "$event": eventSchema ?? true,
@@ -830,7 +886,7 @@ export function generateHandlerSchema(
     ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
     ...(Object.keys(mergedDefinitions).length &&
       { definitions: mergedDefinitions }),
-  }, true);
+  });
 }
 
 function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {

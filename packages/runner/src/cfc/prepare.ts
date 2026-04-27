@@ -1,5 +1,5 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
@@ -47,7 +47,9 @@ const isPrefix = (
   path: readonly string[],
 ): boolean =>
   prefix.length <= path.length &&
-  prefix.every((segment, index) => segment === path[index]);
+  prefix.every((segment, index) =>
+    segment === path[index] || segment === "*" || path[index] === "*"
+  );
 
 const labelAtPath = (
   metadata: CfcMetadata | undefined,
@@ -218,6 +220,11 @@ type StructuralProvenanceInput = Extract<
   { kind: "structural-provenance" }
 >;
 
+type LinkWritePolicyInput = Extract<
+  WritePolicyInput,
+  { kind: "link-write" }
+>;
+
 const structuralProvenanceForPath = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -295,6 +302,9 @@ const storedMetadataFor = (
     : undefined;
 };
 
+/**
+ * This returns a map whose values are always interned schemas.
+ */
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
   implementationIdentity?: ImplementationIdentity,
@@ -318,12 +328,66 @@ const candidateSchemasByTarget = (
     result.set(
       key,
       existing === undefined
-        ? candidate
-        : mergeCfcSchemaEnvelopes(existing, candidate),
+        ? internSchema(candidate)
+        : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
     );
   }
   return result;
 };
+
+const targetKey = (target: {
+  space: MemorySpace;
+  id: string;
+  type: string;
+}): string => `${target.space}\u0000${target.id}\u0000${target.type}`;
+
+const linkWritesByTarget = (
+  inputs: readonly WritePolicyInput[],
+): Map<string, LinkWritePolicyInput[]> => {
+  const result = new Map<string, LinkWritePolicyInput[]>();
+  for (const input of inputs) {
+    if (input.kind !== "link-write") {
+      continue;
+    }
+    const key = targetKey(input.target);
+    const entries = result.get(key) ?? [];
+    entries.push(input);
+    result.set(key, entries);
+  }
+  return result;
+};
+
+const pathKey = (path: readonly string[]): string =>
+  canonicalizeLogicalPath(path).join("\u0000");
+
+const pathsOverlap = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean => isPrefix(left, right) || isPrefix(right, left);
+
+const linkWriteCoversAffectedPath = (
+  writePath: readonly string[],
+  entryPath: readonly string[],
+  inputs: readonly LinkWritePolicyInput[],
+): boolean =>
+  inputs.some((input) => {
+    const linkPath = canonicalizeLogicalPath(input.target.path);
+    return pathsOverlap(linkPath, writePath) &&
+      pathsOverlap(linkPath, entryPath);
+  });
+
+const linkWritesCoverCfcAffectedPaths = (
+  metadata: CfcMetadata,
+  writePaths: readonly string[][],
+  inputs: readonly LinkWritePolicyInput[],
+): boolean =>
+  writePaths.every((writePath) =>
+    metadata.labelMap.entries.every((entry) => {
+      const entryPath = canonicalizeLogicalPath(entry.path);
+      return !pathsOverlap(entryPath, writePath) ||
+        linkWriteCoversAffectedPath(writePath, entryPath, inputs);
+    })
+  );
 
 const rebindWriteAuthorizedByClaims = (
   schema: JSONSchema,
@@ -407,10 +471,13 @@ const schemaEnvelopeForTargetPath = (
 
 const valueWriteTargets = (
   tx: IExtendedStorageTransaction,
-): Map<string, { space: MemorySpace; id: URI; type: MediaType }> => {
+): Map<
+  string,
+  { space: MemorySpace; id: URI; type: MediaType; paths: string[][] }
+> => {
   const result = new Map<
     string,
-    { space: MemorySpace; id: URI; type: MediaType }
+    { space: MemorySpace; id: URI; type: MediaType; paths: string[][] }
   >();
   const log = tx.getReactivityLog?.();
   const seenWriteSpaces = new Set<MemorySpace>(
@@ -432,13 +499,18 @@ const valueWriteTargets = (
       ) {
         continue;
       }
-      const key =
-        `${write.address.space}\u0000${write.address.id}\u0000${write.address.type}`;
-      result.set(key, {
-        space: write.address.space,
-        id: write.address.id as URI,
-        type: write.address.type as MediaType,
-      });
+      const key = targetKey(write.address);
+      const existing = result.get(key);
+      if (existing !== undefined) {
+        existing.paths.push(writePath);
+      } else {
+        result.set(key, {
+          space: write.address.space,
+          id: write.address.id as URI,
+          type: write.address.type as MediaType,
+          paths: [writePath],
+        });
+      }
     }
   }
   return result;
@@ -474,6 +546,38 @@ const walkIfcSchema = (
     walkIfcSchema(schema.items, [...path, "*"], entries);
   }
   return entries;
+};
+
+const policyOnlySchema = (schema: JSONSchema): JSONSchema => {
+  if (!isRecord(schema) || !isRecord(schema.ifc)) {
+    return {};
+  }
+  return { ifc: { ...schema.ifc } } as JSONSchema;
+};
+
+const storedSchemaClaimsForLinkWrites = (
+  schema: JSONSchema,
+  inputs: readonly LinkWritePolicyInput[],
+): JSONSchema => {
+  let result: JSONSchema | undefined;
+  const targetPaths = inputs.map((input) =>
+    canonicalizeLogicalPath(input.target.path)
+  );
+  for (const entry of walkIfcSchema(schema)) {
+    if (
+      !targetPaths.some((targetPath) => pathsOverlap(targetPath, entry.path))
+    ) {
+      continue;
+    }
+    const envelope = schemaEnvelopeForTargetPath(
+      policyOnlySchema(entry.schema),
+      entry.path,
+    );
+    result = result === undefined
+      ? envelope
+      : mergeCfcSchemaEnvelopes(result, envelope);
+  }
+  return result ?? {};
 };
 
 const unsupportedTrustSensitiveReason = (
@@ -719,6 +823,121 @@ const derivePersistedLabel = (
   };
 };
 
+const persistedLabelFromSchemaAtPath = (
+  schema: JSONSchema,
+  path: readonly string[],
+): IFCLabel | undefined => {
+  const logicalPath = canonicalizeLogicalPath(path);
+  const entries = walkIfcSchema(schema);
+  let match:
+    | { path: string[]; label: IFCLabel; schema: JSONSchema }
+    | undefined;
+  for (const entry of entries) {
+    if (!isPrefix(entry.path, logicalPath)) {
+      continue;
+    }
+    if (match === undefined || match.path.length < entry.path.length) {
+      match = entry;
+    }
+  }
+  if (match === undefined) {
+    return undefined;
+  }
+  const entryLabels = new Map<string, IFCLabel>(
+    entries.map((entry) => [pathKey(entry.path), entry.label]),
+  );
+  return derivePersistedLabel(match.schema, match.label, entryLabels);
+};
+
+const mergeLabels = (
+  left: IFCLabel | undefined,
+  right: IFCLabel | undefined,
+): IFCLabel => ({
+  confidentiality: mergeLabelValues(
+    left?.confidentiality,
+    right?.confidentiality,
+  ),
+  integrity: mergeLabelValues(left?.integrity, right?.integrity),
+});
+
+const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
+  type: "https://commonfabric.org/cfc/atom/LinkReference",
+  source: {
+    space: input.source.space,
+    id: input.source.id,
+    type: input.source.type,
+    path: canonicalizeLogicalPath(input.source.path),
+  },
+  target: {
+    space: input.target.space,
+    id: input.target.id,
+    type: input.target.type,
+    path: canonicalizeLogicalPath(input.target.path),
+  },
+});
+
+const rootLabelFromSchema = (schema: JSONSchema | undefined): IFCLabel => {
+  if (schema === undefined) {
+    return {};
+  }
+  const root = walkIfcSchema(schema).find((entry) => entry.path.length === 0);
+  return root?.label ?? {};
+};
+
+const derivePersistedLinkLabel = (
+  tx: IExtendedStorageTransaction,
+  input: LinkWritePolicyInput,
+  candidateSchemas: ReadonlyMap<string, JSONSchema>,
+): { label?: IFCLabel; reason?: string } => {
+  const sourceMetadata = storedMetadataFor(
+    tx,
+    input.source.space,
+    input.source.id as URI,
+    input.source.type as MediaType,
+  );
+  const pendingSourceLabel = candidateSchemas.get(targetKey(input.source)) !==
+      undefined
+    ? persistedLabelFromSchemaAtPath(
+      candidateSchemas.get(targetKey(input.source))!,
+      input.source.path,
+    )
+    : undefined;
+  if (sourceMetadata === undefined && pendingSourceLabel === undefined) {
+    return {
+      reason: `missing link source metadata for ${input.target.id} at /${
+        input.target.path.join("/")
+      }`,
+    };
+  }
+  const sourceLabel = mergeLabels(
+    sourceMetadata === undefined ? undefined : labelAtPath(
+      sourceMetadata,
+      canonicalizeLogicalPath(input.source.path),
+    ) ?? {},
+    pendingSourceLabel,
+  );
+  const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
+  const label: IFCLabel = {
+    confidentiality: mergeLabelValues(
+      sourceLabel.confidentiality,
+      linkSchemaLabel.confidentiality,
+    ),
+    integrity: mergeLabelValues(
+      sourceLabel.integrity,
+      linkSchemaLabel.integrity,
+      [linkReferenceIntegrity(input)],
+    ),
+  };
+  return { label };
+};
+
+const cloneLabel = (label: IFCLabel): IFCLabel => ({
+  ...(label.confidentiality !== undefined
+    ? { confidentiality: [...label.confidentiality] }
+    : {}),
+  ...(label.integrity !== undefined ? { integrity: [...label.integrity] } : {}),
+});
+
 const ensureSchemaDocument = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -777,12 +996,28 @@ export const prepareBoundaryCommit = (
     tx.getCfcState().writePolicyInputs,
     tx.getCfcState().implementationIdentity,
   );
+  const linkWrites = linkWritesByTarget(tx.getCfcState().writePolicyInputs);
   for (const [key, target] of valueWriteTargets(tx)) {
     if (candidates.has(key)) {
       continue;
     }
+    const existing = storedMetadataFor(
+      tx,
+      target.space,
+      target.id,
+      target.type,
+    );
+    if (existing === undefined) {
+      continue;
+    }
+    const linkWriteInputs = linkWrites.get(key) ?? [];
     if (
-      storedMetadataFor(tx, target.space, target.id, target.type) === undefined
+      linkWriteInputs.length > 0 &&
+      linkWritesCoverCfcAffectedPaths(
+        existing,
+        target.paths,
+        linkWriteInputs,
+      )
     ) {
       continue;
     }
@@ -790,42 +1025,37 @@ export const prepareBoundaryCommit = (
       `missing schema write-policy input for ${target.id}`,
     );
   }
-  for (const [key, schema] of candidates) {
+  const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
+  for (const key of targetKeys) {
+    const candidateSchema = candidates.get(key);
+    const schema = candidateSchema ?? emptySchemaObject();
+    const undefinedCandidate = candidateSchema === undefined;
     const [space, id, type] = key.split("\u0000") as [
       MemorySpace,
       URI,
       MediaType,
     ];
-    const frozen = toDeepFrozenSchema(schema, true) as JSONSchema;
 
     const target = { space, id, type };
-    const requirementFailure = verifyInputRequirements(tx, frozen, target);
-    if (requirementFailure) {
-      reasons.push(requirementFailure);
-      continue;
-    }
-    const trustedEventFailure = verifyTrustedEventRequirements(
-      tx,
-      target,
-      frozen,
-    );
-    if (trustedEventFailure) {
-      reasons.push(trustedEventFailure);
-      continue;
-    }
-
-    const exactCopyFailure = verifyExactCopyRequirements(tx, target, frozen);
-    if (exactCopyFailure) {
-      reasons.push(exactCopyFailure);
-      continue;
-    }
-
     const existing = storedMetadataFor(tx, space, id, type);
-    let mergedSchema = frozen;
-    if (existing !== undefined) {
+    let storedSchema: JSONSchema | undefined;
+    let mergedSchema = schema;
+    if (existing !== undefined && undefinedCandidate) {
       try {
-        const storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
-        mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, frozen);
+        storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
+        mergedSchema = storedSchema;
+      } catch (error) {
+        reasons.push(
+          error instanceof Error
+            ? error.message
+            : `schema load failed for ${id}`,
+        );
+        continue;
+      }
+    } else if (existing !== undefined) {
+      try {
+        storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
+        mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, schema);
       } catch (error) {
         reasons.push(
           error instanceof Error
@@ -835,14 +1065,52 @@ export const prepareBoundaryCommit = (
         continue;
       }
     }
-    const schemaAndHash = internSchema(
-      toDeepFrozenSchema(mergedSchema, true) as JSONSchema,
-      true,
+
+    const linkWriteInputs = linkWrites.get(key) ?? [];
+    const verificationSchema = storedSchema !== undefined &&
+        linkWriteInputs.length > 0
+      ? undefinedCandidate
+        ? storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
+        : mergeCfcSchemaEnvelopes(
+          schema,
+          storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
+        )
+      : schema;
+
+    const requirementFailure = verifyInputRequirements(
+      tx,
+      verificationSchema,
+      target,
     );
-    const mergedSchemaEntries = walkIfcSchema(mergedSchema);
+    if (requirementFailure) {
+      reasons.push(requirementFailure);
+      continue;
+    }
+    const trustedEventFailure = verifyTrustedEventRequirements(
+      tx,
+      target,
+      verificationSchema,
+    );
+    if (trustedEventFailure) {
+      reasons.push(trustedEventFailure);
+      continue;
+    }
+
+    const exactCopyFailure = verifyExactCopyRequirements(
+      tx,
+      target,
+      verificationSchema,
+    );
+    if (exactCopyFailure) {
+      reasons.push(exactCopyFailure);
+      continue;
+    }
+
+    const schemaAndHash = internSchema(mergedSchema, true);
+    const mergedSchemaEntries = walkIfcSchema(schemaAndHash.schema);
     const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
       mergedSchemaEntries.map((entry) => [
-        canonicalizeLogicalPath(entry.path).join("\u0000"),
+        pathKey(entry.path),
         entry.label,
       ]),
     );
@@ -859,6 +1127,35 @@ export const prepareBoundaryCommit = (
         }]
         : [];
     });
+    const currentLinkWritePaths = new Set(
+      linkWriteInputs.map((input) => pathKey(input.target.path)),
+    );
+    for (const entry of existing?.labelMap.entries ?? []) {
+      const entryPath = canonicalizeLogicalPath(entry.path);
+      const key = pathKey(entryPath);
+      if (mergedSchemaEntryLabels.has(key) || currentLinkWritePaths.has(key)) {
+        continue;
+      }
+      if (hasLabelValues(entry.label)) {
+        persistedLabelEntries.push({
+          path: entryPath,
+          label: cloneLabel(entry.label),
+        });
+      }
+    }
+    for (const input of linkWriteInputs) {
+      const result = derivePersistedLinkLabel(tx, input, candidates);
+      if (result.reason !== undefined) {
+        reasons.push(result.reason);
+        continue;
+      }
+      if (result.label !== undefined && hasLabelValues(result.label)) {
+        persistedLabelEntries.push({
+          path: canonicalizeLogicalPath(input.target.path),
+          label: result.label,
+        });
+      }
+    }
 
     if (persistedLabelEntries.length === 0) {
       continue;

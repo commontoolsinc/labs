@@ -91,6 +91,11 @@ INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
 export SHELL_PORT
 export TOOLSHED_PORT
 
+KEEP_ALIVE=false
+if [[ -n "${CODEX_SANDBOX:-}" ]]; then
+    KEEP_ALIVE=true
+fi
+
 # Check if port is free; kill processes if --force, otherwise error
 check_port() {
     local port=$1
@@ -232,4 +237,11 @@ if [[ "$BG_UPDATER" == "true" ]]; then
     fi
     echo "Shell log file: packages/shell/local-dev-shell.log"
     echo "Toolshed log file: packages/toolshed/local-dev-toolshed.log"
+fi
+
+if [[ "$KEEP_ALIVE" == "true" ]]; then
+    echo ""
+    echo "Codex detected; keeping this command attached so Codex does not clean up the dev servers."
+    echo "Stop this command or run ./scripts/stop-local-dev.sh from another shell to stop them."
+    wait "$SHELL_PID" "$TOOLSHED_PID"
 fi

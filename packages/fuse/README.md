@@ -213,6 +213,9 @@ cf fuse mount /tmp/cf
 # Mount in background
 cf fuse mount /tmp/cf --background
 
+# Linux: export the mount so Docker/root can traverse it
+cf fuse mount /tmp/cf --allow-other
+
 # Check active mounts
 cf fuse status
 
@@ -227,6 +230,17 @@ cf exec /tmp/cf/home/pieces/todo-app/result/search.tool --help
 ```
 
 Environment variables `CF_API_URL` and `CF_IDENTITY` are also supported.
+
+### Linux: Docker / other-user access
+
+If you need Docker or another user to traverse a Linux FUSE mount, mount with:
+
+```bash
+cf fuse mount /tmp/cf --allow-other
+```
+
+This enables `allow_other` together with `default_permissions`. The host must
+also have `user_allow_other` enabled in `/etc/fuse.conf`.
 
 Handlers remain writable through the mounted `.handler` file. Both mounted
 `.handler` and `.tool` files can be executed directly or via `cf exec`.

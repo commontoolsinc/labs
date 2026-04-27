@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
+  DEFAULT_DOCKER_RUNSC_IMAGE,
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
 } from "../src/sandbox/docker-runsc.ts";
@@ -27,7 +28,10 @@ Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   assertEquals(config.kind, "docker-runsc-cfc");
   assertEquals(config.dockerBinary, "docker");
   assertEquals(config.runtimeName, "runsc-cfc");
-  assertEquals(config.image, "alpine:3.20");
+  assertEquals(
+    config.image,
+    "us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest",
+  );
   assertEquals(config.workspaceMountPath, "/workspace");
   assertEquals(config.shellPath, "/bin/sh");
   assertEquals(config.dockerNetworkMode, "none");
@@ -40,11 +44,12 @@ Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () =
     stderr: "",
     exitCode: 0,
   });
+  const config = resolveDockerRunscSandboxConfig({
+    workspaceHostPath: "/host/project",
+    image: "sandbox:latest",
+  });
   const runtime = new DockerRunscSandboxRuntime(
-    resolveDockerRunscSandboxConfig({
-      workspaceHostPath: "/host/project",
-      image: "sandbox:latest",
-    }),
+    config,
     runner,
   );
 
@@ -67,6 +72,9 @@ Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () =
       "runsc-cfc",
       "--network",
       "none",
+      ...(config.containerUser !== undefined
+        ? ["--user", config.containerUser]
+        : []),
       "--mount",
       "type=bind,src=/host/project,dst=/workspace",
       "-w",
@@ -80,7 +88,7 @@ Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () =
   });
 });
 
-Deno.test("DockerRunscSandboxRuntime runShell uses the configured shell and resolved cwd", async () => {
+Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user override", async () => {
   const runner = new FakeProcessRunner({
     stdout: "",
     stderr: "",
@@ -89,6 +97,7 @@ Deno.test("DockerRunscSandboxRuntime runShell uses the configured shell and reso
   const runtime = new DockerRunscSandboxRuntime(
     resolveDockerRunscSandboxConfig({
       workspaceHostPath: "/host/project",
+      containerUser: "1234:2345",
     }),
     runner,
   );
@@ -108,11 +117,13 @@ Deno.test("DockerRunscSandboxRuntime runShell uses the configured shell and reso
       "runsc-cfc",
       "--network",
       "none",
+      "--user",
+      "1234:2345",
       "--mount",
       "type=bind,src=/host/project,dst=/workspace",
       "-w",
       "/workspace/demo",
-      "alpine:3.20",
+      DEFAULT_DOCKER_RUNSC_IMAGE,
       "/bin/sh",
       "-lc",
       "pwd",

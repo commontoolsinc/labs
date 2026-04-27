@@ -17,7 +17,7 @@ import {
   type SpaceCellContents,
   URI,
 } from "@commonfabric/runner";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type Session } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
@@ -31,8 +31,10 @@ import {
 } from "@commonfabric/runner/schemas";
 ensureNotRenderThread();
 
-const PRIVILEGED_PIECE_LIST_SCHEMA = toDeepFrozenSchema({
-  ...pieceListSchema,
+const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
+  type: "array",
+  items: { type: "unknown", asCell: ["cell"] },
+  default: [],
   ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
 });
 

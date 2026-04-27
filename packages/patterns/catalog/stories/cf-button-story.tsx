@@ -17,11 +17,17 @@ interface ButtonStoryOutput {
 
 export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
   const variant = Writable.of<
-    "primary" | "secondary" | "destructive" | "ghost"
+    | "primary"
+    | "secondary"
+    | "destructive"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "pill"
   >("primary");
   const disabled = Writable.of(false);
   const label = Writable.of("Click me");
-  const size = Writable.of<"default" | "sm" | "lg" | "icon">("default");
+  const size = Writable.of<"xs" | "sm" | "md" | "lg" | "xl" | "icon">("md");
   const clickCount = Writable.of(0);
 
   const handleClick = action(() => {
@@ -67,18 +73,23 @@ export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
               { label: "Primary", value: "primary" },
               { label: "Secondary", value: "secondary" },
               { label: "Destructive", value: "destructive" },
+              { label: "Outline", value: "outline" },
               { label: "Ghost", value: "ghost" },
+              { label: "Link", value: "link" },
+              { label: "Pill", value: "pill" },
             ]}
           />
           <SelectControl
             label="size"
             description="Size of the button"
-            defaultValue="default"
+            defaultValue="md"
             value={size}
             items={[
-              { label: "Default", value: "default" },
+              { label: "Extra Small", value: "xs" },
               { label: "Small", value: "sm" },
+              { label: "Medium", value: "md" },
               { label: "Large", value: "lg" },
+              { label: "Extra Large", value: "xl" },
               { label: "Icon", value: "icon" },
             ]}
           />

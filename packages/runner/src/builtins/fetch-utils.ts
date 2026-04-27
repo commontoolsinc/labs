@@ -4,11 +4,11 @@ import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
 
-export const internalSchema = toDeepFrozenSchema(
+export const internalSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -19,7 +19,6 @@ export const internalSchema = toDeepFrozenSchema(
     default: {},
     required: ["requestId", "lastActivity", "inputHash"],
   },
-  true,
 );
 
 /**

@@ -1,7 +1,7 @@
 import type { Pattern } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 
-const FILTER_INPUT_SCHEMA = toDeepFrozenSchema({
+const FILTER_INPUT_SCHEMA = internSchema({
   type: "object",
   properties: {
     list: { type: "array", items: { asCell: ["cell"], type: "unknown" } },

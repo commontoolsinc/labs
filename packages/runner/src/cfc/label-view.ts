@@ -185,6 +185,18 @@ const readLabelViewForCell = (
       canonicalizeLogicalPath(read.path),
     );
   });
+  views.push(
+    ...tx.getCfcState().dereferenceTraces.flatMap((trace) => [
+      cfcLabelViewFromMetadata(
+        readStoredCfcMetadata(tx, trace.source),
+        canonicalizeLogicalPath(trace.source.path),
+      ),
+      cfcLabelViewFromMetadata(
+        readStoredCfcMetadata(tx, trace.target),
+        canonicalizeLogicalPath(trace.target.path),
+      ),
+    ]),
+  );
   return mergeViews(views);
 };
 
@@ -209,21 +221,20 @@ export const cfcLabelViewForCell = (
     storedMetadataForCell(cell as LabelQueryableCell, link),
     link.path,
   );
-  if (metadataView !== undefined) {
-    return metadataView;
-  }
 
   const sourceCell = (cell as LabelQueryableCell).getSourceCell?.();
+  let sourceMetadataView: CfcLabelView | undefined;
   if (sourceCell !== undefined) {
     const sourceLink = sourceCell.getAsNormalizedFullLink();
-    const sourceMetadataView = cfcLabelViewFromMetadata(
+    sourceMetadataView = cfcLabelViewFromMetadata(
       storedMetadataForCell(sourceCell, sourceLink),
       link.path,
     );
-    if (sourceMetadataView !== undefined) {
-      return sourceMetadataView;
-    }
   }
 
-  return readLabelViewForCell(cell as LabelQueryableCell);
+  return mergeViews([
+    metadataView,
+    sourceMetadataView,
+    readLabelViewForCell(cell as LabelQueryableCell),
+  ]);
 };

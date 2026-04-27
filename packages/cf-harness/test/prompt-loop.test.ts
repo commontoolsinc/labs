@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import type {
@@ -38,6 +39,21 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.shellRequests.push(request);
+    if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
+      return Promise.resolve({
+        stdout: [
+          "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
+          "sh\tpresent\t/bin/sh\tBusyBox v1.36.1",
+          "node\tmissing\t\t",
+          "deno\tpresent\t/usr/local/bin/deno\tdeno 2.2.0",
+          "python\tmissing\t\t",
+          "python3\tpresent\t/usr/bin/python3\tPython 3.11.9",
+          "git\tpresent\t/usr/bin/git\tgit version 2.45.1",
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0,
+      });
+    }
     if (this.shellError) {
       return Promise.reject(this.shellError);
     }
@@ -62,6 +78,10 @@ class FailingArtifactStore implements HarnessArtifactStore {
 
   persistTranscript(): Promise<string> {
     return Promise.resolve(`${this.runRoot}/transcript.json`);
+  }
+
+  persistCapabilitySnapshot(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/capabilities.json`);
   }
 
   persistToolOutput(): Promise<string> {
@@ -136,6 +156,8 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
     "The todo file says hello from file.",
   );
   assertEquals(result.modelTurns, 2);
+  assertEquals(result.runState.endedAt, "2026-04-15T20:00:06.000Z");
+  assertEquals(result.runState.terminalReason, "assistant_completed");
   assertEquals(result.transcript, [
     { role: "system", content: "You are a test harness." },
     { role: "user", content: "Read the todo file and summarize it." },
@@ -198,6 +220,123 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       }),
     },
   );
+});
+
+Deno.test("CfHarnessPromptLoop surfaces recoverable file-tool failures to the model", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "",
+          stderr: "file not found: /workspace/notes/missing.txt",
+          exitCode: 10,
+        },
+      ]),
+      runId: "run-recoverable-file-error",
+      model: "gpt-5.4",
+      now: (() => {
+        const timestamps = [
+          "2026-04-15T20:05:00.000Z",
+          "2026-04-15T20:05:01.000Z",
+          "2026-04-15T20:05:02.000Z",
+          "2026-04-15T20:05:03.000Z",
+          "2026-04-15T20:05:04.000Z",
+          "2026-04-15T20:05:05.000Z",
+        ];
+        return () => timestamps.shift() ?? "2026-04-15T20:05:06.000Z";
+      })(),
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-missing",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({
+                    path: "notes/missing.txt",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "The file is not present.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read the missing file and tell me what happened.",
+  });
+
+  const recoverableOutput = {
+    outputId: createToolOutputId(
+      "run-recoverable-file-error",
+      "read_file",
+      1,
+    ),
+    path: "/workspace/notes/missing.txt",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "file_not_found",
+      message: "file not found: /workspace/notes/missing.txt",
+      path: "/workspace/notes/missing.txt",
+      detail: "file not found: /workspace/notes/missing.txt",
+      exitCode: 10,
+    },
+  };
+
+  assertEquals(result.finalAssistantText, "The file is not present.");
+  assertEquals(result.modelTurns, 2);
+  assertEquals(result.runState.status, "completed");
+  assertEquals(result.runState.terminalReason, "assistant_completed");
+  assertEquals(result.runState.primaryFailure?.kind, "file_not_found");
+  assertEquals(result.transcript.at(-2), {
+    role: "tool",
+    toolCallId: "call-missing",
+    toolName: "read_file",
+    content: JSON.stringify(recoverableOutput),
+    resultRef: {
+      type: "cf-harness.tool-result-ref",
+      outputId: createToolOutputId(
+        "run-recoverable-file-error",
+        "read_file",
+        1,
+      ),
+      toolId: "read_file",
+      runId: "run-recoverable-file-error",
+    },
+  });
+
+  const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+    messages: Array<{ role: string; tool_call_id?: string; content: string }>;
+  };
+  assertEquals(secondRequest.messages.at(-1), {
+    role: "tool",
+    tool_call_id: "call-missing",
+    content: JSON.stringify(recoverableOutput),
+  });
 });
 
 Deno.test("CfHarnessPromptLoop only advertises allowed tools when a tool allowlist is configured", async () => {
@@ -325,6 +464,7 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
     "prompt loop exceeded max model turns (1)",
   );
   assertEquals(loop.engine.getRunState().status, "failed");
+  assertEquals(loop.engine.getRunState().terminalReason, "max_model_turns");
   assertEquals(loop.engine.getRunState().policyEvents, []);
 });
 
@@ -499,8 +639,9 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
     toolId: "bash",
     toolCallId: "call-observe",
     detail: "bash would require direct-command authorization in enforce modes",
-    at: "2026-04-15T22:30:02.000Z",
+    at: "2026-04-15T22:30:04.000Z",
   }]);
+  assertEquals(result.runState.failureRecords, []);
   assertEquals(
     result.transcript.at(-2),
     {
@@ -606,8 +747,9 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
       detail:
         "write_file requires direct-command authorization in enforce-explicit",
     },
-    at: "2026-04-15T22:40:02.000Z",
+    at: "2026-04-15T22:40:04.000Z",
   }]);
+  assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
   assertEquals(
     result.transcript.at(-2),
     {
@@ -700,8 +842,9 @@ Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlis
       reason: "not-authorized",
       detail: "bash is not allowed in this run",
     },
-    at: "2026-04-16T23:20:02.000Z",
+    at: "2026-04-16T23:20:04.000Z",
   }]);
+  assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
   assertEquals(
     result.transcript.at(-2),
     {

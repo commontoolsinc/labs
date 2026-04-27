@@ -1,7 +1,7 @@
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 /** Runtime schema for {@link BuiltInLLMContent} (packages/api/index.ts). */
-export const LLMContentSchema = toDeepFrozenSchema(
+export const LLMContentSchema = internSchema(
   {
     anyOf: [
       { type: "string" },
@@ -28,11 +28,10 @@ export const LLMContentSchema = toDeepFrozenSchema(
       },
     ],
   },
-  true,
 );
 
 /** Runtime schema for {@link BuiltInLLMMessage} (packages/api/index.ts). */
-export const LLMMessageSchema = toDeepFrozenSchema(
+export const LLMMessageSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -41,11 +40,10 @@ export const LLMMessageSchema = toDeepFrozenSchema(
     },
     required: ["role", "content"],
   },
-  true,
 );
 
 /** Runtime schema for {@link BuiltInLLMTool} (packages/api/index.ts). */
-export const LLMToolSchema = toDeepFrozenSchema(
+export const LLMToolSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -75,11 +73,10 @@ export const LLMToolSchema = toDeepFrozenSchema(
     },
     required: [],
   } as const,
-  true,
 );
 
 /** Runtime schema for reduced tool info sent to the LLM provider. */
-export const LLMReducedToolSchema = toDeepFrozenSchema(
+export const LLMReducedToolSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -87,11 +84,10 @@ export const LLMReducedToolSchema = toDeepFrozenSchema(
       inputSchema: { type: "object" },
     },
   },
-  true,
 );
 
 /** Runtime schema for {@link BuiltInLLMParams} (packages/api/index.ts). */
-export const LLMParamsSchema = toDeepFrozenSchema(
+export const LLMParamsSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -114,11 +110,10 @@ export const LLMParamsSchema = toDeepFrozenSchema(
     },
     required: ["messages"],
   } as const,
-  true,
 );
 
 /** Runtime schema for {@link BuiltInGenerateTextParams} (packages/api/index.ts). */
-export const GenerateTextParamsSchema = toDeepFrozenSchema(
+export const GenerateTextParamsSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -139,11 +134,10 @@ export const GenerateTextParamsSchema = toDeepFrozenSchema(
       },
     },
   },
-  true,
 );
 
 /** Runtime schema for {@link BuiltInGenerateObjectParams} (packages/api/index.ts). */
-export const GenerateObjectParamsSchema = toDeepFrozenSchema(
+export const GenerateObjectParamsSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -164,11 +158,10 @@ export const GenerateObjectParamsSchema = toDeepFrozenSchema(
     },
     required: ["schema"],
   },
-  true,
 );
 
 /** Runtime schema for the result of the `llm` builtin. */
-export const LLMResultSchema = toDeepFrozenSchema(
+export const LLMResultSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -185,11 +178,10 @@ export const LLMResultSchema = toDeepFrozenSchema(
     },
     required: ["pending"],
   } as const,
-  true,
 );
 
 /** Runtime schema for the result of the `generateText` builtin. */
-export const GenerateTextResultSchema = toDeepFrozenSchema(
+export const GenerateTextResultSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -201,11 +193,10 @@ export const GenerateTextResultSchema = toDeepFrozenSchema(
     },
     required: ["pending"],
   } as const,
-  true,
 );
 
 /** Runtime schema for the result of the `generateObject` builtin. */
-export const GenerateObjectResultSchema = toDeepFrozenSchema(
+export const GenerateObjectResultSchema = internSchema(
   {
     type: "object",
     properties: {
@@ -217,5 +208,4 @@ export const GenerateObjectResultSchema = toDeepFrozenSchema(
     },
     required: ["pending"],
   } as const,
-  true,
 );

@@ -3,7 +3,7 @@
   "tasks": {
     "run": "deno run -A src/main.ts",
     "help": "deno run -A src/main.ts --help",
-    "test": "ENV=test deno test --allow-read --allow-write test",
+    "test": "ENV=test deno test --allow-read --allow-write --allow-run test",
     "test:integration": "CF_HARNESS_INTEGRATION=1 deno test -A integration"
   },
   "exports": {

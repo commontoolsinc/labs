@@ -2,7 +2,7 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
@@ -30,14 +30,13 @@ interface FetchCacheEntry {
   state: FetchState;
 }
 
-const fetchProgramInputSchema = toDeepFrozenSchema(
+const fetchProgramInputSchema = internSchema(
   {
     type: "object",
     properties: {
       url: { type: "string" },
     },
   },
-  true,
 );
 
 function snapshotFetchProgramInputs(
@@ -51,7 +50,7 @@ function snapshotFetchProgramInputs(
 // Full schema for cache structure to ensure proper validation when reading back
 // from storage. Without this, nested arrays may have undefined elements due to
 // incomplete schema-based transformation.
-const cacheSchema = toDeepFrozenSchema(
+const cacheSchema = internSchema(
   {
     type: "object",
     default: {},
@@ -106,7 +105,6 @@ const cacheSchema = toDeepFrozenSchema(
       },
     },
   },
-  true,
 );
 
 /**

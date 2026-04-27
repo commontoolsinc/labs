@@ -1,12 +1,15 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { CfHarnessEngine } from "../src/engine.ts";
-import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
+import {
+  DEFAULT_DOCKER_RUNSC_IMAGE,
+  resolveDockerRunscSandboxConfig,
+} from "../src/sandbox/docker-runsc.ts";
 
 const INTEGRATION = Deno.env.get("CF_HARNESS_INTEGRATION") === "1";
 const DOCKER_RUNTIME = Deno.env.get("CF_HARNESS_INTEGRATION_RUNTIME") ??
   "runsc-cfc";
 const DOCKER_IMAGE = Deno.env.get("CF_HARNESS_INTEGRATION_IMAGE") ??
-  "alpine:3.20";
+  DEFAULT_DOCKER_RUNSC_IMAGE;
 
 const assertRunscRuntimeAvailable = async () => {
   const result = await new Deno.Command("docker", {

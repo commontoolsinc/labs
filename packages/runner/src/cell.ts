@@ -11,7 +11,6 @@ import {
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
@@ -133,10 +132,7 @@ const recordSchemaWritePolicyInput = (
   if (resolvedSchema === undefined) {
     return;
   }
-  const schemaAndHash = internSchema(
-    toDeepFrozenSchema(resolvedSchema, true),
-    true,
-  );
+  const schemaAndHash = internSchema(resolvedSchema, true);
   tx.recordCfcWritePolicyInput({
     kind: "schema",
     target: {
