@@ -287,9 +287,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     seen.delete(value as object);
 
-    // Apply `TAGS.object` escaping per Section 5.6.
+    // Apply `TAGS.object` escaping per Section 5.6: wrap any plain object
+    // that has at least one /-prefixed key, not just single-key objects.
     const keys = Object.keys(result);
-    if (keys.length === 1 && keys[0].startsWith("/")) {
+    if (keys.some((k) => k.startsWith("/"))) {
       return this.wrapTag(TAGS.object, result) as JsonWireValue;
     }
 
@@ -419,9 +420,18 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return Object.freeze(result);
     }
 
-    // Plain objects: recursively deserialize values, then freeze.
+    // Plain objects: recursively deserialize values and freeze. Any
+    // /-prefixed key is reserved per spec — return ProblematicValue on
+    // first occurrence rather than silently round-tripping the object.
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
+      if (key.startsWith("/")) {
+        return new ProblematicValue(
+          key.slice(1),
+          data as unknown as FabricValue,
+          `object contains reserved /-prefixed key: "${key}"`,
+        ) as unknown as FabricValue;
+      }
       result[key] = this.deserialize(val, runtime, registry);
     }
     return Object.freeze(result);
