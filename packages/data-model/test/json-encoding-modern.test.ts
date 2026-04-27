@@ -934,12 +934,11 @@ describe("json encoding", () => {
   // --------------------------------------------------------------------------
 
   describe("/object escaping", () => {
-    it("wraps single-key object with /-prefixed key", () => {
+    // --- /quote: literal-only /-keyed objects ---
+
+    it("emits /quote for single-key literal /-prefixed object", () => {
       const obj = { "/myKey": "val" } as unknown as FabricValue;
-      const result = toWireFormat(obj);
-      expect(result).toEqual({
-        "/object": { "/myKey": "val" },
-      });
+      expect(toWireFormat(obj)).toEqual({ "/quote": { "/myKey": "val" } });
     });
 
     it("round-trips {'/myKey': 'val'}", () => {
@@ -948,12 +947,9 @@ describe("json encoding", () => {
       expect(result["/myKey"]).toBe("val");
     });
 
-    it("wraps {'/Link@1': 'fake'} (looks like tag but is user data)", () => {
+    it("emits /quote for {'/Link@1': 'fake'} (looks like tag but is literal user data)", () => {
       const obj = { "/Link@1": "fake" } as unknown as FabricValue;
-      const result = toWireFormat(obj);
-      expect(result).toEqual({
-        "/object": { "/Link@1": "fake" },
-      });
+      expect(toWireFormat(obj)).toEqual({ "/quote": { "/Link@1": "fake" } });
     });
 
     it("round-trips {'/Link@1': 'fake'}", () => {
@@ -962,26 +958,26 @@ describe("json encoding", () => {
       expect(result["/Link@1"]).toBe("fake");
     });
 
-    it("wraps multi-key object with one /-prefixed key", () => {
+    it("emits /quote for multi-key literal object with one /-prefixed key", () => {
       const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
-      const result = toWireFormat(obj);
-      expect(result).toEqual({ "/object": { a: 1, "/b": 2 } });
+      expect(toWireFormat(obj)).toEqual({ "/quote": { a: 1, "/b": 2 } });
     });
 
-    it("round-trips multi-key object with one /-prefixed key", () => {
+    it("round-trips multi-key literal object with one /-prefixed key", () => {
       const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["a"]).toBe(1);
       expect(result["/b"]).toBe(2);
     });
 
-    it("wraps multi-key object with multiple /-prefixed keys", () => {
+    it("emits /quote for multi-key literal object with multiple /-prefixed keys", () => {
       const obj = { "/a": 1, "/b": 2, c: 3 } as unknown as FabricValue;
-      const result = toWireFormat(obj);
-      expect(result).toEqual({ "/object": { "/a": 1, "/b": 2, c: 3 } });
+      expect(toWireFormat(obj)).toEqual({
+        "/quote": { "/a": 1, "/b": 2, c: 3 },
+      });
     });
 
-    it("round-trips multi-key object with multiple /-prefixed keys", () => {
+    it("round-trips multi-key literal object with multiple /-prefixed keys", () => {
       const obj = { "/a": 1, "/b": 2, c: 3 } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["/a"]).toBe(1);
@@ -989,49 +985,42 @@ describe("json encoding", () => {
       expect(result["c"]).toBe(3);
     });
 
-    it("malformed wire: multi-key object with /-prefixed key produces ProblematicValue", () => {
-      // Wire data that was NOT encoded by this encoder (no /object wrapper) —
-      // the decoder must not silently round-trip it as a plain object.
-      const data = { a: 1, "/b": 2 } as JsonWireValue;
-      const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicValue);
+    it("emits /quote when value is a plain nested object (no /-keys inside)", () => {
+      const obj = { "/x": { a: 1 } } as unknown as FabricValue;
+      expect(toWireFormat(obj)).toEqual({ "/quote": { "/x": { a: 1 } } });
     });
 
-    it("does not wrap plain object with no /-prefixed keys", () => {
-      const obj = { a: 1, b: 2 } as unknown as FabricValue;
-      const result = toWireFormat(obj);
-      expect(result).toEqual({ a: 1, b: 2 });
-    });
-
-    it("/object-wrapped multi-key object with /-prefixed key deserializes correctly", () => {
-      const data = { "/object": { a: 1, "/b": 2 } } as JsonWireValue;
-      const result = fromWireFormat(data) as Record<string, FabricValue>;
-      expect(result["a"]).toBe(1);
-      expect(result["/b"]).toBe(2);
-    });
-
-    it("round-trips nested object containing /-prefixed key", () => {
-      const obj = { outer: { "/inner": 1 } } as unknown as FabricValue;
+    it("round-trips /-keyed object whose value is a plain nested object", () => {
+      const obj = { "/x": { a: 1 } } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<
         string,
         Record<string, FabricValue>
       >;
-      expect(result["outer"]["/inner"]).toBe(1);
+      expect(result["/x"]["a"]).toBe(1);
     });
 
-    it("round-trips doubly-nested /-prefixed object", () => {
-      // Outer { "/x": inner } wraps outer as /object; inner { "/y": 123 } must
-      // also be encoded as /object (recursive encoding of values).
+    // --- /object: any value requires encoding ---
+
+    it("emits /object for doubly-nested /-prefixed object (inner needs encoding)", () => {
       const obj = { "/x": { "/y": 123 } } as unknown as FabricValue;
       const wire = toWireFormat(obj);
+      // inner { "/y": 123 } is itself literal, so it emits /quote; outer has
+      // a /quote-wrapped value → not a plain literal → outer emits /object.
       expect(wire).toEqual({
-        "/object": { "/x": { "/object": { "/y": 123 } } },
+        "/object": { "/x": { "/quote": { "/y": 123 } } },
       });
       const result = roundTrip(obj) as Record<
         string,
         Record<string, FabricValue>
       >;
       expect(result["/x"]["/y"]).toBe(123);
+    });
+
+    it("emits /object for /-keyed object with FabricError value", () => {
+      const err = new FabricError(new TypeError("eep!"));
+      const obj = { "/x": err } as unknown as FabricValue;
+      const wire = toWireFormat(obj);
+      expect(Object.keys(wire as object)).toEqual(["/object"]);
     });
 
     it("round-trips FabricError as value inside /-prefixed key object", () => {
@@ -1050,6 +1039,56 @@ describe("json encoding", () => {
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["/x"]).toBeInstanceOf(FabricEpochDays);
       expect((result["/x"] as unknown as FabricEpochDays).value).toBe(42n);
+    });
+
+    it("emits /object for mixed: literal and encoded values", () => {
+      const obj = {
+        "/a": "literal",
+        "/b": new FabricError(new Error("oops")),
+      } as unknown as FabricValue;
+      const wire = toWireFormat(obj);
+      expect(Object.keys(wire as object)).toEqual(["/object"]);
+    });
+
+    it("round-trips mixed literal+encoded /-keyed object", () => {
+      const obj = {
+        "/a": "literal",
+        "/b": new FabricError(new Error("oops")),
+      } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result["/a"]).toBe("literal");
+      expect(result["/b"]).toBeInstanceOf(FabricError);
+    });
+
+    // --- General ---
+
+    it("malformed wire: multi-key object with /-prefixed key produces ProblematicValue", () => {
+      // Wire data without /quote or /object wrapper — decoder must not silently
+      // round-trip it as a plain object.
+      const data = { a: 1, "/b": 2 } as JsonWireValue;
+      const result = fromWireFormat(data);
+      expect(result).toBeInstanceOf(ProblematicValue);
+    });
+
+    it("does not wrap plain object with no /-prefixed keys", () => {
+      const obj = { a: 1, b: 2 } as unknown as FabricValue;
+      expect(toWireFormat(obj)).toEqual({ a: 1, b: 2 });
+    });
+
+    it("/object-wrapped multi-key object with /-prefixed key deserializes correctly", () => {
+      const data = { "/object": { a: 1, "/b": 2 } } as JsonWireValue;
+      const result = fromWireFormat(data) as Record<string, FabricValue>;
+      expect(result["a"]).toBe(1);
+      expect(result["/b"]).toBe(2);
+    });
+
+    it("round-trips nested object containing /-prefixed key", () => {
+      const obj = { outer: { "/inner": 1 } } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<
+        string,
+        Record<string, FabricValue>
+      >;
+      expect(result["outer"]["/inner"]).toBe(1);
     });
 
     it("single-key /-prefixed object still routes through unwrapTag (no regression)", () => {

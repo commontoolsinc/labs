@@ -27,6 +27,26 @@ import { TAGS } from "./fabric-type-tags.ts";
 /** Shared default handler registry, created once. */
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
 
+/** Returns true if `v` is a single-key object whose key starts with `/` —
+ * the wire form of an encoded instance (tag-wrapped value). */
+function isEncodedInstance(v: JsonWireValue): boolean {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const keys = Object.keys(v);
+  return keys.length === 1 && keys[0].startsWith("/");
+}
+
+/**
+ * Returns true if `v` contains no encoded instances anywhere in its subtree,
+ * meaning it is safe to embed directly inside a `/quote` wrapper without any
+ * further decoding by the deserializer.
+ */
+function isQuoteSafe(v: JsonWireValue): boolean {
+  if (v === null || typeof v !== "object") return true;
+  if (Array.isArray(v)) return v.every((item) => isQuoteSafe(item));
+  if (isEncodedInstance(v)) return false;
+  return Object.values(v).every((item) => isQuoteSafe(item as JsonWireValue));
+}
+
 /**
  * JSON encoding context implementing the `/<Type>@<Version>` wire format
  * from the formal spec (Section 5).
@@ -287,11 +307,16 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     seen.delete(value as object);
 
-    // Apply `TAGS.object` escaping per Section 5.6: wrap any plain object
-    // that has at least one /-prefixed key, not just single-key objects.
+    // Apply escaping per Section 5.6 for any plain object with a /-prefixed key.
+    // Use /quote when all serialized values are quote-safe (no tag-wrapped forms
+    // anywhere in their subtree); use /object when any value required encoding.
     const keys = Object.keys(result);
     if (keys.some((k) => k.startsWith("/"))) {
-      return this.wrapTag(TAGS.object, result) as JsonWireValue;
+      const allQuoteSafe = Object.values(result).every((v) => isQuoteSafe(v));
+      return this.wrapTag(
+        allQuoteSafe ? TAGS.quote : TAGS.object,
+        result,
+      ) as JsonWireValue;
     }
 
     return result as JsonWireValue;
