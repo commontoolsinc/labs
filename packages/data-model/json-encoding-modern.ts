@@ -181,16 +181,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return null;
     }
 
-    const keys = Object.keys(data);
-    if (keys.length !== 1) {
+    if (!isEncodedInstance(data)) {
       return null;
     }
 
-    const key = keys[0];
-    if (!key.startsWith("/")) {
-      return null;
-    }
-
+    const key = Object.keys(data)[0];
     const tag = key.slice(1);
     const state = (data as Record<string, JsonWireValue>)[key];
     return { tag, state };
