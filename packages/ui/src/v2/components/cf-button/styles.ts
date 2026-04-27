@@ -319,6 +319,17 @@ export const styles = css`
     );
   }
 
+  :host([size="xs"]) .button.pill,
+  :host([size="sm"]) .button.pill,
+  :host([size="lg"]) .button.pill,
+  :host([size="xl"]) .button.pill {
+    height: auto;
+    border-radius: var(
+      --cf-pill-border-radius,
+      var(--cf-button-border-radius-full, var(--cf-border-radius-full, 9999px))
+    );
+  }
+
   :host([size="xs"]) .button.pill {
     min-height: var(--cf-pill-xs-min-height, var(--cf-size-xs-height, 16px));
     padding: var(--cf-pill-xs-padding-v, var(--cf-size-xs-padding-v, 2px))
