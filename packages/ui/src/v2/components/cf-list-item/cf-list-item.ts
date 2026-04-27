@@ -94,7 +94,8 @@ export class CFListItem extends BaseElement {
         );
         text-align: left;
         cursor: pointer;
-        transition: background-color 150ms ease;
+        transition: background-color var(--cf-transition-duration-fast, 150ms)
+          var(--cf-transition-timing-ease, ease);
       }
 
       .item:hover:not(:disabled) {
@@ -178,7 +179,8 @@ export class CFListItem extends BaseElement {
         align-items: center;
         flex-shrink: 0;
         color: var(--cf-theme-color-text-muted, #71747a);
-        transition: transform 150ms ease;
+        transition: transform var(--cf-transition-duration-fast, 150ms)
+          var(--cf-transition-timing-ease, ease);
       }
 
       :host([expanded]) .chevron {
@@ -190,7 +192,11 @@ export class CFListItem extends BaseElement {
         overflow: hidden;
         max-height: 0;
         opacity: 0;
-        transition: max-height 200ms ease, opacity 150ms ease;
+        transition:
+          max-height var(--cf-transition-duration-base, 200ms)
+            var(--cf-transition-timing-ease, ease),
+          opacity var(--cf-transition-duration-fast, 150ms)
+            var(--cf-transition-timing-ease, ease);
       }
 
       :host([expanded]) .detail {

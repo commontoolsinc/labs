@@ -100,7 +100,8 @@ export class CFBadge extends BaseElement {
         line-height: var(--cf-badge-line-height);
         border-radius: var(--cf-badge-border-radius);
         border: 1px solid transparent;
-        transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all var(--cf-transition-duration-fast, 150ms)
+          var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
       }
 
       :host([size="xs"]) .badge {
@@ -178,7 +179,8 @@ export class CFBadge extends BaseElement {
         border: none;
         cursor: pointer;
         opacity: 0.7;
-        transition: opacity 150ms;
+        transition: opacity var(--cf-transition-duration-fast, 150ms)
+          var(--cf-transition-timing-ease, ease);
         color: currentColor;
       }
 

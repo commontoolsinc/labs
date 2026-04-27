@@ -317,6 +317,23 @@ export const variablesCSS = `
   --cf-transition-timing-ease-in: cubic-bezier(0.4, 0, 1, 1);
   --cf-transition-timing-ease-out: cubic-bezier(0, 0, 0.2, 1);
   --cf-transition-timing-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --cf-transition-timing-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --cf-transition-timing-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /*
+   * Shared structural dimensions. Components may expose component-specific
+   * aliases, but these provide a common default vocabulary for overlays,
+   * transient surfaces, prose, and container-aware layouts.
+   */
+  --cf-layout-breakpoint-sm: 640px;
+  --cf-layout-breakpoint-md: 768px;
+  --cf-layout-breakpoint-lg: 1024px;
+  --cf-layout-width-sm: 320px;
+  --cf-layout-width-md: 500px;
+  --cf-layout-width-lg: 700px;
+  --cf-layout-width-transient-min: 240px;
+  --cf-layout-width-transient-max: 420px;
+  --cf-layout-width-prose: 700px;
 
   /* Z-index */
   --cf-z-index-auto: auto;

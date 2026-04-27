@@ -57,8 +57,14 @@ export class CFToast extends BaseElement {
       gap: 0.5rem;
       padding: var(--cf-toast-padding, 0.625rem 0.875rem);
       border-radius: var(--cf-toast-border-radius);
-      max-width: var(--cf-toast-max-width, 420px);
-      min-width: var(--cf-toast-min-width, 240px);
+      max-width: var(
+        --cf-toast-max-width,
+        var(--cf-layout-width-transient-max, 420px)
+      );
+      min-width: var(
+        --cf-toast-min-width,
+        var(--cf-layout-width-transient-min, 240px)
+      );
       box-shadow: var(--cf-toast-box-shadow);
       backdrop-filter: blur(var(--cf-toast-backdrop-blur, 8px));
       font-size: var(--cf-font-body-size, 0.875rem);
@@ -164,7 +170,8 @@ export class CFToast extends BaseElement {
     }
 
     :host([open]) .toast {
-      animation: toast-in 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      animation: toast-in var(--cf-transition-duration-base, 200ms)
+        var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1)) forwards;
     }
 
     @media (prefers-reduced-motion: reduce) {
