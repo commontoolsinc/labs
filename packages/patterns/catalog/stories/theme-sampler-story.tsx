@@ -438,7 +438,9 @@ function ComponentSampler() {
           >
             Muted text color
           </span>
-          <cf-label>Label component</cf-label>
+          <cf-text variant="caption" tone="muted" block>
+            Text component
+          </cf-text>
         </div>
       </div>
     </div>

@@ -77,6 +77,7 @@ interface CatalogInput {
         name: "Display";
         items: [
           { id: "heading"; label: "Heading" },
+          { id: "text"; label: "Text" },
           { id: "label"; label: "Label" },
           { id: "chip"; label: "Chip" },
           { id: "badge"; label: "Badge" },

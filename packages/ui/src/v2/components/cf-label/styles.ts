@@ -5,9 +5,10 @@
 export const labelStyles = `
   :host {
     display: inline-block;
-    --label-font-size: 0.875rem;
-    --label-font-weight: 500;
-    --label-line-height: 1;
+    --label-font-size: var(--cf-font-body-compact-size, 0.8125rem);
+    --label-font-weight: var(--cf-font-body-compact-weight, 500);
+    --label-line-height: var(--cf-font-body-compact-line-height, 1.25rem);
+    --label-letter-spacing: var(--cf-font-body-compact-letter-spacing, 0);
     --label-color: var(--foreground, #0f172a);
     --label-disabled-opacity: 0.7;
     --required-color: var(--destructive, #dc2626);
@@ -26,6 +27,7 @@ export const labelStyles = `
     font-size: var(--label-font-size);
     font-weight: var(--label-font-weight);
     line-height: var(--label-line-height);
+    letter-spacing: var(--label-letter-spacing);
     color: var(--label-color);
     cursor: default;
     user-select: none;

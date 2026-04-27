@@ -80,9 +80,18 @@ export class CFListItem extends BaseElement {
         background: transparent;
         color: var(--cf-list-item-color, var(--cf-theme-color-text, #34373c));
         font-family: inherit;
-        font-size: var(--cf-list-item-font-size, 0.8125rem);
-        font-weight: 510;
-        line-height: 1.25rem;
+        font-size: var(
+          --cf-list-item-font-size,
+          var(--cf-font-body-compact-size, 0.8125rem)
+        );
+        font-weight: var(
+          --cf-list-item-font-weight,
+          var(--cf-font-body-compact-weight, 500)
+        );
+        line-height: var(
+          --cf-list-item-line-height,
+          var(--cf-font-body-compact-line-height, 1.25rem)
+        );
         text-align: left;
         cursor: pointer;
         transition: background-color 150ms ease;
@@ -136,13 +145,16 @@ export class CFListItem extends BaseElement {
       }
 
       .description {
-        font-weight: 400;
-        font-size: var(--cf-list-item-description-size, 0.75rem);
+        font-weight: var(--cf-font-body-weight, 400);
+        font-size: var(
+          --cf-list-item-description-size,
+          var(--cf-font-caption-size, 0.75rem)
+        );
         color: var(
           --cf-list-item-description-color,
           var(--cf-theme-color-text-muted, #71747a)
         );
-        line-height: 1rem;
+        line-height: var(--cf-font-caption-line-height, 1rem);
       }
 
       .description.empty {

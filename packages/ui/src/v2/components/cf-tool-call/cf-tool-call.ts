@@ -58,7 +58,7 @@ export class CFToolCall extends BaseElement {
           var(--cf-theme-spacing-loose, var(--cf-spacing-3, 0.75rem));
         cursor: pointer;
         user-select: none;
-        font-size: 0.875rem;
+        font-size: var(--cf-font-body-size, 0.875rem);
         font-family: var(
           --cf-theme-mono-font-family,
           var(
@@ -93,7 +93,7 @@ export class CFToolCall extends BaseElement {
       }
 
       .tool-call-name {
-        font-weight: 400;
+        font-weight: var(--cf-font-body-weight, 400);
         flex-grow: 1;
       }
 
@@ -101,7 +101,7 @@ export class CFToolCall extends BaseElement {
         display: flex;
         align-items: center;
         gap: var(--cf-theme-spacing-tight, var(--cf-spacing-1, 0.25rem));
-        font-size: 0.75rem;
+        font-size: var(--cf-font-caption-size, 0.75rem);
         font-family: var(
           --cf-theme-mono-font-family,
           var(
@@ -145,10 +145,10 @@ export class CFToolCall extends BaseElement {
       }
 
       .tool-section-title {
-        font-weight: 600;
-        font-size: 0.75rem;
+        font-weight: var(--cf-font-weight-semibold, 600);
+        font-size: var(--cf-font-caption-size, 0.75rem);
         text-transform: uppercase;
-        letter-spacing: 0.025em;
+        letter-spacing: var(--cf-tool-section-title-letter-spacing, 0.025em);
         color: var(--cf-theme-color-text-muted, #4b5563);
         margin-bottom: var(--cf-theme-spacing-normal, var(--cf-spacing-2, 0.5rem));
       }
@@ -167,7 +167,7 @@ export class CFToolCall extends BaseElement {
             monospace
           )
         );
-        font-size: 0.75rem;
+        font-size: var(--cf-font-caption-size, 0.75rem);
         background-color: var(--cf-theme-color-surface, #f9fafb);
         border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         border-radius: var(
