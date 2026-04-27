@@ -1,5 +1,4 @@
 import {
-  action,
   type BuiltInLLMMessage,
   type BuiltInLLMTool,
   Cell,
@@ -259,6 +258,38 @@ const makeUserPromptMessage = (prompt: string): BuiltInLLMMessage => ({
   content: [{ type: "text" as const, text: prompt }],
 });
 
+const runAgentPrompt = handler<
+  any,
+  { addMessage: Stream<BuiltInLLMMessage> }
+>((_event, { addMessage }) => {
+  addMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+});
+
+const runBothAgentPrompts = handler<
+  any,
+  {
+    unsafeAddMessage: Stream<BuiltInLLMMessage>;
+    safeAddMessage: Stream<BuiltInLLMMessage>;
+  }
+>((_event, { unsafeAddMessage, safeAddMessage }) => {
+  unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+  safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+});
+
+const clearMessageList = handler<
+  any,
+  { messages: Writable<BuiltInLLMMessage[]> }
+>((_event, { messages }) => {
+  messages.set([]);
+});
+
+const clearEmailList = handler<any, { emails: Writable<SentEmail[]> }>((
+  _event,
+  { emails },
+) => {
+  emails.set([]);
+});
+
 const logEmail = handler<
   SendMailArgs & {
     result: Writable<SendMailResult>;
@@ -460,9 +491,7 @@ Your job in this half is to fail visibly when the document tries to seize contro
       PROMPT_INFLUENCE_ATOM,
     ],
   });
-  const unsafeClearChat = action((_event: any) => {
-    unsafeMessages.set([]);
-  });
+  const unsafeClearChat = clearMessageList({ messages: unsafeMessages });
   const unsafeAgentUi = (
     <section style={AGENT_PANEL_STYLE}>
       <div style={AGENT_PANEL_STACK_STYLE}>
@@ -580,22 +609,14 @@ user-facing text from those structured fields plus the original user request.`;
     builtinTools: false,
     observationMaxConfidentiality: ["internal", PROMPT_INFLUENCE_ATOM],
   });
-  const runUnsafeAgent = action((_event: any) => {
-    unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+  const runUnsafeAgent = runAgentPrompt({ addMessage: unsafeAddMessage });
+  const runSafeAgent = runAgentPrompt({ addMessage: safeAddMessage });
+  const runBothAgents = runBothAgentPrompts({
+    unsafeAddMessage,
+    safeAddMessage,
   });
-  const runSafeAgent = action((_event: any) => {
-    safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-  });
-  const runBothAgents = action((_event: any) => {
-    unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-    safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-  });
-  const clearEmails = action((_event: any) => {
-    emails.set([]);
-  });
-  const safeClearChat = action((_event: any) => {
-    safeMessages.set([]);
-  });
+  const clearEmails = clearEmailList({ emails });
+  const safeClearChat = clearMessageList({ messages: safeMessages });
   const safeAgentUi = (
     <section style={AGENT_PANEL_STYLE}>
       <div style={AGENT_PANEL_STACK_STYLE}>
