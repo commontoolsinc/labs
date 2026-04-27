@@ -211,6 +211,17 @@ Deno.test("classifyHarnessRunError maps timeouts and path escapes deterministica
     ).kind,
     "workspace_path_confusion",
   );
+  assertEquals(
+    classifyHarnessRunError(
+      new Error(
+        "chat completion transport request failed after 2 attempts for https://llm.stage.commontools.dev/v1/chat/completions: error sending request from 100.87.21.105:52328 for https://llm.stage.commontools.dev/v1/chat/completions (10.128.15.193:443): client error (SendRequest): connection error: timed out",
+      ),
+      {
+        at: "2026-04-22T23:30:02.000Z",
+      },
+    ).kind,
+    "timeout",
+  );
 });
 
 Deno.test("selectPrimaryHarnessFailure prefers the highest-signal failure kind", () => {

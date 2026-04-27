@@ -398,6 +398,27 @@ export const classifyHarnessRunError = (
   }
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
+  if (
+    normalized.includes("chat completion transport request failed") &&
+    (normalized.includes("timed out") ||
+      normalized.includes("timeout"))
+  ) {
+    return createHarnessFailureRecord({
+      kind: "timeout",
+      source: options.source ?? "run_error",
+      detail: message,
+      at: options.at,
+      ...(options.toolId !== undefined ? { toolId: options.toolId } : {}),
+      ...(options.toolCallId !== undefined
+        ? { toolCallId: options.toolCallId }
+        : {}),
+      ...(options.outputId !== undefined ? { outputId: options.outputId } : {}),
+      ...(options.command !== undefined ? { command: options.command } : {}),
+      ...(options.commandName !== undefined
+        ? { commandName: options.commandName }
+        : {}),
+    });
+  }
   if (normalized.includes("path escapes workspace root")) {
     return createHarnessFailureRecord({
       kind: "workspace_path_confusion",
