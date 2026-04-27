@@ -1019,6 +1019,39 @@ describe("json encoding", () => {
       expect(result["outer"]["/inner"]).toBe(1);
     });
 
+    it("round-trips doubly-nested /-prefixed object", () => {
+      // Outer { "/x": inner } wraps outer as /object; inner { "/y": 123 } must
+      // also be encoded as /object (recursive encoding of values).
+      const obj = { "/x": { "/y": 123 } } as unknown as FabricValue;
+      const wire = toWireFormat(obj);
+      expect(wire).toEqual({
+        "/object": { "/x": { "/object": { "/y": 123 } } },
+      });
+      const result = roundTrip(obj) as Record<
+        string,
+        Record<string, FabricValue>
+      >;
+      expect(result["/x"]["/y"]).toBe(123);
+    });
+
+    it("round-trips FabricError as value inside /-prefixed key object", () => {
+      const err = new FabricError(new TypeError("eep!"));
+      const obj = { "/x": err } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result["/x"]).toBeInstanceOf(FabricError);
+      expect((result["/x"] as unknown as FabricError).error.message).toBe(
+        "eep!",
+      );
+    });
+
+    it("round-trips FabricEpochDays as value inside /-prefixed key object", () => {
+      const day = new FabricEpochDays(42n);
+      const obj = { "/x": day } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result["/x"]).toBeInstanceOf(FabricEpochDays);
+      expect((result["/x"] as unknown as FabricEpochDays).value).toBe(42n);
+    });
+
     it("single-key /-prefixed object still routes through unwrapTag (no regression)", () => {
       // Single-key /Tag@1 objects are handled by unwrapTag, not the plain-object
       // path — confirm they still produce UnknownValue (unrecognized tag), not
