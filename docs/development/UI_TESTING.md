@@ -83,6 +83,19 @@ const button = await page.$("[data-cf-button]", {
 });
 ```
 
+## `fill()` Does Not Work on cf-\* Hosts
+
+Playwright's `fill()` requires a native `<input>` or `<textarea>`. Since
+`cf-input` and `cf-textarea` are custom elements, use `click()` +
+`keyboard.type()` instead — `delegatesFocus` forwards focus to the inner
+native input automatically:
+
+```typescript
+const input = page.getByRole("textbox", { name: "Email" });
+await input.click();
+await page.keyboard.type("user@example.com");
+```
+
 ## What Doesn't Work
 
 ❌ **Don't** rely on unlabeled controls:

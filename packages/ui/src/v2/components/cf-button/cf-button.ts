@@ -135,10 +135,11 @@ export class CFButton extends BaseElement {
     if (typeof this.size === "string" && this.size) classes[this.size] = true;
 
     // The host element carries role="button" and tabindex for accessibility.
-    // The inner <button> is aria-hidden and removed from tab order so the
-    // accessibility tree sees one button (the host), not two. Browsers ignore
-    // role="presentation" on native interactive elements, so aria-hidden is
-    // needed instead.
+    // The inner <button> has tabindex="-1" to prevent a double tab stop
+    // (delegatesFocus handles focus forwarding). The inner button still
+    // appears in the accessibility tree as a child of the host — this is
+    // unavoidable without hiding the slotted text. Agents should use
+    // getByRole('button', { name }).first() to target the host.
     return html`
       <button
         class="${classMap(classes)}"
@@ -147,7 +148,6 @@ export class CFButton extends BaseElement {
         @click="${this._handleClick}"
         part="button"
         data-cf-button
-        aria-hidden="true"
         tabindex="-1"
       >
         <slot></slot>

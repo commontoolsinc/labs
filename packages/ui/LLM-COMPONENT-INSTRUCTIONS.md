@@ -109,6 +109,24 @@ agent-browser find role textbox fill "user@example.com" --name "Email"
 agent-browser find placeholder "Enter email" fill "user@example.com"
 ```
 
+**`fill()` caveat:** Playwright's `fill()` does not work on `cf-input` or
+`cf-textarea` hosts because they are custom elements, not native `<input>`
+elements. Use `click` then `type` instead. The `delegatesFocus` shadow root
+forwards focus to the inner native input, so this works reliably:
+
+```bash
+# click first, then type (fill targets native inputs only)
+agent-browser find role textbox click --name "Email"
+agent-browser type "user@example.com"
+```
+
+```typescript
+// Playwright equivalent:
+const input = page.getByRole("textbox", { name: "Email" });
+await input.click();
+await page.keyboard.type("user@example.com");
+```
+
 ### 3. cf-textarea
 
 **Purpose**: Multi-line text input **Tag**: `<cf-textarea>` **Attributes**:

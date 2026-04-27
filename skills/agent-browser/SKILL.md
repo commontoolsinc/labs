@@ -179,8 +179,13 @@ exposes `role="textbox"` on the host with ARIA state such as `aria-disabled`,
 
 ```bash
 agent-browser find role button click --name "Save"
-agent-browser find role textbox fill "Ada" --name "Name"
+agent-browser find role textbox click --name "Name"
+agent-browser type "Ada"
 ```
+
+> **Important:** `cf-input` and `cf-textarea` hosts are custom elements, not
+> native inputs. Use `click` then `type` instead of `fill` — `delegatesFocus`
+> forwards focus to the inner native input automatically.
 
 If a component has not yet been updated with host semantics, fall back to the
 documented pierce selectors such as `[data-cf-button]` or `[data-cf-input]`.

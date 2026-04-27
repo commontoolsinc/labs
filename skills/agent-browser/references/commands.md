@@ -129,8 +129,12 @@ Common Fabric components should be queried by host semantics first:
 
 ```bash
 agent-browser find role button click --name "Save"
-agent-browser find role textbox fill "Ada" --name "Name"
+agent-browser find role textbox click --name "Name"
+agent-browser type "Ada"
 ```
+
+> `cf-input` and `cf-textarea` hosts are custom elements, not native inputs. Use
+> `click` then `type` instead of `fill`.
 
 Use shadow-piercing selectors only as a fallback for components that do not yet
 expose host roles.

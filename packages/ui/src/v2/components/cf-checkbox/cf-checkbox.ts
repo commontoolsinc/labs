@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
@@ -31,6 +31,11 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  */
 
 export class CFCheckbox extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override styles = css`
     :host {
       display: inline-flex;
@@ -212,6 +217,13 @@ export class CFCheckbox extends BaseElement {
       this.required = false;
       this.name = "";
       this.value = "on";
+      // Set exportparts in the constructor (not connectedCallback) so it is
+      // available before the element is connected to the document. This avoids
+      // issues in environments (e.g. Deno tests) that instantiate elements
+      // without connecting them.
+      if (!this.hasAttribute("exportparts")) {
+        this.setAttribute("exportparts", "checkbox,checkmark");
+      }
     }
 
     private getChecked(): boolean {
@@ -227,8 +239,6 @@ export class CFCheckbox extends BaseElement {
 
     override connectedCallback() {
       super.connectedCallback();
-      // Make the element focusable
-      this.tabIndex = this.disabled ? -1 : 0;
       this.setAttribute("role", "checkbox");
       this._updateAriaAttributes();
       // Bind initial checked value
@@ -270,10 +280,6 @@ export class CFCheckbox extends BaseElement {
     ) {
       super.updated(changedProperties);
 
-      if (changedProperties.has("disabled")) {
-        this.tabIndex = this.disabled ? -1 : 0;
-      }
-
       if (
         changedProperties.has("checked") ||
         changedProperties.has("indeterminate") ||
@@ -298,9 +304,14 @@ export class CFCheckbox extends BaseElement {
         .join(" ");
 
       return html`
+        <!-- The host carries role="checkbox" and tabindex for accessibility.
+          The inner element is aria-hidden to prevent double matches in
+          the a11y tree. -->
         <div
           class="${classString}"
           part="checkbox"
+          aria-hidden="true"
+          tabindex="-1"
         >
           <span class="checkmark" part="checkmark"></span>
         </div>
@@ -325,6 +336,7 @@ export class CFCheckbox extends BaseElement {
         this.indeterminate ? "mixed" : String(isChecked),
       );
       this.setAttribute("aria-disabled", String(this.disabled));
+      this.tabIndex = this.disabled ? -1 : 0;
     }
 
     private _handleClick(event: Event) {

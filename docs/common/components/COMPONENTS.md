@@ -117,9 +117,13 @@ Useful styling hooks include:
 with a label, `aria-label`, or placeholder, then find them semantically:
 
 ```bash
-agent-browser find role textbox fill "Quarterly plan" --name "Title"
-agent-browser find placeholder "Search..." fill "notes"
+agent-browser find role textbox click --name "Title"
+agent-browser type "Quarterly plan"
 ```
+
+> **Note:** Playwright's `fill()` does not work on `cf-input` hosts (they are
+> custom elements, not native inputs). Use `click()` + `keyboard.type()`
+> instead — `delegatesFocus` forwards focus to the inner input.
 
 Useful styling hooks include:
 
