@@ -997,6 +997,28 @@ describe("json encoding", () => {
       expect(result).toBeInstanceOf(ProblematicValue);
     });
 
+    it("does not wrap plain object with no /-prefixed keys", () => {
+      const obj = { a: 1, b: 2 } as unknown as FabricValue;
+      const result = toWireFormat(obj);
+      expect(result).toEqual({ a: 1, b: 2 });
+    });
+
+    it("/object-wrapped multi-key object with /-prefixed key deserializes correctly", () => {
+      const data = { "/object": { a: 1, "/b": 2 } } as JsonWireValue;
+      const result = fromWireFormat(data) as Record<string, FabricValue>;
+      expect(result["a"]).toBe(1);
+      expect(result["/b"]).toBe(2);
+    });
+
+    it("round-trips nested object containing /-prefixed key", () => {
+      const obj = { outer: { "/inner": 1 } } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<
+        string,
+        Record<string, FabricValue>
+      >;
+      expect(result["outer"]["/inner"]).toBe(1);
+    });
+
     it("single-key /-prefixed object still routes through unwrapTag (no regression)", () => {
       // Single-key /Tag@1 objects are handled by unwrapTag, not the plain-object
       // path — confirm they still produce UnknownValue (unrecognized tag), not
