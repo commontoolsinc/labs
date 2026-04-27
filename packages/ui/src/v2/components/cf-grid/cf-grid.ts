@@ -106,8 +106,8 @@ export class CFGrid extends BaseElement {
 
       /*
       * Grid container breakpoints remain local for now.
-      * They are intentionally documented here until we introduce a shared
-      * responsive contract for container-query thresholds.
+      * variables.ts documents matching layout breakpoint tokens, but current
+      * container query syntax requires literal values here.
       */
       @container (min-width: 640px) {
         .grid-sm-1 {

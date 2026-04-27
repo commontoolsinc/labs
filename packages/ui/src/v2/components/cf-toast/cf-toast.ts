@@ -25,6 +25,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @csspart dismiss - Dismiss button (only present when dismissable)
  */
 export class CFToast extends BaseElement {
+  // deno-fmt-ignore
   static override styles = css`
     :host {
       --cf-toast-border-radius: var(
@@ -57,13 +58,34 @@ export class CFToast extends BaseElement {
       gap: 0.5rem;
       padding: var(--cf-toast-padding, 0.625rem 0.875rem);
       border-radius: var(--cf-toast-border-radius);
-      max-width: var(--cf-toast-max-width, 420px);
-      min-width: var(--cf-toast-min-width, 240px);
+      max-width: var(
+        --cf-toast-max-width,
+        var(--cf-layout-width-transient-max, 420px)
+      );
+      min-width: var(
+        --cf-toast-min-width,
+        var(--cf-layout-width-transient-min, 240px)
+      );
       box-shadow: var(--cf-toast-box-shadow);
       backdrop-filter: blur(var(--cf-toast-backdrop-blur, 8px));
       font-size: var(--cf-font-body-size, 0.875rem);
       font-family: inherit;
       border: var(--cf-toast-border);
+      --cf-toast-action-background: color-mix(
+        in srgb,
+        currentColor 10%,
+        transparent
+      );
+      --cf-toast-action-background-hover: color-mix(
+        in srgb,
+        currentColor 16%,
+        transparent
+      );
+      --cf-toast-action-border-color: color-mix(
+        in srgb,
+        currentColor 18%,
+        transparent
+      );
     }
 
     /* Default variant */
@@ -138,6 +160,26 @@ export class CFToast extends BaseElement {
       min-width: 0;
     }
 
+    .action {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .action ::slotted(cf-button) {
+      color: inherit;
+      --cf-button-color-secondary: var(--cf-toast-action-background);
+      --cf-button-color-secondary-foreground: currentColor;
+      --cf-button-color-surface-hover: var(--cf-toast-action-background-hover);
+      --cf-button-color-border: var(--cf-toast-action-border-color);
+      --cf-size-sm-height: 1.75rem;
+      --cf-size-sm-padding-v: 0;
+      --cf-size-sm-padding-h: 0.625rem;
+      --cf-size-sm-radius: var(--cf-theme-border-radius, 0.5rem);
+      --cf-size-sm-font-size: var(--cf-font-body-size, 0.875rem);
+      --cf-size-sm-line-height: var(--cf-font-body-line-height, 1.25rem);
+    }
+
     .dismiss {
       all: unset;
       box-sizing: border-box;
@@ -164,7 +206,8 @@ export class CFToast extends BaseElement {
     }
 
     :host([open]) .toast {
-      animation: toast-in 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      animation: toast-in var(--cf-transition-duration-base, 200ms)
+        var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1)) forwards;
     }
 
     @media (prefers-reduced-motion: reduce) {

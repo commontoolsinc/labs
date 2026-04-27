@@ -17,7 +17,7 @@ import {
  *
  * @element cf-button
  *
- * @attr {string} variant - Visual style variant: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link"
+ * @attr {string} variant - Visual style variant: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill"
  * @attr {string} size - Button size: "xs" | "sm" | "md" | "lg" | "xl" | "icon"
  * @attr {boolean} disabled - Whether the button is disabled
  * @attr {string} type - Button type: "button" | "submit" | "reset"

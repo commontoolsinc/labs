@@ -1142,7 +1142,10 @@ export class CFCodeEditor extends BaseElement {
             "var(--cf-code-editor-font-family-prose, var(--cf-theme-font-family, var(--cf-font-family-sans)))",
           lineHeight: "1.6",
           padding: "8px 0",
-          ...(!hasCustomWidth && { maxWidth: "700px" }),
+          ...(!hasCustomWidth && {
+            maxWidth:
+              "var(--cf-code-editor-prose-max-width, var(--cf-layout-width-prose, 700px))",
+          }),
           margin: "0 auto",
         },
         ".cm-line": {

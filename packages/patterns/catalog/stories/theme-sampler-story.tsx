@@ -328,13 +328,16 @@ function ComponentSampler() {
           Alerts
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <cf-alert variant="info" title="Info">
+          <cf-alert variant="info">
+            <span slot="title">Info</span>
             Informational message using theme tokens.
           </cf-alert>
-          <cf-alert variant="success" title="Success">
+          <cf-alert variant="success">
+            <span slot="title">Success</span>
             Operation completed using theme tokens.
           </cf-alert>
-          <cf-alert variant="destructive" title="Error">
+          <cf-alert variant="destructive">
+            <span slot="title">Error</span>
             Something went wrong using theme tokens.
           </cf-alert>
         </div>
@@ -384,10 +387,10 @@ function ComponentSampler() {
             overflow: "hidden",
           }}
         >
-          <cf-list-item title="First item" description="With a description" />
-          <cf-list-item title="Second item" description="Also themed" />
+          <cf-list-item label="First item" description="With a description" />
+          <cf-list-item label="Second item" description="Also themed" />
           <cf-list-item
-            title="Third item"
+            label="Third item"
             description="Hover to check surfaceHover"
           />
         </div>

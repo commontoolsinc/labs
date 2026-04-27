@@ -98,8 +98,8 @@ export default pattern<ToastStoryInput, ToastStoryOutput>(() => {
             Wish sent.
             <cf-button
               slot="action"
-              variant="ghost"
-              style="padding: 2px 8px; font-size: 13px;"
+              variant="secondary"
+              size="sm"
             >
               View
             </cf-button>
