@@ -11,7 +11,7 @@ import { type Cell } from "../cell.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { NAME, type Pattern, UI } from "../builder/types.ts";
+import { type JSONSchema, NAME, type Pattern, UI } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getPatternEnvironment } from "../env.ts";
@@ -207,8 +207,15 @@ type BaseResolution = {
   pathPrefix?: readonly string[];
 };
 
+type SharedHashtagState = {
+  result?: Cell<unknown>;
+  candidates: Cell<unknown>[];
+  error?: unknown;
+  [UI]?: VNode;
+};
+
 type SharedHashtagResolver = {
-  cell: Cell<WishState<unknown>>;
+  cell: Cell<SharedHashtagState>;
   cancel: () => void;
 };
 
@@ -730,11 +737,10 @@ function isSharedHashtagSearchTarget(parsed: ParsedWishTarget): boolean {
 
 function canUseSharedHashtagResult(
   parsed: ParsedWishTarget,
-  options: { headless?: boolean; schema?: unknown },
+  options: { headless?: boolean },
 ): boolean {
   return isSharedHashtagSearchTarget(parsed) &&
-    options.headless === true &&
-    options.schema === undefined;
+    options.headless === true;
 }
 
 function sharedHashtagResolverKey(
@@ -770,7 +776,7 @@ function createSharedHashtagResolver(
   };
   const sharedScope = ctx.scope ? [...ctx.scope] : undefined;
   const query = formatTarget(sharedParsed);
-  const sharedCell = ctx.runtime.getCell<WishState<unknown>>(
+  const sharedCell = ctx.runtime.getCell<SharedHashtagState>(
     ctx.parentCell.space,
     {
       wish: {
@@ -785,9 +791,16 @@ function createSharedHashtagResolver(
   );
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
+    const actionStartedAt = performance.now();
     const stateCell = sharedCell.withTx(tx);
     const queryKey = sanitizeQueryKey(query);
     const sourceBucket = sanitizeSourceKey(getTxDebugActionId(tx) ?? "none");
+    wishFlowLogger.debug(`wish/shared-resolver/start/${queryKey}`, () => [
+      `[WISH SHARED START] source=${getTxDebugActionId(tx) ?? "none"}`,
+      `query=${query}`,
+      `scope=${formatScope(sharedScope)}`,
+      `space=${describeCell(sharedCell)}`,
+    ]);
     try {
       const resolveStartedAt = performance.now();
       const baseResolutions = searchByHashtag(sharedParsed, {
@@ -828,18 +841,6 @@ function createSharedHashtagResolver(
           ),
         sourceBucket,
       );
-      const candidatesCell = measureWishPhase(
-        "shared-candidates-cell",
-        queryKey,
-        () =>
-          ctx.runtime.getImmutableCell(
-            sharedCell.space,
-            uniqueResultCells,
-            undefined,
-            tx,
-          ),
-        sourceBucket,
-      );
       const resultUI = measureWishPhase(
         "shared-result-ui-get",
         queryKey,
@@ -868,7 +869,7 @@ function createSharedHashtagResolver(
 
       stateCell.set({
         result: uniqueResultCells[0],
-        candidates: candidatesCell,
+        candidates: uniqueResultCells,
         [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
       });
     } catch (error) {
@@ -881,9 +882,15 @@ function createSharedHashtagResolver(
         error: errorMessage,
         [UI]: errorUI(errorMessage),
       });
+    } finally {
+      recordWishPhaseTiming(
+        actionStartedAt,
+        "shared-action-total",
+        queryKey,
+        sourceBucket,
+      );
     }
   };
-
   const actionName = `wish:hashtag:${ctx.parentCell.space}:${query}`;
   setRunnableName(action, actionName, { setSrc: true });
   Object.assign(action, {
@@ -948,12 +955,77 @@ function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("cf-cell-link", { $cell: cell });
 }
 
+function projectWishCellValue(
+  cell: Cell<unknown>,
+  schema: unknown,
+): unknown {
+  if (schema === undefined) return cell;
+  return cell.asSchema(schema as JSONSchema).getAsLink({ includeSchema: true });
+}
+
+function createWishCandidatesCell(
+  runtime: Runtime,
+  space: Cell<unknown>["space"],
+  candidates: Cell<unknown>[],
+  schema: unknown,
+  tx: IExtendedStorageTransaction,
+): Cell<unknown> {
+  const values = schema === undefined
+    ? candidates
+    : candidates.map((candidate) => projectWishCellValue(candidate, schema));
+  return runtime.getImmutableCell(space, values, undefined, tx);
+}
+
+function schemaAsCell(schema: unknown): JSONSchema {
+  if (schema && typeof schema === "object") {
+    return {
+      ...(JSON.parse(JSON.stringify(schema)) as Record<string, unknown>),
+      asCell: ["cell"],
+    };
+  }
+  return { asCell: ["cell"] };
+}
+
+function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
+  if (schema === undefined) return undefined;
+  const resultSchema = schemaAsCell(schema);
+  const candidateSchema = schemaAsCell(schema);
+  return internSchema({
+    type: "object",
+    properties: {
+      result: {
+        anyOf: [
+          { type: "undefined" },
+          resultSchema,
+        ],
+      },
+      candidates: {
+        type: "array",
+        items: candidateSchema,
+      },
+      error: true,
+      [UI]: true,
+    },
+    required: ["result", "candidates"],
+  });
+}
+
+function sharedWishCellValue(
+  cell: Cell<SharedHashtagState>,
+  schema: unknown,
+): unknown {
+  const wishStateSchema = wishStateSchemaForResult(schema);
+  if (!wishStateSchema) return cell;
+  return cell.asSchema(wishStateSchema).getAsLink({ includeSchema: true });
+}
+
 const TARGET_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
       query: { type: "string" },
       path: { type: "array", items: { type: "string" } },
+      schema: true,
       context: { type: "object", additionalProperties: { asCell: true } },
       scope: { type: "array", items: { type: "string" } },
       headless: { type: "boolean" },
@@ -1170,12 +1242,23 @@ export function wish(
               scope,
               nowCell,
             };
-            if (canUseSharedHashtagResult(parsed, { headless, schema })) {
+            if (canUseSharedHashtagResult(parsed, { headless })) {
               const shared = getOrCreateSharedHashtagResolver(ctx, parsed);
+              wishFlowLogger.debug(`wish/shared-parent/${queryKey}`, () => [
+                `[WISH SHARED PARENT] source=${sourceKey}`,
+                `query=${query}`,
+                `scope=${formatScope(scope)}`,
+                `schema=${schema === undefined ? "none" : "present"}`,
+                `shared=${describeCell(shared.cell)}`,
+              ]);
               measureWishPhase(
                 "send-shared-hashtag",
                 queryKey,
-                () => sendResult(tx, shared.cell),
+                () =>
+                  sendResult(
+                    tx,
+                    sharedWishCellValue(shared.cell, schema),
+                  ),
                 sourceBucket,
               );
               return;
@@ -1289,10 +1372,11 @@ export function wish(
               "candidates-cell",
               queryKey,
               () =>
-                runtime.getImmutableCell(
+                createWishCandidatesCell(
+                  runtime,
                   parentCell.space,
                   uniqueResultCells,
-                  undefined,
+                  schema,
                   tx,
                 ),
               sourceBucket,
@@ -1322,7 +1406,7 @@ export function wish(
                 queryKey,
                 () =>
                   sendResult(tx, {
-                    result: uniqueResultCells[0],
+                    result: projectWishCellValue(uniqueResultCells[0], schema),
                     candidates: candidatesCell,
                     [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
                   }),
