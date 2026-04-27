@@ -515,6 +515,7 @@ export interface CfHarnessBatchResult {
   model: string;
   artifact_root?: string;
   transcript_path?: string;
+  run_report_path?: string;
 }
 
 export const createCfHarnessBatchResult = (
@@ -535,6 +536,9 @@ export const createCfHarnessBatchResult = (
     : {}),
   ...(result.runState.transcriptPath !== undefined
     ? { transcript_path: result.runState.transcriptPath }
+    : {}),
+  ...(result.runState.runReportPath !== undefined
+    ? { run_report_path: result.runState.runReportPath }
     : {}),
 });
 
@@ -647,6 +651,9 @@ export const formatCfHarnessCliResult = (
   if (result.runState.transcriptPath !== undefined) {
     lines.push(`transcriptPath: ${result.runState.transcriptPath}`);
   }
+  if (result.runState.runReportPath !== undefined) {
+    lines.push(`runReportPath: ${result.runState.runReportPath}`);
+  }
   if (result.runState.policyEvents.length > 0) {
     lines.push(`policyEvents: ${result.runState.policyEvents.length}`);
     for (const event of result.runState.policyEvents) {
@@ -741,7 +748,8 @@ export const runCfHarnessCli = async (
         transcript: artifacts.transcript,
         model: parsed.model ?? artifacts.runState.model,
         maxModelTurns: parsed.maxModelTurns,
-        promptSlotBinding,
+        promptSlotBinding: artifacts.runState.promptSlotBinding ??
+          promptSlotBinding,
         onTranscriptEvent,
       });
     } else {

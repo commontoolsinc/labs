@@ -146,6 +146,34 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
   );
 });
 
+Deno.test("CfHarnessEngine records prompt slot binding into run state", () => {
+  const promptSlotBinding = {
+    type: "cf-harness.prompt-slot-binding",
+    role: "direct-command",
+    kernelName: "cf-harness",
+    surface: "test",
+    subject: "engine-test",
+    eventId: "event-engine",
+  } as const;
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: "run-prompt-slot",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-04-17T19:00:00.000Z",
+        "2026-04-17T19:00:01.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-17T19:00:02.000Z";
+    })(),
+  });
+
+  engine.setPromptSlotBinding(promptSlotBinding);
+
+  assertEquals(engine.getRunState().promptSlotBinding, promptSlotBinding);
+  assertEquals(engine.getRunState().updatedAt, "2026-04-17T19:00:01.000Z");
+});
+
 Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors", async () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime([], new Error("sandbox boom")),

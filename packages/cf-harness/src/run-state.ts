@@ -1,5 +1,6 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
+import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
 import type {
   HarnessCapabilitySnapshot,
@@ -29,10 +30,12 @@ export interface HarnessRunState {
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
+  promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
+  runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
   policyEvents: HarnessPolicyEvent[];
@@ -47,10 +50,12 @@ export interface CreateHarnessRunStateOptions {
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
+  promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
   artifactRoot?: string;
   transcriptPath?: string;
+  runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
   failureRecords?: HarnessFailureRecord[];
@@ -72,6 +77,9 @@ export const createHarnessRunState = (
       ? { terminalReason: options.terminalReason }
       : {}),
     cfcEnforcementMode: options.cfcEnforcementMode,
+    ...(options.promptSlotBinding !== undefined
+      ? { promptSlotBinding: options.promptSlotBinding }
+      : {}),
     currentDir: options.currentDir,
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.artifactRoot !== undefined
@@ -79,6 +87,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
+      : {}),
+    ...(options.runReportPath !== undefined
+      ? { runReportPath: options.runReportPath }
       : {}),
     ...(options.capabilitySnapshot !== undefined
       ? { capabilitySnapshot: options.capabilitySnapshot }
@@ -140,6 +151,16 @@ export const appendHarnessPolicyEvent = (
   policyEvents: [...state.policyEvents, event],
 });
 
+export const setHarnessPromptSlotBinding = (
+  state: HarnessRunState,
+  promptSlotBinding: PromptSlotBinding,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  promptSlotBinding,
+  updatedAt: now,
+});
+
 export const appendHarnessFailureRecord = (
   state: HarnessRunState,
   failure: HarnessFailureRecord,
@@ -172,6 +193,16 @@ export const setHarnessTranscriptPath = (
 ): HarnessRunState => ({
   ...state,
   transcriptPath,
+  updatedAt: now,
+});
+
+export const setHarnessRunReportPath = (
+  state: HarnessRunState,
+  runReportPath: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  runReportPath,
   updatedAt: now,
 });
 

@@ -4,6 +4,7 @@ import { normalize } from "@std/path/posix";
 import {
   createFileSystemHarnessArtifactStore,
   readHarnessRunArtifacts,
+  readHarnessRunReport,
   readHarnessRunState,
   readHarnessTranscript,
 } from "../src/artifacts.ts";
@@ -254,16 +255,20 @@ Deno.test({
 
       const runRoot = join(artifactRoot, "run-loop-persisted");
       const transcriptPath = join(runRoot, "transcript.json");
+      const runReportPath = join(runRoot, "run-report.json");
       const persistedState = await readHarnessRunState(
         join(runRoot, "run-state.json"),
       );
+      const persistedReport = await readHarnessRunReport(runReportPath);
 
       assertEquals(result.runState.transcriptPath, transcriptPath);
+      assertEquals(result.runState.runReportPath, runReportPath);
       assertEquals(
         await readHarnessTranscript(transcriptPath),
         result.transcript,
       );
       assertEquals(persistedState.transcriptPath, transcriptPath);
+      assertEquals(persistedState.runReportPath, runReportPath);
       assertEquals(persistedState.artifactRoot, runRoot);
       assertEquals(persistedState.endedAt, "2026-04-15T21:10:07.000Z");
       assertEquals(persistedState.terminalReason, "assistant_completed");
@@ -273,6 +278,292 @@ Deno.test({
         persistedState.capabilitySnapshot?.commands.python3.present,
         true,
       );
+      assertEquals(persistedReport.type, "cf-harness.run-report");
+      assertEquals(persistedReport.runId, "run-loop-persisted");
+      assertEquals(persistedReport.status, "completed");
+      assertEquals(persistedReport.model, "gpt-5.4");
+      assertEquals(persistedReport.modelTurns, 2);
+      assertEquals(persistedReport.finalAssistantText, "Persisted summary.");
+      assertEquals(persistedReport.policyEventCounts, {
+        total: 0,
+        warnings: 0,
+        denied: 0,
+      });
+      assertEquals(persistedReport.toolActivity.length, 1);
+      assertEquals(persistedReport.toolActivity[0], {
+        type: "cf-harness.tool-activity",
+        runId: "run-loop-persisted",
+        sequence: 1,
+        startedAt: "2026-04-15T21:10:05.000Z",
+        endedAt: "2026-04-15T21:10:07.000Z",
+        toolCallId: "call-1",
+        toolId: "read_file",
+        effectClass: "read",
+        cfcEnforcementMode: "disabled",
+        policyDecision: "allowed",
+        executionStatus: "completed",
+        toolInputSummary: {
+          type: "cf-harness.tool-input-summary",
+          toolId: "read_file",
+          path: "notes/todo.txt",
+        },
+        resultRef: result.runState.toolOutputs[0],
+      });
+      assertEquals(
+        persistedReport.timeline.map((entry) => entry.kind),
+        [
+          "run_started",
+          "transcript_message",
+          "transcript_message",
+          "tool_activity",
+          "transcript_message",
+          "transcript_message",
+          "run_finished",
+        ],
+      );
+      assertEquals(
+        persistedReport.timeline
+          .filter((entry) => entry.kind === "transcript_message")
+          .map((entry) => entry.role),
+        ["user", "assistant", "tool", "assistant"],
+      );
+      assertEquals(
+        persistedReport.timeline.find((entry) =>
+          entry.kind === "tool_activity"
+        ),
+        {
+          type: "cf-harness.timeline-entry",
+          sequence: 4,
+          kind: "tool_activity",
+          at: "2026-04-15T21:10:05.000Z",
+          endedAt: "2026-04-15T21:10:07.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "call-1",
+          toolId: "read_file",
+          policyDecision: "allowed",
+          executionStatus: "completed",
+        },
+      );
+      assertEquals(
+        persistedReport.timeline[persistedReport.timeline.length - 1],
+        {
+          type: "cf-harness.timeline-entry",
+          sequence: 7,
+          kind: "run_finished",
+          at: "2026-04-15T21:10:07.000Z",
+          status: "completed",
+          terminalReason: "assistant_completed",
+        },
+      );
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "CfHarnessEngine persists prompt slot binding in run state artifacts",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-prompt-slot-",
+    });
+    try {
+      const promptSlotBinding = {
+        type: "cf-harness.prompt-slot-binding",
+        role: "direct-command",
+        kernelName: "cf-harness",
+        surface: "test",
+        subject: "artifact-test",
+        eventId: "event-artifact",
+      } as const;
+      const engine = new CfHarnessEngine({
+        artifactRoot,
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-prompt-slot",
+        cfcEnforcementMode: "observe",
+      });
+
+      engine.setPromptSlotBinding(promptSlotBinding);
+      await engine.persistRunState();
+
+      const persistedState = await readHarnessRunState(
+        join(artifactRoot, "run-prompt-slot", "run-state.json"),
+      );
+      assertEquals(persistedState.promptSlotBinding, promptSlotBinding);
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "CfHarnessPromptLoop persists denied tool activity in the run report",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-denied-report-",
+    });
+    try {
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          artifactRoot,
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: "run-denied-report",
+          model: "gpt-5.4",
+          cfcEnforcementMode: "enforce-explicit",
+          now: (() => {
+            const timestamps = [
+              "2026-04-15T21:20:00.000Z",
+              "2026-04-15T21:20:01.000Z",
+              "2026-04-15T21:20:02.000Z",
+              "2026-04-15T21:20:03.000Z",
+              "2026-04-15T21:20:04.000Z",
+              "2026-04-15T21:20:05.000Z",
+              "2026-04-15T21:20:06.000Z",
+              "2026-04-15T21:20:07.000Z",
+              "2026-04-15T21:20:08.000Z",
+              "2026-04-15T21:20:09.000Z",
+            ];
+            return () => timestamps.shift() ?? "2026-04-15T21:20:10.000Z";
+          })(),
+        }),
+        fetchFn: (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as {
+            messages: Array<{ role: string }>;
+          };
+          const payload = body.messages.some((message) =>
+              message.role === "tool"
+            )
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Write was denied.",
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-denied-report",
+                    type: "function",
+                    function: {
+                      name: "write_file",
+                      arguments: JSON.stringify({
+                        path: "notes/out.txt",
+                        content: "nope",
+                      }),
+                    },
+                  }],
+                },
+              }],
+            };
+          return Promise.resolve(
+            new Response(JSON.stringify(payload), { status: 200 }),
+          );
+        },
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Write the output file.",
+      });
+
+      const runReport = await readHarnessRunReport(
+        join(artifactRoot, "run-denied-report", "run-report.json"),
+      );
+
+      assertEquals(result.runState.toolOutputs, []);
+      assertEquals(runReport.policyEventCounts, {
+        total: 1,
+        warnings: 0,
+        denied: 1,
+      });
+      assertEquals(runReport.toolActivity, [{
+        type: "cf-harness.tool-activity",
+        runId: "run-denied-report",
+        sequence: 1,
+        startedAt: "2026-04-15T21:20:05.000Z",
+        endedAt: "2026-04-15T21:20:06.000Z",
+        toolCallId: "call-denied-report",
+        toolId: "write_file",
+        effectClass: "write",
+        cfcEnforcementMode: "enforce-explicit",
+        policyDecision: "denied",
+        executionStatus: "not-run",
+        toolInputSummary: {
+          type: "cf-harness.tool-input-summary",
+          toolId: "write_file",
+          path: "notes/out.txt",
+          mode: "replace",
+          contentBytes: 4,
+          contentDigest:
+            "sha256:ca3704aa0b06f5954c79ee837faa152d84d6b2d42838f0637a15eda8337dbdce",
+        },
+        policyEventIndexes: [0],
+      }]);
+      assertEquals(
+        runReport.timeline.map((entry) => entry.kind),
+        [
+          "run_started",
+          "transcript_message",
+          "transcript_message",
+          "tool_activity",
+          "policy_event",
+          "failure_record",
+          "transcript_message",
+          "transcript_message",
+          "run_finished",
+        ],
+      );
+      assertEquals(
+        runReport.timeline.find((entry) => entry.kind === "policy_event"),
+        {
+          type: "cf-harness.timeline-entry",
+          sequence: 5,
+          kind: "policy_event",
+          at: "2026-04-15T21:20:06.000Z",
+          policyEventIndex: 0,
+          severity: "denied",
+          toolCallId: "call-denied-report",
+          toolId: "write_file",
+        },
+      );
+      assertEquals(
+        runReport.timeline.find((entry) => entry.kind === "tool_activity"),
+        {
+          type: "cf-harness.timeline-entry",
+          sequence: 4,
+          kind: "tool_activity",
+          at: "2026-04-15T21:20:05.000Z",
+          endedAt: "2026-04-15T21:20:06.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "call-denied-report",
+          toolId: "write_file",
+          policyDecision: "denied",
+          executionStatus: "not-run",
+        },
+      );
+      assertEquals(
+        runReport.timeline.find((entry) => entry.kind === "failure_record"),
+        {
+          type: "cf-harness.timeline-entry",
+          sequence: 6,
+          kind: "failure_record",
+          at: "2026-04-15T21:20:06.000Z",
+          failureRecordIndex: 0,
+          failureKind: "tool_not_allowed",
+          source: "policy_event",
+          toolId: "write_file",
+        },
+      );
+      assertEquals(JSON.stringify(runReport).includes("nope"), false);
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }
