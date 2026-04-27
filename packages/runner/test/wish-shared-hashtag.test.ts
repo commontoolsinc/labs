@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type JSONSchema, NAME } from "../src/builder/types.ts";
@@ -51,9 +51,10 @@ const bodyOnlyWishSchema: JSONSchema = {
 };
 
 function wishSearchCount(): number {
-  const counts = getLoggerCountsBreakdown();
-  return counts["runner.wish-flow"]?.["wish/search-hashtag/#notebook"]
-    ?.total ?? 0;
+  const timing = getTimingStatsBreakdown();
+  return timing["runner.wish-flow"]?.[
+    "wish/phase-query/mentionable-filter/#notebook"
+  ]?.count ?? 0;
 }
 
 function rawLinkSchema(value: unknown): unknown {

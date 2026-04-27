@@ -52,47 +52,16 @@ export type ParsedWishTarget = {
   path: string[];
 };
 
-function getTxDebugActionId(
-  tx?: IExtendedStorageTransaction,
-): string | undefined {
-  return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
-}
-
 function sanitizeQueryKey(query: string): string {
   const normalized = query.trim().replace(/[^a-zA-Z0-9#/_:-]+/g, "_");
   if (!normalized) return "empty";
   return normalized.slice(0, 80);
 }
 
-function sanitizeSourceKey(sourceKey: string): string {
-  const normalized = sourceKey.trim().replace(/[^a-zA-Z0-9#/_:-]+/g, "_");
-  if (!normalized) return "none";
-  return normalized.slice(0, 80);
-}
-
-function formatScope(scope?: string[]): string {
-  return scope && scope.length > 0 ? scope.join(",") : "(default)";
-}
-
-function describeCell(cell: Cell<unknown>): string {
-  const link = cell.getAsNormalizedFullLink();
-  const path = link.path.length > 0 ? `/${link.path.join("/")}` : "";
-  return `${link.space}/${link.id}${path}`;
-}
-
-function bucketDuration(ms: number): string {
-  if (ms < 1) return "lt1ms";
-  if (ms < 5) return "1to5ms";
-  if (ms < 20) return "5to20ms";
-  if (ms < 100) return "20to100ms";
-  return "gte100ms";
-}
-
 function recordWishPhaseTiming(
   startedAt: number,
   phase: string,
   queryKey?: string,
-  sourceBucket?: string,
 ): number {
   const endedAt = performance.now();
   wishFlowLogger.time(startedAt, endedAt, "wish", "phase", phase);
@@ -106,17 +75,6 @@ function recordWishPhaseTiming(
       queryKey,
     );
   }
-  if (queryKey && sourceBucket) {
-    wishFlowLogger.time(
-      startedAt,
-      endedAt,
-      "wish",
-      "phase-source",
-      phase,
-      queryKey,
-      sourceBucket,
-    );
-  }
   return endedAt - startedAt;
 }
 
@@ -124,13 +82,12 @@ function measureWishPhase<T>(
   phase: string,
   queryKey: string | undefined,
   fn: () => T,
-  sourceBucket?: string,
 ): T {
   const startedAt = performance.now();
   try {
     return fn();
   } finally {
-    recordWishPhaseTiming(startedAt, phase, queryKey, sourceBucket);
+    recordWishPhaseTiming(startedAt, phase, queryKey);
   }
 }
 
@@ -278,7 +235,6 @@ function searchFavoritesForHashtag(
   pathPrefix: string[],
 ): BaseResolution[] {
   const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
-  const sourceBucket = sanitizeSourceKey(getTxDebugActionId(ctx.tx) ?? "none");
   const userDID = ctx.runtime.userIdentityDID;
   if (!userDID) return [];
 
@@ -292,13 +248,11 @@ function searchFavoritesForHashtag(
         .key("favorites")
         .asSchema(favoriteListSchema);
     },
-    sourceBucket,
   );
   const favorites = measureWishPhase(
     "favorites-get",
     queryKey,
     () => favoritesCell.get() || [],
-    sourceBucket,
   );
 
   const matches = measureWishPhase(
@@ -314,14 +268,12 @@ function searchFavoritesForHashtag(
         // Search schema tag for hashtags
         return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
       }),
-    sourceBucket,
   );
 
   return measureWishPhase(
     "favorites-result-map",
     queryKey,
     () => matches.map((match) => ({ cell: match.cell, pathPrefix })),
-    sourceBucket,
   );
 }
 
@@ -343,8 +295,6 @@ function searchMentionablesForHashtag(
   spaceCell?: Cell<unknown>,
 ): MentionableSearchResult {
   const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
-  const sourceKey = getTxDebugActionId(ctx.tx) ?? "none";
-  const sourceBucket = sanitizeSourceKey(sourceKey);
   const mentionableCell = measureWishPhase(
     "mentionable-cell",
     queryKey,
@@ -355,13 +305,11 @@ function searchMentionablesForHashtag(
         .key("mentionable")
         .resolveAsCell()
         .asSchema(mentionableListSchema),
-    sourceBucket,
   );
   const raw = measureWishPhase(
     "mentionable-get",
     queryKey,
     () => mentionableCell.get(),
-    sourceBucket,
   );
   if (raw === undefined || raw === null) {
     // Data not loaded yet — reactive system will re-trigger when it arrives
@@ -380,7 +328,6 @@ function searchMentionablesForHashtag(
           "mentionable-piece-get",
           queryKey,
           () => pieceCell.get(),
-          sourceBucket,
         );
         if (!piece) return false;
 
@@ -392,7 +339,6 @@ function searchMentionablesForHashtag(
             const name = piece[NAME]?.toLowerCase() ?? "";
             return name === searchTermWithoutHash;
           },
-          sourceBucket,
         );
         if (nameMatches) return true;
 
@@ -405,14 +351,12 @@ function searchMentionablesForHashtag(
             () =>
               pieceCell.resolveAsCell()?.asSchema(undefined)
                 .asSchemaFromLinks?.()?.schema,
-            sourceBucket,
           );
           if (typeof schema === "object") {
             tag = measureWishPhase(
               "mentionable-schema-stringify",
               queryKey,
               () => JSON.stringify(schema),
-              sourceBucket,
             );
           }
         } catch {
@@ -423,34 +367,15 @@ function searchMentionablesForHashtag(
           "mentionable-tag-match",
           queryKey,
           () => tagMatchesHashtag(tag, searchTermWithoutHash),
-          sourceBucket,
         );
       }),
-    sourceBucket,
   );
-
-  const query = `#${searchTermWithoutHash}`;
-  wishFlowLogger.debug(`wish/search-hashtag/${sanitizeQueryKey(query)}`, () =>
-    [
-      `[WISH SEARCH] source=${sourceKey}`,
-      `query=${query}`,
-      `scope=${formatScope(ctx.scope)}`,
-      `space=${describeCell(spaceCell ?? getSpaceCell(ctx))}`,
-      `mentionableCount=${mentionables.length}`,
-      `matchCount=${matches.length}`,
-      matches.length > 0
-        ? `matches=${
-          matches.slice(0, 5).map((cell) => describeCell(cell)).join(", ")
-        }`
-        : undefined,
-    ].filter(Boolean));
 
   return {
     matches: measureWishPhase(
       "mentionable-result-map",
       queryKey,
       () => matches.map((match) => ({ cell: match, pathPrefix })),
-      sourceBucket,
     ),
     loaded: true,
   };
@@ -794,15 +719,7 @@ function createSharedHashtagResolver(
     const actionStartedAt = performance.now();
     const stateCell = sharedCell.withTx(tx);
     const queryKey = sanitizeQueryKey(query);
-    const sourceBucket = sanitizeSourceKey(getTxDebugActionId(tx) ?? "none");
-    wishFlowLogger.debug(`wish/shared-resolver/start/${queryKey}`, () => [
-      `[WISH SHARED START] source=${getTxDebugActionId(tx) ?? "none"}`,
-      `query=${query}`,
-      `scope=${formatScope(sharedScope)}`,
-      `space=${describeCell(sharedCell)}`,
-    ]);
     try {
-      const resolveStartedAt = performance.now();
       const baseResolutions = searchByHashtag(sharedParsed, {
         runtime: ctx.runtime,
         tx,
@@ -828,7 +745,6 @@ function createSharedHashtagResolver(
               : sharedParsed.path;
             return resolvePath(baseResolution.cell, combinedPath);
           }),
-        sourceBucket,
       );
       const uniqueResultCells = measureWishPhase(
         "shared-dedupe-results",
@@ -839,33 +755,12 @@ function createSharedHashtagResolver(
               resultCells.findIndex((candidate) => candidate.equals(cell)) ===
                 index,
           ),
-        sourceBucket,
       );
       const resultUI = measureWishPhase(
         "shared-result-ui-get",
         queryKey,
         () => uniqueResultCells[0].key(UI).get(),
-        sourceBucket,
       ) as VNode | undefined;
-      const resolveMs = Number(
-        (performance.now() - resolveStartedAt).toFixed(3),
-      );
-
-      wishFlowLogger.debug(`wish/resolve/${queryKey}`, () =>
-        [
-          `[WISH RESOLVE] source=${getTxDebugActionId(tx) ?? "none"}`,
-          `query=${query}`,
-          `kind=shared-hashtag-search`,
-          `baseResolutions=${baseResolutions.length}`,
-          `uniqueResults=${uniqueResultCells.length}`,
-          `resolveMs=${resolveMs}`,
-          uniqueResultCells.length > 0
-            ? `results=${
-              uniqueResultCells.slice(0, 5).map((cell) => describeCell(cell))
-                .join(", ")
-            }`
-            : undefined,
-        ].filter(Boolean));
 
       stateCell.set({
         result: uniqueResultCells[0],
@@ -887,7 +782,6 @@ function createSharedHashtagResolver(
         actionStartedAt,
         "shared-action-total",
         queryKey,
-        sourceBucket,
       );
     }
   };
@@ -1073,10 +967,6 @@ export function wish(
     providedTx?: IExtendedStorageTransaction,
   ) {
     suggestionPatternInput = input;
-    const sourceKey = getTxDebugActionId(providedTx) ?? "none";
-    const queryKey = sanitizeQueryKey(input.situation);
-    const sourceBucket = sanitizeSourceKey(sourceKey);
-
     const tx = providedTx || runtime.edit();
 
     if (!suggestionPatternResultCell) {
@@ -1100,20 +990,6 @@ export function wish(
       // Once fetch completes, run the pattern without a tx (it creates its own)
       void suggestionPatternFetchPromise.then((pattern) => {
         if (!cancelled && pattern && suggestionPatternResultCell) {
-          wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
-            `[WISH RUN SUGGESTION] source=${sourceKey}`,
-            `query=${input.situation}`,
-            `mode=fetch-then-run`,
-            `result=${
-              suggestionPatternResultCell
-                ? describeCell(suggestionPatternResultCell)
-                : "unknown"
-            }`,
-          ]);
-          wishFlowLogger.debug(
-            `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
-            () => [`source=${sourceKey}`],
-          );
           runtime.run(
             undefined,
             pattern,
@@ -1124,20 +1000,6 @@ export function wish(
       });
     } else {
       if (!cancelled && suggestionPatternResultCell) {
-        wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
-          `[WISH RUN SUGGESTION] source=${sourceKey}`,
-          `query=${input.situation}`,
-          `mode=reuse-pattern`,
-          `result=${
-            suggestionPatternResultCell
-              ? describeCell(suggestionPatternResultCell)
-              : "unknown"
-          }`,
-        ]);
-        wishFlowLogger.debug(
-          `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
-          () => [`source=${sourceKey}`],
-        );
         runtime.run(
           tx,
           suggestionPattern,
@@ -1161,8 +1023,6 @@ export function wish(
   // wish when the data arrives.
   return (tx: IExtendedStorageTransaction) => {
     const actionStartedAt = performance.now();
-    const sourceKey = getTxDebugActionId(tx) ?? "none";
-    const sourceBucket = sanitizeSourceKey(sourceKey);
     let actionQueryKey: string | undefined;
 
     try {
@@ -1173,7 +1033,6 @@ export function wish(
           const inputsWithTx = inputsCell.withTx(tx);
           return inputsWithTx.asSchema(TARGET_SCHEMA).get();
         },
-        sourceBucket,
       );
 
       if (typeof targetValue === "object") {
@@ -1186,11 +1045,6 @@ export function wish(
           const errorMsg = `Wish target "${
             toCompactDebugString(targetValue)
           }" has no query.`;
-          wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
-            `[WISH ERROR] source=${sourceKey}`,
-            `query=${String(query ?? "")}`,
-            `error=${errorMsg}`,
-          ]);
           measureWishPhase(
             "send-error",
             queryKey,
@@ -1204,25 +1058,12 @@ export function wish(
                   [UI]: errorUI(errorMsg),
                 } satisfies WishState<any>,
               ),
-            sourceBucket,
           );
           return;
         }
 
         // If the query is a path or a hash tag, resolve it directly
         if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
-          wishFlowLogger.debug(`wish/start/${queryKey}`, () => [
-            `[WISH START] source=${sourceKey}`,
-            `query=${query}`,
-            `scope=${formatScope(scope)}`,
-            `headless=${Boolean(headless)}`,
-            `path=${toCompactDebugString(path ?? [])}`,
-            `parent=${describeCell(parentCell)}`,
-          ]);
-          wishFlowLogger.debug(
-            `wish/start-source/${queryKey}/${sourceBucket}`,
-            () => [`source=${sourceKey}`],
-          );
           try {
             const resolveStartedAt = performance.now();
             const parsed = measureWishPhase(
@@ -1233,7 +1074,6 @@ export function wish(
                 parsed.path = [...parsed.path, ...(path ?? [])];
                 return parsed;
               },
-              sourceBucket,
             );
             const ctx: WishContext = {
               runtime,
@@ -1244,13 +1084,6 @@ export function wish(
             };
             if (canUseSharedHashtagResult(parsed, { headless })) {
               const shared = getOrCreateSharedHashtagResolver(ctx, parsed);
-              wishFlowLogger.debug(`wish/shared-parent/${queryKey}`, () => [
-                `[WISH SHARED PARENT] source=${sourceKey}`,
-                `query=${query}`,
-                `scope=${formatScope(scope)}`,
-                `schema=${schema === undefined ? "none" : "present"}`,
-                `shared=${describeCell(shared.cell)}`,
-              ]);
               measureWishPhase(
                 "send-shared-hashtag",
                 queryKey,
@@ -1259,7 +1092,6 @@ export function wish(
                     tx,
                     sharedWishCellValue(shared.cell, schema),
                   ),
-                sourceBucket,
               );
               return;
             }
@@ -1268,7 +1100,6 @@ export function wish(
               "resolve-base",
               queryKey,
               () => resolveBase(parsed, ctx),
-              sourceBucket,
             );
             // Persist #now cell across re-runs to avoid non-idempotent loops
             if (ctx.nowCell) nowCell = ctx.nowCell;
@@ -1290,7 +1121,6 @@ export function wish(
                       [UI]: undefined,
                     } satisfies WishState<any>,
                   ),
-                sourceBucket,
               );
               return;
             }
@@ -1309,7 +1139,6 @@ export function wish(
                   );
                   return schema ? resolvedCell.asSchema(schema) : resolvedCell;
                 }),
-              sourceBucket,
             );
 
             // Deduplicate result cells using Cell.equals()
@@ -1321,48 +1150,12 @@ export function wish(
                   (cell, index) =>
                     resultCells.findIndex((c) => c.equals(cell)) === index,
                 ),
-              sourceBucket,
-            );
-            const resolveMs = Number(
-              (performance.now() - resolveStartedAt).toFixed(3),
-            );
-
-            wishFlowLogger.debug(`wish/resolve/${queryKey}`, () =>
-              [
-                `[WISH RESOLVE] source=${sourceKey}`,
-                `query=${query}`,
-                `kind=${getResolutionKind(parsed)}`,
-                `baseResolutions=${baseResolutions.length}`,
-                `uniqueResults=${uniqueResultCells.length}`,
-                `resolveMs=${resolveMs}`,
-                uniqueResultCells.length > 0
-                  ? `results=${
-                    uniqueResultCells.slice(0, 5).map((cell) =>
-                      describeCell(cell)
-                    ).join(", ")
-                  }`
-                  : undefined,
-              ].filter(Boolean));
-            wishFlowLogger.debug(
-              `wish/resolve-source/${queryKey}/${sourceBucket}`,
-              () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
-            );
-            wishFlowLogger.debug(
-              `wish/resolve-ms/${queryKey}/${bucketDuration(resolveMs)}`,
-              () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
             );
             wishFlowLogger.time(
               resolveStartedAt,
               "wish",
               "resolve",
               queryKey,
-            );
-            wishFlowLogger.time(
-              resolveStartedAt,
-              "wish",
-              "resolve-source",
-              queryKey,
-              sourceBucket,
             );
 
             // Unified shape: always return { result, candidates, [UI] }
@@ -1379,7 +1172,6 @@ export function wish(
                   schema,
                   tx,
                 ),
-              sourceBucket,
             );
 
             if (uniqueResultCells.length === 1 || headless) {
@@ -1389,17 +1181,6 @@ export function wish(
                 "result-ui-get",
                 queryKey,
                 () => uniqueResultCells[0].key(UI).get(),
-                sourceBucket,
-              );
-              wishFlowLogger.debug(`wish/send-fast/${queryKey}`, () => [
-                `[WISH FAST PATH] source=${sourceKey}`,
-                `query=${query}`,
-                `mode=${headless ? "headless" : "single-result"}`,
-                `result=${describeCell(uniqueResultCells[0])}`,
-              ]);
-              wishFlowLogger.debug(
-                `wish/send-fast-source/${queryKey}/${sourceBucket}`,
-                () => [`source=${sourceKey}`],
               );
               measureWishPhase(
                 "send-fast",
@@ -1410,7 +1191,6 @@ export function wish(
                     candidates: candidatesCell,
                     [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
                   }),
-                sourceBucket,
               );
             } else {
               // Multiple results — if suggestion pattern is already loaded,
@@ -1433,7 +1213,6 @@ export function wish(
                         tx,
                       ),
                     ),
-                  sourceBucket,
                 );
               } else {
                 // Pattern not loaded yet — send first result, start fetch
@@ -1441,7 +1220,6 @@ export function wish(
                   "result-ui-get",
                   queryKey,
                   () => uniqueResultCells[0].key(UI).get(),
-                  sourceBucket,
                 );
                 measureWishPhase(
                   "send-fast-before-suggestion",
@@ -1452,7 +1230,6 @@ export function wish(
                       candidates: candidatesCell,
                       [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
                     }),
-                  sourceBucket,
                 );
                 measureWishPhase(
                   "launch-suggestion",
@@ -1466,17 +1243,11 @@ export function wish(
                       },
                       tx,
                     ),
-                  sourceBucket,
                 );
               }
             }
           } catch (e) {
             const errorMsg = e instanceof WishError ? e.message : String(e);
-            wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
-              `[WISH ERROR] source=${sourceKey}`,
-              `query=${query}`,
-              `error=${errorMsg}`,
-            ]);
             measureWishPhase(
               "send-error",
               queryKey,
@@ -1490,16 +1261,10 @@ export function wish(
                     [UI]: errorUI(errorMsg),
                   } satisfies WishState<any>,
                 ),
-              sourceBucket,
             );
           }
         } else if (headless) {
           // Headless mode with freeform query — no suggestion pattern
-          wishFlowLogger.debug(`wish/freeform/${queryKey}`, () => [
-            `[WISH FREEFORM] source=${sourceKey}`,
-            `query=${query}`,
-            `mode=headless`,
-          ]);
           measureWishPhase(
             "send-freeform",
             queryKey,
@@ -1512,15 +1277,9 @@ export function wish(
                   [UI]: undefined,
                 } satisfies WishState<any>,
               ),
-            sourceBucket,
           );
         } else {
           // Otherwise it's a generic query, instantiate suggestion.tsx
-          wishFlowLogger.debug(`wish/launch-suggestion/${queryKey}`, () => [
-            `[WISH LAUNCH SUGGESTION] source=${sourceKey}`,
-            `query=${query}`,
-            `mode=freeform`,
-          ]);
           measureWishPhase(
             "send-suggestion",
             queryKey,
@@ -1532,7 +1291,6 @@ export function wish(
                   tx,
                 ),
               ),
-            sourceBucket,
           );
         }
         return;
@@ -1553,7 +1311,6 @@ export function wish(
                 [UI]: errorUI(errorMsg),
               } satisfies WishState<any>,
             ),
-          sourceBucket,
         );
         return;
       }
@@ -1562,7 +1319,6 @@ export function wish(
         actionStartedAt,
         "action-total",
         actionQueryKey,
-        sourceBucket,
       );
     }
   };

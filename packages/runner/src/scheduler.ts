@@ -75,11 +75,6 @@ const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
 });
-const triggerFlowLogger = getLogger("scheduler.trigger-flow", {
-  enabled: true,
-  level: "warn",
-  logCountEvery: 0,
-});
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
@@ -1070,13 +1065,6 @@ export class Scheduler {
       `Reads: ${reads.length}`,
     ]);
 
-    for (const [spaceAndURI, triggerPaths] of triggerPathsByEntity) {
-      logger.debug("schedule-resubscribe-path", () => [
-        `Registered action for ${spaceAndURI}`,
-        `Paths: ${triggerPaths.map((p) => p.join("/")).join(", ")}`,
-      ]);
-    }
-
     this.setCancelForEntities(action, entities);
 
     // In pull mode: When an effect resubscribes, check if any non-throttled dirty
@@ -1530,18 +1518,6 @@ export class Scheduler {
       next: (notification) => {
         const space = notification.space;
 
-        // Log notification details
-        triggerFlowLogger.debug("schedule-notification", () => [
-          `Type: ${notification.type}`,
-          `Space: ${space}`,
-          `Has source: ${
-            "source" in notification ? notification.source : "none"
-          }`,
-          `Changes: ${
-            "changes" in notification ? [...notification.changes].length : 0
-          }`,
-        ]);
-
         if ("changes" in notification) {
           const sourceChangeGroup = notification.type === "commit"
             ? notification.source?.changeGroup
@@ -1552,21 +1528,12 @@ export class Scheduler {
           let changeIndex = 0;
           for (const change of notification.changes) {
             changeIndex++;
-            triggerFlowLogger.debug("schedule-change", () => [
-              `Change #${changeIndex}`,
-              `Address: ${change.address.id}/${change.address.path.join("/")}`,
-              `Before: ${toCompactDebugString(change.before)}`,
-              `After: ${toCompactDebugString(change.after)}`,
-            ]);
             this.runtime.telemetry.submit({
               type: "cell.update",
               change: change,
             });
 
             if (change.address.type !== "application/json") {
-              triggerFlowLogger.debug("schedule-change-skip", () => [
-                `Change #${changeIndex} skipping non-JSON type: ${change.address.type}`,
-              ]);
               continue;
             }
 
@@ -1584,12 +1551,6 @@ export class Scheduler {
             );
 
             if (paths || nonRecursivePaths) {
-              triggerFlowLogger.debug("schedule-change-match", () => [
-                `Change #${changeIndex} found ${
-                  (paths?.size ?? 0) + (nonRecursivePaths?.size ?? 0)
-                } registered actions for ${spaceAndURI}`,
-              ]);
-
               const triggeredActionSet = new Set<Action>();
               if (paths) {
                 for (
@@ -1639,10 +1600,6 @@ export class Scheduler {
                   } satisfies TriggerTraceEntry
                   : null;
 
-              triggerFlowLogger.debug("schedule-change-trigger", () => [
-                `Change #${changeIndex} triggered ${triggeredActions.length} actions`,
-              ]);
-
               for (const action of triggeredActions) {
                 // Causal edge tracking for diagnosis
                 if (
@@ -1673,10 +1630,6 @@ export class Scheduler {
                   notification.source !== undefined &&
                   this.inFlightSources.get(action)?.has(notification.source);
                 if (isOwnCommitSource) {
-                  triggerFlowLogger.debug("schedule-change-skip-source", () => [
-                    `Change #${changeIndex} skipped action commit source`,
-                    `Action: ${actionId}`,
-                  ]);
                   triggerTraceEntry?.triggered.push({
                     actionId,
                     actionType,
@@ -1695,10 +1648,6 @@ export class Scheduler {
                   actionChangeGroup !== undefined &&
                   Object.is(actionChangeGroup, sourceChangeGroup)
                 ) {
-                  triggerFlowLogger.debug("schedule-change-skip-group", () => [
-                    `Change #${changeIndex} skipped action change group`,
-                    `Action: ${actionId}`,
-                  ]);
                   triggerTraceEntry?.triggered.push({
                     actionId,
                     actionType,
@@ -1712,13 +1661,6 @@ export class Scheduler {
                   });
                   continue;
                 }
-
-                triggerFlowLogger.debug("schedule-trigger", () => [
-                  `Action for ${spaceAndURI}/${change.address.path.join("/")}`,
-                  `Action: ${actionId}`,
-                  `Mode: ${this.pullMode ? "pull" : "push"}`,
-                  `Type: ${actionType}`,
-                ]);
 
                 let decision: TriggerTraceActionRecord["decision"];
                 let scheduledEffects: TriggerTraceScheduledEffect[] = [];
@@ -1760,10 +1702,6 @@ export class Scheduler {
               ) {
                 this.recordTriggerTrace(triggerTraceEntry);
               }
-            } else {
-              triggerFlowLogger.debug("schedule", () => [
-                `[CHANGE ${changeIndex}] No registered actions for ${spaceAndURI}`,
-              ]);
             }
           }
         }

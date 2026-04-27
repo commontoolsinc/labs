@@ -58,19 +58,6 @@ export interface DomApplicatorOptions {
   setProp?: SetPropHandler;
 }
 
-export interface DomApplicatorLifecycleDiagnostics {
-  vdomOps: Record<string, number>;
-  cfCellLinkOps: Record<string, number>;
-  bindingSets: Record<string, { set: number; skipped: number }>;
-  nodeCount: number;
-  connectedNodeCount: number;
-  detachedNodeCount: number;
-  cfCellLinkNodeCount: number;
-  detachedCfCellLinkNodeCount: number;
-  duplicateCreateCount: number;
-  duplicateCreates: Record<string, number>;
-}
-
 /**
  * DOM applicator that applies VDomOps to the real DOM.
  */
@@ -89,14 +76,6 @@ export class DomApplicator {
   private readonly runtimeClient: RuntimeClient;
   private readonly onError?: (error: Error) => void;
   private readonly setPropHandler: SetPropHandler;
-  private readonly vdomOpCounts = new Map<string, number>();
-  private readonly cfCellLinkOpCounts = new Map<string, number>();
-  private readonly bindingSetCounts = new Map<
-    string,
-    { set: number; skipped: number }
-  >();
-  private readonly duplicateCreateCounts = new Map<string, number>();
-  private duplicateCreateCount = 0;
 
   private rootNodeId: number | null = null;
 
@@ -142,8 +121,6 @@ export class DomApplicator {
    * Apply a single VDOM operation.
    */
   private applyOp(op: VDomOp): void {
-    this.recordOperation(op);
-
     switch (op.op) {
       case "create-element":
         this.createElement(op.nodeId, op.tagName);
@@ -303,36 +280,14 @@ export class DomApplicator {
     };
   }
 
-  getLifecycleDiagnostics(): DomApplicatorLifecycleDiagnostics {
-    const nodeState = this.getNodeStateDiagnostics();
-    return {
-      vdomOps: Object.fromEntries(this.vdomOpCounts),
-      cfCellLinkOps: Object.fromEntries(this.cfCellLinkOpCounts),
-      bindingSets: Object.fromEntries(this.bindingSetCounts),
-      ...nodeState,
-      duplicateCreateCount: this.duplicateCreateCount,
-      duplicateCreates: Object.fromEntries(this.duplicateCreateCounts),
-    };
-  }
-
-  resetLifecycleDiagnostics(): void {
-    this.vdomOpCounts.clear();
-    this.cfCellLinkOpCounts.clear();
-    this.bindingSetCounts.clear();
-    this.duplicateCreateCounts.clear();
-    this.duplicateCreateCount = 0;
-  }
-
   // ============== Operation Implementations ==============
 
   private createElement(nodeId: number, tagName: string): void {
-    this.recordDuplicateCreate(nodeId, tagName.toLowerCase());
     const element = this.document.createElement(tagName);
     this.nodes.set(nodeId, element);
   }
 
   private createText(nodeId: number, text: string): void {
-    this.recordDuplicateCreate(nodeId, "#text");
     const textNode = this.document.createTextNode(text);
     this.nodes.set(nodeId, textNode);
   }
@@ -435,13 +390,11 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
 
-    const bindingKey = `${this.diagnosticTagName(node)}.${propName}`;
     const existing = (node as any)[propName];
     if (
       existing instanceof CellHandle &&
       cellRefToKey(existing.ref()) === cellRefToKey(cellRef)
     ) {
-      this.recordBindingSet(bindingKey, "skipped");
       return;
     }
 
@@ -451,7 +404,6 @@ export class DomApplicator {
     // Set the CellHandle on the element's property
     // Custom elements like cf-input and cf-checkbox expect this
     (node as any)[propName] = cellHandle;
-    this.recordBindingSet(bindingKey, "set");
     this.notifyBoundProperty(node, propName);
   }
 
@@ -608,98 +560,6 @@ export class DomApplicator {
     for (const [key, value] of Object.entries(attrs)) {
       this.setProp(nodeId, key, value);
     }
-  }
-
-  private recordOperation(op: VDomOp): void {
-    this.incrementCount(this.vdomOpCounts, op.op);
-    if (this.isCfCellLinkOperation(op)) {
-      this.incrementCount(this.cfCellLinkOpCounts, op.op);
-    }
-  }
-
-  private isCfCellLinkOperation(op: VDomOp): boolean {
-    switch (op.op) {
-      case "create-element":
-        return op.tagName.toLowerCase() === "cf-cell-link";
-      case "set-binding":
-      case "remove-node":
-        return this.nodeTagName(op.nodeId) === "cf-cell-link";
-      default:
-        return false;
-    }
-  }
-
-  private nodeTagName(nodeId: number): string | undefined {
-    const node = this.nodes.get(nodeId);
-    return isElementNode(node) ? this.diagnosticTagName(node) : undefined;
-  }
-
-  private diagnosticTagName(node: HTMLElement): string {
-    return node.tagName.toLowerCase();
-  }
-
-  private getNodeStateDiagnostics(): Pick<
-    DomApplicatorLifecycleDiagnostics,
-    | "nodeCount"
-    | "connectedNodeCount"
-    | "detachedNodeCount"
-    | "cfCellLinkNodeCount"
-    | "detachedCfCellLinkNodeCount"
-  > {
-    const container = this.nodes.get(CONTAINER_NODE_ID);
-    let connectedNodeCount = 0;
-    let detachedNodeCount = 0;
-    let cfCellLinkNodeCount = 0;
-    let detachedCfCellLinkNodeCount = 0;
-
-    for (const [nodeId, node] of this.nodes) {
-      const isContainer = nodeId === CONTAINER_NODE_ID;
-      const isConnected = isContainer ||
-        (container ? container.contains(node) : node.isConnected);
-      const isCfCellLink = isElementNode(node) &&
-        this.diagnosticTagName(node) === "cf-cell-link";
-
-      if (isConnected) {
-        connectedNodeCount++;
-      } else {
-        detachedNodeCount++;
-      }
-
-      if (isCfCellLink) {
-        cfCellLinkNodeCount++;
-        if (!isConnected) {
-          detachedCfCellLinkNodeCount++;
-        }
-      }
-    }
-
-    return {
-      nodeCount: this.nodes.size,
-      connectedNodeCount,
-      detachedNodeCount,
-      cfCellLinkNodeCount,
-      detachedCfCellLinkNodeCount,
-    };
-  }
-
-  private recordDuplicateCreate(nodeId: number, tagName: string): void {
-    if (!this.nodes.has(nodeId)) return;
-
-    this.duplicateCreateCount++;
-    this.incrementCount(this.duplicateCreateCounts, tagName);
-  }
-
-  private recordBindingSet(
-    key: string,
-    disposition: "set" | "skipped",
-  ): void {
-    const existing = this.bindingSetCounts.get(key) ?? { set: 0, skipped: 0 };
-    existing[disposition]++;
-    this.bindingSetCounts.set(key, existing);
-  }
-
-  private incrementCount(map: Map<string, number>, key: string): void {
-    map.set(key, (map.get(key) ?? 0) + 1);
   }
 }
 

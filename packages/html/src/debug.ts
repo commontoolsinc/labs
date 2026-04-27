@@ -4,49 +4,11 @@
  * Usage: commonfabric.vdom.dump()   — pretty-print the VDOM tree
  *        commonfabric.vdom.renders() — list all active renderings
  *        commonfabric.vdom.stats()   — node/listener counts
- *        commonfabric.vdom.diagnostics() — VDOM lifecycle counters
  */
 
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import { debugVDOMSchema } from "@commonfabric/runner/schemas";
 import { type ActiveRender, getActiveRenders } from "./render.ts";
-import type { DomApplicatorLifecycleDiagnostics } from "./main/applicator.ts";
-
-function emptyLifecycleDiagnostics(): DomApplicatorLifecycleDiagnostics {
-  return {
-    vdomOps: {},
-    cfCellLinkOps: {},
-    bindingSets: {},
-    nodeCount: 0,
-    connectedNodeCount: 0,
-    detachedNodeCount: 0,
-    cfCellLinkNodeCount: 0,
-    detachedCfCellLinkNodeCount: 0,
-    duplicateCreateCount: 0,
-    duplicateCreates: {},
-  };
-}
-
-function addCounts(
-  target: Record<string, number>,
-  source: Record<string, number>,
-): void {
-  for (const [key, value] of Object.entries(source)) {
-    target[key] = (target[key] ?? 0) + value;
-  }
-}
-
-function addBindingCounts(
-  target: DomApplicatorLifecycleDiagnostics["bindingSets"],
-  source: DomApplicatorLifecycleDiagnostics["bindingSets"],
-): void {
-  for (const [key, value] of Object.entries(source)) {
-    const existing = target[key] ?? { set: 0, skipped: 0 };
-    existing.set += value.set;
-    existing.skipped += value.skipped;
-    target[key] = existing;
-  }
-}
 
 /**
  * Resolve an optional element-or-index argument to an ActiveRender entry.
@@ -280,55 +242,6 @@ export function createVDomDebugHelpers() {
         i++;
       }
       console.table(rows);
-    },
-
-    /**
-     * Return lifecycle counters for active worker-path renderers.
-     */
-    diagnostics() {
-      const aggregate = emptyLifecycleDiagnostics();
-      const renders: Array<{
-        index: number;
-        container: HTMLElement;
-        path: ActiveRender["path"];
-        diagnostics: DomApplicatorLifecycleDiagnostics | null;
-      }> = [];
-      let i = 0;
-      for (const [parent, entry] of getActiveRenders()) {
-        const diagnostics = entry.renderer
-          ? entry.renderer.getApplicator().getLifecycleDiagnostics()
-          : null;
-        if (diagnostics) {
-          addCounts(aggregate.vdomOps, diagnostics.vdomOps);
-          addCounts(aggregate.cfCellLinkOps, diagnostics.cfCellLinkOps);
-          addBindingCounts(aggregate.bindingSets, diagnostics.bindingSets);
-          aggregate.nodeCount += diagnostics.nodeCount;
-          aggregate.connectedNodeCount += diagnostics.connectedNodeCount;
-          aggregate.detachedNodeCount += diagnostics.detachedNodeCount;
-          aggregate.cfCellLinkNodeCount += diagnostics.cfCellLinkNodeCount;
-          aggregate.detachedCfCellLinkNodeCount +=
-            diagnostics.detachedCfCellLinkNodeCount;
-          aggregate.duplicateCreateCount += diagnostics.duplicateCreateCount;
-          addCounts(aggregate.duplicateCreates, diagnostics.duplicateCreates);
-        }
-        renders.push({
-          index: i,
-          container: parent,
-          path: entry.path,
-          diagnostics,
-        });
-        i++;
-      }
-      return { aggregate, renders };
-    },
-
-    /**
-     * Reset lifecycle counters on active worker-path renderers.
-     */
-    resetDiagnostics() {
-      for (const entry of getActiveRenders().values()) {
-        entry.renderer?.getApplicator().resetLifecycleDiagnostics();
-      }
     },
 
     /**

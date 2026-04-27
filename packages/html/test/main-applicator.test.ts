@@ -608,27 +608,6 @@ Deno.test("DomApplicator - cell bindings", async (t) => {
     });
 
     assertNotStrictEquals(node.cell, firstHandle);
-
-    assertEquals(applicator.getLifecycleDiagnostics(), {
-      vdomOps: {
-        "create-element": 1,
-        "set-binding": 3,
-      },
-      cfCellLinkOps: {
-        "create-element": 1,
-        "set-binding": 3,
-      },
-      bindingSets: {
-        "cf-cell-link.cell": { set: 2, skipped: 1 },
-      },
-      nodeCount: 1,
-      connectedNodeCount: 0,
-      detachedNodeCount: 1,
-      cfCellLinkNodeCount: 1,
-      detachedCfCellLinkNodeCount: 1,
-      duplicateCreateCount: 0,
-      duplicateCreates: {},
-    });
   });
 });
 
