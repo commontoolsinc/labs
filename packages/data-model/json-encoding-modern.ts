@@ -27,6 +27,45 @@ import { TAGS } from "./fabric-type-tags.ts";
 /** Shared default handler registry, created once. */
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
 
+/** Returns true if `v` is a single-key object whose key starts with `/` —
+ * the wire form of an encoded instance (tag-wrapped value). */
+function isEncodedInstance(v: JsonWireValue): boolean {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const keys = Object.keys(v);
+  return keys.length === 1 && keys[0].startsWith("/");
+}
+
+/**
+ * Returns true if the already-serialized wire value `v` can be embedded
+ * inside a /quote wrap without inner deserialization: primitives, plain
+ * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
+ * values (which unquote() can collapse).
+ */
+function isQuoteSafe(v: JsonWireValue): boolean {
+  if (v === null || typeof v !== "object") return true;
+  if (Array.isArray(v)) return v.every((item) => isQuoteSafe(item));
+  if (!isEncodedInstance(v)) {
+    return Object.values(v).every((item) => isQuoteSafe(item as JsonWireValue));
+  }
+  return Object.keys(v)[0] === "/quote";
+}
+
+/**
+ * Unwraps /quote forms one level so their literal content can be embedded
+ * directly inside a parent /quote. The inner content of a /quote is already
+ * literal and must not be recursed into.
+ */
+function unquote(v: JsonWireValue): JsonWireValue {
+  if (v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return v.map(unquote) as JsonWireValue;
+  if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
+    return (v as Record<string, JsonWireValue>)["/quote"];
+  }
+  return Object.fromEntries(
+    Object.entries(v).map(([k, val]) => [k, unquote(val as JsonWireValue)]),
+  ) as JsonWireValue;
+}
+
 /**
  * JSON encoding context implementing the `/<Type>@<Version>` wire format
  * from the formal spec (Section 5).
@@ -161,16 +200,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return null;
     }
 
-    const keys = Object.keys(data);
-    if (keys.length !== 1) {
+    if (!isEncodedInstance(data)) {
       return null;
     }
 
-    const key = keys[0];
-    if (!key.startsWith("/")) {
-      return null;
-    }
-
+    const key = Object.keys(data)[0];
     const tag = key.slice(1);
     const state = (data as Record<string, JsonWireValue>)[key];
     return { tag, state };
@@ -284,13 +318,20 @@ export class JsonEncodingContext implements SerializationContext<string> {
     ) {
       result[key] = this.serialize(val, seen, registry);
     }
-
     seen.delete(value as object);
 
-    // Apply `TAGS.object` escaping per Section 5.6: wrap any plain object
-    // that has at least one /-prefixed key, not just single-key objects.
+    // Apply escaping per Section 5.6 for plain objects with /-prefixed keys.
+    // Serialize all values first (post-pass), then check if all are quote-safe.
+    // If so, unwrap any /quote children and wrap the whole object with /quote.
+    // Otherwise wrap with /object so the decoder deserializes entries.
     const keys = Object.keys(result);
     if (keys.some((k) => k.startsWith("/"))) {
+      if (Object.values(result).every((v) => isQuoteSafe(v))) {
+        const unquoted = Object.fromEntries(
+          Object.entries(result).map(([k, v]) => [k, unquote(v)]),
+        );
+        return this.wrapTag(TAGS.quote, unquoted) as JsonWireValue;
+      }
       return this.wrapTag(TAGS.object, result) as JsonWireValue;
     }
 
