@@ -42,6 +42,41 @@ export const LLMMessageSchema = internSchema(
   },
 );
 
+/** Runtime schema for {@link BuiltInLLMDialogState} (packages/api/index.ts). */
+export const LLMDialogResultSchema = internSchema(
+  {
+    type: "object",
+    properties: {
+      pending: { type: "boolean", default: false },
+      result: {},
+      addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+      cancelGeneration: { asCell: ["stream"] },
+      pinCell: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          name: { type: "string" },
+        },
+        required: ["path", "name"],
+        asCell: ["stream"],
+      },
+      unpinAllCells: { asCell: ["stream"] },
+      flattenedTools: { type: "object", default: {} },
+      pinnedCells: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            name: { type: "string" },
+          },
+        },
+      },
+    },
+    required: ["pending", "addMessage", "cancelGeneration"],
+  } as const,
+);
+
 /** Runtime schema for {@link BuiltInLLMTool} (packages/api/index.ts). */
 export const LLMToolSchema = internSchema(
   {

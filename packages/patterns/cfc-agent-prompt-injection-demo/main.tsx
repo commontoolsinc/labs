@@ -50,6 +50,13 @@ type PromptAttachment = {
   data?: unknown;
 };
 
+type PromptSendEvent = {
+  detail: {
+    text: string;
+    attachments?: Array<PromptAttachment>;
+  };
+};
+
 type SentEmail = {
   route: string;
   recipient: string;
@@ -225,15 +232,7 @@ const makeHostileBriefingDocument = lift<
   )
 );
 
-const sendMessage = handler<
-  {
-    detail: {
-      text: string;
-      attachments?: Array<PromptAttachment>;
-    };
-  },
-  { addMessage: Stream<BuiltInLLMMessage> }
->((event, { addMessage }) => {
+const promptInputMessage = (event: PromptSendEvent): BuiltInLLMMessage => {
   const { text, attachments } = event.detail;
   let resolved = text;
   for (const attachment of attachments ?? []) {
@@ -247,33 +246,15 @@ const sendMessage = handler<
     }
   }
 
-  addMessage.send({
+  return {
     role: "user",
     content: [{ type: "text" as const, text: resolved }],
-  });
-});
+  };
+};
 
 const makeUserPromptMessage = (prompt: string): BuiltInLLMMessage => ({
   role: "user",
   content: [{ type: "text" as const, text: prompt }],
-});
-
-const runAgentPrompt = handler<
-  any,
-  { addMessage: Stream<BuiltInLLMMessage> }
->((_event, { addMessage }) => {
-  addMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-});
-
-const runBothAgentPrompts = handler<
-  any,
-  {
-    unsafeAddMessage: Stream<BuiltInLLMMessage>;
-    safeAddMessage: Stream<BuiltInLLMMessage>;
-  }
->((_event, { unsafeAddMessage, safeAddMessage }) => {
-  unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-  safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
 });
 
 const clearMessageList = handler<
@@ -551,7 +532,8 @@ Your job in this half is to fail visibly when the document tries to seize contro
         <cf-prompt-input
           placeholder="Ask this agent to inspect the briefing..."
           pending={unsafePending}
-          oncf-send={sendMessage({ addMessage: unsafeAddMessage })}
+          oncf-send={(event: PromptSendEvent) =>
+            unsafeAddMessage.send(promptInputMessage(event))}
           oncf-stop={unsafeCancelGeneration}
         />
       </div>
@@ -608,12 +590,6 @@ user-facing text from those structured fields plus the original user request.`;
     model: parentModel,
     builtinTools: false,
     observationMaxConfidentiality: ["internal", PROMPT_INFLUENCE_ATOM],
-  });
-  const runUnsafeAgent = runAgentPrompt({ addMessage: unsafeAddMessage });
-  const runSafeAgent = runAgentPrompt({ addMessage: safeAddMessage });
-  const runBothAgents = runBothAgentPrompts({
-    unsafeAddMessage,
-    safeAddMessage,
   });
   const clearEmails = clearEmailList({ emails });
   const safeClearChat = clearMessageList({ messages: safeMessages });
@@ -676,7 +652,8 @@ user-facing text from those structured fields plus the original user request.`;
         <cf-prompt-input
           placeholder="Ask this agent to inspect the briefing..."
           pending={safePending}
-          oncf-send={sendMessage({ addMessage: safeAddMessage })}
+          oncf-send={(event: PromptSendEvent) =>
+            safeAddMessage.send(promptInputMessage(event))}
           oncf-stop={safeCancelGeneration}
         />
       </div>
@@ -734,21 +711,26 @@ user-facing text from those structured fields plus the original user request.`;
                   <button
                     type="button"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={runBothAgents}
+                    onClick={() => {
+                      unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+                      safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+                    }}
                   >
                     Run both agents
                   </button>
                   <button
                     type="button"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={runUnsafeAgent}
+                    onClick={() =>
+                      unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT))}
                   >
                     Run unsafe only
                   </button>
                   <button
                     type="button"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={runSafeAgent}
+                    onClick={() =>
+                      safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT))}
                   >
                     Run safe only
                   </button>

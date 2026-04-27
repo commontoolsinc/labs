@@ -90,6 +90,22 @@ const hasLabelValues = (label: IFCLabel): boolean =>
   (label.confidentiality?.length ?? 0) > 0 ||
   (label.integrity?.length ?? 0) > 0;
 
+const metadataAppliesToPath = (
+  metadata: CfcMetadata,
+  path: readonly string[],
+): boolean => {
+  const logicalPath = canonicalizeLogicalPath(path);
+  return metadata.labelMap.entries.some((entry) =>
+    hasLabelValues(entry.label) &&
+    (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
+  );
+};
+
+const metadataAppliesToAnyPath = (
+  metadata: CfcMetadata,
+  paths: readonly (readonly string[])[],
+): boolean => paths.some((path) => metadataAppliesToPath(metadata, path));
+
 const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return false;
@@ -1011,6 +1027,9 @@ export const prepareBoundaryCommit = (
       target.type,
     );
     if (existing === undefined) {
+      continue;
+    }
+    if (!metadataAppliesToAnyPath(existing, target.paths)) {
       continue;
     }
     const linkWriteInputs = linkWrites.get(key) ?? [];

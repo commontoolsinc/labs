@@ -17,6 +17,7 @@ import type { Schema } from "@commonfabric/api/schema";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  LLMDialogResultSchema,
   LLMMessageSchema,
   LLMParamsSchema,
   LLMToolSchema,
@@ -51,6 +52,7 @@ import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { resolveLink } from "../link-resolution.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";
+import type { RawBuiltinResult } from "../module.ts";
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -737,39 +739,7 @@ function traverseAndCellify(
   return value;
 }
 
-const resultSchema = internSchema(
-  {
-    type: "object",
-    properties: {
-      pending: { type: "boolean", default: false },
-      result: {},
-      addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
-      cancelGeneration: { asCell: ["stream"] },
-      pinCell: {
-        type: "object",
-        properties: {
-          path: { type: "string" },
-          name: { type: "string" },
-        },
-        required: ["path", "name"],
-        asCell: ["stream"],
-      },
-      unpinAllCells: { asCell: ["stream"] },
-      flattenedTools: { type: "object", default: {} },
-      pinnedCells: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            path: { type: "string" },
-            name: { type: "string" },
-          },
-        },
-      },
-    },
-    required: ["pending", "addMessage", "cancelGeneration"],
-  } as const,
-);
+const resultSchema = LLMDialogResultSchema;
 
 const internalSchema = internSchema(
   {
@@ -2525,7 +2495,7 @@ export function llmDialog(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
-): Action {
+): RawBuiltinResult {
   const inputs = inputsCell.asSchema(LLMParamsSchema);
 
   // Helper function to create and register handlers
@@ -2564,7 +2534,7 @@ export function llmDialog(
     tx.commit();
   });
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     // Setup cells on first run.
     if (!cellsInitialized) {
       // Create result cell. The predictable cause means that it'll map to
@@ -2828,6 +2798,8 @@ export function llmDialog(
       requestId = undefined;
     }
   };
+
+  return { action, isEffect: true };
 }
 
 async function startRequest(

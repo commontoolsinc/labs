@@ -775,7 +775,7 @@ export default pattern<State>(({ value }) => {
       const cancel = render(root, page.cell() as any, renderOptions);
 
       await waitFor(
-        () => Promise.resolve(root.innerHTML.length > 0),
+        () => Promise.resolve(root.getElementsByTagName("button").length > 0),
         { timeout: 5000 },
       );
       assertEquals(await valueCell.sync(), 0);
@@ -849,7 +849,7 @@ export default pattern<State>(({ value }) => {
       const cancel = render(root, page.cell() as any, renderOptions);
 
       await waitFor(
-        () => Promise.resolve(root.innerHTML.length > 0),
+        () => Promise.resolve(root.getElementsByTagName("button").length > 0),
         { timeout: 5000 },
       );
       assertEquals(await valueCell.sync(), 0);
@@ -882,7 +882,7 @@ const addValue = handler<AddEvent, { value: Writable<number> }>((event, { value 
   value.set(value.get() + event.value);
 });
 
-const runAddValue = handler<unknown, { add: Stream<AddEvent> }>((_, { add }) => {
+const runAddValue = handler<any, { add: Stream<AddEvent> }>((_, { add }) => {
   add.send({ value: 1 });
 });
 
@@ -937,7 +937,7 @@ export default pattern<Record<string, never>>(() => {
       const cancel = render(root, page.cell() as any, renderOptions);
 
       await waitFor(
-        () => Promise.resolve(root.innerHTML.length > 0),
+        () => Promise.resolve(root.getElementsByTagName("button").length > 0),
         { timeout: 5000 },
       );
       assertEquals(await valueCell.sync(), 0);
@@ -955,6 +955,203 @@ export default pattern<Record<string, never>>(() => {
       await waitFor(
         () => Promise.resolve(root.innerHTML.includes(">1</span>")),
         { timeout: 5000 },
+      );
+
+      cancel();
+    });
+
+    it("commits click events through handler streams that capture child pattern stream outputs", async () => {
+      const clickPattern =
+        `import { handler, NAME, pattern, Stream, UI, Writable } from "commonfabric";
+
+type AddEvent = { value: number };
+
+interface ChildOutput {
+  [NAME]: string;
+  [UI]: unknown;
+  value: number;
+  add: Stream<AddEvent>;
+}
+
+const addValue = handler<AddEvent, { value: Writable<number> }>((event, { value }) => {
+  value.set(value.get() + event.value);
+});
+
+const runAddValue = handler<any, { add: Stream<AddEvent> }>((_, { add }) => {
+  add.send({ value: 1 });
+});
+
+const Child = pattern<Record<string, never>, ChildOutput>(() => {
+  const value = Writable.of(0, {
+    type: "number",
+    ifc: { confidentiality: [{ kind: "secret" }] },
+  });
+  const add = addValue({ value });
+  return {
+    [NAME]: "Child Stream",
+    [UI]: <span id="child">Child</span>,
+    value,
+    add,
+  };
+});
+
+export default pattern<Record<string, never>>(() => {
+  const child = Child({});
+  const run = runAddValue({ add: child.add });
+  return {
+    [NAME]: "Child Stream Click Test",
+    value: child.value,
+    [UI]: (
+      <div>
+        <button id="run" onClick={run}>Run</button>
+        <span id="value">{child.value}</span>
+      </div>
+    ),
+  };
+});`;
+
+      const clickProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: clickPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session, {
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: `principal:${identity.did()}`,
+          actingPrincipal: identity.did(),
+        },
+      });
+
+      const page = await rt.createPage(clickProgram, {
+        run: true,
+      });
+      const valueCell = (page.cell() as any).key("value").asSchema({
+        type: "number",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.getElementsByTagName("button").length > 0),
+        { timeout: 5000 },
+      );
+      assertEquals(await valueCell.sync(), 0);
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        async () => await valueCell.sync() === 1,
+        { timeout: 5000 },
+      );
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.includes(">1</span>")),
+        { timeout: 5000 },
+      );
+
+      cancel();
+    });
+
+    it("commits click events through inline handlers that capture llmDialog addMessage", async () => {
+      const clickPattern =
+        `import { BuiltInLLMMessage, Cell, llmDialog, NAME, pattern, UI } from "commonfabric";
+
+export default pattern<Record<string, never>>(() => {
+  const messages = Cell.of<BuiltInLLMMessage[]>([]);
+  const { addMessage } = llmDialog({
+    messages,
+    model: "mock:no-response-needed",
+    builtinTools: false,
+    observationMaxConfidentiality: [{ kind: "secret" }],
+  });
+
+  return {
+    [NAME]: "LLM Dialog Inline Click Test",
+    messages,
+    [UI]: (
+      <div>
+        <button
+          id="run"
+          onClick={() =>
+            addMessage.send({ role: "user", content: "Hello from click" })}
+        >
+          Run
+        </button>
+      </div>
+    ),
+  };
+});`;
+
+      const clickProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: clickPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session, {
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: `principal:${identity.did()}`,
+          actingPrincipal: identity.did(),
+        },
+      });
+
+      const page = await rt.createPage(clickProgram, {
+        run: true,
+      });
+      const messagesCell = (page.cell() as any).key("messages").asSchema({
+        type: "array",
+        items: { type: "object", additionalProperties: true },
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.getElementsByTagName("button").length > 0),
+        { timeout: 5000 },
+      );
+      assertEquals(await messagesCell.sync(), []);
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        async () => {
+          const messages = await messagesCell.sync() as any[];
+          return messages.some((message) =>
+            message.content === "Hello from click"
+          );
+        },
+        { timeout: 5000 },
+      );
+
+      const messages = await messagesCell.sync() as any[];
+      assertEquals(
+        messages.some((message) => message.content === "Hello from click"),
+        true,
       );
 
       cancel();

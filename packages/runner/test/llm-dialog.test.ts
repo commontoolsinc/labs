@@ -142,6 +142,86 @@ describe("llmDialog", () => {
     expect(msgs[3].content).toBe("I'm doing well, thanks!");
   });
 
+  it("should support handler streams that capture addMessage", async () => {
+    loadConversationFixture({
+      description: "Handler stream sends a message into llmDialog",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["Hello from handler"] },
+          response: {
+            role: "assistant",
+            content: "Handled.",
+            id: "handler-r1",
+          },
+        },
+      ],
+    });
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        run: { asStream: true },
+        pending: { type: "boolean" },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["run"],
+    } as const satisfies JSONSchema;
+
+    const sendPrompt = handler(
+      true,
+      {
+        type: "object",
+        properties: {
+          addMessage: { ...LLMMessageSchema, asStream: true },
+        },
+        required: ["addMessage"],
+      } as const satisfies JSONSchema,
+      (_event: any, { addMessage }: any) => {
+        addMessage.send({
+          role: "user",
+          content: "Hello from handler",
+        });
+      },
+    );
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({ messages });
+        return {
+          run: sendPrompt({ addMessage: dialog.addMessage as any }),
+          pending: dialog.pending,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-captured-add-message-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const run = await result.key("run").pull();
+    run.send({});
+
+    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+
+    const msgs = (await result.key("messages").pull())!;
+    expect(msgs[0].content).toBe("Hello from handler");
+    expect(msgs[1].content).toBe("Handled.");
+  });
+
   it("should support tool calls in llmDialog", async () => {
     loadConversationFixture({
       description: "Tool call: weather lookup with getWeather tool",
