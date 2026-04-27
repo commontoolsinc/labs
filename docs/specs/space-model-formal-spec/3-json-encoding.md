@@ -262,11 +262,11 @@ Specifically:
 - **Single-key objects** whose sole key starts with `/` are either a tagged
   value of a known type (e.g. `{ "/Error@1": ... }`), a built-in escape
   (`/object`, `/quote`), or an encoding error. Unrecognized tags must be
-  treated as `UnknownValue` (Section 8).
+  treated as `ProblematicValue`.
 - **Multi-key objects** containing one or more `/`-prefixed keys are also
   reserved — they are not valid plain objects. Implementations must not treat
   such objects as plain data; they must be flagged as encoding errors or
-  treated as `UnknownValue`.
+  treated as `ProblematicValue`.
 
 The `/object` escape (Section 6) ensures that legitimate plain objects with
 `/`-prefixed keys are always wrapped before reaching the wire, so a conforming
