@@ -122,7 +122,7 @@ round-trip correctly.
 > the wire. Each type handler must validate the format of its state before
 > processing. For example, a handler whose state is a base64url string (such as
 > `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
-> its state is a `string` containing valid unpadded base64url before decoding. On
+> its state is a `string` containing valid base64url (padded or unpadded) before decoding. On
 > malformed input — wrong type, invalid format, or missing fields — the handler
 > should produce a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
 > rather than throwing or silently producing garbage. This principle applies to
