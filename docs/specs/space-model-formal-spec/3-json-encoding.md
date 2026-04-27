@@ -248,25 +248,28 @@ preserve it for round-tripping.
 
 ## 9. `/`-Key Reservation Rule
 
-All plain objects whose key(s) begin with `/` are **reserved** in the JSON
-encoding. A plain object with a sole key starting with `/` is either a tagged
-value of a known type (e.g. `{ "/Error@1": ... }`) or an encoding error.
+The `/` prefix in key space is wholly owned by the encoding system. Any object
+containing **any** key that starts with `/` — regardless of how many other keys
+the object has — is a **reserved form**. Plain objects in the data model never
+have `/`-prefixed keys; the presence of any such key marks the object as a
+tagged or otherwise reserved encoding.
 
 Specifically:
 
 - **Objects with a bare `"/"` key** (i.e., the tag name is empty after
   stripping the leading `/`) are always encoding errors. No valid tag has an
   empty name.
-- **Objects with an unrecognized `/`-prefixed tag** — one that is not in the
-  implementation's type registry and is not a built-in escape (`/object`,
-  `/quote`) — must be treated as `UnknownValue` (Section 8), not as a plain
-  object. Implementations must not pass the object through as-is.
-- **Objects with multiple keys** where one or more keys begin with `/` do not
-  trigger this rule, since the detection rule (Section 4) requires exactly one
-  key for a special type. Such objects are plain objects and are decoded
-  normally; their `/`-prefixed keys are literal key strings.
+- **Single-key objects** whose sole key starts with `/` are either a tagged
+  value of a known type (e.g. `{ "/Error@1": ... }`), a built-in escape
+  (`/object`, `/quote`), or an encoding error. Unrecognized tags must be
+  treated as `UnknownValue` (Section 8).
+- **Multi-key objects** containing one or more `/`-prefixed keys are also
+  reserved — they are not valid plain objects. Implementations must not treat
+  such objects as plain data; they must be flagged as encoding errors or
+  treated as `UnknownValue`.
 
-The intent is that the `/` prefix in key space is wholly owned by the encoding
-system. Plain objects that happen to contain `"/"`-prefixed keys at the
-serialization boundary are handled by the `/object` escape (Section 6), which
-ensures such keys never appear bare in the wire format.
+The `/object` escape (Section 6) ensures that legitimate plain objects with
+`/`-prefixed keys are always wrapped before reaching the wire, so a conforming
+encoder will never emit a plain-object form that violates this rule. A
+conforming decoder that encounters a violation should treat it as an encoding
+error.
