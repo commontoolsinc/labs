@@ -968,11 +968,21 @@ describe("json encoding", () => {
       expect(result).toEqual({ a: 1, "/b": 2 });
     });
 
-    it("round-trips multi-key object with / key", () => {
-      const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
-      const result = roundTrip(obj) as Record<string, FabricValue>;
-      expect(result.a).toBe(1);
-      expect(result["/b"]).toBe(2);
+    it("deserializing multi-key object with /-prefixed key produces ProblematicValue", () => {
+      // ANY object containing a /-prefixed key is reserved per spec — must not
+      // be silently round-tripped as a plain object.
+      const data = { a: 1, "/b": 2 } as JsonWireValue;
+      const result = fromWireFormat(data);
+      expect(result).toBeInstanceOf(ProblematicValue);
+    });
+
+    it("single-key /-prefixed object still routes through unwrapTag (no regression)", () => {
+      // Single-key /Tag@1 objects are handled by unwrapTag, not the plain-object
+      // path — confirm they still produce UnknownValue (unrecognized tag), not
+      // ProblematicValue from the new multi-key guard.
+      const data = { "/Unknown@1": { id: "x" } } as JsonWireValue;
+      const result = fromWireFormat(data);
+      expect(result).toBeInstanceOf(UnknownValue);
     });
   });
 
