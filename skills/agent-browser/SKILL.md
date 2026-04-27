@@ -172,6 +172,19 @@ agent-browser find placeholder "Search" type "query"
 agent-browser find testid "submit-btn" click
 ```
 
+For Common Fabric UIs, prefer these semantic locators before shadow-piercing
+selectors. `cf-button` exposes `role="button"` on the host, and `cf-input`
+exposes `role="textbox"` on the host with ARIA state such as `aria-disabled`,
+`aria-required`, `aria-readonly`, and `aria-invalid`.
+
+```bash
+agent-browser find role button click --name "Save"
+agent-browser find role textbox fill "Ada" --name "Name"
+```
+
+If a component has not yet been updated with host semantics, fall back to the
+documented pierce selectors such as `[data-cf-button]` or `[data-cf-input]`.
+
 ## Deep-Dive References
 
 | Reference                                                            | When to Use                                               |

@@ -27,6 +27,29 @@ describe("CFButton", () => {
     expect(element.type).toBe("button");
   });
 
+  it("should expose button semantics on the host", () => {
+    const element = new CFButton();
+    element.updated(new Map([["disabled", undefined]]));
+
+    expect(element.getAttribute("role")).toBe("button");
+    expect(element.getAttribute("aria-disabled")).toBe("false");
+    expect(element.getAttribute("exportparts")).toBe("button");
+    expect(element.tabIndex).toBe(0);
+  });
+
+  it("should expose disabled state on the host", () => {
+    const element = new CFButton();
+    element.disabled = true;
+    element.updated(new Map([["disabled", false]]));
+
+    expect(element.getAttribute("aria-disabled")).toBe("true");
+    expect(element.tabIndex).toBe(-1);
+  });
+
+  it("should delegate focus into the shadow button", () => {
+    expect(CFButton.shadowRootOptions.delegatesFocus).toBe(true);
+  });
+
   it("should suppress click events when disabled via host listener", () => {
     const element = new CFButton();
     element.disabled = true;

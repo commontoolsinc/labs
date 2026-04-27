@@ -78,6 +78,13 @@ const increment = action(() => {
 Use `safeDateNow()` rather than `Date.now()` when authored pattern code needs a
 timestamp snapshot.
 
+`cf-button` exposes `role="button"` and `aria-disabled` on the host. Agents and
+tests should find it by role and visible text:
+
+```bash
+agent-browser find role button click --name "Increment"
+```
+
 Useful styling hooks include:
 
 - `--cf-button-color-primary`
@@ -103,6 +110,15 @@ Useful styling hooks include:
     console.log("Changed:", e.detail.value);
   }}
 />
+```
+
+`cf-input` exposes `role="textbox"` plus `aria-disabled`, `aria-readonly`,
+`aria-required`, and `aria-invalid` on the host. Give inputs an accessible name
+with a label, `aria-label`, or placeholder, then find them semantically:
+
+```bash
+agent-browser find role textbox fill "Quarterly plan" --name "Title"
+agent-browser find placeholder "Search..." fill "notes"
 ```
 
 Useful styling hooks include:

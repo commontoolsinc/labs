@@ -125,6 +125,16 @@ agent-browser find last ".item" click
 agent-browser find nth 2 "a" hover
 ```
 
+Common Fabric components should be queried by host semantics first:
+
+```bash
+agent-browser find role button click --name "Save"
+agent-browser find role textbox fill "Ada" --name "Name"
+```
+
+Use shadow-piercing selectors only as a fallback for components that do not yet
+expose host roles.
+
 ## Browser Settings
 
 ```bash

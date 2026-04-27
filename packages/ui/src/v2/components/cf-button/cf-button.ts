@@ -1,4 +1,4 @@
-import { html } from "lit";
+import { html, LitElement } from "lit";
 import { styles } from "./styles.ts";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
@@ -41,6 +41,10 @@ export type ButtonSize = ComponentSize | "icon";
 
 export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
 
   static override properties = {
     variant: { type: String },
@@ -84,13 +88,28 @@ export class CFButton extends BaseElement {
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
     super.firstUpdated(changedProperties);
+    this._updateAccessibilityAttributes();
     this._updateThemeProperties();
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    if (!this.hasAttribute("role")) {
+      this.setAttribute("role", "button");
+    }
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "button");
+    }
+    this._updateAccessibilityAttributes();
   }
 
   override updated(
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
     super.updated(changedProperties);
+    if (changedProperties.has("disabled")) {
+      this._updateAccessibilityAttributes();
+    }
     if (changedProperties.has("theme")) {
       this._updateThemeProperties();
     }
@@ -99,6 +118,17 @@ export class CFButton extends BaseElement {
   private _updateThemeProperties() {
     const currentTheme = this.theme || defaultTheme;
     applyThemeToElement(this, currentTheme);
+  }
+
+  private _updateAccessibilityAttributes() {
+    if (!this.hasAttribute("role")) {
+      this.setAttribute("role", "button");
+    }
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "button");
+    }
+    this.tabIndex = this.disabled ? -1 : 0;
+    this.setAttribute("aria-disabled", String(this.disabled));
   }
 
   override render() {

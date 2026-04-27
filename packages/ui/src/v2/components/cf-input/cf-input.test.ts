@@ -39,6 +39,60 @@ describe("CFInput", () => {
     expect(el.showValidation).toBe(false);
   });
 
+  it("should expose textbox semantics on the host", () => {
+    const el = new CFInput();
+    el.updated(new Map([["disabled", undefined]]));
+
+    expect(el.getAttribute("role")).toBe("textbox");
+    expect(el.getAttribute("aria-disabled")).toBe("false");
+    expect(el.getAttribute("aria-readonly")).toBe("false");
+    expect(el.getAttribute("aria-required")).toBe("false");
+    expect(el.getAttribute("aria-invalid")).toBe("false");
+    expect(el.getAttribute("exportparts")).toBe("input");
+    expect(el.tabIndex).toBe(0);
+  });
+
+  it("should expose control state on the host", () => {
+    const el = new CFInput();
+    el.disabled = true;
+    el.readonly = true;
+    el.required = true;
+    el.error = true;
+    el.updated(
+      new Map([["disabled", false], ["readonly", false], [
+        "required",
+        false,
+      ], ["error", false]]),
+    );
+
+    expect(el.getAttribute("aria-disabled")).toBe("true");
+    expect(el.getAttribute("aria-readonly")).toBe("true");
+    expect(el.getAttribute("aria-required")).toBe("true");
+    expect(el.getAttribute("aria-invalid")).toBe("true");
+    expect(el.tabIndex).toBe(-1);
+  });
+
+  it("should use placeholder as an accessible name fallback", () => {
+    const el = new CFInput();
+    el.placeholder = "Search notes";
+    el.updated(new Map([["placeholder", ""]]));
+
+    expect(el.getAttribute("aria-label")).toBe("Search notes");
+  });
+
+  it("should preserve author-provided accessible names", () => {
+    const el = new CFInput();
+    el.setAttribute("aria-label", "Custom name");
+    el.placeholder = "Search notes";
+    el.updated(new Map([["placeholder", ""]]));
+
+    expect(el.getAttribute("aria-label")).toBe("Custom name");
+  });
+
+  it("should delegate focus into the shadow input", () => {
+    expect(CFInput.shadowRootOptions.delegatesFocus).toBe(true);
+  });
+
   it("should accept a CellHandle as value property", () => {
     const el = new CFInput();
     const cell = createMockCellHandle("hello");

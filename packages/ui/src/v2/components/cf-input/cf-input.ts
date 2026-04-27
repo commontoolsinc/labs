@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
@@ -125,6 +125,11 @@ export const INPUT_PATTERNS = {
 } as const;
 
 export class CFInput extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override styles = css`
     :host {
       --cf-input-color-text: var(--cf-theme-color-text, #111827);
@@ -414,6 +419,7 @@ export class CFInput extends BaseElement {
       declare timingDelay: number;
 
       private _input: HTMLInputElement | null = null;
+      private _generatedAriaLabel: string | null = null;
       private _cellController = createStringCellController(this, {
         timing: {
           strategy: "debounce",
@@ -590,6 +596,18 @@ export class CFInput extends BaseElement {
         if (changedProperties.has("theme")) {
           applyThemeToElement(this, this.theme ?? defaultTheme);
         }
+
+        if (
+          changedProperties.has("disabled") ||
+          changedProperties.has("readonly") ||
+          changedProperties.has("required") ||
+          changedProperties.has("error") ||
+          changedProperties.has("showValidation") ||
+          changedProperties.has("placeholder") ||
+          changedProperties.has("value")
+        ) {
+          this._updateAccessibilityAttributes();
+        }
       }
 
       override firstUpdated() {
@@ -614,6 +632,18 @@ export class CFInput extends BaseElement {
 
         // Apply theme after first render
         applyThemeToElement(this, this.theme ?? defaultTheme);
+        this._updateAccessibilityAttributes();
+      }
+
+      override connectedCallback() {
+        super.connectedCallback();
+        if (!this.hasAttribute("role")) {
+          this.setAttribute("role", "textbox");
+        }
+        if (!this.hasAttribute("exportparts")) {
+          this.setAttribute("exportparts", "input");
+        }
+        this._updateAccessibilityAttributes();
       }
 
       override render() {
@@ -745,6 +775,50 @@ export class CFInput extends BaseElement {
         // Update visual state if showValidation is enabled
         if (this.showValidation) {
           this.requestUpdate();
+        }
+        this._updateAccessibilityAttributes();
+      }
+
+      private _updateAccessibilityAttributes() {
+        if (!this.hasAttribute("role")) {
+          this.setAttribute("role", "textbox");
+        }
+        if (!this.hasAttribute("exportparts")) {
+          this.setAttribute("exportparts", "input");
+        }
+        this.tabIndex = this.disabled ? -1 : 0;
+        this.setAttribute("aria-disabled", String(this.disabled));
+        this.setAttribute("aria-readonly", String(this.readonly));
+        this.setAttribute("aria-required", String(this.required));
+        this._updateGeneratedAriaLabel();
+        this.setAttribute(
+          "aria-invalid",
+          String(this.error || !this.checkValidity()),
+        );
+      }
+
+      private _updateGeneratedAriaLabel() {
+        const ariaLabel = this.getAttribute("aria-label");
+        const hasAuthorProvidedName = this.hasAttribute("aria-labelledby") ||
+          (ariaLabel !== null && ariaLabel !== this._generatedAriaLabel);
+
+        if (hasAuthorProvidedName) {
+          this._generatedAriaLabel = null;
+          return;
+        }
+
+        if (this.placeholder) {
+          this.setAttribute("aria-label", this.placeholder);
+          this._generatedAriaLabel = this.placeholder;
+          return;
+        }
+
+        if (
+          this._generatedAriaLabel !== null &&
+          ariaLabel === this._generatedAriaLabel
+        ) {
+          this.removeAttribute("aria-label");
+          this._generatedAriaLabel = null;
         }
       }
 
