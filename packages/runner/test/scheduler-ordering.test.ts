@@ -222,14 +222,16 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [declaredWrite],
+        writes: [toMemorySpaceAddress(declaredWrite)],
       },
       {},
     );
 
     await runtime.scheduler.run(action);
 
-    expect(runtime.scheduler.getMightWrite(action)).toEqual([declaredWrite]);
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
   });
 
   it("should keep dynamic collection parent writes for numeric children", async () => {
@@ -260,15 +262,19 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [declaredWrite],
+        writes: [toMemorySpaceAddress(declaredWrite)],
       },
       {},
     );
 
     await runtime.scheduler.run(action);
 
-    expect(runtime.scheduler.getMightWrite(action)).toEqual([declaredWrite]);
-    expect(runtime.scheduler.getMightWrite(action)).not.toEqual([firstChild]);
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
+    expect(runtime.scheduler.getMightWrite(action)).not.toEqual([
+      toMemorySpaceAddress(firstChild),
+    ]);
   });
 
   it("should track filter stats", async () => {

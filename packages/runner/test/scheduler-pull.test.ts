@@ -282,9 +282,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [observed.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(observed.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [effectResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -381,9 +381,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [parentResult.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(parentResult.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [effectResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -444,18 +444,18 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [derived.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [derived.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [effectResult.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -1008,27 +1008,27 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       actionA,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [mid.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       actionB,
       {
-        reads: [mid.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [output.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [sink.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -1079,9 +1079,13 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.key("children").getAsNormalizedFullLink()],
+        writes: [
+          toMemorySpaceAddress(
+            output.key("children").getAsNormalizedFullLink(),
+          ),
+        ],
       },
       {},
     );
@@ -1101,7 +1105,11 @@ describe("pull-based scheduling", () => {
       effect,
       {
         reads: [],
-        shallowReads: [output.key("children").getAsNormalizedFullLink()],
+        shallowReads: [
+          toMemorySpaceAddress(
+            output.key("children").getAsNormalizedFullLink(),
+          ),
+        ],
         writes: [],
       },
       { isEffect: true },
@@ -1170,27 +1178,27 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       stableAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [stable.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(stable.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       downstreamAction,
       {
-        reads: [stable.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(stable.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [output.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [sink.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -1267,27 +1275,27 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       upstreamAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [mid.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       downstreamAction,
       {
-        reads: [mid.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [output.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [sink.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -1361,18 +1369,18 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       upstreamAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [mid.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       downstreamAction,
       {
-        reads: [mid.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1474,9 +1482,9 @@ describe("pull-based scheduling", () => {
       runtime.scheduler.subscribe(
         sharedWriter,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [shared.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(shared.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -1490,9 +1498,9 @@ describe("pull-based scheduling", () => {
         runtime.scheduler.subscribe(
           fanWriter,
           {
-            reads: [shared.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(shared.getAsNormalizedFullLink())],
             shallowReads: [],
-            writes: [fanCell.getAsNormalizedFullLink()],
+            writes: [toMemorySpaceAddress(fanCell.getAsNormalizedFullLink())],
           },
           {},
         );
@@ -1508,9 +1516,11 @@ describe("pull-based scheduling", () => {
       runtime.scheduler.subscribe(
         targetWriter,
         {
-          reads: fanCells.map((cell) => cell.getAsNormalizedFullLink()),
+          reads: fanCells.map((cell) =>
+            toMemorySpaceAddress(cell.getAsNormalizedFullLink())
+          ),
           shallowReads: [],
-          writes: [target.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(target.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -1593,20 +1603,20 @@ describe("pull-based scheduling", () => {
       action,
       {
         reads: [
-          selector.getAsNormalizedFullLink(),
-          sourceA.getAsNormalizedFullLink(),
+          toMemorySpaceAddress(selector.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(sourceA.getAsNormalizedFullLink()),
         ],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [output.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [sink.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -1672,18 +1682,18 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       upstreamAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [mid.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       downstreamAction,
       {
-        reads: [mid.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -1736,20 +1746,20 @@ describe("pull-based scheduling", () => {
       actionA,
       {
         reads: [
-          source.getAsNormalizedFullLink(),
-          right.getAsNormalizedFullLink(),
+          toMemorySpaceAddress(source.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(right.getAsNormalizedFullLink()),
         ],
         shallowReads: [],
-        writes: [left.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(left.getAsNormalizedFullLink())],
       },
       {},
     );
     runtime.scheduler.subscribe(
       actionB,
       {
-        reads: [left.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(left.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [right.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(right.getAsNormalizedFullLink())],
       },
       {},
     );
