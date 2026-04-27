@@ -160,306 +160,306 @@ export class CFTags extends BaseElement {
         opacity: 0.58;
         transition:
           opacity var(--cf-transition-duration-fast, 150ms)
-            var(--cf-transition-timing-ease, ease),
+          var(--cf-transition-timing-ease, ease),
           background-color var(--cf-transition-duration-fast, 150ms)
-            var(--cf-transition-timing-ease, ease);
-      }
+          var(--cf-transition-timing-ease, ease);
+        }
 
-      .tag-remove:hover {
-        opacity: 1;
-        background-color: color-mix(in srgb, currentColor 12%, transparent);
-      }
+        .tag-remove:hover {
+          opacity: 1;
+          background-color: color-mix(in srgb, currentColor 12%, transparent);
+        }
 
-      .tag-remove:focus-visible {
-        outline: 2px solid var(--cf-tag-ring);
-        outline-offset: 2px;
-      }
+        .tag-remove:focus-visible {
+          outline: 2px solid var(--cf-tag-ring);
+          outline-offset: 2px;
+        }
 
-      .add-tag {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--cf-tags-gap);
-        min-height: var(--cf-tag-min-height);
-        padding: var(--cf-tag-padding-v) var(--cf-tag-padding-h);
-        background-color: transparent;
-        border: 1px dashed var(--cf-tag-border-color);
-        border-radius: var(--cf-tag-border-radius);
-        font-size: var(--cf-tag-font-size);
-        line-height: var(--cf-tag-line-height);
-        color: var(--cf-tag-add-color);
-        cursor: pointer;
-        transition:
-          background-color var(--cf-transition-duration-fast, 150ms)
+        .add-tag {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--cf-tags-gap);
+          min-height: var(--cf-tag-min-height);
+          padding: var(--cf-tag-padding-v) var(--cf-tag-padding-h);
+          background-color: transparent;
+          border: 1px dashed var(--cf-tag-border-color);
+          border-radius: var(--cf-tag-border-radius);
+          font-size: var(--cf-tag-font-size);
+          line-height: var(--cf-tag-line-height);
+          color: var(--cf-tag-add-color);
+          cursor: pointer;
+          transition:
+            background-color var(--cf-transition-duration-fast, 150ms)
             var(--cf-transition-timing-ease, ease),
-          border-color var(--cf-transition-duration-fast, 150ms)
+            border-color var(--cf-transition-duration-fast, 150ms)
             var(--cf-transition-timing-ease, ease),
-          color var(--cf-transition-duration-fast, 150ms)
+            color var(--cf-transition-duration-fast, 150ms)
             var(--cf-transition-timing-ease, ease);
-        min-width: 4rem;
-      }
+          min-width: 4rem;
+        }
 
-      .add-tag:hover {
-        border-color: var(--cf-tag-ring);
-        color: var(--cf-tag-ring);
-        background-color: var(--cf-tag-hover-background);
-      }
+        .add-tag:hover {
+          border-color: var(--cf-tag-ring);
+          color: var(--cf-tag-ring);
+          background-color: var(--cf-tag-hover-background);
+        }
 
-      .add-tag.active {
-        border-color: var(--cf-tag-ring);
-        background-color: var(--cf-theme-color-background, #ffffff);
-        outline: 2px solid var(--cf-tag-ring);
-        outline-offset: -2px;
-      }
+        .add-tag.active {
+          border-color: var(--cf-tag-ring);
+          background-color: var(--cf-theme-color-background, #ffffff);
+          outline: 2px solid var(--cf-tag-ring);
+          outline-offset: -2px;
+        }
 
-      .add-tag-input {
-        background: transparent;
-        border: none;
-        outline: none;
-        font: inherit;
-        color: var(--cf-tag-color);
-        min-width: 3rem;
-        flex: 1;
-      }
+        .add-tag-input {
+          background: transparent;
+          border: none;
+          outline: none;
+          font: inherit;
+          color: var(--cf-tag-color);
+          min-width: 3rem;
+          flex: 1;
+        }
 
-      .add-tag-input::placeholder {
-        color: var(--cf-tag-add-color);
-      }
+        .add-tag-input::placeholder {
+          color: var(--cf-tag-add-color);
+        }
 
-      .placeholder {
-        color: var(--cf-tag-add-color);
-        font-style: italic;
-        padding: var(--cf-tag-padding-v) var(--cf-tag-padding-h);
-      }
-    `,
-  ];
+        .placeholder {
+          color: var(--cf-tag-add-color);
+          font-style: italic;
+          padding: var(--cf-tag-padding-v) var(--cf-tag-padding-h);
+        }
+      `,
+    ];
 
-  constructor() {
-    super();
-    this.tags = [];
-    this.readonly = false;
-    this.editingIndex = null;
-    this.originalTagValue = "";
-    this.newTagValue = "";
-    this.showingNewInput = false;
-  }
+    constructor() {
+      super();
+      this.tags = [];
+      this.readonly = false;
+      this.editingIndex = null;
+      this.originalTagValue = "";
+      this.newTagValue = "";
+      this.showingNewInput = false;
+    }
 
-  private handleTagClick(index: number, event: MouseEvent) {
-    if (this.readonly) return;
+    private handleTagClick(index: number, event: MouseEvent) {
+      if (this.readonly) return;
 
-    event.preventDefault();
-    this.editingIndex = index;
-    this.originalTagValue = this.tags[index]; // Store original value
-    this.requestUpdate();
-
-    // Focus the input after render
-    setTimeout(() => {
-      const input = this.shadowRoot?.querySelector(
-        `#tag-input-${index}`,
-      ) as HTMLInputElement;
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    }, 0);
-  }
-
-  private handleTagRemove(index: number, event: MouseEvent) {
-    if (this.readonly) return;
-
-    event.stopPropagation();
-    const newTags = [...this.tags];
-    newTags.splice(index, 1);
-    this.tags = newTags;
-    this.emit("cf-change", { tags: this.tags });
-  }
-
-  private handleTagInput(index: number, event: Event) {
-    // Update the tag value as user types
-    const input = event.target as HTMLInputElement;
-    const newTags = [...this.tags];
-    newTags[index] = input.value;
-    this.tags = newTags;
-  }
-
-  private handleTagKeyDown(index: number, event: KeyboardEvent) {
-    if (event.key === "Enter") {
       event.preventDefault();
-      this.finishEditingTag(index);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      // Restore original value
+      this.editingIndex = index;
+      this.originalTagValue = this.tags[index]; // Store original value
+      this.requestUpdate();
+
+      // Focus the input after render
+      setTimeout(() => {
+        const input = this.shadowRoot?.querySelector(
+          `#tag-input-${index}`,
+        ) as HTMLInputElement;
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      }, 0);
+    }
+
+    private handleTagRemove(index: number, event: MouseEvent) {
+      if (this.readonly) return;
+
+      event.stopPropagation();
       const newTags = [...this.tags];
-      newTags[index] = this.originalTagValue;
+      newTags.splice(index, 1);
       this.tags = newTags;
+      this.emit("cf-change", { tags: this.tags });
+    }
+
+    private handleTagInput(index: number, event: Event) {
+      // Update the tag value as user types
+      const input = event.target as HTMLInputElement;
+      const newTags = [...this.tags];
+      newTags[index] = input.value;
+      this.tags = newTags;
+    }
+
+    private handleTagKeyDown(index: number, event: KeyboardEvent) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.finishEditingTag(index);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        // Restore original value
+        const newTags = [...this.tags];
+        newTags[index] = this.originalTagValue;
+        this.tags = newTags;
+        this.editingIndex = null;
+        this.requestUpdate();
+      } else if (event.key === "Backspace") {
+        // Check if the input is empty
+        const input = event.target as HTMLInputElement;
+        if (input.value === "") {
+          event.preventDefault();
+          this.handleTagRemove(index, new MouseEvent("click"));
+        }
+      }
+    }
+
+    private handleTagBlur(index: number) {
+      this.finishEditingTag(index);
+    }
+
+    private finishEditingTag(index: number) {
+      const tag = this.tags[index]?.trim();
+      if (!tag) {
+        // Remove empty tag
+        this.handleTagRemove(index, new MouseEvent("click"));
+      } else {
+        // Update tag and emit change
+        const newTags = [...this.tags];
+        newTags[index] = tag;
+        this.tags = newTags;
+        this.emit("cf-change", { tags: this.tags });
+      }
+
       this.editingIndex = null;
       this.requestUpdate();
-    } else if (event.key === "Backspace") {
-      // Check if the input is empty
-      const input = event.target as HTMLInputElement;
-      if (input.value === "") {
+    }
+
+    private handleAddTagClick() {
+      if (this.readonly) return;
+
+      this.showingNewInput = true;
+      this.newTagValue = "";
+      this.requestUpdate();
+
+      setTimeout(() => {
+        const input = this.shadowRoot?.querySelector(
+          "#new-tag-input",
+        ) as HTMLInputElement;
+        if (input) {
+          input.focus();
+        }
+      }, 0);
+    }
+
+    private handleNewTagInput(event: Event) {
+      this.newTagValue = (event.target as HTMLInputElement).value;
+    }
+
+    private handleNewTagKeyDown(event: KeyboardEvent) {
+      if (event.key === "Enter") {
         event.preventDefault();
-        this.handleTagRemove(index, new MouseEvent("click"));
+        this.addNewTag();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.cancelNewTag();
       }
     }
-  }
 
-  private handleTagBlur(index: number) {
-    this.finishEditingTag(index);
-  }
-
-  private finishEditingTag(index: number) {
-    const tag = this.tags[index]?.trim();
-    if (!tag) {
-      // Remove empty tag
-      this.handleTagRemove(index, new MouseEvent("click"));
-    } else {
-      // Update tag and emit change
-      const newTags = [...this.tags];
-      newTags[index] = tag;
-      this.tags = newTags;
-      this.emit("cf-change", { tags: this.tags });
-    }
-
-    this.editingIndex = null;
-    this.requestUpdate();
-  }
-
-  private handleAddTagClick() {
-    if (this.readonly) return;
-
-    this.showingNewInput = true;
-    this.newTagValue = "";
-    this.requestUpdate();
-
-    setTimeout(() => {
-      const input = this.shadowRoot?.querySelector(
-        "#new-tag-input",
-      ) as HTMLInputElement;
-      if (input) {
-        input.focus();
+    private handleNewTagBlur() {
+      if (this.newTagValue.trim()) {
+        this.addNewTag();
+      } else {
+        this.cancelNewTag();
       }
-    }, 0);
-  }
+    }
 
-  private handleNewTagInput(event: Event) {
-    this.newTagValue = (event.target as HTMLInputElement).value;
-  }
-
-  private handleNewTagKeyDown(event: KeyboardEvent) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      this.addNewTag();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
+    private addNewTag() {
+      const tag = this.newTagValue.trim();
+      if (tag && !this.tags.includes(tag)) {
+        this.tags = [...this.tags, tag];
+        this.emit("cf-change", { tags: this.tags });
+      }
       this.cancelNewTag();
     }
-  }
 
-  private handleNewTagBlur() {
-    if (this.newTagValue.trim()) {
-      this.addNewTag();
-    } else {
-      this.cancelNewTag();
+    private cancelNewTag() {
+      this.showingNewInput = false;
+      this.newTagValue = "";
+      this.requestUpdate();
+    }
+
+    override render() {
+      return html`
+        <div class="tags-container">
+          ${(!Array.isArray(this.tags) || this.tags.length === 0) &&
+              !this.showingNewInput
+            ? html`
+              <span class="placeholder">No tags</span>
+            `
+            : ""} ${repeat(
+              this.tags ?? [],
+              (_, index) => index,
+              (tag, index) => this.renderTag(tag, index),
+            )} ${!this.readonly ? this.renderAddTag() : ""}
+        </div>
+      `;
+    }
+
+    private renderTag(tag: string, index: number) {
+      const isEditing = this.editingIndex === index;
+
+      return html`
+        <div
+          class="tag ${isEditing ? "editing" : ""}"
+          @click="${(e: MouseEvent) => this.handleTagClick(index, e)}"
+        >
+          ${isEditing
+            ? html`
+              <input
+                id="tag-input-${index}"
+                class="tag-input"
+                .value="${tag}"
+                @input="${(e: Event) => this.handleTagInput(index, e)}"
+                @keydown="${(e: KeyboardEvent) =>
+                  this.handleTagKeyDown(index, e)}"
+                @blur="${() => this.handleTagBlur(index)}"
+              />
+            `
+            : html`
+              <span class="tag-text">${tag}</span>
+              ${!this.readonly
+                ? html`
+                  <button
+                    type="button"
+                    class="tag-remove"
+                    @click="${(e: MouseEvent) =>
+                      this.handleTagRemove(index, e)}"
+                    title="Remove tag"
+                    aria-label="Remove ${tag}"
+                  >
+                    ×
+                  </button>
+                `
+                : ""}
+            `}
+        </div>
+      `;
+    }
+
+    private renderAddTag() {
+      return html`
+        <div
+          class="add-tag ${this.showingNewInput ? "active" : ""}"
+          @click="${this.handleAddTagClick}"
+        >
+          ${this.showingNewInput
+            ? html`
+              <input
+                id="new-tag-input"
+                class="add-tag-input"
+                placeholder="New tag"
+                .value="${this.newTagValue}"
+                @input="${this.handleNewTagInput}"
+                @keydown="${this.handleNewTagKeyDown}"
+                @blur="${this.handleNewTagBlur}"
+              />
+            `
+            : html`
+              + Add tag
+            `}
+        </div>
+      `;
     }
   }
 
-  private addNewTag() {
-    const tag = this.newTagValue.trim();
-    if (tag && !this.tags.includes(tag)) {
-      this.tags = [...this.tags, tag];
-      this.emit("cf-change", { tags: this.tags });
-    }
-    this.cancelNewTag();
-  }
-
-  private cancelNewTag() {
-    this.showingNewInput = false;
-    this.newTagValue = "";
-    this.requestUpdate();
-  }
-
-  override render() {
-    return html`
-      <div class="tags-container">
-        ${(!Array.isArray(this.tags) || this.tags.length === 0) &&
-            !this.showingNewInput
-          ? html`
-            <span class="placeholder">No tags</span>
-          `
-          : ""} ${repeat(
-            this.tags ?? [],
-            (_, index) => index,
-            (tag, index) => this.renderTag(tag, index),
-          )} ${!this.readonly ? this.renderAddTag() : ""}
-      </div>
-    `;
-  }
-
-  private renderTag(tag: string, index: number) {
-    const isEditing = this.editingIndex === index;
-
-    return html`
-      <div
-        class="tag ${isEditing ? "editing" : ""}"
-        @click="${(e: MouseEvent) => this.handleTagClick(index, e)}"
-      >
-        ${isEditing
-          ? html`
-            <input
-              id="tag-input-${index}"
-              class="tag-input"
-              .value="${tag}"
-              @input="${(e: Event) => this.handleTagInput(index, e)}"
-              @keydown="${(e: KeyboardEvent) =>
-                this.handleTagKeyDown(index, e)}"
-              @blur="${() => this.handleTagBlur(index)}"
-            />
-          `
-          : html`
-            <span class="tag-text">${tag}</span>
-            ${!this.readonly
-              ? html`
-                <button
-                  type="button"
-                  class="tag-remove"
-                  @click="${(e: MouseEvent) =>
-                    this.handleTagRemove(index, e)}"
-                  title="Remove tag"
-                  aria-label="Remove ${tag}"
-                >
-                  ×
-                </button>
-              `
-              : ""}
-          `}
-      </div>
-    `;
-  }
-
-  private renderAddTag() {
-    return html`
-      <div
-        class="add-tag ${this.showingNewInput ? "active" : ""}"
-        @click="${this.handleAddTagClick}"
-      >
-        ${this.showingNewInput
-          ? html`
-            <input
-              id="new-tag-input"
-              class="add-tag-input"
-              placeholder="New tag"
-              .value="${this.newTagValue}"
-              @input="${this.handleNewTagInput}"
-              @keydown="${this.handleNewTagKeyDown}"
-              @blur="${this.handleNewTagBlur}"
-            />
-          `
-          : html`
-            + Add tag
-          `}
-      </div>
-    `;
-  }
-}
-
-globalThis.customElements.define("cf-tags", CFTags);
+  globalThis.customElements.define("cf-tags", CFTags);

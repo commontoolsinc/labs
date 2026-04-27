@@ -96,242 +96,245 @@ export class CFListItem extends BaseElement {
         cursor: pointer;
         transition: background-color var(--cf-transition-duration-fast, 150ms)
           var(--cf-transition-timing-ease, ease);
-      }
-
-      .item:hover:not(:disabled) {
-        background: var(
-          --cf-list-item-hover-bg,
-          var(--cf-theme-color-surface-hover, rgba(0, 0, 0, 0.03))
-        );
-      }
-
-      .item:focus-visible {
-        outline: 2px solid
-          var(--cf-theme-color-primary, var(--cf-colors-primary-500));
-        outline-offset: 2px;
-      }
-
-      .item:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-
-      /* Icon */
-      .icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        width: var(--cf-list-item-icon-size, 1.5rem);
-        height: var(--cf-list-item-icon-size, 1.5rem);
-      }
-
-      .icon.empty {
-        display: none;
-      }
-
-      /* Content */
-      .content {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0.125rem;
-      }
-
-      .label {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .description {
-        font-weight: var(--cf-font-body-weight, 400);
-        font-size: var(
-          --cf-list-item-description-size,
-          var(--cf-font-caption-size, 0.75rem)
-        );
-        color: var(
-          --cf-list-item-description-color,
-          var(--cf-theme-color-text-muted, #71747a)
-        );
-        line-height: var(--cf-font-caption-line-height, 1rem);
-      }
-
-      .description.empty {
-        display: none;
-      }
-
-      /* Action */
-      .action {
-        display: flex;
-        align-items: center;
-        flex-shrink: 0;
-      }
-
-      .action.empty {
-        display: none;
-      }
-
-      /* Expand chevron */
-      .chevron {
-        display: flex;
-        align-items: center;
-        flex-shrink: 0;
-        color: var(--cf-theme-color-text-muted, #71747a);
-        transition: transform var(--cf-transition-duration-fast, 150ms)
-          var(--cf-transition-timing-ease, ease);
-      }
-
-      :host([expanded]) .chevron {
-        transform: rotate(90deg);
-      }
-
-      /* Detail */
-      .detail {
-        overflow: hidden;
-        max-height: 0;
-        opacity: 0;
-        transition:
-          max-height var(--cf-transition-duration-base, 200ms)
-            var(--cf-transition-timing-ease, ease),
-          opacity var(--cf-transition-duration-fast, 150ms)
-            var(--cf-transition-timing-ease, ease);
-      }
-
-      :host([expanded]) .detail {
-        max-height: 500px;
-        opacity: 1;
-      }
-
-      .detail.empty {
-        display: none;
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .item,
-        .chevron,
-        .detail {
-          transition: none;
         }
-      }
-    `,
-  ];
 
-  declare label: string;
-  declare description: string;
-  declare expandable: boolean;
-  declare expanded: boolean;
-  declare disabled: boolean;
-  declare _hasIcon: boolean;
-  declare _hasDescription: boolean;
-  declare _hasAction: boolean;
-  declare _hasDetail: boolean;
+        .item:hover:not(:disabled) {
+          background: var(
+            --cf-list-item-hover-bg,
+            var(--cf-theme-color-surface-hover, rgba(0, 0, 0, 0.03))
+          );
+        }
 
-  constructor() {
-    super();
-    this.label = "";
-    this.description = "";
-    this.expandable = false;
-    this.expanded = false;
-    this.disabled = false;
-    this._hasIcon = false;
-    this._hasDescription = false;
-    this._hasAction = false;
-    this._hasDetail = false;
-  }
+        .item:focus-visible {
+          outline: 2px solid
+            var(--cf-theme-color-primary, var(--cf-colors-primary-500));
+          outline-offset: 2px;
+        }
 
-  override render() {
-    return html`
-      <div class="row" part="row">
-        <button
-          type="button"
-          class="${classMap({ item: true })}"
-          ?disabled="${this.disabled}"
-          part="item"
-          @click="${this._handleClick}"
-        >
-          <div class="icon ${this._hasIcon ? "" : "empty"}" part="icon">
-            <slot
-              name="icon"
-              @slotchange="${this._handleIconSlotChange}"
-            ></slot>
-          </div>
-          <div class="content" part="content">
-            <div class="label" part="label">
-              <slot>${this.label}</slot>
-            </div>
-            <div
-              class="description ${this.description || this._hasDescription
+        .item:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+
+        /* Icon */
+        .icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          width: var(--cf-list-item-icon-size, 1.5rem);
+          height: var(--cf-list-item-icon-size, 1.5rem);
+        }
+
+        .icon.empty {
+          display: none;
+        }
+
+        /* Content */
+        .content {
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.125rem;
+        }
+
+        .label {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .description {
+          font-weight: var(--cf-font-body-weight, 400);
+          font-size: var(
+            --cf-list-item-description-size,
+            var(--cf-font-caption-size, 0.75rem)
+          );
+          color: var(
+            --cf-list-item-description-color,
+            var(--cf-theme-color-text-muted, #71747a)
+          );
+          line-height: var(--cf-font-caption-line-height, 1rem);
+        }
+
+        .description.empty {
+          display: none;
+        }
+
+        /* Action */
+        .action {
+          display: flex;
+          align-items: center;
+          flex-shrink: 0;
+        }
+
+        .action.empty {
+          display: none;
+        }
+
+        /* Expand chevron */
+        .chevron {
+          display: flex;
+          align-items: center;
+          flex-shrink: 0;
+          color: var(--cf-theme-color-text-muted, #71747a);
+          transition: transform var(--cf-transition-duration-fast, 150ms)
+            var(--cf-transition-timing-ease, ease);
+          }
+
+          :host([expanded]) .chevron {
+            transform: rotate(90deg);
+          }
+
+          /* Detail */
+          .detail {
+            overflow: hidden;
+            max-height: 0;
+            opacity: 0;
+            transition:
+              max-height var(--cf-transition-duration-base, 200ms)
+              var(--cf-transition-timing-ease, ease),
+              opacity var(--cf-transition-duration-fast, 150ms)
+              var(--cf-transition-timing-ease, ease);
+            }
+
+            :host([expanded]) .detail {
+              max-height: 500px;
+              opacity: 1;
+            }
+
+            .detail.empty {
+              display: none;
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+              .item,
+              .chevron,
+              .detail {
+                transition: none;
+              }
+            }
+          `,
+        ];
+
+        declare label: string;
+        declare description: string;
+        declare expandable: boolean;
+        declare expanded: boolean;
+        declare disabled: boolean;
+        declare _hasIcon: boolean;
+        declare _hasDescription: boolean;
+        declare _hasAction: boolean;
+        declare _hasDetail: boolean;
+
+        constructor() {
+          super();
+          this.label = "";
+          this.description = "";
+          this.expandable = false;
+          this.expanded = false;
+          this.disabled = false;
+          this._hasIcon = false;
+          this._hasDescription = false;
+          this._hasAction = false;
+          this._hasDetail = false;
+        }
+
+        override render() {
+          return html`
+            <div class="row" part="row">
+              <button
+                type="button"
+                class="${classMap({ item: true })}"
+                ?disabled="${this.disabled}"
+                part="item"
+                @click="${this._handleClick}"
+              >
+                <div class="icon ${this._hasIcon ? "" : "empty"}" part="icon">
+                  <slot
+                    name="icon"
+                    @slotchange="${this._handleIconSlotChange}"
+                  ></slot>
+                </div>
+                <div class="content" part="content">
+                  <div class="label" part="label">
+                    <slot>${this.label}</slot>
+                  </div>
+                  <div
+                    class="description ${this.description ||
+                        this._hasDescription
+                      ? ""
+                      : "empty"}"
+                    part="description"
+                  >
+                    <slot
+                      name="description"
+                      @slotchange="${this._handleDescriptionSlotChange}"
+                    >${this.description}</slot>
+                  </div>
+                </div>
+                ${this.expandable
+                  ? html`
+                    <span class="chevron" part="chevron" aria-hidden="true">›</span>
+                  `
+                  : ""}
+              </button>
+              <div class="action ${this._hasAction
                 ? ""
-                : "empty"}"
-              part="description"
-            >
-              <slot
-                name="description"
-                @slotchange="${this._handleDescriptionSlotChange}"
-              >${this.description}</slot>
+                : "empty"}" part="action">
+                <slot
+                  name="action"
+                  @slotchange="${this._handleActionSlotChange}"
+                ></slot>
+              </div>
             </div>
-          </div>
-          ${this.expandable
-            ? html`
-              <span class="chevron" part="chevron" aria-hidden="true">›</span>
-            `
-            : ""}
-        </button>
-        <div class="action ${this._hasAction ? "" : "empty"}" part="action">
-          <slot
-            name="action"
-            @slotchange="${this._handleActionSlotChange}"
-          ></slot>
-        </div>
-      </div>
-      ${this.expandable
-        ? html`
-          <div
-            class="detail ${this._hasDetail ? "" : "empty"}"
-            part="detail"
-          >
-            <slot
-              name="detail"
-              @slotchange="${this._handleDetailSlotChange}"
-            ></slot>
-          </div>
-        `
-        : ""}
-    `;
-  }
+            ${this.expandable
+              ? html`
+                <div
+                  class="detail ${this._hasDetail ? "" : "empty"}"
+                  part="detail"
+                >
+                  <slot
+                    name="detail"
+                    @slotchange="${this._handleDetailSlotChange}"
+                  ></slot>
+                </div>
+              `
+              : ""}
+          `;
+        }
 
-  private _handleClick = () => {
-    if (this.disabled) return;
+        private _handleClick = () => {
+          if (this.disabled) return;
 
-    if (this.expandable) {
-      this.expanded = !this.expanded;
-      this.emit("cf-expand", { expanded: this.expanded });
-    }
+          if (this.expandable) {
+            this.expanded = !this.expanded;
+            this.emit("cf-expand", { expanded: this.expanded });
+          }
 
-    this.emit("cf-click", { label: this.label });
-  };
+          this.emit("cf-click", { label: this.label });
+        };
 
-  private _handleIconSlotChange = (e: Event) => {
-    const slot = e.target as HTMLSlotElement;
-    this._hasIcon = slot.assignedElements().length > 0;
-  };
+        private _handleIconSlotChange = (e: Event) => {
+          const slot = e.target as HTMLSlotElement;
+          this._hasIcon = slot.assignedElements().length > 0;
+        };
 
-  private _handleDescriptionSlotChange = (e: Event) => {
-    const slot = e.target as HTMLSlotElement;
-    this._hasDescription = slot.assignedElements().length > 0;
-  };
+        private _handleDescriptionSlotChange = (e: Event) => {
+          const slot = e.target as HTMLSlotElement;
+          this._hasDescription = slot.assignedElements().length > 0;
+        };
 
-  private _handleActionSlotChange = (e: Event) => {
-    const slot = e.target as HTMLSlotElement;
-    this._hasAction = slot.assignedElements().length > 0;
-  };
+        private _handleActionSlotChange = (e: Event) => {
+          const slot = e.target as HTMLSlotElement;
+          this._hasAction = slot.assignedElements().length > 0;
+        };
 
-  private _handleDetailSlotChange = (e: Event) => {
-    const slot = e.target as HTMLSlotElement;
-    this._hasDetail = slot.assignedElements().length > 0;
-  };
-}
+        private _handleDetailSlotChange = (e: Event) => {
+          const slot = e.target as HTMLSlotElement;
+          this._hasDetail = slot.assignedElements().length > 0;
+        };
+      }
 
-globalThis.customElements.define("cf-list-item", CFListItem);
+      globalThis.customElements.define("cf-list-item", CFListItem);

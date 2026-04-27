@@ -102,185 +102,185 @@ export class CFBadge extends BaseElement {
         border: 1px solid transparent;
         transition: all var(--cf-transition-duration-fast, 150ms)
           var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
-      }
+        }
 
-      :host([size="xs"]) .badge {
-        min-height: var(--cf-pill-xs-min-height, var(--cf-size-xs-height));
-        padding: var(--cf-pill-xs-padding-v, var(--cf-size-xs-padding-v))
-          var(--cf-pill-xs-padding-h, var(--cf-size-xs-padding-h));
-        font-size: var(--cf-pill-xs-font-size, var(--cf-size-xs-font-size));
-        line-height: var(--cf-pill-xs-line-height, var(--cf-size-xs-line-height));
-        gap: var(--cf-pill-xs-gap, var(--cf-size-xs-spacing));
-      }
+        :host([size="xs"]) .badge {
+          min-height: var(--cf-pill-xs-min-height, var(--cf-size-xs-height));
+          padding: var(--cf-pill-xs-padding-v, var(--cf-size-xs-padding-v))
+            var(--cf-pill-xs-padding-h, var(--cf-size-xs-padding-h));
+          font-size: var(--cf-pill-xs-font-size, var(--cf-size-xs-font-size));
+          line-height: var(--cf-pill-xs-line-height, var(--cf-size-xs-line-height));
+          gap: var(--cf-pill-xs-gap, var(--cf-size-xs-spacing));
+        }
 
-      /* sm is default — no override needed */
+        /* sm is default — no override needed */
 
-      :host([size="md"]) .badge {
-        min-height: var(--cf-pill-md-min-height, var(--cf-size-md-height));
-        padding: var(--cf-pill-md-padding-v, var(--cf-size-md-padding-v))
-          var(--cf-pill-md-padding-h, var(--cf-size-md-padding-h));
-        font-size: var(--cf-pill-md-font-size, var(--cf-size-md-font-size));
-        line-height: var(--cf-pill-md-line-height, var(--cf-size-md-line-height));
-        gap: var(--cf-pill-md-gap, var(--cf-size-md-spacing));
-      }
+        :host([size="md"]) .badge {
+          min-height: var(--cf-pill-md-min-height, var(--cf-size-md-height));
+          padding: var(--cf-pill-md-padding-v, var(--cf-size-md-padding-v))
+            var(--cf-pill-md-padding-h, var(--cf-size-md-padding-h));
+          font-size: var(--cf-pill-md-font-size, var(--cf-size-md-font-size));
+          line-height: var(--cf-pill-md-line-height, var(--cf-size-md-line-height));
+          gap: var(--cf-pill-md-gap, var(--cf-size-md-spacing));
+        }
 
-      :host([size="lg"]) .badge {
-        min-height: var(--cf-pill-lg-min-height, var(--cf-size-lg-height));
-        padding: var(--cf-pill-lg-padding-v, var(--cf-size-lg-padding-v))
-          var(--cf-pill-lg-padding-h, var(--cf-size-lg-padding-h));
-        font-size: var(--cf-pill-lg-font-size, var(--cf-size-lg-font-size));
-        line-height: var(--cf-pill-lg-line-height, var(--cf-size-lg-line-height));
-        gap: var(--cf-pill-lg-gap, var(--cf-size-lg-spacing));
-      }
+        :host([size="lg"]) .badge {
+          min-height: var(--cf-pill-lg-min-height, var(--cf-size-lg-height));
+          padding: var(--cf-pill-lg-padding-v, var(--cf-size-lg-padding-v))
+            var(--cf-pill-lg-padding-h, var(--cf-size-lg-padding-h));
+          font-size: var(--cf-pill-lg-font-size, var(--cf-size-lg-font-size));
+          line-height: var(--cf-pill-lg-line-height, var(--cf-size-lg-line-height));
+          gap: var(--cf-pill-lg-gap, var(--cf-size-lg-spacing));
+        }
 
-      :host([size="xl"]) .badge {
-        min-height: var(--cf-pill-xl-min-height, var(--cf-size-xl-height));
-        padding: var(--cf-pill-xl-padding-v, var(--cf-size-xl-padding-v))
-          var(--cf-pill-xl-padding-h, var(--cf-size-xl-padding-h));
-        font-size: var(--cf-pill-xl-font-size, var(--cf-size-xl-font-size));
-        line-height: var(--cf-pill-xl-line-height, var(--cf-size-xl-line-height));
-        gap: var(--cf-pill-xl-gap, var(--cf-size-xl-spacing));
-      }
+        :host([size="xl"]) .badge {
+          min-height: var(--cf-pill-xl-min-height, var(--cf-size-xl-height));
+          padding: var(--cf-pill-xl-padding-v, var(--cf-size-xl-padding-v))
+            var(--cf-pill-xl-padding-h, var(--cf-size-xl-padding-h));
+          font-size: var(--cf-pill-xl-font-size, var(--cf-size-xl-font-size));
+          line-height: var(--cf-pill-xl-line-height, var(--cf-size-xl-line-height));
+          gap: var(--cf-pill-xl-gap, var(--cf-size-xl-spacing));
+        }
 
-      /* Variant styles */
-      .badge.default {
-        background-color: var(--cf-badge-color-primary, hsl(212, 100%, 47%));
-        color: var(--cf-badge-color-primary-foreground, hsl(0, 0%, 100%));
-      }
+        /* Variant styles */
+        .badge.default {
+          background-color: var(--cf-badge-color-primary, hsl(212, 100%, 47%));
+          color: var(--cf-badge-color-primary-foreground, hsl(0, 0%, 100%));
+        }
 
-      .badge.secondary {
-        background-color: var(--cf-badge-color-secondary, hsl(0, 0%, 96%));
-        color: var(--cf-badge-color-secondary-foreground, hsl(0, 0%, 9%));
-      }
+        .badge.secondary {
+          background-color: var(--cf-badge-color-secondary, hsl(0, 0%, 96%));
+          color: var(--cf-badge-color-secondary-foreground, hsl(0, 0%, 9%));
+        }
 
-      .badge.destructive {
-        background-color: var(--cf-badge-color-destructive, hsl(0, 100%, 50%));
-        color: var(--cf-badge-color-destructive-foreground, hsl(0, 0%, 100%));
-      }
+        .badge.destructive {
+          background-color: var(--cf-badge-color-destructive, hsl(0, 100%, 50%));
+          color: var(--cf-badge-color-destructive-foreground, hsl(0, 0%, 100%));
+        }
 
-      .badge.outline {
-        background-color: transparent;
-        border-color: var(--cf-badge-color-border, hsl(0, 0%, 89%));
-        color: var(--cf-badge-color-text, hsl(0, 0%, 9%));
-      }
+        .badge.outline {
+          background-color: transparent;
+          border-color: var(--cf-badge-color-border, hsl(0, 0%, 89%));
+          color: var(--cf-badge-color-text, hsl(0, 0%, 9%));
+        }
 
-      /* Close button */
-      .close-button {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: var(--cf-size-sm-icon-sm);
-        height: var(--cf-size-sm-icon-sm);
-        padding: 0;
-        margin: 0;
-        margin-left: 0.125rem;
-        margin-right: -0.25rem;
-        background: none;
-        border: none;
-        cursor: pointer;
-        opacity: 0.7;
-        transition: opacity var(--cf-transition-duration-fast, 150ms)
-          var(--cf-transition-timing-ease, ease);
-        color: currentColor;
-      }
+        /* Close button */
+        .close-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: var(--cf-size-sm-icon-sm);
+          height: var(--cf-size-sm-icon-sm);
+          padding: 0;
+          margin: 0;
+          margin-left: 0.125rem;
+          margin-right: -0.25rem;
+          background: none;
+          border: none;
+          cursor: pointer;
+          opacity: 0.7;
+          transition: opacity var(--cf-transition-duration-fast, 150ms)
+            var(--cf-transition-timing-ease, ease);
+          color: currentColor;
+        }
 
-      .close-button:hover {
-        opacity: 1;
-      }
+        .close-button:hover {
+          opacity: 1;
+        }
 
-      .close-button:focus-visible {
-        outline: 2px solid var(--cf-badge-color-ring, hsl(212, 100%, 47%));
-        outline-offset: 2px;
-        border-radius: 2px;
-      }
+        .close-button:focus-visible {
+          outline: 2px solid var(--cf-badge-color-ring, hsl(212, 100%, 47%));
+          outline-offset: 2px;
+          border-radius: 2px;
+        }
 
-      .close-button svg {
-        width: 100%;
-        height: 100%;
-      }
+        .close-button svg {
+          width: 100%;
+          height: 100%;
+        }
 
-      :host([size="xs"]) .close-button {
-        width: var(--cf-size-xs-icon-sm);
-        height: var(--cf-size-xs-icon-sm);
-      }
-      :host([size="md"]) .close-button {
-        width: var(--cf-size-md-icon-sm);
-        height: var(--cf-size-md-icon-sm);
-      }
-      :host([size="lg"]) .close-button {
-        width: var(--cf-size-lg-icon-sm);
-        height: var(--cf-size-lg-icon-sm);
-      }
-      :host([size="xl"]) .close-button {
-        width: var(--cf-size-xl-icon-sm);
-        height: var(--cf-size-xl-icon-sm);
-      }
-    `,
-  ];
+        :host([size="xs"]) .close-button {
+          width: var(--cf-size-xs-icon-sm);
+          height: var(--cf-size-xs-icon-sm);
+        }
+        :host([size="md"]) .close-button {
+          width: var(--cf-size-md-icon-sm);
+          height: var(--cf-size-md-icon-sm);
+        }
+        :host([size="lg"]) .close-button {
+          width: var(--cf-size-lg-icon-sm);
+          height: var(--cf-size-lg-icon-sm);
+        }
+        :host([size="xl"]) .close-button {
+          width: var(--cf-size-xl-icon-sm);
+          height: var(--cf-size-xl-icon-sm);
+        }
+      `,
+    ];
 
-  static override properties = {
-    variant: { type: String },
-    removable: { type: Boolean },
-    size: { type: String, reflect: true },
-  };
+    static override properties = {
+      variant: { type: String },
+      removable: { type: Boolean },
+      size: { type: String, reflect: true },
+    };
 
-  declare variant: BadgeVariant;
-  declare removable: boolean;
-  declare size: ComponentSize;
+    declare variant: BadgeVariant;
+    declare removable: boolean;
+    declare size: ComponentSize;
 
-  constructor() {
-    super();
-    this.variant = "default";
-    this.removable = false;
-    this.size = "sm";
-  }
+    constructor() {
+      super();
+      this.variant = "default";
+      this.removable = false;
+      this.size = "sm";
+    }
 
-  override render() {
-    return html`
-      <div
-        class="badge ${this.variant}"
-        part="badge"
-      >
-        <slot></slot>
-        ${this.removable
-          ? html`
-            <button
-              type="button"
-              class="close-button"
-              part="close-button"
-              aria-label="Remove"
-              @click="${this._handleRemove}"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
+    override render() {
+      return html`
+        <div
+          class="badge ${this.variant}"
+          part="badge"
+        >
+          <slot></slot>
+          ${this.removable
+            ? html`
+              <button
+                type="button"
+                class="close-button"
+                part="close-button"
+                aria-label="Remove"
+                @click="${this._handleRemove}"
               >
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
-          `
-          : null}
-      </div>
-    `;
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            `
+            : null}
+        </div>
+      `;
+    }
+
+    private _handleRemove(event: Event) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      // Emit cf-remove event
+      this.emit("cf-remove", {
+        variant: this.variant,
+      });
+    }
   }
 
-  private _handleRemove(event: Event) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    // Emit cf-remove event
-    this.emit("cf-remove", {
-      variant: this.variant,
-    });
-  }
-}
-
-globalThis.customElements.define("cf-badge", CFBadge);
+  globalThis.customElements.define("cf-badge", CFBadge);
