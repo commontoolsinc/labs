@@ -173,14 +173,14 @@ member of `FabricValue`.
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
 | `undefined` | None | First-class fabric value; see note below |
-| `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 5.3) |
+| `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 3 of `3-json-encoding.md`) |
 
 > **`undefined` as a first-class fabric value.** `undefined` is a first-class
 > fabric value that round-trips faithfully through serialization. Because most
 > wire formats (including JSON) have no native `undefined` representation, the
 > serialization system uses a dedicated tagged form for `undefined` — the same
 > tagged form regardless of context (array element, object property value, or
-> top-level value). See Section 5.3 for the specific JSON encoding. Deletion
+> top-level value). See Section 3 of `3-json-encoding.md` for the specific JSON encoding. Deletion
 > semantics (e.g., removing a cell's value when `undefined` is written at top
 > level) are an application-level concern, not a serialization concern: the
 > serializer faithfully records `undefined` and the application layer interprets
@@ -860,7 +860,7 @@ Section 4.5.
 - Elements may be `undefined` (a first-class fabric value; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
   `undefined` and are represented using run-length encoding in serialized forms
-  (see below and Section 5.3 for the specific JSON encoding)
+  (see below and Section 3 of `3-json-encoding.md` for the specific JSON encoding)
 - Non-index keys (named properties on arrays) cause rejection
 
 > **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
@@ -876,13 +876,13 @@ Section 4.5.
 >
 > On deserialization, hole entries are reconstructed as true holes (absent
 > indices in the resulting array, not `undefined` assignments), preserving the
-> `in`-operator distinction. See Section 5.3 for the specific JSON encodings.
+> `in`-operator distinction. See Section 3 of `3-json-encoding.md` for the specific JSON encodings.
 
 > **Array serialization strategy.** Even when an array contains holes, it is
 > serialized as an array (not an object or other structure). Runs of consecutive
 > holes are replaced by a single hole marker carrying the run length, preserving
-> the array structure while efficiently encoding sparse arrays. See Section 5.3
-> for the specific JSON encoding and examples.
+> the array structure while efficiently encoding sparse arrays. See Section 3 of
+> `3-json-encoding.md` for the specific JSON encoding and examples.
 
 **Objects:**
 - Plain objects only (class instances must implement the fabric protocol)
@@ -1212,7 +1212,7 @@ The system follows an **immutable-forward** design:
 
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon
   reconstruction. This applies to all deserialization output paths, including
-  `/quote` (Section 5.6) — the freeze is a property of the deserialization
+  `/quote` (Section 6 of `3-json-encoding.md`) — the freeze is a property of the deserialization
   boundary, not of whether type-tag reconstruction occurred.
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement.
@@ -1560,7 +1560,7 @@ The context's private `serialize()` method walks the `FabricValue` tree:
 3. **Arrays** — serialized element-by-element; sparse arrays use run-length
    encoded `hole` entries (Section 1.5).
 4. **Plain objects** — serialized key-by-key; `/object` escaping applied per
-   Section 5.6.
+   Section 6 of `3-json-encoding.md`.
 
 Circular references are detected via a `Set<object>` tracked during the walk.
 
@@ -1569,8 +1569,8 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 The context's private `deserialize()` method walks the `JsonWireValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed keys.
-2. **Structural escapes** — handles `/object` (Section 5.6) and `/quote`
-   (Section 5.6).
+2. **Structural escapes** — handles `/object` (Section 6 of `3-json-encoding.md`) and `/quote`
+   (Section 6 of `3-json-encoding.md`).
 3. **Type handler dispatch** — looks up the tag in the registry; if found,
    delegates to the handler's `deserialize()`. When the context is in lenient
    mode, handler exceptions produce `ProblematicValue` (Section 3.5).
@@ -1868,7 +1868,7 @@ regardless of nibble range.
  * need a string representation can call `toString()` on the result,
  * which produces `<tag>:<base64urlhash>` (unpadded base64url with the
  * URL-safe alphabet `A-Za-z0-9-_`, per RFC 4648 Section 5; see
- * Section 5.3).
+ * Section 3 of `3-json-encoding.md`).
  *
  * Two public entry points are provided:
  * - `hashOfModern(value)` — returns a `FabricHash`.
@@ -2078,7 +2078,7 @@ Four legacy conventions in the current codebase must be migrated to the unified
 > **Note on `$stream`:** In the current codebase, `$stream` is a stateless
 > marker — it signals that a cell path is a stream endpoint rather than carrying
 > reconstructible state. Under the new encoding it becomes `{ "/Stream@1": null }`
-> (a stateless tagged type per Section 5.5), preserving its marker semantics.
+> (a stateless tagged type per Section 5 of `3-json-encoding.md`), preserving its marker semantics.
 >
 > **Note on `$alias`:** An alias is an internal cross-cell reference with an
 > optional schema filter. During migration it maps to `/Link@1` with the
@@ -2110,7 +2110,7 @@ This applies at every point where deserialized data is consumed:
   cast (e.g., `state as { value: number }`). See the note in Section 2.7 for a
   concrete example.
 
-- **JSON type handlers** (Section 5.3) must validate the format of their state
+- **JSON type handlers** (Section 3 of `3-json-encoding.md`) must validate the format of their state
   before processing. Malformed input should produce a `ProblematicValue`
   rather than throwing or silently producing garbage.
 
