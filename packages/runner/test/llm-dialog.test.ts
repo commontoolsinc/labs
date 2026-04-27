@@ -19,6 +19,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
+import { createLLMFriendlyLink } from "../src/link-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -31,6 +32,7 @@ describe("llmDialog", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
+  let Writable: ReturnType<typeof createBuilder>["commonfabric"]["Writable"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let patternTool: ReturnType<
     typeof createBuilder
@@ -51,8 +53,15 @@ describe("llmDialog", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, llmDialog, Cell, handler, patternTool, generateObject } =
-      commonfabric);
+    ({
+      pattern,
+      llmDialog,
+      Cell,
+      Writable,
+      handler,
+      patternTool,
+      generateObject,
+    } = commonfabric);
   });
 
   afterEach(async () => {
@@ -497,6 +506,147 @@ describe("llmDialog", () => {
       },
       required: ["recipient", "subject", "body"],
     });
+  });
+
+  it("should pass opaque text links through handler tool string inputs", async () => {
+    type SentEmail = {
+      recipient: string;
+      subject: string;
+      body: string;
+    };
+    type SendMailArgs = SentEmail;
+
+    const sendMailInputSchema = {
+      type: "object",
+      properties: {
+        recipient: { type: "string" },
+        subject: { type: "string" },
+        body: {
+          anyOf: [
+            { type: "string" },
+            {
+              type: "object",
+              properties: { "@link": { type: "string" } },
+              required: ["@link"],
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+      required: ["recipient", "subject", "body"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const sendMail = handler<
+      SendMailArgs,
+      { emails: any }
+    >(
+      {
+        type: "object",
+        properties: {
+          recipient: { type: "string" },
+          subject: { type: "string" },
+          body: { type: "string" },
+        },
+        required: ["recipient", "subject", "body"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          emails: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+            asCell: true,
+          },
+        },
+        required: ["emails"],
+      },
+      ({ recipient, subject, body }, { emails }) => {
+        emails.push({ recipient, subject, body });
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        emails: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+        summary: { type: "string", asCell: true },
+        tools: true,
+      },
+      required: ["emails", "summary", "tools"],
+    } as const satisfies JSONSchema;
+
+    const testPattern = pattern(
+      () => {
+        const emails = Writable.of<SentEmail[]>([]);
+        const summary = Cell.of("Linked summary text", {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        });
+
+        return {
+          emails,
+          summary,
+          tools: {
+            sendMail: {
+              description:
+                "Send an email. body may be raw text or an opaque text link.",
+              inputSchema: sendMailInputSchema,
+              handler: sendMail({ emails }),
+            },
+          },
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-linked-text-tool-body-test",
+      resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.prepareCfc();
+    await tx.commit();
+    await runtime.idle();
+
+    const catalog = llmToolExecutionHelpers.buildToolCatalog(
+      result.key("tools") as any,
+      false,
+    );
+    const summaryLink = createLLMFriendlyLink(
+      result.key("summary").getAsNormalizedFullLink(),
+      space,
+    );
+
+    await llmToolExecutionHelpers.executeToolCalls(
+      runtime,
+      space,
+      catalog,
+      [{
+        type: "tool-call",
+        toolCallId: "call-linked-body",
+        toolName: "sendMail",
+        input: {
+          recipient: "john@example.org",
+          subject: "not approved",
+          body: { "@link": summaryLink },
+        },
+      }],
+    );
+    await runtime.idle();
+
+    expect(await result.key("emails").pull()).toEqual([{
+      recipient: "john@example.org",
+      subject: "not approved",
+      body: "Linked summary text",
+    }]);
   });
 
   it("should expose a userland subagent in llmDialog tool catalogs", async () => {
