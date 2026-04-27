@@ -1053,12 +1053,13 @@ describe("json encoding", () => {
     });
 
     it("single-key /-prefixed object still routes through unwrapTag (no regression)", () => {
-      // Single-key /Tag@1 objects are handled by unwrapTag, not the plain-object
+      // Single-key /Tag@N objects are handled by unwrapTag, not the plain-object
       // path — confirm they still produce UnknownValue (unrecognized tag), not
       // ProblematicValue from the new multi-key guard.
-      const data = { "/Unknown@1": { id: "x" } } as JsonWireValue;
+      const data = { "/Future@7": { id: "x" } } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
+      expect((result as unknown as UnknownValue).typeTag).toBe("Future@7");
     });
   });
 
