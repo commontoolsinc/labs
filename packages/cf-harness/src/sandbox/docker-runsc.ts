@@ -6,6 +6,7 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "./types.ts";
 
@@ -109,6 +110,20 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
 
   defaultWorkingDirectory(): string {
     return normalizeWorkspacePath(this.config.workspaceMountPath);
+  }
+
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: this.kind,
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: {
+        runtimeRequested: true,
+        runtimeName: this.config.runtimeName,
+        workspaceMountPath: this.config.workspaceMountPath,
+        networkMode: this.config.dockerNetworkMode,
+        extraDockerArgsCount: this.config.extraDockerArgs.length,
+      },
+    };
   }
 
   isPathWithinWorkspace(path: string): boolean {

@@ -8,6 +8,7 @@ import {
   readHarnessRunState,
   readHarnessTranscript,
 } from "../src/artifacts.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -138,6 +139,24 @@ Deno.test({
         capabilitySnapshot: {
           type: "cf-harness.capability-snapshot",
           at: "2026-04-15T21:00:01.000Z",
+          cfc: {
+            enforcementMode: "observe",
+            absenceBehavior: "observe-only",
+            substrateStatus: "not-attested",
+            runManifest: { present: false },
+            sandbox: {
+              kind: "docker-runsc-cfc",
+              defaultWorkingDirectory: "/workspace",
+              cfc: {
+                runtimeRequested: true,
+                workspaceMountPath: "/workspace",
+              },
+            },
+            protectedXattrs: {
+              expectedSandboxVisible: false,
+              sandboxVisibility: "not-probed",
+            },
+          },
           commands: {
             bash: {
               present: true,
@@ -173,6 +192,61 @@ Deno.test({
         toolOutputs: [result.resultRef],
         failureRecords: [],
       });
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "CfHarnessEngine persists Loom run manifest artifacts",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-manifest-",
+    });
+    const runManifest = {
+      type: "cf-harness.loom-run-manifest" as const,
+      version: 1 as const,
+      source: "loom" as const,
+      wishId: "W-519",
+      cfc: { enforcementMode: "observe" as const },
+    };
+    try {
+      const engine = new CfHarnessEngine({
+        artifactRoot,
+        sandboxRuntime: new FakeSandboxRuntime([
+          { stdout: "ok\n", stderr: "", exitCode: 0 },
+        ]),
+        runId: "run-with-manifest",
+        runManifest,
+        runManifestPath: "/tmp/original-loom-run-manifest.json",
+      });
+
+      await engine.invokeBuiltinTool("bash", { command: "echo ok" });
+
+      const runRoot = join(artifactRoot, "run-with-manifest");
+      const manifestPath = join(runRoot, "run-manifest.json");
+      const persistedState = await readHarnessRunState(
+        join(runRoot, "run-state.json"),
+      );
+
+      assertEquals(
+        JSON.parse(await Deno.readTextFile(manifestPath)),
+        runManifest,
+      );
+      assertEquals(persistedState.cfcEnforcementMode, "observe");
+      assertEquals(persistedState.runManifest, runManifest);
+      assertEquals(persistedState.runManifestPath, manifestPath);
+      assertEquals(persistedState.capabilitySnapshot?.cfc.runManifest, {
+        present: true,
+        type: "cf-harness.loom-run-manifest",
+        path: manifestPath,
+      });
+      assertEquals(
+        persistedState.capabilitySnapshot?.cfc.substrateStatus,
+        "manifest-present",
+      );
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }
@@ -299,7 +373,7 @@ Deno.test({
         toolCallId: "call-1",
         toolId: "read_file",
         effectClass: "read",
-        cfcEnforcementMode: "disabled",
+        cfcEnforcementMode: "enforce-explicit",
         policyDecision: "allowed",
         executionStatus: "completed",
         toolInputSummary: {
@@ -370,7 +444,8 @@ Deno.test({
     });
     try {
       const promptSlotBinding = {
-        type: "cf-harness.prompt-slot-binding",
+        type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+        source: { type: "test.prompt-slot", subject: "artifact-test" },
         role: "direct-command",
         kernelName: "cf-harness",
         surface: "test",

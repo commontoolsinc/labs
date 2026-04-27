@@ -84,6 +84,7 @@ The package already includes:
 - package exports and tasks in [deno.json](../deno.json)
 - initial contract surfaces:
   - [prompt-slot.ts](../src/contracts/prompt-slot.ts)
+  - [run-manifest.ts](../src/contracts/run-manifest.ts)
   - [observation.ts](../src/contracts/observation.ts)
   - [policy.ts](../src/contracts/policy.ts)
   - [transcript.ts](../src/contracts/transcript.ts)
@@ -119,6 +120,7 @@ Why:
 
 - artifact store in [artifacts.ts](../src/artifacts.ts)
 - run-state tracking in [run-state.ts](../src/run-state.ts)
+- retained Loom run manifest artifacts
 - transcript-based resume support in the prompt loop and CLI
 
 Why:
@@ -143,7 +145,12 @@ Why:
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
+- default CFC mode aligned with runner-style `enforce-explicit`
 - deny/recovery via JSON `ObservationDenied` tool messages
+- spec-aligned `PromptSlotBound` prompt-slot evidence
+- capability snapshots that record current CFC mode, manifest presence,
+  substrate absence behavior, sandbox CFC request hints, and expected protected
+  xattr visibility
 - CLI summaries of accumulated policy events
 
 Why:

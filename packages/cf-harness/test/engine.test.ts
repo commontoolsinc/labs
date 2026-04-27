@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -76,7 +77,7 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     status: "pending",
     createdAt: "2026-04-15T19:00:00.000Z",
     updatedAt: "2026-04-15T19:00:00.000Z",
-    cfcEnforcementMode: "disabled",
+    cfcEnforcementMode: "enforce-explicit",
     currentDir: "/workspace",
     policyEvents: [],
     toolOutputs: [],
@@ -148,7 +149,8 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
 
 Deno.test("CfHarnessEngine records prompt slot binding into run state", () => {
   const promptSlotBinding = {
-    type: "cf-harness.prompt-slot-binding",
+    type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+    source: { type: "test.prompt-slot", subject: "engine-test" },
     role: "direct-command",
     kernelName: "cf-harness",
     surface: "test",
