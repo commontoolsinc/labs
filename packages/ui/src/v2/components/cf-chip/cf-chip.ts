@@ -55,6 +55,13 @@ export class CFChip extends BaseElement {
           var(--cf-size-sm-line-height)
         );
         display: inline-block;
+        box-sizing: border-box;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: inherit;
       }
 
       .chip {
