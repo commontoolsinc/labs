@@ -37,10 +37,11 @@ round-trip correctly.
 
 > **Base64url encoding convention.** All base64-encoded values in the JSON wire
 > format use the URL-safe base64url alphabet (`A-Za-z0-9-_`, per RFC 4648
-> Section 5) and **must omit** trailing `=` padding characters. Encoders must
-> not emit padding; decoders must **reject** input containing `=` padding
-> characters or standard-base64 characters (`+`, `/`). This convention applies
-> to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state values.
+> Section 5). Encoders **must omit** trailing `=` padding characters. Decoders
+> **must accept** both padded and unpadded input for compatibility; standard-base64
+> characters (`+`, `/`) are still invalid and must be rejected. This convention
+> applies to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state
+> values.
 
 ```typescript
 // file: packages/data-model/json-type-handlers.ts (illustrative -- tag-to-format map)
