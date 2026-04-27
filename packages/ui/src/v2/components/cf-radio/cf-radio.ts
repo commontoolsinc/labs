@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
 
@@ -25,6 +25,11 @@ import { BaseElement } from "../../core/base-element.ts";
  */
 
 export class CFRadio extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override styles = css`
     :host {
       display: inline-block;
@@ -150,12 +155,11 @@ export class CFRadio extends BaseElement {
       this.disabled = false;
       this.value = "";
       this.name = "";
+      this.setAttribute("exportparts", "radio,indicator");
     }
 
     override connectedCallback() {
       super.connectedCallback();
-      // Make the element focusable
-      this.tabIndex = this.disabled ? -1 : 0;
       this.setAttribute("role", "radio");
       this._updateAriaAttributes();
 
@@ -174,10 +178,6 @@ export class CFRadio extends BaseElement {
       changedProperties: Map<string | number | symbol, unknown>,
     ) {
       super.updated(changedProperties);
-
-      if (changedProperties.has("disabled")) {
-        this.tabIndex = this.disabled ? -1 : 0;
-      }
 
       if (
         changedProperties.has("checked") || changedProperties.has("disabled")
@@ -223,6 +223,7 @@ export class CFRadio extends BaseElement {
     private _updateAriaAttributes() {
       this.setAttribute("aria-checked", String(this.checked));
       this.setAttribute("aria-disabled", String(this.disabled));
+      this.tabIndex = this.disabled ? -1 : 0;
     }
 
     private _handleClick(event: Event) {

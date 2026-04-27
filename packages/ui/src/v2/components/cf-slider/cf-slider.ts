@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 export type SliderOrientation = "horizontal" | "vertical";
@@ -24,6 +24,11 @@ export type SliderOrientation = "horizontal" | "vertical";
  * <cf-slider orientation="vertical" style="height: 200px"></cf-slider>
  */
 export class CFSlider extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override properties = {
     value: { type: Number },
     min: { type: Number },
@@ -275,6 +280,7 @@ export class CFSlider extends BaseElement {
     this.step = 1;
     this.disabled = false;
     this.orientation = "horizontal";
+    this.setAttribute("exportparts", "base,track,range,thumb");
   }
 
   get trackElement(): HTMLElement | null {
@@ -311,7 +317,6 @@ export class CFSlider extends BaseElement {
 
     // Set up ARIA attributes
     this.setAttribute("role", "slider");
-    this.tabIndex = this.disabled ? -1 : 0;
     this._updateAriaAttributes();
 
     // Add keyboard event listener
@@ -332,10 +337,6 @@ export class CFSlider extends BaseElement {
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
     super.updated(changedProperties);
-
-    if (changedProperties.has("disabled")) {
-      this.tabIndex = this.disabled ? -1 : 0;
-    }
 
     if (
       changedProperties.has("min") || changedProperties.has("max") ||
@@ -447,6 +448,7 @@ export class CFSlider extends BaseElement {
     this.setAttribute("aria-valuenow", this.value.toString());
     this.setAttribute("aria-disabled", this.disabled.toString());
     this.setAttribute("aria-orientation", this.orientation);
+    this.tabIndex = this.disabled ? -1 : 0;
   }
 
   private _handleTrackMouseDown = (event: MouseEvent): void => {

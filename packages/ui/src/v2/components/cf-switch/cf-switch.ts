@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
@@ -26,6 +26,11 @@ import { createBooleanCellController } from "../../core/cell-controller.ts";
  */
 
 export class CFSwitch extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   // deno-fmt-ignore
   static override styles = [
     BaseElement.baseStyles,
@@ -178,6 +183,7 @@ export class CFSwitch extends BaseElement {
     this.disabled = false;
     this.name = "";
     this.value = "on";
+    this.setAttribute("exportparts", "switch,thumb");
   }
 
   private getChecked(): boolean {
@@ -190,8 +196,6 @@ export class CFSwitch extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    // Make the element focusable
-    this.tabIndex = this.disabled ? -1 : 0;
     this.setAttribute("role", "switch");
     this._updateAriaAttributes();
     // Bind initial checked value
@@ -221,10 +225,6 @@ export class CFSwitch extends BaseElement {
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
     super.updated(changedProperties);
-
-    if (changedProperties.has("disabled")) {
-      this.tabIndex = this.disabled ? -1 : 0;
-    }
 
     if (
       changedProperties.has("checked") ||
@@ -271,6 +271,7 @@ export class CFSwitch extends BaseElement {
     const isChecked = this.getChecked();
     this.setAttribute("aria-checked", String(isChecked));
     this.setAttribute("aria-disabled", String(this.disabled));
+    this.tabIndex = this.disabled ? -1 : 0;
   }
 
   private _handleClick(event: Event) {
