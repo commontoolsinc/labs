@@ -418,6 +418,26 @@ const mainContent = computed(() => {
 
 ---
 
+## cf-text
+
+Generic text primitive for captions, helper copy, metadata, descriptions, and
+other display text that does not label a specific control. Use `cf-label` for
+form/control labels.
+
+```tsx
+<cf-vstack gap="2">
+  <cf-text variant="caption" tone="muted">Updated just now</cf-text>
+  <cf-text>Default body copy.</cf-text>
+  <cf-text variant="body-large" tone="primary">Prominent supporting text.</cf-text>
+</cf-vstack>
+```
+
+- `variant` — `"caption"`, `"body-compact"`, `"body"`, `"body-large"`, `"heading-sm"`, `"heading-md"`, `"heading-lg"`
+- `tone` — `"default"`, `"muted"`, `"tertiary"`, `"disabled"`, `"primary"`, `"success"`, `"warning"`, `"error"`
+- `block` — render as block text instead of inline text
+
+---
+
 ## cf-toast
 
 Floating ephemeral notifications. Place a `cf-toast-provider` at the app root and `cf-toast` elements inside it.

@@ -138,17 +138,17 @@ export class CFCard extends BaseElement {
 
       /* Title slot styling */
       ::slotted([slot="title"]) {
-        font-size: 1.5rem;
-        font-weight: 600;
-        line-height: 2rem;
-        letter-spacing: -0.025em;
+        font-size: var(--cf-font-heading-lg-size, 1.5rem);
+        font-weight: var(--cf-font-heading-lg-weight, 600);
+        line-height: var(--cf-font-heading-lg-line-height, 2rem);
+        letter-spacing: var(--cf-font-heading-lg-letter-spacing, -0.025em);
         margin: 0;
       }
 
       /* Description slot styling */
       ::slotted([slot="description"]) {
-        font-size: 0.875rem;
-        line-height: 1.25rem;
+        font-size: var(--cf-font-body-size, 0.875rem);
+        line-height: var(--cf-font-body-line-height, 1.25rem);
         color: var(--cf-card-color-muted-text, hsl(0, 0%, 45%));
         margin-top: var(--cf-card-spacing-tight, 0.25rem);
       }

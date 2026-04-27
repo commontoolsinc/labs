@@ -61,7 +61,7 @@ export class CFToast extends BaseElement {
       min-width: var(--cf-toast-min-width, 240px);
       box-shadow: var(--cf-toast-box-shadow);
       backdrop-filter: blur(var(--cf-toast-backdrop-blur, 8px));
-      font-size: 0.875rem;
+      font-size: var(--cf-font-body-size, 0.875rem);
       font-family: inherit;
       border: var(--cf-toast-border);
     }

@@ -210,7 +210,7 @@ export class CFChip extends BaseElement {
         .chip-icon {
           display: flex;
           align-items: center;
-          font-size: 0.8125rem;
+          font-size: var(--cf-font-body-compact-size, 0.8125rem);
           line-height: 1;
         }
 

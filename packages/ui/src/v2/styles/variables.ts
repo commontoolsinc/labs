@@ -125,6 +125,46 @@ export const variablesCSS = `
   --cf-line-height-loose: 2;
 
   /*
+   * Typography roles
+   * Use these semantic roles in components instead of hardcoded font-size,
+   * font-weight, line-height, or letter-spacing declarations.
+   */
+  --cf-font-caption-size: 0.75rem;
+  --cf-font-caption-line-height: 1rem;
+  --cf-font-caption-weight: 500;
+  --cf-font-caption-letter-spacing: 0;
+
+  --cf-font-body-compact-size: 0.8125rem;
+  --cf-font-body-compact-line-height: 1.25rem;
+  --cf-font-body-compact-weight: 500;
+  --cf-font-body-compact-letter-spacing: 0;
+
+  --cf-font-body-size: 0.875rem;
+  --cf-font-body-line-height: 1.25rem;
+  --cf-font-body-weight: 400;
+  --cf-font-body-letter-spacing: 0;
+
+  --cf-font-body-large-size: 1rem;
+  --cf-font-body-large-line-height: 1.5rem;
+  --cf-font-body-large-weight: 400;
+  --cf-font-body-large-letter-spacing: 0;
+
+  --cf-font-heading-sm-size: 1.125rem;
+  --cf-font-heading-sm-line-height: 1.5rem;
+  --cf-font-heading-sm-weight: 600;
+  --cf-font-heading-sm-letter-spacing: 0;
+
+  --cf-font-heading-md-size: 1.25rem;
+  --cf-font-heading-md-line-height: 1.75rem;
+  --cf-font-heading-md-weight: 600;
+  --cf-font-heading-md-letter-spacing: 0;
+
+  --cf-font-heading-lg-size: 1.5rem;
+  --cf-font-heading-lg-line-height: 2rem;
+  --cf-font-heading-lg-weight: 600;
+  --cf-font-heading-lg-letter-spacing: -0.025em;
+
+  /*
    * Spacing
    * Layout utility props like gap="4" and padding="2" map directly to
    * this shared spacing namespace.
@@ -225,36 +265,36 @@ export const variablesCSS = `
     var(--cf-border-radius-full, 9999px)
   );
   --cf-pill-xs-min-height: var(--cf-size-xs-height);
-  --cf-pill-xs-padding-h: var(--cf-size-xs-padding-h);
-  --cf-pill-xs-padding-v: var(--cf-size-xs-padding-v);
+  --cf-pill-xs-padding-h: 6px;
+  --cf-pill-xs-padding-v: 1px;
   --cf-pill-xs-gap: var(--cf-size-xs-spacing);
   --cf-pill-xs-font-size: var(--cf-size-xs-font-size);
   --cf-pill-xs-line-height: var(--cf-size-xs-line-height);
 
   --cf-pill-sm-min-height: var(--cf-size-sm-height);
-  --cf-pill-sm-padding-h: var(--cf-size-sm-padding-h);
-  --cf-pill-sm-padding-v: var(--cf-size-sm-padding-v);
+  --cf-pill-sm-padding-h: 10px;
+  --cf-pill-sm-padding-v: 2px;
   --cf-pill-sm-gap: var(--cf-size-sm-spacing);
   --cf-pill-sm-font-size: var(--cf-size-sm-font-size);
   --cf-pill-sm-line-height: var(--cf-size-sm-line-height);
 
   --cf-pill-md-min-height: var(--cf-size-md-height);
-  --cf-pill-md-padding-h: var(--cf-size-md-padding-h);
-  --cf-pill-md-padding-v: var(--cf-size-md-padding-v);
+  --cf-pill-md-padding-h: 12px;
+  --cf-pill-md-padding-v: 4px;
   --cf-pill-md-gap: var(--cf-size-md-spacing);
   --cf-pill-md-font-size: var(--cf-size-md-font-size);
   --cf-pill-md-line-height: var(--cf-size-md-line-height);
 
   --cf-pill-lg-min-height: var(--cf-size-lg-height);
-  --cf-pill-lg-padding-h: var(--cf-size-lg-padding-h);
-  --cf-pill-lg-padding-v: var(--cf-size-lg-padding-v);
+  --cf-pill-lg-padding-h: 14px;
+  --cf-pill-lg-padding-v: 6px;
   --cf-pill-lg-gap: var(--cf-size-lg-spacing);
   --cf-pill-lg-font-size: var(--cf-size-lg-font-size);
   --cf-pill-lg-line-height: var(--cf-size-lg-line-height);
 
   --cf-pill-xl-min-height: var(--cf-size-xl-height);
-  --cf-pill-xl-padding-h: var(--cf-size-xl-padding-h);
-  --cf-pill-xl-padding-v: var(--cf-size-xl-padding-v);
+  --cf-pill-xl-padding-h: 18px;
+  --cf-pill-xl-padding-v: 8px;
   --cf-pill-xl-gap: var(--cf-size-xl-spacing);
   --cf-pill-xl-font-size: var(--cf-size-xl-font-size);
   --cf-pill-xl-line-height: var(--cf-size-xl-line-height);

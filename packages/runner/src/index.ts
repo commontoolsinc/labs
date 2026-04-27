@@ -45,7 +45,7 @@ export {
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export {
-  getPatternIdFromPiece,
+  getPatternIdFromResultCell,
   getPatternIdFromSourceCell,
 } from "./process-cell.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
@@ -158,3 +158,12 @@ export { deepEqual } from "@commonfabric/utils/deep-equal";
 export { getValueAtPath, setValueAtPath } from "./path-utils.ts";
 export { schemaToTypeString } from "./schema-format.ts";
 export type { SchemaFormatOptions } from "./schema-format.ts";
+export { ACLManager } from "./acl-manager.ts";
+export {
+  cellEntityIdString,
+  type CellPath,
+  compileAndSavePattern,
+  getResultCellWithSourceSchema,
+  parseCellPath,
+  resolveCellPath,
+} from "./piece-helpers.ts";

@@ -1,20 +1,16 @@
 import {
   Cell,
-  getPatternIdFromPiece,
+  type CellPath,
+  getPatternIdFromResultCell,
   NAME,
-  Pattern,
-  PatternMeta,
-  RuntimeProgram,
+  type Pattern,
+  type PatternMeta,
+  resolveCellPath,
+  type RuntimeProgram,
 } from "@commonfabric/runner";
 import { pieceId, PieceManager } from "../manager.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
-import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
-import { injectUserCode } from "../iframe/static.ts";
-import {
-  buildFullPattern,
-  getIframePattern,
-  IFramePattern,
-} from "../iframe/pattern.ts";
+import { compileProgram } from "./utils.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -111,7 +107,7 @@ export class PieceController<T = unknown> {
   }
 
   async getPattern(): Promise<Pattern> {
-    const patternId = getPatternIdFromPiece(this.#cell);
+    const patternId = getPatternIdFromResultCell(this.#cell);
     if (!patternId) throw new Error("piece missing pattern ID");
     const runtime = this.#manager.runtime;
     const pattern = await runtime.patternManager.loadPattern(
@@ -122,7 +118,7 @@ export class PieceController<T = unknown> {
   }
 
   getPatternMeta(): Promise<PatternMeta> {
-    const patternId = getPatternIdFromPiece(this.#cell);
+    const patternId = getPatternIdFromResultCell(this.#cell);
     if (!patternId) throw new Error("piece missing pattern ID");
     const space = this.#manager.getSpace();
     return this.#manager.runtime.patternManager.loadPatternMeta(
@@ -131,29 +127,8 @@ export class PieceController<T = unknown> {
     );
   }
 
-  // Returns an `IFramePattern` for the piece, or `undefined`
-  // if not an iframe pattern.
-  getIframePattern(): IFramePattern | undefined {
-    return getIframePattern(this.#cell, this.#manager.runtime).iframe;
-  }
-
   async setPattern(program: RuntimeProgram): Promise<void> {
     const pattern = await compileProgram(this.#manager, program);
-    await execute(this.#manager, this.id, pattern);
-  }
-
-  // Update piece's pattern with usercode for an iframe pattern.
-  // Throws if pattern is not an iframe pattern.
-  async setIframePattern(src: string): Promise<void> {
-    const iframePattern = getIframePattern(this.#cell, this.#manager.runtime);
-    if (!iframePattern.iframe) {
-      throw new Error(`Expected piece "${this.id}" to be an iframe pattern.`);
-    }
-    iframePattern.iframe.src = injectUserCode(src);
-    const pattern = await compileProgram(
-      this.#manager,
-      buildFullPattern(iframePattern.iframe),
-    );
     await execute(this.#manager, this.id, pattern);
   }
 

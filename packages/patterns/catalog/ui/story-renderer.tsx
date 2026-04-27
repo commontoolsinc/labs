@@ -24,6 +24,7 @@ import TextareaStory from "../stories/cf-textarea-story.tsx";
 import MessageInputStory from "../stories/cf-message-input-story.tsx";
 import ToolbarStory from "../stories/cf-toolbar-story.tsx";
 import HeadingStory from "../stories/cf-heading-story.tsx";
+import TextStory from "../stories/cf-text-story.tsx";
 import LabelStory from "../stories/cf-label-story.tsx";
 import ChipStory from "../stories/cf-chip-story.tsx";
 import BadgeStory from "../stories/cf-badge-story.tsx";
@@ -124,6 +125,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ToolbarStory({});
         case "heading":
           return HeadingStory({});
+        case "text":
+          return TextStory({});
         case "label":
           return LabelStory({});
         case "chip":

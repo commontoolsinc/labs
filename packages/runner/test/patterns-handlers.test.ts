@@ -13,7 +13,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getPatternIdFromPiece } from "@commonfabric/runner";
+import { getPatternIdFromResultCell } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -383,7 +383,7 @@ describe("Pattern Runner - Handlers", () => {
     expect(value).toMatchObject({ result: 5 });
 
     // Cast to any to avoid type checking
-    const patternId = getPatternIdFromPiece(piece);
+    const patternId = getPatternIdFromResultCell(piece);
     expect(patternId).toBeDefined();
     expect(lastError?.patternId).toBe(patternId);
     expect(lastError?.space).toBe(space);

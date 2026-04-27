@@ -83,7 +83,7 @@ export const styles = css`
     height: var(--cf-size-md-height, 2rem);
     border-radius: var(--cf-size-md-radius, 8px);
     font-size: var(--cf-size-md-font-size, 0.75rem);
-    font-weight: 500;
+    font-weight: var(--cf-font-weight-medium, 500);
     font-family: var(--cf-button-font-family, inherit);
     line-height: var(--cf-size-md-line-height, 1rem);
     padding: var(--cf-size-md-padding-v, 8px) var(--cf-size-md-padding-h, 8px);

@@ -59,10 +59,10 @@ export const alertStyles = `
 
   /* Alert title */
   .alert-title {
-    font-size: 0.875rem;
-    font-weight: 500;
-    line-height: 1;
-    letter-spacing: -0.025em;
+    font-size: var(--cf-font-body-size, 0.875rem);
+    font-weight: var(--cf-font-weight-medium, 500);
+    line-height: var(--cf-line-height-none, 1);
+    letter-spacing: var(--cf-alert-title-letter-spacing, -0.025em);
   }
 
   .alert-title:empty {
@@ -71,8 +71,8 @@ export const alertStyles = `
 
   /* Alert description */
   .alert-description {
-    font-size: 0.875rem;
-    line-height: 1.5;
+    font-size: var(--cf-font-body-size, 0.875rem);
+    line-height: var(--cf-line-height-normal, 1.5);
     opacity: 0.9;
   }
 

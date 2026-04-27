@@ -12,9 +12,9 @@ export function getPatternIdFromSourceCell(
   return parseLink(patternValue, sourceCell)?.id;
 }
 
-export function getPatternIdFromPiece(
-  piece: Cell<unknown>,
+export function getPatternIdFromResultCell(
+  resultCell: Cell<unknown>,
 ): URI | undefined {
-  const sourceCell = piece.getSourceCell(processLinkSchema);
+  const sourceCell = resultCell.getSourceCell(processLinkSchema);
   return sourceCell ? getPatternIdFromSourceCell(sourceCell) : undefined;
 }

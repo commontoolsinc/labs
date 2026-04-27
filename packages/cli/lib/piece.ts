@@ -10,7 +10,7 @@ import {
   VNode,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
-import { extractUserCode, pieceId, PieceManager } from "@commonfabric/piece";
+import { pieceId, PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -306,11 +306,7 @@ export async function setPiecePattern(
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(config.piece, false);
-  if (entry.mainPath.endsWith(".iframe.js")) {
-    await piece.setIframePattern(entry.mainPath);
-  } else {
-    await piece.setPattern(await getProgramFromFile(manager, entry));
-  }
+  await piece.setPattern(await getProgramFromFile(manager, entry));
 }
 
 export async function savePiecePattern(
@@ -322,17 +318,8 @@ export async function savePiecePattern(
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(config.piece, false);
   const meta = await piece.getPatternMeta();
-  const iframePattern = piece.getIframePattern();
 
-  if (iframePattern) {
-    const userCode = extractUserCode(iframePattern.src);
-    if (!userCode) {
-      throw new Error(
-        `No user code found in iframe pattern "${config.piece}".`,
-      );
-    }
-    await Deno.writeTextFile(join(outPath, "main.iframe.js"), userCode);
-  } else if (meta.program) {
+  if (meta.program) {
     for (const { name, contents } of meta.program.files) {
       if (name[0] !== "/") {
         throw new Error("Ungrounded file in pattern.");

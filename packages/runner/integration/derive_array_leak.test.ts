@@ -12,8 +12,8 @@
 import { Identity, Session } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
 import { StorageManager } from "../src/storage/cache.ts";
-import { Runtime } from "../src/index.ts";
-import { compilePattern, PieceManager } from "@commonfabric/piece";
+import { compileAndSavePattern, Runtime } from "../src/index.ts";
+import { PieceManager } from "@commonfabric/piece";
 
 (Error as any).stackTraceLimit = 100;
 
@@ -113,11 +113,10 @@ async function runTest() {
     "./integration/derive_array_leak.test.tsx",
   );
 
-  const pattern = await compilePattern(
-    patternContent,
-    "pattern",
+  const pattern = await compileAndSavePattern(
     runtime,
-    space_thingy_space,
+    patternContent,
+    { spec: "pattern", space: space_thingy_space },
   );
   console.log("Pattern compiled successfully");
 
