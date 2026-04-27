@@ -125,6 +125,7 @@ export const INPUT_PATTERNS = {
 } as const;
 
 export class CFInput extends BaseElement {
+  static formAssociated = true;
   static override shadowRootOptions = {
     ...LitElement.shadowRootOptions,
     delegatesFocus: true,
@@ -420,6 +421,7 @@ export class CFInput extends BaseElement {
 
       private _input: HTMLInputElement | null = null;
       private _generatedAriaLabel: string | null = null;
+      #internals: ElementInternals;
       private _cellController = createStringCellController(this, {
         timing: {
           strategy: "debounce",
@@ -447,6 +449,7 @@ export class CFInput extends BaseElement {
 
       constructor() {
         super();
+        this.#internals = this.attachInternals();
         this.type = "text";
         this.placeholder = "";
         this.value = "";
@@ -604,6 +607,7 @@ export class CFInput extends BaseElement {
           changedProperties.has("error") ||
           changedProperties.has("showValidation") ||
           changedProperties.has("placeholder") ||
+          changedProperties.has("type") ||
           changedProperties.has("value")
         ) {
           this._updateAccessibilityAttributes();
@@ -637,12 +641,6 @@ export class CFInput extends BaseElement {
 
       override connectedCallback() {
         super.connectedCallback();
-        if (!this.hasAttribute("role")) {
-          this.setAttribute("role", "textbox");
-        }
-        if (!this.hasAttribute("exportparts")) {
-          this.setAttribute("exportparts", "input");
-        }
         this._updateAccessibilityAttributes();
       }
 
@@ -654,6 +652,10 @@ export class CFInput extends BaseElement {
         // For file inputs, we can't set the value programmatically
         const inputValue = this.type === "file" ? undefined : this.getValue();
 
+        // The host element carries the ARIA role and tabindex for accessibility.
+        // The inner <input> is aria-hidden and removed from tab order so the
+        // accessibility tree sees one control (the host), not two. Browsers
+        // ignore role="presentation" on native interactive elements.
         return html`
           <input
             type="${this.type}"
@@ -687,6 +689,8 @@ export class CFInput extends BaseElement {
             @keydown="${this._handleKeyDown}"
             @invalid="${this._handleInvalid}"
             part="input"
+            aria-hidden="true"
+            tabindex="-1"
           />
         `;
       }
@@ -780,9 +784,7 @@ export class CFInput extends BaseElement {
       }
 
       private _updateAccessibilityAttributes() {
-        if (!this.hasAttribute("role")) {
-          this.setAttribute("role", "textbox");
-        }
+        this._syncHostRole();
         if (!this.hasAttribute("exportparts")) {
           this.setAttribute("exportparts", "input");
         }
@@ -791,10 +793,67 @@ export class CFInput extends BaseElement {
         this.setAttribute("aria-readonly", String(this.readonly));
         this.setAttribute("aria-required", String(this.required));
         this._updateGeneratedAriaLabel();
+        // Read .validity.valid directly instead of checkValidity() to avoid
+        // firing the 'invalid' event, which would re-enter _handleInvalid.
+        const nativeValid = this.input?.validity?.valid ?? true;
         this.setAttribute(
           "aria-invalid",
-          String(this.error || !this.checkValidity()),
+          String(this.error || !nativeValid),
         );
+        this._syncInternals();
+      }
+
+      /** Sync value and validity to ElementInternals for native form participation. */
+      private _syncInternals() {
+        this.#internals.setFormValue(this.getValue());
+        if (this.input) {
+          this.#internals.setValidity(
+            this.input.validity,
+            this.input.validationMessage,
+            this.input,
+          );
+        }
+      }
+
+      /** Map input type to the appropriate ARIA role on the host. */
+      private _syncHostRole() {
+        // Respect author-provided roles
+        if (
+          this.hasAttribute("role") &&
+          this.getAttribute("role") !== this._lastGeneratedRole
+        ) {
+          return;
+        }
+        const role = this._roleForType(this.type);
+        if (role) {
+          this.setAttribute("role", role);
+          this._lastGeneratedRole = role;
+        } else if (this._lastGeneratedRole) {
+          this.removeAttribute("role");
+          this._lastGeneratedRole = null;
+        }
+      }
+
+      private _lastGeneratedRole: string | null = null;
+
+      private _roleForType(type: InputType): string | null {
+        switch (type) {
+          case "text":
+          case "email":
+          case "password":
+          case "search":
+          case "tel":
+          case "url":
+            return "textbox";
+          case "number":
+            return "spinbutton";
+          case "range":
+            return "slider";
+          default:
+            // date, time, datetime-local, month, week, color, file, hidden
+            // — no widely-supported ARIA role; leave unset
+            return null;
+        }
       }
 
       private _updateGeneratedAriaLabel() {
@@ -822,12 +881,7 @@ export class CFInput extends BaseElement {
         }
       }
 
-      /**
-       * Focus the input programmatically
-       */
-      override focus(): void {
-        this.input?.focus();
-      }
+      // focus() is handled by delegatesFocus on the shadow root.
 
       /**
        * Blur the input programmatically

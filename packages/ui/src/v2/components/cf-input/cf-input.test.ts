@@ -24,6 +24,20 @@ describe("CFInput", () => {
     expect(element).toBeInstanceOf(CFInput);
   });
 
+  if (typeof document !== "undefined") {
+    it("should be creatable via document.createElement", async () => {
+      const element = document.createElement("cf-input") as CFInput;
+      document.body.append(element);
+      await element.updateComplete;
+
+      expect(element).toBeInstanceOf(CFInput);
+      expect(element.getAttribute("role")).toBe("textbox");
+      expect(element.getAttribute("exportparts")).toBe("input");
+
+      element.remove();
+    });
+  }
+
   it("should have correct default properties", () => {
     const el = new CFInput();
     expect(el.type).toBe("text");
@@ -87,6 +101,34 @@ describe("CFInput", () => {
     el.updated(new Map([["placeholder", ""]]));
 
     expect(el.getAttribute("aria-label")).toBe("Custom name");
+  });
+
+  it("should use role=spinbutton for number inputs", () => {
+    const el = new CFInput();
+    el.type = "number";
+    el.updated(new Map([["type", "text"]]));
+
+    expect(el.getAttribute("role")).toBe("spinbutton");
+  });
+
+  it("should use role=slider for range inputs", () => {
+    const el = new CFInput();
+    el.type = "range";
+    el.updated(new Map([["type", "text"]]));
+
+    expect(el.getAttribute("role")).toBe("slider");
+  });
+
+  it("should not set a role for date inputs", () => {
+    const el = new CFInput();
+    el.type = "date";
+    el.updated(new Map([["type", "text"]]));
+
+    expect(el.hasAttribute("role")).toBe(false);
+  });
+
+  it("should be form-associated", () => {
+    expect(CFInput.formAssociated).toBe(true);
   });
 
   it("should delegate focus into the shadow input", () => {

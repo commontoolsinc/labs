@@ -94,12 +94,6 @@ export class CFButton extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    if (!this.hasAttribute("role")) {
-      this.setAttribute("role", "button");
-    }
-    if (!this.hasAttribute("exportparts")) {
-      this.setAttribute("exportparts", "button");
-    }
     this._updateAccessibilityAttributes();
   }
 
@@ -140,6 +134,11 @@ export class CFButton extends BaseElement {
     }
     if (typeof this.size === "string" && this.size) classes[this.size] = true;
 
+    // The host element carries role="button" and tabindex for accessibility.
+    // The inner <button> is aria-hidden and removed from tab order so the
+    // accessibility tree sees one button (the host), not two. Browsers ignore
+    // role="presentation" on native interactive elements, so aria-hidden is
+    // needed instead.
     return html`
       <button
         class="${classMap(classes)}"
@@ -148,6 +147,8 @@ export class CFButton extends BaseElement {
         @click="${this._handleClick}"
         part="button"
         data-cf-button
+        aria-hidden="true"
+        tabindex="-1"
       >
         <slot></slot>
       </button>

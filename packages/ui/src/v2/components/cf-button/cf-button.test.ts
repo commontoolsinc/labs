@@ -19,6 +19,20 @@ describe("CFButton", () => {
     expect(element).toBeInstanceOf(CFButton);
   });
 
+  if (typeof document !== "undefined") {
+    it("should be creatable via document.createElement", async () => {
+      const element = document.createElement("cf-button") as CFButton;
+      document.body.append(element);
+      await element.updateComplete;
+
+      expect(element).toBeInstanceOf(CFButton);
+      expect(element.getAttribute("role")).toBe("button");
+      expect(element.getAttribute("exportparts")).toBe("button");
+
+      element.remove();
+    });
+  }
+
   it("should have default properties", () => {
     const element = new CFButton();
     expect(element.variant).toBe("primary");
