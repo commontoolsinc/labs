@@ -1015,6 +1015,22 @@ describe("json encoding", () => {
       expect(result["/x"]["/y"]).toBe(123);
     });
 
+    it("boundary contrast: literal subtree uses /quote, Fabric type uses /object", () => {
+      // All-literal: single /quote wraps the whole structure.
+      const literal = { "/x": { "/y": 123 } } as unknown as FabricValue;
+      expect(toWireFormat(literal)).toEqual({
+        "/quote": { "/x": { "/y": 123 } },
+      });
+
+      // Fabric type as value: /object with the epoch encoded as its tagged form.
+      const withEpoch = {
+        "/x": new FabricEpochDays(42n),
+      } as unknown as FabricValue;
+      expect(toWireFormat(withEpoch)).toEqual({
+        "/object": { "/x": { "/EpochDays@1": expect.anything() } },
+      });
+    });
+
     it("emits /object for /-keyed object with FabricError value", () => {
       const err = new FabricError(new TypeError("eep!"));
       const obj = { "/x": err } as unknown as FabricValue;
