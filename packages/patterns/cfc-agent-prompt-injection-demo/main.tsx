@@ -65,6 +65,11 @@ type SendMailArgs = {
   body: string;
 };
 
+type RuntimeClickPayload = {
+  $ctx?: Record<string, never>;
+  $event?: any;
+};
+
 type ReadRawBriefingResult = {
   title: string;
   source: string;
@@ -460,7 +465,7 @@ Your job in this half is to fail visibly when the document tries to seize contro
       PROMPT_INFLUENCE_ATOM,
     ],
   });
-  const unsafeClearChat = action(() => {
+  const unsafeClearChat = action((_event: RuntimeClickPayload) => {
     unsafeMessages.set([]);
   });
   const unsafeAgentUi = (
@@ -580,20 +585,20 @@ user-facing text from those structured fields plus the original user request.`;
     builtinTools: false,
     observationMaxConfidentiality: ["internal", PROMPT_INFLUENCE_ATOM],
   });
-  const runUnsafeAgent = action(() => {
+  const runUnsafeAgent = action((_event: RuntimeClickPayload) => {
     unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
   });
-  const runSafeAgent = action(() => {
+  const runSafeAgent = action((_event: RuntimeClickPayload) => {
     safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
   });
-  const runBothAgents = action(() => {
+  const runBothAgents = action((_event: RuntimeClickPayload) => {
     unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
     safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
   });
-  const clearEmails = action(() => {
+  const clearEmails = action((_event: RuntimeClickPayload) => {
     emails.set([]);
   });
-  const safeClearChat = action(() => {
+  const safeClearChat = action((_event: RuntimeClickPayload) => {
     safeMessages.set([]);
   });
   const safeAgentUi = (
