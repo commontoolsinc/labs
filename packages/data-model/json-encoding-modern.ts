@@ -419,20 +419,18 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return Object.freeze(result);
     }
 
-    // Plain objects: guard against reserved /-prefixed keys, then recursively
-    // deserialize values and freeze. Any /-prefixed key in ANY object is
-    // reserved per spec — return ProblematicValue rather than silently
-    // round-tripping the object.
-    const slashKey = Object.keys(data).find((k) => k.startsWith("/"));
-    if (slashKey !== undefined) {
-      return new ProblematicValue(
-        slashKey,
-        data as unknown as FabricValue,
-        `object contains reserved /-prefixed key: "${slashKey}"`,
-      ) as unknown as FabricValue;
-    }
+    // Plain objects: recursively deserialize values and freeze. Any
+    // /-prefixed key is reserved per spec — return ProblematicValue on
+    // first occurrence rather than silently round-tripping the object.
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
+      if (key.startsWith("/")) {
+        return new ProblematicValue(
+          key.slice(1),
+          data as unknown as FabricValue,
+          `object contains reserved /-prefixed key: "${key}"`,
+        ) as unknown as FabricValue;
+      }
       result[key] = this.deserialize(val, runtime, registry);
     }
     return Object.freeze(result);
