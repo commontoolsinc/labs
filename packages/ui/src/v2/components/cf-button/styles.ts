@@ -293,13 +293,23 @@ export const styles = css`
     border: 1px solid
       var(--cf-button-color-border, var(--cf-colors-gray-300, #d5d7dd));
     border-radius: var(
-      --cf-button-border-radius-full,
-      var(--cf-radius-full, 9999px)
+      --cf-pill-border-radius,
+      var(--cf-button-border-radius-full, var(--cf-border-radius-full, 9999px))
     );
+    width: auto;
     height: auto;
-    padding: 0.25rem 0.625rem;
-    font-size: 0.8125rem;
-    line-height: 1;
+    min-height: var(--cf-pill-md-min-height, var(--cf-size-md-height, 2rem));
+    padding: var(--cf-pill-md-padding-v, var(--cf-size-md-padding-v, 8px))
+      var(--cf-pill-md-padding-h, var(--cf-size-md-padding-h, 8px));
+    font-size: var(
+      --cf-pill-md-font-size,
+      var(--cf-size-md-font-size, 0.75rem)
+    );
+    line-height: var(
+      --cf-pill-md-line-height,
+      var(--cf-size-md-line-height, 1rem)
+    );
+    gap: var(--cf-pill-md-gap, var(--cf-size-md-spacing, 8px));
   }
 
   .button.pill:hover:not(:disabled) {
@@ -307,5 +317,64 @@ export const styles = css`
       --cf-button-color-surface-hover,
       var(--cf-colors-gray-200, #eceef1)
     );
+  }
+
+  :host([size="xs"]) .button.pill,
+  :host([size="sm"]) .button.pill,
+  :host([size="lg"]) .button.pill,
+  :host([size="xl"]) .button.pill {
+    height: auto;
+    border-radius: var(
+      --cf-pill-border-radius,
+      var(--cf-button-border-radius-full, var(--cf-border-radius-full, 9999px))
+    );
+  }
+
+  :host([size="xs"]) .button.pill {
+    min-height: var(--cf-pill-xs-min-height, var(--cf-size-xs-height, 16px));
+    padding: var(--cf-pill-xs-padding-v, var(--cf-size-xs-padding-v, 2px))
+      var(--cf-pill-xs-padding-h, var(--cf-size-xs-padding-h, 4px));
+    font-size: var(--cf-pill-xs-font-size, var(--cf-size-xs-font-size, 9px));
+    line-height: var(
+      --cf-pill-xs-line-height,
+      var(--cf-size-xs-line-height, 12px)
+    );
+    gap: var(--cf-pill-xs-gap, var(--cf-size-xs-spacing, 2px));
+  }
+
+  :host([size="sm"]) .button.pill {
+    min-height: var(--cf-pill-sm-min-height, var(--cf-size-sm-height, 24px));
+    padding: var(--cf-pill-sm-padding-v, var(--cf-size-sm-padding-v, 4px))
+      var(--cf-pill-sm-padding-h, var(--cf-size-sm-padding-h, 6px));
+    font-size: var(--cf-pill-sm-font-size, var(--cf-size-sm-font-size, 11px));
+    line-height: var(
+      --cf-pill-sm-line-height,
+      var(--cf-size-sm-line-height, 16px)
+    );
+    gap: var(--cf-pill-sm-gap, var(--cf-size-sm-spacing, 4px));
+  }
+
+  :host([size="lg"]) .button.pill {
+    min-height: var(--cf-pill-lg-min-height, var(--cf-size-lg-height, 40px));
+    padding: var(--cf-pill-lg-padding-v, var(--cf-size-lg-padding-v, 8px))
+      var(--cf-pill-lg-padding-h, var(--cf-size-lg-padding-h, 12px));
+    font-size: var(--cf-pill-lg-font-size, var(--cf-size-lg-font-size, 16px));
+    line-height: var(
+      --cf-pill-lg-line-height,
+      var(--cf-size-lg-line-height, 20px)
+    );
+    gap: var(--cf-pill-lg-gap, var(--cf-size-lg-spacing, 12px));
+  }
+
+  :host([size="xl"]) .button.pill {
+    min-height: var(--cf-pill-xl-min-height, var(--cf-size-xl-height, 48px));
+    padding: var(--cf-pill-xl-padding-v, var(--cf-size-xl-padding-v, 12px))
+      var(--cf-pill-xl-padding-h, var(--cf-size-xl-padding-h, 16px));
+    font-size: var(--cf-pill-xl-font-size, var(--cf-size-xl-font-size, 18px));
+    line-height: var(
+      --cf-pill-xl-line-height,
+      var(--cf-size-xl-line-height, 24px)
+    );
+    gap: var(--cf-pill-xl-gap, var(--cf-size-xl-spacing, 16px));
   }
 `;

@@ -29,14 +29,47 @@ export class CFChip extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
+        --cf-chip-border-radius: var(
+          --cf-pill-border-radius,
+          var(--cf-border-radius-full, 9999px)
+        );
+        --cf-chip-min-height: var(
+          --cf-pill-sm-min-height,
+          var(--cf-size-sm-height)
+        );
+        --cf-chip-padding-h: var(
+          --cf-pill-sm-padding-h,
+          var(--cf-size-sm-padding-h)
+        );
+        --cf-chip-padding-v: var(
+          --cf-pill-sm-padding-v,
+          var(--cf-size-sm-padding-v)
+        );
+        --cf-chip-gap: var(--cf-pill-sm-gap, var(--cf-size-sm-spacing));
+        --cf-chip-font-size: var(
+          --cf-pill-sm-font-size,
+          var(--cf-size-sm-font-size)
+        );
+        --cf-chip-line-height: var(
+          --cf-pill-sm-line-height,
+          var(--cf-size-sm-line-height)
+        );
         display: inline-block;
+        box-sizing: border-box;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: inherit;
       }
 
       .chip {
         display: inline-flex;
         align-items: center;
-        gap: var(--cf-size-sm-spacing);
-        padding: var(--cf-size-sm-padding-v) var(--cf-size-sm-padding-h);
+        min-height: var(--cf-chip-min-height);
+        gap: var(--cf-chip-gap);
+        padding: var(--cf-chip-padding-v) var(--cf-chip-padding-h);
         background: var(
           --cf-chip-background,
           var(
@@ -60,11 +93,11 @@ export class CFChip extends BaseElement {
             )
           );
         border-radius: var(
-          --cf-theme-border-radius,
+          --cf-chip-border-radius,
           var(--cf-border-radius-full, 9999px)
         );
-        font-size: var(--cf-size-sm-font-size);
-        line-height: var(--cf-size-sm-line-height);
+        font-size: var(--cf-chip-font-size);
+        line-height: var(--cf-chip-line-height);
         user-select: none;
         transition:
           background-color var(--cf-theme-animation-duration, 200ms) ease,
@@ -72,33 +105,41 @@ export class CFChip extends BaseElement {
         }
 
         :host([size="xs"]) .chip {
-          padding: var(--cf-size-xs-padding-v) var(--cf-size-xs-padding-h);
-          font-size: var(--cf-size-xs-font-size);
-          line-height: var(--cf-size-xs-line-height);
-          gap: var(--cf-size-xs-spacing);
+          min-height: var(--cf-pill-xs-min-height, var(--cf-size-xs-height));
+          padding: var(--cf-pill-xs-padding-v, var(--cf-size-xs-padding-v))
+            var(--cf-pill-xs-padding-h, var(--cf-size-xs-padding-h));
+          font-size: var(--cf-pill-xs-font-size, var(--cf-size-xs-font-size));
+          line-height: var(--cf-pill-xs-line-height, var(--cf-size-xs-line-height));
+          gap: var(--cf-pill-xs-gap, var(--cf-size-xs-spacing));
         }
 
         /* sm is default — no override needed */
 
         :host([size="md"]) .chip {
-          padding: var(--cf-size-md-padding-v) var(--cf-size-md-padding-h);
-          font-size: var(--cf-size-md-font-size);
-          line-height: var(--cf-size-md-line-height);
-          gap: var(--cf-size-md-spacing);
+          min-height: var(--cf-pill-md-min-height, var(--cf-size-md-height));
+          padding: var(--cf-pill-md-padding-v, var(--cf-size-md-padding-v))
+            var(--cf-pill-md-padding-h, var(--cf-size-md-padding-h));
+          font-size: var(--cf-pill-md-font-size, var(--cf-size-md-font-size));
+          line-height: var(--cf-pill-md-line-height, var(--cf-size-md-line-height));
+          gap: var(--cf-pill-md-gap, var(--cf-size-md-spacing));
         }
 
         :host([size="lg"]) .chip {
-          padding: var(--cf-size-lg-padding-v) var(--cf-size-lg-padding-h);
-          font-size: var(--cf-size-lg-font-size);
-          line-height: var(--cf-size-lg-line-height);
-          gap: var(--cf-size-lg-spacing);
+          min-height: var(--cf-pill-lg-min-height, var(--cf-size-lg-height));
+          padding: var(--cf-pill-lg-padding-v, var(--cf-size-lg-padding-v))
+            var(--cf-pill-lg-padding-h, var(--cf-size-lg-padding-h));
+          font-size: var(--cf-pill-lg-font-size, var(--cf-size-lg-font-size));
+          line-height: var(--cf-pill-lg-line-height, var(--cf-size-lg-line-height));
+          gap: var(--cf-pill-lg-gap, var(--cf-size-lg-spacing));
         }
 
         :host([size="xl"]) .chip {
-          padding: var(--cf-size-xl-padding-v) var(--cf-size-xl-padding-h);
-          font-size: var(--cf-size-xl-font-size);
-          line-height: var(--cf-size-xl-line-height);
-          gap: var(--cf-size-xl-spacing);
+          min-height: var(--cf-pill-xl-min-height, var(--cf-size-xl-height));
+          padding: var(--cf-pill-xl-padding-v, var(--cf-size-xl-padding-v))
+            var(--cf-pill-xl-padding-h, var(--cf-size-xl-padding-h));
+          font-size: var(--cf-pill-xl-font-size, var(--cf-size-xl-font-size));
+          line-height: var(--cf-pill-xl-line-height, var(--cf-size-xl-line-height));
+          gap: var(--cf-pill-xl-gap, var(--cf-size-xl-spacing));
         }
 
         .chip.interactive {
