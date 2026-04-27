@@ -152,8 +152,9 @@ built-in escape, or an encoding error.
 > including `/`-prefixed ones. The `/object` and `/quote` escapes (Section 6)
 > exist precisely to represent such objects in encoded form without ambiguity.
 > A conforming encoder always wraps user-data objects that contain `/`-prefixed
-> keys via `/object` before they reach the wire, so bare `/`-prefixed keys in
-> the wire format are always encoding signals, never literal user-data keys.
+> keys via one of these escapes before they reach the wire, so bare
+> `/`-prefixed keys in the wire format are always encoding signals, never
+> literal user-data keys.
 
 The common case — a **tagged value** — is a single-key object whose sole key
 starts with `/`:
