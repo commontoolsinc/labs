@@ -1166,32 +1166,6 @@ describe("scheduler", () => {
     await readTx.commit();
   });
 
-  it("records interested children for schema-driven shallow reads", async () => {
-    const testCell = runtime.getCell<{ name: string; wish?: number }>(
-      space,
-      "schema-driven-shallow-interest-cell",
-      {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-        },
-      },
-      tx,
-    );
-    testCell.set({ name: "alpha", wish: 1 });
-    await tx.commit();
-    tx = runtime.edit();
-
-    const value = testCell.withTx(tx).get();
-    expect(value).toEqual({ name: "alpha" });
-
-    const log = txToReactivityLog(tx);
-    expect(log.shallowReads).toContainEqual({
-      ...toMemorySpaceAddress(testCell.getAsNormalizedFullLink()),
-      interestedChildren: ["name"],
-    });
-  });
-
   it("should track read without load for scheduling and still trigger on writes", async () => {
     const sourceCell = runtime.getCell<number>(
       space,

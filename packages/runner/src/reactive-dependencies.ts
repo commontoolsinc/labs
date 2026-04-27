@@ -7,26 +7,11 @@ import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
-  ShallowReadDependency,
 } from "./storage/interface.ts";
 
 export type SortedAndCompactPaths = Array<
   readonly MemoryAddressPathComponent[]
 >;
-
-export interface NonRecursiveDependencyPath {
-  path: readonly MemoryAddressPathComponent[];
-  interestedChildren?: readonly MemoryAddressPathComponent[];
-}
-
-export type SortedAndCompactNonRecursiveDependencies = Array<
-  NonRecursiveDependencyPath
->;
-
-export type TriggerDependencyPath =
-  | readonly MemoryAddressPathComponent[]
-  | NonRecursiveDependencyPath;
-
 export interface DetermineTriggeredActionsOptions {
   /**
    * Non-recursive reads are invalidated by parent/same-path writes only.
@@ -47,10 +32,10 @@ type Keyable = Record<MemoryAddressPathComponent, FabricValue>;
  * @param compactifyChildren - whether to remove entries that have the same prefix
  * @returns The sorted and compactified paths.
  */
-export function sortAndCompactPaths<T extends IMemorySpaceAddress>(
-  unsorted: readonly T[],
+export function sortAndCompactPaths(
+  unsorted: IMemorySpaceAddress[],
   compactifyChildren = true,
-): T[] {
+): IMemorySpaceAddress[] {
   if (unsorted.length === 0) return [];
 
   const sorted = unsorted.toSorted((a, b) =>
@@ -68,7 +53,7 @@ export function sortAndCompactPaths<T extends IMemorySpaceAddress>(
       ? -1
       : 1
   );
-  const result: T[] = [sorted[0]];
+  const result: IMemorySpaceAddress[] = [sorted[0]];
   let previous = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
     if (
@@ -80,8 +65,6 @@ export function sortAndCompactPaths<T extends IMemorySpaceAddress>(
       // If we compactifyChildren, or the paths are identical, skip this
       (compactifyChildren || previous.path.length === sorted[i].path.length)
     ) {
-      result[result.length - 1] = mergeCompactablePaths(previous, sorted[i]);
-      previous = result[result.length - 1];
       continue;
     }
     result.push(sorted[i]);
@@ -109,22 +92,6 @@ export function addressesToPathByEntity(
   return map;
 }
 
-export function shallowReadsToDependencyByEntity(
-  addresses: ShallowReadDependency[],
-): Map<SpaceAndURI, SortedAndCompactNonRecursiveDependencies> {
-  const map = new Map<SpaceAndURI, SortedAndCompactNonRecursiveDependencies>();
-  for (const address of addresses) {
-    if (address.type !== "application/json") continue;
-    const key: SpaceAndURI = `${address.space}/${address.id}`;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push({
-      path: address.path,
-      interestedChildren: address.interestedChildren,
-    });
-  }
-  return map;
-}
-
 /**
  * Determines the actions that are triggered based on the changes to the data.
  *
@@ -138,10 +105,7 @@ export function shallowReadsToDependencyByEntity(
  * @returns The actions that need to be triggered.
  */
 export function determineTriggeredActions(
-  dependencies: Map<
-    Action,
-    SortedAndCompactPaths | SortedAndCompactNonRecursiveDependencies
-  >,
+  dependencies: Map<Action, SortedAndCompactPaths>,
   before: FabricValue,
   after: FabricValue,
   startPath: readonly MemoryAddressPathComponent[] = [],
@@ -149,17 +113,14 @@ export function determineTriggeredActions(
 ): Action[] {
   const triggeredActions: Action[] = [];
 
-  let subscribers: {
-    action: Action;
-    paths: TriggerDependencyPath[];
-  }[] = Array
+  let subscribers: { action: Action; paths: SortedAndCompactPaths }[] = Array
     .from(
       dependencies.entries(),
     ).map((
       [action, paths],
     ) => ({
       action,
-      paths: [...paths].toReversed(),
+      paths: paths.toReversed(),
     }));
 
   if (startPath.length > 0) {
@@ -167,16 +128,12 @@ export function determineTriggeredActions(
     // include those that can be affected by that path.
     subscribers = subscribers.map(({ action, paths }) => ({
       action,
-      paths: paths.filter((path) =>
-        arraysOverlap(dependencyPath(path), startPath)
-      ),
+      paths: paths.filter((path) => arraysOverlap(path, startPath)),
     })).filter(({ paths }) => paths.length > 0);
   }
 
   // Sort subscribers by last/longest path first.
-  subscribers.sort((a, b) =>
-    comparePaths(dependencyPath(b.paths[0]), dependencyPath(a.paths[0]))
-  );
+  subscribers.sort((a, b) => comparePaths(b.paths[0], a.paths[0]));
 
   // Traversal state:
   let currentPath: readonly MemoryAddressPathComponent[] = [];
@@ -191,25 +148,15 @@ export function determineTriggeredActions(
 
   while (subscribers.length > 0) {
     // Pull the next path from the queue
-    const current = [{
-      action: subscribers[0].action,
-      path: subscribers[0].paths.shift()!,
-      paths: subscribers[0].paths,
-    }];
-    subscribers.shift();
-    const targetPath = dependencyPath(current[0].path);
+    const current = [subscribers.shift()!];
+    const targetPath = current[0].paths.shift()!;
 
     // Also pull in all subscribers that have the same path
     while (
-      subscribers.length > 0 &&
-      arrayEqual(targetPath, dependencyPath(subscribers[0].paths[0]))
+      subscribers.length > 0 && arrayEqual(targetPath, subscribers[0].paths[0])
     ) {
-      current.push({
-        action: subscribers[0].action,
-        path: subscribers[0].paths.shift()!,
-        paths: subscribers[0].paths,
-      });
-      subscribers.shift();
+      subscribers[0].paths.shift();
+      current.push(subscribers.shift()!);
     }
 
     // Now traverse the data to target path
@@ -240,18 +187,15 @@ export function determineTriggeredActions(
     let hasChanged: boolean;
     if (beforeCanReach && afterCanReach) {
       // Both reachable - compare actual values
-      if (!options?.nonRecursive) {
-        hasChanged = !deepEqual(
+      if (options?.nonRecursive) {
+        hasChanged = !shallowEqual(
           beforeValues[targetPath.length],
           afterValues[targetPath.length],
         );
       } else {
-        hasChanged = current.some(({ path }) =>
-          !shallowEqual(
-            beforeValues[targetPath.length],
-            afterValues[targetPath.length],
-            interestedChildren(path),
-          )
+        hasChanged = !deepEqual(
+          beforeValues[targetPath.length],
+          afterValues[targetPath.length],
         );
       }
     } else if (beforeCanReach !== afterCanReach) {
@@ -264,34 +208,22 @@ export function determineTriggeredActions(
     }
 
     if (hasChanged) {
-      for (const subscriber of current) {
-        const interested = options?.nonRecursive
-          ? interestedChildren(subscriber.path)
-          : undefined;
-        const subscriberChanged = beforeCanReach && afterCanReach
-          ? options?.nonRecursive
-            ? !shallowEqual(
-              beforeValues[targetPath.length],
-              afterValues[targetPath.length],
-              interested,
-            )
-            : !deepEqual(
-              beforeValues[targetPath.length],
-              afterValues[targetPath.length],
-            )
-          : beforeCanReach !== afterCanReach ||
-            beforeLastObject !== afterLastObject;
-        if (subscriberChanged) {
-          triggeredActions.push(subscriber.action);
-        } else if (subscriber.paths.length > 0) {
-          requeueSubscriber(subscribers, subscriber);
-        }
-      }
+      // If the value changed, trigger the actions
+      triggeredActions.push(...current.map(({ action }) => action));
     } else {
       // Otherwise, queue up the next path, keeping subscribers sorted by path
       for (const subscriber of current) {
         if (subscriber.paths.length > 0) {
-          requeueSubscriber(subscribers, subscriber);
+          const nextPath = subscriber.paths[0];
+          for (let i = 0; i <= subscribers.length; i++) {
+            if (
+              i === subscribers.length ||
+              comparePaths(nextPath, subscribers[i].paths[0]) >= 0
+            ) {
+              subscribers.splice(i, 0, subscriber);
+              break;
+            }
+          }
         }
       }
     }
@@ -310,27 +242,11 @@ export function arraysOverlap(
 }
 
 export function nonRecursiveReadMayOverlapWrite(
-  read: NonRecursiveDependencyPath,
+  readPath: readonly MemoryAddressPathComponent[],
   writePath: readonly MemoryAddressPathComponent[],
 ): boolean {
-  if (
-    writePath.length > read.path.length + 1 ||
-    !arraysOverlap(writePath, read.path)
-  ) {
-    return false;
-  }
-
-  if (writePath.length <= read.path.length) {
-    return true;
-  }
-
-  const interested = read.interestedChildren;
-  if (!interested || interested.length === 0) {
-    return true;
-  }
-
-  const child = writePath[read.path.length];
-  return interested.includes(child ?? "");
+  return writePath.length <= readPath.length + 1 &&
+    arraysOverlap(writePath, readPath);
 }
 
 function commonPrefixLength(
@@ -360,7 +276,6 @@ function commonPrefixLength(
 function shallowEqual(
   before: FabricValue,
   after: FabricValue,
-  interestedChildren?: readonly MemoryAddressPathComponent[],
 ): boolean {
   // Links compare by full identity — a different link target matters.
   if (isPrimitiveCellLink(before) || isPrimitiveCellLink(after)) {
@@ -368,14 +283,6 @@ function shallowEqual(
   }
 
   if (isRecord(before) && isRecord(after)) {
-    if (interestedChildren && interestedChildren.length > 0) {
-      return interestedChildren.every((key) => {
-        const beforeHas = Object.hasOwn(before, key);
-        const afterHas = Object.hasOwn(after, key);
-        return beforeHas === afterHas &&
-          (!beforeHas || deepEqual(before[key], after[key]));
-      });
-    }
     const beforeKeys = Object.keys(before);
     const afterKeys = Object.keys(after);
     if (beforeKeys.length !== afterKeys.length) return false;
@@ -400,89 +307,4 @@ function comparePaths(
     }
   }
   return a.length - b.length;
-}
-
-function mergeCompactablePaths<T extends IMemorySpaceAddress>(
-  left: T,
-  right: T,
-): T {
-  const leftChildren =
-    (left as Partial<ShallowReadDependency>).interestedChildren;
-  const rightChildren = (right as Partial<ShallowReadDependency>)
-    .interestedChildren;
-
-  if (!leftChildren && !rightChildren) {
-    return left;
-  }
-
-  const interestedChildren = mergeInterestedChildren(
-    leftChildren,
-    rightChildren,
-  );
-  if (!interestedChildren) {
-    return left;
-  }
-
-  return {
-    ...left,
-    interestedChildren,
-  } as T;
-}
-
-function dependencyPath(
-  dependency: TriggerDependencyPath,
-): readonly MemoryAddressPathComponent[] {
-  return isNonRecursiveDependencyPath(dependency)
-    ? dependency.path
-    : dependency;
-}
-
-function interestedChildren(
-  dependency: TriggerDependencyPath,
-): readonly MemoryAddressPathComponent[] | undefined {
-  return isNonRecursiveDependencyPath(dependency)
-    ? dependency.interestedChildren
-    : undefined;
-}
-
-function requeueSubscriber(
-  subscribers: Array<{
-    action: Action;
-    paths: TriggerDependencyPath[];
-  }>,
-  subscriber: {
-    action: Action;
-    paths: TriggerDependencyPath[];
-  },
-): void {
-  const nextPath = dependencyPath(subscriber.paths[0]);
-  for (let i = 0; i <= subscribers.length; i++) {
-    if (
-      i === subscribers.length ||
-      comparePaths(nextPath, dependencyPath(subscribers[i].paths[0])) >= 0
-    ) {
-      subscribers.splice(i, 0, subscriber);
-      return;
-    }
-  }
-}
-
-function isNonRecursiveDependencyPath(
-  dependency: TriggerDependencyPath,
-): dependency is NonRecursiveDependencyPath {
-  return !Array.isArray(dependency);
-}
-
-function mergeInterestedChildren(
-  left?: readonly MemoryAddressPathComponent[],
-  right?: readonly MemoryAddressPathComponent[],
-): readonly MemoryAddressPathComponent[] | undefined {
-  if (!left?.length) return right;
-  if (!right?.length) return left;
-
-  const merged = new Set(left);
-  for (const child of right) {
-    merged.add(child);
-  }
-  return [...merged];
 }

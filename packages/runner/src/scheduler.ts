@@ -35,17 +35,13 @@ import type {
   IStorageTransaction,
   MediaType,
   MemoryAddressPathComponent,
-  ShallowReadDependency,
 } from "./storage/interface.ts";
 import {
   addressesToPathByEntity,
   arraysOverlap,
   determineTriggeredActions,
-  type NonRecursiveDependencyPath,
   nonRecursiveReadMayOverlapWrite,
-  shallowReadsToDependencyByEntity,
   sortAndCompactPaths,
-  type SortedAndCompactNonRecursiveDependencies,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
 import {
@@ -216,7 +212,7 @@ type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
   /** Reads that should not invalidate on child writes unless they add a new key */
-  shallowReads: ShallowReadDependency[];
+  shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
   /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
   potentialWrites?: IMemorySpaceAddress[];
@@ -423,7 +419,7 @@ export class Scheduler {
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
   private nonRecursiveTriggers = new Map<
     SpaceAndURI,
-    Map<Action, SortedAndCompactNonRecursiveDependencies>
+    Map<Action, SortedAndCompactPaths>
   >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
@@ -1810,7 +1806,7 @@ export class Scheduler {
     log: ReactivityLog,
   ): {
     reads: IMemorySpaceAddress[];
-    shallowReads: ShallowReadDependency[];
+    shallowReads: IMemorySpaceAddress[];
     log: ReactivityLog;
   } {
     const reads = sortAndCompactPaths(log.reads);
@@ -2010,14 +2006,14 @@ export class Scheduler {
   private addTriggerPaths(
     action: Action,
     reads: IMemorySpaceAddress[],
-    shallowReads: ShallowReadDependency[],
+    shallowReads: IMemorySpaceAddress[],
   ): {
     entities: Set<SpaceAndURI>;
     triggerPathsByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
   } {
     this.clearActionTriggers(action);
     const pathsByEntity = addressesToPathByEntity(reads);
-    const nonRecursivePathsByEntity = shallowReadsToDependencyByEntity(
+    const nonRecursivePathsByEntity = addressesToPathByEntity(
       shallowReads,
     );
     const entities = new Set<SpaceAndURI>();
@@ -2150,10 +2146,7 @@ export class Scheduler {
       }
       entityReads.push(read);
     }
-    const nonRecursiveByEntity = new Map<
-      SpaceAndURI,
-      ShallowReadDependency[]
-    >();
+    const nonRecursiveByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
     for (const read of log.shallowReads) {
       const entity: SpaceAndURI = `${read.space}/${read.id}`;
       let entityReads = nonRecursiveByEntity.get(entity);
@@ -2259,13 +2252,6 @@ export class Scheduler {
     return arraysOverlap(writePath, readPath);
   }
 
-  private nonRecursivePathMatchesWrite(
-    read: NonRecursiveDependencyPath,
-    writePath: readonly MemoryAddressPathComponent[],
-  ): boolean {
-    return nonRecursiveReadMayOverlapWrite(read, writePath);
-  }
-
   private collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
     const entity = `${write.space}/${write.id}` as SpaceAndURI;
     const readers = new Set<Action>();
@@ -2284,7 +2270,7 @@ export class Scheduler {
       for (const [action, reads] of nonRecursiveReaders) {
         if (
           reads.some((read) =>
-            this.nonRecursivePathMatchesWrite(read, write.path)
+            nonRecursiveReadMayOverlapWrite(read, write.path)
           )
         ) {
           readers.add(action);
@@ -2335,7 +2321,7 @@ export class Scheduler {
 
   private readsOverlapWrites(
     reads: IMemorySpaceAddress[],
-    shallowReads: ShallowReadDependency[],
+    shallowReads: IMemorySpaceAddress[],
     writes: IMemorySpaceAddress[],
   ): boolean {
     for (const read of reads) {
@@ -2356,7 +2342,7 @@ export class Scheduler {
         if (
           read.space === write.space &&
           read.id === write.id &&
-          nonRecursiveReadMayOverlapWrite(read, write.path)
+          nonRecursiveReadMayOverlapWrite(read.path, write.path)
         ) {
           return true;
         }
@@ -2984,7 +2970,7 @@ export class Scheduler {
   private pendingDependencyCollectionMightAffect(
     action: Action,
     reads: IMemorySpaceAddress[],
-    shallowReads: ShallowReadDependency[],
+    shallowReads: IMemorySpaceAddress[],
   ): boolean {
     if (reads.length === 0 && shallowReads.length === 0) return false;
 
@@ -5068,7 +5054,7 @@ function topologicalSort(
                 (addr) =>
                   addr.space === write.space &&
                   addr.id === write.id &&
-                  nonRecursiveReadMayOverlapWrite(addr, write.path),
+                  nonRecursiveReadMayOverlapWrite(addr.path, write.path),
               )
             ) {
               graphA.add(actionB);

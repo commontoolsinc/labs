@@ -1,7 +1,6 @@
 import type {
   Activity,
   IMemorySpaceAddress,
-  MemoryAddressPathComponent,
   Metadata,
   TransactionReactivityLog,
 } from "./interface.ts";
@@ -22,10 +21,6 @@ const internalVerifierReadMarker: unique symbol = Symbol(
   "internalVerifierReadMarker",
 );
 
-const shallowReadInterestedChildrenMarker: unique symbol = Symbol(
-  "shallowReadInterestedChildrenMarker",
-);
-
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
@@ -42,14 +37,6 @@ export const internalVerifierRead: Metadata = {
   [internalVerifierReadMarker]: true,
 };
 
-export function shallowReadInterestedChildren(
-  children: readonly MemoryAddressPathComponent[],
-): Metadata {
-  return {
-    [shallowReadInterestedChildrenMarker]: [...new Set(children)],
-  };
-}
-
 export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
   return meta?.[ignoreReadForSchedulingMarker] === true;
 }
@@ -64,23 +51,6 @@ export function isMutableTransactionReadAllowed(meta?: Metadata): boolean {
 
 export function isInternalVerifierRead(meta?: Metadata): boolean {
   return meta?.[internalVerifierReadMarker] === true;
-}
-
-export function getShallowReadInterestedChildren(
-  meta?: Metadata,
-): readonly MemoryAddressPathComponent[] | undefined {
-  const value = meta?.[shallowReadInterestedChildrenMarker];
-  if (!Array.isArray(value) || value.length === 0) {
-    return undefined;
-  }
-  if (
-    !value.every((entry) =>
-      typeof entry === "string" || typeof entry === "number"
-    )
-  ) {
-    return undefined;
-  }
-  return value as readonly MemoryAddressPathComponent[];
 }
 
 export function reactivityLogFromActivities(
@@ -103,13 +73,7 @@ export function reactivityLogFromActivities(
         path: [...activity.read.path],
       };
       if (activity.read.nonRecursive === true) {
-        const interestedChildren = getShallowReadInterestedChildren(
-          activity.read.meta,
-        );
-        log.shallowReads.push({
-          ...address,
-          ...(interestedChildren ? { interestedChildren } : {}),
-        });
+        log.shallowReads.push(address);
       } else {
         log.reads.push(address);
       }
