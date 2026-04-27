@@ -136,6 +136,11 @@ The integration suite requires a working local Docker + `runsc-cfc` environment.
 By default it also uses the published kitchen-sink image above, unless you
 override `CF_HARNESS_INTEGRATION_IMAGE`.
 
+On Linux, Docker/runsc runs default to the host UID/GID. On macOS, the default
+omits `--user` because Docker Desktop bind mounts may expose host files as
+`root:root`, which prevents non-root container users from writing mounted Loom
+workspaces. An explicit `containerUser` still overrides the platform default.
+
 ## Related Docs
 
 - [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)

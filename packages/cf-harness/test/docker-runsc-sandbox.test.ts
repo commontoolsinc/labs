@@ -1,7 +1,8 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertMatch, assertThrows } from "@std/assert";
 import {
   DEFAULT_DOCKER_RUNSC_IMAGE,
   DockerRunscSandboxRuntime,
+  resolveDefaultContainerUser,
   resolveDockerRunscSandboxConfig,
 } from "../src/sandbox/docker-runsc.ts";
 import type {
@@ -36,6 +37,18 @@ Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   assertEquals(config.shellPath, "/bin/sh");
   assertEquals(config.dockerNetworkMode, "none");
   assertEquals(config.extraDockerArgs, []);
+});
+
+Deno.test("resolveDefaultContainerUser omits default --user on macOS", () => {
+  assertEquals(resolveDefaultContainerUser("darwin"), undefined);
+});
+
+Deno.test("resolveDefaultContainerUser keeps host UID/GID default on Linux", () => {
+  if (Deno.build.os === "windows") {
+    return;
+  }
+
+  assertMatch(resolveDefaultContainerUser("linux") ?? "", /^\d+:\d+$/);
 });
 
 Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () => {

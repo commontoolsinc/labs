@@ -25,8 +25,10 @@ const readEnvVar = (name: string): string | undefined => {
   }
 };
 
-const resolveDefaultContainerUser = (): string | undefined => {
-  if (Deno.build.os === "windows") {
+export const resolveDefaultContainerUser = (
+  hostOs: typeof Deno.build.os = Deno.build.os,
+): string | undefined => {
+  if (hostOs === "windows" || hostOs === "darwin") {
     return undefined;
   }
   const uidFromEnv = readEnvVar("UID");
