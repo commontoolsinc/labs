@@ -13,6 +13,11 @@ const UNQUOTE_MARKER = "@@DEBUG_UNQUOTE@@";
 /** Regex matching a marked, JSON-quoted payload. Group 1 is the payload. */
 const UNQUOTE_RE = /"@@DEBUG_UNQUOTE@@(.*?)@@DEBUG_UNQUOTE@@"/g;
 
+/** Wraps a payload in the sentinel markers for unquoting. */
+function marked(payload: string): string {
+  return `${UNQUOTE_MARKER}${payload}${UNQUOTE_MARKER}`;
+}
+
 /**
  * `JSON.stringify()` replacer that handles values it otherwise mishandles for
  * our debugging purposes:
@@ -20,28 +25,47 @@ const UNQUOTE_RE = /"@@DEBUG_UNQUOTE@@(.*?)@@DEBUG_UNQUOTE@@"/g;
  * - `bigint` (would throw),
  * - `undefined` (silently dropped/rewritten),
  * - `function` (silently dropped/rewritten),
- * - `symbol` (silently dropped/rewritten).
+ * - `symbol` (silently dropped/rewritten),
+ * - `NaN` and `±Infinity` (silently rewritten as `null`),
+ * - negative zero (silently rewritten as `0`, dropping the sign).
  *
  * The returned strings carry their desired bare-token form between sentinel
  * markers, which a post-processing pass strips along with the surrounding
  * JSON-string quotes.
  */
 function debugReplacer(_key: string, value: unknown): unknown {
-  if (typeof value === "bigint") {
-    return `${UNQUOTE_MARKER}${value}n${UNQUOTE_MARKER}`;
+  if (typeof value === "number") {
+    // Negative zero must be checked first: `value === 0` is true for both
+    // `0` and `-0` (IEEE 754), so a generic numeric early-out would lose
+    // the sign. `Object.is(value, -0)` distinguishes them.
+    if (Object.is(value, -0)) {
+      return marked("-0");
+    } else if (Number.isNaN(value)) {
+      return marked("NaN");
+    } else if (value === Infinity) {
+      return marked("Infinity");
+    } else if (value === -Infinity) {
+      return marked("-Infinity");
+    } else {
+      return value;
+    }
+  } else if (typeof value === "bigint") {
+    return marked(`${value}n`);
   } else if (value === undefined) {
-    return `${UNQUOTE_MARKER}undefined${UNQUOTE_MARKER}`;
+    return marked("undefined");
   } else if (typeof value === "function") {
-    const payload = value.name === ""
-      ? "(...) => {...}"
-      : `function ${value.name}(...) {...}`;
-    return `${UNQUOTE_MARKER}${payload}${UNQUOTE_MARKER}`;
+    return marked(
+      value.name === ""
+        ? "(...) => {...}"
+        : `function ${value.name}(...) {...}`,
+    );
   } else if (typeof value === "symbol") {
     const key = Symbol.keyFor(value);
-    const payload = key !== undefined
-      ? `Symbol.for(${JSON.stringify(key)})`
-      : `Symbol(${JSON.stringify(value.description ?? "")})`;
-    return `${UNQUOTE_MARKER}${payload}${UNQUOTE_MARKER}`;
+    return marked(
+      key !== undefined
+        ? `Symbol.for(${JSON.stringify(key)})`
+        : `Symbol(${JSON.stringify(value.description ?? "")})`,
+    );
   } else {
     return value;
   }

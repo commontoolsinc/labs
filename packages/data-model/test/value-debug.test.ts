@@ -137,6 +137,40 @@ describe("value-debug", () => {
       expect(toCompactDebugString({ s })).toBe('{"s":Symbol("inner")}');
       expect(toCompactDebugString([s])).toBe('[Symbol("inner")]');
     });
+
+    it("renders top-level `NaN` as a bare token", () => {
+      expect(toCompactDebugString(NaN)).toBe("NaN");
+      expect(toCompactDebugString(0 / 0)).toBe("NaN");
+    });
+
+    it("renders top-level positive `Infinity` as a bare token", () => {
+      expect(toCompactDebugString(Infinity)).toBe("Infinity");
+      expect(toCompactDebugString(Number.POSITIVE_INFINITY)).toBe("Infinity");
+    });
+
+    it("renders top-level negative `Infinity` as a bare token", () => {
+      expect(toCompactDebugString(-Infinity)).toBe("-Infinity");
+      expect(toCompactDebugString(Number.NEGATIVE_INFINITY)).toBe("-Infinity");
+    });
+
+    it("renders top-level negative zero as `-0`", () => {
+      expect(toCompactDebugString(-0)).toBe("-0");
+    });
+
+    it("still renders ordinary `0` as `0` (not `-0`)", () => {
+      expect(toCompactDebugString(0)).toBe("0");
+    });
+
+    it("renders non-finite numbers and -0 inside an object", () => {
+      const v = { a: NaN, b: Infinity, c: -Infinity, d: -0, e: 1 };
+      expect(toCompactDebugString(v))
+        .toBe('{"a":NaN,"b":Infinity,"c":-Infinity,"d":-0,"e":1}');
+    });
+
+    it("renders non-finite numbers and -0 inside an array", () => {
+      expect(toCompactDebugString([NaN, Infinity, -Infinity, -0, 0]))
+        .toBe("[NaN,Infinity,-Infinity,-0,0]");
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -189,6 +223,21 @@ describe("value-debug", () => {
       expect(toIndentedDebugString(v))
         .toBe(
           '{\n  "fn": function qux(...) {...},\n  "sym": Symbol("s")\n}',
+        );
+    });
+
+    it("renders non-finite numbers and -0 as bare tokens (top-level)", () => {
+      expect(toIndentedDebugString(NaN)).toBe("NaN");
+      expect(toIndentedDebugString(Infinity)).toBe("Infinity");
+      expect(toIndentedDebugString(-Infinity)).toBe("-Infinity");
+      expect(toIndentedDebugString(-0)).toBe("-0");
+    });
+
+    it("renders non-finite numbers and -0 inside a structure", () => {
+      const v = { a: NaN, b: Infinity, c: -Infinity, d: -0 };
+      expect(toIndentedDebugString(v))
+        .toBe(
+          '{\n  "a": NaN,\n  "b": Infinity,\n  "c": -Infinity,\n  "d": -0\n}',
         );
     });
   });
