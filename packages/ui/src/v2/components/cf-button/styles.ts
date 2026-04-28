@@ -154,6 +154,7 @@ export const styles = css`
   }
 
   :host([size="icon"]) .button {
+    min-height: auto;
     height: var(--cf-button-icon-size, var(--cf-size-md-height, 2rem));
     width: var(--cf-button-icon-size, var(--cf-size-md-height, 2rem));
     padding: 0;

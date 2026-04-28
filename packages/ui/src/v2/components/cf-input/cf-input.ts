@@ -812,7 +812,7 @@ export class CFInput extends BaseElement {
 
       /** Sync aria-valuemin/max/now for spinbutton and slider roles. */
       private _syncValueAttributes() {
-        const role = this._lastGeneratedRole;
+        const role = this.getAttribute("role");
         if (role === "spinbutton" || role === "slider") {
           const min = this.min || (this.input?.min ?? "");
           const max = this.max || (this.input?.max ?? "");

@@ -100,7 +100,7 @@ agent-browser find role button click --name "Click Me"
 **Accessibility/Automation**:
 
 - Host role: `textbox` (text, email, password, search, tel, url), `spinbutton`
-  (number), `slider` (range), or unset (date, color, file, hidden)
+  (number), or unset (date, time, datetime-local)
 - Host state: `aria-disabled`, `aria-readonly`, `aria-required`, `aria-invalid`
 - Accessible name: associated label, `aria-label`, or placeholder
 - Preferred locators:
