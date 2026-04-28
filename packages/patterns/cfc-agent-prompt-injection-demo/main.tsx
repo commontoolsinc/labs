@@ -3,11 +3,8 @@ import {
   type BuiltInLLMTool,
   Cell,
   computed,
-  type Confidential,
   fetchData,
   handler,
-  type Integrity,
-  lift,
   llmDialog,
   NAME,
   pattern,
@@ -77,17 +74,17 @@ const PROMPT_SLOT_BOUND_ATOM = {
   valueDigest: DEMO_PROMPT_VALUE_DIGEST,
 } as const;
 
-type HostileBriefingLabel = readonly [
-  typeof PROMPT_INJECTION_RISK_ATOM,
-  typeof PROMPT_INFLUENCE_ATOM,
-];
+const HOSTILE_BRIEFING_CONFIDENTIALITY_ATOMS = [
+  PROMPT_INJECTION_RISK_ATOM,
+  PROMPT_INFLUENCE_ATOM,
+] as const;
 
-type DirectCommandLabel = readonly [
-  typeof TRUSTED_AGENT_KERNEL_ATOM,
-  typeof USER_SURFACE_INPUT_ATOM,
-  typeof PROMPT_SLOT_BOUND_ATOM,
-  typeof INJECTION_SAFE_ATOM,
-];
+const DIRECT_COMMAND_INTEGRITY_ATOMS = [
+  TRUSTED_AGENT_KERNEL_ATOM,
+  USER_SURFACE_INPUT_ATOM,
+  PROMPT_SLOT_BOUND_ATOM,
+  INJECTION_SAFE_ATOM,
+] as const;
 
 type PromptAttachment = {
   id: string;
@@ -135,17 +132,10 @@ type DemoTool = BuiltInLLMTool & {
   inputSchema?: JSONSchema;
 };
 
-type DisclosureContentArgument = {
-  id: string;
-  content: string;
-};
-
 const USER_EMAIL_RECIPIENT = "john@example.org";
 const EVIL_EMAIL_RECIPIENT = "bob@evil.org";
 const HOSTILE_BRIEFING_TITLE = "Acme Atlas release briefing";
 const HOSTILE_BRIEFING_SOURCE = "https://partner.example.invalid/briefing";
-const HOSTILE_BRIEFING_DOCUMENT_ID =
-  "data:cfc-agent-prompt-injection-demo-briefing-acme-atlas-v2";
 const DEFAULT_PARENT_MODEL = "gateway:z-ai/glm-5";
 const DEFAULT_SUB_AGENT_MODEL = "gateway:z-ai/glm-5";
 const FALLBACK_MODEL_ITEMS = [
@@ -260,7 +250,7 @@ const SUB_AGENT_BRIEFING_MESSAGES_SCHEMA = {
   type: "array",
   items: { type: "object", additionalProperties: true },
   ifc: {
-    confidentiality: [PROMPT_INJECTION_RISK_ATOM, PROMPT_INFLUENCE_ATOM],
+    confidentiality: HOSTILE_BRIEFING_CONFIDENTIALITY_ATOMS,
   },
 } as const satisfies JSONSchema;
 const AGENT_PANEL_HEIGHT = "clamp(30rem, 68vh, 42rem)";
@@ -300,23 +290,69 @@ const SECONDARY_CONTROL_STYLE = {
   color: "var(--cf-color-gray-900, #101828)",
 };
 
-const makeHostileBriefingDocument = lift<
-  DisclosureContentArgument,
-  Writable<Confidential<string, HostileBriefingLabel>>
->((input) =>
-  Cell.for<Confidential<string, HostileBriefingLabel>>(input.id).set(
-    input.content as Confidential<string, HostileBriefingLabel>,
-  )
-);
+type LabelPreviewProps = {
+  confidentiality?: readonly unknown[];
+  integrity?: readonly unknown[];
+};
 
-const makeDirectCommandDocument = lift<
-  DisclosureContentArgument,
-  Writable<Integrity<string, DirectCommandLabel>>
->((input) =>
-  Cell.for<Integrity<string, DirectCommandLabel>>(input.id).set(
-    input.content as Integrity<string, DirectCommandLabel>,
-  )
-);
+const formatLabelAtom = (atom: unknown) =>
+  typeof atom === "string" ? atom : JSON.stringify(atom, null, 2);
+
+function LabelPreview(
+  { confidentiality = [], integrity = [] }: LabelPreviewProps,
+) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: "0.5rem",
+        padding: "0.75rem",
+        border: "1px solid var(--cf-color-gray-200, #eaecf0)",
+        borderRadius: "12px",
+        background: "var(--cf-color-gray-25, #fcfcfd)",
+      }}
+    >
+      {integrity.length > 0
+        ? (
+          <cf-vstack gap="1">
+            <strong>integrity</strong>
+            {integrity.map((atom) => (
+              <pre
+                style={{
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  fontSize: "11px",
+                  lineHeight: "1.4",
+                }}
+              >
+                {formatLabelAtom(atom)}
+              </pre>
+            ))}
+          </cf-vstack>
+        )
+        : null}
+      {confidentiality.length > 0
+        ? (
+          <cf-vstack gap="1">
+            <strong>confidentiality / caveats</strong>
+            {confidentiality.map((atom) => (
+              <pre
+                style={{
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  fontSize: "11px",
+                  lineHeight: "1.4",
+                }}
+              >
+                {formatLabelAtom(atom)}
+              </pre>
+            ))}
+          </cf-vstack>
+        )
+        : null}
+    </div>
+  );
+}
 
 const promptInputMessage = (event: PromptSendEvent): BuiltInLLMMessage => {
   const { text, attachments } = event.detail;
@@ -341,38 +377,6 @@ const promptInputMessage = (event: PromptSendEvent): BuiltInLLMMessage => {
 const makeUserPromptMessage = (prompt: string): BuiltInLLMMessage => ({
   role: "user",
   content: [{ type: "text" as const, text: prompt }],
-});
-
-const clearMessageList = handler<
-  any,
-  { messages: Writable<BuiltInLLMMessage[]> }
->((_event, { messages }) => {
-  messages.set([]);
-});
-
-const clearEmailList = handler<any, { emails: Writable<SentEmail[]> }>((
-  _event,
-  { emails },
-) => {
-  emails.set([]);
-});
-
-const runSingleDemoAgent = handler<any, { addMessage: any }>((
-  _event,
-  { addMessage },
-) => {
-  addMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-});
-
-const runBothDemoAgents = handler<
-  any,
-  {
-    unsafeAddMessage: any;
-    safeAddMessage: any;
-  }
->((_event, { unsafeAddMessage, safeAddMessage }) => {
-  unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
-  safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
 });
 
 const logEmail = handler<
@@ -440,16 +444,6 @@ const buildSendMailTool = (
   }) satisfies DemoTool;
 
 export default pattern<Record<string, never>>(() => {
-  const directCommand = makeDirectCommandDocument({
-    id: "cfc-agent-prompt-injection-demo-direct-command",
-    content: DEMO_PROMPT,
-  });
-  const directCommandRender: Writable<Integrity<string, DirectCommandLabel>> =
-    directCommand as never;
-  const hostileBody = makeHostileBriefingDocument({
-    id: HOSTILE_BRIEFING_DOCUMENT_ID,
-    content: HOSTILE_BRIEFING_BODY,
-  });
   const emails = Writable.of<SentEmail[]>([]);
   const unsafeMessages = Writable.of<BuiltInLLMMessage[]>([]);
   const safeMessages = Writable.of<BuiltInLLMMessage[]>([]);
@@ -480,7 +474,7 @@ export default pattern<Record<string, never>>(() => {
   const unsafeReadRawBriefingHandler = readRawBriefing({
     title: HOSTILE_BRIEFING_TITLE,
     source: HOSTILE_BRIEFING_SOURCE,
-    body: hostileBody,
+    body: HOSTILE_BRIEFING_BODY,
   });
   const unsafeSendMailHandler = logEmail({
     emails,
@@ -582,7 +576,6 @@ Your job in this half is to fail visibly when the document tries to seize contro
       PROMPT_INFLUENCE_ATOM,
     ],
   });
-  const unsafeClearChat = clearMessageList({ messages: unsafeMessages });
   const unsafeAgentUi = (
     <section style={AGENT_PANEL_STYLE}>
       <div style={AGENT_PANEL_STACK_STYLE}>
@@ -629,14 +622,14 @@ Your job in this half is to fail visibly when the document tries to seize contro
         </cf-vscroll>
 
         <cf-hstack align="center" gap="1">
-          <cf-button
-            variant="pill"
+          <button
             type="button"
             title="Clear this chat"
-            onClick={unsafeClearChat}
+            style={SECONDARY_CONTROL_STYLE}
+            onClick={(_event: any) => unsafeMessages.set([])}
           >
             Clear
-          </cf-button>
+          </button>
         </cf-hstack>
 
         <cf-prompt-input
@@ -707,14 +700,6 @@ string.`;
     builtinTools: false,
     observationMaxConfidentiality: ["internal", PROMPT_INFLUENCE_ATOM],
   });
-  const clearEmails = clearEmailList({ emails });
-  const safeClearChat = clearMessageList({ messages: safeMessages });
-  const runBothAgents = runBothDemoAgents({
-    unsafeAddMessage,
-    safeAddMessage,
-  });
-  const runUnsafeOnly = runSingleDemoAgent({ addMessage: unsafeAddMessage });
-  const runSafeOnly = runSingleDemoAgent({ addMessage: safeAddMessage });
   const safeAgentUi = (
     <section style={AGENT_PANEL_STYLE}>
       <div style={AGENT_PANEL_STACK_STYLE}>
@@ -761,14 +746,14 @@ string.`;
         </cf-vscroll>
 
         <cf-hstack align="center" gap="1">
-          <cf-button
-            variant="pill"
+          <button
             type="button"
             title="Clear this chat"
-            onClick={safeClearChat}
+            style={SECONDARY_CONTROL_STYLE}
+            onClick={(_event: any) => safeMessages.set([])}
           >
             Clear
-          </cf-button>
+          </button>
         </cf-hstack>
 
         <cf-prompt-input
@@ -786,12 +771,7 @@ string.`;
     [NAME]: "CFC agent prompt injection demo",
     [UI]: (
       <cf-screen title="CFC agent prompt injection demo">
-        <cf-vscroll
-          flex
-          showScrollbar
-          fadeEdges
-          style={{ height: "100%" }}
-        >
+        <cf-vscroll flex showScrollbar style={{ height: "100%" }}>
           <cf-vstack gap="4" style={{ padding: "1rem" }}>
             <cf-card>
               <cf-vstack slot="content" gap="2">
@@ -831,48 +811,53 @@ string.`;
                   </cf-vstack>
                 </cf-hstack>
                 <cf-hstack align="center" gap="1" style={{ flexWrap: "wrap" }}>
-                  <cf-button
-                    variant="primary"
+                  <button
+                    type="button"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={runBothAgents}
+                    onClick={(_event: any) => {
+                      unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+                      safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT));
+                    }}
                   >
                     Run both agents
-                  </cf-button>
-                  <cf-button
-                    variant="primary"
+                  </button>
+                  <button
+                    type="button"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={runUnsafeOnly}
+                    onClick={(_event: any) =>
+                      unsafeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT))}
                   >
                     Run unsafe only
-                  </cf-button>
-                  <cf-button
-                    variant="primary"
+                  </button>
+                  <button
+                    type="button"
                     style={PRIMARY_CONTROL_STYLE}
-                    onClick={runSafeOnly}
+                    onClick={(_event: any) =>
+                      safeAddMessage.send(makeUserPromptMessage(DEMO_PROMPT))}
                   >
                     Run safe only
-                  </cf-button>
-                  <cf-button
-                    variant="secondary"
+                  </button>
+                  <button
+                    type="button"
                     style={SECONDARY_CONTROL_STYLE}
-                    onClick={clearEmails}
+                    onClick={(_event: any) => emails.set([])}
                   >
                     Clear emails
-                  </cf-button>
-                  <cf-button
-                    variant="secondary"
+                  </button>
+                  <button
+                    type="button"
                     style={SECONDARY_CONTROL_STYLE}
-                    onClick={unsafeClearChat}
+                    onClick={(_event: any) => unsafeMessages.set([])}
                   >
                     Clear unsafe
-                  </cf-button>
-                  <cf-button
-                    variant="secondary"
+                  </button>
+                  <button
+                    type="button"
                     style={SECONDARY_CONTROL_STYLE}
-                    onClick={safeClearChat}
+                    onClick={(_event: any) => safeMessages.set([])}
                   >
                     Clear safe
-                  </cf-button>
+                  </button>
                 </cf-hstack>
               </cf-vstack>
             </cf-card>
@@ -915,11 +900,10 @@ string.`;
                       background: "var(--cf-color-gray-50)",
                     }}
                   >
-                  {DEMO_PROMPT}
+                    {DEMO_PROMPT}
                   </pre>
-                  <cf-cfc-label
-                    data-cfc-label-surface="prompt-injection-demo-direct-command"
-                    $value={directCommandRender}
+                  <LabelPreview
+                    integrity={DIRECT_COMMAND_INTEGRITY_ATOMS}
                   />
                 </cf-vstack>
               </cf-card>
@@ -947,9 +931,8 @@ string.`;
                   >
                   {HOSTILE_BRIEFING_BODY}
                   </pre>
-                  <cf-cfc-label
-                    data-cfc-label-surface="prompt-injection-demo-briefing"
-                    $value={hostileBody}
+                  <LabelPreview
+                    confidentiality={HOSTILE_BRIEFING_CONFIDENTIALITY_ATOMS}
                   />
                 </cf-vstack>
               </cf-card>
