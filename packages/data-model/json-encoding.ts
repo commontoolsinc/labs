@@ -13,7 +13,16 @@
 
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
-import { JsonEncodingContext } from "./json-encoding-context.ts";
+import {
+  jsonFromValueLegacy,
+  seemsLikeJsonEncodedFabricValueLegacy,
+  valueFromJsonLegacy,
+} from "./json-encoding-legacy.ts";
+import {
+  jsonFromValueModern,
+  seemsLikeJsonEncodedFabricValueModern,
+  valueFromJsonModern,
+} from "./json-encoding-modern.ts";
 
 // ---------------------------------------------------------------------------
 // Unified JSON encoding flag and dispatch configuration
@@ -56,8 +65,6 @@ export function resetJsonEncodingConfig(): void {
 // Flag-dispatched public API
 // ---------------------------------------------------------------------------
 
-const jsonEncodingContext = new JsonEncodingContext();
-
 /**
  * Encodes a fabric value to a JSON string. When unified JSON encoding is ON,
  * uses the modern JSON-based format. When OFF, equivalent to
@@ -65,18 +72,21 @@ const jsonEncodingContext = new JsonEncodingContext();
  */
 export function jsonFromValue(value: FabricValue): string {
   if (jsonEncodingEnabled) {
-    return jsonEncodingContext.encode(value);
+    return jsonFromValueModern(value);
   } else {
-    try {
-      const result = JSON.stringify(value);
-      if (result !== undefined) {
-        return result;
-      }
-    } catch {
-      // Ignore. Fall through to more apt `throw` immediately below.
-    }
+    return jsonFromValueLegacy(value);
+  }
+}
 
-    throw new Error("jsonFromValue (legacy): Cannot stringify given value.");
+/**
+ * Indicates if the given text has a "first-blush" appearance as valid encoded
+ * JSON as defined by this module.
+ */
+export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
+  if (jsonEncodingEnabled) {
+    return seemsLikeJsonEncodedFabricValueModern(value);
+  } else {
+    return seemsLikeJsonEncodedFabricValueLegacy(value);
   }
 }
 
@@ -90,8 +100,8 @@ export function valueFromJson(
   runtime: ReconstructionContext,
 ): FabricValue {
   if (jsonEncodingEnabled) {
-    return jsonEncodingContext.decode(json, runtime);
+    return valueFromJsonModern(json, runtime);
   } else {
-    return JSON.parse(json);
+    return valueFromJsonLegacy(json);
   }
 }
