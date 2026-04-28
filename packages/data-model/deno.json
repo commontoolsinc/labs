@@ -42,6 +42,7 @@
     "./fabric-value-legacy": "./fabric-value-legacy.ts",
     "./fabric-value-modern": "./fabric-value-modern.ts",
     "./array-utils": "./array-utils.ts",
+    "./value-debug": "./value-debug.ts",
     "./value-hash": "./value-hash.ts",
     "./value-hash-legacy": "./value-hash-legacy.ts",
     "./schema-hash": "./schema-hash.ts",
