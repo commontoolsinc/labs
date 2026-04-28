@@ -166,11 +166,13 @@ When refs are unavailable or unreliable, use semantic locators:
 
 ```bash
 agent-browser find text "Sign In" click
-agent-browser find label "Email" fill "user@test.com"
 agent-browser find role button click --name "Submit"
 agent-browser find placeholder "Search" type "query"
 agent-browser find testid "submit-btn" click
 ```
+
+> **Note:** `fill` requires a native `<input>` or `<textarea>`. It does not work
+> on `cf-*` custom element hosts. Use `type @ref "text"` instead.
 
 For Common Fabric UIs, prefer these semantic locators before shadow-piercing
 selectors. `cf-button` exposes `role="button"` on the host, and `cf-input`
@@ -179,13 +181,16 @@ exposes `role="textbox"` on the host with ARIA state such as `aria-disabled`,
 
 ```bash
 agent-browser find role button click --name "Save"
-agent-browser find role textbox click --name "Name"
-agent-browser type "Ada"
+
+# For text inputs, use type with a ref — not bare type after click.
+# Bare type sends keystrokes to page focus, which may not land in the
+# inner native input. type @ref targets the element directly.
+agent-browser snapshot -i            # → textbox "Name" [ref=e4]
+agent-browser type @e4 "Ada"
 ```
 
 > **Important:** `cf-input` and `cf-textarea` hosts are custom elements, not
-> native inputs. Use `click` then `type` instead of `fill` — `delegatesFocus`
-> forwards focus to the inner native input automatically.
+> native inputs. `fill` does not work — use `type @ref "text"` instead.
 
 If a component has not yet been updated with host semantics, fall back to the
 documented pierce selectors such as `[data-cf-button]` or `[data-cf-input]`.

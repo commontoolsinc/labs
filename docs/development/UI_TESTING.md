@@ -86,14 +86,20 @@ const button = await page.$("[data-cf-button]", {
 ## `fill()` Does Not Work on cf-\* Hosts
 
 Playwright's `fill()` requires a native `<input>` or `<textarea>`. Since
-`cf-input` and `cf-textarea` are custom elements, use `click()` +
-`keyboard.type()` instead — `delegatesFocus` forwards focus to the inner
-native input automatically:
+`cf-input` and `cf-textarea` are custom elements, use
+`pressSequentially()` on the locator instead — `delegatesFocus` forwards
+focus to the inner native input automatically:
 
 ```typescript
 const input = page.getByRole("textbox", { name: "Email" });
-await input.click();
-await page.keyboard.type("user@example.com");
+await input.pressSequentially("user@example.com");
+```
+
+For `agent-browser`, use `type @ref` (not bare `type` after `click`):
+
+```bash
+agent-browser snapshot -i            # → textbox "Email" [ref=e3]
+agent-browser type @e3 "user@example.com"
 ```
 
 ## What Doesn't Work
