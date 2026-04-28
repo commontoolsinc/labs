@@ -14,6 +14,7 @@ import {
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 import {
   isPatternFactoryCalleeExpression,
   isPatternFactoryHelperExpression,
@@ -744,9 +745,25 @@ function shouldRetargetReactiveReference(
   context: TransformationContext,
 ): boolean {
   const target = unwrapExpression(expression);
-  return ts.isIdentifier(target) &&
-    !isPatternFactoryHelperExpression(target, context.checker) &&
-    isReactiveValueExpression(target, context.checker);
+  if (
+    !ts.isIdentifier(target) ||
+    isPatternFactoryHelperExpression(target, context.checker)
+  ) {
+    return false;
+  }
+
+  const type = getTypeAtLocationWithFallback(
+    target,
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+  if (type) {
+    return isOpaqueRefType(type, context.checker) ||
+      isCellLikeType(type, context.checker);
+  }
+
+  return isReactiveValueExpression(target, context.checker);
 }
 
 function shouldPreserveStructuralCallArgumentReferences(
