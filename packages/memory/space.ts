@@ -71,6 +71,7 @@ export type {
   SelectSchemaStats,
 } from "./space-schema.ts";
 import { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "../utils/src/types.ts";
 import {
   jsonFromValue,
@@ -1106,7 +1107,7 @@ export const querySchema = <Space extends MemorySpace>(
       span.setAttribute("querySchema.has_selector", true);
       span.setAttribute(
         "querySchema.selectSchema",
-        JSON.stringify(command.args.selectSchema),
+        toCompactDebugString(command.args.selectSchema),
       );
     }
     if (command.args?.since !== undefined) {
