@@ -36,8 +36,9 @@ What works today:
   - `delegate_task`
 - whole-file replace/create plus append writes
 - bounded OpenAI-compatible prompt/tool loop
-- single-child subagent delegation with fresh child prompt context, a default
-  child tool policy, and retained child run references
+- single-child subagent delegation with fresh child prompt context, an explicit
+  default child profile, retained child run references, and a sanitized
+  summary/state return channel
 - persisted run state, transcript, Loom run manifests, capability snapshots, and
   tool outputs
 - transcript-based resumability
@@ -60,7 +61,8 @@ What is not done yet:
 
 - real runner-driven CFC feedback integration
 - richer opaque-handle/pass-through behavior
-- subagent profiles, browser-mediated subagents, and parallel job orchestration
+- additional subagent profiles, browser-mediated subagents, and parallel job
+  orchestration
 - app UI event provenance
 - streaming model responses
 - richer mid-turn resumability
@@ -124,6 +126,18 @@ deno task run -- \
   --gateway-auth-mode none \
   --run-manifest /path/to/loom-run-manifest.json \
   --prompt "Handle this Loom wish."
+```
+
+When constraining the parent tool surface to `delegate_task`, authorize the
+child profile separately so the delegation policy transition is explicit:
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --allow-tool delegate_task \
+  --allow-subagent-profile default \
+  --prompt "Delegate a focused inspection and summarize the result."
 ```
 
 Current caveat:

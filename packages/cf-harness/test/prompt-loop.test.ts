@@ -517,6 +517,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
         parentRunId: string;
         parentToolCallId: string;
         allowedToolIds: string[];
+        returnPolicy: Record<string, unknown>;
         inputSummary: {
           goalBytes: number;
           goalDigest: string;
@@ -549,6 +550,15 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
     "read_file",
     "write_file",
   ]);
+  assertEquals(output.subagent.manifest.returnPolicy, {
+    type: "cf-harness.subagent-return-policy",
+    channel: "summary-and-sanitized-state",
+    includeSummary: true,
+    includeSanitizedRunState: true,
+    includeManifest: true,
+    includeTranscript: false,
+    includeRawFailureRecords: false,
+  });
   assertEquals(output.subagent.manifest.inputSummary.goalBytes, 22);
   assertEquals(output.subagent.manifest.inputSummary.contextBytes, 21);
   assertEquals(
@@ -568,6 +578,114 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
     result.runState.subagentRuns?.[0]?.summary,
     "Child inspected the file and found no issues.",
   );
+});
+
+Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child tools", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["default"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-delegate-explicit-profile",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-explicit-profile",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Inspect with explicit profile.",
+                    profile: "default",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Explicit-profile child completed.",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Explicit-profile parent completed.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate through the explicitly authorized profile.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      childRunId: string;
+      status: string;
+      manifest: {
+        profile: string;
+        allowedToolIds: string[];
+      };
+    };
+  };
+
+  assertEquals(result.finalAssistantText, "Explicit-profile parent completed.");
+  assertEquals(
+    requestBodies[0].tools.map((tool) => tool.function.name),
+    ["delegate_task"],
+  );
+  assertEquals(
+    requestBodies[1].tools.map((tool) => tool.function.name),
+    ["bash", "read_file", "write_file"],
+  );
+  assertEquals(
+    output.subagent.childRunId,
+    "run-delegate-explicit-profile.subagent.1",
+  );
+  assertEquals(output.subagent.status, "completed");
+  assertEquals(output.subagent.manifest.profile, "default");
+  assertEquals(output.subagent.manifest.allowedToolIds, [
+    "bash",
+    "read_file",
+    "write_file",
+  ]);
 });
 
 Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creating a child run", async () => {
@@ -591,6 +709,11 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
       name: "too many turns",
       arguments: { goal: "Inspect", maxModelTurns: 17 },
       message: "delegate_task maxModelTurns must be an integer from 1 to 16",
+    },
+    {
+      name: "unknown profile",
+      arguments: { goal: "Inspect", profile: "browser" },
+      message: "delegate_task profile must be one of default",
     },
   ];
 
@@ -798,6 +921,15 @@ Deno.test("CfHarnessPromptLoop continues subagent ids from retained run state", 
       model: "gpt-5.4",
       allowedToolIds: ["bash", "read_file", "write_file"],
       maxModelTurns: 8,
+      returnPolicy: {
+        type: "cf-harness.subagent-return-policy",
+        channel: "summary-and-sanitized-state",
+        includeSummary: true,
+        includeSanitizedRunState: true,
+        includeManifest: true,
+        includeTranscript: false,
+        includeRawFailureRecords: false,
+      },
       createdAt: "2026-04-18T00:00:01.000Z",
       inputSummary: {
         type: "cf-harness.subagent-input-summary",
@@ -1103,6 +1235,7 @@ Deno.test("CfHarnessPromptLoop denies delegate_task without direct-command autho
     toolInputSummary: {
       type: "cf-harness.tool-input-summary",
       toolId: "delegate_task",
+      profile: "default",
       goalBytes: 34,
       goalDigest:
         "sha256:208d4a765f67911d464e8dd007c46edbac572beb839807a76ad7215b057e38cf",
@@ -1121,6 +1254,106 @@ Deno.test("CfHarnessPromptLoop denies delegate_task without direct-command autho
     JSON.stringify(result.runState.policyEvents[0]?.toolInputSummary)
       .includes("Inspect private delegated context."),
     false,
+  );
+  assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
+});
+
+Deno.test("CfHarnessPromptLoop denies delegate_task when the profile is not authorized", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: [],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-delegate-profile-denied",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-delegate-profile-denied",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Inspect private delegated context.",
+                    profile: "default",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Profile denial observed.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Try a default-profile delegation.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const denied = JSON.parse(toolMessage.content) as {
+    type: string;
+    reason: string;
+    detail: string;
+  };
+
+  assertEquals(result.finalAssistantText, "Profile denial observed.");
+  assertEquals(
+    requestBodies[0].tools.map((tool) => tool.function.name),
+    ["delegate_task"],
+  );
+  assertEquals(denied.type, "cf-harness.observation-denied");
+  assertEquals(denied.reason, "not-authorized");
+  assertEquals(
+    denied.detail,
+    'delegate_task profile "default" is not allowed in this run',
+  );
+  assertEquals(result.runState.subagentRuns, undefined);
+  assertEquals(result.runState.toolOutputs, []);
+  assertEquals(result.runState.policyEvents.length, 1);
+  assertEquals(result.runState.policyEvents[0]?.toolInputSummary, {
+    type: "cf-harness.tool-input-summary",
+    toolId: "delegate_task",
+    profile: "default",
+    goalBytes: 34,
+    goalDigest:
+      "sha256:208d4a765f67911d464e8dd007c46edbac572beb839807a76ad7215b057e38cf",
+  });
+  assertEquals(
+    result.runState.policyEvents[0]?.detail,
+    'delegate_task profile "default" is not allowed in this run',
   );
   assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
 });

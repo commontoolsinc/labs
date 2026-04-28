@@ -25,6 +25,12 @@ export const delegateTaskTool: HarnessToolDefinition<
           description:
             "Specific task for the child run. Include all context the child needs; it will not see the parent transcript.",
         },
+        profile: {
+          type: "string",
+          enum: ["default"],
+          description:
+            "Named subagent profile to spawn. Defaults to the harness default profile.",
+        },
         context: {
           type: "string",
           description:
