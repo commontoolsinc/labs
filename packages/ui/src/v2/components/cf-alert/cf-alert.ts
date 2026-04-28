@@ -16,6 +16,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot - Default slot for alert content
  *
  * @fires cf-dismiss - Fired when alert is dismissed
+ * @fires cf-alert-dismiss - Fired when alert is dismissed
  *
  * @example
  * <cf-alert variant="destructive" dismissible>
@@ -264,7 +265,8 @@ export class CFAlert extends BaseElement {
     }
 
     /* Adjust padding when dismissible */
-    :host([dismissible]) .alert {
+    :host([dismissible]) .alert,
+    :host([dismissable]) .alert {
       padding-right: 2.5rem;
     }
   `;
@@ -272,15 +274,33 @@ export class CFAlert extends BaseElement {
   static override properties = {
     variant: { type: String },
     dismissible: { type: Boolean, reflect: true },
+    dismissable: { type: Boolean, reflect: true },
   };
 
   declare variant: AlertVariant;
   declare dismissible: boolean;
+  declare dismissable: boolean;
 
   constructor() {
     super();
     this.variant = "default";
     this.dismissible = false;
+    this.dismissable = false;
+  }
+
+  override updated(changedProperties: Map<string, unknown>): void {
+    super.updated(changedProperties);
+    if (
+      changedProperties.has("dismissible") &&
+      this.dismissable !== this.dismissible
+    ) {
+      this.dismissable = this.dismissible;
+    } else if (
+      changedProperties.has("dismissable") &&
+      this.dismissible !== this.dismissable
+    ) {
+      this.dismissible = this.dismissable;
+    }
   }
 
   override render() {
@@ -307,7 +327,7 @@ export class CFAlert extends BaseElement {
           </div>
           <slot></slot>
         </div>
-        ${this.dismissible
+        ${this.dismissible || this.dismissable
           ? html`
             <button
               type="button"
@@ -341,10 +361,12 @@ export class CFAlert extends BaseElement {
     event.preventDefault();
     event.stopPropagation();
 
-    // Emit cf-dismiss event
-    this.emit("cf-dismiss", {
+    const detail = {
       variant: this.variant,
-    });
+      reason: "user",
+    } as const;
+    this.emit("cf-dismiss", detail);
+    this.emit("cf-alert-dismiss", detail);
   };
 }
 

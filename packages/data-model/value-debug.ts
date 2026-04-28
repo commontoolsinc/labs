@@ -2,8 +2,6 @@
  * Debugging-ish helpers for `FabricValue`s.
  */
 
-import type { FabricValue } from "./interface.ts";
-
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the
  * final output. The replacer brackets a bare-token payload (e.g. `42n` or
@@ -15,25 +13,75 @@ const UNQUOTE_MARKER = "@@DEBUG_UNQUOTE@@";
 /** Regex matching a marked, JSON-quoted payload. Group 1 is the payload. */
 const UNQUOTE_RE = /"@@DEBUG_UNQUOTE@@(.*?)@@DEBUG_UNQUOTE@@"/g;
 
+/** Wraps a payload in the sentinel markers for unquoting. */
+function marked(payload: string): string {
+  return `${UNQUOTE_MARKER}${payload}${UNQUOTE_MARKER}`;
+}
+
 /**
- * `JSON.stringify()` replacer that handles `bigint` and `undefined`, which it
- * otherwise mishandles for our debugging purposes (throws on `bigint`, and
- * silently drops/rewrites `undefined`). The returned strings carry their
- * desired bare-token form between sentinel markers.
+ * `JSON.stringify()` replacer that handles values it otherwise mishandles for
+ * our debugging purposes:
+ *
+ * - `bigint` (would throw),
+ * - `undefined` (silently dropped/rewritten),
+ * - `function` (silently dropped/rewritten),
+ * - `symbol` (silently dropped/rewritten),
+ * - `NaN` and `±Infinity` (silently rewritten as `null`),
+ * - negative zero (silently rewritten as `0`, dropping the sign).
+ *
+ * The returned strings carry their desired bare-token form between sentinel
+ * markers, which a post-processing pass strips along with the surrounding
+ * JSON-string quotes.
  */
 function debugReplacer(_key: string, value: unknown): unknown {
-  if (typeof value === "bigint") {
-    return `${UNQUOTE_MARKER}${value}n${UNQUOTE_MARKER}`;
+  if (typeof value === "number") {
+    // Negative zero must be checked first: `value === 0` is true for both
+    // `0` and `-0` (IEEE 754), so a generic numeric early-out would lose
+    // the sign. `Object.is(value, -0)` distinguishes them.
+    if (Object.is(value, -0)) {
+      return marked("-0");
+    } else if (Number.isNaN(value)) {
+      return marked("NaN");
+    } else if (value === Infinity) {
+      return marked("Infinity");
+    } else if (value === -Infinity) {
+      return marked("-Infinity");
+    } else {
+      return value;
+    }
+  } else if (typeof value === "bigint") {
+    return marked(`${value}n`);
   } else if (value === undefined) {
-    return `${UNQUOTE_MARKER}undefined${UNQUOTE_MARKER}`;
+    return marked("undefined");
+  } else if (typeof value === "function") {
+    return marked(
+      value.name === ""
+        ? "(...) => {...}"
+        : `function ${value.name}(...) {...}`,
+    );
+  } else if (typeof value === "symbol") {
+    const key = Symbol.keyFor(value);
+    return marked(
+      key !== undefined
+        ? `Symbol.for(${JSON.stringify(key)})`
+        : `Symbol(${JSON.stringify(value.description ?? "")})`,
+    );
   } else {
     return value;
   }
 }
 
-/** Strips sentinel markers (and surrounding JSON quotes) in a stringify output. */
+/**
+ * Strips sentinel markers (and surrounding JSON quotes) in a stringify output.
+ * The captured payload body is decoded back through `JSON.parse` so that any
+ * quote / backslash escapes introduced by the outer `JSON.stringify` round-
+ * trip are undone (e.g. so that the symbol-form payload `Symbol.for("name")`
+ * retains its literal `"`s rather than coming out as `Symbol.for(\"name\")`).
+ */
 function unquoteMarked(json: string): string {
-  return json.replace(UNQUOTE_RE, "$1");
+  return json.replace(UNQUOTE_RE, (_match, body) => {
+    return JSON.parse(`"${body}"`);
+  });
 }
 
 /**
@@ -41,7 +89,7 @@ function unquoteMarked(json: string): string {
  * output of this function is valid JSON text, but not _all_ cases. This
  * function must _not_ be relied on to produce a parseable string.
  */
-export function toCompactDebugString(value: FabricValue): string {
+export function toCompactDebugString(value: unknown): string {
   // TODO(danfuzz): This function will have to get smarter once we have values
   // that go beyond what's representable as JSON text.
   return unquoteMarked(JSON.stringify(value, debugReplacer));
@@ -52,7 +100,7 @@ export function toCompactDebugString(value: FabricValue): string {
  * output of this function is valid JSON text, but not _all_ cases. This
  * function must _not_ be relied on to produce a parseable string.
  */
-export function toIndentedDebugString(value: FabricValue): string {
+export function toIndentedDebugString(value: unknown): string {
   // TODO(danfuzz): This function will have to get smarter once we have values
   // that go beyond what's representable as JSON text.
   return unquoteMarked(JSON.stringify(value, debugReplacer, 2));

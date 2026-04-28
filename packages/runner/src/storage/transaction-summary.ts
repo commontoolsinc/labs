@@ -5,6 +5,7 @@
  * into concise summaries suitable for LLMs to help humans debug software behavior.
  */
 
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -286,7 +287,7 @@ function truncateValue(value: unknown, maxLength: number): unknown {
   }
 
   if (typeof value === "object") {
-    const str = JSON.stringify(value);
+    const str = toCompactDebugString(value);
     return str.length > maxLength ? str.substring(0, maxLength) + "..." : value;
   }
 
@@ -351,7 +352,7 @@ function formatValueForSummary(value: unknown): string {
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
-  return JSON.stringify(value);
+  return toCompactDebugString(value);
 }
 
 /**

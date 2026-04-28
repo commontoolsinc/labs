@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 export type SliderOrientation = "horizontal" | "vertical";
@@ -24,6 +24,11 @@ export type SliderOrientation = "horizontal" | "vertical";
  * <cf-slider orientation="vertical" style="height: 200px"></cf-slider>
  */
 export class CFSlider extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override properties = {
     value: { type: Number },
     min: { type: Number },
@@ -304,14 +309,16 @@ export class CFSlider extends BaseElement {
   private _isDragging = false;
 
   override connectedCallback() {
+    if (!this.hasAttribute("role")) {
+      this.setAttribute("role", "slider");
+    }
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "base,track,range,thumb");
+    }
     super.connectedCallback();
 
     // Ensure value is within bounds and snapped to step
     this.value = this._snapToStep(this._clampValue(this.value));
-
-    // Set up ARIA attributes
-    this.setAttribute("role", "slider");
-    this.tabIndex = this.disabled ? -1 : 0;
     this._updateAriaAttributes();
 
     // Add keyboard event listener
@@ -332,10 +339,6 @@ export class CFSlider extends BaseElement {
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
     super.updated(changedProperties);
-
-    if (changedProperties.has("disabled")) {
-      this.tabIndex = this.disabled ? -1 : 0;
-    }
 
     if (
       changedProperties.has("min") || changedProperties.has("max") ||
@@ -447,6 +450,7 @@ export class CFSlider extends BaseElement {
     this.setAttribute("aria-valuenow", this.value.toString());
     this.setAttribute("aria-disabled", this.disabled.toString());
     this.setAttribute("aria-orientation", this.orientation);
+    this.tabIndex = this.disabled ? -1 : 0;
   }
 
   private _handleTrackMouseDown = (event: MouseEvent): void => {

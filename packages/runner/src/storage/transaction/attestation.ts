@@ -5,6 +5,7 @@ import {
   type FabricValue,
   isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -581,9 +582,9 @@ export const StateInconsistency = (source: {
     }"`,
     space ? ` in space "${space}"` : "",
     ` hash changed. Previously it used to be:\n `,
-    expected === undefined ? "undefined" : JSON.stringify(expected),
+    toCompactDebugString(expected),
     "\n and currently it is:\n ",
-    actual === undefined ? "undefined" : JSON.stringify(actual),
+    toCompactDebugString(actual),
   ].join("");
 
   return {

@@ -1,6 +1,7 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { LINK_V1_TAG, type LinkV1Inner } from "./sigil-types.ts";
 import {
   type CellLink,
@@ -116,10 +117,10 @@ export function resolveLink(
     if (seen.has(key)) {
       logger.error(
         "link-res-error",
-        `Link cycle detected ${key} [${JSON.stringify([...seen])}]`,
+        `Link cycle detected ${key} [${toCompactDebugString([...seen])}]`,
       );
       throw new Error(
-        `Link cycle detected at ${key} [${JSON.stringify([...seen])}]`,
+        `Link cycle detected at ${key} [${toCompactDebugString([...seen])}]`,
       );
     }
     seen.add(key);

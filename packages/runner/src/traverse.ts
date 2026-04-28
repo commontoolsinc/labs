@@ -1,4 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import {
   hashSchema,
   hashSchemaItem,
@@ -2045,7 +2046,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       logger.debug("traverse", () => [
         "Call to traverse failed validation",
         doc,
-        JSON.stringify(this.selector?.schema, undefined, 2),
+        toIndentedDebugString(this.selector?.schema),
         this.getDebugValue(doc),
       ]);
     }

@@ -1,5 +1,6 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
   ChangeGroup,
   CommitError,
@@ -270,7 +271,7 @@ export const read = (
       logger.debug("storage-source-read", () => [
         `Read source path for ${address.id}`,
         `Value type: ${typeof value}`,
-        `Value: ${JSON.stringify(value)}`,
+        `Value: ${toCompactDebugString(value)}`,
       ]);
 
       if (typeof value === "string" && value.startsWith('{"/":')) {
@@ -284,7 +285,7 @@ export const read = (
           };
           logger.debug("storage-source-parse", () => [
             `Parsed JSON string to object`,
-            `Result: ${JSON.stringify(parsedValue)}`,
+            `Result: ${toCompactDebugString(parsedValue)}`,
           ]);
         } catch (e) {
           // If parsing fails, leave it as is

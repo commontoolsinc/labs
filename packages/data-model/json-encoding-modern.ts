@@ -4,6 +4,7 @@
 
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "./empty-reconstruction-context.ts";
 import { JsonEncodingContext } from "./json-encoding-context.ts";
 
 /** Shared JSON encoding context. */
@@ -25,11 +26,17 @@ export function seemsLikeJsonEncodedFabricValueModern(value: string): boolean {
 }
 
 /**
- * Decodes a JSON string back into a fabric value.
+ * Decodes a JSON string back into a fabric value. If `runtime` is `undefined`,
+ * the shared `EMPTY_RECONSTRUCTION_CONTEXT` is used; that context throws on
+ * any `getCell()` call, so callers who pass `undefined` are implicitly
+ * asserting that the encoded value contains no cell references.
  */
 export function valueFromJsonModern(
   json: string,
-  runtime: ReconstructionContext,
+  runtime: ReconstructionContext | undefined,
 ): FabricValue {
-  return jsonEncodingContext.decode(json, runtime);
+  return jsonEncodingContext.decode(
+    json,
+    runtime ?? EMPTY_RECONSTRUCTION_CONTEXT,
+  );
 }

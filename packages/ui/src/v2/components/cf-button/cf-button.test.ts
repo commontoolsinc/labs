@@ -19,12 +19,51 @@ describe("CFButton", () => {
     expect(element).toBeInstanceOf(CFButton);
   });
 
+  if (typeof document !== "undefined") {
+    it("should be creatable via document.createElement", async () => {
+      const element = document.createElement("cf-button") as CFButton;
+      document.body.append(element);
+      await element.updateComplete;
+
+      expect(element).toBeInstanceOf(CFButton);
+      expect(element.getAttribute("role")).toBe("button");
+      expect(element.getAttribute("exportparts")).toBe("button");
+
+      element.remove();
+    });
+  }
+
   it("should have default properties", () => {
     const element = new CFButton();
     expect(element.variant).toBe("primary");
     expect(element.size).toBe("md");
     expect(element.disabled).toBe(false);
     expect(element.type).toBe("button");
+  });
+
+  it("should expose button semantics on the host", () => {
+    const element = new CFButton();
+    element.updated(new Map([["disabled", undefined]]));
+
+    expect(element.getAttribute("role")).toBe("button");
+    expect(element.getAttribute("aria-disabled")).toBe("false");
+    expect(element.getAttribute("exportparts")).toBe("button");
+    expect(element.tabIndex).toBe(0);
+  });
+
+  it("should expose disabled state on the host", () => {
+    const element = new CFButton();
+    element.disabled = true;
+    element.updated(new Map([["disabled", false]]));
+
+    expect(element.getAttribute("aria-disabled")).toBe("true");
+    expect(element.tabIndex).toBe(-1);
+  });
+
+  it("should not use delegatesFocus (incompatible with aria-hidden)", () => {
+    // delegatesFocus sends focus to the inner button, but browsers
+    // refuse to apply aria-hidden on a focused element.
+    expect(CFButton.shadowRootOptions?.delegatesFocus).not.toBe(true);
   });
 
   it("should suppress click events when disabled via host listener", () => {

@@ -18,7 +18,7 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
   const dialogOpen = Writable.of(false);
   const sheetOpen = Writable.of(false);
   const size = Writable.of<"sm" | "md" | "lg" | "full">("md");
-  const dismissable = Writable.of(true);
+  const dismissible = Writable.of(true);
   const grabber = Writable.of(true);
   const detent = Writable.of<"auto" | "half" | "full">("auto");
 
@@ -44,14 +44,14 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
           $open={dialogOpen}
           presentation="dialog"
           size={size}
-          dismissable={dismissable}
+          dismissible={dismissible}
         >
           <div slot="header">
             <cf-heading level={4}>Dialog Modal</cf-heading>
           </div>
           <cf-vstack gap="2">
             <span>This is a centered dialog modal.</span>
-            <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
+            <span style="color: var(--cf-theme-color-text-muted); font-size: 0.875rem;">
               Uses fade + scale animation. Width controlled by the size
               attribute.
             </span>
@@ -73,14 +73,14 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
           presentation="sheet"
           grabber={grabber}
           detent={detent}
-          dismissable={dismissable}
+          dismissible={dismissible}
         >
           <div slot="header">
             <cf-heading level={4}>Sheet Modal</cf-heading>
           </div>
           <cf-vstack gap="2">
             <span>This is a bottom sheet modal.</span>
-            <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
+            <span style="color: var(--cf-theme-color-text-muted); font-size: 0.875rem;">
               Slides up from bottom with iOS-style animation. Height controlled
               by the detent attribute.
             </span>
@@ -131,10 +131,10 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
             checked={grabber}
           />
           <SwitchControl
-            label="dismissable"
+            label="dismissible"
             description="Allow closing via backdrop click or Escape"
             defaultValue="true"
-            checked={dismissable}
+            checked={dismissible}
           />
         </>
       </Controls>

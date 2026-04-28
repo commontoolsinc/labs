@@ -2,6 +2,10 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -1235,13 +1239,13 @@ export class Runner {
               () => [
                 "Error committing transaction",
                 "\nError:",
-                JSON.stringify(error, null, 2),
+                toIndentedDebugString(error),
                 error.name === "ConflictError"
                   ? [
                     "\nConflict details:",
-                    JSON.stringify(error.conflict, null, 2),
+                    toIndentedDebugString(error.conflict),
                     "\nTransaction:",
-                    JSON.stringify(error.transaction, null, 2),
+                    toIndentedDebugString(error.transaction),
                   ]
                   : [],
               ],
@@ -1592,7 +1596,7 @@ export class Runner {
     } else if (isWriteRedirectLink(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
-      throw new Error(`Unknown module: ${JSON.stringify(module)}`);
+      throw new Error(`Unknown module: ${toCompactDebugString(module)}`);
     }
   }
 
