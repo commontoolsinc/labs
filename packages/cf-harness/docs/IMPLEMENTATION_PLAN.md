@@ -169,6 +169,26 @@ Why:
 - to support current Common Tools gateway expectations
 - to make local operator debugging less ambiguous
 
+### Stage H: Minimal subagent delegation
+
+- built-in `delegate_task` tool descriptor
+- prompt-loop orchestration for one focused child run at a time
+- fresh child prompt context with the delegated goal and optional context
+- default child tool policy limited to:
+  - `bash`
+  - `read_file`
+  - `write_file`
+- persisted parent references to child run ids, manifests, summaries, and run
+  state snapshots
+- summary-only parent tool output, without exposing the child transcript back to
+  the parent model
+
+Why:
+
+- to introduce the core containment and provenance shape before browser access
+- to give Loom and Pattern Factory a native delegation primitive without adding
+  profiles, parallelism, or browser mediation in the first slice
+
 ## Current Verified State
 
 At the current checkpoint, the package has:
@@ -277,8 +297,16 @@ Current resumability is transcript-based and useful, but still limited:
 
 ### 5. When do subagents start mattering?
 
-The current package is intentionally single-loop and sequential. That is the
-right choice so far, but it is not the end state.
+The package now has a first minimal subagent path: a parent can delegate one
+focused child run through `delegate_task`, and the child receives a fresh prompt
+context plus the default shell/file tool set.
+
+The remaining subagent work is still substantial:
+
+- profile/policy selection beyond the single default child policy
+- browser-mediated subagents, expected to wrap `agent-browser`
+- parallel child orchestration
+- richer orchestration resume for partially completed child runs
 
 ## Suggested Reading Order
 

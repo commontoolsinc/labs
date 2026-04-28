@@ -162,6 +162,9 @@ const normalizeHarnessRunState = (
       : createHarnessPolicyEvent(event)
   ),
   toolOutputs: [...(state.toolOutputs ?? [])],
+  ...(state.subagentRuns !== undefined
+    ? { subagentRuns: [...state.subagentRuns] }
+    : {}),
   failureRecords: [...(state.failureRecords ?? [])],
 });
 

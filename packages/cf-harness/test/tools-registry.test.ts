@@ -11,8 +11,9 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "bash",
     "read_file",
     "write_file",
+    "delegate_task",
   ]);
-  assertEquals(BUILTIN_TOOL_REGISTRY.size, 3);
+  assertEquals(BUILTIN_TOOL_REGISTRY.size, 4);
 });
 
 Deno.test("builtin tool registry exposes invoke functions for all built-ins", () => {

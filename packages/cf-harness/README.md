@@ -33,8 +33,11 @@ What works today:
   - `bash`
   - `read_file`
   - `write_file`
+  - `delegate_task`
 - whole-file replace/create plus append writes
 - bounded OpenAI-compatible prompt/tool loop
+- single-child subagent delegation with fresh child prompt context, a default
+  child tool policy, and retained child run references
 - persisted run state, transcript, Loom run manifests, capability snapshots, and
   tool outputs
 - transcript-based resumability
@@ -57,7 +60,7 @@ What is not done yet:
 
 - real runner-driven CFC feedback integration
 - richer opaque-handle/pass-through behavior
-- subagents and parallel job orchestration
+- subagent profiles, browser-mediated subagents, and parallel job orchestration
 - app UI event provenance
 - streaming model responses
 - richer mid-turn resumability
@@ -76,8 +79,8 @@ What is not done yet:
   - persisted run state, run manifest, transcript, capability snapshot, and tool
     output storage
 - [src/contracts/](src/contracts/)
-  - prompt-slot, run-manifest, observation, policy, transcript, and tool-result
-    contracts
+  - prompt-slot, run-manifest, observation, policy, run-report, subagent,
+    transcript, and tool-result contracts
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
 

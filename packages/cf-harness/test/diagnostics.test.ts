@@ -3,6 +3,7 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import {
   CAPABILITY_PROBE_SENTINEL,
   classifyBashToolFailure,
+  classifyBuiltinToolFailure,
   classifyHarnessPolicyEventFailure,
   classifyHarnessRunError,
   collectHarnessCapabilitySnapshot,
@@ -206,6 +207,75 @@ Deno.test("classifyBashToolFailure prefers the missing subcommand from shell out
     commandName: "python",
     exitCode: 127,
   });
+});
+
+Deno.test("classifyBuiltinToolFailure handles delegate_task outputs defensively", () => {
+  assertEquals(
+    classifyBuiltinToolFailure(
+      "delegate_task",
+      {},
+      {
+        type: "cf-harness.delegate-task-output",
+        outputId: createToolOutputId("run-delegate", "delegate_task", 1),
+      },
+      "2026-04-23T18:30:00.000Z",
+    ),
+    undefined,
+  );
+
+  assertEquals(
+    classifyBuiltinToolFailure(
+      "delegate_task",
+      {},
+      {
+        type: "cf-harness.delegate-task-output",
+        outputId: createToolOutputId("run-delegate", "delegate_task", 1),
+        subagent: {
+          type: "cf-harness.subagent-result",
+          childRunId: "run-delegate.subagent.1",
+          status: "failed",
+          summary: "child failed",
+          model: "gpt-5.4",
+          modelTurns: 1,
+          runState: {
+            status: "failed",
+            cfcEnforcementMode: "disabled",
+            policyEventCounts: { total: 0, warnings: 0, denied: 0 },
+            failureCount: 1,
+          },
+          manifest: {
+            type: "cf-harness.subagent-run-manifest",
+            version: 1,
+            parentRunId: "run-delegate",
+            parentToolCallId: "call-delegate",
+            childRunId: "run-delegate.subagent.1",
+            profile: "default",
+            depth: 1,
+            cfcEnforcementMode: "disabled",
+            model: "gpt-5.4",
+            allowedToolIds: ["bash", "read_file", "write_file"],
+            maxModelTurns: 8,
+            createdAt: "2026-04-23T18:30:00.000Z",
+            inputSummary: {
+              type: "cf-harness.subagent-input-summary",
+              goalBytes: 4,
+              goalDigest: "sha256:test",
+            },
+          },
+        },
+      },
+      "2026-04-23T18:30:01.000Z",
+    ),
+    {
+      type: "cf-harness.failure-record",
+      kind: "harness_error",
+      source: "tool_output",
+      detail: "subagent run-delegate.subagent.1 failed: child failed",
+      at: "2026-04-23T18:30:01.000Z",
+      toolId: "delegate_task",
+      outputId: createToolOutputId("run-delegate", "delegate_task", 1),
+    },
+  );
 });
 
 Deno.test("classifyHarnessRunError maps timeouts and path escapes deterministically", () => {

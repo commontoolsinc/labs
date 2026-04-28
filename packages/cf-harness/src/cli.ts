@@ -161,7 +161,7 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | write_file)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | write_file | delegate_task)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
   --prompt-slot-role <role>     direct-command | context | quote (default: direct-command)
@@ -203,7 +203,12 @@ const parsePositiveInteger = (
 };
 
 const PROMPT_SLOT_ROLES = ["direct-command", "context", "quote"] as const;
-const BUILTIN_TOOL_IDS = ["bash", "read_file", "write_file"] as const;
+const BUILTIN_TOOL_IDS = [
+  "bash",
+  "read_file",
+  "write_file",
+  "delegate_task",
+] as const;
 
 const parsePromptSlotRole = (
   input: string | undefined,
@@ -238,7 +243,7 @@ const parseBuiltinToolIds = (
   const parsed = values.map((value) => parseBuiltinToolId(value));
   if (parsed.some((value) => value === undefined)) {
     throw new Error(
-      "allowed tools must be one or more of bash, read_file, write_file",
+      "allowed tools must be one or more of bash, read_file, write_file, delegate_task",
     );
   }
   return [...new Set(parsed)] as readonly BuiltinToolId[];
@@ -618,6 +623,8 @@ const summarizeToolCallArguments = (
         )
           .join(" ");
       }
+      case "delegate_task":
+        return "subagent";
       default:
         return undefined;
     }
