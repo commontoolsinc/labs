@@ -164,14 +164,14 @@ export class CFToggle extends BaseElement {
    * Focus the toggle programmatically
    */
   override focus(): void {
-    this.buttonElement?.focus();
+    super.focus();
   }
 
   /**
    * Blur the toggle programmatically
    */
   override blur(): void {
-    this.buttonElement?.blur();
+    super.blur();
   }
 }
 

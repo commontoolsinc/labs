@@ -8,7 +8,8 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} variant - Visual style variant: "default" | "success" | "error" | "warning"
  * @attr {number} duration - Auto-dismiss timeout in ms. 0 = persistent.
- * @attr {boolean} dismissable - Show the dismiss (X) button
+ * @attr {boolean} dismissible - Show the dismiss (X) button
+ * @attr {boolean} dismissable - Deprecated alias for dismissible
  * @attr {boolean} open - Controls visibility
  *
  * @slot - Default slot for notification message content
@@ -16,6 +17,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot action - Optional action button area (hidden when empty)
  *
  * @fires cf-toast-dismiss - Fired when toast is closed. Detail: { reason: "timeout" | "user" }
+ * @fires cf-dismiss - Fired when toast is closed. Detail: { reason: "timeout" | "user" }
  * @fires cf-toast-action - Fired when the action slot area is activated. Detail: {}
  *
  * @csspart toast - Root container div (the visible pill surface)
@@ -222,6 +224,7 @@ export class CFToast extends BaseElement {
     variant: { type: String, reflect: true },
     duration: { type: Number },
     dismissable: { type: Boolean, reflect: true },
+    dismissible: { type: Boolean, reflect: true },
     open: { type: Boolean, reflect: true },
     _hasIcon: { type: Boolean, state: true },
     _hasAction: { type: Boolean, state: true },
@@ -230,6 +233,7 @@ export class CFToast extends BaseElement {
   declare variant: "default" | "success" | "error" | "warning";
   declare duration: number;
   declare dismissable: boolean;
+  declare dismissible: boolean;
   declare open: boolean;
 
   declare private _hasIcon: boolean;
@@ -242,6 +246,7 @@ export class CFToast extends BaseElement {
     this.variant = "default";
     this.duration = 5000;
     this.dismissable = false;
+    this.dismissible = false;
     this.open = false;
     this._hasIcon = false;
     this._hasAction = false;
@@ -276,6 +281,18 @@ export class CFToast extends BaseElement {
     if (changedProperties.has("duration") && this.open) {
       this._startTimer();
     }
+
+    if (
+      changedProperties.has("dismissible") &&
+      this.dismissable !== this.dismissible
+    ) {
+      this.dismissable = this.dismissible;
+    } else if (
+      changedProperties.has("dismissable") &&
+      this.dismissible !== this.dismissable
+    ) {
+      this.dismissible = this.dismissable;
+    }
   }
 
   private _updateAria(): void {
@@ -295,7 +312,7 @@ export class CFToast extends BaseElement {
       this._timer = setTimeout(() => {
         this._timer = null;
         this.open = false;
-        this.emit("cf-toast-dismiss", { reason: "timeout" });
+        this._emitDismiss("timeout");
       }, this.duration);
     }
   }
@@ -310,8 +327,14 @@ export class CFToast extends BaseElement {
   private _handleDismiss = (): void => {
     this.open = false;
     this._clearTimer();
-    this.emit("cf-toast-dismiss", { reason: "user" });
+    this._emitDismiss("user");
   };
+
+  private _emitDismiss(reason: "timeout" | "user"): void {
+    const detail = { reason };
+    this.emit("cf-toast-dismiss", detail);
+    this.emit("cf-dismiss", detail);
+  }
 
   private _handleActionClick = (): void => {
     this.emit("cf-toast-action", {});
@@ -349,7 +372,7 @@ export class CFToast extends BaseElement {
             @slotchange="${this._handleActionSlotChange}"
           ></slot>
         </div>
-        ${this.dismissable
+        ${this.dismissible || this.dismissable
           ? html`
             <button
               class="dismiss"

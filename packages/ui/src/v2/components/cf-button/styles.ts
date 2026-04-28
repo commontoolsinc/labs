@@ -80,7 +80,7 @@ export const styles = css`
     justify-content: center;
     white-space: nowrap;
     width: 100%;
-    height: var(--cf-size-md-height, 2rem);
+    min-height: var(--cf-size-md-height, 2rem);
     border-radius: var(--cf-size-md-radius, 8px);
     font-size: var(--cf-size-md-font-size, 0.75rem);
     font-weight: var(--cf-font-weight-medium, 500);
@@ -115,7 +115,7 @@ export const styles = css`
 
   /* Size variants — driven by :host([size="..."]) attribute selectors */
   :host([size="xs"]) .button {
-    height: var(--cf-size-xs-height, 16px);
+    min-height: var(--cf-size-xs-height, 16px);
     border-radius: var(--cf-size-xs-radius, 4px);
     padding: var(--cf-size-xs-padding-v, 2px) var(--cf-size-xs-padding-h, 4px);
     font-size: var(--cf-size-xs-font-size, 9px);
@@ -124,7 +124,7 @@ export const styles = css`
   }
 
   :host([size="sm"]) .button {
-    height: var(--cf-size-sm-height, 24px);
+    min-height: var(--cf-size-sm-height, 24px);
     border-radius: var(--cf-size-sm-radius, 5px);
     padding: var(--cf-size-sm-padding-v, 4px) var(--cf-size-sm-padding-h, 6px);
     font-size: var(--cf-size-sm-font-size, 11px);
@@ -135,7 +135,7 @@ export const styles = css`
   /* size="md" is the default — styles already in .button base rule */
 
   :host([size="lg"]) .button {
-    height: var(--cf-size-lg-height, 40px);
+    min-height: var(--cf-size-lg-height, 40px);
     border-radius: var(--cf-size-lg-radius, 9px);
     padding: var(--cf-size-lg-padding-v, 8px) var(--cf-size-lg-padding-h, 12px);
     font-size: var(--cf-size-lg-font-size, 16px);
@@ -144,7 +144,7 @@ export const styles = css`
   }
 
   :host([size="xl"]) .button {
-    height: var(--cf-size-xl-height, 48px);
+    min-height: var(--cf-size-xl-height, 48px);
     border-radius: var(--cf-size-xl-radius, 10px);
     padding: var(--cf-size-xl-padding-v, 12px)
       var(--cf-size-xl-padding-h, 16px);

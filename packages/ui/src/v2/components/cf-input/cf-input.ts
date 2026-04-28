@@ -156,6 +156,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-md-padding-h, 8px);
       --input-padding-y: var(--cf-size-md-padding-v, 8px);
       --input-font-size: var(--cf-size-md-font-size, 12px);
+      --input-line-height: var(--cf-size-md-line-height, 16px);
       --input-border-radius: var(--cf-size-md-radius, 8px);
 
       display: block;
@@ -167,6 +168,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-xs-padding-h, 4px);
       --input-padding-y: var(--cf-size-xs-padding-v, 2px);
       --input-font-size: var(--cf-size-xs-font-size, 9px);
+      --input-line-height: var(--cf-size-xs-line-height, 12px);
       --input-border-radius: var(--cf-size-xs-radius, 4px);
     }
 
@@ -175,6 +177,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-sm-padding-h, 6px);
       --input-padding-y: var(--cf-size-sm-padding-v, 4px);
       --input-font-size: var(--cf-size-sm-font-size, 11px);
+      --input-line-height: var(--cf-size-sm-line-height, 16px);
       --input-border-radius: var(--cf-size-sm-radius, 5px);
     }
 
@@ -183,6 +186,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-lg-padding-h, 12px);
       --input-padding-y: var(--cf-size-lg-padding-v, 8px);
       --input-font-size: var(--cf-size-lg-font-size, 16px);
+      --input-line-height: var(--cf-size-lg-line-height, 20px);
       --input-border-radius: var(--cf-size-lg-radius, 9px);
     }
 
@@ -191,6 +195,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-xl-padding-h, 16px);
       --input-padding-y: var(--cf-size-xl-padding-v, 12px);
       --input-font-size: var(--cf-size-xl-font-size, 18px);
+      --input-line-height: var(--cf-size-xl-line-height, 24px);
       --input-border-radius: var(--cf-size-xl-radius, 10px);
     }
 
@@ -203,10 +208,11 @@ export class CFInput extends BaseElement {
     input {
       display: block;
       width: 100%;
-      height: var(--input-height);
+      min-height: var(--input-height);
+      height: auto;
       padding: var(--input-padding-y) var(--input-padding-x);
       font-size: var(--input-font-size);
-      line-height: 1.25rem;
+      line-height: var(--input-line-height);
       color: var(--cf-input-color-text, #111827);
       background-color: var(--cf-input-color-background, #ffffff);
       border: 1px solid var(--cf-input-color-border, #e5e7eb);
