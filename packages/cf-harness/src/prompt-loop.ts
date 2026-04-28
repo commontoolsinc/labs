@@ -40,16 +40,17 @@ import {
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
 import {
-  DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS,
-  DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
   DEFAULT_SUBAGENT_PROFILE,
   type DelegateTaskToolInput,
   type DelegateTaskToolOutput,
+  getHarnessSubagentProfileConfig,
   type HarnessSubagentFailureSummary,
   type HarnessSubagentInputSummary,
+  type HarnessSubagentProfile,
   type HarnessSubagentResult,
   type HarnessSubagentRunManifest,
   type HarnessSubagentRunStateSummary,
+  isHarnessSubagentProfile,
   MAX_SUBAGENT_MAX_MODEL_TURNS,
 } from "./contracts/subagent.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
@@ -66,6 +67,7 @@ export interface CreateHarnessPromptLoopOptions
   fetchFn?: typeof fetch;
   maxModelTurns?: number;
   allowedToolIds?: readonly BuiltinToolId[];
+  allowedSubagentProfiles?: readonly HarnessSubagentProfile[];
 }
 
 export interface RunHarnessPromptOptions {
@@ -406,9 +408,16 @@ const summarizeToolInput = async (
       const contextSummary = typeof input.context === "string"
         ? await summarizeSensitiveText(input.context)
         : undefined;
+      const profile = input.profile === undefined
+        ? DEFAULT_SUBAGENT_PROFILE
+        : typeof input.profile === "string" &&
+            isHarnessSubagentProfile(input.profile)
+        ? input.profile
+        : undefined;
       return {
         type: "cf-harness.tool-input-summary",
         toolId,
+        ...(profile !== undefined ? { profile } : {}),
         ...(goalSummary !== undefined
           ? {
             goalBytes: goalSummary.bytes,
@@ -442,6 +451,17 @@ const parseDelegateTaskInput = (
   if (input.context !== undefined && typeof input.context !== "string") {
     throw new Error("delegate_task context must be a string when provided");
   }
+  const profile = input.profile === undefined
+    ? DEFAULT_SUBAGENT_PROFILE
+    : typeof input.profile === "string" &&
+        isHarnessSubagentProfile(input.profile)
+    ? input.profile
+    : undefined;
+  if (profile === undefined) {
+    throw new Error(
+      `delegate_task profile must be one of ${DEFAULT_SUBAGENT_PROFILE}`,
+    );
+  }
   const maxModelTurns = input.maxModelTurns;
   if (
     maxModelTurns !== undefined &&
@@ -456,6 +476,7 @@ const parseDelegateTaskInput = (
   }
   return {
     goal: input.goal,
+    profile,
     ...(typeof input.context === "string" && input.context.trim().length > 0
       ? { context: input.context }
       : {}),
@@ -655,6 +676,7 @@ export class CfHarnessPromptLoop {
   readonly gatewayClient: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
   readonly #allowedToolIds?: ReadonlySet<BuiltinToolId>;
+  readonly #allowedSubagentProfiles: ReadonlySet<HarnessSubagentProfile>;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -670,6 +692,12 @@ export class CfHarnessPromptLoop {
     this.#allowedToolIds = options.allowedToolIds === undefined
       ? undefined
       : new Set(options.allowedToolIds);
+    this.#allowedSubagentProfiles = new Set(
+      options.allowedSubagentProfiles ??
+        (options.allowedToolIds === undefined
+          ? [DEFAULT_SUBAGENT_PROFILE]
+          : []),
+    );
   }
 
   async runPrompt(
@@ -973,6 +1001,50 @@ export class CfHarnessPromptLoop {
         content: JSON.stringify(denial),
       };
     }
+    let delegateInput: DelegateTaskToolInput | undefined;
+    if (toolCall.function.name === "delegate_task") {
+      try {
+        delegateInput = parseDelegateTaskInput(input);
+      } catch (error) {
+        recordActivity({
+          type: "cf-harness.tool-activity",
+          ...baseActivity(policyDecision, "failed"),
+          toolInputSummary,
+          ...optionalPolicyEventIndexes(policyEventIndexes),
+          errorDetail: toErrorDetail(error),
+        });
+        throw error;
+      }
+      if (!this.#allowedSubagentProfiles.has(delegateInput.profile)) {
+        const detail =
+          `delegate_task profile "${delegateInput.profile}" is not allowed in this run`;
+        const denial = makeObservationDenied("not-authorized", { detail });
+        await recordPolicyEvent({
+          severity: "denied",
+          mode: this.engine.getRunState().cfcEnforcementMode,
+          toolId: toolCall.function.name,
+          toolCallId: toolCall.id,
+          ...(promptSlotBinding !== undefined
+            ? { promptSlot: promptSlotBinding }
+            : {}),
+          toolInputSummary,
+          detail,
+          observationDenied: denial,
+        });
+        recordActivity({
+          type: "cf-harness.tool-activity",
+          ...baseActivity("denied", "not-run"),
+          toolInputSummary,
+          ...optionalPolicyEventIndexes(policyEventIndexes),
+        });
+        return {
+          role: "tool",
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          content: JSON.stringify(denial),
+        };
+      }
+    }
     let result: {
       output: Awaited<
         ReturnType<CfHarnessEngine["invokeBuiltinTool"]>
@@ -983,7 +1055,7 @@ export class CfHarnessPromptLoop {
       result = toolCall.function.name === "delegate_task"
         ? await this.#invokeDelegateTaskTool({
           toolCall,
-          input,
+          input: delegateInput!,
           model,
           promptSlotBinding,
           sequence,
@@ -1037,7 +1109,7 @@ export class CfHarnessPromptLoop {
 
   async #invokeDelegateTaskTool(options: {
     toolCall: HarnessToolCall;
-    input: Record<string, unknown>;
+    input: DelegateTaskToolInput;
     model: string;
     promptSlotBinding?: PromptSlotBinding;
     sequence: number;
@@ -1045,9 +1117,12 @@ export class CfHarnessPromptLoop {
     output: DelegateTaskToolOutput;
     resultRef: ToolResultRef;
   }> {
-    const delegateInput = parseDelegateTaskInput(options.input);
+    const delegateInput = options.input;
+    const profileConfig = getHarnessSubagentProfileConfig(
+      delegateInput.profile,
+    );
     const maxModelTurns = delegateInput.maxModelTurns ??
-      DEFAULT_SUBAGENT_MAX_MODEL_TURNS;
+      profileConfig.maxModelTurns;
     const parentRunState = this.engine.getRunState();
     const subagentSequence = nextSubagentSequence(parentRunState);
     const childRunId = `${parentRunState.runId}.subagent.${subagentSequence}`;
@@ -1068,12 +1143,13 @@ export class CfHarnessPromptLoop {
       parentRunId: parentRunState.runId,
       parentToolCallId: options.toolCall.id,
       childRunId,
-      profile: DEFAULT_SUBAGENT_PROFILE,
+      profile: delegateInput.profile,
       depth: 1,
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
       model: options.model,
-      allowedToolIds: [...DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS],
+      allowedToolIds: [...profileConfig.allowedToolIds],
       maxModelTurns,
+      returnPolicy: profileConfig.returnPolicy,
       createdAt: childCreatedState.createdAt,
       inputSummary: await createSubagentInputSummary(delegateInput),
     };
@@ -1081,7 +1157,8 @@ export class CfHarnessPromptLoop {
       engine: childEngine,
       gatewayClient: this.gatewayClient,
       maxModelTurns,
-      allowedToolIds: DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS,
+      allowedToolIds: profileConfig.allowedToolIds,
+      allowedSubagentProfiles: [],
     });
     let subagentStatus: HarnessSubagentResult["status"] = "completed";
     let summary = "";

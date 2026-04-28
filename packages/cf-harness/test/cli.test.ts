@@ -56,6 +56,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.outputMode, "operator");
   assertEquals(parsed.streamEvents, false);
   assertEquals(parsed.promptSlotRole, "direct-command");
+  assertEquals(parsed.allowedSubagentProfiles, ["default"]);
   assertEquals(parsed.artifactRoot, "/tmp/project/.cf-harness-artifacts");
   assertEquals(parsed.maxModelTurns, 8);
   assertEquals(parsed.printTranscript, false);
@@ -203,7 +204,46 @@ Deno.test("parseCfHarnessCliArgs supports allowed tools and result json path", a
     throw new Error("expected config result");
   }
   assertEquals(parsed.allowedToolIds, ["read_file", "bash"]);
+  assertEquals(parsed.allowedSubagentProfiles, []);
   assertEquals(parsed.resultJsonPath, "/tmp/project/results/output.json");
+});
+
+Deno.test("parseCfHarnessCliArgs supports explicit subagent profile authorization", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "delegate_task",
+      "--allow-subagent-profile",
+      "default",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.allowedToolIds, ["delegate_task"]);
+  assertEquals(parsed.allowedSubagentProfiles, ["default"]);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects unknown subagent profiles", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-subagent-profile", "browser"],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "allowed subagent profiles must be one or more of default",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs resolves focus-root relative to workspace", async () => {
@@ -535,6 +575,7 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
   );
   assertEquals(createdOptions?.apiKey, "test-key");
   assertEquals(createdOptions?.apiKeySource, "CF_HARNESS_API_KEY");
+  assertEquals(createdOptions?.allowedSubagentProfiles, ["default"]);
   assertEquals(
     runPromptOptions?.systemPrompt,
     buildCfHarnessOperatorSystemPrompt({

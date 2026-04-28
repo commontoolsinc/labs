@@ -19,6 +19,11 @@ import {
   type HarnessRunManifest,
   parseLoomRunManifestJson,
 } from "./contracts/run-manifest.ts";
+import {
+  DEFAULT_SUBAGENT_PROFILE,
+  HARNESS_SUBAGENT_PROFILES,
+  type HarnessSubagentProfile,
+} from "./contracts/subagent.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
 import type {
   HarnessTranscriptEvent,
@@ -43,6 +48,7 @@ export interface CfHarnessCliConfig {
   cwd?: string;
   focusRoot?: string;
   allowedToolIds?: readonly BuiltinToolId[];
+  allowedSubagentProfiles: readonly HarnessSubagentProfile[];
   outputMode: CfHarnessCliOutputMode;
   streamEvents: boolean;
   promptSlotRole: PromptSlotRole;
@@ -162,6 +168,7 @@ Options:
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
   --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | write_file | delegate_task)
+  --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
   --prompt-slot-role <role>     direct-command | context | quote (default: direct-command)
@@ -240,6 +247,9 @@ const parseBuiltinToolIds = (
     return undefined;
   }
   const values = Array.isArray(input) ? input : [input];
+  if (values.length === 0) {
+    return undefined;
+  }
   const parsed = values.map((value) => parseBuiltinToolId(value));
   if (parsed.some((value) => value === undefined)) {
     throw new Error(
@@ -248,6 +258,37 @@ const parseBuiltinToolIds = (
   }
   return [...new Set(parsed)] as readonly BuiltinToolId[];
 };
+
+const parseSubagentProfile = (
+  input: string,
+): HarnessSubagentProfile | undefined =>
+  (HARNESS_SUBAGENT_PROFILES as readonly string[]).includes(input)
+    ? input as HarnessSubagentProfile
+    : undefined;
+
+const parseSubagentProfiles = (
+  input: string | readonly string[] | undefined,
+): readonly HarnessSubagentProfile[] | undefined => {
+  if (input === undefined) {
+    return undefined;
+  }
+  const values = Array.isArray(input) ? input : [input];
+  if (values.length === 0) {
+    return undefined;
+  }
+  const parsed = values.map((value) => parseSubagentProfile(value));
+  if (parsed.some((value) => value === undefined)) {
+    throw new Error("allowed subagent profiles must be one or more of default");
+  }
+  return [...new Set(parsed)] as readonly HarnessSubagentProfile[];
+};
+
+const resolveAllowedSubagentProfiles = (
+  allowedToolIds: readonly BuiltinToolId[] | undefined,
+  allowedSubagentProfiles: readonly HarnessSubagentProfile[] | undefined,
+): readonly HarnessSubagentProfile[] =>
+  allowedSubagentProfiles ??
+    (allowedToolIds === undefined ? [DEFAULT_SUBAGENT_PROFILE] : []);
 
 const nonEmptyEnvValue = (input: string | undefined): string | undefined => {
   const trimmed = input?.trim();
@@ -310,6 +351,7 @@ export const parseCfHarnessCliArgs = async (
       "cwd",
       "focus-root",
       "allow-tool",
+      "allow-subagent-profile",
       "output-mode",
       "prompt-slot-role",
       "prompt",
@@ -326,7 +368,7 @@ export const parseCfHarnessCliArgs = async (
       "max-model-turns",
     ],
     boolean: ["help", "print-transcript", "stream-events"],
-    collect: ["allow-tool"],
+    collect: ["allow-tool", "allow-subagent-profile"],
     alias: {
       h: "help",
     },
@@ -354,6 +396,15 @@ export const parseCfHarnessCliArgs = async (
     : undefined;
   const allowedToolIds = parseBuiltinToolIds(
     args["allow-tool"] as string | readonly string[] | undefined,
+  );
+  const allowedSubagentProfiles = resolveAllowedSubagentProfiles(
+    allowedToolIds,
+    parseSubagentProfiles(
+      args["allow-subagent-profile"] as
+        | string
+        | readonly string[]
+        | undefined,
+    ),
   );
   const outputMode = parseCliOutputMode(
     typeof args["output-mode"] === "string" ? args["output-mode"] : undefined,
@@ -446,6 +497,7 @@ export const parseCfHarnessCliArgs = async (
     ...(initialCwd !== undefined ? { cwd: initialCwd } : {}),
     ...(focusRoot !== undefined ? { focusRoot } : {}),
     ...(allowedToolIds !== undefined ? { allowedToolIds } : {}),
+    allowedSubagentProfiles,
     outputMode: outputMode ?? "operator",
     streamEvents: Boolean(args["stream-events"]),
     promptSlotRole: promptSlotRole ?? "direct-command",
@@ -795,6 +847,7 @@ export const runCfHarnessCli = async (
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         maxModelTurns: parsed.maxModelTurns,
+        allowedSubagentProfiles: parsed.allowedSubagentProfiles,
         ...(parsed.allowedToolIds !== undefined
           ? { allowedToolIds: parsed.allowedToolIds }
           : {}),
@@ -843,6 +896,7 @@ export const runCfHarnessCli = async (
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
         maxModelTurns: parsed.maxModelTurns,
+        allowedSubagentProfiles: parsed.allowedSubagentProfiles,
         ...(parsed.allowedToolIds !== undefined
           ? { allowedToolIds: parsed.allowedToolIds }
           : {}),
