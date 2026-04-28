@@ -396,4 +396,39 @@ describe("json-encoding", () => {
       expect(seemsLikeJsonEncodedFabricValue("NaN")).toBe(false);
     });
   });
+
+  // --------------------------------------------------------------------------
+  // valueFromJson with omitted runtime
+  // --------------------------------------------------------------------------
+
+  describe("valueFromJson without a runtime argument", () => {
+    it("decodes a plain object (flag OFF)", () => {
+      expect(valueFromJson('{"a":1}')).toEqual({ a: 1 });
+    });
+
+    it("decodes a plain object (flag ON)", () => {
+      setJsonEncodingConfig(true);
+      expect(valueFromJson('{"a":1}')).toEqual({ a: 1 });
+    });
+
+    it("decodes a primitive (flag OFF)", () => {
+      expect(valueFromJson("42")).toBe(42);
+    });
+
+    it("decodes a primitive (flag ON)", () => {
+      setJsonEncodingConfig(true);
+      expect(valueFromJson("42")).toBe(42);
+    });
+
+    it("decodes tagged values that don't need cell reconstruction (flag ON)", () => {
+      setJsonEncodingConfig(true);
+      expect(valueFromJson('{"\/Undefined@1":null}')).toBe(undefined);
+      expect(valueFromJson('{"\/BigInt@1":"Kg"}')).toBe(42n);
+    });
+
+    it("explicit `undefined` runtime is equivalent to omission", () => {
+      setJsonEncodingConfig(true);
+      expect(valueFromJson('{"a":1}', undefined)).toEqual({ a: 1 });
+    });
+  });
 });
