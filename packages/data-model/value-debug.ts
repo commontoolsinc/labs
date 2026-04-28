@@ -2,8 +2,6 @@
  * Debugging-ish helpers for `FabricValue`s.
  */
 
-import type { FabricValue } from "./interface.ts";
-
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the
  * final output. The replacer brackets a bare-token payload (e.g. `42n` or
@@ -41,7 +39,7 @@ function unquoteMarked(json: string): string {
  * output of this function is valid JSON text, but not _all_ cases. This
  * function must _not_ be relied on to produce a parseable string.
  */
-export function toCompactDebugString(value: FabricValue): string {
+export function toCompactDebugString(value: unknown): string {
   // TODO(danfuzz): This function will have to get smarter once we have values
   // that go beyond what's representable as JSON text.
   return unquoteMarked(JSON.stringify(value, debugReplacer));
@@ -52,7 +50,7 @@ export function toCompactDebugString(value: FabricValue): string {
  * output of this function is valid JSON text, but not _all_ cases. This
  * function must _not_ be relied on to produce a parseable string.
  */
-export function toIndentedDebugString(value: FabricValue): string {
+export function toIndentedDebugString(value: unknown): string {
   // TODO(danfuzz): This function will have to get smarter once we have values
   // that go beyond what's representable as JSON text.
   return unquoteMarked(JSON.stringify(value, debugReplacer, 2));
