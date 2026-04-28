@@ -5,6 +5,7 @@ import {
   sameMemoryV2Flags,
   type ServerMessage,
 } from "../v2.ts";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 type TypedError = {
   name: string;
@@ -35,8 +36,8 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
       error: toError(
         "ProtocolError",
         `memory/v2 flag mismatch: client=${
-          JSON.stringify(message.flags)
-        } server=${JSON.stringify(expectedFlags)}`,
+          toCompactDebugString(message.flags)
+        } server=${toCompactDebugString(expectedFlags)}`,
       ),
     };
   }
