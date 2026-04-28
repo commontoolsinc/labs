@@ -436,6 +436,209 @@ Deno.test({
 });
 
 Deno.test({
+  name:
+    "CfHarnessPromptLoop persists subagent refs, child artifacts, and report timeline",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-subagent-",
+    });
+    try {
+      const requestBodies: Array<{
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      }> = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          artifactRoot,
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: "run-subagent-persisted",
+          model: "gpt-5.4",
+        }),
+        fetchFn: (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as {
+            messages: Array<{ role: string; content: string }>;
+            tools: Array<{ function: { name: string } }>;
+          };
+          requestBodies.push(body);
+          const payload = requestBodies.length === 1
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-subagent-persisted",
+                    type: "function",
+                    function: {
+                      name: "delegate_task",
+                      arguments: JSON.stringify({
+                        goal: "Inspect persisted child artifacts.",
+                        context: "Return a short summary.",
+                      }),
+                    },
+                  }],
+                },
+              }],
+            }
+            : requestBodies.length === 2
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Child artifact summary.",
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Parent artifact summary.",
+                },
+              }],
+            };
+          return Promise.resolve(
+            new Response(JSON.stringify(payload), { status: 200 }),
+          );
+        },
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Delegate and persist the child run.",
+      });
+
+      const runRoot = join(artifactRoot, "run-subagent-persisted");
+      const childRunRoot = join(
+        artifactRoot,
+        "run-subagent-persisted.subagent.1",
+      );
+      const persistedState = await readHarnessRunState(
+        join(runRoot, "run-state.json"),
+      );
+      const persistedReport = await readHarnessRunReport(
+        join(runRoot, "run-report.json"),
+      );
+      const childState = await readHarnessRunState(
+        join(childRunRoot, "run-state.json"),
+      );
+      const childTranscript = await readHarnessTranscript(
+        join(childRunRoot, "transcript.json"),
+      );
+      const delegateToolOutput = JSON.parse(
+        await Deno.readTextFile(persistedState.toolOutputs[0].artifactPath!),
+      ) as {
+        type: string;
+        outputId: string;
+        subagent: {
+          childRunId: string;
+          status: string;
+          summary: string;
+        };
+      };
+
+      assertEquals(result.finalAssistantText, "Parent artifact summary.");
+      assertEquals(persistedState.subagentRuns?.length, 1);
+      const subagentRun = persistedState.subagentRuns?.[0];
+      if (subagentRun === undefined) {
+        throw new Error("expected persisted subagent run ref");
+      }
+      assertEquals(subagentRun, result.runState.subagentRuns?.[0]);
+      assertEquals(
+        subagentRun.outputId,
+        createToolOutputId("run-subagent-persisted", "delegate_task", 1),
+      );
+      assertEquals(subagentRun.parentToolCallId, "call-subagent-persisted");
+      assertEquals(
+        subagentRun.childRunId,
+        "run-subagent-persisted.subagent.1",
+      );
+      assertEquals(subagentRun.status, "completed");
+      assertEquals(subagentRun.summary, "Child artifact summary.");
+      assertEquals(subagentRun.manifest.allowedToolIds, [
+        "bash",
+        "read_file",
+        "write_file",
+      ]);
+      assertEquals(
+        subagentRun.manifest.inputSummary.goalDigest.startsWith("sha256:"),
+        true,
+      );
+      assertEquals(subagentRun.runState.artifactRoot, childRunRoot);
+
+      assertEquals(childState.runId, "run-subagent-persisted.subagent.1");
+      assertEquals(childState.status, "completed");
+      assertEquals(childState.artifactRoot, childRunRoot);
+      assertEquals(
+        childState.transcriptPath,
+        join(childRunRoot, "transcript.json"),
+      );
+      assertEquals(
+        childState.runReportPath,
+        join(childRunRoot, "run-report.json"),
+      );
+      assertEquals(childState.terminalReason, "assistant_completed");
+      assertEquals(childTranscript.map((message) => message.role), [
+        "system",
+        "user",
+        "assistant",
+      ]);
+      assertEquals(
+        childTranscript[1].content.includes(
+          "Inspect persisted child artifacts.",
+        ),
+        true,
+      );
+      assertEquals(
+        childTranscript[1].content.includes(
+          "Delegate and persist the child run.",
+        ),
+        false,
+      );
+
+      assertEquals(delegateToolOutput.type, "cf-harness.delegate-task-output");
+      assertEquals(
+        delegateToolOutput.subagent.childRunId,
+        subagentRun.childRunId,
+      );
+      assertEquals(delegateToolOutput.subagent.status, "completed");
+      assertEquals(
+        delegateToolOutput.subagent.summary,
+        "Child artifact summary.",
+      );
+
+      assertEquals(persistedReport.subagentRuns?.[0], subagentRun);
+      assertEquals(persistedReport.toolActivity[0].toolId, "delegate_task");
+      assertEquals(persistedReport.toolActivity[0].effectClass, "side-effect");
+      assertEquals(
+        persistedReport.toolActivity[0].resultRef?.outputId,
+        createToolOutputId("run-subagent-persisted", "delegate_task", 1),
+      );
+      const timelineEntry = persistedReport.timeline.find((entry) =>
+        entry.kind === "subagent_run"
+      );
+      if (timelineEntry === undefined) {
+        throw new Error("expected subagent_run timeline entry");
+      }
+      assertEquals(timelineEntry.toolCallId, "call-subagent-persisted");
+      assertEquals(
+        timelineEntry.childRunId,
+        "run-subagent-persisted.subagent.1",
+      );
+      assertEquals(timelineEntry.subagentStatus, "completed");
+      assertEquals(timelineEntry.status, "completed");
+      assertEquals(timelineEntry.terminalReason, "assistant_completed");
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
   name: "CfHarnessEngine persists prompt slot binding in run state artifacts",
   permissions: { read: true, write: true },
   async fn() {
