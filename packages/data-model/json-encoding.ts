@@ -2,10 +2,12 @@ import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
 import {
   jsonFromValueLegacy,
+  seemsLikeJsonEncodedFabricValueLegacy,
   valueFromJsonLegacy,
 } from "./json-encoding-legacy.ts";
 import {
   jsonFromValueModern,
+  seemsLikeJsonEncodedFabricValueModern,
   valueFromJsonModern,
 } from "./json-encoding-modern.ts";
 
@@ -60,6 +62,18 @@ export function jsonFromValue(value: FabricValue): string {
     return jsonFromValueModern(value);
   } else {
     return jsonFromValueLegacy(value);
+  }
+}
+
+/**
+ * Indicates if the given text has a "first-blush" appearance as valid encoded
+ * JSON as defined by this module.
+ */
+export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
+  if (jsonEncodingEnabled) {
+    return seemsLikeJsonEncodedFabricValueModern(value);
+  } else {
+    return seemsLikeJsonEncodedFabricValueLegacy(value);
   }
 }
 
