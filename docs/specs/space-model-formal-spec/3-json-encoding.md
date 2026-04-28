@@ -294,10 +294,10 @@ The `/` prefix is wholly owned by the encoding system in the wire format. Any
 object containing **any** key that starts with `/` — regardless of how many
 other keys the object has — is a **reserved form** in the encoded
 representation. User-data plain objects may contain `/`-prefixed keys at the
-data level, but a conforming encoder always wraps them via `/object` (Section 6)
-before they reach the wire. The presence of a bare `/`-prefixed key in a
-wire-format object therefore always signals a tagged value, built-in escape, or
-encoding error — never a literal user-data key.
+data level, but a conforming encoder always wraps them via `/object` or `/quote`
+(Section 6) before they reach the wire. The presence of a bare `/`-prefixed key
+in a wire-format object therefore always signals a tagged value, built-in
+escape, or encoding error — never a literal user-data key.
 
 Specifically:
 
