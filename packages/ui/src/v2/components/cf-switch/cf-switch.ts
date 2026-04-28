@@ -183,7 +183,6 @@ export class CFSwitch extends BaseElement {
     this.disabled = false;
     this.name = "";
     this.value = "on";
-    this.setAttribute("exportparts", "switch,thumb");
   }
 
   private getChecked(): boolean {
@@ -195,8 +194,13 @@ export class CFSwitch extends BaseElement {
   }
 
   override connectedCallback() {
+    if (!this.hasAttribute("role")) {
+      this.setAttribute("role", "switch");
+    }
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "switch,thumb");
+    }
     super.connectedCallback();
-    this.setAttribute("role", "switch");
     this._updateAriaAttributes();
     // Bind initial checked value
     this._checkedCellController.bind(this.checked, booleanSchema);

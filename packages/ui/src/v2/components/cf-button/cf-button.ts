@@ -1,4 +1,4 @@
-import { html, LitElement } from "lit";
+import { html } from "lit";
 import { styles } from "./styles.ts";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
@@ -41,10 +41,6 @@ export type ButtonSize = ComponentSize | "icon";
 
 export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
-  static override shadowRootOptions = {
-    ...LitElement.shadowRootOptions,
-    delegatesFocus: true,
-  };
 
   static override properties = {
     variant: { type: String },
@@ -82,6 +78,16 @@ export class CFButton extends BaseElement {
       },
       { capture: true },
     );
+
+    // The host carries role="button" and tabindex, so it receives keyboard
+    // events directly. Activate on Enter/Space like a native button.
+    this.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (this.disabled) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.click();
+      }
+    });
   }
 
   override firstUpdated(
@@ -134,24 +140,21 @@ export class CFButton extends BaseElement {
     }
     if (typeof this.size === "string" && this.size) classes[this.size] = true;
 
-    // The host element carries role="button" and tabindex for accessibility.
-    // The inner <button> has tabindex="-1" to prevent a double tab stop
-    // (delegatesFocus handles focus forwarding). The inner button still
-    // appears in the accessibility tree as a child of the host — this is
-    // unavoidable without hiding the slotted text. Agents should use
-    // getByRole('button', { name }).first() to target the host.
+    // The inner element is a <div>, not a <button>, so only the host
+    // appears in the accessibility tree with role="button". This avoids
+    // Playwright strict-mode violations from getByRole returning two
+    // matches (host + inner native button). Keyboard activation and form
+    // submission are handled by the host's keydown listener and
+    // _handleClick respectively.
     return html`
-      <button
+      <div
         class="${classMap(classes)}"
-        ?disabled="${this.disabled}"
-        type="${this.type}"
         @click="${this._handleClick}"
         part="button"
         data-cf-button
-        tabindex="-1"
       >
         <slot></slot>
-      </button>
+      </div>
     `;
   }
 

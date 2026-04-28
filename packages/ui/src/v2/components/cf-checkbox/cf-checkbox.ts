@@ -217,13 +217,6 @@ export class CFCheckbox extends BaseElement {
       this.required = false;
       this.name = "";
       this.value = "on";
-      // Set exportparts in the constructor (not connectedCallback) so it is
-      // available before the element is connected to the document. This avoids
-      // issues in environments (e.g. Deno tests) that instantiate elements
-      // without connecting them.
-      if (!this.hasAttribute("exportparts")) {
-        this.setAttribute("exportparts", "checkbox,checkmark");
-      }
     }
 
     private getChecked(): boolean {
@@ -238,8 +231,16 @@ export class CFCheckbox extends BaseElement {
     }
 
     override connectedCallback() {
+      // Set host attributes before super.connectedCallback() triggers rendering.
+      // Cannot be in the constructor — the custom element spec forbids
+      // setAttribute during construction.
+      if (!this.hasAttribute("role")) {
+        this.setAttribute("role", "checkbox");
+      }
+      if (!this.hasAttribute("exportparts")) {
+        this.setAttribute("exportparts", "checkbox,checkmark");
+      }
       super.connectedCallback();
-      this.setAttribute("role", "checkbox");
       this._updateAriaAttributes();
       // Bind initial checked value
       this._checkedCellController.bind(this.checked, booleanSchema);

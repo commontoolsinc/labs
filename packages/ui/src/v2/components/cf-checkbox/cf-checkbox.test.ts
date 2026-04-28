@@ -23,23 +23,12 @@ describe("CFCheckbox", () => {
     expect(CFCheckbox.shadowRootOptions.delegatesFocus).toBe(true);
   });
 
-  it("should set exportparts on construction (before connection)", () => {
+  it("should not set attributes in constructor (custom element spec)", () => {
+    // The custom element spec forbids setAttribute during construction.
+    // Attributes are set in connectedCallback instead.
     const element = new CFCheckbox();
-    expect(element.getAttribute("exportparts")).toBe("checkbox,checkmark");
-  });
-
-  it("should preserve author-provided exportparts", () => {
-    const element = new CFCheckbox();
-    // Simulate author setting exportparts before upgrade/construction
-    // by manually setting after construction — the guard should not overwrite.
-    element.setAttribute("exportparts", "custom-part");
-    // Construct a new element after the attribute is set (not possible directly,
-    // but we verify the guard logic by checking a fresh element's attribute is
-    // set to the default only when not already present).
-    const fresh = new CFCheckbox();
-    fresh.setAttribute("exportparts", "my-part");
-    // The attribute we set manually should remain unchanged.
-    expect(fresh.getAttribute("exportparts")).toBe("my-part");
+    expect(element.getAttribute("exportparts")).toBeNull();
+    expect(element.getAttribute("role")).toBeNull();
   });
 
   if (typeof document !== "undefined") {
@@ -74,7 +63,6 @@ describe("CFCheckbox", () => {
     element.updated(new Map([["disabled", undefined]]));
 
     expect(element.getAttribute("aria-disabled")).toBe("false");
-    expect(element.getAttribute("exportparts")).toBe("checkbox,checkmark");
     expect(element.tabIndex).toBe(0);
   });
 

@@ -56,7 +56,6 @@ export class CFToggle extends BaseElement {
     this.variant = "default";
     this.size = "md";
     this.ariaLabel = "";
-    this.setAttribute("exportparts", "toggle");
   }
 
   get buttonElement(): HTMLButtonElement | null {
@@ -80,9 +79,13 @@ export class CFToggle extends BaseElement {
   }
 
   override connectedCallback() {
+    if (!this.hasAttribute("role")) {
+      this.setAttribute("role", "button");
+    }
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "toggle");
+    }
     super.connectedCallback();
-    // Set ARIA role and initial attributes
-    this.setAttribute("role", "button");
     this._updateAriaAttributes();
 
     // Add event listeners

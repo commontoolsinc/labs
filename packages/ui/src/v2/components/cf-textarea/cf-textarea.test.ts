@@ -109,14 +109,12 @@ describe("CFTextarea", () => {
     expect(CFTextarea.shadowRootOptions.delegatesFocus).toBe(true);
   });
 
-  it("should set role=textbox on the host in the constructor", () => {
+  it("should not set attributes in constructor (custom element spec)", () => {
+    // The custom element spec forbids setAttribute during construction.
+    // Attributes are set in connectedCallback instead.
     const el = new CFTextarea();
-    expect(el.getAttribute("role")).toBe("textbox");
-  });
-
-  it("should set exportparts=textarea on the host in the constructor", () => {
-    const el = new CFTextarea();
-    expect(el.getAttribute("exportparts")).toBe("textarea");
+    expect(el.getAttribute("role")).toBeNull();
+    expect(el.getAttribute("exportparts")).toBeNull();
   });
 
   it("should accept a CellHandle as value property", () => {

@@ -155,12 +155,16 @@ export class CFRadio extends BaseElement {
       this.disabled = false;
       this.value = "";
       this.name = "";
-      this.setAttribute("exportparts", "radio,indicator");
     }
 
     override connectedCallback() {
+      if (!this.hasAttribute("role")) {
+        this.setAttribute("role", "radio");
+      }
+      if (!this.hasAttribute("exportparts")) {
+        this.setAttribute("exportparts", "radio,indicator");
+      }
       super.connectedCallback();
-      this.setAttribute("role", "radio");
       this._updateAriaAttributes();
 
       // Check if within a radio group

@@ -101,13 +101,13 @@ export const styles = css`
     text-decoration: none;
   }
 
-  .button:focus-visible {
+  :host(:focus-visible) .button {
     outline: 2px solid
       var(--cf-button-color-primary, var(--cf-colors-primary-500, #4979fa));
     outline-offset: 2px;
   }
 
-  .button:disabled {
+  :host([disabled]) .button {
     pointer-events: none;
     opacity: 0.5;
     cursor: not-allowed;
@@ -175,12 +175,12 @@ export const styles = css`
     );
   }
 
-  .button.primary:hover:not(:disabled) {
+  :host(:not([disabled])) .button.primary:hover {
     opacity: 0.9;
     transform: translateY(-1px);
   }
 
-  .button.primary:active:not(:disabled) {
+  :host(:not([disabled])) .button.primary:active {
     transform: translateY(0);
   }
 
@@ -199,7 +199,7 @@ export const styles = css`
     );
   }
 
-  .button.destructive:hover:not(:disabled) {
+  :host(:not([disabled])) .button.destructive:hover {
     opacity: 0.9;
   }
 
@@ -212,7 +212,7 @@ export const styles = css`
     color: var(--cf-button-color-text, var(--cf-colors-gray-900, #16181d));
   }
 
-  .button.outline:hover:not(:disabled) {
+  :host(:not([disabled])) .button.outline:hover {
     background-color: var(
       --cf-button-color-surface,
       var(--cf-colors-gray-50, #ffffff)
@@ -234,7 +234,7 @@ export const styles = css`
     );
   }
 
-  .button.secondary:hover:not(:disabled) {
+  :host(:not([disabled])) .button.secondary:hover {
     background-color: var(
       --cf-button-color-surface-hover,
       var(--cf-colors-gray-200, #eceef1)
@@ -255,7 +255,7 @@ export const styles = css`
     padding: 0;
   }
 
-  .button.ghost:hover:not(:disabled) {
+  :host(:not([disabled])) .button.ghost:hover {
     color: var(--cf-button-color-text, var(--cf-colors-gray-700, #404349));
     background-color: var(
       --cf-button-color-surface-hover,
@@ -280,7 +280,7 @@ export const styles = css`
     text-underline-offset: 4px;
   }
 
-  .button.link:hover:not(:disabled) {
+  :host(:not([disabled])) .button.link:hover {
     text-decoration: underline;
   }
 
@@ -312,7 +312,7 @@ export const styles = css`
     gap: var(--cf-pill-md-gap, var(--cf-size-md-spacing, 8px));
   }
 
-  .button.pill:hover:not(:disabled) {
+  :host(:not([disabled])) .button.pill:hover {
     background: var(
       --cf-button-color-surface-hover,
       var(--cf-colors-gray-200, #eceef1)

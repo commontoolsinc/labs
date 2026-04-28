@@ -280,7 +280,6 @@ export class CFSlider extends BaseElement {
     this.step = 1;
     this.disabled = false;
     this.orientation = "horizontal";
-    this.setAttribute("exportparts", "base,track,range,thumb");
   }
 
   get trackElement(): HTMLElement | null {
@@ -310,13 +309,16 @@ export class CFSlider extends BaseElement {
   private _isDragging = false;
 
   override connectedCallback() {
+    if (!this.hasAttribute("role")) {
+      this.setAttribute("role", "slider");
+    }
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "base,track,range,thumb");
+    }
     super.connectedCallback();
 
     // Ensure value is within bounds and snapped to step
     this.value = this._snapToStep(this._clampValue(this.value));
-
-    // Set up ARIA attributes
-    this.setAttribute("role", "slider");
     this._updateAriaAttributes();
 
     // Add keyboard event listener

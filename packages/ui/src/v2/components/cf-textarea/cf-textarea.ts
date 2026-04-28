@@ -378,15 +378,6 @@ export class CFTextarea extends BaseElement {
           this.timingStrategy = "debounce";
           this.timingDelay = 300;
           this.size = "md";
-
-          // Set host semantics in constructor so they are present before
-          // the element connects to the DOM (Deno tests instantiate without DOM).
-          if (!this.hasAttribute("role")) {
-            this.setAttribute("role", "textbox");
-          }
-          if (!this.hasAttribute("exportparts")) {
-            this.setAttribute("exportparts", "textarea");
-          }
         }
 
         private getValue(): string {
@@ -443,6 +434,15 @@ export class CFTextarea extends BaseElement {
         }
 
         override connectedCallback() {
+          // Set host attributes before super triggers rendering.
+          // Cannot be in the constructor — the custom element spec forbids
+          // setAttribute during construction.
+          if (!this.hasAttribute("role")) {
+            this.setAttribute("role", "textbox");
+          }
+          if (!this.hasAttribute("exportparts")) {
+            this.setAttribute("exportparts", "textarea");
+          }
           super.connectedCallback();
           this._updateAccessibilityAttributes();
         }
