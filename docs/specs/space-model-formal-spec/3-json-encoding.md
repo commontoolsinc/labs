@@ -202,8 +202,11 @@ deserialization.
 
 **When the serializer emits `/object`:** During serialization, if a plain object
 has any string key that starts with `/` — regardless of how many other keys the
-object has — the serializer wraps it in `/object`. This prevents the
-deserializer from treating the object as a reserved form.
+object has — the serializer wraps it in one of these escapes (either `/object`
+or `/quote`; see "Encoder dispatch" below). This prevents the deserializer from
+treating the object as a reserved form. `/object` is always a valid choice; the
+distinction between `/object` and `/quote` is a recommendation about which form
+makes the wire output most readable, not a correctness requirement.
 
 ### `/quote` — Fully Literal
 
@@ -237,6 +240,30 @@ Use cases:
 - `/object`: You have a plain object with a slash-prefixed key, but values
   should still be interpreted normally.
 - `/quote`: You want the entire subtree treated as literal JSON data.
+
+### Encoder Dispatch (Recommended Best Practice)
+
+When the encoder encounters a plain object that needs an escape (i.e., any plain
+object containing one or more `/`-prefixed keys), both `/object` and `/quote`
+are valid choices. The recommended best practice is:
+
+- If the entire subtree to be wrapped is fully literal — i.e., it contains no
+  values that would themselves need encoding as special types — emit `/quote`.
+- Otherwise (some descendant value still needs to be processed as a special
+  type during deserialization), emit `/object`.
+
+The motivation for the recommendation is wire-format readability and round-trip
+fidelity: a `/quote`-wrapped literal subtree appears in the wire format as
+itself, with no per-key escaping or restructuring, which is easier for humans to
+read and easier for tools to compare. Conversely, `/object` is required (not
+just preferred) whenever any descendant value still needs encoding, because
+`/quote` would suppress that encoding entirely.
+
+This is a **recommendation, not a requirement**. A conforming encoder may emit
+`/object` in either case; the wire format is unambiguous either way. **A
+conforming decoder must accept both forms.** See `1-fabric-values.md` Section
+2.9 (immutability) and the freeze guarantee under `/quote` above for the
+properties a decoder preserves regardless of which form it sees.
 
 ## 7. Serialization Context Responsibilities
 
