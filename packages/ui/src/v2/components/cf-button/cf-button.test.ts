@@ -60,40 +60,9 @@ describe("CFButton", () => {
     expect(element.tabIndex).toBe(-1);
   });
 
-  if (typeof KeyboardEvent !== "undefined") {
-    it("should activate on Enter and Space keydown", () => {
-      const element = new CFButton();
-      let clicked = false;
-      element.addEventListener("click", () => {
-        clicked = true;
-      });
-
-      element.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-      );
-      expect(clicked).toBe(true);
-
-      clicked = false;
-      element.dispatchEvent(
-        new KeyboardEvent("keydown", { key: " ", bubbles: true }),
-      );
-      expect(clicked).toBe(true);
-    });
-
-    it("should not activate on keydown when disabled", () => {
-      const element = new CFButton();
-      element.disabled = true;
-      let clicked = false;
-      element.addEventListener("click", () => {
-        clicked = true;
-      });
-
-      element.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-      );
-      expect(clicked).toBe(false);
-    });
-  }
+  it("should delegate focus into the shadow button", () => {
+    expect(CFButton.shadowRootOptions.delegatesFocus).toBe(true);
+  });
 
   it("should suppress click events when disabled via host listener", () => {
     const element = new CFButton();

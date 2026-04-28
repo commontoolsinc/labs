@@ -1,4 +1,4 @@
-import { html } from "lit";
+import { html, LitElement } from "lit";
 import { styles } from "./styles.ts";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
@@ -39,30 +39,26 @@ export type ButtonVariant =
 
 export type ButtonSize = ComponentSize | "icon";
 
-// ── Why the inner element is a <div>, not a <button> ──────────────────
+// ── Accessibility strategy ───────────────────────────────────────────
 //
-// The host carries role="button", tabindex, and aria-disabled — it IS
-// the button as far as the accessibility tree is concerned. If the
-// shadow DOM also contained a native <button>, Playwright's
-// getByRole('button', { name }) would return TWO matches (host + inner)
-// and fail in strict mode. We can't suppress the inner button because:
+// The host carries role="button" so agents can find it via getByRole.
+// The shadow DOM contains a real <button> for native keyboard handling
+// (Enter/Space) and delegatesFocus. To prevent Playwright from seeing
+// TWO buttons (host + inner), the inner <button> has aria-hidden="true".
 //
-//   • role="presentation" / role="none" — spec says browsers MUST ignore
-//     these on focusable elements, and <button> is inherently focusable.
-//   • aria-hidden="true" — hides the <slot> content too, so the host
-//     loses its accessible name (computed from slotted text).
-//
-// Using <div> avoids both problems. Keyboard activation (Enter/Space)
-// is handled by a host-level keydown listener. Form submission is
-// already manual (_handleClick searches for the closest cf-form).
-//
-// If native <button> behavior is ever required, the escape hatch is:
-// swap <div> back to <button>, add aria-hidden="true", and sync the
-// host's aria-label from slotted text via a slotchange listener.
-// ──────────────────────────────────────────────────────────────────────
+// aria-hidden also hides the <slot> content from the a11y tree, so the
+// host would lose its computed accessible name. We restore it by syncing
+// the host's aria-label from the light DOM textContent via slotchange.
+// This is skipped when the author provides their own aria-label or
+// aria-labelledby.
+// ─────────────────────────────────────────────────────────────────────
 
 export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
 
   static override properties = {
     variant: { type: String },
@@ -101,22 +97,11 @@ export class CFButton extends BaseElement {
       { capture: true },
     );
 
-    // Handle submit/reset for clicks from ANY source (mouse on inner div
-    // bubbles through shadow boundary to host; keyboard Enter/Space fires
-    // this.click() directly on host). Listening here instead of on the
-    // inner element ensures keyboard activation triggers form submission.
+    // Handle submit/reset for clicks from ANY source (mouse click on inner
+    // button bubbles through shadow boundary to host; keyboard Enter/Space
+    // on the inner button also fires a click that bubbles here).
     this.addEventListener("click", (e) => {
       this._handleClick(e);
-    });
-
-    // The host carries role="button" and tabindex, so it receives keyboard
-    // events directly. Activate on Enter/Space like a native button.
-    this.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (this.disabled) return;
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        this.click();
-      }
     });
   }
 
@@ -126,6 +111,15 @@ export class CFButton extends BaseElement {
     super.firstUpdated(changedProperties);
     this._updateAccessibilityAttributes();
     this._updateThemeProperties();
+
+    // Sync the host's aria-label from slotted text content. The inner
+    // <button> is aria-hidden, so the slot content is invisible to the
+    // a11y tree — we must provide the name explicitly on the host.
+    const slot = this.shadowRoot?.querySelector("slot");
+    if (slot) {
+      slot.addEventListener("slotchange", () => this._syncAriaLabel());
+      this._syncAriaLabel();
+    }
   }
 
   override connectedCallback() {
@@ -161,6 +155,34 @@ export class CFButton extends BaseElement {
     this.setAttribute("aria-disabled", String(this.disabled));
   }
 
+  /**
+   * Sync the host's aria-label from slotted text content, unless the
+   * author has provided their own aria-label or aria-labelledby.
+   */
+  private _syncAriaLabel() {
+    if (
+      this.hasAttribute("aria-labelledby") ||
+      this._authorAriaLabel !== null
+    ) {
+      return;
+    }
+    const text = this.textContent?.trim() || "";
+    if (text) {
+      this.setAttribute("aria-label", text);
+    }
+  }
+
+  /** Stash the author's aria-label (if any) so _syncAriaLabel won't overwrite it. */
+  private get _authorAriaLabel(): string | null {
+    // If aria-label was set before we started syncing, it's the author's.
+    // After first sync, our generated value is present. We distinguish by
+    // comparing against the current textContent — if they match, it's ours.
+    const label = this.getAttribute("aria-label");
+    if (label === null) return null;
+    const text = this.textContent?.trim() || "";
+    return label !== text ? label : null;
+  }
+
   override render() {
     const classes: { [key: string]: true } = {
       button: true,
@@ -170,20 +192,22 @@ export class CFButton extends BaseElement {
     }
     if (typeof this.size === "string" && this.size) classes[this.size] = true;
 
-    // The inner element is a <div>, not a <button>, so only the host
-    // appears in the accessibility tree with role="button". This avoids
-    // Playwright strict-mode violations from getByRole returning two
-    // matches (host + inner native button). Keyboard activation and form
-    // submission are handled by the host's keydown listener and
-    // _handleClick respectively.
+    // The inner <button> is aria-hidden so only the host appears in the
+    // a11y tree with role="button". delegatesFocus forwards focus to the
+    // inner button, which handles Enter/Space natively. The host's
+    // aria-label is synced from slotted textContent via slotchange.
     return html`
-      <div
+      <button
         class="${classMap(classes)}"
+        ?disabled="${this.disabled}"
+        type="${this.type}"
         part="button"
         data-cf-button
+        tabindex="-1"
+        aria-hidden="true"
       >
         <slot></slot>
-      </div>
+      </button>
     `;
   }
 
