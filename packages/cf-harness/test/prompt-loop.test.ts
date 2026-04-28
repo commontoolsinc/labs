@@ -4,6 +4,10 @@ import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import {
+  CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  type PromptSlotBinding,
+} from "../src/contracts/prompt-slot.ts";
 import type {
   SandboxCommandRequest,
   SandboxCommandResult,
@@ -11,10 +15,10 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
-import type { PromptSlotBinding } from "../src/contracts/prompt-slot.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
-  type: "cf-harness.prompt-slot-binding",
+  type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  source: { type: "test.prompt-slot", subject: "direct-test" },
   role: "direct-command",
   kernelName: "cf-harness",
   surface: "test",
@@ -23,7 +27,8 @@ const directPromptSlotBinding: PromptSlotBinding = {
 };
 
 const contextPromptSlotBinding: PromptSlotBinding = {
-  type: "cf-harness.prompt-slot-binding",
+  type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  source: { type: "test.prompt-slot", subject: "context-test" },
   role: "context",
   kernelName: "cf-harness",
   surface: "test",

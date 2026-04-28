@@ -11,6 +11,19 @@ export type CfcEnforcementMode =
   | "enforce-explicit"
   | "enforce-strict";
 
+export const CFC_ENFORCEMENT_MODES = [
+  "disabled",
+  "observe",
+  "enforce-explicit",
+  "enforce-strict",
+] as const satisfies readonly CfcEnforcementMode[];
+
+export const isCfcEnforcementMode = (
+  input: unknown,
+): input is CfcEnforcementMode =>
+  typeof input === "string" &&
+  CFC_ENFORCEMENT_MODES.includes(input as CfcEnforcementMode);
+
 export const DEFAULT_CFC_ENFORCEMENT_MODE: CfcEnforcementMode = "disabled";
 
 export type IFCLabel = {

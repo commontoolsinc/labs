@@ -50,8 +50,21 @@ export interface SandboxCommandResult {
   exitCode: number;
 }
 
+export interface SandboxRuntimeDescription {
+  kind: HarnessSandboxKind;
+  defaultWorkingDirectory: string;
+  cfc?: {
+    runtimeRequested: boolean;
+    runtimeName?: string;
+    workspaceMountPath?: string;
+    networkMode?: DockerNetworkMode;
+    extraDockerArgsCount?: number;
+  };
+}
+
 export interface SandboxRuntime {
   readonly kind: HarnessSandboxKind;
+  describe?(): SandboxRuntimeDescription;
   resolvePath(path: string, cwd?: string): string;
   isPathWithinWorkspace(path: string): boolean;
   defaultWorkingDirectory(): string;

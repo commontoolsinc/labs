@@ -13,6 +13,7 @@ import {
   runCfHarnessCli,
 } from "../src/cli.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import type {
   HarnessPromptLoopResult,
   RunHarnessPromptOptions,
@@ -88,6 +89,36 @@ Deno.test("parseCfHarnessCliArgs supports prompt files and mode overrides", asyn
   assertEquals(parsed.gatewayAuthMode, "bearer");
   assertEquals(parsed.cfcEnforcementModeOverride, "observe");
   assertEquals(parsed.maxModelTurns, 5);
+});
+
+Deno.test("parseCfHarnessCliArgs accepts CFC mode from environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_CFC_ENFORCEMENT_MODE: "enforce-strict" },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.cfcEnforcementModeOverride, "enforce-strict");
+});
+
+Deno.test("parseCfHarnessCliArgs resolves run manifest paths", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--run-manifest", "loom-run.json"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.runManifestPath, "/tmp/project/loom-run.json");
 });
 
 Deno.test("parseCfHarnessCliArgs rejects malformed max-model-turns values", async () => {
@@ -611,6 +642,88 @@ Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async
   assertEquals(stdout.length, 1);
 });
 
+Deno.test("runCfHarnessCli passes a Loom run manifest and its prompt slot", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const manifest = {
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    wishId: "W-519",
+    cfc: { enforcementMode: "observe" },
+    promptSlot: {
+      type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+      source: { type: "loom.wish", wishId: "W-519" },
+      role: "context",
+      kernelName: "cf-harness",
+      surface: "loom",
+      subject: "did:web:example.com#gideon",
+      slotDigest: "sha256:slot",
+    },
+  } as const;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Inspect the workspace",
+      "--gateway-auth-mode",
+      "none",
+      "--run-manifest",
+      "loom-run.json",
+    ],
+    {
+      io,
+      cwd: "/tmp/project",
+      env: {},
+      readTextFile: (path) => {
+        assertEquals(path, "/tmp/project/loom-run.json");
+        return Promise.resolve(JSON.stringify(manifest));
+      },
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: (options) => {
+            runPromptOptions = options;
+            return Promise.resolve(
+              {
+                model: "gpt-5.4",
+                finalAssistantText: "Manifest accepted.",
+                transcript: [
+                  { role: "user", content: "Inspect the workspace" },
+                  { role: "assistant", content: "Manifest accepted." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-manifest",
+                  status: "completed",
+                  createdAt: "2026-04-27T21:00:00.000Z",
+                  updatedAt: "2026-04-27T21:00:01.000Z",
+                  cfcEnforcementMode: "observe",
+                  currentDir: "/workspace",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              } satisfies HarnessPromptLoopResult,
+            );
+          },
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  const engine = createdOptions?.engine as CfHarnessEngine | undefined;
+  assertEquals(exitCode, 0);
+  assertEquals(engine?.getRunState().runManifest?.wishId, "W-519");
+  assertEquals(engine?.getRunState().cfcEnforcementMode, "observe");
+  assertEquals(runPromptOptions?.promptSlotBinding, manifest.promptSlot);
+  assertEquals(stderr, []);
+  assertEquals(stdout.length, 1);
+});
+
 Deno.test("runCfHarnessCli can stream transcript events as they happen", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
@@ -1062,7 +1175,8 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
   const { io, stdout, stderr } = createIoBuffers();
   let runTranscriptOptions: RunHarnessTranscriptOptions | undefined;
   const promptSlotBinding = {
-    type: "cf-harness.prompt-slot-binding",
+    type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+    source: { type: "loom.run", runId: "run-1" },
     role: "context",
     kernelName: "cf-harness",
     surface: "loom",

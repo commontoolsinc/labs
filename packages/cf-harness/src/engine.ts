@@ -17,6 +17,7 @@ import {
   setHarnessCapabilitySnapshot,
   setHarnessPromptSlotBinding,
   setHarnessRunCurrentDir,
+  setHarnessRunManifestPath,
   setHarnessRunReportPath,
   setHarnessRunStatus,
   setHarnessTranscriptPath,
@@ -186,6 +187,8 @@ export class CfHarnessEngine {
         currentDir,
         model: this.config.model,
         artifactRoot: this.artifactStore?.runRoot,
+        runManifest: this.config.runManifest,
+        runManifestPath: this.config.runManifestPath,
         now: this.#now(),
       });
     this.#outputSequence = this.#runState.toolOutputs.length;
@@ -262,6 +265,24 @@ export class CfHarnessEngine {
     return await this.artifactStore?.persistRunState(this.#runState);
   }
 
+  async ensureRunManifestPersisted(): Promise<string | undefined> {
+    if (this.#runState.runManifest === undefined) {
+      return this.#runState.runManifestPath;
+    }
+    const manifestPath = await this.artifactStore?.persistRunManifest?.(
+      this.#runState.runManifest,
+    );
+    if (manifestPath !== undefined) {
+      this.#runState = setHarnessRunManifestPath(
+        this.#runState,
+        manifestPath,
+        this.#now(),
+      );
+      await this.persistRunState();
+    }
+    return manifestPath ?? this.#runState.runManifestPath;
+  }
+
   async terminalizeInterruptedRun(
     signalName: string,
   ): Promise<HarnessRunState> {
@@ -330,12 +351,18 @@ export class CfHarnessEngine {
     if (this.#runState.capabilitySnapshot !== undefined) {
       return this.getRunState();
     }
+    await this.ensureRunManifestPersisted();
     const now = this.#now();
     try {
       const capabilitySnapshot = await collectHarnessCapabilitySnapshot(
         this.sandbox,
         this.#runState.currentDir,
         now,
+        {
+          cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+          runManifest: this.#runState.runManifest,
+          runManifestPath: this.#runState.runManifestPath,
+        },
       );
       let capabilitiesPath: string | undefined;
       try {
