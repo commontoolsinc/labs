@@ -444,6 +444,15 @@ Deno.test({
       prefix: "cf-harness-subagent-",
     });
     try {
+      const promptSlotBinding = {
+        type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+        source: { type: "test.prompt-slot", subject: "subagent-artifact-test" },
+        role: "direct-command",
+        kernelName: "cf-harness",
+        surface: "test",
+        subject: "subagent-artifact-test",
+        eventId: "event-subagent-artifact",
+      } as const;
       const requestBodies: Array<{
         messages: Array<{ role: string; content: string }>;
         tools: Array<{ function: { name: string } }>;
@@ -455,6 +464,7 @@ Deno.test({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-subagent-persisted",
           model: "gpt-5.4",
+          cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: (_input, init) => {
           const body = JSON.parse(String(init?.body)) as {
@@ -510,6 +520,7 @@ Deno.test({
 
       const result = await loop.runPrompt({
         prompt: "Delegate and persist the child run.",
+        promptSlotBinding,
       });
 
       const runRoot = join(artifactRoot, "run-subagent-persisted");

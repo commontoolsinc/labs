@@ -419,6 +419,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate",
       model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -474,6 +475,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
 
   const result = await loop.runPrompt({
     prompt: "Delegate a focused inspection.",
+    promptSlotBinding: directPromptSlotBinding,
   });
 
   assertEquals(result.finalAssistantText, "Parent received the child summary.");
@@ -600,6 +602,7 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-invalid-delegate-${testCase.name.replaceAll(" ", "-")}`,
         model: "gpt-5.4",
+        cfcEnforcementMode: "enforce-explicit",
       }),
       fetchFn: () => {
         requestCount += 1;
@@ -629,7 +632,11 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
     });
 
     await assertRejects(
-      () => loop.runPrompt({ prompt: "Delegate with bad args." }),
+      () =>
+        loop.runPrompt({
+          prompt: "Delegate with bad args.",
+          promptSlotBinding: directPromptSlotBinding,
+        }),
       Error,
       testCase.message,
     );
@@ -653,6 +660,7 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
       ]),
       runId: "run-delegate-child-failure",
       model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -716,6 +724,7 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
 
   const result = await loop.runPrompt({
     prompt: "Delegate a task that will exceed child turns.",
+    promptSlotBinding: directPromptSlotBinding,
   });
 
   assertEquals(
