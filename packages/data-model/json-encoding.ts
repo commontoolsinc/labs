@@ -1,6 +1,10 @@
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
 import {
+  jsonFromValueLegacy,
+  valueFromJsonLegacy,
+} from "./json-encoding-legacy.ts";
+import {
   jsonFromValueModern,
   valueFromJsonModern,
 } from "./json-encoding-modern.ts";
@@ -55,16 +59,7 @@ export function jsonFromValue(value: FabricValue): string {
   if (jsonEncodingEnabled) {
     return jsonFromValueModern(value);
   } else {
-    try {
-      const result = JSON.stringify(value);
-      if (result !== undefined) {
-        return result;
-      }
-    } catch {
-      // Ignore. Fall through to more apt `throw` immediately below.
-    }
-
-    throw new Error("jsonFromValue (legacy): Cannot stringify given value.");
+    return jsonFromValueLegacy(value);
   }
 }
 
@@ -80,6 +75,6 @@ export function valueFromJson(
   if (jsonEncodingEnabled) {
     return valueFromJsonModern(json, runtime);
   } else {
-    return JSON.parse(json);
+    return valueFromJsonLegacy(json);
   }
 }
