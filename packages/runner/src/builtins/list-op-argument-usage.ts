@@ -25,6 +25,17 @@ export function inferListOpArgumentUsage(
   const cached = usageCache.get(pattern as object);
   if (cached) return cached;
 
+  if (pattern.argumentSchema === undefined) {
+    const legacyUsage = {
+      usesElement: true,
+      usesIndex: true,
+      usesArray: true,
+      usesParams: true,
+    } satisfies ListOpArgumentUsage;
+    usageCache.set(pattern as object, legacyUsage);
+    return legacyUsage;
+  }
+
   const usage = {
     usesElement: hasArgumentSchema(cfc, pattern, ["element"]),
     usesIndex: hasArgumentSchema(cfc, pattern, ["index"]),
