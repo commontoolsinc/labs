@@ -4,6 +4,8 @@ import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
+  decodeMemoryV2Boundary,
+  encodeMemoryV2Boundary,
   type EntityDocument,
   getMemoryV2Flags,
   type SessionSync,
@@ -47,7 +49,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -118,7 +120,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(encodeMemoryV2Boundary(message));
   }
 }
 
@@ -141,7 +143,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -221,7 +223,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(encodeMemoryV2Boundary(message));
   }
 }
 
@@ -244,7 +246,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -313,7 +315,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(encodeMemoryV2Boundary(message));
   }
 }
 
