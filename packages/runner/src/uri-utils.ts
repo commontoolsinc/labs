@@ -1,4 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
 import type { URI } from "./sigil-types.ts";
 
@@ -27,7 +28,9 @@ export function toURI(value: unknown): URI {
     }
   }
 
-  throw new Error(`Cannot convert value to URI: ${JSON.stringify(value)}`);
+  throw new Error(
+    `Cannot convert value to URI: ${toCompactDebugString(value)}`,
+  );
 }
 
 /**
