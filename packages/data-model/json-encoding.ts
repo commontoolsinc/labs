@@ -58,7 +58,7 @@ export function getJsonEncodingConfig(): boolean {
  * test runs.
  */
 export function resetJsonEncodingConfig(): void {
-  jsonEncodingEnabled = false;
+  jsonEncodingEnabled = true;
 }
 
 // ---------------------------------------------------------------------------
