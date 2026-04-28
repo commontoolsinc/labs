@@ -67,6 +67,24 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
   assertEquals(snapshot, {
     type: "cf-harness.capability-snapshot",
     at: "2026-04-22T23:00:00.000Z",
+    cfc: {
+      enforcementMode: "enforce-explicit",
+      absenceBehavior: "permissive-if-absent",
+      substrateStatus: "not-attested",
+      runManifest: { present: false },
+      sandbox: {
+        kind: "docker-runsc-cfc",
+        defaultWorkingDirectory: "/workspace",
+        cfc: {
+          runtimeRequested: true,
+          workspaceMountPath: "/workspace",
+        },
+      },
+      protectedXattrs: {
+        expectedSandboxVisible: false,
+        sandboxVisibility: "not-probed",
+      },
+    },
     commands: {
       bash: {
         present: true,

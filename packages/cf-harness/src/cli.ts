@@ -15,6 +15,10 @@ import {
   createCliPromptSlotBinding,
   type PromptSlotRole,
 } from "./contracts/prompt-slot.ts";
+import {
+  type HarnessRunManifest,
+  parseLoomRunManifestJson,
+} from "./contracts/run-manifest.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
 import type {
   HarnessTranscriptEvent,
@@ -50,6 +54,7 @@ export interface CfHarnessCliConfig {
   gatewayAuthMode: HarnessGatewayAuthMode;
   artifactRoot: string;
   resultJsonPath?: string;
+  runManifestPath?: string;
   cfcEnforcementModeOverride?: CfcEnforcementMode;
   maxModelTurns: number;
   printTranscript: boolean;
@@ -169,6 +174,7 @@ Options:
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
   --result-json-path <path>     Optional structured result sidecar path
+  --run-manifest <path>         Optional Loom run manifest JSON path
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -238,6 +244,11 @@ const parseBuiltinToolIds = (
   return [...new Set(parsed)] as readonly BuiltinToolId[];
 };
 
+const nonEmptyEnvValue = (input: string | undefined): string | undefined => {
+  const trimmed = input?.trim();
+  return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+};
+
 const resolvePrompt = async (
   args: ReturnType<typeof parseArgs>,
   cwd: string,
@@ -305,6 +316,7 @@ export const parseCfHarnessCliArgs = async (
       "gateway-auth-mode",
       "artifact-root",
       "result-json-path",
+      "run-manifest",
       "cfc-enforcement-mode",
       "max-model-turns",
     ],
@@ -373,6 +385,9 @@ export const parseCfHarnessCliArgs = async (
   const resultJsonPath = typeof args["result-json-path"] === "string"
     ? resolve(cwd, args["result-json-path"])
     : undefined;
+  const runManifestPath = typeof args["run-manifest"] === "string"
+    ? resolve(cwd, args["run-manifest"])
+    : undefined;
   const gatewayBaseUrl = typeof args["gateway-base-url"] === "string"
     ? args["gateway-base-url"]
     : DEFAULT_GATEWAY_BASE_URL;
@@ -388,26 +403,33 @@ export const parseCfHarnessCliArgs = async (
     throw new Error("gateway auth mode must be one of bearer, none");
   }
   const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
-  const cfcEnforcementModeOverride = parseCfcEnforcementMode(
-    typeof args["cfc-enforcement-mode"] === "string"
-      ? args["cfc-enforcement-mode"]
-      : undefined,
-  );
-  if (
-    args["cfc-enforcement-mode"] !== undefined &&
-    cfcEnforcementModeOverride === undefined
-  ) {
-    throw new Error(
-      "cfc enforcement mode must be one of disabled, observe, enforce-explicit, enforce-strict",
-    );
-  }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
   const prompt = await resolvePrompt(args, cwd, readTextFile);
   const env = deps.env ??
     {
       CF_HARNESS_API_KEY: Deno.env.get("CF_HARNESS_API_KEY"),
       OPENAI_API_KEY: Deno.env.get("OPENAI_API_KEY"),
+      CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
+        "CF_HARNESS_CFC_ENFORCEMENT_MODE",
+      ),
+      CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
     };
+  const explicitCfcMode = typeof args["cfc-enforcement-mode"] === "string"
+    ? args["cfc-enforcement-mode"]
+    : undefined;
+  const envCfcMode = nonEmptyEnvValue(env.CF_HARNESS_CFC_ENFORCEMENT_MODE) ??
+    nonEmptyEnvValue(env.CF_CFC_MODE);
+  const cfcEnforcementModeOverride = parseCfcEnforcementMode(
+    explicitCfcMode ?? envCfcMode,
+  );
+  if (
+    (explicitCfcMode !== undefined || envCfcMode !== undefined) &&
+    cfcEnforcementModeOverride === undefined
+  ) {
+    throw new Error(
+      "cfc enforcement mode must be one of disabled, observe, enforce-explicit, enforce-strict",
+    );
+  }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
   const apiKeySource = env.CF_HARNESS_API_KEY !== undefined
     ? "CF_HARNESS_API_KEY"
@@ -436,6 +458,7 @@ export const parseCfHarnessCliArgs = async (
     gatewayAuthMode,
     artifactRoot,
     ...(resultJsonPath !== undefined ? { resultJsonPath } : {}),
+    ...(runManifestPath !== undefined ? { runManifestPath } : {}),
     ...(cfcEnforcementModeOverride !== undefined
       ? { cfcEnforcementModeOverride }
       : {}),
@@ -450,6 +473,14 @@ export const parseCfHarnessCliArgs = async (
     ...(apiKeySource !== undefined ? { apiKeySource } : {}),
   };
 };
+
+const readRunManifest = async (
+  path: string | undefined,
+  readTextFile: (path: string) => Promise<string>,
+): Promise<HarnessRunManifest | undefined> =>
+  path === undefined
+    ? undefined
+    : parseLoomRunManifestJson(await readTextFile(path));
 
 export const formatCfHarnessCliUsage = (): string => usage;
 
@@ -689,6 +720,7 @@ export const runCfHarnessCli = async (
       ((options: CreateHarnessPromptLoopOptions) =>
         new CfHarnessPromptLoop(options));
     const writeTextFile = deps.writeTextFile ?? Deno.writeTextFile;
+    const readTextFile = deps.readTextFile ?? Deno.readTextFile;
     if (parsed.gatewayAuthMode === "bearer" && parsed.apiKey === undefined) {
       throw new Error(
         "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
@@ -696,11 +728,24 @@ export const runCfHarnessCli = async (
     }
     const startedAt = Date.now();
     let result: HarnessPromptLoopResult;
-    const promptSlotBinding = createCliPromptSlotBinding({
-      kernelName: "cf-harness",
-      role: parsed.promptSlotRole,
-      subject: parsed.resumeRun ?? parsed.workspace,
-    });
+    const runManifest = await readRunManifest(
+      parsed.runManifestPath,
+      readTextFile,
+    );
+    const promptSlotBinding = runManifest?.promptSlot ??
+      createCliPromptSlotBinding({
+        kernelName: "cf-harness",
+        ...(parsed.runManifestPath !== undefined
+          ? {
+            source: {
+              type: "cf-harness.loom-run-manifest-ref",
+              path: parsed.runManifestPath,
+            },
+          }
+          : {}),
+        role: parsed.promptSlotRole,
+        subject: parsed.resumeRun ?? parsed.workspace,
+      });
     const onTranscriptEvent = parsed.streamEvents
       ? (event: HarnessTranscriptEvent) => {
         const formatted = formatCfHarnessTranscriptEvent(event);
@@ -721,6 +766,10 @@ export const runCfHarnessCli = async (
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(parsed.runManifestPath !== undefined
+          ? { runManifestPath: parsed.runManifestPath }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -732,6 +781,10 @@ export const runCfHarnessCli = async (
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(parsed.runManifestPath !== undefined
+          ? { runManifestPath: parsed.runManifestPath }
+          : {}),
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         maxModelTurns: parsed.maxModelTurns,
@@ -761,6 +814,10 @@ export const runCfHarnessCli = async (
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(parsed.runManifestPath !== undefined
+          ? { runManifestPath: parsed.runManifestPath }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -774,6 +831,10 @@ export const runCfHarnessCli = async (
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(parsed.runManifestPath !== undefined
+          ? { runManifestPath: parsed.runManifestPath }
+          : {}),
         maxModelTurns: parsed.maxModelTurns,
         ...(parsed.allowedToolIds !== undefined
           ? { allowedToolIds: parsed.allowedToolIds }

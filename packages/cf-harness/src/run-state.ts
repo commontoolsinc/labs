@@ -1,5 +1,6 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
+import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
 import type {
@@ -34,6 +35,8 @@ export interface HarnessRunState {
   currentDir: string;
   model?: string;
   artifactRoot?: string;
+  runManifest?: HarnessRunManifest;
+  runManifestPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -54,6 +57,8 @@ export interface CreateHarnessRunStateOptions {
   currentDir: string;
   model?: string;
   artifactRoot?: string;
+  runManifest?: HarnessRunManifest;
+  runManifestPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -84,6 +89,12 @@ export const createHarnessRunState = (
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
+      : {}),
+    ...(options.runManifest !== undefined
+      ? { runManifest: options.runManifest }
+      : {}),
+    ...(options.runManifestPath !== undefined
+      ? { runManifestPath: options.runManifestPath }
       : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
@@ -203,6 +214,16 @@ export const setHarnessRunReportPath = (
 ): HarnessRunState => ({
   ...state,
   runReportPath,
+  updatedAt: now,
+});
+
+export const setHarnessRunManifestPath = (
+  state: HarnessRunState,
+  runManifestPath: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  runManifestPath,
   updatedAt: now,
 });
 

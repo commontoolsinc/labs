@@ -15,6 +15,7 @@
     "./cli": "./src/cli.ts",
     "./gateway/openai-client": "./src/gateway/openai-client.ts",
     "./contracts/prompt-slot": "./src/contracts/prompt-slot.ts",
+    "./contracts/run-manifest": "./src/contracts/run-manifest.ts",
     "./contracts/observation": "./src/contracts/observation.ts",
     "./contracts/policy": "./src/contracts/policy.ts",
     "./contracts/run-report": "./src/contracts/run-report.ts",

@@ -6,6 +6,7 @@ export * from "./artifacts.ts";
 export * from "./cli.ts";
 export * from "./gateway/openai-client.ts";
 export * from "./contracts/prompt-slot.ts";
+export * from "./contracts/run-manifest.ts";
 export * from "./contracts/observation.ts";
 export * from "./contracts/policy.ts";
 export * from "./contracts/run-report.ts";

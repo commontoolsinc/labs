@@ -101,6 +101,22 @@ Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () =
   });
 });
 
+Deno.test("DockerRunscSandboxRuntime describe preserves custom CFC runtime aliases", () => {
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      runtimeName: "corp-runsc-prod",
+    }),
+  );
+  const description = runtime.describe();
+  if (description.cfc === undefined) {
+    throw new Error("expected CFC sandbox description");
+  }
+
+  assertEquals(description.cfc.runtimeRequested, true);
+  assertEquals(description.cfc.runtimeName, "corp-runsc-prod");
+});
+
 Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user override", async () => {
   const runner = new FakeProcessRunner({
     stdout: "",

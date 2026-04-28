@@ -9,6 +9,7 @@ import {
 } from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
+import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
@@ -67,6 +68,7 @@ export interface HarnessArtifactStore {
   persistRunReport(
     report: HarnessRunReport,
   ): Promise<string>;
+  persistRunManifest?(manifest: HarnessRunManifest): Promise<string>;
   persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,
@@ -119,6 +121,13 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     await ensureDir(this.runRoot);
     const path = join(this.runRoot, "run-report.json");
     await writeJsonFile(path, report);
+    return path;
+  }
+
+  async persistRunManifest(manifest: HarnessRunManifest): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "run-manifest.json");
+    await writeJsonFile(path, manifest);
     return path;
   }
 
