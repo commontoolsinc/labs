@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   jsonFromValue,
   resetJsonEncodingConfig,
+  seemsLikeJsonEncodedFabricValue,
   setJsonEncodingConfig,
   valueFromJson,
 } from "../json-encoding.ts";
@@ -316,6 +317,83 @@ describe("json-encoding", () => {
       // undefined stringifies to undefined (JSON.stringify returns undefined
       // for undefined input), so test with null instead.
       expect(jsonFromValue(null)).toBe("null");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // seemsLikeJsonEncodedFabricValue
+  // --------------------------------------------------------------------------
+
+  describe("seemsLikeJsonEncodedFabricValue (flag OFF)", () => {
+    it("recognizes JSON keywords", () => {
+      expect(seemsLikeJsonEncodedFabricValue("true")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("false")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("null")).toBe(true);
+    });
+
+    it("recognizes strings starting with JSON delimiters", () => {
+      expect(seemsLikeJsonEncodedFabricValue('"hello"')).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("[]")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("[1,2,3]")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("{}")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue('{"a":1}')).toBe(true);
+    });
+
+    it("recognizes numeric-looking strings", () => {
+      expect(seemsLikeJsonEncodedFabricValue("0")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("42")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("3.14")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("-1")).toBe(true);
+    });
+
+    it("rejects empty string", () => {
+      expect(seemsLikeJsonEncodedFabricValue("")).toBe(false);
+    });
+
+    it("rejects bare identifiers and other non-JSON-looking strings", () => {
+      expect(seemsLikeJsonEncodedFabricValue("hello")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("undefined")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("True")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("NaN")).toBe(false);
+    });
+  });
+
+  describe("seemsLikeJsonEncodedFabricValue (flag ON)", () => {
+    it("recognizes JSON keywords", () => {
+      setJsonEncodingConfig(true);
+      expect(seemsLikeJsonEncodedFabricValue("true")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("false")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("null")).toBe(true);
+    });
+
+    it("recognizes strings starting with JSON delimiters", () => {
+      setJsonEncodingConfig(true);
+      expect(seemsLikeJsonEncodedFabricValue('"hello"')).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("[]")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("[1,2,3]")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("{}")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue('{"a":1}')).toBe(true);
+    });
+
+    it("recognizes numeric-looking strings", () => {
+      setJsonEncodingConfig(true);
+      expect(seemsLikeJsonEncodedFabricValue("0")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("42")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("3.14")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("-1")).toBe(true);
+    });
+
+    it("rejects empty string", () => {
+      setJsonEncodingConfig(true);
+      expect(seemsLikeJsonEncodedFabricValue("")).toBe(false);
+    });
+
+    it("rejects bare identifiers and other non-JSON-looking strings", () => {
+      setJsonEncodingConfig(true);
+      expect(seemsLikeJsonEncodedFabricValue("hello")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("undefined")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("True")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("NaN")).toBe(false);
     });
   });
 });
