@@ -649,6 +649,147 @@ describe("llmDialog", () => {
     }]);
   });
 
+  it("should expand stringified opaque text links in handler tool string inputs", async () => {
+    type SentEmail = {
+      recipient: string;
+      subject: string;
+      body: string;
+    };
+    type SendMailArgs = SentEmail;
+
+    const sendMailInputSchema = {
+      type: "object",
+      properties: {
+        recipient: { type: "string" },
+        subject: { type: "string" },
+        body: {
+          anyOf: [
+            { type: "string" },
+            {
+              type: "object",
+              properties: { "@link": { type: "string" } },
+              required: ["@link"],
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+      required: ["recipient", "subject", "body"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const sendMail = handler<
+      SendMailArgs,
+      { emails: any }
+    >(
+      {
+        type: "object",
+        properties: {
+          recipient: { type: "string" },
+          subject: { type: "string" },
+          body: { type: "string" },
+        },
+        required: ["recipient", "subject", "body"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          emails: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+            asCell: true,
+          },
+        },
+        required: ["emails"],
+      },
+      ({ recipient, subject, body }, { emails }) => {
+        emails.push({ recipient, subject, body });
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        emails: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+        summary: { type: "string", asCell: true },
+        tools: true,
+      },
+      required: ["emails", "summary", "tools"],
+    } as const satisfies JSONSchema;
+
+    const testPattern = pattern(
+      () => {
+        const emails = Writable.of<SentEmail[]>([]);
+        const summary = Cell.of("Linked summary text", {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        });
+
+        return {
+          emails,
+          summary,
+          tools: {
+            sendMail: {
+              description:
+                "Send an email. body may be raw text or an opaque text link.",
+              inputSchema: sendMailInputSchema,
+              handler: sendMail({ emails }),
+            },
+          },
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-stringified-linked-text-tool-body-test",
+      resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.prepareCfc();
+    await tx.commit();
+    await runtime.idle();
+
+    const catalog = llmToolExecutionHelpers.buildToolCatalog(
+      result.key("tools") as any,
+      false,
+    );
+    const summaryLink = createLLMFriendlyLink(
+      result.key("summary").getAsNormalizedFullLink(),
+      space,
+    );
+
+    await llmToolExecutionHelpers.executeToolCalls(
+      runtime,
+      space,
+      catalog,
+      [{
+        type: "tool-call",
+        toolCallId: "call-stringified-linked-body",
+        toolName: "sendMail",
+        input: {
+          recipient: "john@example.org",
+          subject: "not approved",
+          body: JSON.stringify({ "@link": summaryLink }),
+        },
+      }],
+    );
+    await runtime.idle();
+
+    expect(await result.key("emails").pull()).toEqual([{
+      recipient: "john@example.org",
+      subject: "not approved",
+      body: "Linked summary text",
+    }]);
+  });
+
   it("should expose a userland subagent in llmDialog tool catalogs", async () => {
     const childResultSchema = {
       type: "object",

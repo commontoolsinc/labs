@@ -716,6 +716,25 @@ function traverseAndCellify(
   space: MemorySpace,
   value: unknown,
 ): unknown {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (
+          isRecord(parsed) && typeof parsed["@link"] === "string" &&
+          Object.keys(parsed).length === 1 &&
+          matchLLMFriendlyLink.test(parsed["@link"])
+        ) {
+          const link = parseLLMFriendlyLink(parsed["@link"], space);
+          return runtime.getCellFromLink(link);
+        }
+      } catch {
+        // Not a JSON-encoded link object; leave the string as-is.
+      }
+    }
+  }
+
   // It's a valid link, if
   // - it's a record with a single key "/"
   // - the value of the "/" key is a string that matches the URI pattern
