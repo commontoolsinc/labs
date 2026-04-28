@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import { connect, type Transport } from "../v2/client.ts";
+import { decodeMemoryV2Boundary } from "../v2.ts";
 
 const SPACE = "did:key:z6Mk-restore-flush-test";
 
@@ -25,7 +26,7 @@ class ReconnectableTransport implements Transport {
   constructor(private readonly server: Server) {}
 
   async send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type?: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -87,7 +88,9 @@ class ReconnectableTransport implements Transport {
   }
 
   async #deliver(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as { commit?: { localSeq?: number } };
+    const message = decodeMemoryV2Boundary(payload) as {
+      commit?: { localSeq?: number };
+    };
     if (typeof message.commit?.localSeq === "number") {
       this.#deliveredTransactLocalSeqs.push(message.commit.localSeq);
     }
