@@ -22,9 +22,15 @@ function roundTrip(value: FabricValue): FabricValue {
   return valueFromJson(jsonFromValue(value), mockRuntime);
 }
 
-/** Assert that encoding a value produces the expected JSON wire format. */
+/**
+ * Assert that encoding a value produces the expected JSON wire format
+ * (compared as parsed structure, after stripping the modern encoding prefix).
+ */
 function expectWireFormat(value: FabricValue, expected: unknown): void {
-  expect(JSON.parse(jsonFromValue(value))).toEqual(expected);
+  const PREFIX = "fvj1:";
+  const json = jsonFromValue(value);
+  expect(json.startsWith(PREFIX)).toBe(true);
+  expect(JSON.parse(json.slice(PREFIX.length))).toEqual(expected);
 }
 
 // ============================================================================
@@ -99,13 +105,13 @@ describe("json-encoding", () => {
 
     it("valueFromJson decodes tagged undefined", () => {
       setJsonEncodingConfig(true);
-      const json = '{"\/Undefined@1":null}';
+      const json = 'fvj1:{"\/Undefined@1":null}';
       expect(valueFromJson(json, mockRuntime)).toBe(undefined);
     });
 
     it("valueFromJson decodes tagged bigint", () => {
       setJsonEncodingConfig(true);
-      const json = '{"\/BigInt@1":"Kg"}';
+      const json = 'fvj1:{"\/BigInt@1":"Kg"}';
       expect(valueFromJson(json, mockRuntime)).toBe(42n);
     });
 
@@ -126,12 +132,12 @@ describe("json-encoding", () => {
       expect(roundTrip(null)).toBe(null);
     });
 
-    it("JSON-safe primitives stringify normally", () => {
+    it("JSON-safe primitives stringify normally (under the encoding prefix)", () => {
       setJsonEncodingConfig(true);
-      expect(jsonFromValue(42 as FabricValue)).toBe("42");
-      expect(jsonFromValue("hello" as FabricValue)).toBe('"hello"');
-      expect(jsonFromValue(true as FabricValue)).toBe("true");
-      expect(jsonFromValue(null)).toBe("null");
+      expect(jsonFromValue(42 as FabricValue)).toBe("fvj1:42");
+      expect(jsonFromValue("hello" as FabricValue)).toBe('fvj1:"hello"');
+      expect(jsonFromValue(true as FabricValue)).toBe("fvj1:true");
+      expect(jsonFromValue(null)).toBe("fvj1:null");
     });
   });
 
@@ -359,28 +365,22 @@ describe("json-encoding", () => {
   });
 
   describe("seemsLikeJsonEncodedFabricValue (flag ON)", () => {
-    it("recognizes JSON keywords", () => {
+    it("recognizes a string with the encoding prefix", () => {
       setJsonEncodingConfig(true);
-      expect(seemsLikeJsonEncodedFabricValue("true")).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue("false")).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue("null")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue('fvj1:{"a":1}')).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("fvj1:null")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("fvj1:42")).toBe(true);
     });
 
-    it("recognizes strings starting with JSON delimiters", () => {
+    it("recognizes the bare prefix", () => {
       setJsonEncodingConfig(true);
-      expect(seemsLikeJsonEncodedFabricValue('"hello"')).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue("[]")).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue("[1,2,3]")).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue("{}")).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue('{"a":1}')).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue("fvj1:")).toBe(true);
     });
 
-    it("recognizes numeric-looking strings", () => {
+    it("recognizes the actual output of jsonFromValue (round-trip check)", () => {
       setJsonEncodingConfig(true);
-      expect(seemsLikeJsonEncodedFabricValue("0")).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue("42")).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue("3.14")).toBe(true);
-      expect(seemsLikeJsonEncodedFabricValue("-1")).toBe(true);
+      const encoded = jsonFromValue({ a: 1, b: 42n } as FabricValue);
+      expect(seemsLikeJsonEncodedFabricValue(encoded)).toBe(true);
     });
 
     it("rejects empty string", () => {
@@ -388,12 +388,34 @@ describe("json-encoding", () => {
       expect(seemsLikeJsonEncodedFabricValue("")).toBe(false);
     });
 
+    it("rejects plain JSON without the prefix", () => {
+      setJsonEncodingConfig(true);
+      // These are all things the legacy heuristic accepts; under the modern
+      // dispatch they must be rejected, since they don't carry the prefix.
+      expect(seemsLikeJsonEncodedFabricValue("true")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("false")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("null")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue('"hello"')).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("[1,2,3]")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue('{"a":1}')).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("42")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("-1")).toBe(false);
+    });
+
+    it("rejects partial or misplaced prefixes", () => {
+      setJsonEncodingConfig(true);
+      expect(seemsLikeJsonEncodedFabricValue("fvj")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("fvj1")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("FVJ1:")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("fvj2:")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue(" fvj1:")).toBe(false);
+      expect(seemsLikeJsonEncodedFabricValue("xfvj1:")).toBe(false);
+    });
+
     it("rejects bare identifiers and other non-JSON-looking strings", () => {
       setJsonEncodingConfig(true);
       expect(seemsLikeJsonEncodedFabricValue("hello")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("undefined")).toBe(false);
-      expect(seemsLikeJsonEncodedFabricValue("True")).toBe(false);
-      expect(seemsLikeJsonEncodedFabricValue("NaN")).toBe(false);
     });
   });
 });

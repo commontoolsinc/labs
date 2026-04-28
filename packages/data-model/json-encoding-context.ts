@@ -135,7 +135,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * then deserializes tagged forms back into modern runtime types.
    */
   decode(data: string, runtime: ReconstructionContext): FabricValue {
-    if (!data.startsWith(ENCODING_PREFIX_TAG)) {
+    if (!JsonEncodingContext.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
         `Not a JSON-encoded \`FabricValue\` string: \`${excerpt}\``,
@@ -145,6 +145,19 @@ export class JsonEncodingContext implements SerializationContext<string> {
     const json = data.slice(ENCODING_PREFIX_TAG.length);
     const parsed = JSON.parse(json) as JsonWireValue;
     return this.deserialize(parsed, runtime);
+  }
+
+  // -------------------------------------------------------------------------
+  // Static helpers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Indicates if the given text has a "first-blush" appearance as valid JSON
+   * encoded by this class -- that is, whether it carries the encoding prefix
+   * tag.
+   */
+  static seemsLikeEncoded(value: string): boolean {
+    return value.startsWith(ENCODING_PREFIX_TAG);
   }
 
   // -------------------------------------------------------------------------
