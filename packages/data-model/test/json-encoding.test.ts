@@ -2,11 +2,13 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   jsonFromValue,
+  plainObjectFromJson,
   resetJsonEncodingConfig,
   seemsLikeJsonEncodedFabricValue,
   setJsonEncodingConfig,
   valueFromJson,
 } from "../json-encoding.ts";
+import { FabricError } from "../fabric-native-instances.ts";
 import type { ReconstructionContext } from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
 
@@ -429,6 +431,41 @@ describe("json-encoding", () => {
     it("explicit `undefined` runtime is equivalent to omission", () => {
       setJsonEncodingConfig(true);
       expect(valueFromJson('{"a":1}', undefined)).toEqual({ a: 1 });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // plainObjectFromJson
+  // --------------------------------------------------------------------------
+
+  describe("plainObjectFromJson", () => {
+    it("returns the decoded plain object (flag OFF)", () => {
+      expect(plainObjectFromJson('{"a":1,"b":"two"}'))
+        .toEqual({ a: 1, b: "two" });
+    });
+
+    it("returns the decoded plain object (flag ON)", () => {
+      setJsonEncodingConfig(true);
+      const json = jsonFromValue({ a: 1, b: 42n } as FabricValue);
+      const result = plainObjectFromJson<{ a: number; b: bigint }>(json);
+      expect(result.a).toBe(1);
+      expect(result.b).toBe(42n);
+    });
+
+    it("throws on null, primitives, and arrays", () => {
+      expect(() => plainObjectFromJson("null")).toThrow();
+      expect(() => plainObjectFromJson("42")).toThrow();
+      expect(() => plainObjectFromJson('"hello"')).toThrow();
+      expect(() => plainObjectFromJson("true")).toThrow();
+      expect(() => plainObjectFromJson("[]")).toThrow();
+      expect(() => plainObjectFromJson("[1,2,3]")).toThrow();
+    });
+
+    it("throws on a class instance (flag ON, FabricError)", () => {
+      setJsonEncodingConfig(true);
+      const err = new FabricError(new Error("test"));
+      const json = jsonFromValue(err as FabricValue);
+      expect(() => plainObjectFromJson(json)).toThrow(/instance/);
     });
   });
 });

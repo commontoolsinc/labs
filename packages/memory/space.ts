@@ -74,6 +74,7 @@ import { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "../utils/src/types.ts";
 import {
   jsonFromValue,
+  plainObjectFromJson,
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
 export type * from "./interface.ts";
@@ -948,7 +949,7 @@ const commit = <Space extends MemorySpace>(
   const row = stmt.get({ the, of }) as StateRow | undefined;
   const [since, cause] = row
     ? [
-      (valueFromJson(row.is as string) as unknown as CommitData).since + 1,
+      plainObjectFromJson<CommitData>(row.is as string).since + 1,
       hashObjectFromString(row.fact) as HashObject<Assertion>,
     ]
     : [0, unclaimedRef({ the, of }) as HashObject as HashObject<Assertion>];
