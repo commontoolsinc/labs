@@ -426,10 +426,11 @@ function waitForPendingToBecomeFalse(result: any) {
     const timeout = setTimeout(() => {
       reject(new Error("Timeout waiting for pending to become false"));
     }, 5000);
-    const cancel = result.sink((value: any) => {
+    let cancel = () => {};
+    cancel = result.sink((value: any) => {
       if (value?.pending === false) {
         clearTimeout(timeout);
-        cancel();
+        queueMicrotask(cancel);
         resolve();
       }
     });

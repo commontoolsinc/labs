@@ -181,6 +181,7 @@ declare module "@commonfabric/api" {
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
     writableProxy?: boolean;
+    propagateInputIfc?: boolean;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
   }

@@ -31,6 +31,7 @@ import type {
 } from "commonfabric";
 import { isRecord } from "@commonfabric/utils/types";
 import { isCell } from "../cell.ts";
+import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
 
 const WISH_ARGUMENT_SCHEMA = internSchema({
   type: "object",
@@ -38,7 +39,15 @@ const WISH_ARGUMENT_SCHEMA = internSchema({
     query: { type: "string" },
     path: { type: "array", items: { type: "string" } },
     schema: { type: "object" },
-    context: { type: "object", additionalProperties: { asCell: ["cell"] } },
+    context: {
+      type: "object",
+      additionalProperties: {
+        anyOf: [
+          { type: "unknown", asCell: ["cell"] },
+          { type: "unknown", asCell: ["opaque"] },
+        ],
+      },
+    },
     scope: { type: "array", items: { type: "string" } },
   },
 });
@@ -102,6 +111,8 @@ export const llm = createNodeFactory({
 export const llmDialog = createNodeFactory({
   type: "ref",
   implementation: "llmDialog",
+  resultSchema: LLMDialogResultSchema,
+  propagateInputIfc: false,
 }) as (
   params: Opaque<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMDialogState>;

@@ -42,13 +42,50 @@ export const LLMMessageSchema = internSchema(
   },
 );
 
+/** Runtime schema for {@link BuiltInLLMDialogState} (packages/api/index.ts). */
+export const LLMDialogResultSchema = internSchema(
+  {
+    type: "object",
+    properties: {
+      pending: { type: "boolean", default: false },
+      result: {},
+      addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+      cancelGeneration: { asCell: ["stream"] },
+      pinCell: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          name: { type: "string" },
+        },
+        required: ["path", "name"],
+        asCell: ["stream"],
+      },
+      unpinAllCells: { asCell: ["stream"] },
+      flattenedTools: { type: "object", default: {} },
+      pinnedCells: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            name: { type: "string" },
+          },
+        },
+      },
+    },
+    required: ["pending", "addMessage", "cancelGeneration"],
+  } as const,
+);
+
 /** Runtime schema for {@link BuiltInLLMTool} (packages/api/index.ts). */
 export const LLMToolSchema = internSchema(
   {
     type: "object",
     properties: {
       description: { type: "string" },
-      inputSchema: { type: "object" },
+      inputSchema: {
+        anyOf: [{ type: "object" }, { type: "boolean" }],
+      },
       handler: {
         // Deliberately no schema, so it gets populated from the handler
         asCell: ["stream"],
@@ -56,8 +93,12 @@ export const LLMToolSchema = internSchema(
       pattern: {
         type: "object",
         properties: {
-          argumentSchema: { type: "object" },
-          resultSchema: { type: "object" },
+          argumentSchema: {
+            anyOf: [{ type: "object" }, { type: "boolean" }],
+          },
+          resultSchema: {
+            anyOf: [{ type: "object" }, { type: "boolean" }],
+          },
           nodes: { type: "array", items: { type: "object" } },
           program: { type: "object" },
           initial: { type: "object" },
@@ -66,6 +107,7 @@ export const LLMToolSchema = internSchema(
         asCell: ["cell"],
       },
       extraParams: { type: "object" },
+      useResultSchemaForObservation: { type: "boolean" },
       piece: {
         // Accept whole piece - its own schema defines its handlers
         asCell: ["cell"],
@@ -86,6 +128,20 @@ export const LLMReducedToolSchema = internSchema(
   },
 );
 
+const LLMContextEntrySchema = {
+  anyOf: [
+    { type: "unknown", asCell: ["cell"] },
+    { type: "unknown", asCell: ["opaque"] },
+  ],
+} as const;
+
+const JSONSchemaValueSchema = {
+  anyOf: [
+    { type: "object", additionalProperties: true },
+    { type: "boolean" },
+  ],
+} as const;
+
 /** Runtime schema for {@link BuiltInLLMParams} (packages/api/index.ts). */
 export const LLMParamsSchema = internSchema(
   {
@@ -96,6 +152,11 @@ export const LLMParamsSchema = internSchema(
       maxTokens: { type: "number" },
       system: { type: "string" },
       stop: { type: "string" },
+      builtinTools: { type: "boolean", default: true },
+      observationMaxConfidentiality: {
+        type: "array",
+        items: {},
+      },
       tools: {
         type: "object",
         additionalProperties: LLMToolSchema,
@@ -103,10 +164,10 @@ export const LLMParamsSchema = internSchema(
       },
       context: {
         type: "object",
-        additionalProperties: { asCell: ["cell"] },
+        additionalProperties: LLMContextEntrySchema,
         default: {},
       },
-      resultSchema: { type: "object" },
+      resultSchema: JSONSchemaValueSchema,
     },
     required: ["messages"],
   } as const,
@@ -121,7 +182,7 @@ export const GenerateTextParamsSchema = internSchema(
       messages: { type: "array", items: LLMMessageSchema },
       context: {
         type: "object",
-        additionalProperties: { asCell: ["cell"] },
+        additionalProperties: LLMContextEntrySchema,
         default: {},
       },
       system: { type: "string" },
@@ -145,13 +206,18 @@ export const GenerateObjectParamsSchema = internSchema(
       messages: { type: "array", items: LLMMessageSchema },
       context: {
         type: "object",
-        additionalProperties: { asCell: ["cell"] },
+        additionalProperties: LLMContextEntrySchema,
         default: {},
       },
-      schema: { type: "object" },
+      schema: JSONSchemaValueSchema,
       system: { type: "string" },
       model: { type: "string" },
       maxTokens: { type: "number" },
+      observationMaxConfidentiality: {
+        type: "array",
+        items: {},
+      },
+      schemaSanitizePromptInjection: { type: "boolean" },
       cache: { type: "boolean" },
       metadata: { type: "object" },
       tools: { type: "object", additionalProperties: LLMToolSchema },
@@ -202,6 +268,7 @@ export const GenerateObjectResultSchema = internSchema(
     properties: {
       pending: { type: "boolean", default: false },
       result: { type: "object" },
+      messages: { type: "array", items: LLMMessageSchema },
       error: {},
       partial: { type: "string" },
       requestHash: { type: "string" },

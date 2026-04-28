@@ -2,10 +2,6 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  toCompactDebugString,
-  toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -193,6 +189,121 @@ const recordOutputSchemaPolicyInputs = (
       );
     }
   }
+};
+
+const recordSchemaPolicyInputForLink = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void => {
+  if (schema === undefined) {
+    return;
+  }
+  tx.recordCfcWritePolicyInput({
+    kind: "schema",
+    target: {
+      space: link.space,
+      id: link.id,
+      type: link.type,
+      path: [...link.path],
+    },
+    schema,
+  });
+};
+
+const recordRawBuiltinBindingSchemaPolicyInputs = (
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  processCell: Cell<any>,
+  outputBinding: unknown,
+): void => {
+  if (isWriteRedirectLink(outputBinding)) {
+    const bindingLink = parseLink(outputBinding, processCell);
+    const link = resolveLink(
+      runtime,
+      tx,
+      bindingLink,
+      "writeRedirect",
+    );
+    const schema = bindingLink.schema ?? link.schema;
+    recordSchemaPolicyInputForLink(tx, bindingLink, schema);
+    recordSchemaPolicyInputForLink(tx, link, schema);
+    return;
+  }
+
+  if (Array.isArray(outputBinding)) {
+    outputBinding.forEach((child) =>
+      recordRawBuiltinBindingSchemaPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        child,
+      )
+    );
+    return;
+  }
+
+  if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
+    for (const child of Object.values(outputBinding)) {
+      recordRawBuiltinBindingSchemaPolicyInputs(
+        tx,
+        runtime,
+        processCell,
+        child,
+      );
+    }
+  }
+};
+
+const schemaForRawBuiltinRootOutputBinding = (
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  processCell: Cell<any>,
+  outputBinding: unknown,
+): JSONSchema | undefined => {
+  if (!isWriteRedirectLink(outputBinding)) {
+    return undefined;
+  }
+  const bindingLink = parseLink(outputBinding, processCell);
+  const link = resolveLink(
+    runtime,
+    tx,
+    bindingLink,
+    "writeRedirect",
+  );
+  return bindingLink.schema ?? link.schema;
+};
+
+const resultForRawBuiltinOutputBinding = (
+  result: unknown,
+  outputBindingSchema: JSONSchema | undefined,
+  builtinIdentity: ImplementationIdentity | undefined,
+): unknown => {
+  if (
+    !isCell(result) ||
+    outputBindingSchema === undefined ||
+    builtinIdentity?.kind !== "builtin" ||
+    builtinIdentity.builtinId !== "generateObject"
+  ) {
+    return result;
+  }
+  return result.asSchema(outputBindingSchema).getAsLink({
+    includeSchema: true,
+  });
+};
+
+const recordRawBuiltinResultSchemaPolicyInput = (
+  tx: IExtendedStorageTransaction,
+  result: unknown,
+): void => {
+  if (!isCell(result)) {
+    return;
+  }
+  recordSchemaPolicyInputForLink(
+    tx,
+    result.getAsNormalizedFullLink(),
+    result.schema,
+  );
 };
 
 const recordSetupProjectionPolicyInputs = (
@@ -1239,13 +1350,13 @@ export class Runner {
               () => [
                 "Error committing transaction",
                 "\nError:",
-                toIndentedDebugString(error),
+                JSON.stringify(error, null, 2),
                 error.name === "ConflictError"
                   ? [
                     "\nConflict details:",
-                    toIndentedDebugString(error.conflict),
+                    JSON.stringify(error.conflict, null, 2),
                     "\nTransaction:",
-                    toIndentedDebugString(error.transaction),
+                    JSON.stringify(error.transaction, null, 2),
                   ]
                   : [],
               ],
@@ -1596,7 +1707,7 @@ export class Runner {
     } else if (isWriteRedirectLink(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
-      throw new Error(`Unknown module: ${toCompactDebugString(module)}`);
+      throw new Error(`Unknown module: ${JSON.stringify(module)}`);
     }
   }
 
@@ -2515,11 +2626,31 @@ export class Runner {
       builtinResult = module.implementation(
         inputsCell,
         (tx: IExtendedStorageTransaction, result: any) => {
+          const outputBindingSchema = schemaForRawBuiltinRootOutputBinding(
+            tx,
+            this.runtime,
+            processCell,
+            mappedOutputBindings,
+          );
+          recordRawBuiltinBindingSchemaPolicyInputs(
+            tx,
+            this.runtime,
+            processCell,
+            mappedOutputBindings,
+          );
+          recordRawBuiltinResultSchemaPolicyInput(
+            tx,
+            result,
+          );
           sendValueToBinding(
             tx,
             processCell,
             mappedOutputBindings,
-            result,
+            resultForRawBuiltinOutputBinding(
+              result,
+              outputBindingSchema,
+              builtinIdentity,
+            ),
           );
         },
         addCancel,

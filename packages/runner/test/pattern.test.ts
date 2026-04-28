@@ -92,6 +92,10 @@ describe("pattern", () => {
     const secondPath = (testPattern.result as any).second.$alias.path;
     expect(firstPath).toEqual(["internal", "isSelected"]);
     expect(secondPath).toEqual(["internal", "isSelected__#0"]);
+    expect((testPattern.internalSchema as any).properties).toEqual({
+      isSelected: { type: "boolean" },
+      "isSelected__#0": { type: "boolean" },
+    });
   });
 
   it("complex pattern has correct schema and nodes", () => {

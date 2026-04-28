@@ -5,7 +5,6 @@ import {
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
@@ -129,7 +128,7 @@ const schemaIfcOverlapsPath = (
   return visit(schema, basePath);
 };
 
-const hasPendingSourcePolicyInput = (
+const hasPendingSchemaPolicyInput = (
   tx: IExtendedStorageTransaction,
   source: NormalizedFullLink,
 ): boolean => {
@@ -157,9 +156,11 @@ const recordLinkWritePolicyInput = (
     return;
   }
   const sourceMetadata = readStoredCfcMetadata(tx, source);
-  const sourceRelevant = sourceMetadata !== undefined ||
-    hasPendingSourcePolicyInput(tx, source);
-  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target);
+  const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
+    sourceMetadata !== undefined ||
+    hasPendingSchemaPolicyInput(tx, source);
+  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target) ||
+    hasPendingSchemaPolicyInput(tx, target);
   if (!sourceRelevant && !targetRelevant) {
     return;
   }
@@ -214,7 +215,7 @@ export function diffAndUpdate(
   );
   diffLogger.debug(
     "diff",
-    () => `[diffAndUpdate] changes: ${toCompactDebugString(changes)}`,
+    () => `[diffAndUpdate] changes: ${JSON.stringify(changes)}`,
   );
   applyChangeSet(tx, changes);
   return changes.length > 0;
@@ -265,7 +266,7 @@ export function normalizeAndDiff(
     "diff",
     () =>
       `[DIFF_ENTER] path=${pathStr} type=${valueType} newValue=${
-        toCompactDebugString(newValue)
+        JSON.stringify(newValue as any)
       }`,
   );
 
@@ -462,7 +463,7 @@ export function normalizeAndDiff(
       "diff",
       () =>
         `[BRANCH_CELL_LINK] Processing cell link at path=${pathStr} link=${
-          toCompactDebugString(newValue)
+          JSON.stringify(newValue as any)
         }`,
     );
     const parsedLink = parseLink(newValue, link);

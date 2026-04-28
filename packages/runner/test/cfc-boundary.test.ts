@@ -1282,6 +1282,72 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("allows unlabeled sibling writes in documents with stored CFC metadata", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seededId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-stored-sibling-write",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+              pending: { type: "boolean" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: seededId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed", pending: false },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-stored-sibling-write",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+            pending: { type: "boolean" },
+          },
+        },
+        tx,
+      );
+      cell.key("pending").set(true);
+      tx.markCfcRelevant("stored-sibling-write");
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("keeps no-op attempted targets in potentialWrites for labeled paths", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
