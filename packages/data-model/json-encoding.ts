@@ -80,11 +80,13 @@ export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
 /**
  * Decodes a JSON string back into a fabric value. When unified JSON encoding is
  * ON, uses the modern JSON-based format. When OFF, equivalent to
- * `JSON.parse(json)`.
+ * `JSON.parse(json)`. The `runtime` argument is only consulted when the flag
+ * is ON; if omitted, the shared `EMPTY_RECONSTRUCTION_CONTEXT` is substituted,
+ * which throws if any cell reconstruction is needed.
  */
 export function valueFromJson(
   json: string,
-  runtime: ReconstructionContext,
+  runtime?: ReconstructionContext,
 ): FabricValue {
   if (jsonEncodingEnabled) {
     return valueFromJsonModern(json, runtime);
