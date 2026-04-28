@@ -1,6 +1,6 @@
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
-import { JsonEncodingContext } from "./json-encoding-modern.ts";
+import { JsonEncodingContext } from "./json-encoding-context.ts";
 
 // ---------------------------------------------------------------------------
 // Unified JSON encoding flag and dispatch configuration

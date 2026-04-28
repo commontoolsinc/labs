@@ -36,7 +36,7 @@
     "./frozen-builtins": "./frozen-builtins.ts",
     "./fabric-bytes": "./fabric-bytes.ts",
     "./fabric-native-instances": "./fabric-native-instances.ts",
-    "./json-encoding-modern": "./json-encoding-modern.ts",
+    "./json-encoding-context": "./json-encoding-context.ts",
     "./json-encoding": "./json-encoding.ts",
     "./json-type-handlers": "./json-type-handlers.ts",
     "./fabric-value-legacy": "./fabric-value-legacy.ts",
