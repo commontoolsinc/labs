@@ -312,7 +312,10 @@ export class CFSelect extends BaseElement {
     if (changed.has("theme")) {
       applyThemeToElement(this, this.theme ?? defaultTheme);
     }
-    if (changed.has("disabled") || changed.has("required")) {
+    if (
+      changed.has("disabled") || changed.has("required") ||
+      changed.has("multiple")
+    ) {
       this._updateAccessibilityAttributes();
     }
   }
@@ -449,10 +452,18 @@ export class CFSelect extends BaseElement {
     return this._select?.reportValidity() ?? true;
   }
 
+  private _lastGeneratedRole: string | null = null;
+
   /* ---------- Accessibility ---------- */
   private _updateAccessibilityAttributes() {
-    if (!this.hasAttribute("role")) {
-      this.setAttribute("role", "combobox");
+    // A single select is a combobox; a multi-select is a listbox (ARIA spec).
+    const role = this.multiple ? "listbox" : "combobox";
+    if (
+      !this.hasAttribute("role") ||
+      this.getAttribute("role") === this._lastGeneratedRole
+    ) {
+      this.setAttribute("role", role);
+      this._lastGeneratedRole = role;
     }
     if (!this.hasAttribute("exportparts")) {
       this.setAttribute("exportparts", "select");

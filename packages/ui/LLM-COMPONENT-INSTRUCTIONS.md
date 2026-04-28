@@ -99,14 +99,15 @@ agent-browser find role button click --name "Click Me"
 
 **Accessibility/Automation**:
 
-- Host role: `textbox`
+- Host role: `textbox` (text, email, password, search, tel, url), `spinbutton`
+  (number), `slider` (range), or unset (date, color, file, hidden)
 - Host state: `aria-disabled`, `aria-readonly`, `aria-required`, `aria-invalid`
 - Accessible name: associated label, `aria-label`, or placeholder
 - Preferred locators:
 
 ```bash
-agent-browser find role textbox fill "user@example.com" --name "Email"
-agent-browser find placeholder "Enter email" fill "user@example.com"
+agent-browser snapshot -i              # → textbox "Email" [ref=e3]
+agent-browser type @e3 "user@example.com"
 ```
 
 **`fill()` caveat:** Playwright's `fill()` does not work on `cf-input` or

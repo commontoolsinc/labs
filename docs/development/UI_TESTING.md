@@ -29,10 +29,11 @@ without traversing shadow roots.
 
 2. **Find controls by role and accessible name**
 
-   ```typescript
-   // agent-browser
+   ```bash
+   # agent-browser
    agent-browser find role button click --name "Submit"
-   agent-browser find role textbox fill "user@example.com" --name "Email"
+   agent-browser snapshot -i          # → textbox "Email" [ref=e3]
+   agent-browser type @e3 "user@example.com"
    ```
 
    ```typescript

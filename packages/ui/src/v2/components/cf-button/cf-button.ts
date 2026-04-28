@@ -101,6 +101,14 @@ export class CFButton extends BaseElement {
       { capture: true },
     );
 
+    // Handle submit/reset for clicks from ANY source (mouse on inner div
+    // bubbles through shadow boundary to host; keyboard Enter/Space fires
+    // this.click() directly on host). Listening here instead of on the
+    // inner element ensures keyboard activation triggers form submission.
+    this.addEventListener("click", (e) => {
+      this._handleClick(e);
+    });
+
     // The host carries role="button" and tabindex, so it receives keyboard
     // events directly. Activate on Enter/Space like a native button.
     this.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -171,7 +179,6 @@ export class CFButton extends BaseElement {
     return html`
       <div
         class="${classMap(classes)}"
-        @click="${this._handleClick}"
         part="button"
         data-cf-button
       >
