@@ -31,6 +31,79 @@ export type IFCLabel = {
   integrity?: unknown[];
 };
 
+export type CfcSandboxJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | CfcSandboxJsonValue[]
+  | { [key: string]: CfcSandboxJsonValue };
+
+export type CfcSandboxOutputPolicy = "observed" | "opaque" | "denied";
+
+export type CfcStreamChannel = "stdout" | "stderr";
+
+export type CfcStreamSegment = {
+  text: string;
+  label: IFCLabel;
+  offset?: number;
+  byteLength?: number;
+};
+
+export type CfcStreamObservation =
+  | {
+    channel: CfcStreamChannel;
+    policy: "observed";
+    label: IFCLabel;
+    segments: CfcStreamSegment[];
+    truncated?: boolean;
+  }
+  | {
+    channel: CfcStreamChannel;
+    policy: "opaque";
+    label: IFCLabel;
+    byteLength?: number;
+    truncated?: boolean;
+  }
+  | {
+    channel: CfcStreamChannel;
+    policy: "denied";
+    label: IFCLabel;
+    reason?: string;
+  };
+
+export type CfcSandboxExitCodeObservation =
+  | {
+    policy: "observed";
+    label: IFCLabel;
+    value: number | null;
+  }
+  | {
+    policy: "opaque";
+    label: IFCLabel;
+  }
+  | {
+    policy: "denied";
+    label: IFCLabel;
+    reason?: string;
+  };
+
+export type CfcSandboxDiagnostic = {
+  level: "info" | "warning" | "error";
+  code: string;
+  message: string;
+  label?: IFCLabel;
+  details?: { [key: string]: CfcSandboxJsonValue };
+};
+
+export type CfcSandboxResult = {
+  version: 1;
+  stdout: CfcStreamObservation;
+  stderr: CfcStreamObservation;
+  exitCode: CfcSandboxExitCodeObservation;
+  diagnostics?: CfcSandboxDiagnostic[];
+};
+
 export type CfcMetadata = {
   version: 1;
   schemaHash: string;

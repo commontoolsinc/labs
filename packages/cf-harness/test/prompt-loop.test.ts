@@ -1,4 +1,5 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
@@ -125,6 +126,44 @@ class FailingArtifactStore implements HarnessArtifactStore {
     return Promise.resolve(`${this.runRoot}/tool-output.json`);
   }
 }
+
+const observedCfcResult = (
+  stdout: string,
+  options: {
+    stderrPolicy?: "observed" | "denied";
+    stderr?: string;
+    exitCode?: number;
+  } = {},
+): CfcSandboxResult => ({
+  version: 1,
+  stdout: {
+    channel: "stdout",
+    policy: "observed",
+    label: { confidentiality: ["public"] },
+    segments: [{ text: stdout, label: { confidentiality: ["public"] } }],
+  },
+  stderr: options.stderrPolicy === "denied"
+    ? {
+      channel: "stderr",
+      policy: "denied",
+      label: { confidentiality: ["secret"] },
+      reason: "stderr release denied",
+    }
+    : {
+      channel: "stderr",
+      policy: "observed",
+      label: { confidentiality: ["public"] },
+      segments: [{
+        text: options.stderr ?? "",
+        label: { confidentiality: ["public"] },
+      }],
+    },
+  exitCode: {
+    policy: "observed",
+    label: { confidentiality: ["public"] },
+    value: options.exitCode ?? 0,
+  },
+});
 
 Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant response", async () => {
   const fetchCalls: RequestInit[] = [];
@@ -1915,6 +1954,15 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
     },
     detail: "bash would require direct-command authorization in enforce modes",
     at: "2026-04-15T22:30:05.000Z",
+  }, {
+    type: "cf-harness.policy-event",
+    severity: "warning",
+    mode: "observe",
+    toolId: "bash",
+    toolCallId: "call-observe",
+    detail:
+      "bash output did not include trusted CFC mediation metadata; raw output was exposed because CFC is in observe mode",
+    at: "2026-04-15T22:30:06.000Z",
   }]);
   assertEquals(
     JSON.stringify(result.runState.policyEvents[0]?.toolInputSummary)
@@ -1943,6 +1991,156 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
       },
     },
   );
+});
+
+Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforce mode", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        { stdout: "secret from sandbox\n", stderr: "", exitCode: 0 },
+      ]),
+      runId: "run-missing-cfc-result",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-missing-cfc-result",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "cat secret.txt" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Handled denied output.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run a direct command.",
+    promptSlotBinding: {
+      type: "cf-harness.prompt-slot-binding",
+      role: "direct-command",
+      kernelName: "test",
+      surface: "test",
+    },
+  });
+
+  const toolMessage = result.transcript.at(-2);
+  assert(toolMessage !== undefined && toolMessage.role === "tool");
+  assert(!toolMessage.content.includes("secret from sandbox"));
+  assertEquals(JSON.parse(toolMessage.content), {
+    type: "cf-harness.observation-denied",
+    reason: "not-observable",
+    detail: "bash output did not include trusted CFC mediation metadata",
+    handle: {
+      type: "cf-harness.opaque-handle",
+      handleId: "run-missing-cfc-result:bash:1:output",
+      scope: "run",
+      createdAt: JSON.parse(toolMessage.content).handle.createdAt,
+    },
+  });
+  assertEquals(result.runState.policyEvents.at(-1)?.severity, "denied");
+});
+
+Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdout in enforce mode", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "raw secret from sandbox\n",
+          stderr: "raw secret stderr\n",
+          exitCode: 0,
+          cfcResult: observedCfcResult("released stdout\n", {
+            stderrPolicy: "denied",
+          }),
+        },
+      ]),
+      runId: "run-mediated-cfc-result",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-mediated-cfc-result",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "cat secret.txt" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Handled mediated output.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run a direct command.",
+    promptSlotBinding: {
+      type: "cf-harness.prompt-slot-binding",
+      role: "direct-command",
+      kernelName: "test",
+      surface: "test",
+    },
+  });
+
+  const toolMessage = result.transcript.at(-2);
+  assert(toolMessage !== undefined && toolMessage.role === "tool");
+  assert(!toolMessage.content.includes("raw secret"));
+  const content = JSON.parse(toolMessage.content);
+  assertEquals(content.stdout, "released stdout\n");
+  assertEquals(content.stderr.type, "cf-harness.observation-denied");
+  assertEquals(content.stderr.reason, "not-observable");
+  assertEquals(content.exitCode, 0);
+  assertEquals(content.cfc.stdout.policy, "observed");
+  assertEquals(content.cfc.stderr.policy, "denied");
 });
 
 Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforce-explicit mode", async () => {

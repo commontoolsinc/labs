@@ -14,13 +14,47 @@ import type {
 class FakeProcessRunner implements ProcessRunner {
   requests: ProcessRunRequest[] = [];
 
-  constructor(private readonly result: ProcessRunResult) {}
+  constructor(private readonly results: ProcessRunResult[]) {}
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.requests.push(request);
-    return Promise.resolve(this.result);
+    const result = this.results.shift();
+    if (result === undefined) {
+      throw new Error(`unexpected process request: ${request.command}`);
+    }
+    return Promise.resolve(result);
   }
 }
+
+const dockerLifecycleResults = (
+  options: {
+    containerId?: string;
+    stdout?: string;
+    stderr?: string;
+    exitCode?: number;
+  } = {},
+): ProcessRunResult[] => [
+  {
+    stdout: `${options.containerId ?? "container-123"}\n`,
+    stderr: "",
+    exitCode: 0,
+  },
+  {
+    stdout: options.stdout ?? "hello\n",
+    stderr: options.stderr ?? "",
+    exitCode: options.exitCode ?? 0,
+  },
+  {
+    stdout: `${options.exitCode ?? 0}\n`,
+    stderr: "",
+    exitCode: 0,
+  },
+  {
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+  },
+];
 
 Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   const config = resolveDockerRunscSandboxConfig({
@@ -38,6 +72,7 @@ Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   assertEquals(config.dockerNetworkMode, "none");
   assertEquals(config.additionalMounts, []);
   assertEquals(config.extraDockerArgs, []);
+  assertEquals(config.cfcResultDir, undefined);
 });
 
 Deno.test("resolveDefaultContainerUser omits default --user on macOS", () => {
@@ -52,12 +87,8 @@ Deno.test("resolveDefaultContainerUser keeps host UID/GID default on Linux", () 
   assertMatch(resolveDefaultContainerUser("linux") ?? "", /^\d+:\d+$/);
 });
 
-Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () => {
-  const runner = new FakeProcessRunner({
-    stdout: "hello\n",
-    stderr: "",
-    exitCode: 0,
-  });
+Deno.test("DockerRunscSandboxRuntime builds a docker create/start/wait/rm invocation", async () => {
+  const runner = new FakeProcessRunner(dockerLifecycleResults());
   const config = resolveDockerRunscSandboxConfig({
     workspaceHostPath: "/host/project",
     image: "sandbox:latest",
@@ -75,12 +106,12 @@ Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () =
   });
 
   assertEquals(result.stdout, "hello\n");
-  assertEquals(runner.requests.length, 1);
+  assertEquals(result.exitCode, 0);
+  assertEquals(runner.requests.length, 4);
   assertEquals(runner.requests[0], {
     command: "docker",
     args: [
-      "run",
-      "--rm",
+      "create",
       "-i",
       "--runtime",
       "runsc-cfc",
@@ -97,8 +128,25 @@ Deno.test("DockerRunscSandboxRuntime builds a docker run invocation", async () =
       "/bin/echo",
       "hello",
     ],
+  });
+  assertEquals(runner.requests[1], {
+    command: "docker",
+    args: [
+      "start",
+      "--attach",
+      "--interactive",
+      "container-123",
+    ],
     stdinText: "ignored",
     timeoutMs: 500,
+  });
+  assertEquals(runner.requests[2], {
+    command: "docker",
+    args: ["wait", "container-123"],
+  });
+  assertEquals(runner.requests[3], {
+    command: "docker",
+    args: ["rm", "-f", "container-123"],
   });
 });
 
@@ -152,11 +200,7 @@ Deno.test("resolveDockerRunscSandboxConfig rejects overlapping sandbox roots", (
 });
 
 Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user override", async () => {
-  const runner = new FakeProcessRunner({
-    stdout: "",
-    stderr: "",
-    exitCode: 0,
-  });
+  const runner = new FakeProcessRunner(dockerLifecycleResults({ stdout: "" }));
   const runtime = new DockerRunscSandboxRuntime(
     resolveDockerRunscSandboxConfig({
       workspaceHostPath: "/host/project",
@@ -174,8 +218,7 @@ Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user 
   assertEquals(runner.requests[0], {
     command: "docker",
     args: [
-      "run",
-      "--rm",
+      "create",
       "--runtime",
       "runsc-cfc",
       "--network",
@@ -194,9 +237,106 @@ Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user 
       "arg-1",
       "arg-2",
     ],
-    stdinText: undefined,
-    timeoutMs: undefined,
   });
+});
+
+Deno.test("DockerRunscSandboxRuntime attaches observed CFC sidecar output", async () => {
+  const cfcResultDir = await Deno.makeTempDir();
+  try {
+    await Deno.writeTextFile(
+      `${cfcResultDir}/container-123.json`,
+      JSON.stringify({
+        version: 1,
+        containerId: "container-123",
+        sandboxId: "sandbox-123",
+        waitStatus: 0,
+        cfcTaint: {
+          string: "{conf: public, integ: empty}",
+          xattrJSON: {},
+        },
+      }),
+    );
+    const runner = new FakeProcessRunner(
+      dockerLifecycleResults({ stdout: "public\n", stderr: "note\n" }),
+    );
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcResultDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({ argv: ["/bin/echo", "public"] });
+
+    assertEquals(result.stdout, "public\n");
+    if (result.cfcResult === undefined) {
+      throw new Error("missing cfcResult");
+    }
+    if (result.cfcResult.stdout.policy !== "observed") {
+      throw new Error("expected observed stdout");
+    }
+    assertEquals(result.cfcResult.stdout.segments[0].text, "public\n");
+    if (result.cfcResult.stderr.policy !== "observed") {
+      throw new Error("expected observed stderr");
+    }
+    assertEquals(result.cfcResult.stderr.segments[0].text, "note\n");
+    assertEquals(result.cfcResult.exitCode, {
+      policy: "observed",
+      label: {},
+      value: 0,
+    });
+  } finally {
+    await Deno.remove(cfcResultDir, { recursive: true });
+  }
+});
+
+Deno.test("DockerRunscSandboxRuntime makes tainted sidecar output opaque", async () => {
+  const cfcResultDir = await Deno.makeTempDir();
+  try {
+    await Deno.writeTextFile(
+      `${cfcResultDir}/container-123.json`,
+      JSON.stringify({
+        version: 1,
+        containerId: "container-123",
+        waitStatus: 0,
+        cfcTaint: {
+          string: "{conf: alice, integ: empty}",
+          xattrJSON: { confidentiality: ["did:key:alice"] },
+        },
+      }),
+    );
+    const runner = new FakeProcessRunner(
+      dockerLifecycleResults({ stdout: "secret\n", exitCode: 3 }),
+    );
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcResultDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({ argv: ["/bin/cat", "secret.txt"] });
+
+    assertEquals(result.stdout, "secret\n");
+    assertEquals(result.exitCode, 3);
+    if (result.cfcResult === undefined) {
+      throw new Error("missing cfcResult");
+    }
+    assertEquals(result.cfcResult.stdout, {
+      channel: "stdout",
+      policy: "opaque",
+      label: { confidentiality: ["did:key:alice"] },
+      byteLength: 7,
+    });
+    assertEquals(result.cfcResult.exitCode, {
+      policy: "opaque",
+      label: { confidentiality: ["did:key:alice"] },
+    });
+  } finally {
+    await Deno.remove(cfcResultDir, { recursive: true });
+  }
 });
 
 Deno.test("DockerRunscSandboxRuntime resolvePath rejects paths outside the workspace", () => {

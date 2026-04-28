@@ -5,6 +5,9 @@ import {
 } from "./engine.ts";
 import {
   type CfcEnforcementMode,
+  type CfcSandboxExitCodeObservation,
+  type CfcSandboxResult,
+  type CfcStreamObservation,
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
 import {
@@ -17,6 +20,7 @@ import {
 } from "./gateway/openai-client.ts";
 import {
   createObservationDenied as makeObservationDenied,
+  createOpaqueHandle,
   type ObservationDenied,
 } from "./contracts/observation.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
@@ -625,6 +629,184 @@ interface ToolPolicyDecision {
   warningDetail?: string;
   denial?: ObservationDenied;
 }
+
+type ModelFacingToolOutput = unknown;
+
+interface CfcSandboxResultCarrier {
+  cfcResult?: CfcSandboxResult;
+}
+
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const cfcResultFromOutput = (
+  output: unknown,
+): CfcSandboxResult | undefined =>
+  isObjectRecord(output) &&
+    "cfcResult" in output &&
+    isObjectRecord(output.cfcResult) &&
+    output.cfcResult.version === 1
+    ? output.cfcResult as CfcSandboxResult
+    : undefined;
+
+const stripInternalCfcFields = (output: unknown): unknown => {
+  if (!isObjectRecord(output)) {
+    return output;
+  }
+  const { cfcResult: _cfcResult, ...publicOutput } = output as
+    & CfcSandboxResultCarrier
+    & Record<string, unknown>;
+  return publicOutput;
+};
+
+const toolOutputNeedsSandboxMediation = (toolId: BuiltinToolId): boolean =>
+  toolId === "bash";
+
+const createOutputHandle = (
+  resultRef: ToolResultRef,
+  suffix: string,
+  passThrough = false,
+) =>
+  createOpaqueHandle(`${resultRef.outputId}:${suffix}`, "run", {
+    ...(resultRef.artifactPath !== undefined
+      ? { metadataRef: resultRef.artifactPath }
+      : {}),
+    ...(passThrough ? { passThrough: true } : {}),
+  });
+
+const observationDeniedForStream = (
+  observation: Extract<CfcStreamObservation, { policy: "opaque" | "denied" }>,
+  resultRef: ToolResultRef,
+): ObservationDenied =>
+  makeObservationDenied(
+    observation.policy === "opaque"
+      ? "needs-opaque-pass-through"
+      : "not-observable",
+    {
+      detail:
+        observation.policy === "denied" && observation.reason !== undefined
+          ? observation.reason
+          : `${observation.channel} was not released by CFC policy`,
+      handle: createOutputHandle(
+        resultRef,
+        observation.channel,
+        observation.policy === "opaque",
+      ),
+    },
+  );
+
+const renderStreamObservation = (
+  observation: CfcStreamObservation,
+  resultRef: ToolResultRef,
+): string | ObservationDenied => {
+  switch (observation.policy) {
+    case "observed":
+      return observation.segments.map((segment) => segment.text).join("");
+    case "opaque":
+    case "denied":
+      return observationDeniedForStream(observation, resultRef);
+  }
+};
+
+const renderExitCodeObservation = (
+  observation: CfcSandboxExitCodeObservation,
+  resultRef: ToolResultRef,
+): number | null | ObservationDenied => {
+  switch (observation.policy) {
+    case "observed":
+      return observation.value;
+    case "opaque":
+      return makeObservationDenied("needs-opaque-pass-through", {
+        detail: "exit code was not released by CFC policy",
+        handle: createOutputHandle(resultRef, "exitCode", true),
+      });
+    case "denied":
+      return makeObservationDenied("not-observable", {
+        detail: observation.reason ??
+          "exit code was not released by CFC policy",
+        handle: createOutputHandle(resultRef, "exitCode"),
+      });
+  }
+};
+
+const summarizeStreamObservation = (observation: CfcStreamObservation) => {
+  const { channel, policy, label } = observation;
+  switch (observation.policy) {
+    case "observed":
+      return {
+        channel,
+        policy,
+        label,
+        ...(observation.truncated !== undefined
+          ? { truncated: observation.truncated }
+          : {}),
+      };
+    case "opaque":
+      return {
+        channel,
+        policy,
+        label,
+        ...(observation.byteLength !== undefined
+          ? { byteLength: observation.byteLength }
+          : {}),
+        ...(observation.truncated !== undefined
+          ? { truncated: observation.truncated }
+          : {}),
+      };
+    case "denied":
+      return {
+        channel,
+        policy,
+        label,
+        ...(observation.reason !== undefined
+          ? { reason: observation.reason }
+          : {}),
+      };
+  }
+};
+
+const summarizeExitCodeObservation = (
+  observation: CfcSandboxExitCodeObservation,
+) => {
+  const { policy, label } = observation;
+  switch (observation.policy) {
+    case "observed":
+      return { policy, label, value: observation.value };
+    case "opaque":
+      return { policy, label };
+    case "denied":
+      return {
+        policy,
+        label,
+        ...(observation.reason !== undefined
+          ? { reason: observation.reason }
+          : {}),
+      };
+  }
+};
+
+const summarizeCfcSandboxResult = (result: CfcSandboxResult) => ({
+  version: result.version,
+  stdout: summarizeStreamObservation(result.stdout),
+  stderr: summarizeStreamObservation(result.stderr),
+  exitCode: summarizeExitCodeObservation(result.exitCode),
+  ...(result.diagnostics !== undefined
+    ? { diagnostics: result.diagnostics }
+    : {}),
+});
+
+const renderMediatedBashOutput = (
+  output: Record<string, unknown>,
+  cfcResult: CfcSandboxResult,
+  resultRef: ToolResultRef,
+): ModelFacingToolOutput => ({
+  outputId: output.outputId,
+  stdout: renderStreamObservation(cfcResult.stdout, resultRef),
+  stderr: renderStreamObservation(cfcResult.stderr, resultRef),
+  exitCode: renderExitCodeObservation(cfcResult.exitCode, resultRef),
+  cwd: output.cwd,
+  cfc: summarizeCfcSandboxResult(cfcResult),
+});
 
 const hasDirectCommandBinding = (
   promptSlotBinding?: PromptSlotBinding,
@@ -1319,13 +1501,67 @@ export class CfHarnessPromptLoop {
       ...optionalPolicyEventIndexes(policyEventIndexes),
       resultRef: result.resultRef,
     });
+    const modelOutput = await this.#modelFacingToolOutput(
+      toolCall.function.name,
+      result.output,
+      result.resultRef,
+      toolCall.id,
+    );
     return {
       role: "tool",
       toolCallId: toolCall.id,
       toolName: toolCall.function.name,
-      content: JSON.stringify(result.output),
+      content: JSON.stringify(modelOutput),
       resultRef: result.resultRef,
     };
+  }
+
+  async #modelFacingToolOutput(
+    toolId: BuiltinToolId,
+    output: unknown,
+    resultRef: ToolResultRef,
+    toolCallId: string,
+  ): Promise<ModelFacingToolOutput> {
+    const mode = this.engine.getRunState().cfcEnforcementMode;
+    const cfcResult = cfcResultFromOutput(output);
+    if (!toolOutputNeedsSandboxMediation(toolId)) {
+      return stripInternalCfcFields(output);
+    }
+    if (cfcResult === undefined) {
+      const detail =
+        `${toolId} output did not include trusted CFC mediation metadata`;
+      if (mode === "disabled") {
+        return stripInternalCfcFields(output);
+      }
+      if (mode === "observe") {
+        await this.engine.recordPolicyEvent({
+          severity: "warning",
+          mode,
+          toolId,
+          toolCallId,
+          detail:
+            `${detail}; raw output was exposed because CFC is in observe mode`,
+        });
+        return stripInternalCfcFields(output);
+      }
+      const denial = makeObservationDenied("not-observable", {
+        detail,
+        handle: createOutputHandle(resultRef, "output"),
+      });
+      await this.engine.recordPolicyEvent({
+        severity: "denied",
+        mode,
+        toolId,
+        toolCallId,
+        detail,
+        observationDenied: denial,
+      });
+      return denial;
+    }
+    if (toolId === "bash" && isObjectRecord(output)) {
+      return renderMediatedBashOutput(output, cfcResult, resultRef);
+    }
+    return stripInternalCfcFields(output);
   }
 
   async #invokeBuiltinTool<TToolId extends BuiltinToolId>(

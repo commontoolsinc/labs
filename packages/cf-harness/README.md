@@ -191,6 +191,12 @@ omits `--user` because Docker Desktop bind mounts may expose host files as
 `root:root`, which prevents non-root container users from writing mounted Loom
 workspaces. An explicit `containerUser` still overrides the platform default.
 
+CFC sandbox result mediation requires the installed `runsc-cfc` runtime to use
+the same host result directory that `cf-harness` reads. Configure runsc with
+`--cfc-result-dir=/path/to/results`, then set
+`CF_HARNESS_RUNSC_CFC_RESULT_DIR=/path/to/results` or pass `cfcResultDir` in the
+explicit sandbox config.
+
 ## Related Docs
 
 - [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)

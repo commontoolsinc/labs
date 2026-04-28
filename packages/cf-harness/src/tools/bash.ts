@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import {
   commandWithFinalWorkingDirectoryMarker,
@@ -19,6 +20,7 @@ export interface BashToolOutput {
   stderr: string;
   exitCode: number;
   cwd: string;
+  cfcResult?: CfcSandboxResult;
 }
 
 const CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
@@ -47,6 +49,7 @@ export const bashToolDescriptor: HarnessToolDescriptor = {
       stderr: { type: "string" },
       exitCode: { type: "number" },
       cwd: { type: "string" },
+      cfcResult: { type: "object" },
     },
     required: ["outputId", "stdout", "stderr", "exitCode", "cwd"],
     additionalProperties: false,
@@ -70,7 +73,11 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
       cwd: commandCwd,
       timeoutMs: input.timeoutMs,
     });
-    const parsedResult = extractFinalWorkingDirectory(result.stdout, cwdMarker);
+    const mayTrustCwdMarker = context.cfcEnforcementMode === "disabled" ||
+      context.cfcEnforcementMode === "observe";
+    const parsedResult = mayTrustCwdMarker
+      ? extractFinalWorkingDirectory(result.stdout, cwdMarker)
+      : { stdout: result.stdout };
     const isAllowedCurrentDir = parsedResult.cwd !== undefined &&
       (context.sandbox.isPathWithinAllowedRoots?.(parsedResult.cwd) ??
         context.sandbox.isPathWithinWorkspace(parsedResult.cwd));
@@ -85,6 +92,9 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
       stderr: result.stderr,
       exitCode: result.exitCode,
       cwd: nextCurrentDir,
+      ...(result.cfcResult !== undefined
+        ? { cfcResult: result.cfcResult }
+        : {}),
     };
   },
 };
