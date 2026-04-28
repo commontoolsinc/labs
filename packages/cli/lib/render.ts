@@ -1,4 +1,5 @@
 import { encode } from "@commonfabric/utils/encoding";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 function stringify(value: unknown): string {
   switch (typeof value) {
@@ -12,7 +13,7 @@ function stringify(value: unknown): string {
         throw new Error("Binary data could not be stringified");
       }
       try {
-        return JSON.stringify(value, null, 2);
+        return toIndentedDebugString(value);
         // deno-lint-ignore no-empty
       } catch (_) {}
       return value.toString();
