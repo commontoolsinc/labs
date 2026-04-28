@@ -145,6 +145,25 @@ const createEmptyCapabilitySnapshot = (
   cfc,
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isFailedDelegateTaskOutput = (
+  output: unknown,
+): output is DelegateTaskToolOutput => {
+  if (
+    !isRecord(output) ||
+    output.type !== "cf-harness.delegate-task-output" ||
+    typeof output.outputId !== "string" ||
+    !isRecord(output.subagent)
+  ) {
+    return false;
+  }
+  return output.subagent.status === "failed" &&
+    typeof output.subagent.childRunId === "string" &&
+    typeof output.subagent.summary === "string";
+};
+
 const parseCapabilityProbeOutput = (
   stdout: string,
   at: string,
@@ -450,19 +469,15 @@ export const classifyBuiltinToolFailure = (
     case "write_file":
       return classifyStructuredFileToolFailure(toolId, output, at);
     case "delegate_task": {
-      const delegateOutput = output as DelegateTaskToolOutput;
-      if (
-        delegateOutput?.type === "cf-harness.delegate-task-output" &&
-        delegateOutput.subagent.status === "failed"
-      ) {
+      if (isFailedDelegateTaskOutput(output)) {
         return createHarnessFailureRecord({
           kind: "harness_error",
           source: "tool_output",
           detail:
-            `subagent ${delegateOutput.subagent.childRunId} failed: ${delegateOutput.subagent.summary}`,
+            `subagent ${output.subagent.childRunId} failed: ${output.subagent.summary}`,
           at,
           toolId,
-          outputId: delegateOutput.outputId as ToolOutputId,
+          outputId: output.outputId as ToolOutputId,
         });
       }
       return undefined;

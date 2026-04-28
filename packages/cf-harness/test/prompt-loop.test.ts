@@ -735,6 +735,7 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
       childRunId: string;
       status: string;
       summary: string;
+      modelTurns: number;
       runState: {
         status: string;
         terminalReason?: string;
@@ -756,6 +757,7 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
   assertEquals(output.subagent.runState.status, "failed");
   assertEquals(output.subagent.runState.terminalReason, "max_model_turns");
   assertEquals(output.subagent.runState.failureCount, 1);
+  assertEquals(output.subagent.modelTurns, 1);
   assertEquals(result.runState.subagentRuns?.[0]?.status, "failed");
   assertEquals(result.runState.failureRecords?.[0]?.kind, "harness_error");
   assertEquals(result.runState.failureRecords?.[0]?.source, "tool_output");

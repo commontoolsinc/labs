@@ -251,6 +251,41 @@ const transcriptTimelineEntry = (
 const toErrorDetail = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+const PROMPT_LOOP_MODEL_TURNS = Symbol("cf-harness.prompt-loop.model-turns");
+
+interface PromptLoopErrorWithModelTurns {
+  [PROMPT_LOOP_MODEL_TURNS]?: number;
+}
+
+const annotatePromptLoopError = (
+  error: unknown,
+  modelTurns: number,
+): void => {
+  if (typeof error !== "object" || error === null) {
+    return;
+  }
+  try {
+    Object.defineProperty(error, PROMPT_LOOP_MODEL_TURNS, {
+      value: modelTurns,
+      configurable: true,
+    });
+  } catch {
+    // Some thrown objects may be non-extensible; best-effort metadata only.
+  }
+};
+
+const promptLoopModelTurnsFromError = (
+  error: unknown,
+): number | undefined => {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const modelTurns = (error as PromptLoopErrorWithModelTurns)[
+    PROMPT_LOOP_MODEL_TURNS
+  ];
+  return isSafeNonNegativeInteger(modelTurns) ? modelTurns : undefined;
+};
+
 const summarizeToolInput = async (
   toolId: BuiltinToolId,
   input: Record<string, unknown>,
@@ -704,6 +739,7 @@ export class CfHarnessPromptLoop {
         }
       }
     } catch (error) {
+      annotatePromptLoopError(error, modelTurns);
       this.engine.appendFailureFromError(error);
       this.engine.setRunStatus("failed", "prompt_loop_error");
       try {
@@ -718,6 +754,7 @@ export class CfHarnessPromptLoop {
     const turnLimitError = new Error(
       `prompt loop exceeded max model turns (${maxModelTurns}) without a final assistant response`,
     );
+    annotatePromptLoopError(turnLimitError, modelTurns);
     this.engine.appendFailureFromError(turnLimitError);
     this.engine.setRunStatus("failed", "max_model_turns");
     await this.engine.persistRunState();
@@ -1011,6 +1048,7 @@ export class CfHarnessPromptLoop {
       }
     } catch (error) {
       subagentStatus = "failed";
+      childModelTurns = promptLoopModelTurnsFromError(error) ?? childModelTurns;
       summary = `Subagent failed: ${toErrorDetail(error)}`;
     }
     const childRunState = childEngine.getRunState();
