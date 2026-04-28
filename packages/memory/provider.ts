@@ -34,6 +34,10 @@ import {
   UCAN,
 } from "./interface.ts";
 import { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import {
@@ -184,7 +188,7 @@ function recordSlowQuery(entry: SlowQuery) {
           `sharedMemo=${entry.sharedMemoSize}`,
         ]
         : []),
-      `selector=${JSON.stringify(entry.selector)}`,
+      `selector=${toCompactDebugString(entry.selector)}`,
     ],
   );
 }
@@ -412,7 +416,7 @@ class MemoryProviderSession<
           );
           logger.error(
             "stream-error",
-            () => ["Failed command:", JSON.stringify(command)],
+            () => ["Failed command:", toCompactDebugString(command)],
           );
           throw error;
         }
@@ -746,7 +750,7 @@ class MemoryProviderSession<
             () => [
               `space=${invocation.sub}`,
               `elapsed=${txElapsed?.toFixed(1)}ms`,
-              JSON.stringify(result.error, null, 2),
+              toIndentedDebugString(result.error),
             ],
           );
         } else {

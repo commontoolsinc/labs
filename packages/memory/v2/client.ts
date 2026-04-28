@@ -21,6 +21,7 @@ import {
 } from "../v2.ts";
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 export interface Transport {
   send(payload: string): Promise<void>;
@@ -202,8 +203,8 @@ export class Client {
         if (!sameMemoryV2Flags(message.flags, expectedFlags)) {
           const error = new Error(
             `memory/v2 flag mismatch: client=${
-              JSON.stringify(expectedFlags)
-            } server=${JSON.stringify(message.flags)}`,
+              toCompactDebugString(expectedFlags)
+            } server=${toCompactDebugString(message.flags)}`,
           );
           error.name = "ProtocolError";
           this.#helloPending.reject(error);
