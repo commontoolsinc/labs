@@ -231,6 +231,92 @@ Deno.test("parseCfHarnessCliArgs supports explicit subagent profile authorizatio
   assertEquals(parsed.allowedSubagentProfiles, ["default"]);
 });
 
+Deno.test("parseCfHarnessCliArgs covers tool allowlist and subagent profile permutations", async () => {
+  const cases = [
+    {
+      name: "implicit default profile when parent tools are unrestricted",
+      flags: [],
+      allowedToolIds: undefined,
+      allowedSubagentProfiles: ["default"],
+    },
+    {
+      name: "explicit default profile when parent tools are unrestricted",
+      flags: ["--allow-subagent-profile", "default"],
+      allowedToolIds: undefined,
+      allowedSubagentProfiles: ["default"],
+    },
+    {
+      name: "delegate_task alone does not imply child profile authority",
+      flags: ["--allow-tool", "delegate_task"],
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: [],
+    },
+    {
+      name: "delegate_task with explicit default profile authority",
+      flags: [
+        "--allow-tool",
+        "delegate_task",
+        "--allow-subagent-profile",
+        "default",
+      ],
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["default"],
+    },
+    {
+      name: "non-delegate parent tools can still preauthorize a profile",
+      flags: [
+        "--allow-tool",
+        "read_file",
+        "--allow-tool",
+        "bash",
+        "--allow-subagent-profile",
+        "default",
+      ],
+      allowedToolIds: ["read_file", "bash"],
+      allowedSubagentProfiles: ["default"],
+    },
+    {
+      name: "duplicate tool and profile flags are normalized",
+      flags: [
+        "--allow-tool",
+        "delegate_task",
+        "--allow-tool",
+        "delegate_task",
+        "--allow-subagent-profile",
+        "default",
+        "--allow-subagent-profile",
+        "default",
+      ],
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["default"],
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const parsed = await parseCfHarnessCliArgs(
+      ["--prompt", "hi", ...testCase.flags],
+      {
+        cwd: "/tmp/project",
+        env: {},
+      },
+    );
+
+    if ("help" in parsed) {
+      throw new Error(`expected config result for ${testCase.name}`);
+    }
+    assertEquals(
+      parsed.allowedToolIds,
+      testCase.allowedToolIds,
+      testCase.name,
+    );
+    assertEquals(
+      parsed.allowedSubagentProfiles,
+      testCase.allowedSubagentProfiles,
+      testCase.name,
+    );
+  }
+});
+
 Deno.test("parseCfHarnessCliArgs rejects unknown subagent profiles", async () => {
   await assertRejects(
     () =>
@@ -243,6 +329,28 @@ Deno.test("parseCfHarnessCliArgs rejects unknown subagent profiles", async () =>
       ),
     Error,
     "allowed subagent profiles must be one or more of default",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects unknown allowed tools before resolving profiles", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--allow-tool",
+          "agent-browser",
+          "--allow-subagent-profile",
+          "default",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "allowed tools must be one or more of bash, read_file, write_file, delegate_task",
   );
 });
 
@@ -625,6 +733,94 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
     ],
   );
   assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async () => {
+  const cases = [
+    {
+      name: "delegate_task without profile authorization",
+      flags: ["--allow-tool", "delegate_task"],
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: [],
+    },
+    {
+      name: "delegate_task with explicit profile authorization",
+      flags: [
+        "--allow-tool",
+        "delegate_task",
+        "--allow-subagent-profile",
+        "default",
+      ],
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["default"],
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const { io, stdout, stderr } = createIoBuffers();
+    let createdOptions: Record<string, unknown> | undefined;
+    const exitCode = await runCfHarnessCli(
+      [
+        "--workspace",
+        "/tmp/project",
+        "--prompt",
+        `Delegate through ${testCase.name}.`,
+        "--gateway-auth-mode",
+        "none",
+        ...testCase.flags,
+      ],
+      {
+        io,
+        env: {},
+        createPromptLoop: (options) => {
+          createdOptions = options as Record<string, unknown>;
+          return {
+            runPrompt: () =>
+              Promise.resolve(
+                {
+                  model: "gpt-5.4",
+                  finalAssistantText: "Delegation configured.",
+                  transcript: [
+                    {
+                      role: "user",
+                      content: `Delegate through ${testCase.name}.`,
+                    },
+                    { role: "assistant", content: "Delegation configured." },
+                  ],
+                  modelTurns: 1,
+                  runState: {
+                    runId: "run-cli-profile-allowlist",
+                    status: "completed",
+                    createdAt: "2026-04-28T23:35:00.000Z",
+                    updatedAt: "2026-04-28T23:35:01.000Z",
+                    cfcEnforcementMode: "disabled",
+                    currentDir: "/workspace",
+                    policyEvents: [],
+                    toolOutputs: [],
+                  },
+                } satisfies HarnessPromptLoopResult,
+              ),
+            runTranscript: () =>
+              Promise.reject(new Error("unexpected resume path")),
+          };
+        },
+      },
+    );
+
+    assertEquals(exitCode, 0, testCase.name);
+    assertEquals(
+      createdOptions?.allowedToolIds,
+      testCase.allowedToolIds,
+      testCase.name,
+    );
+    assertEquals(
+      createdOptions?.allowedSubagentProfiles,
+      testCase.allowedSubagentProfiles,
+      testCase.name,
+    );
+    assertEquals(stdout.length, 1, testCase.name);
+    assertEquals(stderr, [], testCase.name);
+  }
 });
 
 Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async () => {
@@ -1214,6 +1410,7 @@ Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", asyn
 
 Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () => {
   const { io, stdout, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
   let runTranscriptOptions: RunHarnessTranscriptOptions | undefined;
   const promptSlotBinding = {
     type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -1225,7 +1422,14 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
     eventId: "event-original",
   } as const;
   const exitCode = await runCfHarnessCli(
-    ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-1/run-state.json"],
+    [
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+      "--allow-tool",
+      "delegate_task",
+      "--allow-subagent-profile",
+      "default",
+    ],
     {
       io,
       env: { CF_HARNESS_API_KEY: "test-key" },
@@ -1260,42 +1464,47 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
           ],
         });
       },
-      createPromptLoop: () => ({
-        runPrompt: () => Promise.reject(new Error("unexpected prompt path")),
-        runTranscript: (options) => {
-          runTranscriptOptions = options;
-          const { transcript, model } = options;
-          return Promise.resolve(
-            ({
-              model: model ?? "gpt-5.4",
-              finalAssistantText: "Resumed.",
-              transcript: [
-                ...transcript,
-                { role: "assistant", content: "Resumed." },
-              ],
-              modelTurns: 1,
-              runState: {
-                runId: "run-1",
-                status: "completed",
-                createdAt: "2026-04-15T22:10:00.000Z",
-                updatedAt: "2026-04-15T22:10:02.000Z",
-                cfcEnforcementMode: "disabled",
-                currentDir: "/workspace",
-                model: "gpt-5.4",
-                artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
-                transcriptPath:
-                  "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
-                policyEvents: [],
-                toolOutputs: [],
-              },
-            }) satisfies HarnessPromptLoopResult,
-          );
-        },
-      }),
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: () => Promise.reject(new Error("unexpected prompt path")),
+          runTranscript: (options) => {
+            runTranscriptOptions = options;
+            const { transcript, model } = options;
+            return Promise.resolve(
+              ({
+                model: model ?? "gpt-5.4",
+                finalAssistantText: "Resumed.",
+                transcript: [
+                  ...transcript,
+                  { role: "assistant", content: "Resumed." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-1",
+                  status: "completed",
+                  createdAt: "2026-04-15T22:10:00.000Z",
+                  updatedAt: "2026-04-15T22:10:02.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  model: "gpt-5.4",
+                  artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+                  transcriptPath:
+                    "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            );
+          },
+        };
+      },
     },
   );
 
   assertEquals(exitCode, 0);
+  assertEquals(createdOptions?.allowedToolIds, ["delegate_task"]);
+  assertEquals(createdOptions?.allowedSubagentProfiles, ["default"]);
   assertEquals(runTranscriptOptions?.promptSlotBinding, promptSlotBinding);
   assertEquals(stdout, [
     formatCfHarnessCliResult({
