@@ -30,7 +30,7 @@ export function seemsLikeJsonEncodedFabricValueModern(value: string): boolean {
   }
 
   switch (value[0]) {
-    case "\"":
+    case '"':
     case "[":
     case "{":
     case "-":
