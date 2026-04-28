@@ -292,6 +292,7 @@ function factoryFromPattern<T, R>(
   // Add paths for all the internal cells
   // TODO(seefeld): Infer more stable identifiers
   let count = 0;
+  const usedInternalPathSegments = new Set<string>();
   allCells.forEach((cell) => {
     if (paths.has(cell)) return;
     const { cell: top, path, value, name, external } = cell.export();
@@ -305,10 +306,16 @@ function factoryFromPattern<T, R>(
         const streamMarker = isRecord(value) && value.$stream === true
           ? "stream"
           : "";
-        paths.set(top, [
-          "internal",
-          stableName ?? `__#${count++}${streamMarker}`,
-        ]);
+        let internalPathSegment = stableName ??
+          `__#${count++}${streamMarker}`;
+        let internalPathKey = String(internalPathSegment);
+        while (usedInternalPathSegments.has(internalPathKey)) {
+          internalPathSegment =
+            `${internalPathKey}__#${count++}${streamMarker}`;
+          internalPathKey = String(internalPathSegment);
+        }
+        usedInternalPathSegments.add(internalPathKey);
+        paths.set(top, ["internal", internalPathSegment]);
       }
       if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
     }
