@@ -272,6 +272,13 @@ function collectCpuMetrics(
   };
 }
 
+export function testRunPassed(result: TestRunResult): boolean {
+  return !result.error &&
+    result.results.every((test) => test.skipped || test.passed) &&
+    (result.allowRuntimeErrors || result.runtimeErrors.length === 0) &&
+    (result.expectNonIdempotent || result.nonIdempotent.length === 0);
+}
+
 function printPerfJson(result: TestRunResult): void {
   console.log(JSON.stringify({
     kind: "cf-test-metrics",
@@ -279,7 +286,7 @@ function printPerfJson(result: TestRunResult): void {
     path: result.path,
     totalDurationMs: result.totalDurationMs,
     cpuMetrics: result.cpuMetrics,
-    passed: !result.error,
+    passed: testRunPassed(result),
   }));
 }
 

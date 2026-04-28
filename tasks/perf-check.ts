@@ -34,6 +34,7 @@ import {
   formatOverrideSuggestion,
   githubGet,
   isPatternUnitWallMetric,
+  isTestMetricForPrefix,
   isVeryLargePatternUnitWallRegression,
   mapConcurrent,
   type MetricTimeline,
@@ -46,6 +47,7 @@ import {
   REPO,
   shouldGatePatternUnitWallRegression,
   STDDEV_FACTOR,
+  testMetricPrefixesForStepMetric,
   type TimingSample,
   TOKEN,
   WORKFLOW_FILE,
@@ -395,6 +397,37 @@ async function main() {
           : isVeryLargePatternUnitWallRegression(current, baseline.median)
           ? "very large wall-clock regression"
           : undefined;
+      } else {
+        const relatedPrefixes = testMetricPrefixesForStepMetric(metric);
+        if (relatedPrefixes.length > 0) {
+          const corroboratingMetrics = [...currentMetrics]
+            .filter(([candidate]) =>
+              relatedPrefixes.some((prefix) =>
+                isTestMetricForPrefix(candidate, prefix)
+              )
+            )
+            .filter(([candidate, sample]) => {
+              const candidateEvaluation = evaluateMetric(candidate, sample);
+              return Boolean(candidateEvaluation.baseline) &&
+                candidateEvaluation.current >
+                  candidateEvaluation.baseline!.threshold;
+            })
+            .map(([candidate]) => candidate);
+
+          if (corroboratingMetrics.length === 0) {
+            rows.push({
+              ...row,
+              status: "WATCH",
+              note:
+                "step wall-clock over threshold; related test timings did not corroborate",
+            });
+            continue;
+          }
+
+          row.note = `corroborated by ${
+            corroboratingMetrics.slice(0, 3).join(", ")
+          }`;
+        }
       }
       rows.push(row);
       failures.push(row);

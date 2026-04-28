@@ -113,6 +113,7 @@ export interface Regression {
 export interface JUnitTestSuite {
   name: string;
   time: number;
+  sourceLabel?: string;
   tests: { name: string; time: number }[];
 }
 
@@ -303,12 +304,20 @@ export async function downloadAndParseJUnit(
     const result = await unzip.output();
     if (!result.success) return [];
 
-    const suites: JUnitTestSuite[] = [];
+    const xmlEntries: string[] = [];
     for await (const entry of walkFiles(tmpDir)) {
       if (entry.endsWith(".xml")) {
-        const content = await Deno.readTextFile(entry);
-        suites.push(...parseJUnitXml(content));
+        xmlEntries.push(entry);
       }
+    }
+
+    const suites: JUnitTestSuite[] = [];
+    for (const entry of xmlEntries) {
+      const content = await Deno.readTextFile(entry);
+      const sourceLabel = xmlEntries.length > 1
+        ? junitSourceLabel(entry)
+        : undefined;
+      suites.push(...parseJUnitXml(content, sourceLabel));
     }
     return suites;
   } finally {
@@ -328,30 +337,59 @@ export async function* walkFiles(dir: string): AsyncGenerator<string> {
   }
 }
 
-export function parseJUnitXml(xml: string): JUnitTestSuite[] {
+function junitSourceLabel(filePath: string): string {
+  const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
+  return fileName.replace(/\.xml$/i, "");
+}
+
+function parseXmlAttributes(attrs: string): Map<string, string> {
+  const result = new Map<string, string>();
+  const attrRegex = /([:\w.-]+)="([^"]*)"/g;
+  let match;
+  while ((match = attrRegex.exec(attrs)) !== null) {
+    result.set(match[1], match[2]);
+  }
+  return result;
+}
+
+export function parseJUnitXml(
+  xml: string,
+  sourceLabel?: string,
+): JUnitTestSuite[] {
   const suites: JUnitTestSuite[] = [];
 
-  const suiteRegex =
-    /<testsuite\s[^>]*?name="([^"]*)"[^>]*?time="([^"]*)"[^>]*?>([\s\S]*?)<\/testsuite>/g;
-  const caseRegex =
-    /<testcase\s[^>]*?name="([^"]*)"[^>]*?time="([^"]*)"[^>]*?\/?>(?:<\/testcase>)?/g;
+  const suiteRegex = /<testsuite\b([^>]*)>([\s\S]*?)<\/testsuite>/g;
+  const caseRegex = /<testcase\b([^>]*?)(?:\/>|>[\s\S]*?<\/testcase>)/g;
 
   let suiteMatch;
   while ((suiteMatch = suiteRegex.exec(xml)) !== null) {
-    const [, suiteName, suiteTime, suiteBody] = suiteMatch;
+    const [, suiteAttrs, suiteBody] = suiteMatch;
+    const attrs = parseXmlAttributes(suiteAttrs);
+    const suiteName = attrs.get("name");
+    if (!suiteName) continue;
+
     const tests: { name: string; time: number }[] = [];
 
     let caseMatch;
     while ((caseMatch = caseRegex.exec(suiteBody)) !== null) {
+      const caseAttrs = parseXmlAttributes(caseMatch[1]);
+      const caseName = caseAttrs.get("name");
+      if (!caseName) continue;
       tests.push({
-        name: caseMatch[1],
-        time: parseFloat(caseMatch[2]) || 0,
+        name: caseName,
+        time: parseFloat(caseAttrs.get("time") ?? "0") || 0,
       });
     }
 
+    const suiteTime = parseFloat(attrs.get("time") ?? "");
+    const time = Number.isFinite(suiteTime)
+      ? suiteTime
+      : tests.reduce((sum, test) => sum + test.time, 0);
+
     suites.push({
       name: suiteName,
-      time: parseFloat(suiteTime) || 0,
+      time,
+      sourceLabel,
       tests,
     });
   }
@@ -835,12 +873,15 @@ export function extractTestFileMetrics(
 
   for (const suite of suites) {
     if (suite.time <= 0) continue;
-    const key = `test: ${artifactName}/${suite.name}`;
+    const metricBase = suite.sourceLabel
+      ? `${artifactName}/${suite.sourceLabel}`
+      : artifactName;
+    const key = `test: ${metricBase}/${suite.name}`;
     metrics.set(key, makeSample(suite.time));
 
     for (const test of suite.tests) {
       if (test.time <= 0) continue;
-      const testKey = `subtest: ${artifactName}/${suite.name} > ${test.name}`;
+      const testKey = `subtest: ${metricBase}/${suite.name} > ${test.name}`;
       metrics.set(testKey, makeSample(test.time));
     }
   }
@@ -877,6 +918,26 @@ export function patternUnitCpuMetricForWallMetric(
 
 export function isPatternUnitWallMetric(metric: string): boolean {
   return patternUnitCpuMetricForWallMetric(metric) !== null;
+}
+
+const STEP_TEST_METRIC_PREFIXES: Record<string, string[]> = {
+  "step: runner integration": ["package-integration/runner/"],
+  "step: runtime-client integration": ["package-integration/runtime-client/"],
+  "step: shell integration": ["package-integration/shell/"],
+  "step: background worker integration": [
+    "package-integration/background-charm-service/",
+  ],
+  "step: patterns integration": ["pattern-integration/"],
+  "step: generated patterns integration": ["generated-patterns/"],
+};
+
+export function testMetricPrefixesForStepMetric(metric: string): string[] {
+  return STEP_TEST_METRIC_PREFIXES[metric] ?? [];
+}
+
+export function isTestMetricForPrefix(metric: string, prefix: string): boolean {
+  return metric.startsWith(`test: ${prefix}`) ||
+    metric.startsWith(`subtest: ${prefix}`);
 }
 
 export function isVeryLargePatternUnitWallRegression(

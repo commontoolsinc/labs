@@ -3,12 +3,16 @@ import {
   computeBaseline,
   extractMetrics,
   extractPatternTestCpuMetrics,
+  extractTestFileMetrics,
   isPatternUnitWallMetric,
+  isTestMetricForPrefix,
   type Job,
+  parseJUnitXml,
   parsePatternTestMetricsJson,
   patternUnitCpuMetricForWallMetric,
   shouldGatePatternUnitWallRegression,
   type Step,
+  testMetricPrefixesForStepMetric,
   type WorkflowRun,
 } from "./perf-lib.ts";
 
@@ -105,6 +109,69 @@ Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 15 percent
   assertEquals(baseline?.median, 100);
   assertAlmostEquals(baseline?.stddev ?? 0, 20, 1e-9);
   assertEquals(baseline?.threshold, 160);
+});
+
+Deno.test("parseJUnitXml accepts Deno suites without suite-level time", () => {
+  const suites = parseJUnitXml(
+    `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="deno test" tests="2" failures="0" errors="0" time="1.500">
+  <testsuite name="./integration/shell.test.ts" tests="2" disabled="0" errors="0" failures="0">
+    <testcase name="shell tests" classname="./integration/shell.test.ts" time="1.250" line="1" col="1"></testcase>
+    <testcase name="shell tests &gt; opens menu" classname="ext:cli/40_test.js" time="0.250" line="2" col="1" />
+  </testsuite>
+</testsuites>`,
+    "shell",
+  );
+
+  assertEquals(suites.length, 1);
+  assertEquals(suites[0].name, "./integration/shell.test.ts");
+  assertEquals(suites[0].sourceLabel, "shell");
+  assertAlmostEquals(suites[0].time, 1.5, 1e-9);
+  assertEquals(suites[0].tests.length, 2);
+  assertEquals(suites[0].tests[1].name, "shell tests &gt; opens menu");
+});
+
+Deno.test("extractTestFileMetrics includes XML source label when present", () => {
+  const metrics = extractTestFileMetrics(makeRun(), "package-integration", [{
+    name: "./integration/shell.test.ts",
+    time: 1.5,
+    sourceLabel: "shell",
+    tests: [{ name: "shell tests", time: 1.25 }],
+  }]);
+
+  assertAlmostEquals(
+    metrics.get("test: package-integration/shell/./integration/shell.test.ts")
+      ?.durationSeconds ?? 0,
+    1.5,
+    1e-9,
+  );
+  assertAlmostEquals(
+    metrics.get(
+      "subtest: package-integration/shell/./integration/shell.test.ts > shell tests",
+    )?.durationSeconds ?? 0,
+    1.25,
+    1e-9,
+  );
+});
+
+Deno.test("step metrics map to related test metric prefixes", () => {
+  assertEquals(testMetricPrefixesForStepMetric("step: shell integration"), [
+    "package-integration/shell/",
+  ]);
+  assertEquals(
+    isTestMetricForPrefix(
+      "subtest: package-integration/shell/./integration/shell.test.ts > shell tests",
+      "package-integration/shell/",
+    ),
+    true,
+  );
+  assertEquals(
+    isTestMetricForPrefix(
+      "subtest: package-integration/runner/./integration/runner.test.ts > runner tests",
+      "package-integration/shell/",
+    ),
+    false,
+  );
 });
 
 Deno.test("parsePatternTestMetricsJson accepts pattern-unit CPU metrics", () => {
