@@ -388,7 +388,9 @@ export const validateAgainstSchema = (
 
   const resolved = resolveSchema(schema, fullSchema);
   if (resolved !== schema) {
-    return validateAgainstSchema(resolved, value, resolved);
+    // Keep the original root as `fullSchema` so nested $refs in the resolved
+    // branch can still find sibling $defs entries.
+    return validateAgainstSchema(resolved, value, fullSchema);
   }
 
   if (Array.isArray(schema.allOf)) {

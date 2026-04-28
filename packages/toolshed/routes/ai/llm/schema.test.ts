@@ -65,4 +65,23 @@ describe("normalizeSchemaForProvider", () => {
       },
     );
   });
+
+  it("maps a top-level `false` schema to an empty-object schema", () => {
+    assertEquals(normalizeSchemaForProvider(false), {});
+  });
+
+  it("preserves nested `additionalProperties: false`", () => {
+    assertEquals(
+      normalizeSchemaForProvider({
+        type: "object",
+        properties: { name: { type: "string" } },
+        additionalProperties: false,
+      }),
+      {
+        type: "object",
+        properties: { name: { type: "string" } },
+        additionalProperties: false,
+      },
+    );
+  });
 });

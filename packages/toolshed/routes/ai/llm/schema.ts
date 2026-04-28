@@ -87,5 +87,11 @@ function normalizeSchemaNode(schema: unknown): unknown {
 
 export function normalizeSchemaForProvider(schema: unknown): unknown {
   const normalized = normalizeSchemaNode(schema);
-  return normalized === OMIT_SCHEMA ? {} : normalized;
+  if (normalized === OMIT_SCHEMA) return {};
+  // A top-level `false` schema rejects all values, which providers typically
+  // can't represent in tool input shapes. Map to `{}` (empty schema) at the
+  // outer surface only — recursive `false` values inside the schema (notably
+  // `additionalProperties: false`) keep their JSON-Schema-spec semantics.
+  if (normalized === false) return {};
+  return normalized;
 }

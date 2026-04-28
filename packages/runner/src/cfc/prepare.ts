@@ -95,9 +95,13 @@ const metadataAppliesToPath = (
   path: readonly string[],
 ): boolean => {
   const logicalPath = canonicalizeLogicalPath(path);
+  // A labelMap entry is persisted whenever the source schema had label values
+  // OR a policy claim (writeAuthorizedBy / uiContract / exactCopyOf — see the
+  // entry-construction site). The mere presence of the entry signals "policy
+  // applies on this path"; do NOT filter on `hasLabelValues` here, or
+  // claim-only entries get silently bypassed.
   return metadata.labelMap.entries.some((entry) =>
-    hasLabelValues(entry.label) &&
-    (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
+    isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path)
   );
 };
 

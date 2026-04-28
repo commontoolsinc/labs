@@ -183,4 +183,48 @@ describe("schema-based prompt injection sanitization", () => {
 
     expect(JSON.stringify(schema)).toBe(before);
   });
+
+  it("validates nested $refs by preserving root $defs across recursion", () => {
+    // Top-level $ref → $defs/Outer → contains property whose type is
+    // $defs/Inner. If validateAgainstSchema dropped root $defs when
+    // recursing through the top-level $ref, the nested $ref to Inner
+    // would resolve to false and the validation would reject valid
+    // values. This guards against that regression.
+    const schema = {
+      $defs: {
+        Outer: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            payload: { $ref: "#/$defs/Inner" },
+          },
+          required: ["label", "payload"],
+          additionalProperties: false,
+        },
+        Inner: {
+          type: "object",
+          properties: {
+            value: { type: "number" },
+          },
+          required: ["value"],
+          additionalProperties: false,
+        },
+      },
+      $ref: "#/$defs/Outer",
+    } as const satisfies JSONSchema;
+
+    expect(
+      validateAgainstSchema(schema, {
+        label: "ok",
+        payload: { value: 42 },
+      }),
+    ).toBeUndefined();
+
+    expect(
+      validateAgainstSchema(schema, {
+        label: "ok",
+        payload: { value: "not a number" },
+      }),
+    ).toBeDefined();
+  });
 });
