@@ -1085,6 +1085,15 @@ describe("json encoding", () => {
       expect(result).toBeInstanceOf(ProblematicValue);
     });
 
+    it("malformed wire: bare /-keyed object produces ProblematicValue", () => {
+      // Per spec §9, a single-key object whose key is bare "/" (empty tag
+      // after stripping the leading slash) is an encoding error. Decoding must
+      // produce a ProblematicValue, not an UnknownValue with an empty tag.
+      const data = { "/": "x" } as JsonWireValue;
+      const result = fromWireFormat(data);
+      expect(result).toBeInstanceOf(ProblematicValue);
+    });
+
     it("does not wrap plain object with no /-prefixed keys", () => {
       const obj = { a: 1, b: 2 } as unknown as FabricValue;
       expect(toWireFormat(obj)).toEqual({ a: 1, b: 2 });
@@ -1116,7 +1125,7 @@ describe("json encoding", () => {
       expect((result as unknown as UnknownValue).typeTag).toBe("Future@7");
     });
 
-    it("unquote strips exactly one /quote layer — inner /quote is preserved as literal", () => {
+    it("decoder strips exactly one /quote layer — inner /quote is preserved literally", () => {
       // Wire form { "/quote": { "/quote": "x" } } is a /quote-wrapped literal
       // whose content happens to be { "/quote": "x" }. Decoding must return
       // { "/quote": "x" } as a frozen plain object — NOT recurse into it and
