@@ -39,6 +39,28 @@ export type ButtonVariant =
 
 export type ButtonSize = ComponentSize | "icon";
 
+// ── Why the inner element is a <div>, not a <button> ──────────────────
+//
+// The host carries role="button", tabindex, and aria-disabled — it IS
+// the button as far as the accessibility tree is concerned. If the
+// shadow DOM also contained a native <button>, Playwright's
+// getByRole('button', { name }) would return TWO matches (host + inner)
+// and fail in strict mode. We can't suppress the inner button because:
+//
+//   • role="presentation" / role="none" — spec says browsers MUST ignore
+//     these on focusable elements, and <button> is inherently focusable.
+//   • aria-hidden="true" — hides the <slot> content too, so the host
+//     loses its accessible name (computed from slotted text).
+//
+// Using <div> avoids both problems. Keyboard activation (Enter/Space)
+// is handled by a host-level keydown listener. Form submission is
+// already manual (_handleClick searches for the closest cf-form).
+//
+// If native <button> behavior is ever required, the escape hatch is:
+// swap <div> back to <button>, add aria-hidden="true", and sync the
+// host's aria-label from slotted text via a slotchange listener.
+// ──────────────────────────────────────────────────────────────────────
+
 export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
 
