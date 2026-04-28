@@ -136,6 +136,7 @@ export class CFToggleGroup extends BaseElement {
   }
 
   private updateToggleSelection(): void {
+    this._syncing = true;
     const toggles = this.getToggles();
 
     toggles.forEach((toggle) => {
@@ -152,6 +153,7 @@ export class CFToggleGroup extends BaseElement {
         (toggle as any).pressed = isPressed;
       }
     });
+    this._syncing = false;
   }
 
   private updateToggleDisabled(): void {
@@ -167,7 +169,14 @@ export class CFToggleGroup extends BaseElement {
     });
   }
 
+  private _syncing = false;
+
   private handleToggle = (event: Event): void => {
+    // Ignore events fired while we're syncing toggle states to avoid
+    // an infinite loop: handleToggle → set value → updateToggleSelection
+    // → set pressed → cf-change → handleToggle …
+    if (this._syncing) return;
+
     const customEvent = event as CustomEvent;
     const toggle = event.target as Element;
 
