@@ -8,6 +8,7 @@ import type {
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { BashToolInput, BashToolOutput } from "./tools/bash.ts";
+import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
 import {
   isStructuredFileToolErrorOutput,
   type StructuredFileToolErrorCode,
@@ -448,6 +449,24 @@ export const classifyBuiltinToolFailure = (
     case "read_file":
     case "write_file":
       return classifyStructuredFileToolFailure(toolId, output, at);
+    case "delegate_task": {
+      const delegateOutput = output as DelegateTaskToolOutput;
+      if (
+        delegateOutput?.type === "cf-harness.delegate-task-output" &&
+        delegateOutput.subagent.status === "failed"
+      ) {
+        return createHarnessFailureRecord({
+          kind: "harness_error",
+          source: "tool_output",
+          detail:
+            `subagent ${delegateOutput.subagent.childRunId} failed: ${delegateOutput.subagent.summary}`,
+          at,
+          toolId,
+          outputId: delegateOutput.outputId as ToolOutputId,
+        });
+      }
+      return undefined;
+    }
     default:
       return undefined;
   }

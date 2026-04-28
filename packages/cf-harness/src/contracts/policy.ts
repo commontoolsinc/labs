@@ -31,10 +31,21 @@ export interface HarnessWriteFileToolInputSummary {
   contentDigest?: string;
 }
 
+export interface HarnessDelegateTaskToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "delegate_task";
+  goalBytes?: number;
+  goalDigest?: string;
+  contextBytes?: number;
+  contextDigest?: string;
+  maxModelTurns?: number;
+}
+
 export type HarnessToolInputSummary =
   | HarnessBashToolInputSummary
   | HarnessReadFileToolInputSummary
   | HarnessWriteFileToolInputSummary
+  | HarnessDelegateTaskToolInputSummary
   | {
     type: "cf-harness.tool-input-summary";
     toolId: BuiltinToolId;

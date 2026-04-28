@@ -234,7 +234,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
 
   assertEquals(
     firstRequest.tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file"],
+    ["bash", "read_file", "write_file", "delegate_task"],
   );
   assertEquals(
     secondRequest.messages.at(-1),
@@ -404,6 +404,166 @@ Deno.test("CfHarnessPromptLoop only advertises allowed tools when a tool allowli
   assertEquals(
     request.tools.map((tool) => tool.function.name),
     ["read_file"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summary-only result", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-delegate",
+      model: "gpt-5.4",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-delegate",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Inspect src/example.ts",
+                    context: "Return only findings.",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Child inspected the file and found no issues.",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent received the child summary.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate a focused inspection.",
+  });
+
+  assertEquals(result.finalAssistantText, "Parent received the child summary.");
+  assertEquals(
+    requestBodies[0].tools.map((tool) => tool.function.name),
+    ["bash", "read_file", "write_file", "delegate_task"],
+  );
+  assertEquals(
+    requestBodies[1].tools.map((tool) => tool.function.name),
+    ["bash", "read_file", "write_file"],
+  );
+  assertEquals(
+    requestBodies[1].messages.map((message) => message.role),
+    ["system", "user"],
+  );
+  assertEquals(
+    requestBodies[1].messages[1].content.includes(
+      "Delegate a focused inspection.",
+    ),
+    false,
+  );
+  assertEquals(
+    requestBodies[1].messages[1].content.includes("Inspect src/example.ts"),
+    true,
+  );
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    type: string;
+    outputId: string;
+    subagent: {
+      childRunId: string;
+      status: string;
+      summary: string;
+      modelTurns: number;
+      manifest: {
+        parentRunId: string;
+        parentToolCallId: string;
+        allowedToolIds: string[];
+        inputSummary: {
+          goalBytes: number;
+          goalDigest: string;
+          contextBytes: number;
+          contextDigest: string;
+        };
+      };
+    };
+  };
+  assertEquals(output.type, "cf-harness.delegate-task-output");
+  assertEquals(
+    output.outputId,
+    createToolOutputId(
+      "run-delegate",
+      "delegate_task",
+      1,
+    ),
+  );
+  assertEquals(output.subagent.childRunId, "run-delegate.subagent.1");
+  assertEquals(output.subagent.status, "completed");
+  assertEquals(
+    output.subagent.summary,
+    "Child inspected the file and found no issues.",
+  );
+  assertEquals(output.subagent.modelTurns, 1);
+  assertEquals(output.subagent.manifest.parentRunId, "run-delegate");
+  assertEquals(output.subagent.manifest.parentToolCallId, "call-delegate");
+  assertEquals(output.subagent.manifest.allowedToolIds, [
+    "bash",
+    "read_file",
+    "write_file",
+  ]);
+  assertEquals(output.subagent.manifest.inputSummary.goalBytes, 22);
+  assertEquals(output.subagent.manifest.inputSummary.contextBytes, 21);
+  assertEquals(
+    output.subagent.manifest.inputSummary.goalDigest.startsWith("sha256:"),
+    true,
+  );
+  assertEquals(
+    output.subagent.manifest.inputSummary.contextDigest.startsWith("sha256:"),
+    true,
+  );
+  assertEquals(result.runState.subagentRuns?.length, 1);
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.childRunId,
+    "run-delegate.subagent.1",
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.summary,
+    "Child inspected the file and found no issues.",
   );
 });
 
