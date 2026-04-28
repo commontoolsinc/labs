@@ -85,6 +85,58 @@ describe("value-debug", () => {
       expect(toCompactDebugString({ a: "undefined" }))
         .toBe('{"a":"undefined"}');
     });
+
+    it("renders a named function as a bare abbreviated form", () => {
+      function foo() {}
+      expect(toCompactDebugString(foo)).toBe("function foo(...) {...}");
+    });
+
+    it("renders a named function inside a structure", () => {
+      function bar() {}
+      expect(toCompactDebugString({ fn: bar }))
+        .toBe('{"fn":function bar(...) {...}}');
+      expect(toCompactDebugString([bar]))
+        .toBe("[function bar(...) {...}]");
+    });
+
+    it("renders an anonymous arrow function as a bare abbreviated form", () => {
+      // An immediately-passed arrow expression has no `name`.
+      expect(toCompactDebugString((() => 1) as unknown))
+        .toBe("(...) => {...}");
+    });
+
+    it("renders an anonymous `function` expression as a bare abbreviated form", () => {
+      // Force an empty `name` to simulate a true anonymous function expression
+      // (`(function(){}).name === ""`).
+      const anon = function () {};
+      Object.defineProperty(anon, "name", { value: "" });
+      expect(toCompactDebugString(anon)).toBe("(...) => {...}");
+    });
+
+    it('renders an interned symbol as `Symbol.for("name")`', () => {
+      const s = Symbol.for("my-key");
+      expect(toCompactDebugString(s)).toBe('Symbol.for("my-key")');
+    });
+
+    it("renders an interned symbol inside a structure", () => {
+      const s = Symbol.for("k");
+      expect(toCompactDebugString({ s })).toBe('{"s":Symbol.for("k")}');
+      expect(toCompactDebugString([s])).toBe('[Symbol.for("k")]');
+    });
+
+    it('renders an uninterned symbol as `Symbol("name")`', () => {
+      expect(toCompactDebugString(Symbol("d"))).toBe('Symbol("d")');
+    });
+
+    it("renders an uninterned symbol with no description", () => {
+      expect(toCompactDebugString(Symbol())).toBe('Symbol("")');
+    });
+
+    it("renders an uninterned symbol inside a structure", () => {
+      const s = Symbol("inner");
+      expect(toCompactDebugString({ s })).toBe('{"s":Symbol("inner")}');
+      expect(toCompactDebugString([s])).toBe('[Symbol("inner")]');
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -119,6 +171,25 @@ describe("value-debug", () => {
     it("renders `undefined` and `bigint` inside arrays as bare tokens", () => {
       expect(toIndentedDebugString([1n, undefined, 2n]))
         .toBe("[\n  1n,\n  undefined,\n  2n\n]");
+    });
+
+    it("renders top-level named function as bare abbreviated form", () => {
+      function baz() {}
+      expect(toIndentedDebugString(baz)).toBe("function baz(...) {...}");
+    });
+
+    it('renders top-level interned symbol as `Symbol.for("name")`', () => {
+      expect(toIndentedDebugString(Symbol.for("ind")))
+        .toBe('Symbol.for("ind")');
+    });
+
+    it("renders nested function and symbol as bare tokens", () => {
+      function qux() {}
+      const v = { fn: qux, sym: Symbol("s") };
+      expect(toIndentedDebugString(v))
+        .toBe(
+          '{\n  "fn": function qux(...) {...},\n  "sym": Symbol("s")\n}',
+        );
     });
   });
 });
