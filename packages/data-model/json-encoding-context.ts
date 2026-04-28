@@ -355,6 +355,18 @@ export class JsonEncodingContext implements SerializationContext<string> {
     if (decoded !== null) {
       const { tag, state } = decoded;
 
+      // A bare `"/"` key (empty tag after stripping the leading slash) is
+      // always an encoding error per spec §9 — no valid tag has an empty
+      // name. Produce a ProblematicValue rather than an UnknownValue with
+      // an empty tag.
+      if (tag === "") {
+        return new ProblematicValue(
+          tag,
+          state as unknown as FabricValue,
+          `object has bare "/" key`,
+        ) as unknown as FabricValue;
+      }
+
       // `TAGS.object` unwrapping (Section 5.6).
       if (tag === TAGS.object) {
         const inner = state as Record<string, JsonWireValue>;
