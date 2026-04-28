@@ -659,9 +659,10 @@ export class CFInput extends BaseElement {
         const inputValue = this.type === "file" ? undefined : this.getValue();
 
         // The host element carries the ARIA role and tabindex for accessibility.
-        // The inner <input> is aria-hidden and removed from tab order so the
-        // accessibility tree sees one control (the host), not two. Browsers
-        // ignore role="presentation" on native interactive elements.
+        // delegatesFocus: true routes focus to the inner <input>, so aria-hidden
+        // must NOT be set on it — browsers refuse to apply aria-hidden on focused
+        // elements. The tabindex="-1" keeps it out of the tab sequence (the host
+        // is the tab stop); the host ARIA attributes are the a11y surface.
         return html`
           <input
             type="${this.type}"
@@ -695,7 +696,6 @@ export class CFInput extends BaseElement {
             @keydown="${this._handleKeyDown}"
             @invalid="${this._handleInvalid}"
             part="input"
-            aria-hidden="true"
             tabindex="-1"
           />
         `;

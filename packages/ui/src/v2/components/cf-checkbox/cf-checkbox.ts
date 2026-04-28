@@ -306,12 +306,12 @@ export class CFCheckbox extends BaseElement {
 
       return html`
         <!-- The host carries role="checkbox" and tabindex for accessibility.
-          The inner element is aria-hidden to prevent double matches in
-          the a11y tree. -->
+          delegatesFocus: true routes focus here, so aria-hidden must NOT be
+          set on this div — browsers refuse to apply aria-hidden on focused
+          elements. The host ARIA attributes are the a11y surface. -->
         <div
           class="${classString}"
           part="checkbox"
-          aria-hidden="true"
           tabindex="-1"
         >
           <span class="checkmark" part="checkmark"></span>

@@ -218,7 +218,6 @@ export class CFRadio extends BaseElement {
         <div
           class="${classString}"
           part="radio"
-          aria-hidden="true"
         >
           <span class="indicator" part="indicator"></span>
         </div>

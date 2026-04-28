@@ -1,4 +1,4 @@
-import { html, LitElement } from "lit";
+import { html } from "lit";
 import { styles } from "./styles.ts";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
@@ -42,9 +42,13 @@ export type ButtonSize = ComponentSize | "icon";
 // ── Accessibility strategy ───────────────────────────────────────────
 //
 // The host carries role="button" so agents can find it via getByRole.
-// The shadow DOM contains a real <button> for native keyboard handling
-// (Enter/Space) and delegatesFocus. To prevent Playwright from seeing
-// TWO buttons (host + inner), the inner <button> has aria-hidden="true".
+// The shadow DOM contains a <button> for styling (part="button") with
+// aria-hidden="true" to prevent a duplicate role in the a11y tree.
+//
+// delegatesFocus is NOT used because browsers refuse to apply
+// aria-hidden on a focused element ("Blocked aria-hidden on an element
+// because its descendant retained focus"). Instead, the host owns
+// tabindex and a keydown listener for Enter/Space activation.
 //
 // aria-hidden also hides the <slot> content from the a11y tree, so the
 // host would lose its computed accessible name. We restore it by syncing
@@ -55,10 +59,11 @@ export type ButtonSize = ComponentSize | "icon";
 
 export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
-  static override shadowRootOptions = {
-    ...LitElement.shadowRootOptions,
-    delegatesFocus: true,
-  };
+  // No delegatesFocus — the host owns role="button", tabindex, and
+  // keyboard handling. Focus stays on the host; the inner button is
+  // purely visual and aria-hidden. delegatesFocus would send focus to
+  // the inner button, which browsers refuse to hide ("Blocked
+  // aria-hidden on a focused element").
 
   static override properties = {
     variant: { type: String },
@@ -99,9 +104,19 @@ export class CFButton extends BaseElement {
 
     // Handle submit/reset for clicks from ANY source (mouse click on inner
     // button bubbles through shadow boundary to host; keyboard Enter/Space
-    // on the inner button also fires a click that bubbles here).
+    // fires this.click() which also reaches here).
     this.addEventListener("click", (e) => {
       this._handleClick(e);
+    });
+
+    // The host carries role="button" and tabindex, so it receives keyboard
+    // events directly. Activate on Enter/Space like a native button.
+    this.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (this.disabled) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.click();
+      }
     });
   }
 

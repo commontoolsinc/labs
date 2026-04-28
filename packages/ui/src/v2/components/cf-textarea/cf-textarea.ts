@@ -519,7 +519,10 @@ export class CFTextarea extends BaseElement {
             ? "resize: none;"
             : `resize: ${this.resize};`;
 
-          // The host carries the ARIA role and tabindex. The inner <textarea> is aria-hidden to prevent double matches in the a11y tree.
+          // The host carries the ARIA role and tabindex. delegatesFocus: true
+          // routes focus to the inner <textarea>, so aria-hidden must NOT be set
+          // on it — browsers refuse to apply aria-hidden on focused elements.
+          // tabindex="-1" keeps it out of the tab sequence (the host is the tab stop).
           return html`
             <textarea
               class="${this.error ? "error" : ""}"
@@ -543,7 +546,6 @@ export class CFTextarea extends BaseElement {
               @blur="${this._handleBlur}"
               @keydown="${this._handleKeyDown}"
               part="textarea"
-              aria-hidden="true"
               tabindex="-1"
             ></textarea>
           `;

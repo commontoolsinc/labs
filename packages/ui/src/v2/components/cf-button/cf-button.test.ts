@@ -60,8 +60,10 @@ describe("CFButton", () => {
     expect(element.tabIndex).toBe(-1);
   });
 
-  it("should delegate focus into the shadow button", () => {
-    expect(CFButton.shadowRootOptions.delegatesFocus).toBe(true);
+  it("should not use delegatesFocus (incompatible with aria-hidden)", () => {
+    // delegatesFocus sends focus to the inner button, but browsers
+    // refuse to apply aria-hidden on a focused element.
+    expect(CFButton.shadowRootOptions?.delegatesFocus).not.toBe(true);
   });
 
   it("should suppress click events when disabled via host listener", () => {
