@@ -1,4 +1,3 @@
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   type Frame,
@@ -430,7 +429,7 @@ function formatStableCauseSegment(cause: unknown): string {
   }
 
   try {
-    return toCompactDebugString(cause);
+    return JSON.stringify(cause) ?? String(cause);
   } catch {
     return String(cause);
   }
