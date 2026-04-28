@@ -13,6 +13,7 @@ import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { NAME, type Pattern, UI } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -768,7 +769,7 @@ export function wish(
 
       if (query === undefined || query === null || query === "") {
         const errorMsg = `Wish target "${
-          JSON.stringify(targetValue)
+          toCompactDebugString(targetValue)
         }" has no query.`;
         wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
           `[WISH ERROR] source=${sourceKey}`,
@@ -794,7 +795,7 @@ export function wish(
           `query=${query}`,
           `scope=${formatScope(scope)}`,
           `headless=${Boolean(headless)}`,
-          `path=${JSON.stringify(path ?? [])}`,
+          `path=${toCompactDebugString(path ?? [])}`,
           `parent=${describeCell(parentCell)}`,
         ]);
         wishFlowLogger.debug(
