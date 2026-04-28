@@ -1,4 +1,4 @@
-import { html, LitElement, PropertyValues, unsafeCSS } from "lit";
+import { html, PropertyValues, unsafeCSS } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { toggleStyles } from "./styles.ts";
@@ -27,10 +27,9 @@ export type ToggleSize = "sm" | "md" | "lg";
 export type ToggleVariant = "default" | "outline";
 
 export class CFToggle extends BaseElement {
-  static override shadowRootOptions = {
-    ...LitElement.shadowRootOptions,
-    delegatesFocus: true,
-  };
+  // No delegatesFocus — the host owns role="button", tabindex, and all
+  // event handlers. Focus stays on the host; the inner button is purely
+  // visual and aria-hidden.
 
   static override properties = {
     pressed: { type: Boolean, reflect: true },
@@ -67,12 +66,9 @@ export class CFToggle extends BaseElement {
   }
 
   override updated(changedProperties: PropertyValues) {
-    if (changedProperties.has("pressed")) {
-      const oldValue = changedProperties.get("pressed");
-      if (oldValue !== undefined) {
-        this.emit("cf-change", { pressed: this.pressed });
-      }
-    }
+    // cf-change is emitted from click/keydown handlers only — NOT here.
+    // Emitting from updated() causes infinite loops when a parent
+    // (cf-toggle-group) programmatically sets pressed.
     if (changedProperties.has("pressed") || changedProperties.has("disabled")) {
       this._updateAriaAttributes();
     }
@@ -138,8 +134,8 @@ export class CFToggle extends BaseElement {
       return;
     }
 
-    // Toggle the pressed state
     this.pressed = !this.pressed;
+    this.emit("cf-change", { pressed: this.pressed });
   };
 
   private handleKeydown = (event: KeyboardEvent): void => {
@@ -148,6 +144,7 @@ export class CFToggle extends BaseElement {
     if (event.key === " " || event.key === "Enter") {
       event.preventDefault();
       this.pressed = !this.pressed;
+      this.emit("cf-change", { pressed: this.pressed });
     }
   };
 
