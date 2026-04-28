@@ -17,6 +17,8 @@ describe("CFCodeEditor", () => {
     expect(element.placeholder).toBe("");
     expect(element.timingStrategy).toBe("debounce");
     expect(element.timingDelay).toBe(500);
+    expect(element.autofocus).toBe(false);
+    expect(element.cursorPosition).toBe("start");
   });
 
   it("should have MimeType constants", () => {
@@ -42,5 +44,14 @@ describe("CFCodeEditor", () => {
     expect(element.readonly).toBe(true);
     expect(element.timingStrategy).toBe("immediate");
     expect(element.timingDelay).toBe(100);
+  });
+
+  it("should allow setting autofocus and cursorPosition", () => {
+    const element = new CFCodeEditor();
+    element.autofocus = true;
+    element.cursorPosition = "end";
+
+    expect(element.autofocus).toBe(true);
+    expect(element.cursorPosition).toBe("end");
   });
 });
