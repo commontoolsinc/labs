@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import { connect, type Transport } from "../v2/client.ts";
-import { decodeMemoryV2Boundary } from "../v2.ts";
+import { decodeMemoryV2Boundary, encodeMemoryV2Boundary } from "../v2.ts";
 
 const SPACE = "did:key:z6Mk-restore-flush-test";
 
@@ -106,7 +106,7 @@ class ReconnectableTransport implements Transport {
         const localSeq = typeof requestId === "string"
           ? this.#transactRequestLocalSeqById.get(requestId)
           : undefined;
-        const payload = JSON.stringify(message);
+        const payload = encodeMemoryV2Boundary(message);
         if (
           this.#delayTransacts &&
           typeof requestId === "string" &&
