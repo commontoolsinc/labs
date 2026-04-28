@@ -800,7 +800,28 @@ export class CFInput extends BaseElement {
           "aria-invalid",
           String(this.error || !nativeValid),
         );
+        this._syncValueAttributes();
         this._syncInternals();
+      }
+
+      /** Sync aria-valuemin/max/now for spinbutton and slider roles. */
+      private _syncValueAttributes() {
+        const role = this._lastGeneratedRole;
+        if (role === "spinbutton" || role === "slider") {
+          const min = this.min || (this.input?.min ?? "");
+          const max = this.max || (this.input?.max ?? "");
+          const val = this.input?.value ?? this.getValue();
+          if (min) this.setAttribute("aria-valuemin", min);
+          else this.removeAttribute("aria-valuemin");
+          if (max) this.setAttribute("aria-valuemax", max);
+          else this.removeAttribute("aria-valuemax");
+          if (val) this.setAttribute("aria-valuenow", val);
+          else this.removeAttribute("aria-valuenow");
+        } else {
+          this.removeAttribute("aria-valuemin");
+          this.removeAttribute("aria-valuemax");
+          this.removeAttribute("aria-valuenow");
+        }
       }
 
       /** Sync value and validity to ElementInternals for native form participation. */

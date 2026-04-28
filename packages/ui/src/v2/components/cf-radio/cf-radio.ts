@@ -167,6 +167,12 @@ export class CFRadio extends BaseElement {
       super.connectedCallback();
       this._updateAriaAttributes();
 
+      // Host owns role="radio" and focus — handle interaction here so
+      // keyboard (Space) and click both work regardless of where in the
+      // component they land.
+      this.addEventListener("click", this._handleClick);
+      this.addEventListener("keydown", this._handleKeydown);
+
       // Check if within a radio group
       const radioGroup = this.closest("cf-radio-group");
       if (radioGroup) {
@@ -176,6 +182,12 @@ export class CFRadio extends BaseElement {
           this.name = groupName;
         }
       }
+    }
+
+    override disconnectedCallback() {
+      super.disconnectedCallback();
+      this.removeEventListener("click", this._handleClick);
+      this.removeEventListener("keydown", this._handleKeydown);
     }
 
     override updated(
@@ -206,11 +218,11 @@ export class CFRadio extends BaseElement {
         <div
           class="${classString}"
           part="radio"
-          @click="${this._handleClick}"
-          @keydown="${this._handleKeydown}"
+          aria-hidden="true"
         >
           <span class="indicator" part="indicator"></span>
         </div>
+        <slot></slot>
         <input
           type="radio"
           class="sr-only"
