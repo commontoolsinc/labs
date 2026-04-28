@@ -9,6 +9,13 @@ import {
 
 type PartialCallback = (text: string) => void;
 
+export class LLMStreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LLMStreamError";
+  }
+}
+
 /**
  * Detect if we're running in a test environment.
  * Checks CI=true (CI runners) and ENV=test (set by deno task test).
@@ -617,8 +624,11 @@ export class LLMClient {
               } else if (event.type === "finish") {
                 // Stream finished
                 break;
+              } else if (event.type === "error") {
+                throw new LLMStreamError(event.error ?? "LLM stream error");
               }
             } catch (error) {
+              if (error instanceof LLMStreamError) throw error;
               console.error("Failed to parse JSON line:", line, error);
             }
           }
@@ -633,8 +643,11 @@ export class LLMClient {
         if (typeof event === "string") {
           text += event;
           if (callback) callback(text);
+        } else if (event.type === "error") {
+          throw new LLMStreamError(event.error ?? "LLM stream error");
         }
       } catch (error) {
+        if (error instanceof LLMStreamError) throw error;
         console.error("Failed to parse final JSON line:", buffer, error);
       }
     }
