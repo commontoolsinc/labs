@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
@@ -55,6 +55,12 @@ export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
  */
 
 export class CFTextarea extends BaseElement {
+  static formAssociated = true;
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override properties = {
     placeholder: { type: String },
     value: { type: String },
@@ -328,6 +334,9 @@ export class CFTextarea extends BaseElement {
         @property({ attribute: false })
         accessor theme: CFTheme = defaultTheme;
 
+        #internals: ElementInternals;
+        private _generatedAriaLabel: string | null = null;
+
         // Cache + initial setup
         private _textarea: HTMLTextAreaElement | null = null;
         private _cellController = createStringCellController(this, {
@@ -348,6 +357,7 @@ export class CFTextarea extends BaseElement {
 
         constructor() {
           super();
+          this.#internals = this.attachInternals();
           this.placeholder = "";
           this.value = "";
           this.disabled = false;
@@ -419,6 +429,22 @@ export class CFTextarea extends BaseElement {
             this._minHeight = this.textarea.scrollHeight;
             this.adjustHeight();
           }
+
+          this._updateAccessibilityAttributes();
+        }
+
+        override connectedCallback() {
+          // Set host attributes before super triggers rendering.
+          // Cannot be in the constructor — the custom element spec forbids
+          // setAttribute during construction.
+          if (!this.hasAttribute("role")) {
+            this.setAttribute("role", "textbox");
+          }
+          if (!this.hasAttribute("exportparts")) {
+            this.setAttribute("exportparts", "textarea");
+          }
+          super.connectedCallback();
+          this._updateAccessibilityAttributes();
         }
 
         override disconnectedCallback() {
@@ -475,6 +501,17 @@ export class CFTextarea extends BaseElement {
               this.resize = "vertical";
             }
           }
+
+          if (
+            changedProperties.has("disabled") ||
+            changedProperties.has("readonly") ||
+            changedProperties.has("required") ||
+            changedProperties.has("error") ||
+            changedProperties.has("placeholder") ||
+            changedProperties.has("value")
+          ) {
+            this._updateAccessibilityAttributes();
+          }
         }
 
         override render() {
@@ -482,6 +519,10 @@ export class CFTextarea extends BaseElement {
             ? "resize: none;"
             : `resize: ${this.resize};`;
 
+          // The host carries the ARIA role and tabindex. delegatesFocus: true
+          // routes focus to the inner <textarea>, so aria-hidden must NOT be set
+          // on it — browsers refuse to apply aria-hidden on focused elements.
+          // tabindex="-1" keeps it out of the tab sequence (the host is the tab stop).
           return html`
             <textarea
               class="${this.error ? "error" : ""}"
@@ -505,6 +546,7 @@ export class CFTextarea extends BaseElement {
               @blur="${this._handleBlur}"
               @keydown="${this._handleKeyDown}"
               part="textarea"
+              tabindex="-1"
             ></textarea>
           `;
         }
@@ -575,6 +617,65 @@ export class CFTextarea extends BaseElement {
           }
         }
 
+        private _updateAccessibilityAttributes() {
+          // Respect author-provided role; only set our generated role when none exists
+          if (!this.hasAttribute("role")) {
+            this.setAttribute("role", "textbox");
+          }
+          if (!this.hasAttribute("exportparts")) {
+            this.setAttribute("exportparts", "textarea");
+          }
+          this.tabIndex = this.disabled ? -1 : 0;
+          this.setAttribute("aria-disabled", String(this.disabled));
+          this.setAttribute("aria-readonly", String(this.readonly));
+          this.setAttribute("aria-required", String(this.required));
+          this._updateGeneratedAriaLabel();
+          // Read .validity.valid directly to avoid firing the 'invalid' event.
+          const nativeValid = this.textarea?.validity?.valid ?? true;
+          this.setAttribute(
+            "aria-invalid",
+            String(this.error || !nativeValid),
+          );
+          this._syncInternals();
+        }
+
+        /** Sync value and validity to ElementInternals for native form participation. */
+        private _syncInternals() {
+          this.#internals.setFormValue(this.getValue());
+          if (this.textarea) {
+            this.#internals.setValidity(
+              this.textarea.validity,
+              this.textarea.validationMessage,
+              this.textarea,
+            );
+          }
+        }
+
+        private _updateGeneratedAriaLabel() {
+          const ariaLabel = this.getAttribute("aria-label");
+          const hasAuthorProvidedName = this.hasAttribute("aria-labelledby") ||
+            (ariaLabel !== null && ariaLabel !== this._generatedAriaLabel);
+
+          if (hasAuthorProvidedName) {
+            this._generatedAriaLabel = null;
+            return;
+          }
+
+          if (this.placeholder) {
+            this.setAttribute("aria-label", this.placeholder);
+            this._generatedAriaLabel = this.placeholder;
+            return;
+          }
+
+          if (
+            this._generatedAriaLabel !== null &&
+            ariaLabel === this._generatedAriaLabel
+          ) {
+            this.removeAttribute("aria-label");
+            this._generatedAriaLabel = null;
+          }
+        }
+
         /**
          * Adjust height for auto-resize functionality
          */
@@ -593,12 +694,7 @@ export class CFTextarea extends BaseElement {
             `${newHeight}px`;
         }
 
-        /**
-         * Focus the textarea programmatically
-         */
-        override focus(): void {
-          this.textarea?.focus();
-        }
+        // focus() is handled by delegatesFocus on the shadow root.
 
         /**
          * Blur the textarea programmatically

@@ -14,6 +14,21 @@ shadcn/ui design system. All components:
 - Emit custom events prefixed with `cf-`
 - Follow strict security constraints (no external resources, limited events)
 
+## Automation and Accessibility
+
+Interactive `cf-*` components expose semantic roles and ARIA state on the custom
+element host so browser automation agents can find them without piercing shadow
+DOM. Prefer role/name lookups first:
+
+```bash
+agent-browser find role button click --name "Save"
+agent-browser find role textbox fill "Ada" --name "Name"
+```
+
+Use visible text, `aria-label`, an associated label, or a placeholder to give
+controls stable accessible names. Pierce selectors such as `[data-cf-input]`
+remain available as a fallback for older components.
+
 ## Theme System First
 
 When composing a polished UI with `cf-*` components, prefer `cf-theme` for
@@ -45,6 +60,17 @@ Working references:
 <cf-button variant="primary" size="lg">Click Me</cf-button>
 ```
 
+**Accessibility/Automation**:
+
+- Host role: `button`
+- Host state: `aria-disabled`
+- Accessible name: visible button text or `aria-label`
+- Preferred locator:
+
+```bash
+agent-browser find role button click --name "Click Me"
+```
+
 ### 2. cf-input
 
 **Purpose**: Text input field **Tag**: `<cf-input>` **Attributes**:
@@ -69,6 +95,36 @@ Working references:
 
 ```html
 <cf-input type="email" placeholder="Enter email" required></cf-input>
+```
+
+**Accessibility/Automation**:
+
+- Host role: `textbox` (text, email, password, search, tel, url), `spinbutton`
+  (number), or unset (date, time, datetime-local)
+- Host state: `aria-disabled`, `aria-readonly`, `aria-required`, `aria-invalid`
+- Accessible name: associated label, `aria-label`, or placeholder
+- Preferred locators:
+
+```bash
+agent-browser snapshot -i              # → textbox "Email" [ref=e3]
+agent-browser type @e3 "user@example.com"
+```
+
+**`fill()` caveat:** Playwright's `fill()` does not work on `cf-input` or
+`cf-textarea` hosts because they are custom elements, not native `<input>`
+elements. Use `type @ref` in agent-browser, or `pressSequentially()` in
+Playwright:
+
+```bash
+# use type with a ref — not bare type after click
+agent-browser snapshot -i              # → textbox "Email" [ref=e3]
+agent-browser type @e3 "user@example.com"
+```
+
+```typescript
+// Playwright equivalent:
+const input = page.getByRole("textbox", { name: "Email" });
+await input.pressSequentially("user@example.com");
 ```
 
 ### 3. cf-textarea

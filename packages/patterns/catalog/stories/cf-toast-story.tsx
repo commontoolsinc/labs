@@ -76,7 +76,7 @@ export default pattern<ToastStoryInput, ToastStoryOutput>(() => {
             open={showError}
             variant="error"
             duration={0}
-            dismissable
+            dismissible
             oncf-toast-dismiss={action(() => showError.set(false))}
           >
             Connection lost. Retrying...
