@@ -2,6 +2,7 @@ import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
+  decodeMemoryV2Boundary,
   type EntitySnapshot,
   getMemoryV2Flags,
   MEMORY_V2_PROTOCOL,
@@ -391,7 +392,7 @@ class ReconnectableLoopbackTransport implements Transport {
   constructor(private readonly server: Server) {}
 
   async send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as { type?: string };
+    const message = decodeMemoryV2Boundary(payload) as { type?: string };
     await this.connection().receive(payload);
     if (message.type === "session.watch.set") {
       this.watchSetCount++;
@@ -452,7 +453,7 @@ class ScriptedReconnectTransport implements Transport {
       this.connectionCount++;
     }
 
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -539,7 +540,7 @@ class DelayedTransactTransport implements Transport {
   setCloseReceiver(): void {}
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -626,7 +627,7 @@ class AckCountingTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -702,7 +703,7 @@ class HangingAckTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -783,7 +784,7 @@ class ControlledReconnectTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -832,7 +833,7 @@ class CloseOnSessionOpenTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -871,7 +872,7 @@ class CloseOnAppliedCommitTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -1497,7 +1498,7 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
   let receiver = (_payload: string) => {};
   const transport: Transport = {
     send(payload): Promise<void> {
-      const message = JSON.parse(payload) as { type?: string };
+      const message = decodeMemoryV2Boundary(payload) as { type?: string };
       if (message.type === "hello") {
         receiver(JSON.stringify({
           type: "hello.ok",
@@ -1606,7 +1607,7 @@ class DisconnectableAckTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -1741,7 +1742,7 @@ class SessionChangingTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryV2Boundary(payload) as {
       type: string;
       requestId?: string;
       sessionId?: string;
