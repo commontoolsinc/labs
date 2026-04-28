@@ -10,6 +10,7 @@ import {
 import {
   appendHarnessFailureRecord,
   appendHarnessPolicyEvent,
+  appendHarnessSubagentRun,
   appendHarnessToolOutput,
   createHarnessRunState,
   type HarnessRunState,
@@ -37,6 +38,7 @@ import {
 } from "./contracts/policy.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
+import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import {
   createToolResultRef,
   type ToolOutputId,
@@ -53,6 +55,10 @@ import type { ProcessRunner } from "./sandbox/process-runner.ts";
 import type { HarnessSandboxConfig, SandboxRuntime } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
+  type DelegateTaskToolInput,
+  type DelegateTaskToolOutput,
+} from "./contracts/subagent.ts";
+import {
   type ReadFileToolInput,
   type ReadFileToolOutput,
 } from "./tools/read-file.ts";
@@ -66,12 +72,14 @@ export interface BuiltinToolInputMap {
   bash: BashToolInput;
   read_file: ReadFileToolInput;
   write_file: WriteFileToolInput;
+  delegate_task: DelegateTaskToolInput;
 }
 
 export interface BuiltinToolOutputMap {
   bash: BashToolOutput;
   read_file: ReadFileToolOutput;
   write_file: WriteFileToolOutput;
+  delegate_task: DelegateTaskToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -283,6 +291,23 @@ export class CfHarnessEngine {
     return manifestPath ?? this.#runState.runManifestPath;
   }
 
+  nextToolOutputId(toolId: string): ToolOutputId {
+    this.#outputSequence += 1;
+    return `${this.#runState.runId}:${toolId}:${this.#outputSequence}` as ToolOutputId;
+  }
+
+  async recordSubagentRun(
+    subagentRun: HarnessSubagentRunRef,
+  ): Promise<HarnessRunState> {
+    this.#runState = appendHarnessSubagentRun(
+      this.#runState,
+      subagentRun,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
   async terminalizeInterruptedRun(
     signalName: string,
   ): Promise<HarnessRunState> {
@@ -417,51 +442,7 @@ export class CfHarnessEngine {
         this.#createToolContext(),
         input,
       ) as BuiltinToolOutputMap[TToolId];
-      if (!isToolOutputWithId(output)) {
-        throw new Error(`builtin tool did not return an outputId: ${toolId}`);
-      }
-      const artifactPath = await this.artifactStore?.persistToolOutput(
-        toolId,
-        output.outputId as ToolOutputId,
-        output,
-      );
-      const resultRef = createToolResultRef(
-        output.outputId as ToolOutputId,
-        toolId,
-        this.#runState.runId,
-        artifactPath,
-      );
-      const completionTime = this.#now();
-      this.#runState = appendHarnessToolOutput(
-        setHarnessRunStatus(
-          this.#runState,
-          "completed",
-          completionTime,
-          "tool_completed",
-        ),
-        resultRef,
-        completionTime,
-      );
-      const failure = classifyBuiltinToolFailure(
-        toolId,
-        input,
-        output,
-        completionTime,
-        this.#runState.capabilitySnapshot,
-      );
-      if (failure !== undefined) {
-        this.#runState = appendHarnessFailureRecord(
-          this.#runState,
-          failure,
-          completionTime,
-        );
-      }
-      await this.persistRunState();
-      return {
-        output,
-        resultRef,
-        runState: this.getRunState(),
-      };
+      return await this.recordBuiltinToolOutput(toolId, input, output);
     } catch (error) {
       const failureTime = this.#now();
       this.#runState = setHarnessRunStatus(
@@ -484,6 +465,58 @@ export class CfHarnessEngine {
     }
   }
 
+  async recordBuiltinToolOutput<TToolId extends BuiltinToolId>(
+    toolId: TToolId,
+    input: BuiltinToolInputMap[TToolId],
+    output: BuiltinToolOutputMap[TToolId],
+  ): Promise<BuiltinToolInvocationResult<TToolId>> {
+    if (!isToolOutputWithId(output)) {
+      throw new Error(`builtin tool did not return an outputId: ${toolId}`);
+    }
+    const artifactPath = await this.artifactStore?.persistToolOutput(
+      toolId,
+      output.outputId as ToolOutputId,
+      output,
+    );
+    const resultRef = createToolResultRef(
+      output.outputId as ToolOutputId,
+      toolId,
+      this.#runState.runId,
+      artifactPath,
+    );
+    const completionTime = this.#now();
+    this.#runState = appendHarnessToolOutput(
+      setHarnessRunStatus(
+        this.#runState,
+        "completed",
+        completionTime,
+        "tool_completed",
+      ),
+      resultRef,
+      completionTime,
+    );
+    const failure = classifyBuiltinToolFailure(
+      toolId,
+      input,
+      output,
+      completionTime,
+      this.#runState.capabilitySnapshot,
+    );
+    if (failure !== undefined) {
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        failure,
+        completionTime,
+      );
+    }
+    await this.persistRunState();
+    return {
+      output,
+      resultRef,
+      runState: this.getRunState(),
+    };
+  }
+
   #createToolContext() {
     return {
       runId: this.#runState.runId,
@@ -504,8 +537,7 @@ export class CfHarnessEngine {
         );
       },
       nextOutputId: (toolId: string) => {
-        this.#outputSequence += 1;
-        return `${this.#runState.runId}:${toolId}:${this.#outputSequence}` as ToolOutputId;
+        return this.nextToolOutputId(toolId);
       },
     };
   }

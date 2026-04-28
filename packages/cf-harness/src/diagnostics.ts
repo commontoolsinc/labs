@@ -8,6 +8,7 @@ import type {
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { BashToolInput, BashToolOutput } from "./tools/bash.ts";
+import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
 import {
   isStructuredFileToolErrorOutput,
   type StructuredFileToolErrorCode,
@@ -143,6 +144,25 @@ const createEmptyCapabilitySnapshot = (
   ) as Record<HarnessCapabilityCommand, HarnessCapabilityProbe>,
   cfc,
 });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isFailedDelegateTaskOutput = (
+  output: unknown,
+): output is DelegateTaskToolOutput => {
+  if (
+    !isRecord(output) ||
+    output.type !== "cf-harness.delegate-task-output" ||
+    typeof output.outputId !== "string" ||
+    !isRecord(output.subagent)
+  ) {
+    return false;
+  }
+  return output.subagent.status === "failed" &&
+    typeof output.subagent.childRunId === "string" &&
+    typeof output.subagent.summary === "string";
+};
 
 const parseCapabilityProbeOutput = (
   stdout: string,
@@ -448,6 +468,20 @@ export const classifyBuiltinToolFailure = (
     case "read_file":
     case "write_file":
       return classifyStructuredFileToolFailure(toolId, output, at);
+    case "delegate_task": {
+      if (isFailedDelegateTaskOutput(output)) {
+        return createHarnessFailureRecord({
+          kind: "harness_error",
+          source: "tool_output",
+          detail:
+            `subagent ${output.subagent.childRunId} failed: ${output.subagent.summary}`,
+          at,
+          toolId,
+          outputId: output.outputId as ToolOutputId,
+        });
+      }
+      return undefined;
+    }
     default:
       return undefined;
   }
