@@ -45,6 +45,7 @@ import {
   DEFAULT_SUBAGENT_PROFILE,
   type DelegateTaskToolInput,
   type DelegateTaskToolOutput,
+  type HarnessSubagentFailureSummary,
   type HarnessSubagentInputSummary,
   type HarnessSubagentResult,
   type HarnessSubagentRunManifest,
@@ -52,6 +53,7 @@ import {
   MAX_SUBAGENT_MAX_MODEL_TURNS,
 } from "./contracts/subagent.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
+import type { HarnessFailureRecord } from "./diagnostics.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
 
@@ -286,6 +288,59 @@ const promptLoopModelTurnsFromError = (
   return isSafeNonNegativeInteger(modelTurns) ? modelTurns : undefined;
 };
 
+const childRunSequenceFromId = (
+  parentRunId: string,
+  childRunId: string,
+): number | undefined => {
+  const prefix = `${parentRunId}.subagent.`;
+  if (!childRunId.startsWith(prefix)) {
+    return undefined;
+  }
+  const sequenceText = childRunId.slice(prefix.length);
+  if (!/^[1-9]\d*$/.test(sequenceText)) {
+    return undefined;
+  }
+  const sequence = Number(sequenceText);
+  return Number.isSafeInteger(sequence) ? sequence : undefined;
+};
+
+const nextSubagentSequence = (
+  runState: ReturnType<CfHarnessEngine["getRunState"]>,
+): number => {
+  const retainedDelegateOutputs =
+    runState.toolOutputs.filter((ref) =>
+      ref.runId === runState.runId && ref.toolId === "delegate_task"
+    ).length;
+  const retainedChildRunSequence = Math.max(
+    0,
+    ...(runState.subagentRuns ?? []).flatMap((run) => {
+      const sequence = childRunSequenceFromId(
+        runState.runId,
+        run.childRunId,
+      );
+      return sequence === undefined ? [] : [sequence];
+    }),
+  );
+  return Math.max(retainedDelegateOutputs, retainedChildRunSequence) + 1;
+};
+
+const summarizeSubagentFailure = (
+  failure: HarnessFailureRecord,
+): HarnessSubagentFailureSummary => ({
+  type: "cf-harness.subagent-failure-summary",
+  kind: failure.kind,
+  source: failure.source,
+  ...(failure.toolId !== undefined ? { toolId: failure.toolId } : {}),
+  ...(failure.toolCallId !== undefined
+    ? { toolCallId: failure.toolCallId }
+    : {}),
+  ...(failure.outputId !== undefined ? { outputId: failure.outputId } : {}),
+  ...(failure.commandName !== undefined
+    ? { commandName: failure.commandName }
+    : {}),
+  ...(failure.exitCode !== undefined ? { exitCode: failure.exitCode } : {}),
+});
+
 const summarizeToolInput = async (
   toolId: BuiltinToolId,
   input: Record<string, unknown>,
@@ -484,7 +539,7 @@ const summarizeSubagentRunState = (
     },
     failureCount: runState.failureRecords?.length ?? 0,
     ...(runState.primaryFailure !== undefined
-      ? { primaryFailure: runState.primaryFailure }
+      ? { primaryFailure: summarizeSubagentFailure(runState.primaryFailure) }
       : {}),
   };
 };
@@ -994,7 +1049,7 @@ export class CfHarnessPromptLoop {
     const maxModelTurns = delegateInput.maxModelTurns ??
       DEFAULT_SUBAGENT_MAX_MODEL_TURNS;
     const parentRunState = this.engine.getRunState();
-    const subagentSequence = (parentRunState.subagentRuns?.length ?? 0) + 1;
+    const subagentSequence = nextSubagentSequence(parentRunState);
     const childRunId = `${parentRunState.runId}.subagent.${subagentSequence}`;
     const childEngine = new CfHarnessEngine({
       runId: childRunId,

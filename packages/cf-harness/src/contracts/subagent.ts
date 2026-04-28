@@ -38,6 +38,20 @@ export interface HarnessSubagentRunManifest {
   inputSummary: HarnessSubagentInputSummary;
 }
 
+export interface HarnessSubagentFailureSummary extends
+  Pick<
+    HarnessFailureRecord,
+    | "kind"
+    | "source"
+    | "toolId"
+    | "toolCallId"
+    | "outputId"
+    | "commandName"
+    | "exitCode"
+  > {
+  type: "cf-harness.subagent-failure-summary";
+}
+
 export interface HarnessSubagentRunStateSummary {
   status: string;
   cfcEnforcementMode: CfcEnforcementMode;
@@ -54,7 +68,7 @@ export interface HarnessSubagentRunStateSummary {
     denied: number;
   };
   failureCount: number;
-  primaryFailure?: HarnessFailureRecord;
+  primaryFailure?: HarnessSubagentFailureSummary;
 }
 
 export interface HarnessSubagentResult {

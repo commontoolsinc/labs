@@ -919,6 +919,116 @@ Deno.test("CfHarnessPromptLoop continues subagent ids from retained run state", 
   );
 });
 
+Deno.test("CfHarnessPromptLoop avoids reusing child ids when only delegate output was retained", async () => {
+  const priorOutputId = createToolOutputId(
+    "run-resumed-delegate-output-only",
+    "delegate_task",
+    1,
+  );
+  const resumedState: HarnessRunState = {
+    runId: "run-resumed-delegate-output-only",
+    status: "completed",
+    createdAt: "2026-04-18T00:00:00.000Z",
+    updatedAt: "2026-04-18T00:00:03.000Z",
+    endedAt: "2026-04-18T00:00:03.000Z",
+    terminalReason: "assistant_completed",
+    cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
+    model: "gpt-5.4",
+    policyEvents: [],
+    toolOutputs: [{
+      type: "cf-harness.tool-result-ref",
+      outputId: priorOutputId,
+      toolId: "delegate_task",
+      runId: "run-resumed-delegate-output-only",
+    }],
+    failureRecords: [],
+  };
+  let requestCount = 0;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runState: resumedState,
+    }),
+    fetchFn: () => {
+      requestCount += 1;
+      const payload = requestCount === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-resumed-output-only",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Inspect after partial resume.",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestCount === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Child after partial resume completed.",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent after partial resume completed.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate after a partial resume.",
+  });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    outputId: string;
+    subagent: { childRunId: string };
+  };
+
+  assertEquals(
+    output.outputId,
+    createToolOutputId(
+      "run-resumed-delegate-output-only",
+      "delegate_task",
+      2,
+    ),
+  );
+  assertEquals(
+    output.subagent.childRunId,
+    "run-resumed-delegate-output-only.subagent.2",
+  );
+  assertEquals(result.runState.subagentRuns?.length, 1);
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.childRunId,
+    "run-resumed-delegate-output-only.subagent.2",
+  );
+});
+
 Deno.test("CfHarnessPromptLoop denies delegate_task without direct-command authorization", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
