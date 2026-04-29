@@ -8,6 +8,8 @@ import {
   resolve,
 } from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
+import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
+import type { HarnessPolicyTrace } from "./contracts/policy-trace.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
@@ -65,6 +67,12 @@ export interface HarnessArtifactStore {
   persistCapabilitySnapshot(
     snapshot: HarnessCapabilitySnapshot,
   ): Promise<string>;
+  persistCfcPolicySnapshot(
+    snapshot: HarnessCfcPolicySnapshot,
+  ): Promise<string>;
+  persistPolicyTrace?(
+    trace: HarnessPolicyTrace,
+  ): Promise<string>;
   persistRunReport(
     report: HarnessRunReport,
   ): Promise<string>;
@@ -115,6 +123,24 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     return path;
   }
 
+  async persistCfcPolicySnapshot(
+    snapshot: HarnessCfcPolicySnapshot,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "policy-snapshot.json");
+    await writeJsonFile(path, snapshot);
+    return path;
+  }
+
+  async persistPolicyTrace(
+    trace: HarnessPolicyTrace,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "policy-trace.json");
+    await writeJsonFile(path, trace);
+    return path;
+  }
+
   async persistRunReport(
     report: HarnessRunReport,
   ): Promise<string> {
@@ -162,6 +188,9 @@ const normalizeHarnessRunState = (
       : createHarnessPolicyEvent(event)
   ),
   toolOutputs: [...(state.toolOutputs ?? [])],
+  ...(state.policyDecisions !== undefined
+    ? { policyDecisions: [...state.policyDecisions] }
+    : {}),
   ...(state.subagentRuns !== undefined
     ? { subagentRuns: [...state.subagentRuns] }
     : {}),

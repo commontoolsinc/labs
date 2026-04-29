@@ -5,8 +5,8 @@ See `docs/specs/verifiable-execution/README.md` for navigation.
 ## Conventions
 
 - **Normative language:** “MUST”, “SHOULD”, etc are used in the RFC 2119 sense.
-- **Content addressing:** Hashes and references are computed via `merkle-reference`
-  (see `packages/memory/HASHING.md` for implementation details and canonicalization behavior).
+- **Content addressing:** Hashes and references are computed via this project's
+  `hashOf()` function.
 - **Types:** Where practical, names and shapes align with `packages/memory/interface.ts`.
 
 ---

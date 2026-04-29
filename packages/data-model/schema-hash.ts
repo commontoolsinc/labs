@@ -3,7 +3,7 @@
  *
  * Provides `hashSchema` and `hashSchemaItem` — deterministic string
  * hashes for schemas and general schema-related items. Dispatches between
- * legacy `stableStringify` (schema-hash-legacy.ts) and canonical hashing
+ * legacy `stableStringify` (schema-hash-legacy.ts) and modern hashing
  * (schema-hash-modern.ts) based on a runtime flag.
  *
  * Also provides `internSchema` and `findInternedSchema` for schema

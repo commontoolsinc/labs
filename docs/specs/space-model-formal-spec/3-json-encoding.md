@@ -114,8 +114,8 @@ round-trip correctly.
 //   - `-1n` → 0xFF             → "_w"
 //   - `128n` → 0x00 0x80       → "AIA"  (leading 0x00 needed: 0x80 alone would decode as -128)
 //   - `-128n` → 0x80           → "gA"
-// This matches the canonical hash byte format (2-canonical-hash-byte-format.md),
-// which already uses two's complement big-endian for BigInt payloads.
+// This matches the hash byte format (2-hash-byte-format.md), which already
+// uses two's complement big-endian for BigInt payloads.
 ```
 
 > **Deserialization validation.** Deserialization cannot assume type safety from

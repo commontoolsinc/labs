@@ -1,7 +1,7 @@
 /**
  * Shared BigInt two's-complement big-endian encoding, and base64url helpers for
- * the JSON wire format. Used by both `canonical-hash.ts` (byte-level hashing)
- * and `type-handlers.ts` (JSON serialization).
+ * the JSON wire format. Used by both `value-hash-modern.ts` (byte-level hashing)
+ * and `json-type-handlers.ts` (JSON serialization).
  *
  * The two's-complement encoding is minimal: no unnecessary leading 0x00 bytes
  * for positive values, no unnecessary leading 0xFF bytes for negative values,
@@ -26,7 +26,7 @@ function hexToNibble(c: number): number {
  * Shared 8-byte scratch buffer for the DataView fast path. A single
  * `setBigUint64()` call writes all 8 bytes at once, avoiding hex string
  * processing for values that fit in 64 bits. Same shared-buffer pattern as
- * `f64Buf`/`f64View`/`f64Bytes` in `canonical-hash.ts`.
+ * `f64Buf`/`f64View`/`f64Bytes` in `value-hash-modern.ts`.
  */
 const dv64Buf = new ArrayBuffer(8);
 const dv64View = new DataView(dv64Buf);
@@ -34,7 +34,7 @@ const dv64Bytes = new Uint8Array(dv64Buf);
 
 /**
  * Convert a bigint to its minimal two's-complement big-endian byte
- * representation. The encoding is the same one used by the canonical hash
+ * representation. The encoding is the same one used by the hash
  * byte-level spec (Section 3.7).
  *
  * Uses a hybrid strategy: values that fit in 64 bits (the common case) are

@@ -27,9 +27,8 @@ export const unclaimed = (
 ): Unclaimed => ({ the, of });
 
 /**
- * Cache of frozen `{ the, of }` objects keyed by `"${the}\0${of}"`. Reusing
- * the same frozen object identity lets downstream caches (WeakMap in
- * `modernHash()`, merkle-reference's internal WeakMap) hit on every
+ * Cache of frozen `{ the, of }` objects keyed by `"${the}\0${of}"`. Reusing the
+ * same frozen object identity lets the downstream hashing cache hit on every
  * repeat instead of re-hashing a fresh object each time.
  */
 const frozenUnclaimedCache = new Map<

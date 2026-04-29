@@ -1,4 +1,4 @@
-import { refer } from "merkle-reference/json";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -37,7 +37,7 @@ function makeDoc(
     the: type,
     of: entity,
     is: { value },
-    cause: refer({ the: type, of: entity }),
+    cause: hashOf({ the: type, of: entity }),
     since: 1,
   };
   store.set(`${revision.of}/${revision.the}`, revision);

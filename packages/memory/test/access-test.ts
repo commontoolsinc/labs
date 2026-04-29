@@ -1,28 +1,15 @@
 import { assert, assertEquals, assertMatch } from "@std/assert";
-import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
 import { type DID } from "@commonfabric/identity";
-import {
-  hashOf,
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Invocation } from "../interface.ts";
 
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
 describe("access", () => {
-  // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // hashOf() path regardless of what the ambient default is.
-  beforeAll(() => {
-    setModernHashConfig(false);
-  });
-  afterAll(() => {
-    resetModernHashConfig();
-  });
-
   it("signer.did()", () => {
     assertEquals(
       alice.did(),

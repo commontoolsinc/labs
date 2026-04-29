@@ -52,7 +52,6 @@ const initializeRuntime = async () => {
       experimental: {
         modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
         unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
-        modernHash: env.EXPERIMENTAL_MODERN_HASH,
         modernSchemaHash: env.EXPERIMENTAL_MODERN_SCHEMA_HASH,
       },
       cachedCompiler,

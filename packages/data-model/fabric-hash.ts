@@ -54,7 +54,7 @@ export class FabricHash extends FabricPrimitive {
   /**
    * CID-link-style accessor, returns the raw hash bytes. Present to satisfy
    * the `EntityId` structural type (`{ "/": string | Uint8Array }`).
-   * TODO(danfuzz): Remove after canonical hashing flag graduates.
+   * TODO(danfuzz): Remove now that legacy hashing is gone.
    */
   get "/"(): Uint8Array {
     return new Uint8Array(this.#hash);

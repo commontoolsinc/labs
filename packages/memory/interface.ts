@@ -779,9 +779,9 @@ export type ACL = {
 export type URI = `${string}:${string}`;
 // Mime type or Media Type -- often called 'the'
 export type MIME = `${string}/${string}`;
-// TODO(danfuzz): Clean up after canonical hashing flag graduates. The `fid1:`
-// branch was added for FabricHash; once the experiment is permanent,
-// the `b`-prefixed format can be removed.
+// TODO(danfuzz): The `b`-prefixed (legacy merkle-reference) format is no
+// longer produced; once existing data has been migrated, this branch can be
+// removed.
 export type CauseString = `b${string}` | `fid1:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<

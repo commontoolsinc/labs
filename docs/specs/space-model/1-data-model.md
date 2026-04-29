@@ -185,9 +185,9 @@ equally well.
 
 ## Proposed Directions
 
-### Simplified Canonical Hashing
+### Simplified Hashing
 
-Replace `merkle-reference` with a simpler canonical hashing approach:
+Replace `merkle-reference` with a simpler hashing approach:
 - Traverse the natural data structure directly (no intermediate tree)
 - Sort object keys, preserve array order
 - Hash type tags + content in a single pass
@@ -206,14 +206,14 @@ intermediate representation.
 #### Relationship to Late Serialization
 
 This proposal pairs with [Late Serialization](#late-serialization-rich-types-within-the-runtime):
-if rich types flow through the runtime, canonical hashing should operate on
-those types directly (via their deconstructed state for `FabricInstance`s),
-not on JSON-encoded forms. The hash becomes encoding-independent — the same
+if rich types flow through the runtime, hashing should operate on those
+types directly (via their deconstructed state for `FabricInstance`s), not
+on JSON-encoded forms. The hash becomes encoding-independent — the same
 identity whether later serialized to JSON, CBOR, or Automerge.
 
 #### Open Questions
 
-- What is the exact specification for canonical hashing?
+- What is the exact specification for hashing?
 - How should each type be tagged? (null, bool, int, float, string, bytes, array, object, references)
 - How do special object shapes (references, streams, errors) participate?
 - What is the migration path from current CID-based identifiers?
@@ -490,10 +490,10 @@ The `deserialize` function needs runtime context to reconstitute rich types
 - **Better tooling**: Debuggers show actual Cells, not JSON blobs
 - **Extensible**: New fabric types only need to implement the protocol
 
-#### Relationship to Canonical Hashing
+#### Relationship to Hashing
 
-This proposal pairs with [Simplified Canonical Hashing](#simplified-canonical-hashing):
-canonical hashes can be computed over rich types directly, using deconstructed
+This proposal pairs with [Simplified Hashing](#simplified-hashing):
+hashes can be computed over rich types directly, using deconstructed
 state for `FabricInstance`s and type-specific handling for built-in JS types.
 This makes identity hashing independent of any particular wire encoding.
 

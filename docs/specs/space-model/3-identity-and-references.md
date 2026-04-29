@@ -103,10 +103,10 @@ This is the form used for:
 
 ## Proposed Directions
 
-### Simplified Canonical Hashing
+### Simplified Hashing
 
-See [Data Model](./1-data-model.md#simplified-canonical-hashing) for the
-proposal to simplify content addressing.
+See [Data Model](./1-data-model.md#simplified-hashing) for the proposal to
+simplify content addressing.
 
 ### Legacy Format Deprecation
 

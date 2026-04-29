@@ -20,6 +20,11 @@ import {
   type ObservationDenied,
 } from "./contracts/observation.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import {
+  createHarnessCfcPolicySnapshot,
+  type HarnessParentToolAllowance,
+  type HarnessPromptSlotBindingSource,
+} from "./contracts/cfc-policy-snapshot.ts";
 import type {
   HarnessAssistantTranscriptMessage,
   HarnessToolCall,
@@ -33,6 +38,10 @@ import type {
   HarnessToolDescriptor,
 } from "./contracts/tool-descriptor.ts";
 import type { HarnessToolInputSummary } from "./contracts/policy.ts";
+import {
+  createHarnessPolicyTrace,
+  type HarnessPolicyDecisionReasonCode,
+} from "./contracts/policy-trace.ts";
 import {
   createHarnessRunReport,
   type HarnessRunTimelineEntryInput,
@@ -223,6 +232,9 @@ const summarizeSensitiveText = async (
     digest: await sha256Digest(bytes),
   };
 };
+
+const digestJsonValue = async (input: unknown): Promise<string> =>
+  await sha256Digest(textBytes(JSON.stringify(input)));
 
 const isSafeNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -609,6 +621,7 @@ const createAssistantTranscriptMessage = (
 
 interface ToolPolicyDecision {
   allowed: boolean;
+  reasonCodes: readonly HarnessPolicyDecisionReasonCode[];
   warningDetail?: string;
   denial?: ObservationDenied;
 }
@@ -636,15 +649,31 @@ const evaluateToolPolicy = (
       path: typeof input?.path === "string" ? input.path : "unknown",
       mode: input?.mode === "append" ? "append" : "replace",
     });
+    const writeReasonCode: HarnessPolicyDecisionReasonCode =
+      cfcEnforcementMode === "disabled"
+        ? "write_file_disabled"
+        : cfcEnforcementMode === "observe"
+        ? directCommand
+          ? "write_file_observe_direct_command"
+          : "write_file_observe_requires_direct_command"
+        : cfcEnforcementMode === "enforce-explicit"
+        ? directCommand
+          ? "write_file_enforce_explicit_direct_command"
+          : "write_file_enforce_explicit_requires_direct_command"
+        : directCommand
+        ? "write_file_enforce_strict_direct_command"
+        : "write_file_enforce_strict_requires_direct_command";
     return decision.allowed
       ? {
         allowed: true,
+        reasonCodes: [writeReasonCode],
         ...(decision.warningDetail !== undefined
           ? { warningDetail: decision.warningDetail }
           : {}),
       }
       : {
         allowed: false,
+        reasonCodes: [writeReasonCode],
         denial: makeObservationDenied("not-authorized", {
           detail: decision.denialDetail ?? "write_file was denied",
         }),
@@ -652,22 +681,38 @@ const evaluateToolPolicy = (
   }
   switch (cfcEnforcementMode) {
     case "disabled":
-      return { allowed: true };
+      return { allowed: true, reasonCodes: ["cfc_disabled"] };
     case "observe":
       if (!directCommand && descriptor.effectClass !== "read") {
         return {
           allowed: true,
+          reasonCodes: ["cfc_observe_requires_direct_command"],
           warningDetail:
             `${descriptor.toolId} would require direct-command authorization in enforce modes`,
         };
       }
-      return { allowed: true };
+      return {
+        allowed: true,
+        reasonCodes: [
+          descriptor.effectClass === "read"
+            ? "cfc_observe_read"
+            : "cfc_observe_direct_command",
+        ],
+      };
     case "enforce-explicit":
       if (descriptor.effectClass === "read" || directCommand) {
-        return { allowed: true };
+        return {
+          allowed: true,
+          reasonCodes: [
+            descriptor.effectClass === "read"
+              ? "cfc_enforce_explicit_read"
+              : "cfc_enforce_explicit_direct_command",
+          ],
+        };
       }
       return {
         allowed: false,
+        reasonCodes: ["cfc_enforce_explicit_requires_direct_command"],
         denial: makeObservationDenied("not-authorized", {
           detail:
             `${descriptor.toolId} requires direct-command authorization in enforce-explicit`,
@@ -675,10 +720,14 @@ const evaluateToolPolicy = (
       };
     case "enforce-strict":
       if (directCommand) {
-        return { allowed: true };
+        return {
+          allowed: true,
+          reasonCodes: ["cfc_enforce_strict_direct_command"],
+        };
       }
       return {
         allowed: false,
+        reasonCodes: ["cfc_enforce_strict_requires_direct_command"],
         denial: makeObservationDenied("not-authorized", {
           detail:
             `${descriptor.toolId} requires direct-command authorization in enforce-strict`,
@@ -692,6 +741,7 @@ export class CfHarnessPromptLoop {
   readonly gatewayClient: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
   readonly #allowedToolIds: ReadonlySet<BuiltinToolId>;
+  readonly #parentToolAllowanceMode: HarnessParentToolAllowance;
   readonly #allowedSubagentProfiles: ReadonlySet<HarnessSubagentProfile>;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
@@ -705,6 +755,9 @@ export class CfHarnessPromptLoop {
         fetchFn: options.fetchFn,
       });
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
+    this.#parentToolAllowanceMode = options.allowedToolIds === undefined
+      ? "all-builtins"
+      : "restricted";
     this.#allowedToolIds = new Set(
       options.allowedToolIds ?? DEFAULT_PROMPT_LOOP_TOOL_IDS,
     );
@@ -713,6 +766,57 @@ export class CfHarnessPromptLoop {
         (options.allowedToolIds === undefined
           ? [DEFAULT_SUBAGENT_PROFILE]
           : []),
+    );
+  }
+
+  #parentToolAllowance(): HarnessParentToolAllowance {
+    return this.#parentToolAllowanceMode;
+  }
+
+  #allowedToolIdsForSnapshot(): readonly BuiltinToolId[] {
+    return this.#allowedToolIds === undefined
+      ? BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId)
+      : [...this.#allowedToolIds];
+  }
+
+  #allowedSubagentProfilesForSnapshot(): readonly HarnessSubagentProfile[] {
+    return [...this.#allowedSubagentProfiles];
+  }
+
+  async #persistCfcPolicySnapshot(
+    promptSlotBinding: PromptSlotBinding | undefined,
+    promptSlotBindingSource: HarnessPromptSlotBindingSource,
+  ): Promise<void> {
+    const runState = this.engine.getRunState();
+    const cfc = runState.capabilitySnapshot?.cfc;
+    const allowedSubagentProfiles = this.#allowedSubagentProfilesForSnapshot();
+    await this.engine.persistCfcPolicySnapshot(
+      createHarnessCfcPolicySnapshot({
+        runId: runState.runId,
+        generatedAt: runState.updatedAt,
+        cfcEnforcementMode: runState.cfcEnforcementMode,
+        cfcEnforcementModeSource: this.engine.config.cfcEnforcementModeSource,
+        runManifest: runState.runManifest,
+        runManifestPath: runState.runManifestPath,
+        promptSlotBinding,
+        promptSlotBindingSource,
+        parentToolAllowance: this.#parentToolAllowance(),
+        allowedToolIds: this.#allowedToolIdsForSnapshot(),
+        allowedSubagentProfiles,
+        subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
+          getHarnessSubagentProfileConfig(profile)
+        ),
+        ...(cfc?.absenceBehavior !== undefined
+          ? { absenceBehavior: cfc.absenceBehavior }
+          : {}),
+        ...(cfc?.substrateStatus !== undefined
+          ? { substrateStatus: cfc.substrateStatus }
+          : {}),
+        ...(cfc?.sandbox !== undefined ? { sandbox: cfc.sandbox } : {}),
+        ...(cfc?.protectedXattrs !== undefined
+          ? { protectedXattrs: cfc.protectedXattrs }
+          : {}),
+      }),
     );
   }
 
@@ -739,6 +843,12 @@ export class CfHarnessPromptLoop {
     const initialRunState = this.engine.getRunState();
     const model = options.model ?? initialRunState.model ??
       this.engine.config.model;
+    const promptSlotBindingSource: HarnessPromptSlotBindingSource =
+      options.promptSlotBinding !== undefined
+        ? "run-options"
+        : initialRunState.promptSlotBinding !== undefined
+        ? "run-state"
+        : "absent";
     const promptSlotBinding = options.promptSlotBinding ??
       initialRunState.promptSlotBinding;
     if (model === undefined) {
@@ -751,9 +861,28 @@ export class CfHarnessPromptLoop {
     const toolActivity: HarnessToolActivity[] = [];
     const reportTimeline: HarnessRunTimelineEntryInput[] = [];
     let modelTurns = 0;
+    const buildPolicyTrace = async () => {
+      const runState = this.engine.getRunState();
+      const cfcPolicySnapshotDigest = runState.cfcPolicySnapshot === undefined
+        ? undefined
+        : await digestJsonValue(runState.cfcPolicySnapshot);
+      return createHarnessPolicyTrace({
+        runId: runState.runId,
+        generatedAt: runState.updatedAt,
+        cfcEnforcementMode: runState.cfcEnforcementMode,
+        ...(runState.cfcPolicySnapshotPath !== undefined
+          ? { cfcPolicySnapshotPath: runState.cfcPolicySnapshotPath }
+          : {}),
+        ...(cfcPolicySnapshotDigest !== undefined
+          ? { cfcPolicySnapshotDigest }
+          : {}),
+        decisions: runState.policyDecisions ?? [],
+      });
+    };
     const persistRunReport = async (
       finalAssistantText?: string,
     ): Promise<void> => {
+      await this.engine.persistPolicyTrace(await buildPolicyTrace());
       await this.engine.persistRunReport(
         createHarnessRunReport({
           runState: this.engine.getRunState(),
@@ -770,6 +899,10 @@ export class CfHarnessPromptLoop {
     if (options.promptSlotBinding !== undefined) {
       this.engine.setPromptSlotBinding(options.promptSlotBinding);
     }
+    await this.#persistCfcPolicySnapshot(
+      promptSlotBinding,
+      promptSlotBindingSource,
+    );
     await this.engine.persistRunState();
     await this.engine.persistTranscript(transcript);
     const initialTranscriptAt = this.engine.getRunState().updatedAt;
@@ -953,6 +1086,23 @@ export class CfHarnessPromptLoop {
           : {}),
         ...optionalPolicyEventIndexes(policyEventIndexes),
       });
+      await this.engine.recordPolicyDecision({
+        toolActivitySequence: sequence,
+        toolCallId: toolCall.id,
+        toolId: toolCall.function.name,
+        effectClass: tool.descriptor.effectClass,
+        cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
+        decision: "denied",
+        reasonCodes: ["tool_not_allowed"],
+        detail: denial.detail ?? `${toolCall.function.name} is not allowed`,
+        ...(promptSlotBinding !== undefined
+          ? { promptSlot: promptSlotBinding }
+          : {}),
+        ...(deniedToolInputSummary !== undefined
+          ? { toolInputSummary: deniedToolInputSummary }
+          : {}),
+        ...optionalPolicyEventIndexes(policyEventIndexes),
+      });
       return {
         role: "tool",
         toolCallId: toolCall.id,
@@ -970,6 +1120,8 @@ export class CfHarnessPromptLoop {
       input,
     );
     let policyDecision: HarnessToolPolicyDecision = "allowed";
+    const policyDecisionReasonCodes = [...decision.reasonCodes];
+    let policyDecisionDetail: string | undefined;
     if (decision.warningDetail !== undefined) {
       await recordPolicyEvent({
         severity: "warning",
@@ -983,6 +1135,7 @@ export class CfHarnessPromptLoop {
         detail: decision.warningDetail,
       });
       policyDecision = "warned";
+      policyDecisionDetail = decision.warningDetail;
     }
     if (!decision.allowed) {
       const denial = decision.denial ??
@@ -1007,6 +1160,21 @@ export class CfHarnessPromptLoop {
         toolInputSummary,
         ...optionalPolicyEventIndexes(policyEventIndexes),
       });
+      await this.engine.recordPolicyDecision({
+        toolActivitySequence: sequence,
+        toolCallId: toolCall.id,
+        toolId: toolCall.function.name,
+        effectClass: tool.descriptor.effectClass,
+        cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
+        decision: "denied",
+        reasonCodes: policyDecisionReasonCodes,
+        detail: denial.detail ?? `${toolCall.function.name} was denied`,
+        ...(promptSlotBinding !== undefined
+          ? { promptSlot: promptSlotBinding }
+          : {}),
+        toolInputSummary,
+        ...optionalPolicyEventIndexes(policyEventIndexes),
+      });
       return {
         role: "tool",
         toolCallId: toolCall.id,
@@ -1025,6 +1193,23 @@ export class CfHarnessPromptLoop {
           toolInputSummary,
           ...optionalPolicyEventIndexes(policyEventIndexes),
           errorDetail: toErrorDetail(error),
+        });
+        await this.engine.recordPolicyDecision({
+          toolActivitySequence: sequence,
+          toolCallId: toolCall.id,
+          toolId: toolCall.function.name,
+          effectClass: tool.descriptor.effectClass,
+          cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
+          decision: policyDecision,
+          reasonCodes: policyDecisionReasonCodes,
+          ...(policyDecisionDetail !== undefined
+            ? { detail: policyDecisionDetail }
+            : {}),
+          ...(promptSlotBinding !== undefined
+            ? { promptSlot: promptSlotBinding }
+            : {}),
+          toolInputSummary,
+          ...optionalPolicyEventIndexes(policyEventIndexes),
         });
         throw error;
       }
@@ -1050,6 +1235,25 @@ export class CfHarnessPromptLoop {
           toolInputSummary,
           ...optionalPolicyEventIndexes(policyEventIndexes),
         });
+        await this.engine.recordPolicyDecision({
+          toolActivitySequence: sequence,
+          toolCallId: toolCall.id,
+          toolId: toolCall.function.name,
+          effectClass: tool.descriptor.effectClass,
+          cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
+          decision: "denied",
+          reasonCodes: [
+            ...policyDecisionReasonCodes,
+            "subagent_profile_not_allowed",
+          ],
+          detail,
+          ...(promptSlotBinding !== undefined
+            ? { promptSlot: promptSlotBinding }
+            : {}),
+          toolInputSummary,
+          subagentProfile: delegateInput.profile,
+          ...optionalPolicyEventIndexes(policyEventIndexes),
+        });
         return {
           role: "tool",
           toolCallId: toolCall.id,
@@ -1057,7 +1261,28 @@ export class CfHarnessPromptLoop {
           content: JSON.stringify(denial),
         };
       }
+      policyDecisionReasonCodes.push("subagent_profile_allowed");
     }
+    await this.engine.recordPolicyDecision({
+      toolActivitySequence: sequence,
+      toolCallId: toolCall.id,
+      toolId: toolCall.function.name,
+      effectClass: tool.descriptor.effectClass,
+      cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
+      decision: policyDecision,
+      reasonCodes: policyDecisionReasonCodes,
+      ...(policyDecisionDetail !== undefined
+        ? { detail: policyDecisionDetail }
+        : {}),
+      ...(promptSlotBinding !== undefined
+        ? { promptSlot: promptSlotBinding }
+        : {}),
+      toolInputSummary,
+      ...(delegateInput !== undefined
+        ? { subagentProfile: delegateInput.profile }
+        : {}),
+      ...optionalPolicyEventIndexes(policyEventIndexes),
+    });
     let result: {
       output: Awaited<
         ReturnType<CfHarnessEngine["invokeBuiltinTool"]>

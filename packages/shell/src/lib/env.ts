@@ -8,7 +8,6 @@ declare global {
   var $EXPERIMENTAL_MODERN_DATA_MODEL: string | undefined;
   var $EXPERIMENTAL_UNIFIED_JSON_ENCODING: string | undefined;
   var $EXPERIMENTAL_MODERN_SCHEMA_HASH: string | undefined;
-  var $EXPERIMENTAL_MODERN_HASH: string | undefined;
   var $COMPILATION_CACHE_CLIENT: string | undefined;
 }
 
@@ -33,10 +32,6 @@ const EXPERIMENTAL_UNIFIED_JSON_ENCODING_DEFINE =
 const EXPERIMENTAL_MODERN_SCHEMA_HASH_DEFINE =
   typeof $EXPERIMENTAL_MODERN_SCHEMA_HASH === "string"
     ? $EXPERIMENTAL_MODERN_SCHEMA_HASH
-    : undefined;
-const EXPERIMENTAL_MODERN_HASH_DEFINE =
-  typeof $EXPERIMENTAL_MODERN_HASH === "string"
-    ? $EXPERIMENTAL_MODERN_HASH
     : undefined;
 const COMPILATION_CACHE_CLIENT_DEFINE =
   typeof $COMPILATION_CACHE_CLIENT === "string"
@@ -68,7 +63,6 @@ function flagValue(flag: string | undefined): boolean | undefined {
 export const EXPERIMENTAL = {
   modernDataModel: flagValue(EXPERIMENTAL_MODERN_DATA_MODEL_DEFINE),
   unifiedJsonEncoding: flagValue(EXPERIMENTAL_UNIFIED_JSON_ENCODING_DEFINE),
-  modernHash: flagValue(EXPERIMENTAL_MODERN_HASH_DEFINE),
   modernSchemaHash: flagValue(EXPERIMENTAL_MODERN_SCHEMA_HASH_DEFINE),
 };
 

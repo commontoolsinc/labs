@@ -19,10 +19,6 @@ import {
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import {
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
-import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
 } from "@commonfabric/data-model/json-encoding";
@@ -156,12 +152,8 @@ export interface ExperimentalOptions {
   richStorableValues?: boolean | undefined;
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean | undefined;
-  /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
-  modernHash?: boolean | undefined;
   /** Enable modern schema hashing, replacing stableStringify-based schema hashing. */
   modernSchemaHash?: boolean | undefined;
-  /** Backward-compat alias for `modernHash`. */
-  canonicalHashing?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
 }
@@ -320,9 +312,7 @@ export class Runtime {
       modernDataModel: undefined,
       richStorableValues: undefined,
       unifiedJsonEncoding: undefined,
-      modernHash: undefined,
       modernSchemaHash: undefined,
-      canonicalHashing: undefined,
       schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
@@ -333,23 +323,6 @@ export class Runtime {
     ) {
       this.experimental.modernDataModel =
         options.experimental.richStorableValues;
-    }
-
-    if (
-      options.experimental?.modernHash === undefined &&
-      options.experimental?.canonicalHashing !== undefined
-    ) {
-      this.experimental.modernHash = options.experimental.canonicalHashing;
-    }
-
-    if (
-      this.experimental.modernDataModel &&
-      !this.experimental.modernHash
-    ) {
-      throw new Error(
-        "ExperimentalOptions: `modernDataModel` requires " +
-          "`modernHash` to be enabled",
-      );
     }
 
     // Log any overridden experimental flags.
@@ -364,7 +337,6 @@ export class Runtime {
 
     // Propagate experimental flags to the memory layer's ambient config.
     setDataModelConfig(this.experimental.modernDataModel);
-    setModernHashConfig(this.experimental.modernHash);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
     setSchemaHashConfig(this.experimental.modernSchemaHash);
     this.id = options.storageManager.id;
@@ -539,7 +511,6 @@ export class Runtime {
 
     // Reset experimental fabric config to defaults
     resetDataModelConfig();
-    resetModernHashConfig();
     resetJsonEncodingConfig();
     resetSchemaHashConfig();
 

@@ -3,6 +3,7 @@ import {
   isCfcEnforcementMode,
   type TrustSnapshot,
 } from "@commonfabric/runner/cfc";
+import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { HarnessSandboxConfig } from "./sandbox/types.ts";
 
@@ -20,6 +21,7 @@ export interface HarnessConfig {
   skillsRoot?: string;
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
+  cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
   trustSnapshot?: TrustSnapshot;
   sandbox?: HarnessSandboxConfig;
   runManifest?: HarnessRunManifest;
@@ -87,6 +89,33 @@ export const resolveCfcEnforcementMode = (
     DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE;
 };
 
+export const resolveCfcEnforcementModeSource = (
+  options: Pick<
+    ResolveHarnessConfigOptions,
+    | "cfcEnforcementModeOverride"
+    | "cfcEnforcementMode"
+    | "inheritedCfcEnforcementMode"
+    | "runManifest"
+  >,
+): HarnessCfcEnforcementModeSource => {
+  const parsedOverride = typeof options.cfcEnforcementModeOverride === "string"
+    ? parseCfcEnforcementMode(options.cfcEnforcementModeOverride)
+    : options.cfcEnforcementModeOverride;
+  if (parsedOverride != null) {
+    return "override";
+  }
+  if (options.cfcEnforcementMode != null) {
+    return "explicit-config";
+  }
+  if (options.inheritedCfcEnforcementMode != null) {
+    return "inherited";
+  }
+  if (parseCfcEnforcementMode(options.runManifest?.cfc?.enforcementMode)) {
+    return "run-manifest";
+  }
+  return "default";
+};
+
 export const normalizeGatewayBaseUrl = (input: string): string =>
   new URL(input).toString();
 
@@ -131,4 +160,5 @@ export const resolveHarnessConfig = (
     ? { runManifestPath: options.runManifestPath }
     : {}),
   cfcEnforcementMode: resolveCfcEnforcementMode(options),
+  cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
 });

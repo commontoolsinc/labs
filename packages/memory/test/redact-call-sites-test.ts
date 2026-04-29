@@ -5,19 +5,9 @@
  * - provider.ts: When commits are broadcast to subscribers
  * - space-schema.ts: When commit log data is included in query results
  */
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  it,
-} from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertFalse } from "@std/assert";
-import {
-  hashOf,
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Consumer from "../consumer.ts";
@@ -26,10 +16,6 @@ import type { UTCUnixTimestampInSeconds } from "../interface.ts";
 import * as Provider from "../provider.ts";
 import { LABEL_TYPE } from "../space.ts";
 import { alice } from "./principal.ts";
-
-// Explicitly pin canonical hashing off so these tests exercise the legacy
-// hashOf() path regardless of what the ambient default is.
-setModernHashConfig(false);
 
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
@@ -48,11 +34,6 @@ const the = "application/json";
 const store = new URL(`memory://`);
 
 describe("redactCommitData call sites", () => {
-  // Clean up the module-level setModernHashConfig(false) after all tests.
-  afterAll(() => {
-    resetModernHashConfig();
-  });
-
   let provider: Provider.Provider<Provider.Protocol>;
   let session: Provider.ProviderSession<Provider.Protocol>;
 

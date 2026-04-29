@@ -17,8 +17,7 @@ This spec covers:
   strategy, the `serialize()`/`deserialize()` functions, and boundary inventory
 - **JSON encoding** -- the `/<Type>@<Version>` wire format for special types,
   escaping, detection rules, and the `/`-key reservation rule
-- **Canonical hashing** (Section 6) -- content-based identity for fabric
-  values
+- **Hashing** (Section 6) -- content-based identity for fabric values
 - **Implementation guidance** (Section 7) -- migration from legacy formats
 
 Out of scope: CRDT-based storage layer, network sync protocols, the reactive
@@ -28,10 +27,10 @@ system, schemas.
 
 - [1-fabric-values.md](./1-fabric-values.md) -- Fabric value types, the
   three-layer architecture, the fabric protocol, unknown types, serialization
-  contexts, canonical hashing, implementation guidance, and conversion
-  functions. (Sections 1-4, 6-8.)
-- [2-canonical-hash-byte-format.md](./2-canonical-hash-byte-format.md) --
-  Byte-level encoding for the canonical hash algorithm.
+  contexts, hashing, implementation guidance, and conversion functions.
+  (Sections 1-4, 6-8.)
+- [2-hash-byte-format.md](./2-hash-byte-format.md) --
+  Byte-level encoding for the hash algorithm.
 - [3-json-encoding.md](./3-json-encoding.md) -- The JSON wire format for
   fabric values: `/<Type>@<Version>` tagged objects, standard type encodings,
   detection, escaping, and the `/`-key reservation rule.

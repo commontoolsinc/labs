@@ -1,5 +1,10 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
+import type {
+  HarnessPolicyDecisionRecord,
+  HarnessPolicyTrace,
+} from "./contracts/policy-trace.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
@@ -42,7 +47,12 @@ export interface HarnessRunState {
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
+  cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
+  cfcPolicySnapshotPath?: string;
+  policyTrace?: HarnessPolicyTrace;
+  policyTracePath?: string;
   policyEvents: HarnessPolicyEvent[];
+  policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
   subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
@@ -65,6 +75,11 @@ export interface CreateHarnessRunStateOptions {
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
+  cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
+  cfcPolicySnapshotPath?: string;
+  policyTrace?: HarnessPolicyTrace;
+  policyTracePath?: string;
+  policyDecisions?: HarnessPolicyDecisionRecord[];
   subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
   primaryFailure?: HarnessFailureRecord;
@@ -111,7 +126,22 @@ export const createHarnessRunState = (
     ...(options.capabilitiesPath !== undefined
       ? { capabilitiesPath: options.capabilitiesPath }
       : {}),
+    ...(options.cfcPolicySnapshot !== undefined
+      ? { cfcPolicySnapshot: options.cfcPolicySnapshot }
+      : {}),
+    ...(options.cfcPolicySnapshotPath !== undefined
+      ? { cfcPolicySnapshotPath: options.cfcPolicySnapshotPath }
+      : {}),
+    ...(options.policyTrace !== undefined
+      ? { policyTrace: options.policyTrace }
+      : {}),
+    ...(options.policyTracePath !== undefined
+      ? { policyTracePath: options.policyTracePath }
+      : {}),
     policyEvents: [],
+    ...(options.policyDecisions !== undefined
+      ? { policyDecisions: [...options.policyDecisions] }
+      : {}),
     toolOutputs: [],
     ...(options.subagentRuns !== undefined
       ? { subagentRuns: [...options.subagentRuns] }
@@ -166,6 +196,16 @@ export const appendHarnessPolicyEvent = (
   ...state,
   updatedAt: now,
   policyEvents: [...state.policyEvents, event],
+});
+
+export const appendHarnessPolicyDecision = (
+  state: HarnessRunState,
+  decision: HarnessPolicyDecisionRecord,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  updatedAt: now,
+  policyDecisions: [...(state.policyDecisions ?? []), decision],
 });
 
 export const appendHarnessSubagentRun = (
@@ -252,5 +292,29 @@ export const setHarnessCapabilitySnapshot = (
   ...state,
   capabilitySnapshot,
   ...(capabilitiesPath !== undefined ? { capabilitiesPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessCfcPolicySnapshot = (
+  state: HarnessRunState,
+  cfcPolicySnapshot: HarnessCfcPolicySnapshot,
+  cfcPolicySnapshotPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  cfcPolicySnapshot,
+  ...(cfcPolicySnapshotPath !== undefined ? { cfcPolicySnapshotPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessPolicyTrace = (
+  state: HarnessRunState,
+  policyTrace: HarnessPolicyTrace,
+  policyTracePath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  policyTrace,
+  ...(policyTracePath !== undefined ? { policyTracePath } : {}),
   updatedAt: now,
 });

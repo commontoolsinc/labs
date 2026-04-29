@@ -6,6 +6,7 @@ import {
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
   resolveCfcEnforcementMode,
+  resolveCfcEnforcementModeSource,
   resolveGatewayAuthMode,
   resolveHarnessConfig,
 } from "../src/config.ts";
@@ -85,6 +86,71 @@ Deno.test("resolveCfcEnforcementMode ignores malformed in-memory run manifest mo
   );
 });
 
+Deno.test("resolveCfcEnforcementModeSource identifies the winning mode source", () => {
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      cfcEnforcementModeOverride: "observe",
+      cfcEnforcementMode: "disabled",
+    }),
+    "override",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      cfcEnforcementMode: "disabled",
+      inheritedCfcEnforcementMode: "observe",
+    }),
+    "explicit-config",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      inheritedCfcEnforcementMode: "observe",
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        cfc: { enforcementMode: "enforce-strict" },
+      },
+    }),
+    "inherited",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        cfc: { enforcementMode: "enforce-strict" },
+      },
+    }),
+    "run-manifest",
+  );
+  assertEquals(resolveCfcEnforcementModeSource({}), "default");
+});
+
+Deno.test("resolveCfcEnforcementModeSource treats null like absent mode values", () => {
+  assertEquals(
+    resolveCfcEnforcementMode({
+      cfcEnforcementModeOverride: null as unknown as CfcEnforcementMode,
+      cfcEnforcementMode: "observe",
+    }),
+    "observe",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      cfcEnforcementModeOverride: null as unknown as CfcEnforcementMode,
+      cfcEnforcementMode: "observe",
+    }),
+    "explicit-config",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      cfcEnforcementMode: null as unknown as CfcEnforcementMode,
+      inheritedCfcEnforcementMode: "enforce-explicit",
+    }),
+    "inherited",
+  );
+});
+
 Deno.test("resolveGatewayAuthMode prefers explicit override", () => {
   assertEquals(
     resolveGatewayAuthMode({
@@ -106,6 +172,7 @@ Deno.test("resolveHarnessConfig normalizes the gateway base URL", () => {
   assertEquals(config.gatewayBaseUrl, DEFAULT_GATEWAY_BASE_URL);
   assertEquals(config.gatewayAuthMode, "bearer");
   assertEquals(config.cfcEnforcementMode, DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE);
+  assertEquals(config.cfcEnforcementModeSource, "default");
 });
 
 Deno.test("resolveHarnessConfig accepts an explicit mode override string", () => {
@@ -114,6 +181,7 @@ Deno.test("resolveHarnessConfig accepts an explicit mode override string", () =>
     cfcEnforcementModeOverride: "enforce-strict",
   });
   assertEquals(config.cfcEnforcementMode, "enforce-strict");
+  assertEquals(config.cfcEnforcementModeSource, "override");
 });
 
 Deno.test("resolveHarnessConfig preserves explicit sandbox config", () => {
