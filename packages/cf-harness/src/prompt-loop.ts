@@ -69,10 +69,15 @@ import {
   MAX_SUBAGENT_MAX_MODEL_TURNS,
 } from "./contracts/subagent.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
+import {
+  cwdMarkerForOutput,
+  extractFinalWorkingDirectory,
+} from "./tools/shell-cwd.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
+const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
 
 export interface CreateHarnessPromptLoopOptions
   extends CreateHarnessEngineOptions {
@@ -631,6 +636,9 @@ interface ToolPolicyDecision {
 }
 
 type ModelFacingToolOutput = unknown;
+type RecordHarnessPolicyEvent = (
+  event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
+) => Promise<void>;
 
 interface CfcSandboxResultCarrier {
   cfcResult?: CfcSandboxResult;
@@ -668,9 +676,6 @@ const createOutputHandle = (
   passThrough = false,
 ) =>
   createOpaqueHandle(`${resultRef.outputId}:${suffix}`, "run", {
-    ...(resultRef.artifactPath !== undefined
-      ? { metadataRef: resultRef.artifactPath }
-      : {}),
     ...(passThrough ? { passThrough: true } : {}),
   });
 
@@ -706,6 +711,19 @@ const renderStreamObservation = (
     case "denied":
       return observationDeniedForStream(observation, resultRef);
   }
+};
+
+const stripBashCwdMarker = (
+  stdout: string | ObservationDenied,
+  outputId: unknown,
+): string | ObservationDenied => {
+  if (typeof stdout !== "string" || typeof outputId !== "string") {
+    return stdout;
+  }
+  return extractFinalWorkingDirectory(
+    stdout,
+    cwdMarkerForOutput(BASH_CWD_MARKER_PREFIX, outputId),
+  ).stdout;
 };
 
 const renderExitCodeObservation = (
@@ -801,7 +819,10 @@ const renderMediatedBashOutput = (
   resultRef: ToolResultRef,
 ): ModelFacingToolOutput => ({
   outputId: output.outputId,
-  stdout: renderStreamObservation(cfcResult.stdout, resultRef),
+  stdout: stripBashCwdMarker(
+    renderStreamObservation(cfcResult.stdout, resultRef),
+    output.outputId,
+  ),
   stderr: renderStreamObservation(cfcResult.stderr, resultRef),
   exitCode: renderExitCodeObservation(cfcResult.exitCode, resultRef),
   cwd: output.cwd,
@@ -1494,19 +1515,32 @@ export class CfHarnessPromptLoop {
       });
       throw error;
     }
-    recordActivity({
-      type: "cf-harness.tool-activity",
-      ...baseActivity(policyDecision, "completed"),
-      toolInputSummary,
-      ...optionalPolicyEventIndexes(policyEventIndexes),
-      resultRef: result.resultRef,
-    });
     const modelOutput = await this.#modelFacingToolOutput(
       toolCall.function.name,
       result.output,
       result.resultRef,
       toolCall.id,
+      recordPolicyEvent,
     );
+    const policyEvents = this.engine.getRunState().policyEvents;
+    let activityPolicyDecision: HarnessToolPolicyDecision = policyDecision;
+    for (const index of policyEventIndexes) {
+      const severity = policyEvents[index]?.severity;
+      if (severity === "denied") {
+        activityPolicyDecision = "denied";
+        break;
+      }
+      if (severity === "warning" && activityPolicyDecision === "allowed") {
+        activityPolicyDecision = "warned";
+      }
+    }
+    recordActivity({
+      type: "cf-harness.tool-activity",
+      ...baseActivity(activityPolicyDecision, "completed"),
+      toolInputSummary,
+      ...optionalPolicyEventIndexes(policyEventIndexes),
+      resultRef: result.resultRef,
+    });
     return {
       role: "tool",
       toolCallId: toolCall.id,
@@ -1521,7 +1555,10 @@ export class CfHarnessPromptLoop {
     output: unknown,
     resultRef: ToolResultRef,
     toolCallId: string,
+    recordPolicyEvent?: RecordHarnessPolicyEvent,
   ): Promise<ModelFacingToolOutput> {
+    const writePolicyEvent = recordPolicyEvent ??
+      ((event) => this.engine.recordPolicyEvent(event));
     const mode = this.engine.getRunState().cfcEnforcementMode;
     const cfcResult = cfcResultFromOutput(output);
     if (!toolOutputNeedsSandboxMediation(toolId)) {
@@ -1534,7 +1571,7 @@ export class CfHarnessPromptLoop {
         return stripInternalCfcFields(output);
       }
       if (mode === "observe") {
-        await this.engine.recordPolicyEvent({
+        await writePolicyEvent({
           severity: "warning",
           mode,
           toolId,
@@ -1548,7 +1585,7 @@ export class CfHarnessPromptLoop {
         detail,
         handle: createOutputHandle(resultRef, "output"),
       });
-      await this.engine.recordPolicyEvent({
+      await writePolicyEvent({
         severity: "denied",
         mode,
         toolId,

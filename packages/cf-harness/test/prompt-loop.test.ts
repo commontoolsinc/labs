@@ -2064,17 +2064,22 @@ Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforc
 
 Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdout in enforce mode", async () => {
   const fetchCalls: RequestInit[] = [];
+  const outputId = createToolOutputId("run-mediated-cfc-result", "bash", 1);
+  const cwdMarker = `__CF_HARNESS_CWD__${outputId}__`;
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
         {
-          stdout: "raw secret from sandbox\n",
+          stdout: `raw secret from sandbox\n${cwdMarker}/workspace/private`,
           stderr: "raw secret stderr\n",
           exitCode: 0,
-          cfcResult: observedCfcResult("released stdout\n", {
-            stderrPolicy: "denied",
-          }),
+          cfcResult: observedCfcResult(
+            `released stdout\n${cwdMarker}/workspace/private`,
+            {
+              stderrPolicy: "denied",
+            },
+          ),
         },
       ]),
       runId: "run-mediated-cfc-result",
@@ -2124,6 +2129,8 @@ Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdou
   const toolMessage = result.transcript.at(-2);
   assert(toolMessage !== undefined && toolMessage.role === "tool");
   assert(!toolMessage.content.includes("raw secret"));
+  assert(!toolMessage.content.includes("__CF_HARNESS_CWD__"));
+  assert(!toolMessage.content.includes("/workspace/private"));
   const content = JSON.parse(toolMessage.content);
   assertEquals(content.stdout, "released stdout\n");
   assertEquals(content.stderr.type, "cf-harness.observation-denied");
