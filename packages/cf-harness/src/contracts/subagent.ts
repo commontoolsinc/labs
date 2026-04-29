@@ -5,6 +5,8 @@ import type { BuiltinToolId } from "./tool-descriptor.ts";
 export const DEFAULT_SUBAGENT_PROFILE = "default" as const;
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 16;
+export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
+  "summary-and-sanitized-state" as const;
 export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
   "read_file",
@@ -13,6 +15,62 @@ export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
 
 export type HarnessSubagentProfile = typeof DEFAULT_SUBAGENT_PROFILE;
 export type HarnessSubagentRunStatus = "completed" | "failed";
+export type HarnessSubagentReturnChannel =
+  typeof DEFAULT_SUBAGENT_RETURN_CHANNEL;
+
+export const HARNESS_SUBAGENT_PROFILES = [
+  DEFAULT_SUBAGENT_PROFILE,
+] as const satisfies readonly HarnessSubagentProfile[];
+
+export interface HarnessSubagentReturnPolicy {
+  type: "cf-harness.subagent-return-policy";
+  channel: HarnessSubagentReturnChannel;
+  includeSummary: true;
+  includeSanitizedRunState: true;
+  includeManifest: true;
+  includeTranscript: false;
+  includeRawFailureRecords: false;
+}
+
+export interface HarnessSubagentProfileConfig {
+  type: "cf-harness.subagent-profile-config";
+  profile: HarnessSubagentProfile;
+  allowedToolIds: readonly BuiltinToolId[];
+  maxModelTurns: number;
+  returnPolicy: HarnessSubagentReturnPolicy;
+}
+
+export const DEFAULT_SUBAGENT_RETURN_POLICY: HarnessSubagentReturnPolicy = {
+  type: "cf-harness.subagent-return-policy",
+  channel: DEFAULT_SUBAGENT_RETURN_CHANNEL,
+  includeSummary: true,
+  includeSanitizedRunState: true,
+  includeManifest: true,
+  includeTranscript: false,
+  includeRawFailureRecords: false,
+};
+
+export const DEFAULT_SUBAGENT_PROFILE_CONFIG: HarnessSubagentProfileConfig = {
+  type: "cf-harness.subagent-profile-config",
+  profile: DEFAULT_SUBAGENT_PROFILE,
+  allowedToolIds: DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS,
+  maxModelTurns: DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
+  returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
+};
+
+export const isHarnessSubagentProfile = (
+  input: string,
+): input is HarnessSubagentProfile =>
+  (HARNESS_SUBAGENT_PROFILES as readonly string[]).includes(input);
+
+export const getHarnessSubagentProfileConfig = (
+  profile: HarnessSubagentProfile,
+): HarnessSubagentProfileConfig => {
+  switch (profile) {
+    case DEFAULT_SUBAGENT_PROFILE:
+      return DEFAULT_SUBAGENT_PROFILE_CONFIG;
+  }
+};
 
 export interface HarnessSubagentInputSummary {
   type: "cf-harness.subagent-input-summary";
@@ -34,6 +92,7 @@ export interface HarnessSubagentRunManifest {
   model: string;
   allowedToolIds: readonly BuiltinToolId[];
   maxModelTurns: number;
+  returnPolicy: HarnessSubagentReturnPolicy;
   createdAt: string;
   inputSummary: HarnessSubagentInputSummary;
 }
@@ -95,6 +154,7 @@ export interface HarnessSubagentRunRef {
 
 export interface DelegateTaskToolInput {
   goal: string;
+  profile: HarnessSubagentProfile;
   context?: string;
   maxModelTurns?: number;
 }

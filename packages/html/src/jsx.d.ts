@@ -3968,6 +3968,8 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "tabIndent"?: boolean;
   "theme"?: "light" | "dark";
   "mode"?: "code" | "prose";
+  "autofocus"?: boolean;
+  "cursorPosition"?: "start" | "end";
   "oncf-change"?: any;
   "oncf-focus"?: any;
   "oncf-blur"?: any;

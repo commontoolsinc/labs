@@ -255,6 +255,15 @@ Deno.test("classifyBuiltinToolFailure handles delegate_task outputs defensively"
             model: "gpt-5.4",
             allowedToolIds: ["bash", "read_file", "write_file"],
             maxModelTurns: 8,
+            returnPolicy: {
+              type: "cf-harness.subagent-return-policy",
+              channel: "summary-and-sanitized-state",
+              includeSummary: true,
+              includeSanitizedRunState: true,
+              includeManifest: true,
+              includeTranscript: false,
+              includeRawFailureRecords: false,
+            },
             createdAt: "2026-04-23T18:30:00.000Z",
             inputSummary: {
               type: "cf-harness.subagent-input-summary",

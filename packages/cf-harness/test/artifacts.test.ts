@@ -575,6 +575,15 @@ Deno.test({
         "read_file",
         "write_file",
       ]);
+      assertEquals(subagentRun.manifest.returnPolicy, {
+        type: "cf-harness.subagent-return-policy",
+        channel: "summary-and-sanitized-state",
+        includeSummary: true,
+        includeSanitizedRunState: true,
+        includeManifest: true,
+        includeTranscript: false,
+        includeRawFailureRecords: false,
+      });
       assertEquals(
         subagentRun.manifest.inputSummary.goalDigest.startsWith("sha256:"),
         true,
