@@ -198,6 +198,31 @@ Why:
 - to make delegation a visible policy transition before adding higher-taint
   child capabilities such as `agent-browser`
 
+### Stage I: Browser subagent profile, provisional host shell
+
+- built-in `bash-no-sandbox` tool descriptor and implementation
+- parent/default prompt loops keep `bash-no-sandbox` unavailable unless a loop
+  is explicitly constructed with that tool
+- package CLI intentionally does not expose `bash-no-sandbox` as a parent
+  `--allow-tool`
+- named `browser` subagent profile limited to:
+  - `bash-no-sandbox`
+  - `read_file`
+  - `write_file`
+- subagent manifests record `hostToolIds` so host execution capability is
+  visible in retained provenance
+- child prompt explicitly labels host execution as outside the sandbox and
+  orients browser-profile children toward `agent-browser`
+
+Why:
+
+- to keep the intended eventual `agent-browser` usage shape: agents invoke it
+  through shell commands, not through a special-purpose harness tool
+- to put the high-taint browser capability behind an explicit delegation
+  transition before broader browser policy exists
+- to avoid silently making host execution part of the parent/default tool
+  surface
+
 ## Current Verified State
 
 At the current checkpoint, the package has:
@@ -308,12 +333,14 @@ Current resumability is transcript-based and useful, but still limited:
 
 The package now has a first minimal subagent path: a parent can delegate one
 focused child run through `delegate_task`, and the child receives a fresh prompt
-context plus the default shell/file tool set.
+context plus the selected profile's tool set. The default profile remains
+sandbox shell/file only; the provisional browser profile adds host shell access
+for `agent-browser`-style commands.
 
 The remaining subagent work is still substantial:
 
-- additional profile/policy selection beyond the single default child policy
-- browser-mediated subagents, expected to wrap `agent-browser`
+- first-class browser-mediated subagent policy on top of the provisional host
+  shell path
 - parallel child orchestration
 - richer orchestration resume for partially completed child runs
 

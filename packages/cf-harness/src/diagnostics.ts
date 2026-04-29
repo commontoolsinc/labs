@@ -399,7 +399,7 @@ const detailForMissingBinary = (
   capabilitySnapshot?: HarnessCapabilitySnapshot,
 ): string => {
   if (commandName === undefined) {
-    return "a shell command was not found in the sandbox";
+    return "a shell command was not found";
   }
   const capabilityCommand = capabilityCommandForName(commandName);
   const probe = capabilityCommand === undefined
@@ -422,6 +422,7 @@ export const classifyBashToolFailure = (
   output: BashToolOutput,
   at: string,
   capabilitySnapshot?: HarnessCapabilitySnapshot,
+  toolId = "bash",
 ): HarnessFailureRecord | undefined => {
   if (output.exitCode !== 127) {
     return undefined;
@@ -442,7 +443,7 @@ export const classifyBashToolFailure = (
     source: "tool_output",
     detail: detailForMissingBinary(commandName, capabilitySnapshot),
     at,
-    toolId: "bash",
+    toolId,
     outputId: output.outputId as ToolOutputId,
     command: input.command,
     ...(commandName !== undefined ? { commandName } : {}),
@@ -464,6 +465,15 @@ export const classifyBuiltinToolFailure = (
         output as BashToolOutput,
         at,
         capabilitySnapshot,
+        toolId,
+      );
+    case "bash-no-sandbox":
+      return classifyBashToolFailure(
+        input as BashToolInput,
+        output as BashToolOutput,
+        at,
+        undefined,
+        toolId,
       );
     case "read_file":
     case "write_file":

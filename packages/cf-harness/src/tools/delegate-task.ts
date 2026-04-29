@@ -1,7 +1,9 @@
 import type {
   DelegateTaskToolInput,
   DelegateTaskToolOutput,
+  HarnessSubagentProfile,
 } from "../contracts/subagent.ts";
+import { HARNESS_SUBAGENT_PROFILES } from "../contracts/subagent.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 import { createUnimplementedToolError } from "./types.ts";
 
@@ -27,7 +29,9 @@ export const delegateTaskTool: HarnessToolDefinition<
         },
         profile: {
           type: "string",
-          enum: ["default"],
+          enum: [
+            ...HARNESS_SUBAGENT_PROFILES,
+          ] satisfies HarnessSubagentProfile[],
           description:
             "Named subagent profile to spawn. Defaults to the harness default profile.",
         },

@@ -575,6 +575,7 @@ Deno.test({
         "read_file",
         "write_file",
       ]);
+      assertEquals(subagentRun.manifest.hostToolIds, []);
       assertEquals(subagentRun.manifest.returnPolicy, {
         type: "cf-harness.subagent-return-policy",
         channel: "summary-and-sanitized-state",

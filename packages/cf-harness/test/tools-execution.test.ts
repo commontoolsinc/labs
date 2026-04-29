@@ -2,9 +2,15 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { bashTool } from "../src/tools/bash.ts";
+import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
 import { writeFileTool } from "../src/tools/write-file.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
+import type {
+  ProcessRunner,
+  ProcessRunRequest,
+  ProcessRunResult,
+} from "../src/sandbox/process-runner.ts";
 import type {
   SandboxCommandRequest,
   SandboxCommandResult,
@@ -64,12 +70,33 @@ class StrictFakeSandboxRuntime extends FakeSandboxRuntime {
   }
 }
 
+class FakeProcessRunner implements ProcessRunner {
+  readonly calls: ProcessRunRequest[] = [];
+
+  constructor(
+    private readonly results: ProcessRunResult[] = [{
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+    }],
+  ) {}
+
+  run(request: ProcessRunRequest): Promise<ProcessRunResult> {
+    this.calls.push(request);
+    return Promise.resolve(
+      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
+  }
+}
+
 const createContext = (
   sandbox: SandboxRuntime,
   initialCurrentDir = "/workspace",
+  hostProcessRunner: ProcessRunner = new FakeProcessRunner(),
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
+  const workspaceHostPath = "/tmp/cf-harness-workspace";
   return {
     runId: "run-1",
     cfcEnforcementMode: "observe",
@@ -77,8 +104,22 @@ const createContext = (
       return currentDir;
     },
     sandbox,
+    hostProcessRunner,
     resolvePath(path: string) {
       return sandbox.resolvePath(path, currentDir);
+    },
+    resolveHostPath(path: string) {
+      const sandboxPath = sandbox.resolvePath(path, currentDir);
+      return sandboxPath === "/workspace"
+        ? workspaceHostPath
+        : `${workspaceHostPath}${sandboxPath.slice("/workspace".length)}`;
+    },
+    hostPathToWorkspacePath(path: string) {
+      return path === workspaceHostPath
+        ? "/workspace"
+        : path.startsWith(`${workspaceHostPath}/`)
+        ? `/workspace${path.slice(workspaceHostPath.length)}`
+        : undefined;
     },
     setCurrentDir(path: string) {
       currentDir = sandbox.resolvePath(path, currentDir);
@@ -122,6 +163,64 @@ Deno.test("bash tool executes the command through the sandbox shell runtime", as
       timeoutMs: 1000,
     },
   }]);
+  assertEquals(context.currentDir, "/workspace/repo");
+});
+
+Deno.test("bash-no-sandbox tool executes the command through the host process runner", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout:
+      "host ok\n__CF_HARNESS_HOST_CWD__run-1:bash-no-sandbox:1__/tmp/cf-harness-workspace/browser",
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const sandbox = new FakeSandboxRuntime();
+  const context = createContext(sandbox, "/workspace", hostRunner);
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "agent-browser --help",
+    cwd: "browser",
+    timeoutMs: 1000,
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "host ok\n",
+    stderr: "",
+    exitCode: 0,
+    cwd: "/workspace/browser",
+  });
+  assertEquals(sandbox.calls, []);
+  assertEquals(hostRunner.calls, [{
+    command: "bash",
+    args: [
+      "-lc",
+      [
+        '__cf_harness_cwd_marker="__CF_HARNESS_HOST_CWD__run-1:bash-no-sandbox:1__"',
+        'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+        "agent-browser --help",
+      ].join("\n"),
+    ],
+    cwd: "/tmp/cf-harness-workspace/browser",
+    timeoutMs: 1000,
+  }]);
+  assertEquals(context.currentDir, "/workspace/browser");
+});
+
+Deno.test("bash-no-sandbox keeps currentDir inside the workspace if the host command exits elsewhere", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: "__CF_HARNESS_HOST_CWD__run-1:bash-no-sandbox:1__/tmp/outside",
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "cd /tmp/outside",
+  });
+
+  assertEquals(output.cwd, "/workspace/repo");
   assertEquals(context.currentDir, "/workspace/repo");
 });
 
