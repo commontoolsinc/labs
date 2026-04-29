@@ -1,5 +1,5 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   hashSchemaItem,
@@ -3027,6 +3027,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
         redirSelector?.schema === undefined ||
         SchemaObjectTraverser.hasAsCell(redirSelector.schema)
       ) {
+        const schema = redirSelector?.schema;
+        const asCellValues = ContextualFlowControl.getAsCellValues(
+          schema,
+        );
+        if (schema !== undefined && asCellValues.at(0) === "stream") {
+          const cellLink = getNormalizedLink(
+            redirDoc.address,
+            schema,
+          );
+          return { ok: this.objectCreator.createObject(cellLink, undefined) };
+        }
         // If we don't have a schema, we don't allow undefined
         // If we have a schema with asCell, we can't create a cell for this,
         // since we can't follow all the write-redirect links.

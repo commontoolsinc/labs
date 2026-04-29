@@ -21,6 +21,9 @@ const asSchemaObject = (
   schema: JSONSchema,
   path: string,
 ): JSONSchemaObj => {
+  if (schema === true) {
+    return {};
+  }
   if (!isRecord(schema)) {
     throw new Error(`unsupported schema form at ${path || "/"}`);
   }

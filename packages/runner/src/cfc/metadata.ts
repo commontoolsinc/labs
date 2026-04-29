@@ -23,15 +23,6 @@ const isPrefix = (
   left.length <= right.length &&
   left.every((segment, index) => segment === right[index]);
 
-const hasLabelValues = (
-  label: {
-    confidentiality?: readonly unknown[];
-    integrity?: readonly unknown[];
-  },
-): boolean =>
-  (label.confidentiality?.length ?? 0) > 0 ||
-  (label.integrity?.length ?? 0) > 0;
-
 export const readStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -62,8 +53,14 @@ export const storedCfcMetadataAppliesToPath = (
     return false;
   }
   const logicalPath = canonicalizeLogicalPath(target.path);
+  // labelMap entries are persisted both for paths with confidentiality /
+  // integrity values AND for paths whose schema carried a policy claim
+  // (writeAuthorizedBy / uiContract / exactCopyOf — see
+  // `derivePersistedLabel` and the persistence guard in `prepare.ts`). The
+  // mere presence of an entry signals "policy applies on this path"; do NOT
+  // filter on `hasLabelValues` here, or claim-only entries get silently
+  // bypassed.
   return metadata.labelMap.entries.some((entry) =>
-    hasLabelValues(entry.label) &&
-    (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
+    isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path)
   );
 };

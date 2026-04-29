@@ -110,7 +110,7 @@ export function createNodeFactory<T = any, R = any>(
     module.resultSchema,
   );
   return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
-    const outputs = opaqueRef<R>();
+    const outputs = opaqueRef<R>(undefined, module.resultSchema);
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
     connectInputAndOutputs(node);

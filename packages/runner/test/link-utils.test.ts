@@ -437,6 +437,16 @@ describe("link-utils", () => {
       );
       expect(() => parseLinkOrThrow(123)).toThrow("Cannot parse value as link");
     });
+
+    it("should not crash on BigInt values when formatting the error", () => {
+      // Regression: a previous version embedded `JSON.stringify(value)` in the
+      // error message, which throws on BigInt and masks the original "not a
+      // link" failure. Using `toCompactDebugString` instead handles BigInt
+      // safely.
+      expect(() => parseLinkOrThrow(123n as unknown as never)).toThrow(
+        "Cannot parse value as link",
+      );
+    });
   });
 
   describe("areLinksSame", () => {

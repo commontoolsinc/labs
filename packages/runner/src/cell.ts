@@ -656,6 +656,8 @@ export class CellImpl<T extends FabricValue>
    * Check if this cell contains a stream value
    */
   private isStream(resolvedToValueLink?: NormalizedFullLink): boolean {
+    if (this._kind === "stream") return true;
+
     const tx = this.runtime.readTx(this.tx);
 
     if (!resolvedToValueLink) {

@@ -13,12 +13,19 @@ import {
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
+  JSONSchema,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { cfcLabelViewForCell } from "../cfc/label-view.ts";
+import {
+  schemaWithInjectionSafeAnnotations,
+  validateAgainstSchema,
+} from "../cfc/schema-sanitization.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { type Cell } from "../cell.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import { type Cell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -32,7 +39,11 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -46,6 +57,53 @@ const client = new LLMClient();
 
 /** Batch interval for partial streaming updates (~15fps). */
 const PARTIAL_BATCH_MS = 66;
+
+function logGenerateObject(stage: string, details: Record<string, unknown>) {
+  console.warn("[generateObject]", stage, details);
+}
+
+function summarizeGenerateObjectRequest(details: {
+  hash: string;
+  path: "direct" | "tools";
+  model?: string;
+  hasTools: boolean;
+  toolNames?: string[];
+  messageCount: number;
+  contextKeys?: string[];
+  queueName?: string;
+}) {
+  return {
+    hash: details.hash.slice(0, 12),
+    path: details.path,
+    model: details.model,
+    hasTools: details.hasTools,
+    toolNames: details.toolNames ?? [],
+    messageCount: details.messageCount,
+    contextKeys: details.contextKeys ?? [],
+    queueName: details.queueName,
+  };
+}
+
+function collectCellConfidentiality(cell: Cell<any>): readonly unknown[] {
+  const labelView = cfcLabelViewForCell(cell);
+  if (labelView === undefined) {
+    return [];
+  }
+
+  return ContextualFlowControl.uniqueAtoms(
+    labelView.entries.flatMap((entry) => entry.label.confidentiality ?? []),
+  );
+}
+
+function collectGenerateObjectPromptConfidentiality(
+  inputs: Cell<any>,
+): readonly unknown[] {
+  return ContextualFlowControl.uniqueAtoms([
+    ...collectCellConfidentiality(inputs.key("prompt")),
+    ...collectCellConfidentiality(inputs.key("messages")),
+    ...collectCellConfidentiality(inputs.key("system")),
+  ]);
+}
 
 /**
  * Creates an updatePartial callback that safely updates the partial cell
@@ -129,6 +187,8 @@ async function executeWithToolsLoop(params: {
   toolCatalog?:
     | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
     | undefined;
+  initialObservedConfidentiality?: readonly unknown[];
+  observationMaxConfidentiality?: readonly unknown[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
   space: any;
@@ -139,6 +199,8 @@ async function executeWithToolsLoop(params: {
   const {
     llmParams,
     toolCatalog,
+    initialObservedConfidentiality = [],
+    observationMaxConfidentiality,
     updatePartial,
     runtime,
     space,
@@ -149,6 +211,7 @@ async function executeWithToolsLoop(params: {
 
   const executeRecursive = async (
     currentMessages: readonly BuiltInLLMMessage[],
+    observedConfidentiality: readonly unknown[],
   ): Promise<void> => {
     if (thisRun !== getCurrentRun()) return;
 
@@ -180,6 +243,9 @@ async function executeWithToolsLoop(params: {
         space,
         toolCatalog,
         toolCallParts,
+        undefined,
+        observedConfidentiality,
+        observationMaxConfidentiality,
       );
 
       const toolResultMessages = llmToolExecutionHelpers
@@ -191,14 +257,24 @@ async function executeWithToolsLoop(params: {
         ...toolResultMessages,
       ];
 
-      await executeRecursive(updatedMessages);
+      const nextObservedConfidentiality = ContextualFlowControl.uniqueAtoms([
+        ...observedConfidentiality,
+        ...toolResults.flatMap((result) =>
+          result.observedConfidentiality ?? []
+        ),
+      ]);
+
+      await executeRecursive(updatedMessages, nextObservedConfidentiality);
     } else {
       // No more tool calls, finish
       await onComplete(llmResult);
     }
   };
 
-  await executeRecursive(params.initialMessages);
+  await executeRecursive(
+    params.initialMessages,
+    initialObservedConfidentiality,
+  );
 }
 
 /**
@@ -253,9 +329,14 @@ function buildContextDocumentation(
   runtime: Runtime,
   space: any,
   tx: IExtendedStorageTransaction,
-): string {
+): { docs: string; observedConfidentiality: readonly unknown[] } {
   const context = inputs.key("context").withTx(tx).get();
-  if (!context) return "";
+  if (!context) {
+    return {
+      docs: "",
+      observedConfidentiality: [],
+    };
+  }
 
   // Create empty pinned cells array with proper schema
   const pinnedCellsSchema = {
@@ -270,18 +351,22 @@ function buildContextDocumentation(
     },
   } as const;
 
-  return llmToolExecutionHelpers.buildAvailableCellsDocumentation(
-    runtime,
-    space,
-    context,
-    // LLM builtins don't have pinned cells (only llmDialog does)
-    runtime.getCell(
+  return llmToolExecutionHelpers
+    .buildAvailableCellsDocumentationWithObservation(
+      runtime,
       space,
-      { llm: { pinnedCells: [] } },
-      pinnedCellsSchema,
-      tx,
-    ),
-  );
+      context,
+      // LLM builtins don't have pinned cells (only llmDialog does)
+      runtime.getCell(
+        space,
+        { llm: { pinnedCells: [] } },
+        pinnedCellsSchema,
+        tx,
+      ),
+      inputs.key("observationMaxConfidentiality").withTx(tx).get() as
+        | readonly unknown[]
+        | undefined,
+    );
 }
 
 function enqueuePostCommitLLMWork(
@@ -317,6 +402,25 @@ function markRequestHashPendingCommit(
       setPreviousCallHash(previousCallHash);
     }
   });
+}
+
+async function pullContextCells(
+  context: Record<string, unknown> | undefined,
+) {
+  for (const value of Object.values(context ?? {})) {
+    try {
+      const resolved = isCellResultForDereferencing(value)
+        ? getCellOrThrow(value).resolveAsCell()
+        : isCell(value)
+        ? value.resolveAsCell()
+        : isRecord(value) && typeof value.resolveAsCell === "function"
+        ? value.resolveAsCell()
+        : undefined;
+      await resolved?.pull?.();
+    } catch {
+      // Ignore unresolved context cells and let request construction continue.
+    }
+  }
 }
 
 /**
@@ -385,7 +489,7 @@ export function llm(
     );
 
     const llmParams: LLMRequest = {
-      system: ((system ?? "") + contextDocs).trim() ||
+      system: ((system ?? "") + contextDocs.docs).trim() ||
         "You are a helpful assistant.",
       messages: (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
       stop: stop ?? "",
@@ -472,6 +576,13 @@ export function llm(
                     [],
                 llmParams: requestSnapshot,
                 toolCatalog,
+                initialObservedConfidentiality:
+                  contextDocs.observedConfidentiality,
+                observationMaxConfidentiality: inputs.key(
+                  "observationMaxConfidentiality",
+                ).get() as
+                  | readonly unknown[]
+                  | undefined,
                 updatePartial,
                 runtime,
                 space: parentCell.space,
@@ -608,7 +719,7 @@ export function generateText(
     );
 
     const llmParams: LLMRequest = {
-      system: ((system ?? "") + contextDocs).trim() ||
+      system: ((system ?? "") + contextDocs.docs).trim() ||
         "You are a helpful assistant.",
       messages: requestMessages,
       stop: "",
@@ -702,6 +813,13 @@ export function generateText(
                 initialMessages: requestMessages,
                 llmParams: requestSnapshot,
                 toolCatalog,
+                initialObservedConfidentiality:
+                  contextDocs.observedConfidentiality,
+                observationMaxConfidentiality: inputs.key(
+                  "observationMaxConfidentiality",
+                ).get() as
+                  | readonly unknown[]
+                  | undefined,
                 updatePartial,
                 runtime,
                 space: parentCell.space,
@@ -804,6 +922,7 @@ export function generateObject<T extends Record<string, unknown>>(
     }
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
+    const messagesWithLog = resultCell.key("messages").withTx(tx);
     const errorWithLog = resultCell.key("error").withTx(tx);
     const partialWithLog = resultCell.key("partial").withTx(tx);
     const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
@@ -818,11 +937,24 @@ export function generateObject<T extends Record<string, unknown>>(
       cache,
       tools,
       metadata,
+      schemaSanitizePromptInjection,
     } = inputs.withTx(tx).get() ?? {};
+    const context = inputs.key("context").withTx(tx).get() as
+      | Record<string, unknown>
+      | undefined;
+    const observationMaxConfidentiality = inputs.key(
+      "observationMaxConfidentiality",
+    ).withTx(tx).get() as
+      | readonly unknown[]
+      | undefined;
 
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
-    if ((!hasPrompt && (!messages || messages.length === 0)) || !schema) {
+    if (
+      (!hasPrompt && (!messages || messages.length === 0)) ||
+      schema === undefined
+    ) {
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
@@ -837,20 +969,64 @@ export function generateObject<T extends Record<string, unknown>>(
       [{ role: "user", content: prompt! }];
 
     // Build context documentation from context cells and append to system prompt
-    const contextDocs = buildContextDocumentation(
-      inputs,
-      runtime,
-      parentCell.space,
-      tx,
-    );
-
+    const pinnedCellsSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          name: { type: "string" },
+        },
+        required: ["path", "name"],
+      },
+    } as const;
+    const contextDocs = context
+      ? llmToolExecutionHelpers.buildAvailableCellsDocumentationWithObservation(
+        runtime,
+        parentCell.space,
+        context as Record<string, Cell<any>>,
+        runtime.getCell(
+          parentCell.space,
+          { generateObject: { pinnedCells: [] } },
+          pinnedCellsSchema,
+          tx,
+        ),
+        observationMaxConfidentiality,
+      )
+      : {
+        docs: "",
+        observedConfidentiality: [],
+      };
     // Determine whether to use the tool-calling path or the direct generateObject path
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const validationSchema = schemaSanitizePromptInjection
+      ? JSON.parse(JSON.stringify(schema)) as JSONSchema
+      : undefined;
+    const resultSchemaForObserved = (
+      observedConfidentiality: readonly unknown[],
+    ) =>
+      schemaSanitizePromptInjection
+        ? schemaWithInjectionSafeAnnotations(
+          validationSchema as any,
+          observedConfidentiality,
+        )
+        : undefined;
+    const validateResultForSchemaSanitization = (value: unknown): void => {
+      if (validationSchema === undefined) {
+        return;
+      }
+      const failure = validateAgainstSchema(validationSchema, value);
+      if (failure !== undefined) {
+        throw new Error(
+          `generateObject result failed schema sanitization validation: ${failure}`,
+        );
+      }
+    };
 
     if (hasTools) {
       // Use tool-calling path with presentResult builtin tool
       const llmParams: LLMRequest = {
-        system: ((system ?? "") + contextDocs).trim() ||
+        system: ((system ?? "") + contextDocs.docs).trim() ||
           "You are a helpful assistant.",
         messages: requestMessages,
         stop: "",
@@ -893,7 +1069,13 @@ export function generateObject<T extends Record<string, unknown>>(
         tools: toolCatalog.llmTools,
       };
       const requestSnapshot = createFrozenRequestSnapshot(
-        JSON.parse(JSON.stringify({ ...llmParamsWithTools, schema })),
+        JSON.parse(
+          JSON.stringify({
+            ...llmParamsWithTools,
+            schema,
+            schemaSanitizePromptInjection,
+          }),
+        ),
       );
       const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
@@ -902,6 +1084,16 @@ export function generateObject<T extends Record<string, unknown>>(
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
+      const toolsRequestSummary = summarizeGenerateObjectRequest({
+        hash,
+        path: "tools",
+        model: llmParamsWithTools.model,
+        hasTools: true,
+        toolNames: Object.keys(toolCatalog.llmTools),
+        messageCount: requestMessages.length,
+        contextKeys: context ? Object.keys(context) : [],
+        queueName,
+      });
 
       // Return if the same request is being made again
       // Also return if there's an error for this request (don't retry automatically)
@@ -909,10 +1101,12 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        logGenerateObject("skip-cached", toolsRequestSummary);
         return;
       }
 
       if (hash === previousCallHash) {
+        logGenerateObject("skip-inflight", toolsRequestSummary);
         return;
       }
 
@@ -931,8 +1125,10 @@ export function generateObject<T extends Record<string, unknown>>(
       const thisRun = currentRun;
 
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
+      messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
       pendingWithLog.set(true);
 
       const { callback: updatePartial, cleanup: cleanupPartial } =
@@ -948,6 +1144,8 @@ export function generateObject<T extends Record<string, unknown>>(
         ? () => false
         : () => thisRun !== currentRun;
 
+      logGenerateObject("enqueue", toolsRequestSummary);
+
       enqueuePostCommitLLMWork(
         tx,
         "generateObject",
@@ -955,19 +1153,58 @@ export function generateObject<T extends Record<string, unknown>>(
         "generateObject-start",
         requestSnapshot,
         () => {
+          logGenerateObject("post-commit-start", toolsRequestSummary);
           const resultPromise = (async () => {
             try {
+              await inputs.pull();
+              const liveContext = inputs.key("context").get() as
+                | Record<string, unknown>
+                | undefined;
+              await pullContextCells(liveContext);
+              const liveContextDocs = liveContext
+                ? llmToolExecutionHelpers
+                  .buildAvailableCellsDocumentationWithObservation(
+                    runtime,
+                    parentCell.space,
+                    liveContext as Record<string, Cell<any>>,
+                    runtime.getCell(
+                      parentCell.space,
+                      { generateObject: { pinnedCells: [] } },
+                      pinnedCellsSchema,
+                    ),
+                    observationMaxConfidentiality,
+                  )
+                : {
+                  docs: "",
+                  observedConfidentiality: [],
+                };
+              const liveSystem =
+                ((system ?? "") + liveContextDocs.docs).trim() ||
+                "You are a helpful assistant.";
+              const livePromptObservedConfidentiality =
+                collectGenerateObjectPromptConfidentiality(inputs);
+              const liveInitialObservedConfidentiality = ContextualFlowControl
+                .uniqueAtoms([
+                  ...livePromptObservedConfidentiality,
+                  ...liveContextDocs.observedConfidentiality,
+                ]);
+
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
+              let finalMessages: readonly BuiltInLLMMessage[] = requestMessages;
+              let finalObservedConfidentiality: readonly unknown[] =
+                liveInitialObservedConfidentiality;
 
               // Custom execution loop for generateObject with presentResult extraction
               const executeRecursive = async (
                 currentMessages: readonly BuiltInLLMMessage[],
+                observedConfidentiality: readonly unknown[],
               ): Promise<void> => {
                 if (isRunCancelled()) return;
 
                 const requestParams: LLMRequest = {
                   ...llmParamsWithTools,
+                  system: liveSystem,
                   messages: currentMessages,
                 };
 
@@ -995,6 +1232,9 @@ export function generateObject<T extends Record<string, unknown>>(
                       parentCell.space,
                       toolCatalog,
                       toolCallParts,
+                      undefined,
+                      observedConfidentiality,
+                      observationMaxConfidentiality,
                     );
 
                   // Check if presentResult was called. Cellify from the raw
@@ -1021,10 +1261,25 @@ export function generateObject<T extends Record<string, unknown>>(
                     assistantMessage,
                     ...toolResultMessages,
                   ];
+                  finalMessages = updatedMessages;
+
+                  const nextObservedConfidentiality = ContextualFlowControl
+                    .uniqueAtoms([
+                      ...observedConfidentiality,
+                      ...toolResults.flatMap((result) =>
+                        result.observedConfidentiality ?? []
+                      ),
+                    ]);
+                  if (presentResultPart) {
+                    finalObservedConfidentiality = nextObservedConfidentiality;
+                  }
 
                   // Continue if presentResult wasn't called yet
                   if (!presentResultPart) {
-                    await executeRecursive(updatedMessages);
+                    await executeRecursive(
+                      updatedMessages,
+                      nextObservedConfidentiality,
+                    );
                   }
                 } else {
                   throw new Error(
@@ -1034,36 +1289,71 @@ export function generateObject<T extends Record<string, unknown>>(
               };
 
               const doWork = async () => {
-                await executeRecursive(requestMessages);
+                logGenerateObject("tools-loop-start", toolsRequestSummary);
+                await executeRecursive(
+                  requestMessages,
+                  liveInitialObservedConfidentiality,
+                );
 
                 if (finalResult === undefined) {
                   throw new Error("presentResult was never called");
                 }
+                validateResultForSchemaSanitization(finalResult);
 
-                return finalResult;
+                return {
+                  object: finalResult,
+                  messages: finalMessages,
+                  resultSchema: resultSchemaForObserved(
+                    finalObservedConfidentiality,
+                  ),
+                };
               };
 
-              const objectResult = queueName
+              const objectResponse = queueName
                 ? await runtime.getOrCreateQueue(queueName).enqueue(doWork)
                 : await doWork();
 
-              if (isRunCancelled()) return;
+              logGenerateObject("tools-loop-complete", {
+                ...toolsRequestSummary,
+                objectKeys: Object.keys(objectResponse.object ?? {}),
+              });
+
+              if (isRunCancelled()) {
+                logGenerateObject(
+                  "write-skipped-cancelled",
+                  toolsRequestSummary,
+                );
+                return;
+              }
 
               await runtime.idle();
 
               await runtime.editWithRetry((tx) => {
                 resultCell.key("pending").withTx(tx).set(false);
-                resultCell.key("result").withTx(tx).set(objectResult);
+                const resultTarget = objectResponse.resultSchema === undefined
+                  ? resultCell.key("result")
+                  : resultCell.key("result").asSchema(
+                    objectResponse.resultSchema,
+                  );
+                resultTarget.withTx(tx).set(objectResponse.object);
+                resultCell.key("messages").withTx(tx).set(
+                  JSON.parse(JSON.stringify(objectResponse.messages)) as any,
+                );
                 resultCell.key("error").withTx(tx).set(undefined);
                 resultCell.key("requestHash").withTx(tx).set(hash);
               });
+              logGenerateObject("write-complete", toolsRequestSummary);
             } finally {
               cleanupPartial();
             }
           })();
 
-          resultPromise.catch((e) =>
-            handleLLMError(
+          resultPromise.catch((e) => {
+            logGenerateObject("error", {
+              ...toolsRequestSummary,
+              error: e instanceof Error ? e.message : String(e),
+            });
+            return handleLLMError(
               e,
               runtime,
               resultCell.key("pending"),
@@ -1077,8 +1367,8 @@ export function generateObject<T extends Record<string, unknown>>(
               () => {
                 previousCallHash = undefined;
               },
-            )
-          );
+            );
+          });
         },
       );
     } else {
@@ -1100,10 +1390,14 @@ export function generateObject<T extends Record<string, unknown>>(
       };
 
       // Always set system prompt with context documentation
-      generateObjectParams.system = ((system ?? "") + contextDocs).trim() ||
+      generateObjectParams.system =
+        ((system ?? "") + contextDocs.docs).trim() ||
         "You are a helpful assistant.";
 
-      const requestSnapshot = createFrozenRequestSnapshot(generateObjectParams);
+      const requestSnapshot = createFrozenRequestSnapshot({
+        ...generateObjectParams,
+        schemaSanitizePromptInjection,
+      });
       const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
@@ -1111,6 +1405,15 @@ export function generateObject<T extends Record<string, unknown>>(
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
+      const directRequestSummary = summarizeGenerateObjectRequest({
+        hash,
+        path: "direct",
+        model: generateObjectParams.model,
+        hasTools: false,
+        messageCount: requestMessages.length,
+        contextKeys: context ? Object.keys(context) : [],
+        queueName,
+      });
 
       // Return if the same request is being made again
       // Also return if there's an error for this request (don't retry automatically)
@@ -1118,11 +1421,13 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        logGenerateObject("skip-cached", directRequestSummary);
         return;
       }
 
       // Also skip if this is the same request in the current transaction
       if (hash === previousCallHash) {
+        logGenerateObject("skip-inflight", directRequestSummary);
         return;
       }
 
@@ -1143,13 +1448,17 @@ export function generateObject<T extends Record<string, unknown>>(
       const thisRun = currentRun;
 
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
+      messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
       pendingWithLog.set(true);
 
       const isRunCancelled = queueName
         ? () => false
         : () => thisRun !== currentRun;
+
+      logGenerateObject("enqueue", directRequestSummary);
 
       enqueuePostCommitLLMWork(
         tx,
@@ -1158,12 +1467,62 @@ export function generateObject<T extends Record<string, unknown>>(
         "generateObject-start",
         requestSnapshot,
         () => {
-          const doWork = () =>
-            client.generateObject(
-              generateObjectParams,
-            ) as Promise<{
+          logGenerateObject("post-commit-start", directRequestSummary);
+          const doWork = async () => {
+            logGenerateObject("direct-work-start", directRequestSummary);
+            await inputs.pull();
+            const liveContext = inputs.key("context").get() as
+              | Record<string, unknown>
+              | undefined;
+            await pullContextCells(liveContext);
+            const liveContextDocs = liveContext
+              ? llmToolExecutionHelpers
+                .buildAvailableCellsDocumentationWithObservation(
+                  runtime,
+                  parentCell.space,
+                  liveContext as Record<string, Cell<any>>,
+                  runtime.getCell(
+                    parentCell.space,
+                    { generateObject: { pinnedCells: [] } },
+                    pinnedCellsSchema,
+                  ),
+                  observationMaxConfidentiality,
+                )
+              : {
+                docs: "",
+                observedConfidentiality: [],
+              };
+            logGenerateObject("client-generateObject-start", {
+              ...directRequestSummary,
+              observedConfidentialityCount: ContextualFlowControl.uniqueAtoms([
+                ...collectGenerateObjectPromptConfidentiality(inputs),
+                ...liveContextDocs.observedConfidentiality,
+              ]).length,
+            });
+            const response = await client.generateObject({
+              ...generateObjectParams,
+              system: ((system ?? "") + liveContextDocs.docs).trim() ||
+                "You are a helpful assistant.",
+            }) as {
               object: T;
-            }>;
+            };
+            logGenerateObject("client-generateObject-complete", {
+              ...directRequestSummary,
+              objectKeys: Object.keys(response.object ?? {}),
+            });
+            validateResultForSchemaSanitization(response.object);
+            const livePromptObservedConfidentiality =
+              collectGenerateObjectPromptConfidentiality(inputs);
+            return {
+              ...response,
+              resultSchema: resultSchemaForObserved(
+                ContextualFlowControl.uniqueAtoms([
+                  ...livePromptObservedConfidentiality,
+                  ...liveContextDocs.observedConfidentiality,
+                ]),
+              ),
+            };
+          };
 
           const resultPromise = queueName
             ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
@@ -1171,19 +1530,41 @@ export function generateObject<T extends Record<string, unknown>>(
 
           resultPromise
             .then(async (response) => {
-              if (isRunCancelled()) return;
+              if (isRunCancelled()) {
+                logGenerateObject(
+                  "write-skipped-cancelled",
+                  directRequestSummary,
+                );
+                return;
+              }
 
               await runtime.idle();
 
               await runtime.editWithRetry((tx) => {
+                const assistantMessage: BuiltInLLMMessage = {
+                  role: "assistant",
+                  content: JSON.stringify(response.object, null, 2),
+                };
                 resultCell.key("pending").withTx(tx).set(false);
-                resultCell.key("result").withTx(tx).set(response.object);
+                const resultTarget = response.resultSchema === undefined
+                  ? resultCell.key("result")
+                  : resultCell.key("result").asSchema(response.resultSchema);
+                resultTarget.withTx(tx).set(response.object);
+                resultCell.key("messages").withTx(tx).set([
+                  ...JSON.parse(JSON.stringify(requestMessages)),
+                  JSON.parse(JSON.stringify(assistantMessage)),
+                ] as any);
                 resultCell.key("error").withTx(tx).set(undefined);
                 resultCell.key("requestHash").withTx(tx).set(hash);
               });
+              logGenerateObject("write-complete", directRequestSummary);
             })
-            .catch((e) =>
-              handleLLMError(
+            .catch((e) => {
+              logGenerateObject("error", {
+                ...directRequestSummary,
+                error: e instanceof Error ? e.message : String(e),
+              });
+              return handleLLMError(
                 e,
                 runtime,
                 resultCell.key("pending"),
@@ -1197,8 +1578,8 @@ export function generateObject<T extends Record<string, unknown>>(
                 () => {
                   previousCallHash = undefined;
                 },
-              )
-            );
+              );
+            });
         },
       );
     }
