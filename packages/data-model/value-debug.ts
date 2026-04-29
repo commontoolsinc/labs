@@ -31,6 +31,9 @@ function unquoteMarked(json: string): string {
   });
 }
 
+/**
+ * Helper class for rendering debug-string representations of values.
+ */
 class DebugStringifier {
   #circles = new Set<object>();
   #unusedCircles = new Set<object>();
@@ -123,10 +126,13 @@ class DebugStringifier {
       return value;
     }
   }
+}
 
-  static render(value: unknown, indent?: number) {
-    return new this(value, indent).render();
-  }
+/**
+ * Renders the debug-string form of the given value with optional indentation.
+ */
+function renderDebugString(value: unknown, indent?: number) {
+  return new DebugStringifier(value, indent).render();
 }
 
 /**
@@ -143,7 +149,7 @@ export function toCompactDebugString(
   value: unknown,
   maxLength?: number,
 ): string {
-  const result = DebugStringifier.render(value);
+  const result = renderDebugString(value);
 
   if (typeof maxLength === "number") {
     const actualMax = Math.max(Math.floor(maxLength), 3);
@@ -163,5 +169,5 @@ export function toCompactDebugString(
  * parseable string.
  */
 export function toIndentedDebugString(value: unknown): string {
-  return DebugStringifier.render(value, 2);
+  return renderDebugString(value, 2);
 }
