@@ -171,7 +171,7 @@ function renderDebugString(value: unknown, indent?: number) {
  *   as `<circle>`.
  *
  * If the stringification could not be completed (stack overflow, object
- * `toJSON()` conversion error, etc.), this function returns the literl string
+ * `toJSON()` conversion error, etc.), this function returns the literal string
  * `"<unrenderable debug string>"`.
  *
  * **Note:** In _many_ cases, the output of this function is valid JSON text,
@@ -211,7 +211,7 @@ export function toCompactDebugString(
  *   as `<circle>`.
  *
  * If the stringification could not be completed (stack overflow, object
- * `toJSON()` conversion error, etc.), this function returns the literl string
+ * `toJSON()` conversion error, etc.), this function returns the literal string
  * `"<unrenderable debug string>"`.
  *
  * **Note:** In _many_ cases, the output of this function is valid JSON text,
