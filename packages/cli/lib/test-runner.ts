@@ -38,6 +38,7 @@ import type {
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { OpaqueRef } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
@@ -971,7 +972,7 @@ export async function runTestPattern(
     if (!Array.isArray(testSteps)) {
       throw new Error(
         "Test pattern must return { tests: TestStep[] }. Got: " +
-          JSON.stringify(typeof testSteps),
+          toCompactDebugString(typeof testSteps),
       );
     }
 
@@ -1083,7 +1084,7 @@ export async function runTestPattern(
       if (!isAction && !isAssertion) {
         throw new Error(
           `Test step at index ${i} must have either 'action' or 'assertion' key. Got: ${
-            JSON.stringify(Object.keys(stepValue))
+            toCompactDebugString(Object.keys(stepValue))
           }`,
         );
       }
@@ -1325,7 +1326,7 @@ export async function runTestPattern(
             }
             return {
               passed: false,
-              error: `Expected true, got ${JSON.stringify(value)}`,
+              error: `Expected true, got ${toCompactDebugString(value)}`,
             };
           } catch (err) {
             return {
