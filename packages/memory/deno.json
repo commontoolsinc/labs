@@ -4,8 +4,8 @@
     "dev": "deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts",
     "check": "deno check .",
     "just-test": {
-      "description": "Just run unit tests without type checking",
-      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check"
+      "description": "Run unit tests",
+      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env"
     },
     "test": {
       "description": "Type check & run tests",
