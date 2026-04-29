@@ -349,6 +349,12 @@ export interface BuilderFunctionsAndConstants {
   FabricEpochDays:
     typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochDays;
   FabricHash: typeof import("@commonfabric/data-model/fabric-hash").FabricHash;
+
+  // Debug stringifiers
+  toCompactDebugString:
+    typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
+  toIndentedDebugString:
+    typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
 }
 
 // Runtime interface needed by createCell
