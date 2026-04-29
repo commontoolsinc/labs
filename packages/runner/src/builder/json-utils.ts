@@ -67,7 +67,7 @@ export function toJSONWithLegacyAliases(
         $alias: {
           path: pathToCell as (string | number)[],
           ...(schema !== undefined &&
-            { schema: sanitizeSchemaForLinks(schema) }),
+            { schema: sanitizeSchemaForLinks(schema, { keepStreams: true }) }),
         },
       } satisfies LegacyAlias;
     } else throw new Error(`Cell not found in paths`);

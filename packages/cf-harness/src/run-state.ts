@@ -1,6 +1,8 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
+import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
 import type {
   HarnessCapabilitySnapshot,
@@ -34,12 +36,15 @@ export interface HarnessRunState {
   currentDir: string;
   model?: string;
   artifactRoot?: string;
+  runManifest?: HarnessRunManifest;
+  runManifestPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
   policyEvents: HarnessPolicyEvent[];
   toolOutputs: ToolResultRef[];
+  subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
   primaryFailure?: HarnessFailureRecord;
 }
@@ -54,10 +59,13 @@ export interface CreateHarnessRunStateOptions {
   currentDir: string;
   model?: string;
   artifactRoot?: string;
+  runManifest?: HarnessRunManifest;
+  runManifestPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
+  subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
   primaryFailure?: HarnessFailureRecord;
   now?: string;
@@ -85,6 +93,12 @@ export const createHarnessRunState = (
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
       : {}),
+    ...(options.runManifest !== undefined
+      ? { runManifest: options.runManifest }
+      : {}),
+    ...(options.runManifestPath !== undefined
+      ? { runManifestPath: options.runManifestPath }
+      : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
       : {}),
@@ -99,6 +113,9 @@ export const createHarnessRunState = (
       : {}),
     policyEvents: [],
     toolOutputs: [],
+    ...(options.subagentRuns !== undefined
+      ? { subagentRuns: [...options.subagentRuns] }
+      : {}),
     failureRecords: [...(options.failureRecords ?? [])],
     ...(options.primaryFailure !== undefined
       ? { primaryFailure: options.primaryFailure }
@@ -149,6 +166,16 @@ export const appendHarnessPolicyEvent = (
   ...state,
   updatedAt: now,
   policyEvents: [...state.policyEvents, event],
+});
+
+export const appendHarnessSubagentRun = (
+  state: HarnessRunState,
+  subagentRun: HarnessSubagentRunRef,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  updatedAt: now,
+  subagentRuns: [...(state.subagentRuns ?? []), subagentRun],
 });
 
 export const setHarnessPromptSlotBinding = (
@@ -203,6 +230,16 @@ export const setHarnessRunReportPath = (
 ): HarnessRunState => ({
   ...state,
   runReportPath,
+  updatedAt: now,
+});
+
+export const setHarnessRunManifestPath = (
+  state: HarnessRunState,
+  runManifestPath: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  runManifestPath,
   updatedAt: now,
 });
 

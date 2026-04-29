@@ -1,4 +1,4 @@
-import { css, html, nothing } from "lit";
+import { css, html, LitElement, nothing } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
@@ -61,6 +61,11 @@ export interface SelectItem {
 }
 
 export class CFSelect extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   /* ---------- Styles ---------- */
   static override styles = [
     BaseElement.baseStyles,
@@ -257,6 +262,11 @@ export class CFSelect extends BaseElement {
   }
 
   /* ---------- Lifecycle ---------- */
+  override connectedCallback() {
+    super.connectedCallback();
+    this._updateAccessibilityAttributes();
+  }
+
   override firstUpdated() {
     this._select = this.shadowRoot!.querySelector(
       "select",
@@ -270,6 +280,7 @@ export class CFSelect extends BaseElement {
 
     // Register with form after binding is complete
     this._formField.register(this.name);
+    this._updateAccessibilityAttributes();
   }
 
   override disconnectedCallback() {
@@ -301,6 +312,12 @@ export class CFSelect extends BaseElement {
     if (changed.has("theme")) {
       applyThemeToElement(this, this.theme ?? defaultTheme);
     }
+    if (
+      changed.has("disabled") || changed.has("required") ||
+      changed.has("multiple")
+    ) {
+      this._updateAccessibilityAttributes();
+    }
   }
 
   // Theme consumption
@@ -323,6 +340,7 @@ export class CFSelect extends BaseElement {
         @focus="${() => this.emit("cf-focus")}"
         @blur="${() => this.emit("cf-blur")}"
         part="select"
+        tabindex="-1"
       >
         ${this._renderPlaceholder()} ${this._renderOptions()}
       </select>
@@ -432,6 +450,27 @@ export class CFSelect extends BaseElement {
 
   reportValidity() {
     return this._select?.reportValidity() ?? true;
+  }
+
+  private _lastGeneratedRole: string | null = null;
+
+  /* ---------- Accessibility ---------- */
+  private _updateAccessibilityAttributes() {
+    // A single select is a combobox; a multi-select is a listbox (ARIA spec).
+    const role = this.multiple ? "listbox" : "combobox";
+    if (
+      !this.hasAttribute("role") ||
+      this.getAttribute("role") === this._lastGeneratedRole
+    ) {
+      this.setAttribute("role", role);
+      this._lastGeneratedRole = role;
+    }
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "select");
+    }
+    this.tabIndex = this.disabled ? -1 : 0;
+    this.setAttribute("aria-disabled", String(this.disabled));
+    this.setAttribute("aria-required", String(this.required));
   }
 
   /* ---------- Internal helpers ---------- */

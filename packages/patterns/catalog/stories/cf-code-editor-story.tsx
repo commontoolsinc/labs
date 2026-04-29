@@ -39,6 +39,8 @@ export default pattern<CodeEditorStoryInput, CodeEditorStoryOutput>(() => {
   const tabIndent = Writable.of(true);
   const theme = Writable.of<"light" | "dark">("light");
   const mode = Writable.of<"code" | "prose">("prose");
+  const autofocus = Writable.of(false);
+  const cursorPosition = Writable.of<"start" | "end">("start");
   const pattern = Writable.of("catalog");
   const mentionableData = [
     { [NAME]: "Design System" },
@@ -92,6 +94,8 @@ export default pattern<CodeEditorStoryInput, CodeEditorStoryOutput>(() => {
             tabIndent={tabIndent}
             theme={theme}
             mode={mode}
+            autofocus={autofocus}
+            cursorPosition={cursorPosition}
             style="height: 100%;"
           />
         </div>
@@ -251,6 +255,22 @@ export default pattern<CodeEditorStoryInput, CodeEditorStoryOutput>(() => {
             description="Indent using Tab key"
             defaultValue="true"
             checked={tabIndent}
+          />
+          <SwitchControl
+            label="autofocus"
+            description="Auto-focus editor on mount"
+            defaultValue="false"
+            checked={autofocus}
+          />
+          <SelectControl
+            label="cursorPosition"
+            description="Initial cursor position"
+            defaultValue="start"
+            value={cursorPosition}
+            items={[
+              { label: "Start", value: "start" },
+              { label: "End", value: "end" },
+            ]}
           />
         </>
       </Controls>

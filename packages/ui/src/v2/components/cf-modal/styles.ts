@@ -192,6 +192,8 @@ export const modalStyles = css`
         outline-offset: 2px;
       }
 
+      :host(:not([dismissible])) .close-button,
+      :host([dismissible="false"]) .close-button,
       :host(:not([dismissable])) .close-button,
       :host([dismissable="false"]) .close-button {
         display: none;

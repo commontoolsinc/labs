@@ -15,6 +15,15 @@ import {
   createCliPromptSlotBinding,
   type PromptSlotRole,
 } from "./contracts/prompt-slot.ts";
+import {
+  type HarnessRunManifest,
+  parseLoomRunManifestJson,
+} from "./contracts/run-manifest.ts";
+import {
+  DEFAULT_SUBAGENT_PROFILE,
+  HARNESS_SUBAGENT_PROFILES,
+  type HarnessSubagentProfile,
+} from "./contracts/subagent.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
 import type {
   HarnessTranscriptEvent,
@@ -39,6 +48,7 @@ export interface CfHarnessCliConfig {
   cwd?: string;
   focusRoot?: string;
   allowedToolIds?: readonly BuiltinToolId[];
+  allowedSubagentProfiles: readonly HarnessSubagentProfile[];
   outputMode: CfHarnessCliOutputMode;
   streamEvents: boolean;
   promptSlotRole: PromptSlotRole;
@@ -50,6 +60,7 @@ export interface CfHarnessCliConfig {
   gatewayAuthMode: HarnessGatewayAuthMode;
   artifactRoot: string;
   resultJsonPath?: string;
+  runManifestPath?: string;
   cfcEnforcementModeOverride?: CfcEnforcementMode;
   maxModelTurns: number;
   printTranscript: boolean;
@@ -156,7 +167,8 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | write_file)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | write_file | delegate_task)
+  --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
   --prompt-slot-role <role>     direct-command | context | quote (default: direct-command)
@@ -169,6 +181,7 @@ Options:
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
   --result-json-path <path>     Optional structured result sidecar path
+  --run-manifest <path>         Optional Loom run manifest JSON path
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -197,7 +210,12 @@ const parsePositiveInteger = (
 };
 
 const PROMPT_SLOT_ROLES = ["direct-command", "context", "quote"] as const;
-const BUILTIN_TOOL_IDS = ["bash", "read_file", "write_file"] as const;
+const BUILTIN_TOOL_IDS = [
+  "bash",
+  "read_file",
+  "write_file",
+  "delegate_task",
+] as const;
 
 const parsePromptSlotRole = (
   input: string | undefined,
@@ -229,13 +247,52 @@ const parseBuiltinToolIds = (
     return undefined;
   }
   const values = Array.isArray(input) ? input : [input];
+  if (values.length === 0) {
+    return undefined;
+  }
   const parsed = values.map((value) => parseBuiltinToolId(value));
   if (parsed.some((value) => value === undefined)) {
     throw new Error(
-      "allowed tools must be one or more of bash, read_file, write_file",
+      "allowed tools must be one or more of bash, read_file, write_file, delegate_task",
     );
   }
   return [...new Set(parsed)] as readonly BuiltinToolId[];
+};
+
+const parseSubagentProfile = (
+  input: string,
+): HarnessSubagentProfile | undefined =>
+  (HARNESS_SUBAGENT_PROFILES as readonly string[]).includes(input)
+    ? input as HarnessSubagentProfile
+    : undefined;
+
+const parseSubagentProfiles = (
+  input: string | readonly string[] | undefined,
+): readonly HarnessSubagentProfile[] | undefined => {
+  if (input === undefined) {
+    return undefined;
+  }
+  const values = Array.isArray(input) ? input : [input];
+  if (values.length === 0) {
+    return undefined;
+  }
+  const parsed = values.map((value) => parseSubagentProfile(value));
+  if (parsed.some((value) => value === undefined)) {
+    throw new Error("allowed subagent profiles must be one or more of default");
+  }
+  return [...new Set(parsed)] as readonly HarnessSubagentProfile[];
+};
+
+const resolveAllowedSubagentProfiles = (
+  allowedToolIds: readonly BuiltinToolId[] | undefined,
+  allowedSubagentProfiles: readonly HarnessSubagentProfile[] | undefined,
+): readonly HarnessSubagentProfile[] =>
+  allowedSubagentProfiles ??
+    (allowedToolIds === undefined ? [DEFAULT_SUBAGENT_PROFILE] : []);
+
+const nonEmptyEnvValue = (input: string | undefined): string | undefined => {
+  const trimmed = input?.trim();
+  return trimmed === undefined || trimmed === "" ? undefined : trimmed;
 };
 
 const resolvePrompt = async (
@@ -294,6 +351,7 @@ export const parseCfHarnessCliArgs = async (
       "cwd",
       "focus-root",
       "allow-tool",
+      "allow-subagent-profile",
       "output-mode",
       "prompt-slot-role",
       "prompt",
@@ -305,11 +363,12 @@ export const parseCfHarnessCliArgs = async (
       "gateway-auth-mode",
       "artifact-root",
       "result-json-path",
+      "run-manifest",
       "cfc-enforcement-mode",
       "max-model-turns",
     ],
     boolean: ["help", "print-transcript", "stream-events"],
-    collect: ["allow-tool"],
+    collect: ["allow-tool", "allow-subagent-profile"],
     alias: {
       h: "help",
     },
@@ -337,6 +396,15 @@ export const parseCfHarnessCliArgs = async (
     : undefined;
   const allowedToolIds = parseBuiltinToolIds(
     args["allow-tool"] as string | readonly string[] | undefined,
+  );
+  const allowedSubagentProfiles = resolveAllowedSubagentProfiles(
+    allowedToolIds,
+    parseSubagentProfiles(
+      args["allow-subagent-profile"] as
+        | string
+        | readonly string[]
+        | undefined,
+    ),
   );
   const outputMode = parseCliOutputMode(
     typeof args["output-mode"] === "string" ? args["output-mode"] : undefined,
@@ -373,6 +441,9 @@ export const parseCfHarnessCliArgs = async (
   const resultJsonPath = typeof args["result-json-path"] === "string"
     ? resolve(cwd, args["result-json-path"])
     : undefined;
+  const runManifestPath = typeof args["run-manifest"] === "string"
+    ? resolve(cwd, args["run-manifest"])
+    : undefined;
   const gatewayBaseUrl = typeof args["gateway-base-url"] === "string"
     ? args["gateway-base-url"]
     : DEFAULT_GATEWAY_BASE_URL;
@@ -388,26 +459,33 @@ export const parseCfHarnessCliArgs = async (
     throw new Error("gateway auth mode must be one of bearer, none");
   }
   const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
-  const cfcEnforcementModeOverride = parseCfcEnforcementMode(
-    typeof args["cfc-enforcement-mode"] === "string"
-      ? args["cfc-enforcement-mode"]
-      : undefined,
-  );
-  if (
-    args["cfc-enforcement-mode"] !== undefined &&
-    cfcEnforcementModeOverride === undefined
-  ) {
-    throw new Error(
-      "cfc enforcement mode must be one of disabled, observe, enforce-explicit, enforce-strict",
-    );
-  }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
   const prompt = await resolvePrompt(args, cwd, readTextFile);
   const env = deps.env ??
     {
       CF_HARNESS_API_KEY: Deno.env.get("CF_HARNESS_API_KEY"),
       OPENAI_API_KEY: Deno.env.get("OPENAI_API_KEY"),
+      CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
+        "CF_HARNESS_CFC_ENFORCEMENT_MODE",
+      ),
+      CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
     };
+  const explicitCfcMode = typeof args["cfc-enforcement-mode"] === "string"
+    ? args["cfc-enforcement-mode"]
+    : undefined;
+  const envCfcMode = nonEmptyEnvValue(env.CF_HARNESS_CFC_ENFORCEMENT_MODE) ??
+    nonEmptyEnvValue(env.CF_CFC_MODE);
+  const cfcEnforcementModeOverride = parseCfcEnforcementMode(
+    explicitCfcMode ?? envCfcMode,
+  );
+  if (
+    (explicitCfcMode !== undefined || envCfcMode !== undefined) &&
+    cfcEnforcementModeOverride === undefined
+  ) {
+    throw new Error(
+      "cfc enforcement mode must be one of disabled, observe, enforce-explicit, enforce-strict",
+    );
+  }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
   const apiKeySource = env.CF_HARNESS_API_KEY !== undefined
     ? "CF_HARNESS_API_KEY"
@@ -419,6 +497,7 @@ export const parseCfHarnessCliArgs = async (
     ...(initialCwd !== undefined ? { cwd: initialCwd } : {}),
     ...(focusRoot !== undefined ? { focusRoot } : {}),
     ...(allowedToolIds !== undefined ? { allowedToolIds } : {}),
+    allowedSubagentProfiles,
     outputMode: outputMode ?? "operator",
     streamEvents: Boolean(args["stream-events"]),
     promptSlotRole: promptSlotRole ?? "direct-command",
@@ -436,6 +515,7 @@ export const parseCfHarnessCliArgs = async (
     gatewayAuthMode,
     artifactRoot,
     ...(resultJsonPath !== undefined ? { resultJsonPath } : {}),
+    ...(runManifestPath !== undefined ? { runManifestPath } : {}),
     ...(cfcEnforcementModeOverride !== undefined
       ? { cfcEnforcementModeOverride }
       : {}),
@@ -450,6 +530,14 @@ export const parseCfHarnessCliArgs = async (
     ...(apiKeySource !== undefined ? { apiKeySource } : {}),
   };
 };
+
+const readRunManifest = async (
+  path: string | undefined,
+  readTextFile: (path: string) => Promise<string>,
+): Promise<HarnessRunManifest | undefined> =>
+  path === undefined
+    ? undefined
+    : parseLoomRunManifestJson(await readTextFile(path));
 
 export const formatCfHarnessCliUsage = (): string => usage;
 
@@ -587,6 +675,8 @@ const summarizeToolCallArguments = (
         )
           .join(" ");
       }
+      case "delegate_task":
+        return "subagent";
       default:
         return undefined;
     }
@@ -689,6 +779,7 @@ export const runCfHarnessCli = async (
       ((options: CreateHarnessPromptLoopOptions) =>
         new CfHarnessPromptLoop(options));
     const writeTextFile = deps.writeTextFile ?? Deno.writeTextFile;
+    const readTextFile = deps.readTextFile ?? Deno.readTextFile;
     if (parsed.gatewayAuthMode === "bearer" && parsed.apiKey === undefined) {
       throw new Error(
         "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
@@ -696,11 +787,24 @@ export const runCfHarnessCli = async (
     }
     const startedAt = Date.now();
     let result: HarnessPromptLoopResult;
-    const promptSlotBinding = createCliPromptSlotBinding({
-      kernelName: "cf-harness",
-      role: parsed.promptSlotRole,
-      subject: parsed.resumeRun ?? parsed.workspace,
-    });
+    const runManifest = await readRunManifest(
+      parsed.runManifestPath,
+      readTextFile,
+    );
+    const promptSlotBinding = runManifest?.promptSlot ??
+      createCliPromptSlotBinding({
+        kernelName: "cf-harness",
+        ...(parsed.runManifestPath !== undefined
+          ? {
+            source: {
+              type: "cf-harness.loom-run-manifest-ref",
+              path: parsed.runManifestPath,
+            },
+          }
+          : {}),
+        role: parsed.promptSlotRole,
+        subject: parsed.resumeRun ?? parsed.workspace,
+      });
     const onTranscriptEvent = parsed.streamEvents
       ? (event: HarnessTranscriptEvent) => {
         const formatted = formatCfHarnessTranscriptEvent(event);
@@ -721,6 +825,10 @@ export const runCfHarnessCli = async (
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(parsed.runManifestPath !== undefined
+          ? { runManifestPath: parsed.runManifestPath }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -732,9 +840,14 @@ export const runCfHarnessCli = async (
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(parsed.runManifestPath !== undefined
+          ? { runManifestPath: parsed.runManifestPath }
+          : {}),
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         maxModelTurns: parsed.maxModelTurns,
+        allowedSubagentProfiles: parsed.allowedSubagentProfiles,
         ...(parsed.allowedToolIds !== undefined
           ? { allowedToolIds: parsed.allowedToolIds }
           : {}),
@@ -761,6 +874,10 @@ export const runCfHarnessCli = async (
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(parsed.runManifestPath !== undefined
+          ? { runManifestPath: parsed.runManifestPath }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -774,7 +891,12 @@ export const runCfHarnessCli = async (
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(parsed.runManifestPath !== undefined
+          ? { runManifestPath: parsed.runManifestPath }
+          : {}),
         maxModelTurns: parsed.maxModelTurns,
+        allowedSubagentProfiles: parsed.allowedSubagentProfiles,
         ...(parsed.allowedToolIds !== undefined
           ? { allowedToolIds: parsed.allowedToolIds }
           : {}),

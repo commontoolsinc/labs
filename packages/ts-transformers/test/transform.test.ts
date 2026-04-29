@@ -229,6 +229,39 @@ export function make() {
     assert(!main.includes('.for(["foo", 0, "param"], true)'));
   });
 
+  it("does not retarget plain handler params inside local object initializers", async () => {
+    const source = `
+import { handler, type Stream } from "commonfabric";
+
+type Message = {
+  role: "user";
+  content: Array<{ type: "text"; text: string }>;
+};
+
+const runBoth = handler<void, { send: Stream<Message>; prompt: string }>(
+  (_, { send, prompt }) => {
+    const message = {
+      role: "user" as const,
+      content: [{ type: "text" as const, text: prompt }],
+    };
+    send.send(message);
+  },
+);
+
+export { runBoth };
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(main, "text: prompt");
+    assertNotMatch(main, /prompt\.for\(/);
+  });
+
   it("does not duplicate stable causes on asserted reactive initializers", async () => {
     const source = `
 import { Default, pattern } from "commonfabric";

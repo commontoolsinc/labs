@@ -2,6 +2,7 @@ import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
 import type { HarnessPolicyEvent, HarnessToolInputSummary } from "./policy.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
+import type { HarnessSubagentRunRef } from "./subagent.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
 import type { ToolResultRef } from "./tool-result.ts";
@@ -12,6 +13,7 @@ export type HarnessRunTimelineKind =
   | "run_started"
   | "transcript_message"
   | "tool_activity"
+  | "subagent_run"
   | "policy_event"
   | "failure_record"
   | "run_finished";
@@ -57,6 +59,8 @@ export interface HarnessRunTimelineEntry {
   failureRecordIndex?: number;
   failureKind?: string;
   source?: string;
+  childRunId?: string;
+  subagentStatus?: string;
 }
 
 export type HarnessRunTimelineEntryInput = Omit<
@@ -91,6 +95,7 @@ export interface HarnessRunReport {
   timeline: HarnessRunTimelineEntry[];
   toolActivity: HarnessToolActivity[];
   toolOutputs: ToolResultRef[];
+  subagentRuns?: HarnessSubagentRunRef[];
 }
 
 export interface CreateHarnessRunReportOptions {
@@ -109,6 +114,7 @@ export interface CreateHarnessRunReportOptions {
     failureRecords?: HarnessFailureRecord[];
     policyEvents: HarnessPolicyEvent[];
     toolOutputs: ToolResultRef[];
+    subagentRuns?: HarnessSubagentRunRef[];
   };
   model: string;
   modelTurns: number;
@@ -152,6 +158,18 @@ export const createHarnessRunTimeline = (
       toolId: activity.toolId,
       policyDecision: activity.policyDecision,
       executionStatus: activity.executionStatus,
+    });
+  }
+  for (const subagentRun of options.runState.subagentRuns ?? []) {
+    push({
+      kind: "subagent_run",
+      at: subagentRun.runState.endedAt ?? subagentRun.runState.updatedAt ??
+        subagentRun.manifest.createdAt,
+      toolCallId: subagentRun.parentToolCallId,
+      childRunId: subagentRun.childRunId,
+      subagentStatus: subagentRun.status,
+      status: subagentRun.runState.status,
+      terminalReason: subagentRun.runState.terminalReason,
     });
   }
   for (
@@ -262,5 +280,9 @@ export const createHarnessRunReport = (
     }),
     toolActivity: [...options.toolActivity],
     toolOutputs: [...options.runState.toolOutputs],
+    ...(options.runState.subagentRuns !== undefined &&
+        options.runState.subagentRuns.length > 0
+      ? { subagentRuns: [...options.runState.subagentRuns] }
+      : {}),
   };
 };

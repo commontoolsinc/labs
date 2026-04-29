@@ -1,3 +1,4 @@
+import { isInstance } from "@commonfabric/utils/types";
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
 import {
@@ -66,6 +67,31 @@ export function jsonFromValue(value: FabricValue): string {
 }
 
 /**
+ * Decodes a JSON string back into a fabric value which is expected to be a
+ * plain object. Throws if it turns out to be something else.
+ */
+export function plainObjectFromJson<T extends object = object>(
+  json: string,
+  runtime?: ReconstructionContext,
+): T {
+  const result = valueFromJson(json, runtime);
+
+  if ((result === null) || (typeof result !== "object")) {
+    throw new Error("plainObjectFromJson: Decoded to non-object");
+  } else if (Array.isArray(result)) {
+    throw new Error(
+      "plainObjectFromJson: Decoded to array (not a plain object)",
+    );
+  } else if (isInstance(result)) {
+    throw new Error(
+      "plainObjectFromJson: Decoded to instance (not a plain object)",
+    );
+  }
+
+  return result as T;
+}
+
+/**
  * Indicates if the given text has a "first-blush" appearance as valid encoded
  * JSON as defined by this module.
  */
@@ -80,11 +106,13 @@ export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
 /**
  * Decodes a JSON string back into a fabric value. When unified JSON encoding is
  * ON, uses the modern JSON-based format. When OFF, equivalent to
- * `JSON.parse(json)`.
+ * `JSON.parse(json)`. The `runtime` argument is only consulted when the flag
+ * is ON; if omitted, the shared `EMPTY_RECONSTRUCTION_CONTEXT` is substituted,
+ * which throws if any cell reconstruction is needed.
  */
 export function valueFromJson(
   json: string,
-  runtime: ReconstructionContext,
+  runtime?: ReconstructionContext | undefined,
 ): FabricValue {
   if (jsonEncodingEnabled) {
     return valueFromJsonModern(json, runtime);

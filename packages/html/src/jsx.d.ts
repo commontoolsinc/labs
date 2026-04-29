@@ -3357,15 +3357,19 @@ interface CFSvgAttributes<T> extends CFHTMLAttributes<T> {
 interface CFAlertAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?: "default" | "destructive" | "warning" | "success" | "info";
   "dismissible"?: boolean;
+  "dismissable"?: boolean;
   "oncf-dismiss"?: EventHandler<{}>;
+  "oncf-alert-dismiss"?: EventHandler<{}>;
 }
 
 interface CFToastAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?: "default" | "success" | "error" | "warning";
   "duration"?: number;
+  "dismissible"?: boolean;
   "dismissable"?: boolean;
   "open"?: boolean;
   "oncf-toast-dismiss"?: EventHandler<{ reason: string }>;
+  "oncf-dismiss"?: EventHandler<{ reason: string }>;
   "oncf-toast-action"?: EventHandler<{}>;
 }
 
@@ -3614,6 +3618,7 @@ interface CFFabAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "$open"?: CellLike<boolean> | boolean;
+  "dismissible"?: boolean;
   "dismissable"?: boolean;
   "size"?: "sm" | "md" | "lg" | "full";
   "presentation"?: "dialog" | "sheet";
@@ -3623,6 +3628,7 @@ interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "label"?: string;
   "oncf-modal-open"?: EventHandler<void>;
   "oncf-modal-close"?: EventHandler<{ reason: string }>;
+  "oncf-dismiss"?: EventHandler<{ reason: string }>;
   "oncf-modal-opened"?: EventHandler<void>;
   "oncf-modal-closed"?: EventHandler<void>;
 }
@@ -3962,6 +3968,8 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "tabIndent"?: boolean;
   "theme"?: "light" | "dark";
   "mode"?: "code" | "prose";
+  "autofocus"?: boolean;
+  "cursorPosition"?: "start" | "end";
   "oncf-change"?: any;
   "oncf-focus"?: any;
   "oncf-blur"?: any;

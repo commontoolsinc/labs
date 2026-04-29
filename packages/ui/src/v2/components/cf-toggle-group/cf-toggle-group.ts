@@ -168,12 +168,11 @@ export class CFToggleGroup extends BaseElement {
   }
 
   private handleToggle = (event: Event): void => {
-    event.stopPropagation();
-
     const customEvent = event as CustomEvent;
     const toggle = event.target as Element;
 
     if (!toggle || !toggle.matches("cf-toggle")) return;
+    event.stopPropagation();
 
     const toggleValue = toggle.getAttribute("value") ||
       toggle.textContent?.trim() || "";

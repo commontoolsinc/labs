@@ -1,6 +1,8 @@
 import { assertEquals } from "@std/assert";
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
+  DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
   resolveCfcEnforcementMode,
@@ -49,7 +51,38 @@ Deno.test("resolveCfcEnforcementMode falls back through config and inherited val
     }),
     "observe",
   );
-  assertEquals(resolveCfcEnforcementMode({}), "disabled");
+  assertEquals(
+    resolveCfcEnforcementMode({}),
+    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+  );
+});
+
+Deno.test("resolveCfcEnforcementMode can inherit from a run manifest", () => {
+  assertEquals(
+    resolveCfcEnforcementMode({
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        cfc: { enforcementMode: "observe" },
+      },
+    }),
+    "observe",
+  );
+});
+
+Deno.test("resolveCfcEnforcementMode ignores malformed in-memory run manifest modes", () => {
+  assertEquals(
+    resolveCfcEnforcementMode({
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        cfc: { enforcementMode: "bogus" as CfcEnforcementMode },
+      },
+    }),
+    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+  );
 });
 
 Deno.test("resolveGatewayAuthMode prefers explicit override", () => {
@@ -72,7 +105,7 @@ Deno.test("resolveHarnessConfig normalizes the gateway base URL", () => {
   });
   assertEquals(config.gatewayBaseUrl, DEFAULT_GATEWAY_BASE_URL);
   assertEquals(config.gatewayAuthMode, "bearer");
-  assertEquals(config.cfcEnforcementMode, "disabled");
+  assertEquals(config.cfcEnforcementMode, DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE);
 });
 
 Deno.test("resolveHarnessConfig accepts an explicit mode override string", () => {

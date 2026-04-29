@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
@@ -125,6 +125,12 @@ export const INPUT_PATTERNS = {
 } as const;
 
 export class CFInput extends BaseElement {
+  static formAssociated = true;
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override styles = css`
     :host {
       --cf-input-color-text: var(--cf-theme-color-text, #111827);
@@ -150,6 +156,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-md-padding-h, 8px);
       --input-padding-y: var(--cf-size-md-padding-v, 8px);
       --input-font-size: var(--cf-size-md-font-size, 12px);
+      --input-line-height: var(--cf-size-md-line-height, 16px);
       --input-border-radius: var(--cf-size-md-radius, 8px);
 
       display: block;
@@ -161,6 +168,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-xs-padding-h, 4px);
       --input-padding-y: var(--cf-size-xs-padding-v, 2px);
       --input-font-size: var(--cf-size-xs-font-size, 9px);
+      --input-line-height: var(--cf-size-xs-line-height, 12px);
       --input-border-radius: var(--cf-size-xs-radius, 4px);
     }
 
@@ -169,6 +177,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-sm-padding-h, 6px);
       --input-padding-y: var(--cf-size-sm-padding-v, 4px);
       --input-font-size: var(--cf-size-sm-font-size, 11px);
+      --input-line-height: var(--cf-size-sm-line-height, 16px);
       --input-border-radius: var(--cf-size-sm-radius, 5px);
     }
 
@@ -177,6 +186,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-lg-padding-h, 12px);
       --input-padding-y: var(--cf-size-lg-padding-v, 8px);
       --input-font-size: var(--cf-size-lg-font-size, 16px);
+      --input-line-height: var(--cf-size-lg-line-height, 20px);
       --input-border-radius: var(--cf-size-lg-radius, 9px);
     }
 
@@ -185,6 +195,7 @@ export class CFInput extends BaseElement {
       --input-padding-x: var(--cf-size-xl-padding-h, 16px);
       --input-padding-y: var(--cf-size-xl-padding-v, 12px);
       --input-font-size: var(--cf-size-xl-font-size, 18px);
+      --input-line-height: var(--cf-size-xl-line-height, 24px);
       --input-border-radius: var(--cf-size-xl-radius, 10px);
     }
 
@@ -197,10 +208,11 @@ export class CFInput extends BaseElement {
     input {
       display: block;
       width: 100%;
-      height: var(--input-height);
+      min-height: var(--input-height);
+      height: auto;
       padding: var(--input-padding-y) var(--input-padding-x);
       font-size: var(--input-font-size);
-      line-height: 1.25rem;
+      line-height: var(--input-line-height);
       color: var(--cf-input-color-text, #111827);
       background-color: var(--cf-input-color-background, #ffffff);
       border: 1px solid var(--cf-input-color-border, #e5e7eb);
@@ -414,6 +426,8 @@ export class CFInput extends BaseElement {
       declare timingDelay: number;
 
       private _input: HTMLInputElement | null = null;
+      private _generatedAriaLabel: string | null = null;
+      #internals: ElementInternals;
       private _cellController = createStringCellController(this, {
         timing: {
           strategy: "debounce",
@@ -441,6 +455,7 @@ export class CFInput extends BaseElement {
 
       constructor() {
         super();
+        this.#internals = this.attachInternals();
         this.type = "text";
         this.placeholder = "";
         this.value = "";
@@ -590,6 +605,19 @@ export class CFInput extends BaseElement {
         if (changedProperties.has("theme")) {
           applyThemeToElement(this, this.theme ?? defaultTheme);
         }
+
+        if (
+          changedProperties.has("disabled") ||
+          changedProperties.has("readonly") ||
+          changedProperties.has("required") ||
+          changedProperties.has("error") ||
+          changedProperties.has("showValidation") ||
+          changedProperties.has("placeholder") ||
+          changedProperties.has("type") ||
+          changedProperties.has("value")
+        ) {
+          this._updateAccessibilityAttributes();
+        }
       }
 
       override firstUpdated() {
@@ -614,6 +642,12 @@ export class CFInput extends BaseElement {
 
         // Apply theme after first render
         applyThemeToElement(this, this.theme ?? defaultTheme);
+        this._updateAccessibilityAttributes();
+      }
+
+      override connectedCallback() {
+        super.connectedCallback();
+        this._updateAccessibilityAttributes();
       }
 
       override render() {
@@ -624,6 +658,11 @@ export class CFInput extends BaseElement {
         // For file inputs, we can't set the value programmatically
         const inputValue = this.type === "file" ? undefined : this.getValue();
 
+        // The host element carries the ARIA role and tabindex for accessibility.
+        // delegatesFocus: true routes focus to the inner <input>, so aria-hidden
+        // must NOT be set on it — browsers refuse to apply aria-hidden on focused
+        // elements. The tabindex="-1" keeps it out of the tab sequence (the host
+        // is the tab stop); the host ARIA attributes are the a11y surface.
         return html`
           <input
             type="${this.type}"
@@ -657,6 +696,7 @@ export class CFInput extends BaseElement {
             @keydown="${this._handleKeyDown}"
             @invalid="${this._handleInvalid}"
             part="input"
+            tabindex="-1"
           />
         `;
       }
@@ -746,14 +786,129 @@ export class CFInput extends BaseElement {
         if (this.showValidation) {
           this.requestUpdate();
         }
+        this._updateAccessibilityAttributes();
       }
 
-      /**
-       * Focus the input programmatically
-       */
-      override focus(): void {
-        this.input?.focus();
+      private _updateAccessibilityAttributes() {
+        this._syncHostRole();
+        if (!this.hasAttribute("exportparts")) {
+          this.setAttribute("exportparts", "input");
+        }
+        this.tabIndex = this.disabled ? -1 : 0;
+        this.setAttribute("aria-disabled", String(this.disabled));
+        this.setAttribute("aria-readonly", String(this.readonly));
+        this.setAttribute("aria-required", String(this.required));
+        this._updateGeneratedAriaLabel();
+        // Read .validity.valid directly instead of checkValidity() to avoid
+        // firing the 'invalid' event, which would re-enter _handleInvalid.
+        const nativeValid = this.input?.validity?.valid ?? true;
+        this.setAttribute(
+          "aria-invalid",
+          String(this.error || !nativeValid),
+        );
+        this._syncValueAttributes();
+        this._syncInternals();
       }
+
+      /** Sync aria-valuemin/max/now for spinbutton and slider roles. */
+      private _syncValueAttributes() {
+        const role = this.getAttribute("role");
+        if (role === "spinbutton" || role === "slider") {
+          const min = this.min || (this.input?.min ?? "");
+          const max = this.max || (this.input?.max ?? "");
+          const val = this.input?.value ?? this.getValue();
+          if (min) this.setAttribute("aria-valuemin", min);
+          else this.removeAttribute("aria-valuemin");
+          if (max) this.setAttribute("aria-valuemax", max);
+          else this.removeAttribute("aria-valuemax");
+          if (val) this.setAttribute("aria-valuenow", val);
+          else this.removeAttribute("aria-valuenow");
+        } else {
+          this.removeAttribute("aria-valuemin");
+          this.removeAttribute("aria-valuemax");
+          this.removeAttribute("aria-valuenow");
+        }
+      }
+
+      /** Sync value and validity to ElementInternals for native form participation. */
+      private _syncInternals() {
+        this.#internals.setFormValue(this.getValue());
+        if (this.input) {
+          this.#internals.setValidity(
+            this.input.validity,
+            this.input.validationMessage,
+            this.input,
+          );
+        }
+      }
+
+      /** Map input type to the appropriate ARIA role on the host. */
+      private _syncHostRole() {
+        // Respect author-provided roles
+        if (
+          this.hasAttribute("role") &&
+          this.getAttribute("role") !== this._lastGeneratedRole
+        ) {
+          return;
+        }
+        const role = this._roleForType(this.type);
+        if (role) {
+          this.setAttribute("role", role);
+          this._lastGeneratedRole = role;
+        } else if (this._lastGeneratedRole) {
+          this.removeAttribute("role");
+          this._lastGeneratedRole = null;
+        }
+      }
+
+      private _lastGeneratedRole: string | null = null;
+
+      private _roleForType(type: InputType): string | null {
+        switch (type) {
+          case "text":
+          case "email":
+          case "password":
+          case "search":
+          case "tel":
+          case "url":
+            return "textbox";
+          case "number":
+            return "spinbutton";
+          case "range":
+            return "slider";
+          default:
+            // date, time, datetime-local, month, week, color, file, hidden
+            // — no widely-supported ARIA role; leave unset
+            return null;
+        }
+      }
+
+      private _updateGeneratedAriaLabel() {
+        const ariaLabel = this.getAttribute("aria-label");
+        const hasAuthorProvidedName = this.hasAttribute("aria-labelledby") ||
+          (ariaLabel !== null && ariaLabel !== this._generatedAriaLabel);
+
+        if (hasAuthorProvidedName) {
+          this._generatedAriaLabel = null;
+          return;
+        }
+
+        if (this.placeholder) {
+          this.setAttribute("aria-label", this.placeholder);
+          this._generatedAriaLabel = this.placeholder;
+          return;
+        }
+
+        if (
+          this._generatedAriaLabel !== null &&
+          ariaLabel === this._generatedAriaLabel
+        ) {
+          this.removeAttribute("aria-label");
+          this._generatedAriaLabel = null;
+        }
+      }
+
+      // focus() is handled by delegatesFocus on the shadow root.
 
       /**
        * Blur the input programmatically

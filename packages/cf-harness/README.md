@@ -33,9 +33,14 @@ What works today:
   - `bash`
   - `read_file`
   - `write_file`
+  - `delegate_task`
 - whole-file replace/create plus append writes
 - bounded OpenAI-compatible prompt/tool loop
-- persisted run state, transcript, and tool outputs
+- single-child subagent delegation with fresh child prompt context, an explicit
+  default child profile, retained child run references, and a sanitized
+  summary/state return channel
+- persisted run state, transcript, Loom run manifests, capability snapshots, and
+  tool outputs
 - transcript-based resumability
 - package-local operator CLI
 - CFC mode plumbing with:
@@ -43,6 +48,10 @@ What works today:
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
+- default CFC mode aligned with the runner's permissive-if-absent
+  `enforce-explicit` rollout behavior
+- spec-aligned `PromptSlotBound` prompt-slot evidence
+- Loom run manifest intake through `--run-manifest`
 - first-pass policy events and deny/recovery behavior
 - configurable gateway auth mode:
   - `bearer`
@@ -52,7 +61,8 @@ What is not done yet:
 
 - real runner-driven CFC feedback integration
 - richer opaque-handle/pass-through behavior
-- subagents and parallel job orchestration
+- additional subagent profiles, browser-mediated subagents, and parallel job
+  orchestration
 - app UI event provenance
 - streaming model responses
 - richer mid-turn resumability
@@ -68,9 +78,11 @@ What is not done yet:
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
 - [src/artifacts.ts](src/artifacts.ts)
-  - persisted run state, transcript, and tool output storage
+  - persisted run state, run manifest, transcript, capability snapshot, and tool
+    output storage
 - [src/contracts/](src/contracts/)
-  - prompt-slot, observation, policy, transcript, and tool-result contracts
+  - prompt-slot, run-manifest, observation, policy, run-report, subagent,
+    transcript, and tool-result contracts
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
 
@@ -104,6 +116,28 @@ deno task run -- \
   --gateway-auth-mode none \
   --prompt "Summarize the cf-harness package structure." \
   --print-transcript
+```
+
+Loom-backed batch runs may also pass a retained manifest:
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --run-manifest /path/to/loom-run-manifest.json \
+  --prompt "Handle this Loom wish."
+```
+
+When constraining the parent tool surface to `delegate_task`, authorize the
+child profile separately so the delegation policy transition is explicit:
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --allow-tool delegate_task \
+  --allow-subagent-profile default \
+  --prompt "Delegate a focused inspection and summarize the result."
 ```
 
 Current caveat:

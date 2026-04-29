@@ -71,27 +71,14 @@ export type {
   SelectSchemaStats,
 } from "./space-schema.ts";
 import { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "../utils/src/types.ts";
 import {
   jsonFromValue,
+  plainObjectFromJson,
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
-import type { ReconstructionContext } from "@commonfabric/data-model/fabric-value";
 export type * from "./interface.ts";
-
-/**
- * Minimal reconstruction context for decoding values at the storage boundary.
- * Step 0 only handles types that don't require runtime context (undefined,
- * bigint, sparse arrays, etc.), so `getCell` is unimplemented. Future steps
- * that add Cell serialization will need to supply a real context.
- */
-const storageReconstructionContext: ReconstructionContext = {
-  getCell() {
-    throw new globalThis.Error(
-      "getCell is not available at the storage boundary (step 0)",
-    );
-  },
-};
 
 export const PREPARE = `
 BEGIN TRANSACTION;
@@ -576,10 +563,7 @@ const recall = <Space extends MemorySpace>(
       // dispatch, `JSON.parse` returned `any` which silently satisfied the
       // type; `valueFromJson` returns `FabricValue`, so we need a cast.
       // deno-lint-ignore no-explicit-any
-      (revision as any).is = valueFromJson(
-        row.is,
-        storageReconstructionContext,
-      );
+      (revision as any).is = valueFromJson(row.is);
     }
 
     return revision;
@@ -660,10 +644,7 @@ const getFact = <Space extends MemorySpace>(
   if (row.is) {
     // See comment in `recall` for why this cast is needed.
     // deno-lint-ignore no-explicit-any
-    (revision as any).is = valueFromJson(
-      row.is,
-      storageReconstructionContext,
-    );
+    (revision as any).is = valueFromJson(row.is);
   }
   return revision;
 };
@@ -721,9 +702,7 @@ const toFact = function (row: StateRow): SelectedFact {
     cause: row.cause
       ? row.cause as CauseString
       : unclaimedRef(row as FactAddress).toString() as CauseString,
-    is: row.is
-      ? valueFromJson(row.is, storageReconstructionContext) as FabricValue
-      : undefined,
+    is: row.is ? valueFromJson(row.is) as FabricValue : undefined,
     since: row.since,
   };
 };
@@ -971,7 +950,7 @@ const commit = <Space extends MemorySpace>(
   const row = stmt.get({ the, of }) as StateRow | undefined;
   const [since, cause] = row
     ? [
-      (JSON.parse(row.is as string) as CommitData).since + 1,
+      plainObjectFromJson<CommitData>(row.is as string).since + 1,
       hashObjectFromString(row.fact) as HashObject<Assertion>,
     ]
     : [0, unclaimedRef({ the, of }) as HashObject as HashObject<Assertion>];
@@ -1128,7 +1107,7 @@ export const querySchema = <Space extends MemorySpace>(
       span.setAttribute("querySchema.has_selector", true);
       span.setAttribute(
         "querySchema.selectSchema",
-        JSON.stringify(command.args.selectSchema),
+        toCompactDebugString(command.args.selectSchema),
       );
     }
     if (command.args?.since !== undefined) {

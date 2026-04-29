@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
@@ -31,6 +31,11 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  */
 
 export class CFCheckbox extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override styles = css`
     :host {
       display: inline-flex;
@@ -226,10 +231,16 @@ export class CFCheckbox extends BaseElement {
     }
 
     override connectedCallback() {
+      // Set host attributes before super.connectedCallback() triggers rendering.
+      // Cannot be in the constructor — the custom element spec forbids
+      // setAttribute during construction.
+      if (!this.hasAttribute("role")) {
+        this.setAttribute("role", "checkbox");
+      }
+      if (!this.hasAttribute("exportparts")) {
+        this.setAttribute("exportparts", "checkbox,checkmark");
+      }
       super.connectedCallback();
-      // Make the element focusable
-      this.tabIndex = this.disabled ? -1 : 0;
-      this.setAttribute("role", "checkbox");
       this._updateAriaAttributes();
       // Bind initial checked value
       this._checkedCellController.bind(this.checked, booleanSchema);
@@ -270,10 +281,6 @@ export class CFCheckbox extends BaseElement {
     ) {
       super.updated(changedProperties);
 
-      if (changedProperties.has("disabled")) {
-        this.tabIndex = this.disabled ? -1 : 0;
-      }
-
       if (
         changedProperties.has("checked") ||
         changedProperties.has("indeterminate") ||
@@ -298,9 +305,14 @@ export class CFCheckbox extends BaseElement {
         .join(" ");
 
       return html`
+        <!-- The host carries role="checkbox" and tabindex for accessibility.
+          delegatesFocus: true routes focus here, so aria-hidden must NOT be
+          set on this div — browsers refuse to apply aria-hidden on focused
+          elements. The host ARIA attributes are the a11y surface. -->
         <div
           class="${classString}"
           part="checkbox"
+          tabindex="-1"
         >
           <span class="checkmark" part="checkmark"></span>
         </div>
@@ -325,6 +337,7 @@ export class CFCheckbox extends BaseElement {
         this.indeterminate ? "mixed" : String(isChecked),
       );
       this.setAttribute("aria-disabled", String(this.disabled));
+      this.tabIndex = this.disabled ? -1 : 0;
     }
 
     private _handleClick(event: Event) {

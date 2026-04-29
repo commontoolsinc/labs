@@ -1,5 +1,9 @@
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { hashObjectFromString } from "@commonfabric/data-model/value-hash";
+import {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import type {
   CauseString,
@@ -917,7 +921,7 @@ export class Replica {
               // Log actual content for each document
               for (const [contentType, data] of Object.entries(facts)) {
                 try {
-                  const dataStr = JSON.stringify(data);
+                  const dataStr = toCompactDebugString(data);
                   const preview = dataStr.length > 1000
                     ? dataStr.substring(0, 1000) + "..."
                     : dataStr;
@@ -1203,24 +1207,24 @@ export class Replica {
           () => [
             "Transaction failed (aready exists)",
             "\nError:",
-            JSON.stringify(result.error, null, 2),
+            toIndentedDebugString(result.error),
             "\nConflict details:",
-            JSON.stringify((result.error as any).conflict, null, 2),
+            toIndentedDebugString((result.error as any).conflict),
             "\nTransaction:",
-            JSON.stringify((result.error as any).transaction, null, 2),
+            toIndentedDebugString((result.error as any).transaction),
           ],
         );
       } else {
         logger.warn("push-error", () => [
           "Transaction failed",
           "\nError:",
-          JSON.stringify(result.error, null, 2),
+          toIndentedDebugString(result.error),
           result.error.name === "ConflictError"
             ? [
               "\nConflict details:",
-              JSON.stringify((result.error as any).conflict, null, 2),
+              toIndentedDebugString((result.error as any).conflict),
               "\nTransaction:",
-              JSON.stringify((result.error as any).transaction, null, 2),
+              toIndentedDebugString((result.error as any).transaction),
             ]
             : [],
         ]);

@@ -41,6 +41,7 @@ function fetchBuildHash(): Promise<string | undefined> {
       try {
         const resp = await fetch(
           new URL("/build-manifest.json", globalThis.location.origin),
+          { cache: "no-store" },
         );
         if (resp.ok) {
           const manifest = await resp.json();
@@ -357,18 +358,18 @@ export class RuntimeInternals extends EventTarget {
       })`,
     );
 
-    // Fetch build manifest (for compilation cache fingerprint) and
-    // connect worker transport in parallel — they're independent I/O.
+    // Fetch the build manifest first so the worker URL and compilation-cache
+    // fingerprint both point at the same worker bundle.
     // See docs/specs/compilation-cache.md Phase 3.
-    const [buildHash, transport] = await Promise.all([
-      COMPILATION_CACHE_CLIENT ? fetchBuildHash() : Promise.resolve(undefined),
-      WebWorkerRuntimeTransport.connect({
-        workerUrl: new URL(
-          "/scripts/worker-runtime.js",
-          globalThis.location.origin,
-        ),
-      }),
-    ]);
+    const buildHash = COMPILATION_CACHE_CLIENT
+      ? await fetchBuildHash()
+      : undefined;
+    const workerUrl = new URL(
+      "/scripts/worker-runtime.js",
+      globalThis.location.origin,
+    );
+    if (buildHash) workerUrl.searchParams.set("v", buildHash);
+    const transport = await WebWorkerRuntimeTransport.connect({ workerUrl });
     if (COMPILATION_CACHE_CLIENT) {
       console.log(
         buildHash

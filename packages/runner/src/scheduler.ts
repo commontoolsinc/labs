@@ -1,3 +1,4 @@
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
@@ -1477,8 +1478,8 @@ export class Scheduler {
             triggerFlowLogger.debug("schedule-change", () => [
               `Change #${changeIndex}`,
               `Address: ${change.address.id}/${change.address.path.join("/")}`,
-              `Before: ${JSON.stringify(change.before)}`,
-              `After: ${JSON.stringify(change.after)}`,
+              `Before: ${toCompactDebugString(change.before)}`,
+              `After: ${toCompactDebugString(change.after)}`,
             ]);
             this.runtime.telemetry.submit({
               type: "cell.update",

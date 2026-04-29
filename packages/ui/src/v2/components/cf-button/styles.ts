@@ -80,7 +80,7 @@ export const styles = css`
     justify-content: center;
     white-space: nowrap;
     width: 100%;
-    height: var(--cf-size-md-height, 2rem);
+    min-height: var(--cf-size-md-height, 2rem);
     border-radius: var(--cf-size-md-radius, 8px);
     font-size: var(--cf-size-md-font-size, 0.75rem);
     font-weight: var(--cf-font-weight-medium, 500);
@@ -101,13 +101,13 @@ export const styles = css`
     text-decoration: none;
   }
 
-  .button:focus-visible {
+  :host(:focus-visible) .button {
     outline: 2px solid
       var(--cf-button-color-primary, var(--cf-colors-primary-500, #4979fa));
     outline-offset: 2px;
   }
 
-  .button:disabled {
+  :host([disabled]) .button {
     pointer-events: none;
     opacity: 0.5;
     cursor: not-allowed;
@@ -115,7 +115,7 @@ export const styles = css`
 
   /* Size variants — driven by :host([size="..."]) attribute selectors */
   :host([size="xs"]) .button {
-    height: var(--cf-size-xs-height, 16px);
+    min-height: var(--cf-size-xs-height, 16px);
     border-radius: var(--cf-size-xs-radius, 4px);
     padding: var(--cf-size-xs-padding-v, 2px) var(--cf-size-xs-padding-h, 4px);
     font-size: var(--cf-size-xs-font-size, 9px);
@@ -124,7 +124,7 @@ export const styles = css`
   }
 
   :host([size="sm"]) .button {
-    height: var(--cf-size-sm-height, 24px);
+    min-height: var(--cf-size-sm-height, 24px);
     border-radius: var(--cf-size-sm-radius, 5px);
     padding: var(--cf-size-sm-padding-v, 4px) var(--cf-size-sm-padding-h, 6px);
     font-size: var(--cf-size-sm-font-size, 11px);
@@ -135,7 +135,7 @@ export const styles = css`
   /* size="md" is the default — styles already in .button base rule */
 
   :host([size="lg"]) .button {
-    height: var(--cf-size-lg-height, 40px);
+    min-height: var(--cf-size-lg-height, 40px);
     border-radius: var(--cf-size-lg-radius, 9px);
     padding: var(--cf-size-lg-padding-v, 8px) var(--cf-size-lg-padding-h, 12px);
     font-size: var(--cf-size-lg-font-size, 16px);
@@ -144,7 +144,7 @@ export const styles = css`
   }
 
   :host([size="xl"]) .button {
-    height: var(--cf-size-xl-height, 48px);
+    min-height: var(--cf-size-xl-height, 48px);
     border-radius: var(--cf-size-xl-radius, 10px);
     padding: var(--cf-size-xl-padding-v, 12px)
       var(--cf-size-xl-padding-h, 16px);
@@ -154,6 +154,7 @@ export const styles = css`
   }
 
   :host([size="icon"]) .button {
+    min-height: auto;
     height: var(--cf-button-icon-size, var(--cf-size-md-height, 2rem));
     width: var(--cf-button-icon-size, var(--cf-size-md-height, 2rem));
     padding: 0;
@@ -175,12 +176,12 @@ export const styles = css`
     );
   }
 
-  .button.primary:hover:not(:disabled) {
+  :host(:not([disabled])) .button.primary:hover {
     opacity: 0.9;
     transform: translateY(-1px);
   }
 
-  .button.primary:active:not(:disabled) {
+  :host(:not([disabled])) .button.primary:active {
     transform: translateY(0);
   }
 
@@ -199,7 +200,7 @@ export const styles = css`
     );
   }
 
-  .button.destructive:hover:not(:disabled) {
+  :host(:not([disabled])) .button.destructive:hover {
     opacity: 0.9;
   }
 
@@ -212,7 +213,7 @@ export const styles = css`
     color: var(--cf-button-color-text, var(--cf-colors-gray-900, #16181d));
   }
 
-  .button.outline:hover:not(:disabled) {
+  :host(:not([disabled])) .button.outline:hover {
     background-color: var(
       --cf-button-color-surface,
       var(--cf-colors-gray-50, #ffffff)
@@ -234,7 +235,7 @@ export const styles = css`
     );
   }
 
-  .button.secondary:hover:not(:disabled) {
+  :host(:not([disabled])) .button.secondary:hover {
     background-color: var(
       --cf-button-color-surface-hover,
       var(--cf-colors-gray-200, #eceef1)
@@ -255,7 +256,7 @@ export const styles = css`
     padding: 0;
   }
 
-  .button.ghost:hover:not(:disabled) {
+  :host(:not([disabled])) .button.ghost:hover {
     color: var(--cf-button-color-text, var(--cf-colors-gray-700, #404349));
     background-color: var(
       --cf-button-color-surface-hover,
@@ -280,7 +281,7 @@ export const styles = css`
     text-underline-offset: 4px;
   }
 
-  .button.link:hover:not(:disabled) {
+  :host(:not([disabled])) .button.link:hover {
     text-decoration: underline;
   }
 
@@ -312,7 +313,7 @@ export const styles = css`
     gap: var(--cf-pill-md-gap, var(--cf-size-md-spacing, 8px));
   }
 
-  .button.pill:hover:not(:disabled) {
+  :host(:not([disabled])) .button.pill:hover {
     background: var(
       --cf-button-color-surface-hover,
       var(--cf-colors-gray-200, #eceef1)

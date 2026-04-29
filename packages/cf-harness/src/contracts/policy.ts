@@ -1,6 +1,7 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { ObservationDenied } from "./observation.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
+import type { HarnessSubagentProfile } from "./subagent.ts";
 import type { BuiltinToolId } from "./tool-descriptor.ts";
 
 export type HarnessPolicyEventSeverity = "warning" | "denied";
@@ -31,10 +32,22 @@ export interface HarnessWriteFileToolInputSummary {
   contentDigest?: string;
 }
 
+export interface HarnessDelegateTaskToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "delegate_task";
+  profile?: HarnessSubagentProfile;
+  goalBytes?: number;
+  goalDigest?: string;
+  contextBytes?: number;
+  contextDigest?: string;
+  maxModelTurns?: number;
+}
+
 export type HarnessToolInputSummary =
   | HarnessBashToolInputSummary
   | HarnessReadFileToolInputSummary
   | HarnessWriteFileToolInputSummary
+  | HarnessDelegateTaskToolInputSummary
   | {
     type: "cf-harness.tool-input-summary";
     toolId: BuiltinToolId;

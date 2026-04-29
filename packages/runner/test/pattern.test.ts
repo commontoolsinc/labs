@@ -75,6 +75,29 @@ describe("pattern", () => {
     });
   });
 
+  it("uniquifies repeated stable internal paths with schemas", () => {
+    const isPositive = lift(
+      { type: "number" } as const satisfies JSONSchema,
+      { type: "boolean" } as const satisfies JSONSchema,
+      (value: number) => value > 0,
+    );
+
+    const testPattern = pattern(() => {
+      const first = (isPositive(1) as any).for("isSelected", true);
+      const second = (isPositive(2) as any).for("isSelected", true);
+      return { first, second };
+    });
+
+    const firstPath = (testPattern.result as any).first.$alias.path;
+    const secondPath = (testPattern.result as any).second.$alias.path;
+    expect(firstPath).toEqual(["internal", "isSelected"]);
+    expect(secondPath).toEqual(["internal", "isSelected__#0"]);
+    expect((testPattern.internalSchema as any).properties).toEqual({
+      isSelected: { type: "boolean" },
+      "isSelected__#0": { type: "boolean" },
+    });
+  });
+
   it("complex pattern has correct schema and nodes", () => {
     const doublePattern = pattern<{ x: number }>(({ x }) => {
       const double = lift<number>((x) => x * 2);

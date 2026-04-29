@@ -48,6 +48,7 @@ import type {
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   type HashObject,
   hashObjectFromJson,
@@ -203,7 +204,7 @@ class MemoryConsumerSession<
           );
           logger.error(
             "stream-error",
-            () => ["Failed command:", JSON.stringify(command)],
+            () => ["Failed command:", toCompactDebugString(command)],
           );
           throw error;
         }

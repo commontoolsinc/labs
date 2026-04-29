@@ -84,6 +84,7 @@ The package already includes:
 - package exports and tasks in [deno.json](../deno.json)
 - initial contract surfaces:
   - [prompt-slot.ts](../src/contracts/prompt-slot.ts)
+  - [run-manifest.ts](../src/contracts/run-manifest.ts)
   - [observation.ts](../src/contracts/observation.ts)
   - [policy.ts](../src/contracts/policy.ts)
   - [transcript.ts](../src/contracts/transcript.ts)
@@ -119,6 +120,7 @@ Why:
 
 - artifact store in [artifacts.ts](../src/artifacts.ts)
 - run-state tracking in [run-state.ts](../src/run-state.ts)
+- retained Loom run manifest artifacts
 - transcript-based resume support in the prompt loop and CLI
 
 Why:
@@ -143,7 +145,12 @@ Why:
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
+- default CFC mode aligned with runner-style `enforce-explicit`
 - deny/recovery via JSON `ObservationDenied` tool messages
+- spec-aligned `PromptSlotBound` prompt-slot evidence
+- capability snapshots that record current CFC mode, manifest presence,
+  substrate absence behavior, sandbox CFC request hints, and expected protected
+  xattr visibility
 - CLI summaries of accumulated policy events
 
 Why:
@@ -161,6 +168,35 @@ Why:
 
 - to support current Common Tools gateway expectations
 - to make local operator debugging less ambiguous
+
+### Stage H: Minimal subagent delegation
+
+- built-in `delegate_task` tool descriptor
+- prompt-loop orchestration for one focused child run at a time
+- fresh child prompt context with the delegated goal and optional context
+- explicit default child profile limited to:
+  - `bash`
+  - `read_file`
+  - `write_file`
+- parent delegation authority separated from direct parent tool allowlists:
+  - unconstrained runs allow the default profile
+  - runs with an explicit `--allow-tool` list require
+    `--allow-subagent-profile default` to spawn the default profile
+- named return policy that sends the parent a summary, manifest, and sanitized
+  run-state summary, while retaining raw child transcript/failure detail in
+  child artifacts
+- persisted parent references to child run ids, manifests, summaries, and run
+  state snapshots
+- summary-only parent tool output, without exposing the child transcript back to
+  the parent model
+
+Why:
+
+- to introduce the core containment and provenance shape before browser access
+- to give Loom and Pattern Factory a native delegation primitive without adding
+  additional profiles, parallelism, or browser mediation in the first slice
+- to make delegation a visible policy transition before adding higher-taint
+  child capabilities such as `agent-browser`
 
 ## Current Verified State
 
@@ -270,8 +306,16 @@ Current resumability is transcript-based and useful, but still limited:
 
 ### 5. When do subagents start mattering?
 
-The current package is intentionally single-loop and sequential. That is the
-right choice so far, but it is not the end state.
+The package now has a first minimal subagent path: a parent can delegate one
+focused child run through `delegate_task`, and the child receives a fresh prompt
+context plus the default shell/file tool set.
+
+The remaining subagent work is still substantial:
+
+- additional profile/policy selection beyond the single default child policy
+- browser-mediated subagents, expected to wrap `agent-browser`
+- parallel child orchestration
+- richer orchestration resume for partially completed child runs
 
 ## Suggested Reading Order
 

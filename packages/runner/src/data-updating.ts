@@ -128,7 +128,7 @@ const schemaIfcOverlapsPath = (
   return visit(schema, basePath);
 };
 
-const hasPendingSourcePolicyInput = (
+const hasPendingSchemaPolicyInput = (
   tx: IExtendedStorageTransaction,
   source: NormalizedFullLink,
 ): boolean => {
@@ -156,9 +156,11 @@ const recordLinkWritePolicyInput = (
     return;
   }
   const sourceMetadata = readStoredCfcMetadata(tx, source);
-  const sourceRelevant = sourceMetadata !== undefined ||
-    hasPendingSourcePolicyInput(tx, source);
-  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target);
+  const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
+    sourceMetadata !== undefined ||
+    hasPendingSchemaPolicyInput(tx, source);
+  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target) ||
+    hasPendingSchemaPolicyInput(tx, target);
   if (!sourceRelevant && !targetRelevant) {
     return;
   }

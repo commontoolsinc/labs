@@ -4,6 +4,7 @@
 
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "./empty-reconstruction-context.ts";
 import { JsonEncodingContext } from "./json-encoding-context.ts";
 
 /** Shared JSON encoding context. */
@@ -21,42 +22,21 @@ export function jsonFromValueModern(value: FabricValue): string {
  * JSON as defined by this module.
  */
 export function seemsLikeJsonEncodedFabricValueModern(value: string): boolean {
-  switch (value) {
-    case "false":
-    case "true":
-    case "null": {
-      return true;
-    }
-  }
-
-  switch (value[0]) {
-    case '"':
-    case "[":
-    case "{":
-    case "-":
-    case "0":
-    case "1":
-    case "2":
-    case "3":
-    case "4":
-    case "5":
-    case "6":
-    case "7":
-    case "8":
-    case "9": {
-      return true;
-    }
-  }
-
-  return false;
+  return JsonEncodingContext.seemsLikeEncoded(value);
 }
 
 /**
- * Decodes a JSON string back into a fabric value.
+ * Decodes a JSON string back into a fabric value. If `runtime` is `undefined`,
+ * the shared `EMPTY_RECONSTRUCTION_CONTEXT` is used; that context throws on
+ * any `getCell()` call, so callers who pass `undefined` are implicitly
+ * asserting that the encoded value contains no cell references.
  */
 export function valueFromJsonModern(
   json: string,
-  runtime: ReconstructionContext,
+  runtime: ReconstructionContext | undefined,
 ): FabricValue {
-  return jsonEncodingContext.decode(json, runtime);
+  return jsonEncodingContext.decode(
+    json,
+    runtime ?? EMPTY_RECONSTRUCTION_CONTEXT,
+  );
 }

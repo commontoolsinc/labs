@@ -1,8 +1,14 @@
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import { ProcessTimeoutError } from "./sandbox/process-runner.ts";
-import type { SandboxRuntime } from "./sandbox/types.ts";
+import type {
+  SandboxRuntime,
+  SandboxRuntimeDescription,
+} from "./sandbox/types.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { BashToolInput, BashToolOutput } from "./tools/bash.ts";
+import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
 import {
   isStructuredFileToolErrorOutput,
   type StructuredFileToolErrorCode,
@@ -31,6 +37,35 @@ export interface HarnessCapabilitySnapshot {
   type: "cf-harness.capability-snapshot";
   at: string;
   commands: Record<HarnessCapabilityCommand, HarnessCapabilityProbe>;
+  cfc: HarnessCfcCapabilitySnapshot;
+}
+
+export type HarnessCfcAbsenceBehavior =
+  | "not-required"
+  | "observe-only"
+  | "permissive-if-absent"
+  | "fail-closed-if-absent";
+
+export type HarnessCfcSubstrateStatus =
+  | "not-required"
+  | "manifest-present"
+  | "not-attested"
+  | "missing";
+
+export interface HarnessCfcCapabilitySnapshot {
+  enforcementMode: CfcEnforcementMode;
+  absenceBehavior: HarnessCfcAbsenceBehavior;
+  substrateStatus: HarnessCfcSubstrateStatus;
+  runManifest: {
+    present: boolean;
+    type?: string;
+    path?: string;
+  };
+  sandbox: SandboxRuntimeDescription;
+  protectedXattrs: {
+    expectedSandboxVisible: false;
+    sandboxVisibility: "not-probed";
+  };
 }
 
 export type HarnessFailureKind =
@@ -100,19 +135,41 @@ const isHarnessCapabilityCommand = (
 
 const createEmptyCapabilitySnapshot = (
   at: string,
+  cfc: HarnessCfcCapabilitySnapshot,
 ): HarnessCapabilitySnapshot => ({
   type: "cf-harness.capability-snapshot",
   at,
   commands: Object.fromEntries(
     HARNESS_CAPABILITY_COMMANDS.map((command) => [command, { present: false }]),
   ) as Record<HarnessCapabilityCommand, HarnessCapabilityProbe>,
+  cfc,
 });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isFailedDelegateTaskOutput = (
+  output: unknown,
+): output is DelegateTaskToolOutput => {
+  if (
+    !isRecord(output) ||
+    output.type !== "cf-harness.delegate-task-output" ||
+    typeof output.outputId !== "string" ||
+    !isRecord(output.subagent)
+  ) {
+    return false;
+  }
+  return output.subagent.status === "failed" &&
+    typeof output.subagent.childRunId === "string" &&
+    typeof output.subagent.summary === "string";
+};
 
 const parseCapabilityProbeOutput = (
   stdout: string,
   at: string,
+  cfc: HarnessCfcCapabilitySnapshot,
 ): HarnessCapabilitySnapshot => {
-  const snapshot = createEmptyCapabilitySnapshot(at);
+  const snapshot = createEmptyCapabilitySnapshot(at, cfc);
   for (const line of stdout.split("\n")) {
     if (line.trim() === "") {
       continue;
@@ -132,11 +189,90 @@ const parseCapabilityProbeOutput = (
   return snapshot;
 };
 
+const cfcAbsenceBehaviorForMode = (
+  mode: CfcEnforcementMode,
+): HarnessCfcAbsenceBehavior => {
+  switch (mode) {
+    case "disabled":
+      return "not-required";
+    case "observe":
+      return "observe-only";
+    case "enforce-explicit":
+      return "permissive-if-absent";
+    case "enforce-strict":
+      return "fail-closed-if-absent";
+  }
+};
+
+const cfcSubstrateStatusFor = (options: {
+  mode: CfcEnforcementMode;
+  runManifest?: HarnessRunManifest;
+}): HarnessCfcSubstrateStatus => {
+  if (options.mode === "disabled") {
+    return "not-required";
+  }
+  if (options.runManifest !== undefined) {
+    return "manifest-present";
+  }
+  return options.mode === "enforce-strict" ? "missing" : "not-attested";
+};
+
+const describeSandbox = (
+  sandbox: SandboxRuntime,
+  cwd: string,
+): SandboxRuntimeDescription =>
+  sandbox.describe?.() ?? {
+    kind: sandbox.kind,
+    defaultWorkingDirectory: sandbox.defaultWorkingDirectory(),
+    cfc: {
+      runtimeRequested: sandbox.kind === "docker-runsc-cfc",
+      workspaceMountPath: cwd,
+    },
+  };
+
+const createCfcCapabilitySnapshot = (
+  sandbox: SandboxRuntime,
+  cwd: string,
+  options: CollectHarnessCapabilitySnapshotOptions,
+): HarnessCfcCapabilitySnapshot => {
+  const mode = options.cfcEnforcementMode ?? "enforce-explicit";
+  return {
+    enforcementMode: mode,
+    absenceBehavior: cfcAbsenceBehaviorForMode(mode),
+    substrateStatus: cfcSubstrateStatusFor({
+      mode,
+      runManifest: options.runManifest,
+    }),
+    runManifest: {
+      present: options.runManifest !== undefined,
+      ...(options.runManifest !== undefined
+        ? { type: options.runManifest.type }
+        : {}),
+      ...(options.runManifestPath !== undefined
+        ? { path: options.runManifestPath }
+        : {}),
+    },
+    sandbox: describeSandbox(sandbox, cwd),
+    protectedXattrs: {
+      expectedSandboxVisible: false,
+      sandboxVisibility: "not-probed",
+    },
+  };
+};
+
+export interface CollectHarnessCapabilitySnapshotOptions {
+  cfcEnforcementMode?: CfcEnforcementMode;
+  runManifest?: HarnessRunManifest;
+  runManifestPath?: string;
+}
+
 export const collectHarnessCapabilitySnapshot = async (
   sandbox: SandboxRuntime,
   cwd: string,
   at = new Date().toISOString(),
+  options: CollectHarnessCapabilitySnapshotOptions = {},
 ): Promise<HarnessCapabilitySnapshot> => {
+  const cfc = createCfcCapabilitySnapshot(sandbox, cwd, options);
   const result = await sandbox.runShell({
     command: CAPABILITY_PROBE_SCRIPT,
     cwd,
@@ -148,7 +284,7 @@ export const collectHarnessCapabilitySnapshot = async (
       }`,
     );
   }
-  return parseCapabilityProbeOutput(result.stdout, at);
+  return parseCapabilityProbeOutput(result.stdout, at, cfc);
 };
 
 export const createHarnessFailureRecord = (
@@ -332,6 +468,20 @@ export const classifyBuiltinToolFailure = (
     case "read_file":
     case "write_file":
       return classifyStructuredFileToolFailure(toolId, output, at);
+    case "delegate_task": {
+      if (isFailedDelegateTaskOutput(output)) {
+        return createHarnessFailureRecord({
+          kind: "harness_error",
+          source: "tool_output",
+          detail:
+            `subagent ${output.subagent.childRunId} failed: ${output.subagent.summary}`,
+          at,
+          toolId,
+          outputId: output.outputId as ToolOutputId,
+        });
+      }
+      return undefined;
+    }
     default:
       return undefined;
   }

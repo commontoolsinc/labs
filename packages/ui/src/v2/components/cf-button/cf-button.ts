@@ -39,8 +39,31 @@ export type ButtonVariant =
 
 export type ButtonSize = ComponentSize | "icon";
 
+// ── Accessibility strategy ───────────────────────────────────────────
+//
+// The host carries role="button" so agents can find it via getByRole.
+// The shadow DOM contains a <button> for styling (part="button") with
+// aria-hidden="true" to prevent a duplicate role in the a11y tree.
+//
+// delegatesFocus is NOT used because browsers refuse to apply
+// aria-hidden on a focused element ("Blocked aria-hidden on an element
+// because its descendant retained focus"). Instead, the host owns
+// tabindex and a keydown listener for Enter/Space activation.
+//
+// aria-hidden also hides the <slot> content from the a11y tree, so the
+// host would lose its computed accessible name. We restore it by syncing
+// the host's aria-label from the light DOM textContent via slotchange.
+// This is skipped when the author provides their own aria-label or
+// aria-labelledby.
+// ─────────────────────────────────────────────────────────────────────
+
 export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
+  // No delegatesFocus — the host owns role="button", tabindex, and
+  // keyboard handling. Focus stays on the host; the inner button is
+  // purely visual and aria-hidden. delegatesFocus would send focus to
+  // the inner button, which browsers refuse to hide ("Blocked
+  // aria-hidden on a focused element").
 
   static override properties = {
     variant: { type: String },
@@ -78,19 +101,54 @@ export class CFButton extends BaseElement {
       },
       { capture: true },
     );
+
+    // Handle submit/reset for clicks from ANY source (mouse click on inner
+    // button bubbles through shadow boundary to host; keyboard Enter/Space
+    // fires this.click() which also reaches here).
+    this.addEventListener("click", (e) => {
+      this._handleClick(e);
+    });
+
+    // The host carries role="button" and tabindex, so it receives keyboard
+    // events directly. Activate on Enter/Space like a native button.
+    this.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (this.disabled) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.click();
+      }
+    });
   }
 
   override firstUpdated(
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
     super.firstUpdated(changedProperties);
+    this._updateAccessibilityAttributes();
     this._updateThemeProperties();
+
+    // Sync the host's aria-label from slotted text content. The inner
+    // <button> is aria-hidden, so the slot content is invisible to the
+    // a11y tree — we must provide the name explicitly on the host.
+    const slot = this.shadowRoot?.querySelector("slot");
+    if (slot) {
+      slot.addEventListener("slotchange", () => this._syncAriaLabel());
+      this._syncAriaLabel();
+    }
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this._updateAccessibilityAttributes();
   }
 
   override updated(
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
     super.updated(changedProperties);
+    if (changedProperties.has("disabled")) {
+      this._updateAccessibilityAttributes();
+    }
     if (changedProperties.has("theme")) {
       this._updateThemeProperties();
     }
@@ -99,6 +157,45 @@ export class CFButton extends BaseElement {
   private _updateThemeProperties() {
     const currentTheme = this.theme || defaultTheme;
     applyThemeToElement(this, currentTheme);
+  }
+
+  private _updateAccessibilityAttributes() {
+    if (!this.hasAttribute("role")) {
+      this.setAttribute("role", "button");
+    }
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "button");
+    }
+    this.tabIndex = this.disabled ? -1 : 0;
+    this.setAttribute("aria-disabled", String(this.disabled));
+  }
+
+  /**
+   * Sync the host's aria-label from slotted text content, unless the
+   * author has provided their own aria-label or aria-labelledby.
+   */
+  private _syncAriaLabel() {
+    if (
+      this.hasAttribute("aria-labelledby") ||
+      this._authorAriaLabel !== null
+    ) {
+      return;
+    }
+    const text = this.textContent?.trim() || "";
+    if (text) {
+      this.setAttribute("aria-label", text);
+    }
+  }
+
+  /** Stash the author's aria-label (if any) so _syncAriaLabel won't overwrite it. */
+  private get _authorAriaLabel(): string | null {
+    // If aria-label was set before we started syncing, it's the author's.
+    // After first sync, our generated value is present. We distinguish by
+    // comparing against the current textContent — if they match, it's ours.
+    const label = this.getAttribute("aria-label");
+    if (label === null) return null;
+    const text = this.textContent?.trim() || "";
+    return label !== text ? label : null;
   }
 
   override render() {
@@ -110,14 +207,19 @@ export class CFButton extends BaseElement {
     }
     if (typeof this.size === "string" && this.size) classes[this.size] = true;
 
+    // The inner <button> is aria-hidden so only the host appears in the
+    // a11y tree with role="button". delegatesFocus forwards focus to the
+    // inner button, which handles Enter/Space natively. The host's
+    // aria-label is synced from slotted textContent via slotchange.
     return html`
       <button
         class="${classMap(classes)}"
         ?disabled="${this.disabled}"
         type="${this.type}"
-        @click="${this._handleClick}"
         part="button"
         data-cf-button
+        tabindex="-1"
+        aria-hidden="true"
       >
         <slot></slot>
       </button>
