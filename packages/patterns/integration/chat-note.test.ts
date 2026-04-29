@@ -81,7 +81,7 @@ describe("Chat Note pattern test", () => {
 
       // Check for the Generate button
       const generateButton = await page.waitForSelector(
-        'cf-button[variant="primary"]',
+        'cf-button[color="primary"]',
         { strategy: "pierce" },
       );
       assert(generateButton, "Should find Generate button");
@@ -135,7 +135,7 @@ describe("Chat Note pattern test", () => {
 
       // Find the Generate button
       const generateButton = await page.waitForSelector(
-        'cf-button[variant="primary"]',
+        'cf-button[color="primary"]',
         { strategy: "pierce" },
       );
       assert(generateButton, "Should find Generate button");
@@ -158,7 +158,7 @@ describe("Chat Note pattern test", () => {
 
       // Click the Generate button
       const generateButton = await page.waitForSelector(
-        'cf-button[variant="primary"]',
+        'cf-button[color="primary"]',
         { strategy: "pierce" },
       );
       assert(generateButton, "Should find Generate button");
@@ -255,7 +255,7 @@ Say hello`;
 
       // Click Generate
       const generateButton = await page.waitForSelector(
-        'cf-button[variant="primary"]',
+        'cf-button[color="primary"]',
         { strategy: "pierce" },
       );
       await generateButton?.click();

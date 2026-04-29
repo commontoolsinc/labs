@@ -273,11 +273,11 @@ function ComponentSampler() {
           Buttons
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <cf-button variant="primary">Primary</cf-button>
-          <cf-button variant="secondary">Secondary</cf-button>
-          <cf-button variant="destructive">Destructive</cf-button>
-          <cf-button variant="ghost">Ghost</cf-button>
-          <cf-button variant="outline">Outline</cf-button>
+          <cf-button color="primary" variant="solid">Primary</cf-button>
+          <cf-button color="neutral" variant="outline">Secondary</cf-button>
+          <cf-button color="danger" variant="solid">Destructive</cf-button>
+          <cf-button color="neutral" variant="ghost">Ghost</cf-button>
+          <cf-button color="neutral" variant="outline">Outline</cf-button>
         </div>
       </div>
 
@@ -304,12 +304,12 @@ function ComponentSampler() {
           }}
         >
           <cf-chip>Default</cf-chip>
-          <cf-chip variant="primary">Primary</cf-chip>
-          <cf-chip variant="accent">Accent</cf-chip>
-          <cf-badge variant="default">Default</cf-badge>
-          <cf-badge variant="secondary">Secondary</cf-badge>
-          <cf-badge variant="destructive">Destructive</cf-badge>
-          <cf-badge variant="outline">Outline</cf-badge>
+          <cf-chip color="primary">Primary</cf-chip>
+          <cf-chip color="accent">Accent</cf-chip>
+          <cf-badge color="primary" variant="solid">Default</cf-badge>
+          <cf-badge color="neutral" variant="solid">Secondary</cf-badge>
+          <cf-badge color="danger" variant="solid">Destructive</cf-badge>
+          <cf-badge color="neutral" variant="outline">Outline</cf-badge>
         </div>
       </div>
 
@@ -328,15 +328,15 @@ function ComponentSampler() {
           Alerts
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <cf-alert variant="info">
+          <cf-alert status="info">
             <span slot="title">Info</span>
             Informational message using theme tokens.
           </cf-alert>
-          <cf-alert variant="success">
+          <cf-alert status="success">
             <span slot="title">Success</span>
             Operation completed using theme tokens.
           </cf-alert>
-          <cf-alert variant="destructive">
+          <cf-alert status="error">
             <span slot="title">Error</span>
             Something went wrong using theme tokens.
           </cf-alert>

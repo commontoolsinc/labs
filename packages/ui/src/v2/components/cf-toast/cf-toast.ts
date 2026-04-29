@@ -1,12 +1,13 @@
 import { css, html, nothing } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import type { StatusIntent } from "../theme-context.ts";
 
 /**
  * CFToast - Floating ephemeral notification component
  *
  * @element cf-toast
  *
- * @attr {string} variant - Visual style variant: "default" | "success" | "error" | "warning"
+ * @attr {string} status - Status intent: "info" | "success" | "error" | "warning"
  * @attr {number} duration - Auto-dismiss timeout in ms. 0 = persistent.
  * @attr {boolean} dismissible - Show the dismiss (X) button
  * @attr {boolean} dismissable - Deprecated alias for dismissible
@@ -90,9 +91,9 @@ export class CFToast extends BaseElement {
       );
     }
 
-    /* Default variant */
-    :host([variant="default"]) .toast,
-    :host(:not([variant])) .toast {
+    /* Info status (default) */
+    :host([status="info"]) .toast,
+    :host(:not([status])) .toast {
       background: var(
         --cf-toast-background,
         var(--cf-surface-transient-background)
@@ -104,8 +105,8 @@ export class CFToast extends BaseElement {
       );
     }
 
-    /* Success variant */
-    :host([variant="success"]) .toast {
+    /* Success status */
+    :host([status="success"]) .toast {
       background: var(
         --cf-toast-background,
         var(--cf-theme-color-success, #10b981)
@@ -120,8 +121,8 @@ export class CFToast extends BaseElement {
       );
     }
 
-    /* Error variant */
-    :host([variant="error"]) .toast {
+    /* Error status */
+    :host([status="error"]) .toast {
       background: var(
         --cf-toast-background,
         var(--cf-theme-color-error, #dc2626)
@@ -136,8 +137,8 @@ export class CFToast extends BaseElement {
       );
     }
 
-    /* Warning variant */
-    :host([variant="warning"]) .toast {
+    /* Warning status */
+    :host([status="warning"]) .toast {
       background: var(
         --cf-toast-background,
         var(--cf-theme-color-warning, #f59e0b)
@@ -221,7 +222,7 @@ export class CFToast extends BaseElement {
   `;
 
   static override properties = {
-    variant: { type: String, reflect: true },
+    status: { type: String, reflect: true },
     duration: { type: Number },
     dismissable: { type: Boolean, reflect: true },
     dismissible: { type: Boolean, reflect: true },
@@ -230,7 +231,7 @@ export class CFToast extends BaseElement {
     _hasAction: { type: Boolean, state: true },
   };
 
-  declare variant: "default" | "success" | "error" | "warning";
+  declare status: StatusIntent;
   declare duration: number;
   declare dismissable: boolean;
   declare dismissible: boolean;
@@ -243,7 +244,7 @@ export class CFToast extends BaseElement {
 
   constructor() {
     super();
-    this.variant = "default";
+    this.status = "info";
     this.duration = 5000;
     this.dismissable = false;
     this.dismissible = false;
@@ -265,7 +266,7 @@ export class CFToast extends BaseElement {
   override updated(changedProperties: Map<string, unknown>): void {
     super.updated(changedProperties);
 
-    if (changedProperties.has("variant")) {
+    if (changedProperties.has("status")) {
       this._updateAria();
     }
 
@@ -296,7 +297,7 @@ export class CFToast extends BaseElement {
   }
 
   private _updateAria(): void {
-    if (this.variant === "error") {
+    if (this.status === "error") {
       this.setAttribute("role", "alert");
       this.setAttribute("aria-live", "assertive");
     } else {

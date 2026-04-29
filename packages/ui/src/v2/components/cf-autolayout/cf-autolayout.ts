@@ -615,7 +615,8 @@ export class CFAutoLayout extends BaseElement {
           })}">
             <cf-button
               size="icon"
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               aria-label="Toggle left sidebar"
               @click="${(e: Event) =>
                 this._toggleLeft(e.currentTarget as Element)}"
@@ -639,7 +640,8 @@ export class CFAutoLayout extends BaseElement {
             </div>
             <cf-button
               size="icon"
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               aria-label="Toggle right sidebar"
               @click="${(e: Event) =>
                 this._toggleRight(e.currentTarget as Element)}"
@@ -652,7 +654,8 @@ export class CFAutoLayout extends BaseElement {
           <div class="desktop-toggle desktop-toggle-left">
             <cf-button
               size="icon"
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               aria-label="Toggle left sidebar"
               @click="${(e: Event) =>
                 this._toggleLeft(e.currentTarget as Element)}"
@@ -663,7 +666,8 @@ export class CFAutoLayout extends BaseElement {
           <div class="desktop-toggle desktop-toggle-right">
             <cf-button
               size="icon"
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               aria-label="Toggle right sidebar"
               @click="${(e: Event) =>
                 this._toggleRight(e.currentTarget as Element)}"
