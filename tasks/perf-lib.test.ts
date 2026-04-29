@@ -3,6 +3,7 @@ import {
   computeBaseline,
   extractMetrics,
   type Job,
+  readPRBodyFromEventPayload,
   type Step,
   type WorkflowRun,
 } from "./perf-lib.ts";
@@ -100,4 +101,27 @@ Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 15 percent
   assertEquals(baseline?.median, 100);
   assertAlmostEquals(baseline?.stddev ?? 0, 20, 1e-9);
   assertEquals(baseline?.threshold, 160);
+});
+
+Deno.test("readPRBodyFromEventPayload reads matching pull request bodies", async () => {
+  const eventPath = await Deno.makeTempFile();
+  try {
+    await Deno.writeTextFile(
+      eventPath,
+      JSON.stringify({
+        pull_request: {
+          number: 3427,
+          body: "NEW_PERF_BASELINE: job: Test = 300s",
+        },
+      }),
+    );
+
+    assertEquals(
+      await readPRBodyFromEventPayload(3427, eventPath),
+      "NEW_PERF_BASELINE: job: Test = 300s",
+    );
+    assertEquals(await readPRBodyFromEventPayload(1, eventPath), undefined);
+  } finally {
+    await Deno.remove(eventPath);
+  }
 });

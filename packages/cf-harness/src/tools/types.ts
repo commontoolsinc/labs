@@ -1,14 +1,18 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
+import type { ProcessRunner } from "../sandbox/process-runner.ts";
 import type { SandboxRuntime } from "../sandbox/types.ts";
 
 export interface HarnessToolContext {
   runId: string;
   cfcEnforcementMode: CfcEnforcementMode;
   sandbox: SandboxRuntime;
+  hostProcessRunner: ProcessRunner;
   currentDir: string;
   resolvePath(path: string): string;
+  resolveHostPath(path: string): string;
+  hostPathToWorkspacePath(path: string): string | undefined;
   setCurrentDir(path: string): void;
   nextOutputId(toolId: string): ToolOutputId;
 }

@@ -24,7 +24,10 @@ import {
   HARNESS_SUBAGENT_PROFILES,
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
-import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import {
+  type BuiltinToolId,
+  DEFAULT_PARENT_TOOL_IDS,
+} from "./contracts/tool-descriptor.ts";
 import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
@@ -168,7 +171,7 @@ Options:
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
   --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | write_file | delegate_task)
-  --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default)
+  --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
   --prompt-slot-role <role>     direct-command | context | quote (default: direct-command)
@@ -210,12 +213,7 @@ const parsePositiveInteger = (
 };
 
 const PROMPT_SLOT_ROLES = ["direct-command", "context", "quote"] as const;
-const BUILTIN_TOOL_IDS = [
-  "bash",
-  "read_file",
-  "write_file",
-  "delegate_task",
-] as const;
+const CLI_PARENT_TOOL_IDS = DEFAULT_PARENT_TOOL_IDS;
 
 const parsePromptSlotRole = (
   input: string | undefined,
@@ -236,7 +234,7 @@ const parseCliOutputMode = (
 const parseBuiltinToolId = (
   input: string,
 ): BuiltinToolId | undefined =>
-  (BUILTIN_TOOL_IDS as readonly string[]).includes(input)
+  (CLI_PARENT_TOOL_IDS as readonly string[]).includes(input)
     ? input as BuiltinToolId
     : undefined;
 
@@ -253,7 +251,7 @@ const parseBuiltinToolIds = (
   const parsed = values.map((value) => parseBuiltinToolId(value));
   if (parsed.some((value) => value === undefined)) {
     throw new Error(
-      "allowed tools must be one or more of bash, read_file, write_file, delegate_task",
+      `allowed tools must be one or more of ${CLI_PARENT_TOOL_IDS.join(", ")}`,
     );
   }
   return [...new Set(parsed)] as readonly BuiltinToolId[];
@@ -278,7 +276,11 @@ const parseSubagentProfiles = (
   }
   const parsed = values.map((value) => parseSubagentProfile(value));
   if (parsed.some((value) => value === undefined)) {
-    throw new Error("allowed subagent profiles must be one or more of default");
+    throw new Error(
+      `allowed subagent profiles must be one or more of ${
+        HARNESS_SUBAGENT_PROFILES.join(", ")
+      }`,
+    );
   }
   return [...new Set(parsed)] as readonly HarnessSubagentProfile[];
 };
@@ -656,6 +658,7 @@ const summarizeToolCallArguments = (
     const parsed = JSON.parse(rawArguments) as Record<string, unknown>;
     switch (toolName) {
       case "bash":
+      case "bash-no-sandbox":
         return typeof parsed.command === "string"
           ? `command=${JSON.stringify(parsed.command)}`
           : undefined;
