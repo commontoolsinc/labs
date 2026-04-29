@@ -51,12 +51,16 @@ class DebugStringifier {
     const rawResult = JSON.stringify(
       this.#value,
       (_key: string, value: unknown) => this.#replacer(value),
-      this.#indent);
+      this.#indent,
+    );
 
     return unquoteMarked(rawResult);
   }
 
-  #findCircles(value: unknown, possibleCircles: Set<object> = new Set<object>()) {
+  #findCircles(
+    value: unknown,
+    possibleCircles: Set<object> = new Set<object>(),
+  ) {
     if (!value || (typeof value !== "object") || this.#circles.has(value)) {
       return;
     } else if (possibleCircles.has(value)) {
