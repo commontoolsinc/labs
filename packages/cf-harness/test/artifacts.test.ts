@@ -152,6 +152,19 @@ Deno.test({
                 workspaceMountPath: "/workspace",
               },
             },
+            mounts: {
+              workspace: {
+                kind: "workspace",
+                status: "configured",
+                sandboxPath: "/workspace",
+                readOnly: false,
+              },
+              fabric: {
+                kind: "fabric-fuse",
+                status: "not-configured",
+                sandboxPath: "/fabric",
+              },
+            },
             protectedXattrs: {
               expectedSandboxVisible: false,
               sandboxVisibility: "not-probed",

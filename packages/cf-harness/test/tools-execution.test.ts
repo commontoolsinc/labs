@@ -70,6 +70,14 @@ class StrictFakeSandboxRuntime extends FakeSandboxRuntime {
   }
 }
 
+class MultiRootFakeSandboxRuntime extends FakeSandboxRuntime {
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path) ||
+      path === "/fabric" ||
+      path.startsWith("/fabric/");
+  }
+}
+
 class FakeProcessRunner implements ProcessRunner {
   readonly calls: ProcessRunRequest[] = [];
 
@@ -164,6 +172,21 @@ Deno.test("bash tool executes the command through the sandbox shell runtime", as
     },
   }]);
   assertEquals(context.currentDir, "/workspace/repo");
+});
+
+Deno.test("bash tool preserves currentDir inside a configured Fabric mount", async () => {
+  const sandbox = new MultiRootFakeSandboxRuntime([{
+    stdout: "__CF_HARNESS_CWD__run-1:bash:1__/fabric/home",
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const context = createContext(sandbox);
+  const output = await bashTool.invoke(context, {
+    command: "cd /fabric/home",
+  });
+
+  assertEquals(output.cwd, "/fabric/home");
+  assertEquals(context.currentDir, "/fabric/home");
 });
 
 Deno.test("bash-no-sandbox tool executes the command through the host process runner", async () => {

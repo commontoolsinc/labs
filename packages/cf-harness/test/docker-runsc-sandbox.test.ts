@@ -36,6 +36,7 @@ Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   assertEquals(config.workspaceMountPath, "/workspace");
   assertEquals(config.shellPath, "/bin/sh");
   assertEquals(config.dockerNetworkMode, "none");
+  assertEquals(config.additionalMounts, []);
   assertEquals(config.extraDockerArgs, []);
 });
 
@@ -117,6 +118,39 @@ Deno.test("DockerRunscSandboxRuntime describe preserves custom CFC runtime alias
   assertEquals(description.cfc.runtimeName, "corp-runsc-prod");
 });
 
+Deno.test("resolveDockerRunscSandboxConfig normalizes a Fabric FUSE mount", () => {
+  const config = resolveDockerRunscSandboxConfig({
+    workspaceHostPath: "/host/project",
+    additionalMounts: [{
+      kind: "fabric-fuse",
+      hostPath: "/tmp/cf-fuse",
+    }],
+  });
+
+  assertEquals(config.additionalMounts, [{
+    kind: "fabric-fuse",
+    hostPath: "/tmp/cf-fuse",
+    sandboxPath: "/fabric",
+    readOnly: false,
+  }]);
+});
+
+Deno.test("resolveDockerRunscSandboxConfig rejects overlapping sandbox roots", () => {
+  assertThrows(
+    () =>
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        additionalMounts: [{
+          kind: "fabric-fuse",
+          hostPath: "/tmp/cf-fuse",
+          sandboxPath: "/workspace/fabric",
+        }],
+      }),
+    Error,
+    "sandbox mount paths overlap",
+  );
+});
+
 Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user override", async () => {
   const runner = new FakeProcessRunner({
     stdout: "",
@@ -196,4 +230,62 @@ Deno.test("DockerRunscSandboxRuntime accepts workspace paths when the mount path
     runtime.isPathWithinWorkspace("/workspace/notes/todo.txt"),
     true,
   );
+});
+
+Deno.test("DockerRunscSandboxRuntime mounts Fabric separately and accepts Fabric paths", async () => {
+  const runner = new FakeProcessRunner({
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+  });
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      image: "sandbox:latest",
+      additionalMounts: [{
+        kind: "fabric-fuse",
+        hostPath: "/tmp/cf-fuse",
+        readOnly: true,
+      }],
+    }),
+    runner,
+  );
+
+  assertEquals(
+    runtime.resolvePath("/fabric/home/pieces"),
+    "/fabric/home/pieces",
+  );
+  assertEquals(runtime.isPathWithinWorkspace("/fabric/home"), false);
+  assertEquals(runtime.isPathWithinAllowedRoots("/fabric/home"), true);
+
+  const description = runtime.describe();
+  assertEquals(description.cfc?.mounts, [
+    { kind: "workspace", sandboxPath: "/workspace", readOnly: false },
+    { kind: "fabric-fuse", sandboxPath: "/fabric", readOnly: true },
+  ]);
+
+  await runtime.run({
+    argv: ["/bin/pwd"],
+    cwd: "/fabric/home",
+  });
+
+  assertEquals(runner.requests[0]?.args, [
+    "run",
+    "--rm",
+    "--runtime",
+    "runsc-cfc",
+    "--network",
+    "none",
+    ...(runtime.config.containerUser !== undefined
+      ? ["--user", runtime.config.containerUser]
+      : []),
+    "--mount",
+    "type=bind,src=/host/project,dst=/workspace",
+    "--mount",
+    "type=bind,src=/tmp/cf-fuse,dst=/fabric,readonly",
+    "-w",
+    "/fabric/home",
+    "sandbox:latest",
+    "/bin/pwd",
+  ]);
 });

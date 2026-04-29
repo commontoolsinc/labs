@@ -1367,6 +1367,7 @@ export class CfHarnessPromptLoop {
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       sandboxRuntime: this.engine.sandbox,
+      sandbox: this.engine.config.sandbox,
       workspaceHostPath: this.engine.workspaceHostPath,
       processRunner: this.engine.hostProcessRunner,
       artifactRoot: this.engine.artifactStore?.artifactRoot,
