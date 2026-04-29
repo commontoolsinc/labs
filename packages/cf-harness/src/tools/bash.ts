@@ -1,5 +1,10 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import {
+  commandWithFinalWorkingDirectoryMarker,
+  cwdMarkerForOutput,
+  extractFinalWorkingDirectory,
+} from "./shell-cwd.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface BashToolInput {
@@ -16,22 +21,7 @@ export interface BashToolOutput {
   cwd: string;
 }
 
-const cwdMarkerForOutput = (outputId: string): string =>
-  `__CF_HARNESS_CWD__${outputId}__`;
-
-const extractFinalWorkingDirectory = (
-  stdout: string,
-  marker: string,
-): { stdout: string; cwd?: string } => {
-  const markerIndex = stdout.lastIndexOf(marker);
-  if (markerIndex === -1) {
-    return { stdout };
-  }
-  return {
-    stdout: stdout.slice(0, markerIndex),
-    cwd: stdout.slice(markerIndex + marker.length),
-  };
-};
+const CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
 
 export const bashToolDescriptor: HarnessToolDescriptor = {
   toolId: "bash",
@@ -71,13 +61,12 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
     const commandCwd = input.cwd !== undefined
       ? context.resolvePath(input.cwd)
       : context.currentDir;
-    const cwdMarker = cwdMarkerForOutput(outputId);
+    const cwdMarker = cwdMarkerForOutput(CWD_MARKER_PREFIX, outputId);
     const result = await context.sandbox.runShell({
-      command: [
-        `__cf_harness_cwd_marker=${JSON.stringify(cwdMarker)}`,
-        'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+      command: commandWithFinalWorkingDirectoryMarker(
         input.command,
-      ].join("\n"),
+        cwdMarker,
+      ),
       cwd: commandCwd,
       timeoutMs: input.timeoutMs,
     });
