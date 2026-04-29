@@ -75,55 +75,66 @@ class DebugStringifier {
   }
 
   #replacer(value: unknown) {
-    // TODO(danfuzz): This function will have to get smarter once we have
-    // `FabricSpecialObject`s flowing through the system (which generally cannot
-    // be stringified with full fidelity via `JSON.stringify()`'s default
-    // behavior).
-
-    if (typeof value === "number") {
-      // Negative zero must be checked first: `value === 0` is true for both
-      // `0` and `-0` (IEEE 754), so a generic numeric early-out would lose
-      // the sign. `Object.is(value, -0)` distinguishes them.
-      if (Object.is(value, -0)) {
-        return marked("-0");
-      } else if (Number.isNaN(value)) {
-        return marked("NaN");
-      } else if (value === Infinity) {
-        return marked("Infinity");
-      } else if (value === -Infinity) {
-        return marked("-Infinity");
-      } else {
-        return value;
+    switch (typeof value) {
+      case "bigint": {
+        return marked(`${value}n`);
       }
-    } else if (typeof value === "bigint") {
-      return marked(`${value}n`);
-    } else if (value === undefined) {
-      return marked("undefined");
-    } else if (typeof value === "function") {
-      return marked(
-        value.name === ""
-          ? "(...) => {...}"
-          : `function ${value.name}(...) {...}`,
-      );
-    } else if (typeof value === "symbol") {
-      const key = Symbol.keyFor(value);
-      return marked(
-        key !== undefined
-          ? `Symbol.for(${JSON.stringify(key)})`
-          : `Symbol(${JSON.stringify(value.description ?? "")})`,
-      );
-    } else if ((typeof value === "object") && (value !== null)) {
-      if (this.#circles.has(value)) {
-        if (this.#unusedCircles.has(value)) {
-          this.#unusedCircles.delete(value);
+
+      case "function": {
+        return marked(
+          value.name === ""
+            ? "(...) => {...}"
+            : `function ${value.name}(...) {...}`,
+        );
+      }
+
+      case "number": {
+        if (Object.is(value, -0)) {
+          return marked("-0");
+        } else if (Number.isNaN(value)) {
+          return marked("NaN");
+        } else if (value === Infinity) {
+          return marked("Infinity");
+        } else if (value === -Infinity) {
+          return marked("-Infinity");
+        } else {
           return value;
         }
-        return marked("<circle>");
-      } else {
+      }
+
+      case "object": {
+        // TODO(danfuzz): This case will have to get smarter once we have
+        // `FabricSpecialObject`s flowing through the system (which generally cannot
+        // be stringified with full fidelity via `JSON.stringify()`'s default
+        // behavior).
+
+        if ((value !== null) && this.#circles.has(value)) {
+          if (this.#unusedCircles.has(value)) {
+            this.#unusedCircles.delete(value);
+            return value;
+          }
+          return marked("<circle>");
+        } else {
+          return value;
+        }
+      }
+
+      case "symbol": {
+        const key = Symbol.keyFor(value);
+        return marked(
+          (key === undefined)
+            ? `Symbol(${JSON.stringify(value.description ?? "")})`
+            : `Symbol.for(${JSON.stringify(key)})`,
+        );
+      }
+
+      case "undefined": {
+        return marked("undefined");
+      }
+
+      default: {
         return value;
       }
-    } else {
-      return value;
     }
   }
 }
