@@ -50,8 +50,17 @@ import {
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
 } from "./sandbox/docker-runsc.ts";
-import { dirname } from "@std/path";
-import type { ProcessRunner } from "./sandbox/process-runner.ts";
+import {
+  dirname,
+  join as joinHostPath,
+  normalize as normalizeHostPath,
+  relative as relativeHostPath,
+} from "@std/path";
+import { normalize as normalizeSandboxPath } from "@std/path/posix";
+import {
+  DenoProcessRunner,
+  type ProcessRunner,
+} from "./sandbox/process-runner.ts";
 import type { HarnessSandboxConfig, SandboxRuntime } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
@@ -70,6 +79,7 @@ import { getBuiltinTool } from "./tools/registry.ts";
 
 export interface BuiltinToolInputMap {
   bash: BashToolInput;
+  "bash-no-sandbox": BashToolInput;
   read_file: ReadFileToolInput;
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
@@ -77,6 +87,7 @@ export interface BuiltinToolInputMap {
 
 export interface BuiltinToolOutputMap {
   bash: BashToolOutput;
+  "bash-no-sandbox": BashToolOutput;
   read_file: ReadFileToolOutput;
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
@@ -155,10 +166,29 @@ const resolveInitialCurrentDir = (
   return sandbox.defaultWorkingDirectory();
 };
 
+const normalizeSandboxRoot = (path: string): string => {
+  const normalized = normalizeSandboxPath(path);
+  return normalized.length > 1 && normalized.endsWith("/")
+    ? normalized.slice(0, -1)
+    : normalized;
+};
+
+const isHostPathWithinRoot = (root: string, path: string): boolean => {
+  const relativePath = relativeHostPath(
+    normalizeHostPath(root),
+    normalizeHostPath(path),
+  );
+  return relativePath === "" ||
+    (!relativePath.startsWith("..") && !relativePath.startsWith("/"));
+};
+
 export class CfHarnessEngine {
   readonly config: HarnessConfig;
   readonly sandbox: SandboxRuntime;
   readonly artifactStore?: HarnessArtifactStore;
+  readonly hostProcessRunner: ProcessRunner;
+  readonly workspaceHostPath?: string;
+  readonly workspaceMountPath: string;
 
   #runState: HarnessRunState;
   #outputSequence: number;
@@ -169,11 +199,18 @@ export class CfHarnessEngine {
     this.config = resolveHarnessConfig(options);
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
+    const sandboxConfig = options.sandboxRuntime === undefined
+      ? resolveSandboxConfig(this.config, options.workspaceHostPath)
+      : this.config.sandbox;
+    this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
     this.sandbox = options.sandboxRuntime ??
-      createSandboxRuntime(
-        resolveSandboxConfig(this.config, options.workspaceHostPath),
-        options.processRunner,
-      );
+      createSandboxRuntime(sandboxConfig!, options.processRunner);
+    this.workspaceHostPath = sandboxConfig?.workspaceHostPath ??
+      options.workspaceHostPath;
+    this.workspaceMountPath = normalizeSandboxRoot(
+      sandboxConfig?.workspaceMountPath ??
+        this.sandbox.defaultWorkingDirectory(),
+    );
     this.artifactStore = options.artifactStore ??
       ((this.config.artifactRoot ?? options.runState?.artifactRoot) !==
           undefined
@@ -517,14 +554,61 @@ export class CfHarnessEngine {
     };
   }
 
+  #resolveHostPath(path: string): string {
+    if (this.workspaceHostPath === undefined) {
+      throw new Error(
+        "bash-no-sandbox requires a workspace host path to map sandbox paths",
+      );
+    }
+    const sandboxPath = this.sandbox.resolvePath(
+      path,
+      this.#runState.currentDir,
+    );
+    const mountPath = this.workspaceMountPath;
+    if (sandboxPath === mountPath) {
+      return normalizeHostPath(this.workspaceHostPath);
+    }
+    if (!sandboxPath.startsWith(`${mountPath}/`)) {
+      throw new Error(`path escapes workspace root: ${path}`);
+    }
+    return normalizeHostPath(
+      joinHostPath(
+        this.workspaceHostPath,
+        sandboxPath.slice(mountPath.length + 1),
+      ),
+    );
+  }
+
+  #hostPathToWorkspacePath(path: string): string | undefined {
+    if (this.workspaceHostPath === undefined) {
+      return undefined;
+    }
+    const hostRoot = normalizeHostPath(this.workspaceHostPath);
+    const hostPath = normalizeHostPath(path);
+    if (!isHostPathWithinRoot(hostRoot, hostPath)) {
+      return undefined;
+    }
+    const relativePath = relativeHostPath(hostRoot, hostPath);
+    if (relativePath === "") {
+      return this.workspaceMountPath;
+    }
+    return normalizeSandboxPath(
+      `${this.workspaceMountPath}/${relativePath.replaceAll("\\", "/")}`,
+    );
+  }
+
   #createToolContext() {
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
       currentDir: this.#runState.currentDir,
       sandbox: this.sandbox,
+      hostProcessRunner: this.hostProcessRunner,
       resolvePath: (path: string) =>
         this.sandbox.resolvePath(path, this.#runState.currentDir),
+      resolveHostPath: (path: string) => this.#resolveHostPath(path),
+      hostPathToWorkspacePath: (path: string) =>
+        this.#hostPathToWorkspacePath(path),
       setCurrentDir: (path: string) => {
         const resolved = this.sandbox.resolvePath(
           path,

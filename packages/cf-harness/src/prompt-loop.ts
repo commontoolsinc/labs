@@ -44,9 +44,11 @@ import {
   type DelegateTaskToolInput,
   type DelegateTaskToolOutput,
   getHarnessSubagentProfileConfig,
+  HARNESS_SUBAGENT_PROFILES,
   type HarnessSubagentFailureSummary,
   type HarnessSubagentInputSummary,
   type HarnessSubagentProfile,
+  type HarnessSubagentProfileConfig,
   type HarnessSubagentResult,
   type HarnessSubagentRunManifest,
   type HarnessSubagentRunStateSummary,
@@ -55,6 +57,7 @@ import {
 } from "./contracts/subagent.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
+import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
 
@@ -150,21 +153,19 @@ const toOpenAIChatMessage = (
 };
 
 const toOpenAITools = (
-  allowedToolIds?: ReadonlySet<BuiltinToolId>,
+  allowedToolIds: ReadonlySet<BuiltinToolId>,
 ): OpenAIChatCompletionTool[] =>
-  BUILTIN_TOOLS.filter((tool) =>
-    allowedToolIds === undefined ||
-    allowedToolIds.has(tool.descriptor.toolId)
-  ).map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.descriptor.toolId,
-      description: tool.descriptor.description,
-      parameters: typeof tool.descriptor.inputSchema === "boolean"
-        ? tool.descriptor.inputSchema
-        : { ...tool.descriptor.inputSchema },
-    },
-  }));
+  BUILTIN_TOOLS.filter((tool) => allowedToolIds.has(tool.descriptor.toolId))
+    .map((tool) => ({
+      type: "function",
+      function: {
+        name: tool.descriptor.toolId,
+        description: tool.descriptor.description,
+        parameters: typeof tool.descriptor.inputSchema === "boolean"
+          ? tool.descriptor.inputSchema
+          : { ...tool.descriptor.inputSchema },
+      },
+    }));
 
 const parseToolArguments = (
   toolCall: HarnessToolCall,
@@ -348,7 +349,8 @@ const summarizeToolInput = async (
   input: Record<string, unknown>,
 ): Promise<HarnessToolInputSummary> => {
   switch (toolId) {
-    case "bash": {
+    case "bash":
+    case "bash-no-sandbox": {
       const commandSummary = typeof input.command === "string"
         ? await summarizeSensitiveText(input.command)
         : undefined;
@@ -459,7 +461,9 @@ const parseDelegateTaskInput = (
     : undefined;
   if (profile === undefined) {
     throw new Error(
-      `delegate_task profile must be one of ${DEFAULT_SUBAGENT_PROFILE}`,
+      `delegate_task profile must be one of ${
+        HARNESS_SUBAGENT_PROFILES.join(", ")
+      }`,
     );
   }
   const maxModelTurns = input.maxModelTurns;
@@ -504,13 +508,25 @@ const createSubagentInputSummary = async (
   };
 };
 
-const buildSubagentSystemPrompt = (currentDir: string): string =>
+const buildSubagentSystemPrompt = (
+  currentDir: string,
+  profileConfig: HarnessSubagentProfileConfig,
+): string =>
   [
     "You are a focused cf-harness subagent working on one delegated task.",
     "You start with a fresh context and do not know the parent conversation.",
     "Use only the task and context provided in this child run.",
     "Do not ask the user follow-up questions.",
     "Do not attempt to delegate further; nested subagents are not available.",
+    `Subagent profile: ${profileConfig.profile}`,
+    ...(profileConfig.hostToolIds.length > 0
+      ? [
+        `Host execution tools available: ${
+          profileConfig.hostToolIds.join(", ")
+        }`,
+        "Host execution is outside the sandbox. Use it only for the delegated task and prefer agent-browser commands when browser access is needed.",
+      ]
+      : []),
     `Current sandbox directory: ${currentDir}`,
     "",
     "When finished, return a concise summary with:",
@@ -675,7 +691,7 @@ export class CfHarnessPromptLoop {
   readonly engine: CfHarnessEngine;
   readonly gatewayClient: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
-  readonly #allowedToolIds?: ReadonlySet<BuiltinToolId>;
+  readonly #allowedToolIds: ReadonlySet<BuiltinToolId>;
   readonly #allowedSubagentProfiles: ReadonlySet<HarnessSubagentProfile>;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
@@ -689,9 +705,9 @@ export class CfHarnessPromptLoop {
         fetchFn: options.fetchFn,
       });
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
-    this.#allowedToolIds = options.allowedToolIds === undefined
-      ? undefined
-      : new Set(options.allowedToolIds);
+    this.#allowedToolIds = new Set(
+      options.allowedToolIds ?? DEFAULT_PROMPT_LOOP_TOOL_IDS,
+    );
     this.#allowedSubagentProfiles = new Set(
       options.allowedSubagentProfiles ??
         (options.allowedToolIds === undefined
@@ -911,10 +927,7 @@ export class CfHarnessPromptLoop {
       await this.engine.recordPolicyEvent(event);
       policyEventIndexes.push(index);
     };
-    if (
-      this.#allowedToolIds !== undefined &&
-      !this.#allowedToolIds.has(toolCall.function.name)
-    ) {
+    if (!this.#allowedToolIds.has(toolCall.function.name)) {
       const denial = makeObservationDenied("not-authorized", {
         detail: `${toolCall.function.name} is not allowed in this run`,
       });
@@ -1129,6 +1142,8 @@ export class CfHarnessPromptLoop {
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       sandboxRuntime: this.engine.sandbox,
+      workspaceHostPath: this.engine.workspaceHostPath,
+      processRunner: this.engine.hostProcessRunner,
       artifactRoot: this.engine.artifactStore?.artifactRoot,
       model: options.model,
       gatewayBaseUrl: this.engine.config.gatewayBaseUrl,
@@ -1148,6 +1163,7 @@ export class CfHarnessPromptLoop {
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
       model: options.model,
       allowedToolIds: [...profileConfig.allowedToolIds],
+      hostToolIds: [...profileConfig.hostToolIds],
       maxModelTurns,
       returnPolicy: profileConfig.returnPolicy,
       createdAt: childCreatedState.createdAt,
@@ -1167,6 +1183,7 @@ export class CfHarnessPromptLoop {
       const childResult = await childLoop.runPrompt({
         systemPrompt: buildSubagentSystemPrompt(
           childEngine.getRunState().currentDir,
+          profileConfig,
         ),
         prompt: buildSubagentUserPrompt(delegateInput),
         model: options.model,

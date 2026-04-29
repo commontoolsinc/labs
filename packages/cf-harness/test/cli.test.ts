@@ -231,6 +231,29 @@ Deno.test("parseCfHarnessCliArgs supports explicit subagent profile authorizatio
   assertEquals(parsed.allowedSubagentProfiles, ["default"]);
 });
 
+Deno.test("parseCfHarnessCliArgs supports explicit browser subagent profile authorization", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "delegate_task",
+      "--allow-subagent-profile",
+      "browser",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.allowedToolIds, ["delegate_task"]);
+  assertEquals(parsed.allowedSubagentProfiles, ["browser"]);
+});
+
 Deno.test("parseCfHarnessCliArgs covers tool allowlist and subagent profile permutations", async () => {
   const cases = [
     {
@@ -244,6 +267,12 @@ Deno.test("parseCfHarnessCliArgs covers tool allowlist and subagent profile perm
       flags: ["--allow-subagent-profile", "default"],
       allowedToolIds: undefined,
       allowedSubagentProfiles: ["default"],
+    },
+    {
+      name: "explicit browser profile when parent tools are unrestricted",
+      flags: ["--allow-subagent-profile", "browser"],
+      allowedToolIds: undefined,
+      allowedSubagentProfiles: ["browser"],
     },
     {
       name: "delegate_task alone does not imply child profile authority",
@@ -290,6 +319,19 @@ Deno.test("parseCfHarnessCliArgs covers tool allowlist and subagent profile perm
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["default"],
     },
+    {
+      name: "default and browser profiles can both be preauthorized",
+      flags: [
+        "--allow-tool",
+        "delegate_task",
+        "--allow-subagent-profile",
+        "default",
+        "--allow-subagent-profile",
+        "browser",
+      ],
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["default", "browser"],
+    },
   ] as const;
 
   for (const testCase of cases) {
@@ -321,14 +363,29 @@ Deno.test("parseCfHarnessCliArgs rejects unknown subagent profiles", async () =>
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
-        ["--prompt", "hi", "--allow-subagent-profile", "browser"],
+        ["--prompt", "hi", "--allow-subagent-profile", "unknown"],
         {
           cwd: "/tmp/project",
           env: {},
         },
       ),
     Error,
-    "allowed subagent profiles must be one or more of default",
+    "allowed subagent profiles must be one or more of default, browser",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects bash-no-sandbox as a parent allow-tool", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "bash-no-sandbox"],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "allowed tools must be one or more of bash, read_file, write_file, delegate_task",
   );
 });
 
@@ -753,6 +810,17 @@ Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async (
       ],
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["default"],
+    },
+    {
+      name: "delegate_task with explicit browser profile authorization",
+      flags: [
+        "--allow-tool",
+        "delegate_task",
+        "--allow-subagent-profile",
+        "browser",
+      ],
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["browser"],
     },
   ] as const;
 
