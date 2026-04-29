@@ -61,6 +61,15 @@ const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   path: [...link.path],
 });
 
+export type CellViewRef = {
+  link: NormalizedFullLink;
+  cfcLabelView?: CfcLabelView;
+};
+
+const isCellViewRef = (
+  ref: NormalizedFullLink | CellViewRef,
+): ref is CellViewRef => isRecord(ref) && "link" in ref;
+
 const isPrefix = (
   prefix: readonly string[],
   path: readonly string[],
@@ -607,14 +616,12 @@ export interface ValidateAndTransformOptions {
   traverseCells?: boolean;
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
-  /** Labels accumulated by following links before this read. */
-  cfcLabelView?: CfcLabelView;
 }
 
 export function validateAndTransform(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
-  link: NormalizedFullLink,
+  sourceRef: NormalizedFullLink | CellViewRef,
   _seen?: Array<[string, any]>,
   options?: ValidateAndTransformOptions,
 ): any {
@@ -624,9 +631,12 @@ export function validateAndTransform(
   tx = runtime.readTx(tx);
 
   // Reconstruct doc, path, schema from link and runtime
+  let link = isCellViewRef(sourceRef) ? sourceRef.link : sourceRef;
   const schema = link.schema;
   const resolvedSchema = resolveSchema(schema);
-  let cfcLabelView = cloneCfcLabelView(options?.cfcLabelView);
+  let cfcLabelView = cloneCfcLabelView(
+    isCellViewRef(sourceRef) ? sourceRef.cfcLabelView : undefined,
+  );
 
   // For opaque cells, create the cell directly from the current link.
   // We intentionally avoid traversing redirect chains or reading through the
@@ -701,7 +711,7 @@ export function validateAndTransform(
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
   const valueTraceStart = tx.getCfcState().dereferenceTraces.length;
-  const ref = resolveLink(runtime, tx, link);
+  const resolvedValueLink = resolveLink(runtime, tx, link);
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
     cfcLabelViewForDereferenceTraces(
@@ -741,15 +751,20 @@ export function validateAndTransform(
     // This will overwrite any schema that we got from the first non-redirect
     // link, but this one should be more accurate
     // Otherwise, we won't return a cell like we are supposed to.
-    if (ref.schema !== undefined) {
-      link.schema = mergeSchemaFlags(effectiveSchema!, ref.schema);
+    if (resolvedValueLink.schema !== undefined) {
+      link.schema = mergeSchemaFlags(
+        effectiveSchema!,
+        resolvedValueLink.schema,
+      );
     }
     objectCreator.setBase(link, cfcLabelView);
     return objectCreator.createObject(link, undefined);
   }
 
   // Link paths don't include value, but doc address should
-  const address: IMemorySpaceValueAddress = toMemorySpaceAddress(ref);
+  const address: IMemorySpaceValueAddress = toMemorySpaceAddress(
+    resolvedValueLink,
+  );
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
   const value = tx.readOrThrow(address, {
@@ -759,7 +774,7 @@ export function validateAndTransform(
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,
-    schema: ref.schema ?? link.schema!,
+    schema: resolvedValueLink.schema ?? link.schema!,
   };
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct

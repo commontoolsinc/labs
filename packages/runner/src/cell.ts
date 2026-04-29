@@ -61,6 +61,7 @@ import {
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
+  type CellViewRef,
   processDefaultValue,
   resolveSchema,
   schemaHasIfc,
@@ -537,6 +538,13 @@ export class CellImpl<T extends FabricValue>
     return this._link as NormalizedFullLink;
   }
 
+  private get viewRef(): CellViewRef {
+    return {
+      link: this.link,
+      cfcLabelView: this._cfcLabelView,
+    };
+  }
+
   /**
    * Check if this cell has a full link (with id and space)
    */
@@ -693,9 +701,9 @@ export class CellImpl<T extends FabricValue>
     const value = validateAndTransform(
       this.runtime,
       this.tx,
-      this.link,
+      this.viewRef,
       [],
-      { ...options, synced: this.synced, cfcLabelView: this._cfcLabelView },
+      { ...options, synced: this.synced },
     );
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
@@ -725,9 +733,7 @@ export class CellImpl<T extends FabricValue>
     const readTx = this.runtime.readTx(this.tx);
     const nonReactiveTx = createNonReactiveTransaction(readTx);
 
-    return validateAndTransform(this.runtime, nonReactiveTx, this.link, [], {
-      cfcLabelView: this._cfcLabelView,
-    });
+    return validateAndTransform(this.runtime, nonReactiveTx, this.viewRef);
   }
 
   /**
@@ -771,9 +777,7 @@ export class CellImpl<T extends FabricValue>
 
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        result = validateAndTransform(this.runtime, tx, this.link, [], {
-          cfcLabelView: this._cfcLabelView,
-        });
+        result = validateAndTransform(this.runtime, tx, this.viewRef);
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
@@ -1277,7 +1281,7 @@ export class CellImpl<T extends FabricValue>
       return subscribeToReferencedDocs(
         callback,
         this.runtime,
-        this.link,
+        this.viewRef,
         options,
       );
     }
@@ -1915,10 +1919,11 @@ export class CellImpl<T extends FabricValue>
 function subscribeToReferencedDocs<T>(
   callback: (value: T) => Cancel | undefined | void,
   runtime: Runtime,
-  link: NormalizedFullLink,
+  ref: CellViewRef,
   options: SinkOptions = {},
 ): Cancel {
   let cleanup: Cancel | undefined | void;
+  const link = ref.link;
 
   const action: Action = (tx) => {
     if (isCancel(cleanup)) cleanup();
@@ -1932,7 +1937,7 @@ function subscribeToReferencedDocs<T>(
     const schema = link.schema;
     const needsTraversal = schema === undefined ||
       ContextualFlowControl.isTrueSchema(schema);
-    const newValue = validateAndTransform(runtime, wrappedTx, link);
+    const newValue = validateAndTransform(runtime, wrappedTx, ref);
     if (needsTraversal && newValue !== undefined && newValue !== null) {
       deepTraverse(newValue);
     }
