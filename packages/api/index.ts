@@ -2121,6 +2121,11 @@ export interface PatternEnvironment {
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
 export type NonPrivateRandomFunction = () => number;
 export type SafeDateNowFunction = () => number;
+export type ToCompactDebugStringFunction = (
+  value: unknown,
+  maxLength?: number,
+) => string;
+export type ToIndentedDebugStringFunction = (value: unknown) => string;
 
 /**
  * Compare two cells or values for equality after resolving, i.e. after
@@ -2165,6 +2170,8 @@ export declare const byRef: ByRefFunction;
 export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
 export declare const nonPrivateRandom: NonPrivateRandomFunction;
 export declare const safeDateNow: SafeDateNowFunction;
+export declare const toCompactDebugString: ToCompactDebugStringFunction;
+export declare const toIndentedDebugString: ToIndentedDebugStringFunction;
 
 export interface UiActionProps {
   readonly as?: string;
