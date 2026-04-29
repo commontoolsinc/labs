@@ -2,6 +2,12 @@ import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessCfcPolicySnapshot } from "./cfc-policy-snapshot.ts";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
 import type { HarnessPolicyEvent, HarnessToolInputSummary } from "./policy.ts";
+import type {
+  HarnessPolicyDecisionCounts,
+  HarnessPolicyDecisionRecord,
+  HarnessPolicyTrace,
+} from "./policy-trace.ts";
+import { countHarnessPolicyDecisions } from "./policy-trace.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { HarnessSubagentRunRef } from "./subagent.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
@@ -86,6 +92,8 @@ export interface HarnessRunReport {
   transcriptPath?: string;
   promptSlotBinding?: PromptSlotBinding;
   cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
+  policyTrace?: HarnessPolicyTrace;
+  policyTracePath?: string;
   primaryFailure?: HarnessFailureRecord;
   failureRecords?: HarnessFailureRecord[];
   policyEventCounts: {
@@ -93,7 +101,9 @@ export interface HarnessRunReport {
     warnings: number;
     denied: number;
   };
+  policyDecisionCounts: HarnessPolicyDecisionCounts;
   policyEvents: HarnessPolicyEvent[];
+  policyDecisions: HarnessPolicyDecisionRecord[];
   timeline: HarnessRunTimelineEntry[];
   toolActivity: HarnessToolActivity[];
   toolOutputs: ToolResultRef[];
@@ -113,9 +123,12 @@ export interface CreateHarnessRunReportOptions {
     transcriptPath?: string;
     promptSlotBinding?: PromptSlotBinding;
     cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
+    policyTrace?: HarnessPolicyTrace;
+    policyTracePath?: string;
     primaryFailure?: HarnessFailureRecord;
     failureRecords?: HarnessFailureRecord[];
     policyEvents: HarnessPolicyEvent[];
+    policyDecisions?: HarnessPolicyDecisionRecord[];
     toolOutputs: ToolResultRef[];
     subagentRuns?: HarnessSubagentRunRef[];
   };
@@ -234,6 +247,7 @@ export const createHarnessRunReport = (
   const denied =
     options.runState.policyEvents.filter((event) => event.severity === "denied")
       .length;
+  const policyDecisions = [...(options.runState.policyDecisions ?? [])];
   return {
     type: "cf-harness.run-report",
     runId: options.runState.runId,
@@ -267,6 +281,12 @@ export const createHarnessRunReport = (
     ...(options.runState.cfcPolicySnapshot !== undefined
       ? { cfcPolicySnapshot: options.runState.cfcPolicySnapshot }
       : {}),
+    ...(options.runState.policyTrace !== undefined
+      ? { policyTrace: options.runState.policyTrace }
+      : {}),
+    ...(options.runState.policyTracePath !== undefined
+      ? { policyTracePath: options.runState.policyTracePath }
+      : {}),
     ...(options.runState.primaryFailure !== undefined
       ? { primaryFailure: options.runState.primaryFailure }
       : {}),
@@ -278,7 +298,9 @@ export const createHarnessRunReport = (
       warnings,
       denied,
     },
+    policyDecisionCounts: countHarnessPolicyDecisions(policyDecisions),
     policyEvents: [...options.runState.policyEvents],
+    policyDecisions,
     timeline: createHarnessRunTimeline({
       runState: options.runState,
       timeline: options.timeline,

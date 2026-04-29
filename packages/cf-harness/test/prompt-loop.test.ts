@@ -113,6 +113,10 @@ class FailingArtifactStore implements HarnessArtifactStore {
     return Promise.resolve(`${this.runRoot}/policy-snapshot.json`);
   }
 
+  persistPolicyTrace(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/policy-trace.json`);
+  }
+
   persistRunReport(): Promise<string> {
     return Promise.resolve(`${this.runRoot}/run-report.json`);
   }

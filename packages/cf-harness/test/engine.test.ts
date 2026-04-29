@@ -197,6 +197,9 @@ Deno.test("CfHarnessEngine stamps policy snapshot state changes with mutation ti
     persistCfcPolicySnapshot() {
       return Promise.reject(new Error("snapshot persist boom"));
     },
+    persistPolicyTrace() {
+      return Promise.resolve(`${runRoot}/policy-trace.json`);
+    },
     persistRunReport() {
       return Promise.resolve(`${runRoot}/run-report.json`);
     },

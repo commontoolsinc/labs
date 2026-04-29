@@ -83,6 +83,7 @@ export type HarnessFailureKind =
 export type HarnessFailureSource =
   | "capability_snapshot"
   | "policy_snapshot"
+  | "policy_trace"
   | "policy_event"
   | "tool_output"
   | "run_error";

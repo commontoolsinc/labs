@@ -330,6 +330,7 @@ Deno.test({
       const runRoot = join(artifactRoot, "run-loop-persisted");
       const transcriptPath = join(runRoot, "transcript.json");
       const policySnapshotPath = join(runRoot, "policy-snapshot.json");
+      const policyTracePath = join(runRoot, "policy-trace.json");
       const runReportPath = join(runRoot, "run-report.json");
       const persistedState = await readHarnessRunState(
         join(runRoot, "run-state.json"),
@@ -337,10 +338,14 @@ Deno.test({
       const persistedPolicySnapshot = JSON.parse(
         await Deno.readTextFile(policySnapshotPath),
       );
+      const persistedPolicyTrace = JSON.parse(
+        await Deno.readTextFile(policyTracePath),
+      );
       const persistedReport = await readHarnessRunReport(runReportPath);
 
       assertEquals(result.runState.transcriptPath, transcriptPath);
       assertEquals(result.runState.cfcPolicySnapshotPath, policySnapshotPath);
+      assertEquals(result.runState.policyTracePath, policyTracePath);
       assertEquals(result.runState.runReportPath, runReportPath);
       assertEquals(
         await readHarnessTranscript(transcriptPath),
@@ -349,6 +354,8 @@ Deno.test({
       assertEquals(persistedState.transcriptPath, transcriptPath);
       assertEquals(persistedState.cfcPolicySnapshotPath, policySnapshotPath);
       assertEquals(persistedState.cfcPolicySnapshot, persistedPolicySnapshot);
+      assertEquals(persistedState.policyTracePath, policyTracePath);
+      assertEquals(persistedState.policyTrace, persistedPolicyTrace);
       assertEquals(persistedState.runReportPath, runReportPath);
       assertEquals(persistedState.artifactRoot, runRoot);
       assertEquals(persistedState.endedAt, "2026-04-15T21:10:07.000Z");
@@ -394,6 +401,41 @@ Deno.test({
         persistedPolicySnapshot.substrate?.sandbox?.kind,
         "docker-runsc-cfc",
       );
+      assertEquals(persistedPolicyTrace.type, "cf-harness.policy-trace");
+      assertEquals(persistedPolicyTrace.version, 1);
+      assertEquals(persistedPolicyTrace.runId, "run-loop-persisted");
+      assertEquals(
+        persistedPolicyTrace.cfcPolicySnapshotPath,
+        policySnapshotPath,
+      );
+      assertEquals(
+        persistedPolicyTrace.cfcPolicySnapshotDigest.startsWith("sha256:"),
+        true,
+      );
+      assertEquals(persistedPolicyTrace.decisionCounts, {
+        total: 1,
+        allowed: 1,
+        warned: 0,
+        denied: 0,
+      });
+      assertEquals(persistedPolicyTrace.decisions[0], {
+        type: "cf-harness.policy-decision",
+        sequence: 1,
+        runId: "run-loop-persisted",
+        at: "2026-04-15T21:10:07.000Z",
+        toolActivitySequence: 1,
+        toolCallId: "call-1",
+        toolId: "read_file",
+        effectClass: "read",
+        cfcEnforcementMode: "enforce-explicit",
+        decision: "allowed",
+        reasonCodes: ["cfc_enforce_explicit_read"],
+        toolInputSummary: {
+          type: "cf-harness.tool-input-summary",
+          toolId: "read_file",
+          path: "notes/todo.txt",
+        },
+      });
       assertEquals(persistedReport.type, "cf-harness.run-report");
       assertEquals(persistedReport.runId, "run-loop-persisted");
       assertEquals(persistedReport.status, "completed");
@@ -401,6 +443,17 @@ Deno.test({
       assertEquals(persistedReport.modelTurns, 2);
       assertEquals(persistedReport.finalAssistantText, "Persisted summary.");
       assertEquals(persistedReport.cfcPolicySnapshot, persistedPolicySnapshot);
+      assertEquals(persistedReport.policyTracePath, policyTracePath);
+      assertEquals(persistedReport.policyTrace, persistedPolicyTrace);
+      assertEquals(persistedReport.policyDecisionCounts, {
+        total: 1,
+        allowed: 1,
+        warned: 0,
+        denied: 0,
+      });
+      assertEquals(persistedReport.policyDecisions, [
+        persistedPolicyTrace.decisions[0],
+      ]);
       assertEquals(persistedReport.policyEventCounts, {
         total: 0,
         warnings: 0,
@@ -1004,8 +1057,28 @@ Deno.test({
       const runReport = await readHarnessRunReport(
         join(artifactRoot, "run-denied-report", "run-report.json"),
       );
+      const policyTrace = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactRoot, "run-denied-report", "policy-trace.json"),
+        ),
+      );
 
       assertEquals(result.runState.toolOutputs, []);
+      assertEquals(policyTrace.decisionCounts, {
+        total: 1,
+        allowed: 0,
+        warned: 0,
+        denied: 1,
+      });
+      assertEquals(policyTrace.decisions[0].decision, "denied");
+      assertEquals(policyTrace.decisions[0].reasonCodes, [
+        "write_file_enforce_explicit_requires_direct_command",
+      ]);
+      assertEquals(policyTrace.decisions[0].policyEventIndexes, [0]);
+      assertEquals(
+        policyTrace.decisions[0].detail,
+        "write_file requires direct-command authorization in enforce-explicit",
+      );
       assertEquals(runReport.policyEventCounts, {
         total: 1,
         warnings: 0,
@@ -1090,6 +1163,7 @@ Deno.test({
         },
       );
       assertEquals(JSON.stringify(runReport).includes("nope"), false);
+      assertEquals(JSON.stringify(policyTrace).includes("nope"), false);
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }

@@ -10,6 +10,7 @@ export * from "./contracts/cfc-policy-snapshot.ts";
 export * from "./contracts/run-manifest.ts";
 export * from "./contracts/observation.ts";
 export * from "./contracts/policy.ts";
+export * from "./contracts/policy-trace.ts";
 export * from "./contracts/run-report.ts";
 export * from "./contracts/subagent.ts";
 export * from "./contracts/tool-result.ts";

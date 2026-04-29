@@ -9,6 +9,7 @@ import {
 } from "./artifacts.ts";
 import {
   appendHarnessFailureRecord,
+  appendHarnessPolicyDecision,
   appendHarnessPolicyEvent,
   appendHarnessSubagentRun,
   appendHarnessToolOutput,
@@ -17,6 +18,7 @@ import {
   type HarnessRunTerminalReason,
   setHarnessCapabilitySnapshot,
   setHarnessCfcPolicySnapshot,
+  setHarnessPolicyTrace,
   setHarnessPromptSlotBinding,
   setHarnessRunCurrentDir,
   setHarnessRunManifestPath,
@@ -38,6 +40,11 @@ import {
   type HarnessPolicyEvent,
 } from "./contracts/policy.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
+import {
+  createHarnessPolicyDecisionRecord,
+  type HarnessPolicyDecisionRecord,
+  type HarnessPolicyTrace,
+} from "./contracts/policy-trace.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
@@ -308,6 +315,28 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  async recordPolicyDecision(
+    decision: Omit<
+      HarnessPolicyDecisionRecord,
+      "type" | "sequence" | "runId" | "at"
+    >,
+  ): Promise<HarnessRunState> {
+    const now = this.#now();
+    const policyDecision = createHarnessPolicyDecisionRecord({
+      ...decision,
+      runId: this.#runState.runId,
+      sequence: (this.#runState.policyDecisions ?? []).length + 1,
+      at: now,
+    });
+    this.#runState = appendHarnessPolicyDecision(
+      this.#runState,
+      policyDecision,
+      now,
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
   async persistRunState(): Promise<string | undefined> {
     return await this.artifactStore?.persistRunState(this.#runState);
   }
@@ -439,6 +468,33 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return cfcPolicySnapshotPath;
+  }
+
+  async persistPolicyTrace(
+    trace: HarnessPolicyTrace,
+  ): Promise<string | undefined> {
+    let policyTracePath: string | undefined;
+    try {
+      policyTracePath = await this.artifactStore?.persistPolicyTrace?.(trace);
+    } catch (error) {
+      const now = this.#now();
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        classifyHarnessRunError(error, {
+          at: now,
+          source: "policy_trace",
+        }),
+        now,
+      );
+    }
+    this.#runState = setHarnessPolicyTrace(
+      this.#runState,
+      trace,
+      policyTracePath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return policyTracePath;
   }
 
   async ensureDiagnosticsInitialized(): Promise<HarnessRunState> {
