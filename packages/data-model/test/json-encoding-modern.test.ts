@@ -45,21 +45,30 @@ function roundTrip(value: FabricValue): FabricValue {
 }
 
 /**
+ * The encoding prefix tag emitted by `JsonEncodingContext.encode()`. Defined
+ * here (rather than imported) so the production module can keep the tag
+ * private; these helpers strip/add it to bridge between encoded strings and
+ * the underlying wire-format tree.
+ */
+const ENCODING_PREFIX = "fvj1:";
+
+/**
  * Helper: encode a value and return the wire-format tree (parsed JSON).
  * Used for assertions about the intermediate wire representation.
  */
 function toWireFormat(value: FabricValue): JsonWireValue {
   const { context } = makeTestContext();
-  return JSON.parse(context.encode(value)) as JsonWireValue;
+  const encoded = context.encode(value);
+  return JSON.parse(encoded.slice(ENCODING_PREFIX.length)) as JsonWireValue;
 }
 
 /**
- * Helper: decode from a wire-format tree. Stringifies to JSON first,
- * then feeds through the public decode API.
+ * Helper: decode from a wire-format tree. Stringifies to JSON first (with the
+ * encoding prefix prepended), then feeds through the public decode API.
  */
 function fromWireFormat(data: JsonWireValue): FabricValue {
   const { context, runtime } = makeTestContext();
-  return context.decode(JSON.stringify(data), runtime);
+  return context.decode(ENCODING_PREFIX + JSON.stringify(data), runtime);
 }
 
 // ============================================================================
@@ -1304,10 +1313,7 @@ describe("json encoding", () => {
         "original data",
         "something went wrong",
       );
-      const { context } = makeTestContext();
-      const wireFormat = JSON.parse(
-        context.encode(prob as FabricValue),
-      );
+      const wireFormat = toWireFormat(prob as FabricValue);
       expect(wireFormat).toEqual({ "/BadType@1": "original data" });
     });
 
@@ -1322,7 +1328,10 @@ describe("json encoding", () => {
       // BigInt@1 with a non-string state produces ProblematicValue
       // in lenient mode because the handler validates the state type.
       const data = { "/BigInt@1": 42 } as JsonWireValue;
-      const result = context.decode(JSON.stringify(data), runtime);
+      const result = context.decode(
+        ENCODING_PREFIX + JSON.stringify(data),
+        runtime,
+      );
       expect(result).toBeInstanceOf(ProblematicValue);
       const prob = result as unknown as ProblematicValue;
       expect(prob.typeTag).toBe("BigInt@1");
@@ -1341,7 +1350,10 @@ describe("json encoding", () => {
       const data = {
         "/Map@1": [["key", "value"]],
       } as JsonWireValue;
-      const result = context.decode(JSON.stringify(data), runtime);
+      const result = context.decode(
+        ENCODING_PREFIX + JSON.stringify(data),
+        runtime,
+      );
       expect(result).toBeInstanceOf(ProblematicValue);
       const prob = result as unknown as ProblematicValue;
       expect(prob.typeTag).toBe("Map@1");
@@ -1533,21 +1545,22 @@ describe("json encoding", () => {
   // --------------------------------------------------------------------------
 
   describe("JsonEncodingContext", () => {
-    it("encode returns a JSON string", () => {
+    it("encode returns a prefixed JSON string", () => {
       const ctx = new JsonEncodingContext();
       const result = ctx.encode(42);
       expect(typeof result).toBe("string");
-      expect(JSON.parse(result)).toBe(42);
+      expect(result.startsWith(ENCODING_PREFIX)).toBe(true);
+      expect(JSON.parse(result.slice(ENCODING_PREFIX.length))).toBe(42);
     });
 
-    it("decode parses a JSON string back to a value", () => {
+    it("decode parses a prefixed JSON string back to a value", () => {
       const ctx = new JsonEncodingContext();
       const runtime: ReconstructionContext = {
         getCell(_ref) {
           throw new Error("not implemented");
         },
       };
-      const result = ctx.decode("42", runtime);
+      const result = ctx.decode(ENCODING_PREFIX + "42", runtime);
       expect(result).toBe(42);
     });
 

@@ -24,6 +24,14 @@ import {
 } from "./fabric-native-instances.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 
+/**
+ * Tag prefix for the encoded form used by this module. We use this explicit
+ * prefix so as to make it unambiguous when a given JSON-ish text string is
+ * the result of encoding via this module vs. being JSON from some other source.
+ * The tag stands for "Fabric Value Json, version 1."
+ */
+const ENCODING_PREFIX_TAG = "fvj1:";
+
 /** Shared default handler registry, created once. */
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
 
@@ -119,7 +127,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
-    return JSON.stringify(this.serialize(value));
+    return ENCODING_PREFIX_TAG + JSON.stringify(this.serialize(value));
   }
 
   /**
@@ -127,8 +135,29 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * then deserializes tagged forms back into modern runtime types.
    */
   decode(data: string, runtime: ReconstructionContext): FabricValue {
-    const parsed = JSON.parse(data) as JsonWireValue;
+    if (!JsonEncodingContext.seemsLikeEncoded(data)) {
+      const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
+      throw new Error(
+        `Not a JSON-encoded \`FabricValue\` string: \`${excerpt}\``,
+      );
+    }
+
+    const json = data.slice(ENCODING_PREFIX_TAG.length);
+    const parsed = JSON.parse(json) as JsonWireValue;
     return this.deserialize(parsed, runtime);
+  }
+
+  // -------------------------------------------------------------------------
+  // Static helpers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Indicates if the given text has a "first-blush" appearance as valid JSON
+   * encoded by this class -- that is, whether it carries the encoding prefix
+   * tag.
+   */
+  static seemsLikeEncoded(value: string): boolean {
+    return value.startsWith(ENCODING_PREFIX_TAG);
   }
 
   // -------------------------------------------------------------------------
