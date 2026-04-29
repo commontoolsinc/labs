@@ -34,6 +34,11 @@ function marked(payload: string): string {
  * JSON-string quotes.
  */
 function debugReplacer(_key: string, value: unknown): unknown {
+  // TODO(danfuzz): This function will have to get smarter once we have
+  // `FabricSpecialObject`s flowing through the system (which generally cannot
+  // be stringified with full fidelity via `JSON.stringify()`'s default
+  // behavior).
+
   if (typeof value === "number") {
     // Negative zero must be checked first: `value === 0` is true for both
     // `0` and `-0` (IEEE 754), so a generic numeric early-out would lose
@@ -85,20 +90,37 @@ function unquoteMarked(json: string): string {
 }
 
 /**
- * Produces a compact string representation of a value. In _many_ cases, the
- * output of this function is valid JSON text, but not _all_ cases. This
- * function must _not_ be relied on to produce a parseable string.
+ * Produces a compact string representation of a value, optionally truncating to
+ * a specified maximum length. When truncating is requested and turns out to be
+ * necessary, the returned result will be the indicated length, which includes
+ * an "ASCII ellipsis" of `...`.
+ *
+ * **Note:** In _many_ cases, the output of this function is valid JSON text,
+ * but not _all_ cases. This function must _not_ be relied on to produce a
+ * parseable string.
  */
-export function toCompactDebugString(value: unknown): string {
-  // TODO(danfuzz): This function will have to get smarter once we have values
-  // that go beyond what's representable as JSON text.
-  return unquoteMarked(JSON.stringify(value, debugReplacer));
+export function toCompactDebugString(
+  value: unknown,
+  maxLength?: number,
+): string {
+  const result = unquoteMarked(JSON.stringify(value, debugReplacer));
+
+  if (typeof maxLength === "number") {
+    const actualMax = Math.max(Math.floor(maxLength), 3);
+    if (result.length > actualMax) {
+      return result.slice(0, actualMax - 3) + "...";
+    }
+  }
+
+  return result;
 }
 
 /**
- * Produces an indented string representation of a value. In _many_ cases, the
- * output of this function is valid JSON text, but not _all_ cases. This
- * function must _not_ be relied on to produce a parseable string.
+ * Produces an indented string representation of a value.
+ *
+ * **Note:** In _many_ cases, the output of this function is valid JSON text,
+ * but not _all_ cases. This function must _not_ be relied on to produce a
+ * parseable string.
  */
 export function toIndentedDebugString(value: unknown): string {
   // TODO(danfuzz): This function will have to get smarter once we have values

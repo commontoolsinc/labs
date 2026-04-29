@@ -171,6 +171,23 @@ describe("value-debug", () => {
       expect(toCompactDebugString([NaN, Infinity, -Infinity, -0, 0]))
         .toBe("[NaN,Infinity,-Infinity,-0,0]");
     });
+
+    describe("with `maxLength`", () => {
+      for (const len of [10, 25, 100]) {
+        it("renders the full text when `maxLength` fits the whole thing", () => {
+          const item = ["xy", NaN];
+          const expected = '["xy",NaN]'; // Note: Length 10.
+          expect(toCompactDebugString(item, len)).toBe(expected);
+        });
+
+        it("truncates to `maxLength` when it is smaller than the whole rendered length", () => {
+          const largeString = "This is a very large string! ".repeat(40);
+          const item = { a: 123, b: 456, c: 789, d: largeString };
+          const expected = JSON.stringify(item).slice(0, len - 3) + "...";
+          expect(toCompactDebugString(item, len)).toBe(expected);
+        });
+      }
+    });
   });
 
   // --------------------------------------------------------------------------
