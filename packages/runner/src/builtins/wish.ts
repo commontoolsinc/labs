@@ -174,6 +174,7 @@ type SharedHashtagState = {
 type SharedHashtagResolver = {
   cell: Cell<SharedHashtagState>;
   cancel: () => void;
+  refCount: number;
 };
 
 const sharedHashtagResolvers = new WeakMap<
@@ -798,21 +799,34 @@ function createSharedHashtagResolver(
   };
   const cancel = ctx.runtime.scheduler.subscribe(action, initialLog);
 
-  return { cell: sharedCell, cancel };
+  return { cell: sharedCell, cancel, refCount: 0 };
 }
 
-function getOrCreateSharedHashtagResolver(
+function acquireSharedHashtagResolver(
   ctx: WishContext,
   parsed: ParsedWishTarget,
 ): SharedHashtagResolver {
   const key = sharedHashtagResolverKey(ctx.parentCell.space, parsed, ctx.scope);
   const resolvers = getRuntimeSharedHashtagResolvers(ctx.runtime);
-  const existing = resolvers.get(key);
-  if (existing) return existing;
-
-  const resolver = createSharedHashtagResolver(ctx, parsed);
-  resolvers.set(key, resolver);
+  let resolver = resolvers.get(key);
+  if (!resolver) {
+    resolver = createSharedHashtagResolver(ctx, parsed);
+    resolvers.set(key, resolver);
+  }
+  resolver.refCount++;
   return resolver;
+}
+
+function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
+  const resolvers = sharedHashtagResolvers.get(runtime);
+  const resolver = resolvers?.get(key);
+  if (!resolver) return;
+
+  resolver.refCount--;
+  if (resolver.refCount > 0) return;
+
+  resolver.cancel();
+  resolvers?.delete(key);
 }
 
 // fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
@@ -940,6 +954,7 @@ export function wish(
   // Per-instance cached #now cell — prevents non-idempotent re-runs from
   // Date.now() producing a different value each time the sync action fires.
   let nowCell: Cell<unknown> | undefined;
+  let sharedHashtagKey: string | undefined;
 
   // Per-instance suggestion pattern result cell
   let suggestionPatternInput:
@@ -953,10 +968,35 @@ export function wish(
 
   addCancel(() => {
     cancelled = true;
+    releaseCurrentSharedHashtagResolver();
     if (suggestionPatternResultCell) {
       runtime.runner.stop(suggestionPatternResultCell);
     }
   });
+
+  function releaseCurrentSharedHashtagResolver(): void {
+    if (!sharedHashtagKey) return;
+    releaseSharedHashtagResolver(runtime, sharedHashtagKey);
+    sharedHashtagKey = undefined;
+  }
+
+  function getCurrentSharedHashtagResolver(
+    ctx: WishContext,
+    parsed: ParsedWishTarget,
+  ): SharedHashtagResolver {
+    const nextKey = sharedHashtagResolverKey(
+      ctx.parentCell.space,
+      parsed,
+      ctx.scope,
+    );
+    const existing = sharedHashtagResolvers.get(runtime)?.get(nextKey);
+    if (nextKey === sharedHashtagKey && existing) return existing;
+
+    releaseCurrentSharedHashtagResolver();
+    const resolver = acquireSharedHashtagResolver(ctx, parsed);
+    sharedHashtagKey = nextKey;
+    return resolver;
+  }
 
   function launchSuggestionPattern(
     input: {
@@ -1024,6 +1064,7 @@ export function wish(
   return (tx: IExtendedStorageTransaction) => {
     const actionStartedAt = performance.now();
     let actionQueryKey: string | undefined;
+    let usedSharedHashtagResolver = false;
 
     try {
       const targetValue = measureWishPhase(
@@ -1083,7 +1124,8 @@ export function wish(
               nowCell,
             };
             if (canUseSharedHashtagResult(parsed, { headless })) {
-              const shared = getOrCreateSharedHashtagResolver(ctx, parsed);
+              const shared = getCurrentSharedHashtagResolver(ctx, parsed);
+              usedSharedHashtagResolver = true;
               measureWishPhase(
                 "send-shared-hashtag",
                 queryKey,
@@ -1226,7 +1268,10 @@ export function wish(
                   queryKey,
                   () =>
                     sendResult(tx, {
-                      result: uniqueResultCells[0],
+                      result: projectWishCellValue(
+                        uniqueResultCells[0],
+                        schema,
+                      ),
                       candidates: candidatesCell,
                       [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
                     }),
@@ -1315,6 +1360,9 @@ export function wish(
         return;
       }
     } finally {
+      if (!usedSharedHashtagResolver) {
+        releaseCurrentSharedHashtagResolver();
+      }
       recordWishPhaseTiming(
         actionStartedAt,
         "action-total",

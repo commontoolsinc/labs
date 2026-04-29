@@ -93,6 +93,7 @@ export class CFCellLink extends BaseElement {
 
   private _unsubscribe?: () => void;
   private _resolvedCellKey: string | undefined = undefined;
+  private _subscribedCell: CellHandle | undefined = undefined;
   private _subscribedCellKey: string | undefined = undefined;
   private _resolveCellGeneration = 0;
 
@@ -122,6 +123,7 @@ export class CFCellLink extends BaseElement {
       this._unsubscribe();
       this._unsubscribe = undefined;
     }
+    this._subscribedCell = undefined;
     this._subscribedCellKey = undefined;
   }
 
@@ -226,7 +228,8 @@ export class CFCellLink extends BaseElement {
     const nextCellKey = this._cellKey(cell);
     if (
       this._unsubscribe && nextCellKey &&
-      nextCellKey === this._subscribedCellKey
+      nextCellKey === this._subscribedCellKey &&
+      cell === this._subscribedCell
     ) {
       return;
     }
@@ -242,6 +245,7 @@ export class CFCellLink extends BaseElement {
         type: "object",
         properties: { [NAME]: { type: "string" } },
       });
+      this._subscribedCell = cell;
       this._subscribedCellKey = nextCellKey;
       this._unsubscribe = namedCell.subscribe((val) => {
         this._updateNameFromValue(val);
@@ -251,7 +255,7 @@ export class CFCellLink extends BaseElement {
 
   private _setResolvedCell(cell: CellHandle | undefined) {
     const nextCellKey = this._cellKey(cell);
-    if (nextCellKey === this._resolvedCellKey) {
+    if (cell === this._resolvedCell && nextCellKey === this._resolvedCellKey) {
       return;
     }
     this._resolvedCell = cell;

@@ -86,6 +86,43 @@ describe("CFCellLink", () => {
     expect(unsubscribeCount).toBe(1);
   });
 
+  it("resubscribes when the resolved handle changes with the same ref", () => {
+    const ref: CellRef = {
+      id: "of:test-cell" as CellRef["id"],
+      space: "did:key:test-space" as CellRef["space"],
+      path: [],
+      type: "application/json" as CellRef["type"],
+      schema: { type: "object" },
+    };
+    const activeSubscriptions = new Set<string>();
+    let unsubscribeCount = 0;
+    const makeCell = (label: string) =>
+      ({
+        ref: () => ref,
+        asSchema: () => ({
+          subscribe: () => {
+            activeSubscriptions.add(label);
+            return () => {
+              activeSubscriptions.delete(label);
+              unsubscribeCount++;
+            };
+          },
+        }),
+      }) as any;
+
+    const element = new CFCellLink() as any;
+    markConnected(element);
+    element._setResolvedCell(makeCell("first"));
+    element._updateSubscription();
+
+    element._setResolvedCell(makeCell("second"));
+    element._updateSubscription();
+
+    expect(activeSubscriptions.has("first")).toBe(false);
+    expect(activeSubscriptions.has("second")).toBe(true);
+    expect(unsubscribeCount).toBe(1);
+  });
+
   it("ignores stale async cell resolutions after a later cell is selected", async () => {
     const refA: CellRef = {
       id: "of:slow-cell" as CellRef["id"],

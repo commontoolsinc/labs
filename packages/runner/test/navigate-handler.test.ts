@@ -34,6 +34,7 @@ async function runNavigateHandlerTest(
       NAME,
       Writable,
       handler,
+      ifElse,
       navigateTo,
       pattern,
     } = commonfabric;
@@ -65,7 +66,7 @@ async function runNavigateHandlerTest(
       return {
         menuOpen,
         openNote: conditional
-          ? menuOpen ? openNote({ menuOpen }) : undefined
+          ? ifElse(menuOpen, openNote({ menuOpen }), undefined)
           : openNote({ menuOpen }),
       };
     });
