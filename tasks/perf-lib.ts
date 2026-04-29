@@ -819,7 +819,7 @@ export async function readPRBodyFromEventPayload(
       await Deno.readTextFile(eventPath),
     ) as PullRequestEventPayload;
     return payload.pull_request?.number === prNumber
-      ? payload.pull_request.body
+      ? payload.pull_request.body ?? undefined
       : undefined;
   } catch {
     return undefined;
