@@ -920,16 +920,10 @@ export class Replica {
 
               // Log actual content for each document
               for (const [contentType, data] of Object.entries(facts)) {
-                try {
-                  const dataStr = toCompactDebugString(data, 1000);
-                  logs.push(
-                    `  └─ doc: ${docId}, type: ${contentType}, data: ${dataStr}`,
-                  );
-                } catch (_e) {
-                  logs.push(
-                    `  └─ doc: ${docId}, type: ${contentType}, data: <unable to stringify>`,
-                  );
-                }
+                const dataStr = toCompactDebugString(data, 1000);
+                logs.push(
+                  `  └─ doc: ${docId}, type: ${contentType}, data: ${dataStr}`,
+                );
               }
             }
             return logs;
