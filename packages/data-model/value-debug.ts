@@ -153,6 +153,9 @@ function renderDebugString(value: unknown, indent?: number) {
  * necessary, the returned result will be the indicated length, which includes
  * an "ASCII ellipsis" of `...`.
  *
+ * This function handles circular references, rendering the back-references as
+ * simply `<circle>`.
+ *
  * **Note:** In _many_ cases, the output of this function is valid JSON text,
  * but not _all_ cases. This function must _not_ be relied on to produce a
  * parseable string.
@@ -175,6 +178,9 @@ export function toCompactDebugString(
 
 /**
  * Produces an indented string representation of a value.
+ *
+ * This function handles circular references, rendering the back-references as
+ * simply `<circle>`.
  *
  * **Note:** In _many_ cases, the output of this function is valid JSON text,
  * but not _all_ cases. This function must _not_ be relied on to produce a
