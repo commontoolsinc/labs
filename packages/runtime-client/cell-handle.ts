@@ -456,8 +456,19 @@ function cellRefsEqual(a: CellRef, b: CellRef): boolean {
   for (let i = 0; i < a.path.length; i++) {
     if (a.path[i] !== b.path[i]) return false;
   }
+  if (!cfcLabelViewsEqual(a.cfcLabelView, b.cfcLabelView)) return false;
   return true;
 }
+
+function cfcLabelViewsEqual(
+  a: CfcLabelView | undefined,
+  b: CfcLabelView | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /**
  * Deep equality check for cell values.
  * Handles primitives, arrays, objects, and CellHandles.

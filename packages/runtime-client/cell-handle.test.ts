@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   $conn,
+  $onCellUpdate,
   CellHandle,
   type CellRef,
   RequestType,
@@ -129,5 +130,80 @@ describe("CellHandle CFC label IPC", () => {
         },
       },
     });
+  });
+
+  it("refreshes reused cell refs when carried label views change", async () => {
+    const requests: unknown[] = [];
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: unknown) => {
+          requests.push(request);
+          return Promise.resolve({ cfcLabel: undefined });
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    const baseRef: CellRef = {
+      id: "of:cfc-label-parent" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      type: "application/json",
+      path: [],
+      schema: true,
+    };
+    const childRef = {
+      id: "of:cfc-label-child",
+      space: "did:key:test",
+      type: "application/json",
+      path: [],
+    };
+    const firstLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { integrity: ["selected-first"] },
+      }],
+    };
+    const secondLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { integrity: ["selected-second"] },
+      }],
+    };
+    const linkWithLabel = (cfcLabelView: typeof firstLabel) => ({
+      "/": {
+        "link@1": {
+          ...childRef,
+          cfcLabelView,
+        },
+      },
+    });
+
+    const parent = new CellHandle<{ item: CellHandle }>(runtime, baseRef);
+    parent[$onCellUpdate]({ item: linkWithLabel(firstLabel) });
+    const firstChild = parent.get()!.item;
+    await firstChild.getCfcLabel();
+
+    parent[$onCellUpdate]({ item: linkWithLabel(secondLabel) });
+    const secondChild = parent.get()!.item;
+    await secondChild.getCfcLabel();
+
+    expect(secondChild).not.toBe(firstChild);
+    expect(requests).toEqual([{
+      type: RequestType.CellGetCfcLabel,
+      cell: {
+        ...childRef,
+        path: [],
+        cfcLabelView: firstLabel,
+      },
+    }, {
+      type: RequestType.CellGetCfcLabel,
+      cell: {
+        ...childRef,
+        path: [],
+        cfcLabelView: secondLabel,
+      },
+    }]);
   });
 });
