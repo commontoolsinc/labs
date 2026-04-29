@@ -95,7 +95,7 @@ class FailingArtifactStore implements HarnessArtifactStore {
 
   persistRunState(): Promise<string> {
     this.runStatePersistCount += 1;
-    if (this.runStatePersistCount >= 3) {
+    if (this.runStatePersistCount >= 4) {
       return Promise.reject(new Error("persist boom"));
     }
     return Promise.resolve(`${this.runRoot}/run-state.json`);
@@ -107,6 +107,10 @@ class FailingArtifactStore implements HarnessArtifactStore {
 
   persistCapabilitySnapshot(): Promise<string> {
     return Promise.resolve(`${this.runRoot}/capabilities.json`);
+  }
+
+  persistCfcPolicySnapshot(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/policy-snapshot.json`);
   }
 
   persistRunReport(): Promise<string> {
@@ -679,6 +683,22 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
     ["bash", "read_file", "write_file"],
+  );
+  assertEquals(result.runState.cfcPolicySnapshot?.parentTools, {
+    allowance: "restricted",
+    allowedToolIds: ["delegate_task"],
+  });
+  assertEquals(
+    result.runState.cfcPolicySnapshot?.subagents.allowedProfiles,
+    ["default"],
+  );
+  assertEquals(
+    result.runState.cfcPolicySnapshot?.promptSlot.bindingSource,
+    "run-options",
+  );
+  assertEquals(
+    result.runState.cfcPolicySnapshot?.promptSlot.binding,
+    directPromptSlotBinding,
   );
   assertEquals(
     output.subagent.childRunId,
@@ -1730,7 +1750,7 @@ Deno.test("CfHarnessPromptLoop preserves the original error when failure persist
     Error,
     "gateway boom",
   );
-  assertEquals(artifactStore.runStatePersistCount, 3);
+  assertEquals(artifactStore.runStatePersistCount, 4);
   assertEquals(loop.engine.getRunState().status, "failed");
 });
 
@@ -1890,7 +1910,7 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
         "sha256:17bc0d7e89ddefaf38bce5f3bedcd6309b9453c5d85dafd24d1243bb1e505e8c",
     },
     detail: "bash would require direct-command authorization in enforce modes",
-    at: "2026-04-15T22:30:04.000Z",
+    at: "2026-04-15T22:30:05.000Z",
   }]);
   assertEquals(
     JSON.stringify(result.runState.policyEvents[0]?.toolInputSummary)

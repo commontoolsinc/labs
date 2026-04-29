@@ -329,19 +329,26 @@ Deno.test({
 
       const runRoot = join(artifactRoot, "run-loop-persisted");
       const transcriptPath = join(runRoot, "transcript.json");
+      const policySnapshotPath = join(runRoot, "policy-snapshot.json");
       const runReportPath = join(runRoot, "run-report.json");
       const persistedState = await readHarnessRunState(
         join(runRoot, "run-state.json"),
       );
+      const persistedPolicySnapshot = JSON.parse(
+        await Deno.readTextFile(policySnapshotPath),
+      );
       const persistedReport = await readHarnessRunReport(runReportPath);
 
       assertEquals(result.runState.transcriptPath, transcriptPath);
+      assertEquals(result.runState.cfcPolicySnapshotPath, policySnapshotPath);
       assertEquals(result.runState.runReportPath, runReportPath);
       assertEquals(
         await readHarnessTranscript(transcriptPath),
         result.transcript,
       );
       assertEquals(persistedState.transcriptPath, transcriptPath);
+      assertEquals(persistedState.cfcPolicySnapshotPath, policySnapshotPath);
+      assertEquals(persistedState.cfcPolicySnapshot, persistedPolicySnapshot);
       assertEquals(persistedState.runReportPath, runReportPath);
       assertEquals(persistedState.artifactRoot, runRoot);
       assertEquals(persistedState.endedAt, "2026-04-15T21:10:07.000Z");
@@ -352,12 +359,48 @@ Deno.test({
         persistedState.capabilitySnapshot?.commands.python3.present,
         true,
       );
+      assertEquals(
+        persistedPolicySnapshot.type,
+        "cf-harness.cfc-policy-snapshot",
+      );
+      assertEquals(persistedPolicySnapshot.version, 1);
+      assertEquals(
+        persistedPolicySnapshot.generatedAt,
+        "2026-04-15T21:10:03.000Z",
+      );
+      assertEquals(persistedPolicySnapshot.cfc, {
+        enforcementMode: "enforce-explicit",
+        enforcementModeSource: "default",
+        absenceBehavior: "permissive-if-absent",
+        substrateStatus: "not-attested",
+      });
+      assertEquals(persistedPolicySnapshot.runManifest, { present: false });
+      assertEquals(persistedPolicySnapshot.promptSlot, {
+        present: false,
+        bindingSource: "absent",
+      });
+      assertEquals(persistedPolicySnapshot.parentTools, {
+        allowance: "all-builtins",
+        allowedToolIds: ["bash", "read_file", "write_file", "delegate_task"],
+      });
+      assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
+        "default",
+      ]);
+      assertEquals(
+        persistedPolicySnapshot.subagents.profileConfigs[0].allowedToolIds,
+        ["bash", "read_file", "write_file"],
+      );
+      assertEquals(
+        persistedPolicySnapshot.substrate?.sandbox?.kind,
+        "docker-runsc-cfc",
+      );
       assertEquals(persistedReport.type, "cf-harness.run-report");
       assertEquals(persistedReport.runId, "run-loop-persisted");
       assertEquals(persistedReport.status, "completed");
       assertEquals(persistedReport.model, "gpt-5.4");
       assertEquals(persistedReport.modelTurns, 2);
       assertEquals(persistedReport.finalAssistantText, "Persisted summary.");
+      assertEquals(persistedReport.cfcPolicySnapshot, persistedPolicySnapshot);
       assertEquals(persistedReport.policyEventCounts, {
         total: 0,
         warnings: 0,
@@ -368,7 +411,7 @@ Deno.test({
         type: "cf-harness.tool-activity",
         runId: "run-loop-persisted",
         sequence: 1,
-        startedAt: "2026-04-15T21:10:05.000Z",
+        startedAt: "2026-04-15T21:10:06.000Z",
         endedAt: "2026-04-15T21:10:07.000Z",
         toolCallId: "call-1",
         toolId: "read_file",
@@ -409,7 +452,7 @@ Deno.test({
           type: "cf-harness.timeline-entry",
           sequence: 4,
           kind: "tool_activity",
-          at: "2026-04-15T21:10:05.000Z",
+          at: "2026-04-15T21:10:06.000Z",
           endedAt: "2026-04-15T21:10:07.000Z",
           toolActivitySequence: 1,
           toolCallId: "call-1",
@@ -972,8 +1015,8 @@ Deno.test({
         type: "cf-harness.tool-activity",
         runId: "run-denied-report",
         sequence: 1,
-        startedAt: "2026-04-15T21:20:05.000Z",
-        endedAt: "2026-04-15T21:20:06.000Z",
+        startedAt: "2026-04-15T21:20:06.000Z",
+        endedAt: "2026-04-15T21:20:07.000Z",
         toolCallId: "call-denied-report",
         toolId: "write_file",
         effectClass: "write",
@@ -1011,7 +1054,7 @@ Deno.test({
           type: "cf-harness.timeline-entry",
           sequence: 5,
           kind: "policy_event",
-          at: "2026-04-15T21:20:06.000Z",
+          at: "2026-04-15T21:20:07.000Z",
           policyEventIndex: 0,
           severity: "denied",
           toolCallId: "call-denied-report",
@@ -1024,8 +1067,8 @@ Deno.test({
           type: "cf-harness.timeline-entry",
           sequence: 4,
           kind: "tool_activity",
-          at: "2026-04-15T21:20:05.000Z",
-          endedAt: "2026-04-15T21:20:06.000Z",
+          at: "2026-04-15T21:20:06.000Z",
+          endedAt: "2026-04-15T21:20:07.000Z",
           toolActivitySequence: 1,
           toolCallId: "call-denied-report",
           toolId: "write_file",
@@ -1039,7 +1082,7 @@ Deno.test({
           type: "cf-harness.timeline-entry",
           sequence: 6,
           kind: "failure_record",
-          at: "2026-04-15T21:20:06.000Z",
+          at: "2026-04-15T21:20:07.000Z",
           failureRecordIndex: 0,
           failureKind: "tool_not_allowed",
           source: "policy_event",

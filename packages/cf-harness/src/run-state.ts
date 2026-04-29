@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
@@ -42,6 +43,8 @@ export interface HarnessRunState {
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
+  cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
+  cfcPolicySnapshotPath?: string;
   policyEvents: HarnessPolicyEvent[];
   toolOutputs: ToolResultRef[];
   subagentRuns?: HarnessSubagentRunRef[];
@@ -65,6 +68,8 @@ export interface CreateHarnessRunStateOptions {
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
+  cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
+  cfcPolicySnapshotPath?: string;
   subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
   primaryFailure?: HarnessFailureRecord;
@@ -110,6 +115,12 @@ export const createHarnessRunState = (
       : {}),
     ...(options.capabilitiesPath !== undefined
       ? { capabilitiesPath: options.capabilitiesPath }
+      : {}),
+    ...(options.cfcPolicySnapshot !== undefined
+      ? { cfcPolicySnapshot: options.cfcPolicySnapshot }
+      : {}),
+    ...(options.cfcPolicySnapshotPath !== undefined
+      ? { cfcPolicySnapshotPath: options.cfcPolicySnapshotPath }
       : {}),
     policyEvents: [],
     toolOutputs: [],
@@ -252,5 +263,17 @@ export const setHarnessCapabilitySnapshot = (
   ...state,
   capabilitySnapshot,
   ...(capabilitiesPath !== undefined ? { capabilitiesPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessCfcPolicySnapshot = (
+  state: HarnessRunState,
+  cfcPolicySnapshot: HarnessCfcPolicySnapshot,
+  cfcPolicySnapshotPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  cfcPolicySnapshot,
+  ...(cfcPolicySnapshotPath !== undefined ? { cfcPolicySnapshotPath } : {}),
   updatedAt: now,
 });
