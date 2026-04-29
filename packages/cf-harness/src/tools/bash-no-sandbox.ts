@@ -2,6 +2,11 @@ import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { BashToolInput, BashToolOutput } from "./bash.ts";
 import {
+  BROWSER_HOST_COMMAND_DENIED_EXIT_CODE,
+  BROWSER_HOST_COMMAND_DENIED_PREFIX,
+  validateBrowserHostCommand,
+} from "./browser-host-command-policy.ts";
+import {
   commandWithFinalWorkingDirectoryMarker,
   cwdMarkerForOutput,
   extractFinalWorkingDirectory,
@@ -14,7 +19,7 @@ export const bashNoSandboxToolDescriptor: HarnessToolDescriptor = {
   toolId: "bash-no-sandbox",
   title: "Bash (No Sandbox)",
   description:
-    "PROVISIONAL HOST SHELL. Runs a bash command outside the sandbox on the host workspace. Intended only for the browser subagent profile, especially invoking agent-browser; do not use for normal repository work.",
+    "PROVISIONAL BROWSER HOST COMMAND TOOL. Runs policy-restricted commands outside the sandbox on the host workspace. Intended only for the browser subagent profile, especially invoking agent-browser; do not use for normal repository work.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -51,6 +56,17 @@ export const bashNoSandboxTool: HarnessToolDefinition<
     const commandCwd = input.cwd !== undefined
       ? context.resolvePath(input.cwd)
       : context.currentDir;
+    const policyResult = validateBrowserHostCommand(input.command);
+    if (!policyResult.allowed) {
+      context.setCurrentDir(commandCwd);
+      return {
+        outputId,
+        stdout: "",
+        stderr: `${BROWSER_HOST_COMMAND_DENIED_PREFIX}: ${policyResult.reason}`,
+        exitCode: BROWSER_HOST_COMMAND_DENIED_EXIT_CODE,
+        cwd: commandCwd,
+      };
+    }
     const hostCwd = context.resolveHostPath(commandCwd);
     const cwdMarker = cwdMarkerForOutput(CWD_MARKER_PREFIX, outputId);
     const result = await context.hostProcessRunner.run({

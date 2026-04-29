@@ -214,6 +214,21 @@ Why:
 - child prompt explicitly labels host execution as outside the sandbox and
   orients browser-profile children toward `agent-browser`
 
+### Stage J: Browser host command policy
+
+- `bash-no-sandbox` is no longer an arbitrary host shell even inside the browser
+  profile
+- allowed host command shapes:
+  - `agent-browser ...` except host-mutating setup such as
+    `agent-browser install`
+  - `which agent-browser` and `command -v agent-browser`
+  - `pwd`
+  - `ls` with a small read-only flag set and workspace-relative paths
+  - `find` with workspace-relative paths, required bounded `-maxdepth`, and a
+    small read-only predicate set
+- denied host commands return a normal nonzero tool result without invoking the
+  host process runner, and diagnostics classify the denial as `tool_not_allowed`
+
 Why:
 
 - to keep the intended eventual `agent-browser` usage shape: agents invoke it

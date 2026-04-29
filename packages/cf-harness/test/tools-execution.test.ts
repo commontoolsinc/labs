@@ -217,11 +217,35 @@ Deno.test("bash-no-sandbox keeps currentDir inside the workspace if the host com
     hostRunner,
   );
   const output = await bashNoSandboxTool.invoke(context, {
-    command: "cd /tmp/outside",
+    command: "agent-browser --help",
   });
 
   assertEquals(output.cwd, "/workspace/repo");
   assertEquals(context.currentDir, "/workspace/repo");
+});
+
+Deno.test("bash-no-sandbox denies host commands outside the browser policy", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "git status",
+    cwd: "browser",
+  });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr:
+      "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+    exitCode: 126,
+    cwd: "/workspace/repo/browser",
+  });
+  assertEquals(context.currentDir, "/workspace/repo/browser");
 });
 
 Deno.test("read_file tool resolves relative paths from the session currentDir", async () => {
