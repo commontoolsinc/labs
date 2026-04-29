@@ -1,16 +1,3 @@
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!! This turns on the modern JSON flag, for
-// DO NOT MERGE THIS FILE!!!! development purposes, but it should not be merged.
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!!
-// DO NOT MERGE THIS FILE!!!!
-
 import { isInstance } from "@commonfabric/utils/types";
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
@@ -35,7 +22,7 @@ import {
  * symbols dispatch to the `JsonEncodingContext` codec instead of plain
  * JSON.stringify / JSON.parse.
  */
-let jsonEncodingEnabled = true;
+let jsonEncodingEnabled = false;
 
 /**
  * Activates or deactivates unified JSON encoding mode. Called by the
@@ -54,12 +41,12 @@ export function getJsonEncodingConfig(): boolean {
 }
 
 /**
- * Restores unified JSON encoding mode to its default (enabled). Called by
+ * Restores unified JSON encoding mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs.
  */
 export function resetJsonEncodingConfig(): void {
-  jsonEncodingEnabled = true;
+  jsonEncodingEnabled = false;
 }
 
 // ---------------------------------------------------------------------------
