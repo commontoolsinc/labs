@@ -241,6 +241,12 @@ const parseSimpleShellCommand = (command: string): SimpleShellParseResult => {
       }
       continue;
     }
+    if (isDisallowedUnquotedShellExpansionSyntax(char)) {
+      return {
+        error:
+          "unquoted shell expansion syntax is not allowed; quote literal selectors, URLs, and patterns",
+      };
+    }
     if (isDisallowedShellSyntax(char)) {
       return {
         error:
@@ -263,6 +269,14 @@ const parseSimpleShellCommand = (command: string): SimpleShellParseResult => {
 
 const isDisallowedShellExpansionSyntax = (char: string): boolean =>
   char === "`" || char === "$" || char === "\\";
+
+const isDisallowedUnquotedShellExpansionSyntax = (char: string): boolean =>
+  char === "{" ||
+  char === "}" ||
+  char === "[" ||
+  char === "]" ||
+  char === "*" ||
+  char === "?";
 
 const isDisallowedShellSyntax = (char: string): boolean =>
   char === "|" ||

@@ -13,6 +13,7 @@ Deno.test("validateBrowserHostCommand allows agent-browser invocations", () => {
   assertAllowed("agent-browser --help");
   assertAllowed('agent-browser open "https://example.com/?a=1&b=2"');
   assertAllowed('agent-browser find role button click "Submit"');
+  assertAllowed(`agent-browser click 'button[aria-label="Close"]'`);
 });
 
 Deno.test("validateBrowserHostCommand allows agent-browser discovery", () => {
@@ -42,6 +43,15 @@ Deno.test("validateBrowserHostCommand rejects shell operators and substitutions"
   assertDenied("agent-browser open `cat url.txt`");
   assertDenied("agent-browser snapshot > page.txt");
   assertDenied("agent-browser snapshot\nls");
+});
+
+Deno.test("validateBrowserHostCommand rejects unquoted shell expansion syntax", () => {
+  assertDenied("ls {.,..}");
+  assertDenied("ls [.][.]");
+  assertDenied("find {.,..} -maxdepth 1 -type d -print");
+  assertDenied("find . -maxdepth 2 -type f -name *.ts -print");
+  assertDenied("agent-browser open https://example.com/?a=1");
+  assertDenied("agent-browser click button[aria-label=Close]");
 });
 
 Deno.test("validateBrowserHostCommand keeps ls and find within the workspace", () => {
