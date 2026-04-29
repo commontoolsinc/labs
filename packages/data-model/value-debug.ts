@@ -89,8 +89,8 @@ class DebugStringifier {
       }
 
       case "number": {
-        if (Object.is(value, -0)) {
-          return marked("-0");
+        if (Number.isFinite(value)) {
+          return Object.is(value, -0) ? marked("-0") : value;
         } else if (Number.isNaN(value)) {
           return marked("NaN");
         } else if (value === Infinity) {
@@ -98,7 +98,8 @@ class DebugStringifier {
         } else if (value === -Infinity) {
           return marked("-Infinity");
         } else {
-          return value;
+          // Shouldn't happen; there aren't any other non-finite possibilites.
+          return marked(`<non-finite ${value}`);
         }
       }
 
