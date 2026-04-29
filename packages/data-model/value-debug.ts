@@ -99,7 +99,7 @@ class DebugStringifier {
           return marked("-Infinity");
         } else {
           // Shouldn't happen; there aren't any other non-finite possibilites.
-          return marked(`<non-finite ${value}`);
+          return marked(`<non-finite ${value}>`);
         }
       }
 
