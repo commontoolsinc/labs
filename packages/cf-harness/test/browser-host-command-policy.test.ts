@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import { validateBrowserHostCommand } from "../src/tools/browser-host-command-policy.ts";
 
 const assertAllowed = (command: string) => {
-  assertEquals(validateBrowserHostCommand(command), { allowed: true });
+  assertEquals(validateBrowserHostCommand(command).allowed, true);
 };
 
 const assertDenied = (command: string) => {
@@ -17,8 +17,20 @@ Deno.test("validateBrowserHostCommand allows agent-browser invocations", () => {
 });
 
 Deno.test("validateBrowserHostCommand allows agent-browser discovery", () => {
-  assertAllowed("which agent-browser");
-  assertAllowed("command -v agent-browser");
+  assertEquals(validateBrowserHostCommand("which agent-browser"), {
+    allowed: true,
+    plan: {
+      argv: ["which", "agent-browser"],
+      workspacePathArgs: [],
+    },
+  });
+  assertEquals(validateBrowserHostCommand("command -v agent-browser"), {
+    allowed: true,
+    plan: {
+      argv: ["which", "agent-browser"],
+      workspacePathArgs: [],
+    },
+  });
 });
 
 Deno.test("validateBrowserHostCommand allows minimal workspace read commands", () => {
@@ -69,4 +81,15 @@ Deno.test("validateBrowserHostCommand keeps ls and find within the workspace", (
 
 Deno.test("validateBrowserHostCommand rejects host-mutating agent-browser setup", () => {
   assertDenied("agent-browser install");
+});
+
+Deno.test("validateBrowserHostCommand rejects high-risk agent-browser host surfaces", () => {
+  assertDenied("agent-browser eval 'location.href'");
+  assertDenied("agent-browser upload '#file' ./secret.txt");
+  assertDenied("agent-browser screenshot page.png");
+  assertDenied("agent-browser open file:///etc/passwd");
+  assertDenied("agent-browser --cdp 9222 snapshot");
+  assertDenied("agent-browser --extension ./extension snapshot");
+  assertDenied("agent-browser -p ios snapshot");
+  assertDenied("agent-browser -p=ios snapshot");
 });

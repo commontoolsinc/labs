@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import { join, normalize } from "@std/path";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { BashToolInput, BashToolOutput } from "./bash.ts";
 import {
@@ -6,14 +7,11 @@ import {
   BROWSER_HOST_COMMAND_DENIED_PREFIX,
   validateBrowserHostCommand,
 } from "./browser-host-command-policy.ts";
-import {
-  commandWithFinalWorkingDirectoryMarker,
-  cwdMarkerForOutput,
-  extractFinalWorkingDirectory,
-} from "./shell-cwd.ts";
-import type { HarnessToolDefinition } from "./types.ts";
+import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
-const CWD_MARKER_PREFIX = "__CF_HARNESS_HOST_CWD__";
+const DEFAULT_HOST_TIMEOUT_MS = 30_000;
+const MAX_HOST_TIMEOUT_MS = 120_000;
+const MAX_HOST_OUTPUT_CHARS = 20_000;
 
 export const bashNoSandboxToolDescriptor: HarnessToolDescriptor = {
   toolId: "bash-no-sandbox",
@@ -68,27 +66,80 @@ export const bashNoSandboxTool: HarnessToolDefinition<
       };
     }
     const hostCwd = context.resolveHostPath(commandCwd);
-    const cwdMarker = cwdMarkerForOutput(CWD_MARKER_PREFIX, outputId);
+    const plan = policyResult.plan;
+    if (plan === undefined || plan.argv.length === 0) {
+      context.setCurrentDir(commandCwd);
+      return {
+        outputId,
+        stdout: "",
+        stderr:
+          `${BROWSER_HOST_COMMAND_DENIED_PREFIX}: command did not produce an execution plan`,
+        exitCode: BROWSER_HOST_COMMAND_DENIED_EXIT_CODE,
+        cwd: commandCwd,
+      };
+    }
+    const hostPathFailure = await validateHostWorkspacePaths(
+      context,
+      hostCwd,
+      plan.workspacePathArgs,
+    );
+    if (hostPathFailure !== undefined) {
+      context.setCurrentDir(commandCwd);
+      return {
+        outputId,
+        stdout: "",
+        stderr: `${BROWSER_HOST_COMMAND_DENIED_PREFIX}: ${hostPathFailure}`,
+        exitCode: BROWSER_HOST_COMMAND_DENIED_EXIT_CODE,
+        cwd: commandCwd,
+      };
+    }
     const result = await context.hostProcessRunner.run({
-      command: "bash",
-      args: [
-        "-lc",
-        commandWithFinalWorkingDirectoryMarker(input.command, cwdMarker),
-      ],
+      command: plan.argv[0]!,
+      args: [...plan.argv.slice(1)],
       cwd: hostCwd,
-      timeoutMs: input.timeoutMs,
+      timeoutMs: resolveHostTimeoutMs(input.timeoutMs),
     });
-    const parsedResult = extractFinalWorkingDirectory(result.stdout, cwdMarker);
-    const nextCurrentDir = parsedResult.cwd === undefined
-      ? commandCwd
-      : context.hostPathToWorkspacePath(parsedResult.cwd) ?? commandCwd;
-    context.setCurrentDir(nextCurrentDir);
+    context.setCurrentDir(commandCwd);
     return {
       outputId,
-      stdout: parsedResult.stdout,
-      stderr: result.stderr,
+      stdout: truncateHostOutput(result.stdout, "stdout"),
+      stderr: truncateHostOutput(result.stderr, "stderr"),
       exitCode: result.exitCode,
-      cwd: nextCurrentDir,
+      cwd: commandCwd,
     };
   },
+};
+
+const resolveHostTimeoutMs = (timeoutMs: number | undefined): number => {
+  if (timeoutMs === undefined) {
+    return DEFAULT_HOST_TIMEOUT_MS;
+  }
+  return Math.min(Math.max(Math.floor(timeoutMs), 0), MAX_HOST_TIMEOUT_MS);
+};
+
+const truncateHostOutput = (output: string, label: string): string => {
+  if (output.length <= MAX_HOST_OUTPUT_CHARS) {
+    return output;
+  }
+  const omitted = output.length - MAX_HOST_OUTPUT_CHARS;
+  return `${
+    output.slice(0, MAX_HOST_OUTPUT_CHARS)
+  }\n[cf-harness truncated ${label}: ${omitted} chars omitted]`;
+};
+
+const validateHostWorkspacePaths = async (
+  context: HarnessToolContext,
+  hostCwd: string,
+  workspacePathArgs: readonly string[],
+): Promise<string | undefined> => {
+  if (!(await context.isHostPathWithinWorkspace(hostCwd))) {
+    return `cwd ${hostCwd} must resolve within the workspace`;
+  }
+  for (const pathArg of workspacePathArgs) {
+    const hostPath = normalize(join(hostCwd, pathArg));
+    if (!(await context.isHostPathWithinWorkspace(hostPath))) {
+      return `path ${pathArg} must resolve within the workspace`;
+    }
+  }
+  return undefined;
 };

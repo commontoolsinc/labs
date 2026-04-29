@@ -629,6 +629,19 @@ export class CfHarnessEngine {
     );
   }
 
+  async #isHostPathWithinWorkspace(path: string): Promise<boolean> {
+    if (this.workspaceHostPath === undefined) {
+      return false;
+    }
+    try {
+      const hostRoot = await Deno.realPath(this.workspaceHostPath);
+      const hostPath = await Deno.realPath(path);
+      return isHostPathWithinRoot(hostRoot, hostPath);
+    } catch {
+      return false;
+    }
+  }
+
   #createToolContext() {
     return {
       runId: this.#runState.runId,
@@ -641,6 +654,8 @@ export class CfHarnessEngine {
       resolveHostPath: (path: string) => this.#resolveHostPath(path),
       hostPathToWorkspacePath: (path: string) =>
         this.#hostPathToWorkspacePath(path),
+      isHostPathWithinWorkspace: (path: string) =>
+        this.#isHostPathWithinWorkspace(path),
       setCurrentDir: (path: string) => {
         const resolved = this.sandbox.resolvePath(
           path,

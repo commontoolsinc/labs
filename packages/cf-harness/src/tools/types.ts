@@ -13,6 +13,7 @@ export interface HarnessToolContext {
   resolvePath(path: string): string;
   resolveHostPath(path: string): string;
   hostPathToWorkspacePath(path: string): string | undefined;
+  isHostPathWithinWorkspace(path: string): Promise<boolean>;
   setCurrentDir(path: string): void;
   nextOutputId(toolId: string): ToolOutputId;
 }

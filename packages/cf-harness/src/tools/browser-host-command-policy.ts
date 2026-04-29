@@ -1,6 +1,12 @@
 export interface BrowserHostCommandPolicyResult {
   allowed: boolean;
   reason?: string;
+  plan?: BrowserHostCommandPlan;
+}
+
+export interface BrowserHostCommandPlan {
+  argv: readonly string[];
+  workspacePathArgs: readonly string[];
 }
 
 export const BROWSER_HOST_COMMAND_DENIED_EXIT_CODE = 126;
@@ -29,7 +35,7 @@ export const validateBrowserHostCommand = (
       return validateLsCommand(args);
     case "pwd":
       return args.length === 0
-        ? allow()
+        ? allow(["pwd"])
         : deny("pwd does not accept arguments in the browser host profile");
     case "which":
       return validateWhichCommand(args);
@@ -42,7 +48,16 @@ export const validateBrowserHostCommand = (
   }
 };
 
-const allow = (): BrowserHostCommandPolicyResult => ({ allowed: true });
+const allow = (
+  argv: readonly string[],
+  workspacePathArgs: readonly string[] = [],
+): BrowserHostCommandPolicyResult => ({
+  allowed: true,
+  plan: {
+    argv: [...argv],
+    workspacePathArgs: [...workspacePathArgs],
+  },
+});
 
 const deny = (reason: string): BrowserHostCommandPolicyResult => ({
   allowed: false,
@@ -52,29 +67,116 @@ const deny = (reason: string): BrowserHostCommandPolicyResult => ({
 const validateAgentBrowserCommand = (
   args: readonly string[],
 ): BrowserHostCommandPolicyResult => {
-  if (args[0] === "install") {
-    return deny("agent-browser install is not allowed from cf-harness");
+  for (const arg of args) {
+    const flag = normalizeLongFlag(arg);
+    if (
+      DISALLOWED_AGENT_BROWSER_FLAGS.has(flag) ||
+      isDisallowedAgentBrowserShortFlag(arg)
+    ) {
+      return deny(`agent-browser flag ${flag} is not allowed from cf-harness`);
+    }
   }
-  return allow();
+
+  const command = findAgentBrowserSubcommand(args);
+  if (command !== undefined) {
+    if (DISALLOWED_AGENT_BROWSER_COMMANDS.has(command.name)) {
+      return deny(
+        `agent-browser ${command.name} is not allowed from cf-harness`,
+      );
+    }
+    if (
+      command.name === "open" &&
+      args.slice(command.index + 1).some((arg) => /^file:/i.test(arg))
+    ) {
+      return deny("agent-browser open file: URLs are not allowed");
+    }
+  }
+  return allow([AGENT_BROWSER_COMMAND, ...args]);
+};
+
+const DISALLOWED_AGENT_BROWSER_COMMANDS = new Set([
+  "connect",
+  "download",
+  "eval",
+  "install",
+  "pdf",
+  "profiler",
+  "record",
+  "screenshot",
+  "trace",
+  "upload",
+]);
+
+const DISALLOWED_AGENT_BROWSER_FLAGS = new Set([
+  "--allow-file-access",
+  "--args",
+  "--auto-connect",
+  "--cdp",
+  "--config",
+  "--device",
+  "--executable-path",
+  "--extension",
+  "--headers",
+  "--ignore-https-errors",
+  "--profile",
+  "--provider",
+  "--proxy",
+  "--proxy-bypass",
+  "--state",
+  "--user-agent",
+]);
+
+const AGENT_BROWSER_VALUE_FLAGS = new Set([
+  "--session",
+  "--session-name",
+]);
+
+const normalizeLongFlag = (arg: string): string => {
+  if (!arg.startsWith("--")) {
+    return arg;
+  }
+  const equalsIndex = arg.indexOf("=");
+  return equalsIndex === -1 ? arg : arg.slice(0, equalsIndex);
+};
+
+const isDisallowedAgentBrowserShortFlag = (arg: string): boolean =>
+  arg === "-p" || arg.startsWith("-p=");
+
+const findAgentBrowserSubcommand = (
+  args: readonly string[],
+): { name: string; index: number } | undefined => {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (arg.startsWith("-")) {
+      const flag = normalizeLongFlag(arg);
+      if (AGENT_BROWSER_VALUE_FLAGS.has(flag) && !arg.includes("=")) {
+        index += 1;
+      }
+      continue;
+    }
+    return { name: arg, index };
+  }
+  return undefined;
 };
 
 const validateCommandBuiltin = (
   args: readonly string[],
 ): BrowserHostCommandPolicyResult =>
   args.length === 2 && args[0] === "-v" && args[1] === AGENT_BROWSER_COMMAND
-    ? allow()
+    ? allow(["which", AGENT_BROWSER_COMMAND])
     : deny("only command -v agent-browser is allowed");
 
 const validateWhichCommand = (
   args: readonly string[],
 ): BrowserHostCommandPolicyResult =>
   args.length === 1 && args[0] === AGENT_BROWSER_COMMAND
-    ? allow()
+    ? allow(["which", AGENT_BROWSER_COMMAND])
     : deny("only which agent-browser is allowed");
 
 const validateLsCommand = (
   args: readonly string[],
 ): BrowserHostCommandPolicyResult => {
+  const workspacePathArgs: string[] = [];
   for (const arg of args) {
     if (arg.startsWith("-")) {
       if (!/^-[alhF1d]+$/.test(arg)) {
@@ -85,8 +187,9 @@ const validateLsCommand = (
     if (!isSafeWorkspaceRelativePath(arg)) {
       return deny(`ls path ${arg} must stay within the workspace`);
     }
+    workspacePathArgs.push(arg);
   }
-  return allow();
+  return allow(["ls", ...args], workspacePathArgs);
 };
 
 const validateFindCommand = (
@@ -98,6 +201,7 @@ const validateFindCommand = (
   let sawSearchPath = false;
   let sawMaxDepth = false;
   let index = 0;
+  const workspacePathArgs: string[] = [];
   while (index < args.length) {
     const arg = args[index]!;
     if (!arg.startsWith("-")) {
@@ -107,6 +211,7 @@ const validateFindCommand = (
       if (!isSafeWorkspaceRelativePath(arg)) {
         return deny(`find path ${arg} must stay within the workspace`);
       }
+      workspacePathArgs.push(arg);
       sawSearchPath = true;
       index += 1;
       continue;
@@ -172,7 +277,7 @@ const validateFindCommand = (
   if (!sawMaxDepth) {
     return deny("find must include -maxdepth");
   }
-  return allow();
+  return allow(["find", ...args], workspacePathArgs);
 };
 
 const parseBoundedInteger = (input: string | undefined): number | undefined => {
