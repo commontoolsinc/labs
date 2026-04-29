@@ -799,6 +799,9 @@ export async function fetchPRBody(
 ): Promise<string> {
   const bodyFromEvent = await readPRBodyFromEventPayload(prNumber, eventPath);
   if (bodyFromEvent !== undefined) {
+    console.log("############# BEGIN PR BODY FROM PAYLOAD");
+    console.log(bodyFromEvent);
+    console.log("############# END PR BODY FROM PAYLOAD");
     return bodyFromEvent;
   }
   const pr = await githubGet<{ body: string | null }>(
