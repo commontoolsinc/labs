@@ -7,6 +7,7 @@ import {
   DEFAULT_DOCKER_RUNSC_IMAGE,
   resolveDockerRunscSandboxConfig,
 } from "../src/sandbox/docker-runsc.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import type {
   ReadFileToolOutput,
   ReadFileToolSuccessOutput,
@@ -275,7 +276,11 @@ Deno.test({
             model: "gpt-5.4",
             prompt: "Read the tainted secret.",
             promptSlotBinding: {
-              type: "cf-harness.prompt-slot-binding",
+              type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+              source: {
+                type: "cf-harness.integration.prompt-slot",
+                subject: "direct-command",
+              },
               role: "direct-command",
               kernelName: "integration",
               surface: "cli",
