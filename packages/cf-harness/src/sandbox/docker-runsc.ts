@@ -65,6 +65,8 @@ const optionalNonEmptyString = (
 export const resolveDefaultContainerUser = (
   hostOs: typeof Deno.build.os = Deno.build.os,
 ): string | undefined => {
+  // Docker Desktop bind mounts are mediated by a Linux VM; the macOS uid/gid
+  // does not imply write access inside the container.
   if (hostOs === "windows" || hostOs === "darwin") {
     return undefined;
   }

@@ -23,6 +23,34 @@ const CFC_RESULT_DIR_CONFIGURED =
   (Deno.env.get(CFC_RESULT_DIR_ENV) ?? "").length > 0;
 const TAINTED_SECRET = '{"secret":"tainted from policy"}\n';
 
+const defaultCfcPolicyFile = (): string => {
+  const home = Deno.env.get("HOME");
+  if (Deno.build.os === "darwin" && home !== undefined && home.length > 0) {
+    return `${home}/.local/share/runsc-cfc/cfc-policy.json`;
+  }
+  return "/etc/gvisor/cfc-policy.json";
+};
+
+const CFC_POLICY_FILE =
+  Deno.env.get("CF_HARNESS_INTEGRATION_CFC_POLICY_FILE") ??
+    Deno.env.get("CFC_POLICY_FILE") ?? defaultCfcPolicyFile();
+
+const integrationTempRoot = async (): Promise<string> => {
+  const home = Deno.env.get("HOME");
+  if (Deno.build.os !== "darwin" || home === undefined || home.length === 0) {
+    return "/tmp";
+  }
+  const root = `${home}/.cache/cf-harness/integration`;
+  await Deno.mkdir(root, { recursive: true });
+  return root;
+};
+
+const makeIntegrationTempDir = async (prefix: string): Promise<string> =>
+  Deno.makeTempDir({
+    prefix,
+    dir: await integrationTempRoot(),
+  });
+
 interface WithHarnessOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
   configureSandbox?: (
@@ -54,7 +82,7 @@ const assertRunscRuntimeAvailable = async () => {
 
 const assertCfcPolicyLabelsAvailable = async () => {
   const policy = JSON.parse(
-    await Deno.readTextFile("/etc/gvisor/cfc-policy.json"),
+    await Deno.readTextFile(CFC_POLICY_FILE),
   ) as { path_labels?: Array<{ pattern?: unknown }> };
   const patterns = new Set(
     (policy.path_labels ?? [])
@@ -64,7 +92,7 @@ const assertCfcPolicyLabelsAvailable = async () => {
   for (const required of ["/secrets/*.json", "/data/alice/*"]) {
     assert(
       patterns.has(required),
-      `/etc/gvisor/cfc-policy.json is missing path label ${required}`,
+      `${CFC_POLICY_FILE} is missing path label ${required}`,
     );
   }
 };
@@ -89,7 +117,7 @@ const withHarness = async (
 ) => {
   const tempDir = await Deno.makeTempDir({
     prefix: "cf-harness-int-",
-    dir: "/tmp",
+    dir: await integrationTempRoot(),
   });
   const workspaceHostPath = await Deno.realPath(tempDir);
   try {
@@ -117,14 +145,19 @@ Deno.test({
   ignore: !INTEGRATION,
   permissions: { env: true, read: true, run: true, write: true },
   async fn() {
-    await withHarness("integration-bash", async (engine) => {
-      const result = await engine.invokeBuiltinTool("bash", {
-        command: "pwd",
-      });
-      assertEquals(result.output.stdout, "/workspace\n");
-      assertEquals(result.runState.status, "completed");
-      assertEquals(result.runState.toolOutputs.length, 1);
-    });
+    await withHarness(
+      "integration-bash",
+      async (engine) => {
+        const result = await engine.invokeBuiltinTool("bash", {
+          command: "pwd",
+        });
+        assertEquals(result.output.stdout, "/workspace\n");
+        assertEquals(result.output.cwd, "/workspace");
+        assertEquals(result.runState.status, "completed");
+        assertEquals(result.runState.toolOutputs.length, 1);
+      },
+      { cfcEnforcementMode: "observe" },
+    );
   },
 });
 
@@ -135,10 +168,9 @@ Deno.test({
   permissions: { env: true, read: true, run: true, write: true },
   async fn() {
     await assertCfcPolicyLabelsAvailable();
-    const secretsHostPath = await Deno.makeTempDir({
-      prefix: "cf-harness-secrets-",
-      dir: "/tmp",
-    });
+    const secretsHostPath = await makeIntegrationTempDir(
+      "cf-harness-secrets-",
+    );
     try {
       await writePolicyLabeledSecret(secretsHostPath);
       await withHarness(
@@ -184,10 +216,9 @@ Deno.test({
   permissions: { env: true, read: true, run: true, write: true },
   async fn() {
     await assertCfcPolicyLabelsAvailable();
-    const secretsHostPath = await Deno.makeTempDir({
-      prefix: "cf-harness-secrets-",
-      dir: "/tmp",
-    });
+    const secretsHostPath = await makeIntegrationTempDir(
+      "cf-harness-secrets-",
+    );
     try {
       await writePolicyLabeledSecret(secretsHostPath);
       await withHarness(

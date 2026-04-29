@@ -197,6 +197,14 @@ the same host result directory that `cf-harness` reads. Configure runsc with
 `CF_HARNESS_RUNSC_CFC_RESULT_DIR=/path/to/results` or pass `cfcResultDir` in the
 explicit sandbox config.
 
+On Docker Desktop for macOS, use the host path for `cf-harness` and the
+`/host_mnt/...` projection for Docker's runtime args. The gVisor
+`docker-desktop-cfc-setup` helper defaults to:
+
+```bash
+export CF_HARNESS_RUNSC_CFC_RESULT_DIR="$HOME/.local/share/runsc-cfc/cfc-results"
+```
+
 ## Related Docs
 
 - [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
