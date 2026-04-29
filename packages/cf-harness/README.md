@@ -31,13 +31,14 @@ What works today:
   - `us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest`
 - built-in tools:
   - `bash`
+  - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
   - `write_file`
   - `delegate_task`
 - whole-file replace/create plus append writes
 - bounded OpenAI-compatible prompt/tool loop
-- single-child subagent delegation with fresh child prompt context, an explicit
-  default child profile, retained child run references, and a sanitized
+- single-child subagent delegation with fresh child prompt context, explicit
+  default/browser child profiles, retained child run references, and a sanitized
   summary/state return channel
 - persisted run state, transcript, Loom run manifests, capability snapshots, and
   tool outputs
@@ -61,8 +62,9 @@ What is not done yet:
 
 - real runner-driven CFC feedback integration
 - richer opaque-handle/pass-through behavior
-- additional subagent profiles, browser-mediated subagents, and parallel job
-  orchestration
+- first-class browser operation policy on top of the provisional browser
+  subagent profile
+- parallel child orchestration
 - app UI event provenance
 - streaming model responses
 - richer mid-turn resumability
@@ -138,6 +140,20 @@ deno task run -- \
   --allow-tool delegate_task \
   --allow-subagent-profile default \
   --prompt "Delegate a focused inspection and summarize the result."
+```
+
+The provisional browser profile is the only CLI-supported path to
+`bash-no-sandbox`. It gives the child a host shell so it can invoke
+`agent-browser`, while the parent still receives only the normal sanitized
+subagent result:
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --allow-tool delegate_task \
+  --allow-subagent-profile browser \
+  --prompt "Delegate browser inspection of the local app and summarize the result."
 ```
 
 Current caveat:

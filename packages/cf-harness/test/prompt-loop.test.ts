@@ -514,9 +514,11 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       summary: string;
       modelTurns: number;
       manifest: {
+        profile: string;
         parentRunId: string;
         parentToolCallId: string;
         allowedToolIds: string[];
+        hostToolIds: string[];
         returnPolicy: Record<string, unknown>;
         inputSummary: {
           goalBytes: number;
@@ -545,11 +547,13 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   assertEquals(output.subagent.modelTurns, 1);
   assertEquals(output.subagent.manifest.parentRunId, "run-delegate");
   assertEquals(output.subagent.manifest.parentToolCallId, "call-delegate");
+  assertEquals(output.subagent.manifest.profile, "default");
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash",
     "read_file",
     "write_file",
   ]);
+  assertEquals(output.subagent.manifest.hostToolIds, []);
   assertEquals(output.subagent.manifest.returnPolicy, {
     type: "cf-harness.subagent-return-policy",
     channel: "summary-and-sanitized-state",
@@ -662,6 +666,7 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
       manifest: {
         profile: string;
         allowedToolIds: string[];
+        hostToolIds: string[];
       };
     };
   };
@@ -686,6 +691,263 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
     "read_file",
     "write_file",
   ]);
+  assertEquals(output.subagent.manifest.hostToolIds, []);
+});
+
+Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent by default", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      workspaceHostPath: "/tmp/project",
+      runId: "run-parent-host-tool-denied",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-host-tool",
+                type: "function",
+                function: {
+                  name: "bash-no-sandbox",
+                  arguments: JSON.stringify({
+                    command: "agent-browser --help",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Host tool denied.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Try the host tool.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+  const firstRequest = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected host tool denial message");
+  }
+  const denied = JSON.parse(toolMessage.content) as { detail: string };
+
+  assertEquals(
+    firstRequest.tools.map((tool) => tool.function.name),
+    ["bash", "read_file", "write_file", "delegate_task"],
+  );
+  assertEquals(denied.detail, "bash-no-sandbox is not allowed in this run");
+  assertEquals(result.runState.toolOutputs, []);
+  assertEquals(result.runState.policyEvents[0]?.toolId, "bash-no-sandbox");
+  assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
+});
+
+Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized browser subagent profile", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["browser"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      workspaceHostPath: "/tmp/project",
+      runId: "run-delegate-browser-profile",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-browser-profile",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Open the local app with agent-browser.",
+                    profile: "browser",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Browser-profile child completed.",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Browser-profile parent completed.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate browser work.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      manifest: {
+        profile: string;
+        allowedToolIds: string[];
+        hostToolIds: string[];
+      };
+    };
+  };
+
+  assertEquals(
+    requestBodies[0].tools.map((tool) => tool.function.name),
+    ["delegate_task"],
+  );
+  assertEquals(
+    requestBodies[1].tools.map((tool) => tool.function.name),
+    ["bash-no-sandbox", "read_file", "write_file"],
+  );
+  assertEquals(
+    requestBodies[1].messages[0].content.includes(
+      "Host execution tools available: bash-no-sandbox",
+    ),
+    true,
+  );
+  assertEquals(output.subagent.manifest.profile, "browser");
+  assertEquals(output.subagent.manifest.allowedToolIds, [
+    "bash-no-sandbox",
+    "read_file",
+    "write_file",
+  ]);
+  assertEquals(output.subagent.manifest.hostToolIds, ["bash-no-sandbox"]);
+  assertEquals(result.finalAssistantText, "Browser-profile parent completed.");
+});
+
+Deno.test("CfHarnessPromptLoop does not authorize the browser profile by default", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      workspaceHostPath: "/tmp/project",
+      runId: "run-browser-profile-default-denied",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-browser-default-denied",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Use browser profile.",
+                    profile: "browser",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Browser profile denied.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Try browser delegation.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task denial message");
+  }
+  const denied = JSON.parse(toolMessage.content) as { detail: string };
+
+  assertEquals(
+    denied.detail,
+    'delegate_task profile "browser" is not allowed in this run',
+  );
+  assertEquals(result.runState.subagentRuns, undefined);
+  assertEquals(result.runState.toolOutputs, []);
+  assertEquals(result.runState.policyEvents[0]?.toolInputSummary, {
+    type: "cf-harness.tool-input-summary",
+    toolId: "delegate_task",
+    profile: "browser",
+    goalBytes: 20,
+    goalDigest:
+      "sha256:8175c86ebf4f98a6041f1eb335920800690b2de78acb76fb8962ea6bf5f99eed",
+  });
 });
 
 Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creating a child run", async () => {
@@ -712,8 +974,8 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
     },
     {
       name: "unknown profile",
-      arguments: { goal: "Inspect", profile: "browser" },
-      message: "delegate_task profile must be one of default",
+      arguments: { goal: "Inspect", profile: "unknown" },
+      message: "delegate_task profile must be one of default, browser",
     },
   ];
 
@@ -920,6 +1182,7 @@ Deno.test("CfHarnessPromptLoop continues subagent ids from retained run state", 
       cfcEnforcementMode: "disabled",
       model: "gpt-5.4",
       allowedToolIds: ["bash", "read_file", "write_file"],
+      hostToolIds: [],
       maxModelTurns: 8,
       returnPolicy: {
         type: "cf-harness.subagent-return-policy",

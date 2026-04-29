@@ -148,6 +148,13 @@ export interface PRInfo {
   merged_at: string | null;
 }
 
+export interface PullRequestEventPayload {
+  pull_request?: {
+    number?: number;
+    body?: string | null;
+  };
+}
+
 export interface BaselineOverrides {
   /** Metric name -> value in the metric's native unit (seconds or nanoseconds). */
   metrics: Map<string, number>;
@@ -786,11 +793,37 @@ export async function fetchPRForCommit(
 }
 
 /** Fetch the full body of a PR by number. */
-export async function fetchPRBody(prNumber: number): Promise<string> {
+export async function fetchPRBody(
+  prNumber: number,
+  eventPath = Deno.env.get("GITHUB_EVENT_PATH"),
+): Promise<string> {
+  const bodyFromEvent = await readPRBodyFromEventPayload(prNumber, eventPath);
+  if (bodyFromEvent !== undefined) {
+    return bodyFromEvent;
+  }
   const pr = await githubGet<{ body: string | null }>(
     `/repos/${REPO}/pulls/${prNumber}`,
   );
   return pr.body ?? "";
+}
+
+export async function readPRBodyFromEventPayload(
+  prNumber: number,
+  eventPath: string | undefined,
+): Promise<string | undefined> {
+  if (eventPath === undefined || eventPath === "") {
+    return undefined;
+  }
+  try {
+    const payload = JSON.parse(
+      await Deno.readTextFile(eventPath),
+    ) as PullRequestEventPayload;
+    return payload.pull_request?.number === prNumber
+      ? payload.pull_request.body ?? ""
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------

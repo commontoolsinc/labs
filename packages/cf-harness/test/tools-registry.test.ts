@@ -1,5 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
 import {
+  type BuiltinToolId,
+  DEFAULT_PARENT_TOOL_IDS,
+} from "../src/contracts/tool-descriptor.ts";
+import {
   BUILTIN_TOOL_REGISTRY,
   BUILTIN_TOOLS,
   getBuiltinTool,
@@ -9,11 +13,21 @@ import { WRITE_FILE_MODES } from "../src/tools/write-file.ts";
 Deno.test("builtin tool registry includes the agreed first-pass tool floor", () => {
   assertEquals(BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId), [
     "bash",
+    "bash-no-sandbox",
     "read_file",
     "write_file",
     "delegate_task",
   ]);
-  assertEquals(BUILTIN_TOOL_REGISTRY.size, 4);
+  assertEquals(BUILTIN_TOOL_REGISTRY.size, 5);
+  assertEquals(
+    [...DEFAULT_PARENT_TOOL_IDS],
+    [
+      "bash",
+      "read_file",
+      "write_file",
+      "delegate_task",
+    ] satisfies BuiltinToolId[],
+  );
 });
 
 Deno.test("builtin tool registry exposes invoke functions for all built-ins", () => {

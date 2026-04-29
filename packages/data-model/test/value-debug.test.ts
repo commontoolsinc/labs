@@ -171,6 +171,154 @@ describe("value-debug", () => {
       expect(toCompactDebugString([NaN, Infinity, -Infinity, -0, 0]))
         .toBe("[NaN,Infinity,-Infinity,-0,0]");
     });
+
+    describe("with circular references", () => {
+      it("does not throw on a self-referential object (no stack blowout)", () => {
+        const a: Record<string, unknown> = { x: 1 };
+        a.self = a;
+        expect(() => toCompactDebugString(a)).not.toThrow();
+      });
+
+      it("renders a self-referential object with `<circle>` for the back-ref", () => {
+        const a: Record<string, unknown> = { x: 1 };
+        a.self = a;
+        expect(toCompactDebugString(a))
+          .toBe('{"x":1,"self":<circle>}');
+      });
+
+      it("renders a self-referential array with `<circle>` for the back-ref", () => {
+        const arr: unknown[] = [1, 2];
+        arr.push(arr);
+        expect(toCompactDebugString(arr)).toBe("[1,2,<circle>]");
+      });
+
+      it("renders a two-object mutual reference cycle", () => {
+        const a: Record<string, unknown> = {};
+        const b: Record<string, unknown> = { a };
+        a.b = b;
+        expect(toCompactDebugString(a))
+          .toBe('{"b":{"a":<circle>}}');
+      });
+
+      it("renders a cycle that closes through several intermediate objects", () => {
+        const c: Record<string, unknown> = {};
+        const a: Record<string, unknown> = { b: { c } };
+        c.back = a;
+        expect(toCompactDebugString(a))
+          .toBe('{"b":{"c":{"back":<circle>}}}');
+      });
+
+      it("renders a cycle nested under a non-circular root", () => {
+        const cyc: Record<string, unknown> = {};
+        cyc.self = cyc;
+        expect(toCompactDebugString({ x: 1, y: cyc }))
+          .toBe('{"x":1,"y":{"self":<circle>}}');
+      });
+
+      it("renders multiple independent cycles in the same value", () => {
+        const c1: Record<string, unknown> = { v: 1 };
+        c1.self = c1;
+        const c2: Record<string, unknown> = { v: 2 };
+        c2.self = c2;
+        expect(toCompactDebugString({ a: c1, b: c2 }))
+          .toBe(
+            '{"a":{"v":1,"self":<circle>},"b":{"v":2,"self":<circle>}}',
+          );
+      });
+
+      it("renders shared non-cyclic refs in full at each occurrence", () => {
+        // Sibling references to the same object are not a cycle, so each
+        // occurrence is rendered fully rather than treated as a back-edge.
+        const x = { v: 1 };
+        expect(toCompactDebugString({ a: x, b: x }))
+          .toBe('{"a":{"v":1},"b":{"v":1}}');
+      });
+    });
+
+    describe("with values that prevent rendering", () => {
+      const FALLBACK = "<unrenderable debug string>";
+
+      it("honors a normal `toJSON()` and renders its return value", () => {
+        // Sanity check that `toJSON()` is consulted in the usual way; this is
+        // the happy-path counterpart to the throw cases below.
+        const v = { toJSON: () => ({ simplified: 1 }) };
+        expect(toCompactDebugString(v)).toBe('{"simplified":1}');
+      });
+
+      it("returns the fallback string when a top-level `toJSON()` throws", () => {
+        const v = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(toCompactDebugString(v)).toBe(FALLBACK);
+      });
+
+      it("returns the fallback string when a nested `toJSON()` throws", () => {
+        const inner = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(toCompactDebugString({ a: 1, b: inner })).toBe(FALLBACK);
+      });
+
+      it("returns the fallback string when a `toJSON()` inside an array throws", () => {
+        const inner = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(toCompactDebugString([1, inner, 3])).toBe(FALLBACK);
+      });
+
+      it("returns the fallback string when an enumerable getter throws", () => {
+        const v = {};
+        Object.defineProperty(v, "x", {
+          get: () => {
+            throw new Error("nope");
+          },
+          enumerable: true,
+        });
+        expect(toCompactDebugString(v)).toBe(FALLBACK);
+      });
+
+      it("returns the fallback string in the indented form too", () => {
+        const v = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(toIndentedDebugString(v)).toBe(FALLBACK);
+      });
+
+      it("does not throw to its caller on a throwing `toJSON()`", () => {
+        const v = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(() => toCompactDebugString(v)).not.toThrow();
+        expect(() => toIndentedDebugString(v)).not.toThrow();
+      });
+    });
+
+    describe("with `maxLength`", () => {
+      for (const len of [10, 25, 100]) {
+        it("renders the full text when `maxLength` fits the whole thing", () => {
+          const item = ["xy", NaN];
+          const expected = '["xy",NaN]'; // Note: Length 10.
+          expect(toCompactDebugString(item, len)).toBe(expected);
+        });
+
+        it("truncates to `maxLength` when it is smaller than the whole rendered length", () => {
+          const largeString = "This is a very large string! ".repeat(40);
+          const item = { a: 123, b: 456, c: 789, d: largeString };
+          const expected = JSON.stringify(item).slice(0, len - 3) + "...";
+          expect(toCompactDebugString(item, len)).toBe(expected);
+        });
+      }
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -239,6 +387,13 @@ describe("value-debug", () => {
         .toBe(
           '{\n  "a": NaN,\n  "b": Infinity,\n  "c": -Infinity,\n  "d": -0\n}',
         );
+    });
+
+    it("renders a self-referential object with `<circle>` for the back-ref", () => {
+      const a: Record<string, unknown> = { x: 1 };
+      a.self = a;
+      expect(toIndentedDebugString(a))
+        .toBe('{\n  "x": 1,\n  "self": <circle>\n}');
     });
   });
 });

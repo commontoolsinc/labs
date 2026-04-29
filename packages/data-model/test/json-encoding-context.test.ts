@@ -75,7 +75,7 @@ function fromWireFormat(data: JsonWireValue): FabricValue {
 // Tests
 // ============================================================================
 
-describe("json encoding", () => {
+describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
   // Public API: Uint8Array boundary
   // --------------------------------------------------------------------------

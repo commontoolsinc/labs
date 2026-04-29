@@ -209,6 +209,34 @@ Deno.test("classifyBashToolFailure prefers the missing subcommand from shell out
   });
 });
 
+Deno.test("classifyBuiltinToolFailure records host shell failures without sandbox capability claims", () => {
+  const failure = classifyBuiltinToolFailure(
+    "bash-no-sandbox",
+    { command: "agent-browser --help" },
+    {
+      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+      stdout: "",
+      stderr: "bash: agent-browser: command not found",
+      exitCode: 127,
+      cwd: "/workspace",
+    },
+    "2026-04-23T18:25:00.000Z",
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "missing_binary",
+    source: "tool_output",
+    detail: "agent-browser was not found while executing a shell command.",
+    at: "2026-04-23T18:25:00.000Z",
+    toolId: "bash-no-sandbox",
+    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+    command: "agent-browser --help",
+    commandName: "agent-browser",
+    exitCode: 127,
+  });
+});
+
 Deno.test("classifyBuiltinToolFailure handles delegate_task outputs defensively", () => {
   assertEquals(
     classifyBuiltinToolFailure(
@@ -254,6 +282,7 @@ Deno.test("classifyBuiltinToolFailure handles delegate_task outputs defensively"
             cfcEnforcementMode: "disabled",
             model: "gpt-5.4",
             allowedToolIds: ["bash", "read_file", "write_file"],
+            hostToolIds: [],
             maxModelTurns: 8,
             returnPolicy: {
               type: "cf-harness.subagent-return-policy",
