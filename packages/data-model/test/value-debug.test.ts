@@ -235,6 +235,74 @@ describe("value-debug", () => {
       });
     });
 
+    describe("with values that prevent rendering", () => {
+      const FALLBACK = "<unrenderable debug string>";
+
+      it("honors a normal `toJSON()` and renders its return value", () => {
+        // Sanity check that `toJSON()` is consulted in the usual way; this is
+        // the happy-path counterpart to the throw cases below.
+        const v = { toJSON: () => ({ simplified: 1 }) };
+        expect(toCompactDebugString(v)).toBe('{"simplified":1}');
+      });
+
+      it("returns the fallback string when a top-level `toJSON()` throws", () => {
+        const v = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(toCompactDebugString(v)).toBe(FALLBACK);
+      });
+
+      it("returns the fallback string when a nested `toJSON()` throws", () => {
+        const inner = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(toCompactDebugString({ a: 1, b: inner })).toBe(FALLBACK);
+      });
+
+      it("returns the fallback string when a `toJSON()` inside an array throws", () => {
+        const inner = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(toCompactDebugString([1, inner, 3])).toBe(FALLBACK);
+      });
+
+      it("returns the fallback string when an enumerable getter throws", () => {
+        const v = {};
+        Object.defineProperty(v, "x", {
+          get: () => {
+            throw new Error("nope");
+          },
+          enumerable: true,
+        });
+        expect(toCompactDebugString(v)).toBe(FALLBACK);
+      });
+
+      it("returns the fallback string in the indented form too", () => {
+        const v = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(toIndentedDebugString(v)).toBe(FALLBACK);
+      });
+
+      it("does not throw to its caller on a throwing `toJSON()`", () => {
+        const v = {
+          toJSON: () => {
+            throw new Error("nope");
+          },
+        };
+        expect(() => toCompactDebugString(v)).not.toThrow();
+        expect(() => toIndentedDebugString(v)).not.toThrow();
+      });
+    });
+
     describe("with `maxLength`", () => {
       for (const len of [10, 25, 100]) {
         it("renders the full text when `maxLength` fits the whole thing", () => {
