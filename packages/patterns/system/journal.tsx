@@ -9,6 +9,7 @@ import {
   handler,
   NAME,
   pattern,
+  toIndentedDebugString,
   UI,
   wish,
   Writable,
@@ -86,7 +87,7 @@ export default pattern<Record<string, never>>((_) => {
   // Debug: stringify raw result for the debug panel
   const debugRaw = computed(() => {
     const raw = journalResult.result;
-    return JSON.stringify(raw, null, 2);
+    return toIndentedDebugString(raw);
   });
 
   // Most recent entries first

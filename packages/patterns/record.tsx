@@ -22,6 +22,7 @@ import {
   safeDateNow,
   SELF,
   str,
+  toCompactDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -687,7 +688,7 @@ const handleUpdateModule = handler<
       if (result) {
         result.set({
           success: true,
-          message: `Updated ${field} to ${JSON.stringify(value)}`,
+          message: `Updated ${field} to ${toCompactDebugString(value)}`,
         });
       }
     } else if (fieldCell && typeof fieldCell.key === "function") {

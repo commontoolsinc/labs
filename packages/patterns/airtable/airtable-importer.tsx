@@ -5,6 +5,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  toCompactDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -662,7 +663,7 @@ function formatCellValue(value: unknown): string {
     return value.map((v) => formatCellValue(v)).join(", ");
   }
   if (typeof value === "object") {
-    return JSON.stringify(value);
+    return toCompactDebugString(value);
   }
   return String(value);
 }

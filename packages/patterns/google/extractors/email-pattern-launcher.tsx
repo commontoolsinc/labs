@@ -26,6 +26,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  toIndentedDebugString,
   UI,
   when,
 } from "commonfabric";
@@ -390,7 +391,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   console.log("registryError 2", registryError);
                   return "";
                 })}
-                <pre>{JSON.stringify(registryError, null, 2)}</pre>
+                <pre>{toIndentedDebugString(registryError)}</pre>
               </div>,
             )}
 
