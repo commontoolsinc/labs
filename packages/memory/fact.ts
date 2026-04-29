@@ -1,5 +1,6 @@
 import type { URI } from "./interface.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/api";
+import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import {
   Assertion,
   Fact,
@@ -12,7 +13,6 @@ import {
   Unclaimed,
 } from "./interface.ts";
 import {
-  HashObject,
   hashObjectFromJson,
   hashObjectFromString,
   hashOf,
@@ -43,7 +43,7 @@ const frozenUnclaimedCache = new Map<
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): HashObject<Unclaimed> => {
+): FabricHash => {
   const key = `${the}\0${of}`;
   let frozen = frozenUnclaimedCache.get(key);
   if (!frozen) {
@@ -66,7 +66,7 @@ export const assert = <
   the: T;
   of: Of;
   is: Is;
-  cause?: Fact | HashObject<Fact> | null | undefined;
+  cause?: Fact | FabricHash | null | undefined;
 }) =>
   ({
     the,
@@ -135,9 +135,7 @@ export function normalizeFact<
     of: Of;
     is: Is;
     cause?:
-      | HashObject<Assertion<T, Of, Is>>
-      | HashObject<Retraction<T, Of, Is>>
-      | HashObject<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
@@ -152,9 +150,7 @@ export function normalizeFact<
     the: T;
     of: Of;
     cause?:
-      | HashObject<Assertion<T, Of, Is>>
-      | HashObject<Retraction<T, Of, Is>>
-      | HashObject<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
@@ -170,9 +166,7 @@ export function normalizeFact<
     of: Of;
     is?: Is;
     cause?:
-      | HashObject<Assertion<T, Of, Is>>
-      | HashObject<Retraction<T, Of, Is>>
-      | HashObject<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
@@ -205,6 +199,6 @@ export function normalizeFact<
   }
 }
 
-export const factReference = (fact: Fact): HashObject<Fact> => {
+export const factReference = (fact: Fact): FabricHash => {
   return hashOf(normalizeFact(fact));
 };

@@ -10,41 +10,25 @@ import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 
 // ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
-
-/**
- * Content hash -- a hash-based reference to a value.
- *
- * The phantom type parameter `T` is kept for compatibility with generic call
- * sites; `FabricHash` ignores it (no phantom member).
- */
-export type HashObject<T extends FabricValue = FabricValue> = FabricHash;
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /** Parse a hash object from its string representation. */
-export function hashObjectFromString(source: string): HashObject {
+export function hashObjectFromString(source: string): FabricHash {
   return FabricHash.fromString(source);
 }
 
 /** Type guard: returns true if the value is a content hash. */
-export function isHashObject<T extends FabricValue>(
-  value: unknown | HashObject<T>,
-): value is HashObject<T> {
+export function isHashObject(value: unknown): value is FabricHash {
   return value instanceof FabricHash;
 }
 
 /** Reconstructs a hash object from its JSON representation. */
-export function hashObjectFromJson(source: { "/": string }): HashObject {
+export function hashObjectFromJson(source: { "/": string }): FabricHash {
   return FabricHash.fromString(source["/"]);
 }
 
 /** Compute a content hash for the given source value. */
-export function hashOf<T extends FabricValue>(
-  source: T,
-): HashObject<T> {
+export function hashOf(source: FabricValue): FabricHash {
   return hashOfModern(source);
 }

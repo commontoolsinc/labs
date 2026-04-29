@@ -1,7 +1,7 @@
 export type {
-  HashObject,
-  HashObject as ContentId,
-} from "@commonfabric/data-model/value-hash";
+  FabricHash,
+  FabricHash as ContentId,
+} from "@commonfabric/data-model/fabric-hash";
 
 export {
   hashObjectFromJson as contentIdFromJSON,

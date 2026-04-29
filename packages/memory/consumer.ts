@@ -48,9 +48,9 @@ import type {
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
-  type HashObject,
   hashObjectFromJson,
   hashOf,
 } from "@commonfabric/data-model/value-hash";
@@ -155,7 +155,7 @@ class MemoryConsumerSession<
     >
     | undefined;
   invocations: Map<
-    InvocationURL<HashObject<Invocation>>,
+    InvocationURL<FabricHash>,
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
 
@@ -386,7 +386,7 @@ class MemoryConsumerSession<
 
   private executeAuthorized<
     Ability extends string,
-    Access extends HashObject[],
+    Access extends FabricHash[],
   >(
     authorizationResult: Result<Authorization<Access[number]>, Error>,
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
@@ -592,7 +592,7 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
 
   source: ConsumerInvocationFor<Ability, Protocol>;
 
-  #reference: HashObject<Invocation>;
+  #reference: FabricHash;
 
   static create<Ability extends string, Protocol extends Proto>(
     as: DID,

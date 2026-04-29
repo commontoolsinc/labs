@@ -8,15 +8,14 @@ import {
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
+import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import {
-  type HashObject,
   hashObjectFromString,
   hashOf,
 } from "@commonfabric/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
-  Assertion,
   AsyncResult,
   AuthorizationError,
   CauseString,
@@ -552,7 +551,7 @@ const recall = <Space extends MemorySpace>(
       of,
       cause: (row.cause
         ? hashObjectFromString(row.cause)
-        : unclaimedRef({ the, of })) as HashObject<Assertion>,
+        : unclaimedRef({ the, of })) as FabricHash,
       since: row.since,
       fact: row.fact, // Include stored hash to avoid recomputing with hashOf()
     };
@@ -638,7 +637,7 @@ const getFact = <Space extends MemorySpace>(
     cause:
       (row.cause
         ? hashObjectFromString(row.cause)
-        : unclaimedRef(row as FactAddress)) as HashObject<Assertion>,
+        : unclaimedRef(row as FactAddress)) as FabricHash,
     since: row.since,
   };
   if (row.is) {
@@ -830,7 +829,7 @@ const swap = <Space extends MemorySpace>(
     : [source.claim, source.claim.fact];
   const cause = expect.toString();
   const base = unclaimedRef({ the, of }).toString();
-  const expected = cause === base ? null : (expect as HashObject<Fact>);
+  const expected = cause === base ? null : (expect as FabricHash);
 
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
@@ -951,9 +950,9 @@ const commit = <Space extends MemorySpace>(
   const [since, cause] = row
     ? [
       plainObjectFromJson<CommitData>(row.is as string).since + 1,
-      hashObjectFromString(row.fact) as HashObject<Assertion>,
+      hashObjectFromString(row.fact) as FabricHash,
     ]
-    : [0, unclaimedRef({ the, of }) as HashObject as HashObject<Assertion>];
+    : [0, unclaimedRef({ the, of }) as FabricHash];
 
   const commit = createCommit({
     space: of,

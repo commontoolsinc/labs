@@ -7,7 +7,8 @@ import {
   Proof,
   Signer,
 } from "./interface.ts";
-import { type HashObject, hashOf } from "@commonfabric/data-model/value-hash";
+import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { unauthorized } from "./error.ts";
 import { type DID } from "@commonfabric/identity";
 import { fromDID } from "./util.ts";
@@ -106,7 +107,7 @@ export const claim = async <Access extends Invocation>(
 /**
  * Issues verifiable authorization signed by the given signer.
  */
-export const authorize = async <Access extends HashObject[]>(
+export const authorize = async <Access extends FabricHash[]>(
   access: Access,
   as: Signer,
 ): AsyncResult<Authorization<Access[number]>, Error> => {

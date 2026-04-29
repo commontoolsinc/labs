@@ -1,3 +1,7 @@
+import type {
+  FabricHash as ApiFabricHash,
+  FabricHashConstructor as ApiFabricHashConstructor,
+} from "@commonfabric/api";
 import { FabricPrimitive } from "./interface.ts";
 import {
   fromBase64url,
@@ -19,7 +23,7 @@ import {
  * freeze `ArrayBuffer` contents). The string form is cached internally so
  * that repeated `toString()` calls are O(1).
  */
-export class FabricHash extends FabricPrimitive {
+export class FabricHash extends FabricPrimitive implements ApiFabricHash {
   readonly #hash: Uint8Array;
   readonly #tag: string;
   readonly #justHashString: string;
@@ -113,3 +117,8 @@ export class FabricHash extends FabricPrimitive {
     return new FabricHash(fromBase64url(hashBase64url), tag);
   }
 }
+
+// Compile-time check that the exported `FabricHash` constructor matches the
+// `FabricHashConstructor` declared in `@commonfabric/api`. This catches drift
+// between the public type contract and this implementation.
+FabricHash satisfies ApiFabricHashConstructor;
