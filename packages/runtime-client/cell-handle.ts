@@ -11,7 +11,6 @@ import {
   type SigilLink,
   type URI,
 } from "@commonfabric/runner/shared";
-import { rebaseCfcLabelView } from "@commonfabric/runner/cfc";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 import {
   type CellRef,
@@ -281,7 +280,7 @@ export class CellHandle<T = unknown> {
       type: this.#ref.type,
       // Child schema is unknown, so we don't include it
       ...(this.#ref.cfcLabelView !== undefined && {
-        cfcLabelView: rebaseCfcLabelView(this.#ref.cfcLabelView, [key]),
+        cfcLabelView: rebaseClientCfcLabelView(this.#ref.cfcLabelView, [key]),
       }),
     };
   }
@@ -467,6 +466,114 @@ function cfcLabelViewsEqual(
   if (a === b) return true;
   if (a === undefined || b === undefined) return false;
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+const CFC_LABEL_KEYS = ["confidentiality", "integrity"] as const;
+
+function canonicalizeCfcLogicalPath(path: readonly string[]): string[] {
+  return path[0] === "value" ? [...path.slice(1)] : [...path];
+}
+
+function isCfcPathPrefix(
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean {
+  return prefix.length <= path.length &&
+    prefix.every((segment, index) => segment === path[index]);
+}
+
+function cloneClientCfcLabel(
+  label: CfcLabelView["entries"][number]["label"],
+): CfcLabelView["entries"][number]["label"] {
+  const cloned: CfcLabelView["entries"][number]["label"] = {};
+  for (const key of CFC_LABEL_KEYS) {
+    const value = label[key];
+    if (Array.isArray(value) && value.length > 0) {
+      cloned[key] = [...value];
+    }
+  }
+  return cloned;
+}
+
+function hasClientCfcLabelValues(
+  label: CfcLabelView["entries"][number]["label"],
+): boolean {
+  return CFC_LABEL_KEYS.some((key) =>
+    Array.isArray(label[key]) && label[key]!.length > 0
+  );
+}
+
+function mergeClientCfcLabels(
+  left: CfcLabelView["entries"][number]["label"] | undefined,
+  right: CfcLabelView["entries"][number]["label"],
+): CfcLabelView["entries"][number]["label"] {
+  const merged: CfcLabelView["entries"][number]["label"] = {};
+  for (const key of CFC_LABEL_KEYS) {
+    const values = [
+      ...(Array.isArray(left?.[key]) ? left[key]! : []),
+      ...(Array.isArray(right[key]) ? right[key]! : []),
+    ];
+    const unique = [...new Set(values)];
+    if (unique.length > 0) {
+      merged[key] = unique;
+    }
+  }
+  return merged;
+}
+
+function cfcPathKey(path: readonly string[]): string {
+  return JSON.stringify(canonicalizeCfcLogicalPath(path));
+}
+
+function normalizeClientCfcLabelView(
+  entries: CfcLabelView["entries"],
+): CfcLabelView | undefined {
+  const byPath = new Map<string, CfcLabelView["entries"][number]>();
+  for (const entry of entries) {
+    const path = canonicalizeCfcLogicalPath(entry.path);
+    const label = cloneClientCfcLabel(entry.label);
+    if (!hasClientCfcLabelValues(label)) continue;
+
+    const key = cfcPathKey(path);
+    const existing = byPath.get(key);
+    byPath.set(key, {
+      path,
+      label: mergeClientCfcLabels(existing?.label, label),
+    });
+  }
+
+  const normalized = [...byPath.values()].sort((left, right) =>
+    cfcPathKey(left.path).localeCompare(cfcPathKey(right.path))
+  );
+  return normalized.length > 0
+    ? { version: 1, entries: normalized }
+    : undefined;
+}
+
+function rebaseClientCfcLabelView(
+  view: CfcLabelView | undefined,
+  path: readonly string[],
+): CfcLabelView | undefined {
+  if (!view) return undefined;
+
+  const logicalPath = canonicalizeCfcLogicalPath(path);
+  const entries: CfcLabelView["entries"] = [];
+  for (const entry of view.entries) {
+    const entryPath = canonicalizeCfcLogicalPath(entry.path);
+    const label = cloneClientCfcLabel(entry.label);
+    if (!hasClientCfcLabelValues(label)) continue;
+
+    if (isCfcPathPrefix(logicalPath, entryPath)) {
+      entries.push({
+        path: entryPath.slice(logicalPath.length),
+        label,
+      });
+    } else if (isCfcPathPrefix(entryPath, logicalPath)) {
+      entries.push({ path: [], label });
+    }
+  }
+
+  return normalizeClientCfcLabelView(entries);
 }
 
 /**
