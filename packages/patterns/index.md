@@ -652,18 +652,22 @@ type Input = Record<string, never>;
 ### Output Schema
 
 ```ts
-type DecisionEntry = {
+type SentEmail = {
   route: string;
-  verdict: string;
-  rationale: string;
-  injectionDetected: boolean;
+  recipient: string;
+  subject: string;
+  body: string;
   loggedAt: string;
 };
 
 type Output = {
-  decisions: DecisionEntry[];
-  unsafeAgent: unknown;
-  safeAgent: unknown;
+  emails: SentEmail[];
+  unsafeMessages: BuiltInLLMMessage[];
+  safeMessages: BuiltInLLMMessage[];
+  unsafePending: boolean;
+  safePending: boolean;
+  parentModel: string;
+  subAgentModel: string;
 };
 ```
 

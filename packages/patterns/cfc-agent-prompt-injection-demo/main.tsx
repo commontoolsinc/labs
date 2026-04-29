@@ -100,6 +100,13 @@ type PromptSendEvent = {
   };
 };
 
+// SendMailArgs.body matches TEXT_OR_LINK_SCHEMA below — raw text or an
+// opaque-link object. Higher-clearance summaries are passed through as
+// `{ "@link": "..." }` without being read at the parent's clearance.
+// SentEmail.body is the display-flat string we persist after normalizing the
+// link form, so the renderer doesn't have to branch on the union shape.
+type SendMailBody = string | { "@link": string };
+
 type SentEmail = {
   route: string;
   recipient: string;
@@ -111,7 +118,7 @@ type SentEmail = {
 type SendMailArgs = {
   recipient: string;
   subject: string;
-  body: string;
+  body: SendMailBody;
 };
 
 type ReadRawBriefingResult = {
@@ -394,11 +401,16 @@ const logEmail = handler<
   }
 >(({ recipient, subject, body, result }, { emails, route }) => {
   const timestamp = new Date(safeDateNow()).toISOString();
+  // Flatten the link form to a display string so SentEmail.body stays string-
+  // typed and the renderer doesn't have to branch.
+  const displayBody = typeof body === "string"
+    ? body
+    : `[opaque link: ${body["@link"]}]`;
   emails.push({
     route,
     recipient,
     subject,
-    body,
+    body: displayBody,
     loggedAt: timestamp,
   });
 

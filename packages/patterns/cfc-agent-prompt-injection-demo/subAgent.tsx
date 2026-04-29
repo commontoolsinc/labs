@@ -38,7 +38,10 @@ const parseResultSchema = lift<
   ) {
     return resultSchema as JSONSchema;
   }
-  return true;
+  // Fail closed for malformed inputs (arrays, numbers, null, undefined). A
+  // permissive `true` here would let arbitrary subagent output through —
+  // exactly the prompt-injection vector this demo is meant to illustrate.
+  return false;
 });
 
 const appendTaskToSystem = lift<
