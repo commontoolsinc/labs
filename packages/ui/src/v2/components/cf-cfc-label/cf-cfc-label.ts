@@ -249,8 +249,11 @@ export class CFCFCLabel extends BaseElement {
   }
 
   private refreshForCurrentValue(): void {
+    const isSameValue = Object.is(this.value, this._observedValue);
     this.observeValue(this.value);
-    void this.refreshLabel();
+    if (!isSameValue) {
+      void this.refreshLabel();
+    }
   }
 
   private observeValue(value: unknown): boolean {

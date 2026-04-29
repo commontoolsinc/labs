@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { normalize } from "@std/path/posix";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
@@ -101,13 +102,14 @@ const createContext = (
   sandbox: SandboxRuntime,
   initialCurrentDir = "/workspace",
   hostProcessRunner: ProcessRunner = new FakeProcessRunner(),
+  cfcEnforcementMode: HarnessToolContext["cfcEnforcementMode"] = "observe",
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
   const workspaceHostPath = "/tmp/cf-harness-workspace";
   return {
     runId: "run-1",
-    cfcEnforcementMode: "observe",
+    cfcEnforcementMode,
     get currentDir() {
       return currentDir;
     },
@@ -138,6 +140,27 @@ const createContext = (
     },
   };
 };
+
+const observedCfcResult = (stdout: string): CfcSandboxResult => ({
+  version: 1,
+  stdout: {
+    channel: "stdout",
+    policy: "observed",
+    label: { confidentiality: ["public"] },
+    segments: [{ text: stdout, label: { confidentiality: ["public"] } }],
+  },
+  stderr: {
+    channel: "stderr",
+    policy: "observed",
+    label: { confidentiality: ["public"] },
+    segments: [{ text: "", label: { confidentiality: ["public"] } }],
+  },
+  exitCode: {
+    policy: "observed",
+    label: { confidentiality: ["public"] },
+    value: 0,
+  },
+});
 
 Deno.test("bash tool executes the command through the sandbox shell runtime", async () => {
   const sandbox = new FakeSandboxRuntime([{
@@ -187,6 +210,31 @@ Deno.test("bash tool preserves currentDir inside a configured Fabric mount", asy
 
   assertEquals(output.cwd, "/fabric/home");
   assertEquals(context.currentDir, "/fabric/home");
+});
+
+Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout", async () => {
+  const outputId = createToolOutputId("run-1", "bash", 1);
+  const cwdMarker = `__CF_HARNESS_CWD__${outputId}__`;
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: `raw public\n${cwdMarker}/workspace/repo`,
+    stderr: "",
+    exitCode: 0,
+    cfcResult: observedCfcResult(`public\n${cwdMarker}/workspace/repo`),
+  }]);
+  const context = createContext(
+    sandbox,
+    "/workspace",
+    new FakeProcessRunner(),
+    "enforce-explicit",
+  );
+
+  const output = await bashTool.invoke(context, {
+    command: "cd repo",
+  });
+
+  assertEquals(output.cwd, "/workspace/repo");
+  assertEquals(context.currentDir, "/workspace/repo");
+  assertEquals(output.stdout, `raw public\n${cwdMarker}/workspace/repo`);
 });
 
 Deno.test("bash-no-sandbox tool executes the command through the host process runner", async () => {

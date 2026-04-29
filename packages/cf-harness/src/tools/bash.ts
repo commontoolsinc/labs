@@ -25,6 +25,13 @@ export interface BashToolOutput {
 
 const CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
 
+const observedCfcStdout = (
+  cfcResult: CfcSandboxResult | undefined,
+): string | undefined =>
+  cfcResult?.stdout.policy === "observed"
+    ? cfcResult.stdout.segments.map((segment) => segment.text).join("")
+    : undefined;
+
 export const bashToolDescriptor: HarnessToolDescriptor = {
   toolId: "bash",
   title: "Bash",
@@ -75,20 +82,26 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
     });
     const mayTrustCwdMarker = context.cfcEnforcementMode === "disabled" ||
       context.cfcEnforcementMode === "observe";
-    const parsedResult = mayTrustCwdMarker
-      ? extractFinalWorkingDirectory(result.stdout, cwdMarker)
-      : { stdout: result.stdout };
-    const isAllowedCurrentDir = parsedResult.cwd !== undefined &&
-      (context.sandbox.isPathWithinAllowedRoots?.(parsedResult.cwd) ??
-        context.sandbox.isPathWithinWorkspace(parsedResult.cwd));
-    const nextCurrentDir = parsedResult.cwd !== undefined &&
+    const cwdSourceStdout = mayTrustCwdMarker
+      ? result.stdout
+      : observedCfcStdout(result.cfcResult);
+    const parsedCwd = cwdSourceStdout !== undefined
+      ? extractFinalWorkingDirectory(cwdSourceStdout, cwdMarker)
+      : undefined;
+    const outputStdout = mayTrustCwdMarker && parsedCwd !== undefined
+      ? parsedCwd.stdout
+      : result.stdout;
+    const isAllowedCurrentDir = parsedCwd?.cwd !== undefined &&
+      (context.sandbox.isPathWithinAllowedRoots?.(parsedCwd.cwd) ??
+        context.sandbox.isPathWithinWorkspace(parsedCwd.cwd));
+    const nextCurrentDir = parsedCwd?.cwd !== undefined &&
         isAllowedCurrentDir
-      ? parsedResult.cwd
+      ? parsedCwd.cwd
       : commandCwd;
     context.setCurrentDir(nextCurrentDir);
     return {
       outputId,
-      stdout: parsedResult.stdout,
+      stdout: outputStdout,
       stderr: result.stderr,
       exitCode: result.exitCode,
       cwd: nextCurrentDir,

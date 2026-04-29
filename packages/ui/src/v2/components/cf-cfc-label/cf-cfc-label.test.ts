@@ -124,6 +124,39 @@ describe("CFCFCLabel", () => {
 
     expect(element.cfcLabel).toEqual(cfcLabel);
   });
+
+  it("does not duplicate label refreshes for the same bound value", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["prompt-influence"] },
+      }],
+    };
+    let labelCalls = 0;
+    const element = new CFCFCLabel();
+    element.value = {
+      getCfcLabel: () => {
+        labelCalls += 1;
+        return Promise.resolve(cfcLabel);
+      },
+      subscribe: () => () => {},
+    };
+    const lifecycle = element as unknown as {
+      firstUpdated(changedProperties: Map<PropertyKey, unknown>): void;
+      updated(changedProperties: Map<PropertyKey, unknown>): void;
+    };
+
+    lifecycle.firstUpdated(new Map());
+    await Promise.resolve();
+    lifecycle.updated(
+      new Map<PropertyKey, unknown>([["value", element.value]]),
+    );
+    await Promise.resolve();
+
+    expect(labelCalls).toBe(1);
+    expect(element.cfcLabel).toEqual(cfcLabel);
+  });
 });
 
 describe("cf-cfc-label formatting", () => {

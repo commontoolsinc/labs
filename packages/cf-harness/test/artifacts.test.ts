@@ -936,19 +936,23 @@ Deno.test({
         JSON.stringify(childState.primaryFailure).includes(rawChildCommand),
         false,
       );
-      assertEquals(childState.failureRecords?.[0]?.kind, "missing_binary");
-      assertEquals(childState.failureRecords?.[0]?.command, rawChildCommand);
+      const missingBinaryFailure = childState.failureRecords?.find((failure) =>
+        failure.kind === "missing_binary"
+      );
+      const deniedFailure = childState.failureRecords?.find((failure) =>
+        failure.kind === "tool_not_allowed"
+      );
+      assertEquals(missingBinaryFailure?.command, rawChildCommand);
       assertEquals(
-        childState.failureRecords?.[0]?.detail.includes(
+        missingBinaryFailure?.detail.includes(
           "secret-child-command",
         ),
         true,
       );
-      assertEquals(childState.failureRecords?.[1]?.kind, "tool_not_allowed");
-      assertEquals(childState.failureRecords?.[1]?.source, "policy_event");
-      assertEquals(childState.failureRecords?.[1]?.toolId, "bash");
+      assertEquals(deniedFailure?.source, "policy_event");
+      assertEquals(deniedFailure?.toolId, "bash");
       assertEquals(
-        JSON.stringify(childState.failureRecords?.[1]).includes(
+        JSON.stringify(deniedFailure).includes(
           rawChildCommand,
         ),
         false,
