@@ -287,8 +287,7 @@ function truncateValue(value: unknown, maxLength: number): unknown {
   }
 
   if (typeof value === "object") {
-    const str = toCompactDebugString(value);
-    return str.length > maxLength ? str.substring(0, maxLength) + "..." : value;
+    return toCompactDebugString(value, maxLength);
   }
 
   return value;
