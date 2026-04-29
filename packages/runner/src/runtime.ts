@@ -52,7 +52,11 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { type CfcEnforcementMode, type TrustSnapshot } from "./cfc/mod.ts";
+import {
+  type CfcEnforcementMode,
+  type CfcLabelView,
+  type TrustSnapshot,
+} from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -800,16 +804,19 @@ export class Runtime {
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema: S,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<Schema<S>>;
   getCellFromLink(
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<any> {
     let link = isCellLink(cellLink)
       ? parseLink(cellLink)
@@ -817,8 +824,23 @@ export class Runtime {
       ? cellLink
       : undefined;
     if (!link) throw new Error("Invalid cell link");
+    const carriedLabelView =
+      (link as NormalizedLink & { cfcLabelView?: CfcLabelView }).cfcLabelView;
+    if ("cfcLabelView" in link) {
+      const { cfcLabelView: _cfcLabelView, ...cleanLink } = link as
+        & NormalizedLink
+        & { cfcLabelView?: CfcLabelView };
+      link = cleanLink;
+    }
     if (schema !== undefined) link = { ...link, schema };
-    return createCell(this, link as NormalizedFullLink, tx);
+    return createCell(
+      this,
+      link as NormalizedFullLink,
+      tx,
+      false,
+      undefined,
+      cfcLabelView ?? carriedLabelView,
+    );
   }
 
   getImmutableCell<T>(
@@ -826,29 +848,39 @@ export class Runtime {
     data: T,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     data: any,
     schema: S,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<Schema<S>>;
   getImmutableCell(
     space: MemorySpace,
     data: any,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<any> {
     const asDataURI = `data:application/json,${
       encodeURIComponent(JSON.stringify({ value: data }))
     }` as const as `${string}:${string}`;
-    return createCell(this, {
-      space,
-      path: [],
-      id: asDataURI,
-      type: "application/json",
-      schema,
-    }, tx);
+    return createCell(
+      this,
+      {
+        space,
+        path: [],
+        id: asDataURI,
+        type: "application/json",
+        schema,
+      },
+      tx,
+      false,
+      undefined,
+      cfcLabelView,
+    );
   }
 
   getHomeSpaceCell(

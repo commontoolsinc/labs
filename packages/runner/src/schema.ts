@@ -39,11 +39,50 @@ import {
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import {
+  type CfcLabelView,
+  cfcLabelViewForDereference,
+  cfcLabelViewForDereferenceTraces,
+  cloneCfcLabelView,
+  mergeCfcLabelViews,
+  rebaseCfcLabelView,
+} from "./cfc/label-view-state.ts";
+import type { CfcAddress } from "./cfc/types.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
   level: "debug",
 });
+
+const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
+  space: link.space,
+  id: link.id,
+  type: link.type,
+  path: [...link.path],
+});
+
+const isPrefix = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+const labelViewForLink = (
+  baseLink: NormalizedFullLink,
+  baseView: CfcLabelView | undefined,
+  link: NormalizedFullLink,
+): CfcLabelView | undefined => {
+  if (
+    baseLink.space === link.space &&
+    baseLink.id === link.id &&
+    baseLink.type === link.type &&
+    isPrefix(baseLink.path, link.path)
+  ) {
+    return rebaseCfcLabelView(baseView, link.path.slice(baseLink.path.length));
+  }
+  return cloneCfcLabelView(baseView);
+};
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -264,6 +303,7 @@ export function processDefaultValue(
   link: NormalizedFullLink,
   defaultValue: any,
   synced = false,
+  cfcLabelView?: CfcLabelView,
 ): any {
   const schema = link.schema;
   if (!schema) return defaultValue;
@@ -277,6 +317,7 @@ export function processDefaultValue(
       link,
       tx,
       synced,
+      cfcLabelView,
     );
   }
 
@@ -297,6 +338,7 @@ export function processDefaultValue(
         { $stream: true },
         resolvedSchema,
         tx,
+        cfcLabelView,
       );
     } else {
       // If schema indicates this should be some sort of a cell
@@ -310,6 +352,7 @@ export function processDefaultValue(
           resolvedSchema.default,
           resolvedSchema,
           tx,
+          cfcLabelView,
         );
       } else {
         return createCell(
@@ -321,6 +364,7 @@ export function processDefaultValue(
           getTransactionForChildCells(tx),
           synced,
           asCellValues.at(0),
+          cfcLabelView,
         );
       }
     }
@@ -352,6 +396,7 @@ export function processDefaultValue(
             { ...link, schema: propSchema, path: [...link.path, key] },
             defaultValue[key as keyof typeof defaultValue],
             synced,
+            rebaseCfcLabelView(cfcLabelView, [key]),
           );
           processedKeys.add(key);
         } else if (isRecord(propSchema)) {
@@ -366,6 +411,7 @@ export function processDefaultValue(
               { ...link, schema: propSchema, path: [...link.path, key] },
               undefined,
               synced,
+              rebaseCfcLabelView(cfcLabelView, [key]),
             );
           } else if (propSchema.default !== undefined) {
             result[key] = processDefaultValue(
@@ -374,6 +420,7 @@ export function processDefaultValue(
               { ...link, schema: propSchema, path: [...link.path, key] },
               propSchema.default,
               synced,
+              rebaseCfcLabelView(cfcLabelView, [key]),
             );
           } else if (
             resolvedSchema?.required?.includes(key) &&
@@ -385,6 +432,7 @@ export function processDefaultValue(
               { ...link, schema: propSchema, path: [...link.path, key] },
               propSchema.type === "object" ? {} : [],
               synced,
+              rebaseCfcLabelView(cfcLabelView, [key]),
             );
           }
         }
@@ -411,12 +459,20 @@ export function processDefaultValue(
             },
             defaultValue[key as keyof typeof defaultValue],
             synced,
+            rebaseCfcLabelView(cfcLabelView, [key]),
           );
         }
       }
     }
 
-    return annotateWithBackToCellSymbols(result, runtime, link, tx, synced);
+    return annotateWithBackToCellSymbols(
+      result,
+      runtime,
+      link,
+      tx,
+      synced,
+      cfcLabelView,
+    );
   }
 
   // Handle array type defaults
@@ -453,13 +509,28 @@ export function processDefaultValue(
         },
         item,
         synced,
+        rebaseCfcLabelView(cfcLabelView, [String(i)]),
       )
     );
-    return annotateWithBackToCellSymbols(result, runtime, link, tx, synced);
+    return annotateWithBackToCellSymbols(
+      result,
+      runtime,
+      link,
+      tx,
+      synced,
+      cfcLabelView,
+    );
   }
 
   // For primitive types, return as is
-  return annotateWithBackToCellSymbols(defaultValue, runtime, link, tx, synced);
+  return annotateWithBackToCellSymbols(
+    defaultValue,
+    runtime,
+    link,
+    tx,
+    synced,
+    cfcLabelView,
+  );
 }
 
 /** @internal Exported for testing only. */
@@ -494,6 +565,7 @@ function annotateWithBackToCellSymbols(
   link: NormalizedFullLink,
   tx: IExtendedStorageTransaction | undefined,
   synced = false,
+  cfcLabelView?: CfcLabelView,
 ) {
   if (!isRecord(value) || isCell(value)) {
     // We only possibly annotate objects or arrays that _aren't_ cells.
@@ -515,7 +587,14 @@ function annotateWithBackToCellSymbols(
     // Use getTransactionForChildCells so that if this was called from sample(),
     // the resulting cell is still reactive
     value: () =>
-      createCell(runtime, link, getTransactionForChildCells(tx), synced),
+      createCell(
+        runtime,
+        link,
+        getTransactionForChildCells(tx),
+        synced,
+        undefined,
+        cfcLabelView,
+      ),
     enumerable: false,
   });
 
@@ -528,6 +607,8 @@ export interface ValidateAndTransformOptions {
   traverseCells?: boolean;
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
+  /** Labels accumulated by following links before this read. */
+  cfcLabelView?: CfcLabelView;
 }
 
 export function validateAndTransform(
@@ -545,12 +626,7 @@ export function validateAndTransform(
   // Reconstruct doc, path, schema from link and runtime
   const schema = link.schema;
   const resolvedSchema = resolveSchema(schema);
-
-  const objectCreator = new TransformObjectCreator(
-    runtime,
-    tx!,
-    options?.synced ?? false,
-  );
+  let cfcLabelView = cloneCfcLabelView(options?.cfcLabelView);
 
   // For opaque cells, create the cell directly from the current link.
   // We intentionally avoid traversing redirect chains or reading through the
@@ -558,7 +634,13 @@ export function validateAndTransform(
   // the pointed-to value.
   const asCellValues = ContextualFlowControl.getAsCellValues(resolvedSchema);
   if (asCellValues.at(0) === "opaque") {
-    return objectCreator.createObject(
+    return new TransformObjectCreator(
+      runtime,
+      tx!,
+      options?.synced ?? false,
+      link,
+      cfcLabelView,
+    ).createObject(
       { ...link, schema: resolvedSchema },
       undefined,
     );
@@ -567,7 +649,15 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
+  const writeRedirectTraceStart = tx.getCfcState().dereferenceTraces.length;
   const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
+  cfcLabelView = mergeCfcLabelViews([
+    cfcLabelView,
+    cfcLabelViewForDereferenceTraces(
+      tx,
+      tx.getCfcState().dereferenceTraces.slice(writeRedirectTraceStart),
+    ),
+  ]);
 
   const resolvedLinkSchema = resolveSchema(resolvedLink.schema);
   const effectiveSchema = resolvedSchema !== undefined
@@ -588,6 +678,13 @@ export function validateAndTransform(
     ...resolvedLink,
     ...(effectiveSchema !== undefined && { schema: effectiveSchema }),
   };
+  const objectCreator = new TransformObjectCreator(
+    runtime,
+    tx!,
+    options?.synced ?? false,
+    link,
+    cfcLabelView,
+  );
 
   // If we don't have a schema, and we aren't asCell/asStream, use a proxy
   if (
@@ -597,13 +694,22 @@ export function validateAndTransform(
     ) &&
     filteredSchema === undefined
   ) {
-    return createQueryResultProxy(runtime, tx, link);
+    return createQueryResultProxy(runtime, tx, link, 0, false, cfcLabelView);
   }
 
   // Now resolve further links until we get the actual value.
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
+  const valueTraceStart = tx.getCfcState().dereferenceTraces.length;
   const ref = resolveLink(runtime, tx, link);
+  cfcLabelView = mergeCfcLabelViews([
+    cfcLabelView,
+    cfcLabelViewForDereferenceTraces(
+      tx,
+      tx.getCfcState().dereferenceTraces.slice(valueTraceStart),
+    ),
+  ]);
+  objectCreator.setBase(link, cfcLabelView);
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.
@@ -616,6 +722,14 @@ export function validateAndTransform(
     // but x.foo is link to y.baz, we really want y.baz.bar.
     // I'm not currently handling this, because it doesn't come up.
     if (next !== undefined) {
+      cfcLabelView = mergeCfcLabelViews([
+        cfcLabelView,
+        cfcLabelViewForDereference(
+          tx,
+          cfcAddressFromLink(link),
+          cfcAddressFromLink(next),
+        ),
+      ]);
       // We leave the asCell/asStream in the schema, so that createObject
       // knows to create a cell
       const mergedSchema = (next.schema !== undefined)
@@ -630,6 +744,7 @@ export function validateAndTransform(
     if (ref.schema !== undefined) {
       link.schema = mergeSchemaFlags(effectiveSchema!, ref.schema);
     }
+    objectCreator.setBase(link, cfcLabelView);
     return objectCreator.createObject(link, undefined);
   }
 
@@ -670,7 +785,21 @@ class TransformObjectCreator
     private runtime: Runtime,
     private tx: IExtendedStorageTransaction,
     private synced: boolean,
+    private baseLink: NormalizedFullLink,
+    private cfcLabelView: CfcLabelView | undefined,
   ) {
+  }
+
+  setBase(
+    baseLink: NormalizedFullLink,
+    cfcLabelView: CfcLabelView | undefined,
+  ): void {
+    this.baseLink = baseLink;
+    this.cfcLabelView = cloneCfcLabelView(cfcLabelView);
+  }
+
+  private labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
+    return labelViewForLink(this.baseLink, this.cfcLabelView, link);
   }
 
   /**
@@ -743,7 +872,14 @@ class TransformObjectCreator
     link: NormalizedFullLink,
     value: T | undefined,
   ): T | undefined {
-    return processDefaultValue(this.runtime, this.tx, link, value, this.synced);
+    return processDefaultValue(
+      this.runtime,
+      this.tx,
+      link,
+      value,
+      this.synced,
+      this.labelViewFor(link),
+    );
   }
 
   // This is an early pass to see if we should just create a proxy or cell
@@ -758,7 +894,14 @@ class TransformObjectCreator
     // If we have a schema without asCell or asStream, we should annotate the
     // object so we can get back to the cell if needed.
     if (link.schema === undefined || link.schema === true) {
-      return createQueryResultProxy(this.runtime, this.tx, link);
+      return createQueryResultProxy(
+        this.runtime,
+        this.tx,
+        link,
+        0,
+        false,
+        this.labelViewFor(link),
+      );
     } else if (isRecord(link.schema)) {
       const { asCell: _c, asStream: _s, ...restSchema } = link.schema;
       const asCellValues = ContextualFlowControl.getAsCellValues(link.schema);
@@ -779,12 +922,20 @@ class TransformObjectCreator
           getTransactionForChildCells(this.tx),
           this.synced,
           cellKind,
+          this.labelViewFor(link),
         ) as AnyCellWrapping<FabricValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy
       if (ContextualFlowControl.isTrueSchema(link.schema)) {
-        return createQueryResultProxy(this.runtime, this.tx, link);
+        return createQueryResultProxy(
+          this.runtime,
+          this.tx,
+          link,
+          0,
+          false,
+          this.labelViewFor(link),
+        );
       }
       // link.schema is not true, and not asCell/asStream
       // If we're undefined, check for a default and apply that
@@ -796,6 +947,7 @@ class TransformObjectCreator
           link,
           link.schema.default,
           this.synced,
+          this.labelViewFor(link),
         );
       }
       // If we're an object, we may be missing some properties that have a
@@ -830,6 +982,7 @@ class TransformObjectCreator
                 },
                 undefined,
                 this.synced,
+                rebaseCfcLabelView(this.labelViewFor(link), [propName]),
               );
             }
           }
@@ -844,6 +997,7 @@ class TransformObjectCreator
       link,
       this.tx,
       this.synced,
+      this.labelViewFor(link),
     );
   }
 }

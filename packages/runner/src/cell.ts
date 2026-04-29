@@ -101,6 +101,15 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import {
+  type CfcLabelView,
+  cfcLabelViewForDereferenceTraces,
+  cfcLabelViewSymbol,
+  cloneCfcLabelView,
+  getCarriedCfcLabelView,
+  mergeCfcLabelViews,
+  rebaseCfcLabelView,
+} from "./cfc/label-view-state.ts";
 import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -415,6 +424,7 @@ export function createCell<T>(
   tx?: IExtendedStorageTransaction,
   synced = false,
   kind?: CellKind,
+  cfcLabelView?: CfcLabelView,
 ): Cell<T> {
   return new CellImpl(
     runtime,
@@ -423,6 +433,7 @@ export function createCell<T>(
     synced,
     undefined, // No shared causeContainer
     kind,
+    cfcLabelView,
   ) as unknown as Cell<T>; // Cast to set brand
 }
 
@@ -476,6 +487,7 @@ export class CellImpl<T extends FabricValue>
     private synced: boolean = false,
     causeContainer?: CauseContainer,
     kind?: CellKind,
+    private _cfcLabelView?: CfcLabelView,
   ) {
     this._frame = getTopFrame();
 
@@ -495,6 +507,11 @@ export class CellImpl<T extends FabricValue>
     };
 
     this._kind = kind ?? "cell";
+    this._cfcLabelView = cloneCfcLabelView(_cfcLabelView);
+  }
+
+  [cfcLabelViewSymbol](): CfcLabelView | undefined {
+    return cloneCfcLabelView(this._cfcLabelView);
   }
 
   /**
@@ -678,7 +695,7 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       this.link,
       [],
-      { ...options, synced: this.synced },
+      { ...options, synced: this.synced, cfcLabelView: this._cfcLabelView },
     );
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
@@ -708,7 +725,9 @@ export class CellImpl<T extends FabricValue>
     const readTx = this.runtime.readTx(this.tx);
     const nonReactiveTx = createNonReactiveTransaction(readTx);
 
-    return validateAndTransform(this.runtime, nonReactiveTx, this.link);
+    return validateAndTransform(this.runtime, nonReactiveTx, this.link, [], {
+      cfcLabelView: this._cfcLabelView,
+    });
   }
 
   /**
@@ -752,7 +771,9 @@ export class CellImpl<T extends FabricValue>
 
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        result = validateAndTransform(this.runtime, tx, this.link);
+        result = validateAndTransform(this.runtime, tx, this.link, [], {
+          cfcLabelView: this._cfcLabelView,
+        });
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
@@ -1108,6 +1129,7 @@ export class CellImpl<T extends FabricValue>
   key(...keys: PropertyKey[]): Cell<any> {
     let currentLink = this._link;
     let childSchema: JSONSchema | undefined;
+    const childPath = keys.map((key) => key.toString());
 
     for (const key of keys) {
       // Get child schema if we have one
@@ -1142,6 +1164,7 @@ export class CellImpl<T extends FabricValue>
       this.synced,
       this._causeContainer,
       kind,
+      rebaseCfcLabelView(this._cfcLabelView, childPath),
     ) as unknown as Cell<any>;
   }
 
@@ -1166,6 +1189,7 @@ export class CellImpl<T extends FabricValue>
       false, // Reset synced flag, since schema is changing
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
+      this._cfcLabelView,
     ) as unknown as Cell<any>;
   }
 
@@ -1215,6 +1239,7 @@ export class CellImpl<T extends FabricValue>
       false, // Reset synced flag, since schema is changing
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
+      this._cfcLabelView,
     ) as unknown as Cell<T>;
   }
 
@@ -1228,6 +1253,7 @@ export class CellImpl<T extends FabricValue>
       this.synced,
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
+      this._cfcLabelView,
     ) as unknown as Cell<T>;
   }
 
@@ -1265,14 +1291,26 @@ export class CellImpl<T extends FabricValue>
 
   resolveAsCell(): Cell<T> {
     const readTx = this.runtime.readTx(this.tx);
+    const tracesBefore = readTx.getCfcState().dereferenceTraces.length;
     let link: NormalizedFullLink = resolveLink(
       this.runtime,
       readTx,
       this.link,
     );
+    const dereferenceView = cfcLabelViewForDereferenceTraces(
+      readTx,
+      readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
+    );
     const nonReactiveTx = createNonReactiveTransaction(readTx);
     link = maybeConvertArrayPathToDataURILink(nonReactiveTx, link);
-    return createCell(this.runtime, link, this.tx, this.synced);
+    return createCell(
+      this.runtime,
+      link,
+      this.tx,
+      this.synced,
+      undefined,
+      mergeCfcLabelViews([this._cfcLabelView, dereferenceView]),
+    );
   }
 
   getAsQueryResult<Path extends PropertyKey[]>(
@@ -1291,6 +1329,10 @@ export class CellImpl<T extends FabricValue>
       },
       0,
       writable,
+      rebaseCfcLabelView(
+        this._cfcLabelView,
+        subPath.map((p) => p.toString()),
+      ),
     );
   }
 
@@ -2246,6 +2288,7 @@ export function convertCellsToLinks(
   options: {
     includeSchema?: boolean;
     doNotConvertCellResults?: boolean;
+    includeCfcLabelView?: boolean;
   } & SanitizeSchemaForLinksOptions = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
@@ -2260,9 +2303,26 @@ export function convertCellsToLinks(
 
   // Early-return cases
   if (!options.doNotConvertCellResults && isCellResultForDereferencing(value)) {
-    return getCellOrThrow(value).getAsLink(options);
+    const cell = getCellOrThrow(value);
+    const link = cell.getAsLink(options);
+    if (options.includeCfcLabelView) {
+      const cfcLabelView = getCarriedCfcLabelView(cell);
+      if (cfcLabelView) {
+        (link["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView = cfcLabelView;
+      }
+    }
+    return link;
   } else if (isCell(value)) {
-    return value.getAsLink(options);
+    const link = value.getAsLink(options);
+    if (options.includeCfcLabelView) {
+      const cfcLabelView = getCarriedCfcLabelView(value);
+      if (cfcLabelView) {
+        (link["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView = cfcLabelView;
+      }
+    }
+    return link;
   } else if (!(isRecord(value) || isFunction(value))) {
     return value;
   }

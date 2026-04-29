@@ -2357,15 +2357,17 @@ async function handleInvoke(
 
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
+    const concreteResult = result.resolveAsCell();
+    const concreteResultSchema = getCellSchema(concreteResult) ?? resultSchema;
     const serialized = serializeForLLMObservation({
-      value: result.get(),
-      schema: resultSchema,
+      value: concreteResult.get(),
+      schema: concreteResultSchema,
       seen: new Set(),
       contextSpace: space,
-      rootLink: result.getAsNormalizedFullLink(),
+      rootLink: concreteResult.getAsNormalizedFullLink(),
       labelView: useResultSchemaForObservation
         ? undefined
-        : cfcLabelViewForCell(result),
+        : cfcLabelViewForCell(concreteResult),
       observationMaxConfidentiality,
     });
     return {
@@ -2374,7 +2376,7 @@ async function handleInvoke(
         value: {
           "@resultLocation": resultLink,
           result: serialized.value,
-          schema: resultSchema,
+          schema: concreteResultSchema,
         },
       },
       observedConfidentiality: serialized.observedConfidentiality,

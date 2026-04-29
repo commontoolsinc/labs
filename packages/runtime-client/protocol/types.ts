@@ -23,7 +23,9 @@ export type { CfcLabelView };
 
 export type MessageId = number;
 
-export type CellRef = NormalizedFullLink;
+export type CellRef = NormalizedFullLink & {
+  cfcLabelView?: CfcLabelView;
+};
 
 export type PageRef = {
   cell: CellRef;

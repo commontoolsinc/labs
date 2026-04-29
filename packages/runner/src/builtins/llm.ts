@@ -85,7 +85,7 @@ function summarizeGenerateObjectRequest(details: {
 }
 
 function collectCellConfidentiality(cell: Cell<any>): readonly unknown[] {
-  const labelView = cfcLabelViewForCell(cell);
+  const labelView = cfcLabelViewForCell(cell.resolveAsCell());
   if (labelView === undefined) {
     return [];
   }

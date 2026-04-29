@@ -432,7 +432,72 @@ describe("RuntimeProcessor CFC label IPC", () => {
     });
   });
 
-  it("syncs a result cell before looking up CFC from its source", async () => {
+  it("returns label views on resolved cell refs", () => {
+    const sourceRef: CellRef = {
+      id: "of:cfc-label-source" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      type: "application/json",
+      path: [],
+    };
+    const resolvedRef: CellRef = {
+      id: "of:cfc-label-resolved" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      type: "application/json",
+      path: [],
+    };
+    const resolvedCell = {
+      getAsLink: () => ({
+        "/": {
+          "link@1": resolvedRef,
+        },
+      }),
+      getAsNormalizedFullLink: () => resolvedRef,
+      runtime: {
+        readTx: () => ({
+          readOrThrow: () => ({
+            value: "resolved value",
+            cfc: {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: { integrity: ["authored-by-bob"] },
+                }],
+              },
+            },
+          }),
+        }),
+      },
+    };
+    const sourceCell = {
+      resolveAsCell: () => resolvedCell,
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => sourceCell,
+      },
+    } as unknown as RuntimeProcessor;
+
+    expect(RuntimeProcessor.prototype.handleCellResolveAsCell.call(processor, {
+      type: RequestType.CellResolveAsCell,
+      cell: sourceRef,
+    })).toEqual({
+      cell: {
+        ...resolvedRef,
+        cfcLabelView: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: { integrity: ["authored-by-bob"] },
+          }],
+        },
+      },
+    });
+  });
+
+  it("does not look up CFC labels from a result cell source", async () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -495,13 +560,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
         cell: resultRef,
       }),
     )).resolves.toEqual({
-      cfcLabel: {
-        version: 1,
-        entries: [{
-          path: [],
-          label: { confidentiality: ["source-label"] },
-        }],
-      },
+      cfcLabel: undefined,
     });
     expect(resultSynced).toBe(true);
     expect(sourceSynced).toBe(true);

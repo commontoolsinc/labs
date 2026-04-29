@@ -1893,13 +1893,14 @@ describe("generateObject with tools", () => {
 
       const liveResult = generatedResult.withTx();
       await liveResult.sync();
-      expect(liveResult.key("result").get()).toEqual({
+      const resolvedResult = liveResult.key("result").resolveAsCell();
+      expect(resolvedResult.get()).toEqual({
         action: "reject",
         approved: false,
         confidence: 0.91,
         reasoning: "The briefing was not approved.",
       });
-      expect(cfcLabelViewForCell(liveResult.key("result"))).toMatchObject({
+      expect(cfcLabelViewForCell(resolvedResult)).toMatchObject({
         entries: expect.arrayContaining([
           {
             path: ["action"],

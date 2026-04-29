@@ -11,6 +11,7 @@ import {
   type SigilLink,
   type URI,
 } from "@commonfabric/runner/shared";
+import { rebaseCfcLabelView } from "@commonfabric/runner/cfc";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 import {
   type CellRef,
@@ -279,6 +280,9 @@ export class CellHandle<T = unknown> {
       path: [...this.#ref.path, key],
       type: this.#ref.type,
       // Child schema is unknown, so we don't include it
+      ...(this.#ref.cfcLabelView !== undefined && {
+        cfcLabelView: rebaseCfcLabelView(this.#ref.cfcLabelView, [key]),
+      }),
     };
   }
 
@@ -287,7 +291,15 @@ export class CellHandle<T = unknown> {
     // and dereferences it (e.g., when passed through event.detail.sourceCell)
     return {
       "/": {
-        [LINK_V1_TAG]: { ...this.ref() },
+        [LINK_V1_TAG]: {
+          id: this.#ref.id,
+          space: this.#ref.space,
+          path: this.#ref.path,
+          type: this.#ref.type,
+          ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
+          ...(this.#ref.overwrite !== undefined &&
+            { overwrite: this.#ref.overwrite }),
+        } as never,
       },
     };
   }
@@ -500,6 +512,11 @@ function parseAsCellRef(
       path: (linkData.path ?? []).map((p) => p.toString()),
       type: "application/json",
       ...(linkData.schema !== undefined && { schema: linkData.schema }),
+      ...((linkData as { cfcLabelView?: CfcLabelView }).cfcLabelView !==
+          undefined && {
+        cfcLabelView: (linkData as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView,
+      }),
     };
   } else if (isLegacyAlias(value)) {
     const alias = value.$alias;
