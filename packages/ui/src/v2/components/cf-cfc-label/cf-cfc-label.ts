@@ -249,10 +249,8 @@ export class CFCFCLabel extends BaseElement {
   }
 
   private refreshForCurrentValue(): void {
-    const hasSubscription = this.observeValue(this.value);
-    if (!hasSubscription) {
-      void this.refreshLabel();
-    }
+    this.observeValue(this.value);
+    void this.refreshLabel();
   }
 
   private observeValue(value: unknown): boolean {

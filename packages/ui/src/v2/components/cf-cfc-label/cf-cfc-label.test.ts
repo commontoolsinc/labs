@@ -87,7 +87,7 @@ describe("CFCFCLabel", () => {
 
     element.value = {
       getCfcLabel: () =>
-        Promise.resolve(labelCalls++ === 0 ? undefined : cfcLabel),
+        Promise.resolve(labelCalls++ < 2 ? undefined : cfcLabel),
       subscribe: (callback: () => void) => {
         emitUpdate = () => callback();
         callback();
@@ -101,6 +101,25 @@ describe("CFCFCLabel", () => {
       throw new Error("expected cf-cfc-label to subscribe to the bound cell");
     }
     emitUpdate();
+    await Promise.resolve();
+
+    expect(element.cfcLabel).toEqual(cfcLabel);
+  });
+
+  it("loads the initial label for a subscribable bound value", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["prompt-influence"] },
+      }],
+    };
+    const element = new CFCFCLabel();
+
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+      subscribe: () => () => {},
+    };
     await Promise.resolve();
 
     expect(element.cfcLabel).toEqual(cfcLabel);
