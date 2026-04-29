@@ -1910,7 +1910,7 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
         "sha256:17bc0d7e89ddefaf38bce5f3bedcd6309b9453c5d85dafd24d1243bb1e505e8c",
     },
     detail: "bash would require direct-command authorization in enforce modes",
-    at: "2026-04-15T22:30:04.000Z",
+    at: "2026-04-15T22:30:05.000Z",
   }]);
   assertEquals(
     JSON.stringify(result.runState.policyEvents[0]?.toolInputSummary)

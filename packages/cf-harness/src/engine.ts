@@ -435,7 +435,7 @@ export class CfHarnessEngine {
       this.#runState,
       snapshot,
       cfcPolicySnapshotPath,
-      snapshot.generatedAt,
+      this.#now(),
     );
     await this.persistRunState();
     return cfcPolicySnapshotPath;

@@ -1,5 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { normalize } from "@std/path/posix";
+import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import { createHarnessCfcPolicySnapshot } from "../src/contracts/cfc-policy-snapshot.ts";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
@@ -174,6 +176,78 @@ Deno.test("CfHarnessEngine records prompt slot binding into run state", () => {
 
   assertEquals(engine.getRunState().promptSlotBinding, promptSlotBinding);
   assertEquals(engine.getRunState().updatedAt, "2026-04-17T19:00:01.000Z");
+});
+
+Deno.test("CfHarnessEngine stamps policy snapshot state changes with mutation time", async () => {
+  const persistedStates: HarnessRunState[] = [];
+  const runRoot = "/tmp/cf-harness-artifacts/run-policy-time";
+  const artifactStore: HarnessArtifactStore = {
+    artifactRoot: "/tmp/cf-harness-artifacts",
+    runRoot,
+    persistRunState(state) {
+      persistedStates.push(structuredClone(state));
+      return Promise.resolve(`${runRoot}/run-state.json`);
+    },
+    persistTranscript() {
+      return Promise.resolve(`${runRoot}/transcript.json`);
+    },
+    persistCapabilitySnapshot() {
+      return Promise.resolve(`${runRoot}/capabilities.json`);
+    },
+    persistCfcPolicySnapshot() {
+      return Promise.reject(new Error("snapshot persist boom"));
+    },
+    persistRunReport() {
+      return Promise.resolve(`${runRoot}/run-report.json`);
+    },
+    persistToolOutput() {
+      return Promise.resolve(`${runRoot}/tool-output.json`);
+    },
+  };
+  const engine = new CfHarnessEngine({
+    artifactStore,
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: "run-policy-time",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-04-17T20:30:00.000Z",
+        "2026-04-17T20:30:01.000Z",
+        "2026-04-17T20:30:02.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-17T20:30:03.000Z";
+    })(),
+  });
+  const snapshot = createHarnessCfcPolicySnapshot({
+    runId: "run-policy-time",
+    generatedAt: "2026-04-17T20:00:00.000Z",
+    cfcEnforcementMode: "observe",
+    cfcEnforcementModeSource: "default",
+    promptSlotBindingSource: "absent",
+    parentToolAllowance: "restricted",
+    allowedToolIds: ["read_file"],
+    allowedSubagentProfiles: [],
+    subagentProfileConfigs: [],
+  });
+
+  const snapshotPath = await engine.persistCfcPolicySnapshot(snapshot);
+
+  assertEquals(snapshotPath, undefined);
+  assertEquals(engine.getRunState().cfcPolicySnapshot, snapshot);
+  assertEquals(engine.getRunState().cfcPolicySnapshotPath, undefined);
+  assertEquals(
+    engine.getRunState().failureRecords?.[0]?.source,
+    "policy_snapshot",
+  );
+  assertEquals(
+    engine.getRunState().failureRecords?.[0]?.at,
+    "2026-04-17T20:30:01.000Z",
+  );
+  assertEquals(engine.getRunState().updatedAt, "2026-04-17T20:30:02.000Z");
+  assertEquals(
+    persistedStates.at(-1)?.updatedAt,
+    "2026-04-17T20:30:02.000Z",
+  );
 });
 
 Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors", async () => {

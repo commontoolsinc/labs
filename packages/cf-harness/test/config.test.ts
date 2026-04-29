@@ -127,6 +127,30 @@ Deno.test("resolveCfcEnforcementModeSource identifies the winning mode source", 
   assertEquals(resolveCfcEnforcementModeSource({}), "default");
 });
 
+Deno.test("resolveCfcEnforcementModeSource treats null like absent mode values", () => {
+  assertEquals(
+    resolveCfcEnforcementMode({
+      cfcEnforcementModeOverride: null as unknown as CfcEnforcementMode,
+      cfcEnforcementMode: "observe",
+    }),
+    "observe",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      cfcEnforcementModeOverride: null as unknown as CfcEnforcementMode,
+      cfcEnforcementMode: "observe",
+    }),
+    "explicit-config",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      cfcEnforcementMode: null as unknown as CfcEnforcementMode,
+      inheritedCfcEnforcementMode: "enforce-explicit",
+    }),
+    "inherited",
+  );
+});
+
 Deno.test("resolveGatewayAuthMode prefers explicit override", () => {
   assertEquals(
     resolveGatewayAuthMode({

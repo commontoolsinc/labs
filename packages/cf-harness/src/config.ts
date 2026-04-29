@@ -101,13 +101,13 @@ export const resolveCfcEnforcementModeSource = (
   const parsedOverride = typeof options.cfcEnforcementModeOverride === "string"
     ? parseCfcEnforcementMode(options.cfcEnforcementModeOverride)
     : options.cfcEnforcementModeOverride;
-  if (parsedOverride !== undefined) {
+  if (parsedOverride != null) {
     return "override";
   }
-  if (options.cfcEnforcementMode !== undefined) {
+  if (options.cfcEnforcementMode != null) {
     return "explicit-config";
   }
-  if (options.inheritedCfcEnforcementMode !== undefined) {
+  if (options.inheritedCfcEnforcementMode != null) {
     return "inherited";
   }
   if (parseCfcEnforcementMode(options.runManifest?.cfc?.enforcementMode)) {

@@ -697,6 +697,7 @@ export class CfHarnessPromptLoop {
   readonly gatewayClient: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
   readonly #allowedToolIds: ReadonlySet<BuiltinToolId>;
+  readonly #parentToolAllowanceMode: HarnessParentToolAllowance;
   readonly #allowedSubagentProfiles: ReadonlySet<HarnessSubagentProfile>;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
@@ -710,6 +711,9 @@ export class CfHarnessPromptLoop {
         fetchFn: options.fetchFn,
       });
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
+    this.#parentToolAllowanceMode = options.allowedToolIds === undefined
+      ? "all-builtins"
+      : "restricted";
     this.#allowedToolIds = new Set(
       options.allowedToolIds ?? DEFAULT_PROMPT_LOOP_TOOL_IDS,
     );
@@ -722,7 +726,7 @@ export class CfHarnessPromptLoop {
   }
 
   #parentToolAllowance(): HarnessParentToolAllowance {
-    return this.#allowedToolIds === undefined ? "all-builtins" : "restricted";
+    return this.#parentToolAllowanceMode;
   }
 
   #allowedToolIdsForSnapshot(): readonly BuiltinToolId[] {
