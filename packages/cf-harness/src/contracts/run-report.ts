@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessCfcPolicySnapshot } from "./cfc-policy-snapshot.ts";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
 import type { HarnessPolicyEvent, HarnessToolInputSummary } from "./policy.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
@@ -84,6 +85,7 @@ export interface HarnessRunReport {
   artifactRoot?: string;
   transcriptPath?: string;
   promptSlotBinding?: PromptSlotBinding;
+  cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
   primaryFailure?: HarnessFailureRecord;
   failureRecords?: HarnessFailureRecord[];
   policyEventCounts: {
@@ -110,6 +112,7 @@ export interface CreateHarnessRunReportOptions {
     artifactRoot?: string;
     transcriptPath?: string;
     promptSlotBinding?: PromptSlotBinding;
+    cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
     primaryFailure?: HarnessFailureRecord;
     failureRecords?: HarnessFailureRecord[];
     policyEvents: HarnessPolicyEvent[];
@@ -260,6 +263,9 @@ export const createHarnessRunReport = (
       : {}),
     ...(options.runState.promptSlotBinding !== undefined
       ? { promptSlotBinding: options.runState.promptSlotBinding }
+      : {}),
+    ...(options.runState.cfcPolicySnapshot !== undefined
+      ? { cfcPolicySnapshot: options.runState.cfcPolicySnapshot }
       : {}),
     ...(options.runState.primaryFailure !== undefined
       ? { primaryFailure: options.runState.primaryFailure }

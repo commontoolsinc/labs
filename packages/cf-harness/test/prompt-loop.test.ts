@@ -95,7 +95,7 @@ class FailingArtifactStore implements HarnessArtifactStore {
 
   persistRunState(): Promise<string> {
     this.runStatePersistCount += 1;
-    if (this.runStatePersistCount >= 3) {
+    if (this.runStatePersistCount >= 4) {
       return Promise.reject(new Error("persist boom"));
     }
     return Promise.resolve(`${this.runRoot}/run-state.json`);
@@ -107,6 +107,10 @@ class FailingArtifactStore implements HarnessArtifactStore {
 
   persistCapabilitySnapshot(): Promise<string> {
     return Promise.resolve(`${this.runRoot}/capabilities.json`);
+  }
+
+  persistCfcPolicySnapshot(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/policy-snapshot.json`);
   }
 
   persistRunReport(): Promise<string> {
@@ -679,6 +683,22 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
     ["bash", "read_file", "write_file"],
+  );
+  assertEquals(result.runState.cfcPolicySnapshot?.parentTools, {
+    allowance: "restricted",
+    allowedToolIds: ["delegate_task"],
+  });
+  assertEquals(
+    result.runState.cfcPolicySnapshot?.subagents.allowedProfiles,
+    ["default"],
+  );
+  assertEquals(
+    result.runState.cfcPolicySnapshot?.promptSlot.bindingSource,
+    "run-options",
+  );
+  assertEquals(
+    result.runState.cfcPolicySnapshot?.promptSlot.binding,
+    directPromptSlotBinding,
   );
   assertEquals(
     output.subagent.childRunId,
@@ -1730,7 +1750,7 @@ Deno.test("CfHarnessPromptLoop preserves the original error when failure persist
     Error,
     "gateway boom",
   );
-  assertEquals(artifactStore.runStatePersistCount, 3);
+  assertEquals(artifactStore.runStatePersistCount, 4);
   assertEquals(loop.engine.getRunState().status, "failed");
 });
 

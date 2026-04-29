@@ -20,6 +20,11 @@ import {
   type ObservationDenied,
 } from "./contracts/observation.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import {
+  createHarnessCfcPolicySnapshot,
+  type HarnessParentToolAllowance,
+  type HarnessPromptSlotBindingSource,
+} from "./contracts/cfc-policy-snapshot.ts";
 import type {
   HarnessAssistantTranscriptMessage,
   HarnessToolCall,
@@ -716,6 +721,57 @@ export class CfHarnessPromptLoop {
     );
   }
 
+  #parentToolAllowance(): HarnessParentToolAllowance {
+    return this.#allowedToolIds === undefined ? "all-builtins" : "restricted";
+  }
+
+  #allowedToolIdsForSnapshot(): readonly BuiltinToolId[] {
+    return this.#allowedToolIds === undefined
+      ? BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId)
+      : [...this.#allowedToolIds];
+  }
+
+  #allowedSubagentProfilesForSnapshot(): readonly HarnessSubagentProfile[] {
+    return [...this.#allowedSubagentProfiles];
+  }
+
+  async #persistCfcPolicySnapshot(
+    promptSlotBinding: PromptSlotBinding | undefined,
+    promptSlotBindingSource: HarnessPromptSlotBindingSource,
+  ): Promise<void> {
+    const runState = this.engine.getRunState();
+    const cfc = runState.capabilitySnapshot?.cfc;
+    const allowedSubagentProfiles = this.#allowedSubagentProfilesForSnapshot();
+    await this.engine.persistCfcPolicySnapshot(
+      createHarnessCfcPolicySnapshot({
+        runId: runState.runId,
+        generatedAt: runState.updatedAt,
+        cfcEnforcementMode: runState.cfcEnforcementMode,
+        cfcEnforcementModeSource: this.engine.config.cfcEnforcementModeSource,
+        runManifest: runState.runManifest,
+        runManifestPath: runState.runManifestPath,
+        promptSlotBinding,
+        promptSlotBindingSource,
+        parentToolAllowance: this.#parentToolAllowance(),
+        allowedToolIds: this.#allowedToolIdsForSnapshot(),
+        allowedSubagentProfiles,
+        subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
+          getHarnessSubagentProfileConfig(profile)
+        ),
+        ...(cfc?.absenceBehavior !== undefined
+          ? { absenceBehavior: cfc.absenceBehavior }
+          : {}),
+        ...(cfc?.substrateStatus !== undefined
+          ? { substrateStatus: cfc.substrateStatus }
+          : {}),
+        ...(cfc?.sandbox !== undefined ? { sandbox: cfc.sandbox } : {}),
+        ...(cfc?.protectedXattrs !== undefined
+          ? { protectedXattrs: cfc.protectedXattrs }
+          : {}),
+      }),
+    );
+  }
+
   async runPrompt(
     options: RunHarnessPromptOptions,
   ): Promise<HarnessPromptLoopResult> {
@@ -739,6 +795,12 @@ export class CfHarnessPromptLoop {
     const initialRunState = this.engine.getRunState();
     const model = options.model ?? initialRunState.model ??
       this.engine.config.model;
+    const promptSlotBindingSource: HarnessPromptSlotBindingSource =
+      options.promptSlotBinding !== undefined
+        ? "run-options"
+        : initialRunState.promptSlotBinding !== undefined
+        ? "run-state"
+        : "absent";
     const promptSlotBinding = options.promptSlotBinding ??
       initialRunState.promptSlotBinding;
     if (model === undefined) {
@@ -770,6 +832,10 @@ export class CfHarnessPromptLoop {
     if (options.promptSlotBinding !== undefined) {
       this.engine.setPromptSlotBinding(options.promptSlotBinding);
     }
+    await this.#persistCfcPolicySnapshot(
+      promptSlotBinding,
+      promptSlotBindingSource,
+    );
     await this.engine.persistRunState();
     await this.engine.persistTranscript(transcript);
     const initialTranscriptAt = this.engine.getRunState().updatedAt;

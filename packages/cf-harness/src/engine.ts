@@ -16,6 +16,7 @@ import {
   type HarnessRunState,
   type HarnessRunTerminalReason,
   setHarnessCapabilitySnapshot,
+  setHarnessCfcPolicySnapshot,
   setHarnessPromptSlotBinding,
   setHarnessRunCurrentDir,
   setHarnessRunManifestPath,
@@ -36,6 +37,7 @@ import {
   createHarnessPolicyEvent,
   type HarnessPolicyEvent,
 } from "./contracts/policy.ts";
+import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
@@ -407,6 +409,36 @@ export class CfHarnessEngine {
       await this.persistRunState();
     }
     return runReportPath;
+  }
+
+  async persistCfcPolicySnapshot(
+    snapshot: HarnessCfcPolicySnapshot,
+  ): Promise<string | undefined> {
+    let cfcPolicySnapshotPath: string | undefined;
+    try {
+      cfcPolicySnapshotPath = await this.artifactStore
+        ?.persistCfcPolicySnapshot(
+          snapshot,
+        );
+    } catch (error) {
+      const now = this.#now();
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        classifyHarnessRunError(error, {
+          at: now,
+          source: "policy_snapshot",
+        }),
+        now,
+      );
+    }
+    this.#runState = setHarnessCfcPolicySnapshot(
+      this.#runState,
+      snapshot,
+      cfcPolicySnapshotPath,
+      snapshot.generatedAt,
+    );
+    await this.persistRunState();
+    return cfcPolicySnapshotPath;
   }
 
   async ensureDiagnosticsInitialized(): Promise<HarnessRunState> {
