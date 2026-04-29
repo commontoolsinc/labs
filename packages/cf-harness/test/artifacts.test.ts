@@ -904,21 +904,15 @@ Deno.test({
         throw new Error("expected sanitized parent failure summary");
       }
 
-      assertEquals(delegateToolOutput.subagent.runState.failureCount, 1);
+      assertEquals(delegateToolOutput.subagent.runState.failureCount, 2);
       assertEquals(parentFailure.type, "cf-harness.subagent-failure-summary");
-      assertEquals(parentFailure.kind, "missing_binary");
-      assertEquals(parentFailure.source, "tool_output");
+      assertEquals(parentFailure.kind, "tool_not_allowed");
+      assertEquals(parentFailure.source, "policy_event");
       assertEquals(parentFailure.toolId, "bash");
-      assertEquals(
-        parentFailure.outputId,
-        createToolOutputId(
-          "run-subagent-sanitized-failure.subagent.1",
-          "bash",
-          1,
-        ),
-      );
-      assertEquals(parentFailure.commandName, "secret-child-command");
-      assertEquals(parentFailure.exitCode, 127);
+      assertEquals(parentFailure.toolCallId, "call-child-bash-failure");
+      assertEquals("outputId" in parentFailure, false);
+      assertEquals("commandName" in parentFailure, false);
+      assertEquals("exitCode" in parentFailure, false);
       assertEquals("command" in parentFailure, false);
       assertEquals("detail" in parentFailure, false);
       assertEquals("at" in parentFailure, false);
@@ -937,15 +931,28 @@ Deno.test({
           | undefined,
       );
 
-      assertEquals(childState.primaryFailure?.command, rawChildCommand);
-      assertEquals(childState.primaryFailure?.kind, "missing_binary");
+      assertEquals(childState.primaryFailure?.kind, "tool_not_allowed");
       assertEquals(
-        childState.primaryFailure?.detail.includes(
+        JSON.stringify(childState.primaryFailure).includes(rawChildCommand),
+        false,
+      );
+      assertEquals(childState.failureRecords?.[0]?.kind, "missing_binary");
+      assertEquals(childState.failureRecords?.[0]?.command, rawChildCommand);
+      assertEquals(
+        childState.failureRecords?.[0]?.detail.includes(
           "secret-child-command",
         ),
         true,
       );
-      assertEquals(childState.failureRecords?.[0]?.command, rawChildCommand);
+      assertEquals(childState.failureRecords?.[1]?.kind, "tool_not_allowed");
+      assertEquals(childState.failureRecords?.[1]?.source, "policy_event");
+      assertEquals(childState.failureRecords?.[1]?.toolId, "bash");
+      assertEquals(
+        JSON.stringify(childState.failureRecords?.[1]).includes(
+          rawChildCommand,
+        ),
+        false,
+      );
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }

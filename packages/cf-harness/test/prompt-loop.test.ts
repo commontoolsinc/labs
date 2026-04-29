@@ -2042,12 +2042,7 @@ Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforc
 
   const result = await loop.runPrompt({
     prompt: "Run a direct command.",
-    promptSlotBinding: {
-      type: "cf-harness.prompt-slot-binding",
-      role: "direct-command",
-      kernelName: "test",
-      surface: "test",
-    },
+    promptSlotBinding: directPromptSlotBinding,
   });
 
   const toolMessage = result.transcript.at(-2);
@@ -2123,12 +2118,7 @@ Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdou
 
   const result = await loop.runPrompt({
     prompt: "Run a direct command.",
-    promptSlotBinding: {
-      type: "cf-harness.prompt-slot-binding",
-      role: "direct-command",
-      kernelName: "test",
-      surface: "test",
-    },
+    promptSlotBinding: directPromptSlotBinding,
   });
 
   const toolMessage = result.transcript.at(-2);
