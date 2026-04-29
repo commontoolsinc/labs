@@ -70,6 +70,7 @@ export const LLMDialogResultSchema = internSchema(
             path: { type: "string" },
             name: { type: "string" },
           },
+          required: ["path", "name"],
         },
       },
     },
