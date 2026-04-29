@@ -7,7 +7,7 @@
  * WeakMap caching.
  *
  * Used by `schema-hash.ts` as the legacy dispatch target; will be
- * replaced by canonical hashing (via `hashOfModern`) behind a flag.
+ * replaced by `hashOfModern` behind a flag.
  */
 
 import type { JSONSchema } from "@commonfabric/api";

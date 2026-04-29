@@ -1,13 +1,11 @@
 /**
- * Canonical hash of an arbitrary value, producing a deterministic digest
- * based on the value's logical structure.
+ * Hash of an arbitrary value, producing a deterministic digest based on the
+ * value's logical structure.
  *
  * Replaces merkle-reference's CID-based hashing. Traverses the value tree
  * directly (no intermediate serialization) and feeds type-tagged data into
  * a single SHA-256 context. See Section 6 of the formal spec and the
  * byte-level spec for the full algorithm.
- *
- * Gated behind `ExperimentalOptions.modernHash`.
  */
 import {
   createHasher,
@@ -536,8 +534,8 @@ function hashOfModernInternal(
 }
 
 /**
- * Compute the canonical SHA-256 hash of a `FabricValue`. Returns a
- * `FabricHash` with algorithm tag `fid1` (fabric ID, v1).
+ * Compute the SHA-256 hash of a `FabricValue`. Returns a `FabricHash` with
+ * algorithm tag `fid1` (fabric ID, v1).
  * The caller (`hashOf()`) extracts the raw digest via `.bytes` for
  * `Reference.fromDigest()`.
  *

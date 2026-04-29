@@ -1,9 +1,5 @@
 /**
- * Hashing Performance Benchmarks: Legacy (merkle-reference) vs. Modern
- *
- * Compares the two hashing paths used by `hashOf()`:
- * - Legacy: merkle-reference tree builder with primitive LRU + WeakMap caching
- * - Modern: `hashOfModern()` single-pass incremental SHA-256
+ * Hashing Performance Benchmarks
  *
  * Run with: deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/hashing-bench.ts
  */
@@ -85,7 +81,7 @@ const assertion16KB = {
   is: { content: "X".repeat(16 * 1024 - 100), id: "bench-id" },
 };
 
-// Warm up both paths to avoid measuring JIT compilation
+// Warm up to avoid measuring JIT compilation
 for (let i = 0; i < 20; i++) {
   hashOf(smallObject);
 }
@@ -95,7 +91,7 @@ for (let i = 0; i < 20; i++) {
 // ==========================================================================
 
 Deno.bench({
-  name: "canonical hashOf() - small object (5 keys)",
+  name: "small object (5 keys)",
   group: "small-object",
   fn(b) {
     b.start();
@@ -105,7 +101,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - medium object (15 keys, 2-level)",
+  name: "medium object (15 keys, 2-level)",
   group: "medium-object",
   fn(b) {
     b.start();
@@ -115,7 +111,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - large tree (~364 nodes)",
+  name: "large tree (~364 nodes)",
   group: "large-tree",
   fn(b) {
     b.start();
@@ -125,7 +121,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - small array (5 elements)",
+  name: "small array (5 elements)",
   group: "small-array",
   fn(b) {
     b.start();
@@ -135,7 +131,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - large array (200 objects)",
+  name: "large array (200 objects)",
   group: "large-array",
   fn(b) {
     b.start();
@@ -145,7 +141,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - repeated subtrees (50 items, 1 shared)",
+  name: "repeated subtrees (50 items, 1 shared)",
   group: "repeated-subtrees",
   fn(b) {
     b.start();
@@ -155,7 +151,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - unclaimed {the, of}",
+  name: "unclaimed {the, of}",
   group: "unclaimed",
   fn(b) {
     b.start();
@@ -165,7 +161,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - 16KB assertion",
+  name: "16KB assertion",
   group: "assertion-16kb",
   fn(b) {
     b.start();
@@ -208,7 +204,7 @@ function freshAssertion16KB() {
 }
 
 Deno.bench({
-  name: "canonical hashOf() - small object (5 keys, fresh)",
+  name: "small object (5 keys, fresh)",
   group: "small-object-fresh",
   fn(b) {
     const data = freshSmallObject();
@@ -219,7 +215,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - medium object (15 keys, fresh)",
+  name: "medium object (15 keys, fresh)",
   group: "medium-object-fresh",
   fn(b) {
     const data = freshMediumObject();
@@ -230,7 +226,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - unclaimed {the, of} (fresh)",
+  name: "unclaimed {the, of} (fresh)",
   group: "unclaimed-fresh",
   fn(b) {
     const data = freshUnclaimedFact();
@@ -241,7 +237,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - 16KB assertion (fresh)",
+  name: "16KB assertion (fresh)",
   group: "assertion-16kb-fresh",
   fn(b) {
     const data = freshAssertion16KB();
@@ -261,7 +257,7 @@ for (let i = 0; i < 100; i += 3) {
 }
 
 Deno.bench({
-  name: "hashOfModern() - sparse array (100 slots, 34 filled)",
+  name: "sparse array (100 slots, 34 filled)",
   group: "sparse-array",
   fn() {
     hashOfModern(sparseArray);
@@ -306,7 +302,7 @@ for (let i = 0; i < 20; i++) {
 }
 
 Deno.bench({
-  name: "canonical hashOf() - frozen small flat (5 keys, WeakMap cached)",
+  name: "frozen small flat (5 keys, WeakMap cached)",
   group: "frozen-small-flat",
   fn(b) {
     b.start();
@@ -316,7 +312,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - frozen nested (3-level, WeakMap cached)",
+  name: "frozen nested (3-level, WeakMap cached)",
   group: "frozen-nested",
   fn(b) {
     b.start();
@@ -326,7 +322,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - frozen array (6 elements, WeakMap cached)",
+  name: "frozen array (6 elements, WeakMap cached)",
   group: "frozen-array",
   fn(b) {
     b.start();
@@ -336,7 +332,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - frozen object+arrays (WeakMap cached)",
+  name: "frozen object+arrays (WeakMap cached)",
   group: "frozen-obj-arrays",
   fn(b) {
     b.start();
@@ -346,7 +342,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - frozen large tree (~364 nodes, WeakMap cached)",
+  name: "frozen large tree (~364 nodes, WeakMap cached)",
   group: "frozen-large-tree",
   fn(b) {
     b.start();
@@ -360,7 +356,7 @@ Deno.bench({
 // ==========================================================================
 
 Deno.bench({
-  name: "canonical hashOf() - frozen small flat (fresh)",
+  name: "frozen small flat (fresh)",
   group: "frozen-small-flat-fresh",
   fn(b) {
     const data = deepFreeze({
@@ -377,7 +373,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - frozen nested (fresh)",
+  name: "frozen nested (fresh)",
   group: "frozen-nested-fresh",
   fn(b) {
     const data = deepFreeze({
@@ -392,7 +388,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - frozen large tree (fresh)",
+  name: "frozen large tree (fresh)",
   group: "frozen-large-tree-fresh",
   fn(b) {
     const data = deepFreeze(makeLargeNestedTree(6, 3));
@@ -417,7 +413,7 @@ for (let i = 0; i < 20; i++) {
 }
 
 Deno.bench({
-  name: "canonical hashOf() - frozen {the, of} (WeakMap cached)",
+  name: "frozen {the, of} (WeakMap cached)",
   group: "frozen-the-of",
   fn(b) {
     b.start();
@@ -427,7 +423,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonical hashOf() - frozen {the, of} (fresh)",
+  name: "frozen {the, of} (fresh)",
   group: "frozen-the-of-fresh",
   fn(b) {
     const data = Object.freeze({

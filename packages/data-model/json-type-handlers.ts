@@ -181,9 +181,9 @@ export const UndefinedHandler: TypeHandler = {
  * base64 string encoding the bigint's two's-complement big-endian byte
  * representation. Wire format: `{ "/BigInt@1": "<base64>" }`.
  *
- * The byte encoding is the same one used by the canonical hash (Section 3.7
- * of the byte-level spec): minimal two's-complement big-endian, with sign
- * extension as needed.
+ * The byte encoding is the same one used by the hash (Section 3.7 of the
+ * byte-level spec): minimal two's-complement big-endian, with sign extension
+ * as needed.
  */
 export const BigIntHandler: TypeHandler = {
   tag: TAGS.BigInt,

@@ -85,7 +85,7 @@ export const claim = async <Access extends Invocation>(
         availableKeys.length > 0 ? availableKeys.join(", ") : "(none)"
       }`,
     ];
-    // Detect legacy-vs-canonical hash format mismatch
+    // Detect legacy-vs-modern hash format mismatch
     const claimIsModern = claim.includes(":");
     const keysAreModern = availableKeys.some((k) => k.includes(":"));
     if (claimIsModern !== keysAreModern && availableKeys.length > 0) {

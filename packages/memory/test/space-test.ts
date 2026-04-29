@@ -749,8 +749,8 @@ describe("space-test", () => {
       actual: { ...v3, since: 2 },
     });
 
-    // Use string equality instead of assertMatch because canonical hashing
-    // produces base64 strings with regex-special characters (e.g. '+').
+    // Use string equality instead of assertMatch because hashing produces
+    // base64 strings with regex-special characters (e.g. '+').
     assertEquals(
       result.error.message,
       `The ${the} of ${doc} in ${space.did()} was expected to be ${

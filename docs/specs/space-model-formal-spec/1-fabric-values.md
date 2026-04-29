@@ -190,7 +190,7 @@ member of `FabricValue`.
 > (`0`) during fabric-value conversion (i.e., `shallowFabricFromNativeValue()`),
 > before the value reaches a serialization boundary. This matches
 > `JSON.stringify` behavior and ensures that `0` and `-0` produce the same
-> serialized form and canonical hash. In the current codebase, this
+> serialized form and hash. In the current codebase, this
 > normalization happens in `packages/data-model/fabric-value-modern.ts` at the
 > `shallowFabricFromNativeValueModern()` call site.
 
@@ -224,8 +224,8 @@ The **special primitive** types (`FabricEpochNsec`, `FabricEpochDays`,
 `FabricSpecialObject`, and the `FabricValue` union includes
 `FabricSpecialObject`, so all `FabricPrimitive` subclasses are implicitly
 members of `FabricValue`. They are always-frozen value types that bypass the
-`freeze` option in conversion functions. They have dedicated canonical hash
-tags and dedicated `TypeHandler`s for wire format serialization, but they do
+`freeze` option in conversion functions. They have dedicated hash tags and
+dedicated `TypeHandler`s for wire format serialization, but they do
 not implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag`
 property.
 
@@ -659,7 +659,7 @@ export class FabricEpochDays extends FabricPrimitive {
  * system (always frozen, passes through conversion unchanged).
  *
  * The first algorithm tag is `fid1` ("fabric ID, v1"), which corresponds
- * to the SHA-256-based canonical hash produced by `hashOfModern()`
+ * to the SHA-256-based hash produced by `hashOfModern()`
  * (Section 6.4).
  *
  * Stringification produces `<tag>:<base64urlHash>` where `<base64urlHash>`
@@ -1775,13 +1775,13 @@ specified in a dedicated document:
 
 ---
 
-## 6. Canonical Hashing
+## 6. Hashing
 
 ### 6.1 Overview
 
-The system uses canonical hashing for content-based identity. The hashing
-scheme operates directly on the natural data structure without intermediate
-tree construction.
+The system uses hashing for content-based identity. The hashing scheme
+operates directly on the natural data structure without intermediate tree
+construction.
 
 ### 6.2 Design Principles
 
@@ -1796,8 +1796,8 @@ tree construction.
 
 ### 6.3 Suggested Tag Bytes
 
-The following single-byte type tags are used by the canonical hash byte format
-and are recommended for any binary encoding of `FabricValue`s. They are
+The following single-byte type tags are used by the hash byte format and are
+recommended for any binary encoding of `FabricValue`s. They are
 organized into four categories by high nibble:
 
 **Meta tags (`0x0N`)** — structural markers that are not themselves value types:
@@ -1844,9 +1844,9 @@ enforced by the encoding — a decoder should handle any tag byte it encounters
 regardless of nibble range.
 
 > **Scope.** These tag bytes are defined here for use by any wire format that
-> needs to distinguish `FabricValue` types at the byte level. The canonical
-> hash byte format (`2-canonical-hash-byte-format.md`) is the first consumer;
-> future binary serialization formats may reuse the same tag assignments.
+> needs to distinguish `FabricValue` types at the byte level. The hash byte
+> format (`2-hash-byte-format.md`) is the first consumer; future binary
+> serialization formats may reuse the same tag assignments.
 
 ### 6.4 Hashing Algorithm
 
@@ -1854,9 +1854,9 @@ regardless of nibble range.
 // file: packages/data-model/value-hash-modern.ts
 
 /**
- * Compute a canonical hash for a fabric value. The hash is
- * encoding-independent: the same identity whether later serialized
- * to JSON, CBOR, or any other format.
+ * Compute a hash for a fabric value. The hash is encoding-independent:
+ * the same identity whether later serialized to JSON, CBOR, or any
+ * other format.
  *
  * The digest algorithm is SHA-256. Future additions (e.g., BLAKE2b)
  * would use the same byte-level input format; only the digest function
@@ -1988,8 +1988,8 @@ export function hashOfModern(value: unknown): FabricHash {
   // distinct hashes, ensuring `[1, , 3]`, `[1, undefined, 3]`, and
   // `[1, null, 3]` are distinguishable by hash.
   //
-  // Note: The canonical hash is a function of the logical value, not
-  // any particular wire format. Implementations that hash from an
+  // Note: The hash is a function of the logical value, not any
+  // particular wire format. Implementations that hash from an
   // in-memory array and implementations that hash from the wire
   // format must produce identical hashes. Both use maximal-run RLE
   // for holes in the hash stream.
@@ -1998,10 +1998,10 @@ export function hashOfModern(value: unknown): FabricHash {
 
 > **String encoding for hashing.** Strings are hashed as UTF-8 byte sequences,
 > prefixed by their byte length (unsigned LEB128). See the byte-level spec
-> (`2-canonical-hash-byte-format.md`, Section 4.4) for the precise encoding.
+> (`2-hash-byte-format.md`, Section 4.4) for the precise encoding.
 
-> **Map/Set ordering in hashing.** Canonical hashing preserves insertion order
-> for `FabricMap` entries and `FabricSet` elements, matching the serialized
+> **Map/Set ordering in hashing.** Hashing preserves insertion order for
+> `FabricMap` entries and `FabricSet` elements, matching the serialized
 > form. This means two `FabricMap`s or `FabricSet`s with the same elements
 > in different insertion order will hash differently. This is intentional:
 > insertion order is part of the observable semantics of `Map`/`Set` in
@@ -2011,15 +2011,15 @@ export function hashOfModern(value: unknown): FabricHash {
 
 ### 6.5 Relationship to Late Serialization
 
-Canonical hashing operates on `FabricValue` directly, using deconstructed
-state for `FabricInstance`s (including the native object wrappers) and
-type-specific handling for primitives and containers. This makes identity
-hashing independent of any particular wire encoding — the same hash whether
-later serialized to JSON, CBOR, or Automerge.
+Hashing operates on `FabricValue` directly, using deconstructed state for
+`FabricInstance`s (including the native object wrappers) and type-specific
+handling for primitives and containers. This makes identity hashing
+independent of any particular wire encoding — the same hash whether later
+serialized to JSON, CBOR, or Automerge.
 
 ### 6.6 Use Cases
 
-Canonical hashing is used for:
+Hashing is used for:
 - Pattern ID generation (derived from pattern definition)
 - Request deduplication
 - Causal chain references (hashing the causal tree of what led to the data's
@@ -2087,10 +2087,10 @@ Four legacy conventions in the current codebase must be migrated to the unified
 
 ### 7.3 Replacing CID-Based Hashing
 
-The canonical hashing approach (Section 6) replaces `merkle-reference` /
-CID-based hashing. Since the system does not participate in the IPFS network,
-CID formatting adds overhead without interoperability benefit. The canonical
-hash operates on the logical data structure directly.
+The hashing approach (Section 6) replaces `merkle-reference` / CID-based
+hashing. Since the system does not participate in the IPFS network, CID
+formatting adds overhead without interoperability benefit. The hash operates
+on the logical data structure directly.
 
 ### 7.4 Untrusted Deserialized Input
 
@@ -2114,7 +2114,7 @@ This applies at every point where deserialized data is consumed:
   before processing. Malformed input should produce a `ProblematicValue`
   rather than throwing or silently producing garbage.
 
-- **Canonical hashing** (Section 6.3) may operate on values that have been
+- **Hashing** (Section 6.3) may operate on values that have been
   through a deserialization round-trip. Code that extracts properties from
   `FabricInstance` values (e.g., casting to `{ typeTag: string }`) must
   validate those properties at runtime.
@@ -2530,10 +2530,10 @@ spec from being implementable.
   deconstructed state. How does this integrate with the schema language?
   Currently out of scope (schemas are listed as out-of-scope for this spec).
 
-- **Exact canonical hash specification**: The precise byte-level format is
-  defined in `2-canonical-hash-byte-format.md`. All lengths and counts use
-  unsigned LEB128 encoding; see that document for the complete specification
-  of type tags, encoding per type, and illustrative examples.
+- **Exact hash specification**: The precise byte-level format is defined in
+  `2-hash-byte-format.md`. All lengths and counts use unsigned LEB128
+  encoding; see that document for the complete specification of type tags,
+  encoding per type, and illustrative examples.
 
 - **Migration path**: Out of scope for this spec. The detailed migration plan
   (sequencing of flag introductions, criteria for graduating each flag to

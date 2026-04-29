@@ -119,10 +119,7 @@ export const open = ({
   const consumer = create({ as, clock, ttl });
   // The pipeTo() promise is captured as `consumer.closed` so that callers
   // (specifically StorageManagerEmulator.close()) can await full pipeline
-  // shutdown before resetting ambient state like the canonical hash config.
-  // Without this, Runtime.dispose() could reset the hash config while
-  // in-flight messages were still being delivered from consumer to provider,
-  // causing hash format mismatches in Access.claim().
+  // shutdown before tearing down ambient state.
   //
   // pipeTo() rejects when the TransformStream is terminated during teardown
   // (consumer.close() calls cancel() then controller.terminate()). That
