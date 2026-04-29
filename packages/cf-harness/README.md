@@ -188,6 +188,18 @@ The integration suite requires a working local Docker + `runsc-cfc` environment.
 By default it also uses the published kitchen-sink image above, unless you
 override `CF_HARNESS_INTEGRATION_IMAGE`.
 
+To also exercise a real host Fabric FUSE mount bind-mounted into the sandbox at
+`/fabric`, start `cf fuse mount` separately and pass the mountpoint:
+
+```bash
+cd packages/cf-harness
+CF_HARNESS_INTEGRATION_FABRIC_MOUNT=/tmp/cf deno task test:integration
+```
+
+That opt-in case verifies that cf-harness can navigate `/fabric` through
+`runsc-cfc` and read the FUSE `.status` file. Without
+`CF_HARNESS_INTEGRATION_FABRIC_MOUNT`, the Fabric mount case is skipped.
+
 On Linux, Docker/runsc runs default to the host UID/GID. On macOS, the default
 omits `--user` because Docker Desktop bind mounts may expose host files as
 `root:root`, which prevents non-root container users from writing mounted Loom

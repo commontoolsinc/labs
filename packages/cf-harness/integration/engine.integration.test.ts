@@ -23,6 +23,10 @@ const CFC_TAINT_IMAGE = Deno.env.get("CF_HARNESS_INTEGRATION_TAINT_IMAGE") ??
 const CFC_RESULT_DIR_CONFIGURED =
   (Deno.env.get(CFC_RESULT_DIR_ENV) ?? "").length > 0;
 const TAINTED_SECRET = '{"secret":"tainted from policy"}\n';
+const FABRIC_MOUNT = Deno.env.get("CF_HARNESS_INTEGRATION_FABRIC_MOUNT");
+const FABRIC_INTEGRATION = INTEGRATION &&
+  FABRIC_MOUNT !== undefined &&
+  FABRIC_MOUNT.trim() !== "";
 
 const defaultCfcPolicyFile = (): string => {
   const home = Deno.env.get("HOME");
@@ -136,6 +140,53 @@ const withHarness = async (
       }),
     });
     await fn(engine, workspaceHostPath);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+};
+
+const requireFabricMount = async (): Promise<string> => {
+  if (FABRIC_MOUNT === undefined || FABRIC_MOUNT.trim() === "") {
+    throw new Error(
+      "CF_HARNESS_INTEGRATION_FABRIC_MOUNT is required for Fabric mount integration tests",
+    );
+  }
+  const realPath = await Deno.realPath(FABRIC_MOUNT);
+  const stat = await Deno.stat(realPath);
+  if (!stat.isDirectory) {
+    throw new Error(
+      `CF_HARNESS_INTEGRATION_FABRIC_MOUNT must be a directory: ${realPath}`,
+    );
+  }
+  return realPath;
+};
+
+const withFabricHarness = async (
+  runId: string,
+  fn: (
+    engine: CfHarnessEngine,
+    workspaceHostPath: string,
+    fabricHostPath: string,
+  ) => Promise<void>,
+) => {
+  const fabricHostPath = await requireFabricMount();
+  const tempDir = await makeIntegrationTempDir("cf-harness-int-");
+  const workspaceHostPath = await Deno.realPath(tempDir);
+  try {
+    await assertRunscRuntimeAvailable();
+    const engine = new CfHarnessEngine({
+      runId,
+      sandbox: resolveDockerRunscSandboxConfig({
+        workspaceHostPath,
+        runtimeName: DOCKER_RUNTIME,
+        image: DOCKER_IMAGE,
+        additionalMounts: [{
+          kind: "fabric-fuse",
+          hostPath: fabricHostPath,
+        }],
+      }),
+    });
+    await fn(engine, workspaceHostPath, fabricHostPath);
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
@@ -376,6 +427,42 @@ Deno.test({
       assertEquals(readResult.output.content, "line one\nline two\n");
       const diskContent = await Deno.readTextFile(`${hostPath}/notes/log.txt`);
       assertEquals(diskContent, "line one\nline two\n");
+    });
+  },
+});
+
+Deno.test({
+  name:
+    "cf-harness integration: Fabric FUSE mount is visible through runsc-cfc",
+  ignore: !FABRIC_INTEGRATION,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    await withFabricHarness("integration-fabric-mount", async (engine) => {
+      const navResult = await engine.invokeBuiltinTool("bash", {
+        command: [
+          "set -eu",
+          "cd /fabric",
+          'printf "pwd=%s\\n" "$(pwd)"',
+          "test -f .status",
+          'printf "status-bytes="',
+          "wc -c < .status",
+        ].join("\n"),
+      });
+      assertEquals(navResult.output.exitCode, 0);
+      assertEquals(navResult.output.cwd, "/fabric");
+      assertStringIncludes(navResult.output.stdout, "pwd=/fabric\n");
+      assertStringIncludes(navResult.output.stdout, "status-bytes=");
+
+      const statusResult = await engine.invokeBuiltinTool("read_file", {
+        path: "/fabric/.status",
+        maxBytes: 8192,
+      });
+      assert(
+        "content" in statusResult.output,
+        JSON.stringify(statusResult.output),
+      );
+      assertStringIncludes(statusResult.output.content, '"startedAt"');
+      assertStringIncludes(statusResult.output.content, '"spaces"');
     });
   },
 });
