@@ -47,7 +47,6 @@ export CF_IDENTITY=./cf.key
 
 ```bash
 # Pass experiment env vars to CLI commands:
-EXPERIMENTAL_MODERN_HASH=true \
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
 deno task cf piece new pattern.tsx ...
 ```

@@ -13,10 +13,6 @@ import {
   setSchemaHashConfig,
 } from "@commonfabric/data-model/schema-hash";
 import {
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
-import {
   decodeMemoryV2Boundary,
   DEFAULT_BRANCH,
   encodeMemoryV2Boundary,
@@ -120,36 +116,30 @@ describe("memory v2 flags", () => {
   it("reflects the active runtime storage flags", () => {
     resetDataModelConfig();
     resetJsonEncodingConfig();
-    resetModernHashConfig();
     resetSchemaHashConfig();
 
     setDataModelConfig(false);
     setJsonEncodingConfig(false);
-    setModernHashConfig(false);
     setSchemaHashConfig(false);
 
     assertEquals(getMemoryV2Flags(), {
       richStorableValues: false,
       unifiedJsonEncoding: false,
-      canonicalHashing: false,
       modernSchemaHash: false,
     });
 
     setDataModelConfig(true);
     setJsonEncodingConfig(true);
-    setModernHashConfig(true);
     setSchemaHashConfig(true);
 
     assertEquals(getMemoryV2Flags(), {
       richStorableValues: true,
       unifiedJsonEncoding: true,
-      canonicalHashing: true,
       modernSchemaHash: true,
     });
 
     resetDataModelConfig();
     resetJsonEncodingConfig();
-    resetModernHashConfig();
     resetSchemaHashConfig();
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Modern schema hashing via canonical content identification.
+ * Modern schema hashing via content identification.
  *
  * Delegates to `hashOfModern()` from `value-hash-modern.ts` to produce
  * deterministic hashes using the modern (non-merkle-reference) hashing

@@ -191,7 +191,7 @@ describe("Cell", () => {
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
-      experimental: { modernDataModel: true, modernHash: true },
+      experimental: { modernDataModel: true },
     });
     const localTx = rt.edit();
     const c = rt.getCell<unknown>(
@@ -870,7 +870,6 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
       storageManager,
       experimental: {
         richStorableValues: true,
-        canonicalHashing: true,
       },
     });
     tx = runtime.edit();

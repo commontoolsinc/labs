@@ -1,19 +1,8 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  it,
-} from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRef, getEntityId } from "../src/create-ref.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import {
-  hashOf,
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -23,15 +12,6 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("hashOf", () => {
-  // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // hashOf() path regardless of what the ambient default is.
-  beforeAll(() => {
-    setModernHashConfig(false);
-  });
-  afterAll(() => {
-    resetModernHashConfig();
-  });
-
   it("should create a reference that is equal to another reference with the same source", () => {
     const ref = hashOf({ hello: "world" });
     const ref2 = hashOf({ hello: "world" });

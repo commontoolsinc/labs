@@ -1,13 +1,13 @@
-# Canonical Hash Byte Format
+# Hash Byte Format
 
-This document specifies the precise byte-level format for canonical hashing of
+This document specifies the precise byte-level format for hashing of
 `FabricValue`s. It is the implementation-ready companion to Section 6.4 of the
 formal spec (`1-fabric-values.md`), which defines the algorithm at the
 pseudocode level. The tag byte assignments used here are defined in formal spec
 Section 6.3.
 
 An implementer can work from this document alone to produce a byte-for-byte
-compatible canonical hasher. All encodings are deterministic; two conforming
+compatible hasher. All encodings are deterministic; two conforming
 implementations must produce identical byte streams (and therefore identical
 hashes) for any given `FabricValue`.
 
@@ -175,8 +175,8 @@ cache keyed by the JavaScript string. Because the two encodings use different
 type tags (`0x24` vs. `0xF0`), they are unambiguous and cannot collide.
 
 **The two forms produce different hashes for the same string.** The
-64-byte threshold is part of the canonical format, and conforming
-implementations must use the threshold when deciding which form to emit.
+64-byte threshold is part of the format, and conforming implementations
+must use the threshold when deciding which form to emit.
 
 The hashed form applies everywhere this spec encodes a string via the
 `TAG_STRING` layout: standalone strings (this section), object keys (Section
@@ -419,7 +419,7 @@ the sort order and the hash encoding use the same byte representation.
 >
 > For strings containing only BMP characters (U+0000--U+FFFF) — the practical
 > common case for object keys — the two orderings are equivalent. An
-> implementation that needs to match the canonical hash sort order must sort by
+> implementation that needs to match the hash sort order must sort by
 > UTF-8 bytes (or equivalently, by Unicode code point), not by JavaScript's
 > default string comparison, if supplementary characters may appear in keys.
 
@@ -669,7 +669,7 @@ sequence.
 ## 8. Rejected Values
 
 The following JavaScript values are rejected by `fabricFromNativeValue()` and must
-never be passed to the canonical hasher:
+never be passed to the hasher:
 
 - `NaN`
 - `Infinity`
