@@ -144,7 +144,11 @@ class DebugStringifier {
  * Renders the debug-string form of the given value with optional indentation.
  */
 function renderDebugString(value: unknown, indent?: number) {
-  return new DebugStringifier(value, indent).render();
+  try {
+    return new DebugStringifier(value, indent).render();
+  } catch {
+    return "<unrenderable debug string>";
+  }
 }
 
 /**
@@ -153,8 +157,22 @@ function renderDebugString(value: unknown, indent?: number) {
  * necessary, the returned result will be the indicated length, which includes
  * an "ASCII ellipsis" of `...`.
  *
- * This function handles circular references, rendering the back-references as
- * simply `<circle>`.
+ * This function handles:
+ * * all normal JSON-compatible values.
+ * * other JavaScript primitive values:
+ *   * bigints.
+ *   * symbols, both interned and uninterned.
+ *   * non-finite numbers.
+ *   * `-0` rendered as such.
+ * * functions, rendered in a simplified form and without any additional
+ *   properties listed.
+ * * objects which define `toJSON()`, calling that method in the usual way.
+ * * objects and arrays with circular references, rendering the back-references
+ *   as `<circle>`.
+ *
+ * If the stringification could not be completed (stack overflow, object
+ * `toJSON()` conversion error, etc.), this function returns the literl string
+ * `"<unrenderable debug string>"`.
  *
  * **Note:** In _many_ cases, the output of this function is valid JSON text,
  * but not _all_ cases. This function must _not_ be relied on to produce a
@@ -179,8 +197,22 @@ export function toCompactDebugString(
 /**
  * Produces an indented string representation of a value.
  *
- * This function handles circular references, rendering the back-references as
- * simply `<circle>`.
+ * This function handles:
+ * * all normal JSON-compatible values.
+ * * other JavaScript primitive values:
+ *   * bigints.
+ *   * symbols, both interned and uninterned.
+ *   * non-finite numbers.
+ *   * `-0` rendered as such.
+ * * functions, rendered in a simplified form and without any additional
+ *   properties listed.
+ * * objects which define `toJSON()`, calling that method in the usual way.
+ * * objects and arrays with circular references, rendering the back-references
+ *   as `<circle>`.
+ *
+ * If the stringification could not be completed (stack overflow, object
+ * `toJSON()` conversion error, etc.), this function returns the literl string
+ * `"<unrenderable debug string>"`.
  *
  * **Note:** In _many_ cases, the output of this function is valid JSON text,
  * but not _all_ cases. This function must _not_ be relied on to produce a
