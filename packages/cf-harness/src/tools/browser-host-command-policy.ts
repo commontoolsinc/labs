@@ -140,7 +140,7 @@ const normalizeLongFlag = (arg: string): string => {
 };
 
 const isDisallowedAgentBrowserShortFlag = (arg: string): boolean =>
-  arg === "-p" || arg.startsWith("-p=");
+  arg === "-p" || arg.startsWith("-p=") || /^-p[^-]/.test(arg);
 
 const findAgentBrowserSubcommand = (
   args: readonly string[],

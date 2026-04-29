@@ -137,8 +137,12 @@ const validateHostWorkspacePaths = async (
   }
   for (const pathArg of workspacePathArgs) {
     const hostPath = normalize(join(hostCwd, pathArg));
-    if (!(await context.isHostPathWithinWorkspace(hostPath))) {
-      return `path ${pathArg} must resolve within the workspace`;
+    if (
+      !(await context.isHostPathWithinWorkspace(hostPath, {
+        allowMissing: true,
+      }))
+    ) {
+      return `path ${pathArg} must resolve within or below the workspace`;
     }
   }
   return undefined;

@@ -629,17 +629,58 @@ export class CfHarnessEngine {
     );
   }
 
-  async #isHostPathWithinWorkspace(path: string): Promise<boolean> {
+  async #isHostPathWithinWorkspace(
+    path: string,
+    options: { allowMissing?: boolean } = {},
+  ): Promise<boolean> {
     if (this.workspaceHostPath === undefined) {
       return false;
     }
+    const normalizedPath = normalizeHostPath(path);
     try {
       const hostRoot = await Deno.realPath(this.workspaceHostPath);
-      const hostPath = await Deno.realPath(path);
+      const hostPath = await Deno.realPath(normalizedPath);
       return isHostPathWithinRoot(hostRoot, hostPath);
+    } catch (error) {
+      if (!options.allowMissing || !(error instanceof Deno.errors.NotFound)) {
+        return false;
+      }
+      return await this.#missingHostPathCanResolveWithinWorkspace(
+        normalizedPath,
+      );
+    }
+  }
+
+  async #missingHostPathCanResolveWithinWorkspace(path: string): Promise<
+    boolean
+  > {
+    if (this.workspaceHostPath === undefined) {
+      return false;
+    }
+    const lexicalRoot = normalizeHostPath(this.workspaceHostPath);
+    let realRoot: string;
+    try {
+      realRoot = await Deno.realPath(this.workspaceHostPath);
     } catch {
       return false;
     }
+    let candidate = normalizeHostPath(path);
+    while (isHostPathWithinRoot(lexicalRoot, candidate)) {
+      try {
+        const realCandidate = await Deno.realPath(candidate);
+        return isHostPathWithinRoot(realRoot, realCandidate);
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) {
+          return false;
+        }
+      }
+      const parent = dirname(candidate);
+      if (parent === candidate) {
+        return false;
+      }
+      candidate = parent;
+    }
+    return false;
   }
 
   #createToolContext() {
@@ -654,8 +695,10 @@ export class CfHarnessEngine {
       resolveHostPath: (path: string) => this.#resolveHostPath(path),
       hostPathToWorkspacePath: (path: string) =>
         this.#hostPathToWorkspacePath(path),
-      isHostPathWithinWorkspace: (path: string) =>
-        this.#isHostPathWithinWorkspace(path),
+      isHostPathWithinWorkspace: (
+        path: string,
+        options?: { allowMissing?: boolean },
+      ) => this.#isHostPathWithinWorkspace(path, options),
       setCurrentDir: (path: string) => {
         const resolved = this.sandbox.resolvePath(
           path,

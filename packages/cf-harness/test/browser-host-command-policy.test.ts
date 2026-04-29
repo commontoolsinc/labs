@@ -92,4 +92,5 @@ Deno.test("validateBrowserHostCommand rejects high-risk agent-browser host surfa
   assertDenied("agent-browser --extension ./extension snapshot");
   assertDenied("agent-browser -p ios snapshot");
   assertDenied("agent-browser -p=ios snapshot");
+  assertDenied("agent-browser -pbrowserbase snapshot");
 });

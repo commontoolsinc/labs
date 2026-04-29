@@ -294,6 +294,45 @@ Deno.test("bash-no-sandbox translates command -v agent-browser to direct argv", 
   }]);
 });
 
+Deno.test("bash-no-sandbox lets allowed host commands handle missing workspace paths", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: "",
+    stderr: "ls: missing.txt: No such file or directory\n",
+    exitCode: 1,
+  }]);
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+  context.isHostPathWithinWorkspace = (
+    path: string,
+    options?: { allowMissing?: boolean },
+  ) =>
+    Promise.resolve(
+      path === "/tmp/cf-harness-workspace/repo" ||
+        (path.endsWith("/missing.txt") && options?.allowMissing === true),
+    );
+
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "ls missing.txt",
+  });
+
+  assertEquals(hostRunner.calls, [{
+    command: "ls",
+    args: ["missing.txt"],
+    cwd: "/tmp/cf-harness-workspace/repo",
+    timeoutMs: 30_000,
+  }]);
+  assertEquals(output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr: "ls: missing.txt: No such file or directory\n",
+    exitCode: 1,
+    cwd: "/workspace/repo",
+  });
+});
+
 Deno.test("bash-no-sandbox denies ls and find paths that realpath outside the workspace", async () => {
   const hostRunner = new FakeProcessRunner();
   const context = createContext(
@@ -313,7 +352,7 @@ Deno.test("bash-no-sandbox denies ls and find paths that realpath outside the wo
     outputId: "run-1:bash-no-sandbox:1",
     stdout: "",
     stderr:
-      "bash-no-sandbox command denied: path outside-link must resolve within the workspace",
+      "bash-no-sandbox command denied: path outside-link must resolve within or below the workspace",
     exitCode: 126,
     cwd: "/workspace/repo",
   });
