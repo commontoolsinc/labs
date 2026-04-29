@@ -2,6 +2,28 @@ export type HarnessSandboxKind = "docker-runsc-cfc";
 
 export type DockerNetworkMode = "none" | "bridge" | "host";
 
+export type SandboxRuntimeMountKind = "workspace" | "fabric-fuse";
+
+export interface SandboxRuntimeMountDescription {
+  kind: SandboxRuntimeMountKind;
+  sandboxPath: string;
+  readOnly: boolean;
+}
+
+export interface DockerRunscAdditionalMountConfig {
+  kind: "fabric-fuse";
+  hostPath: string;
+  sandboxPath?: string;
+  readOnly?: boolean;
+}
+
+export interface DockerRunscAdditionalMount {
+  kind: "fabric-fuse";
+  hostPath: string;
+  sandboxPath: string;
+  readOnly: boolean;
+}
+
 export interface DockerRunscSandboxConfig {
   kind: "docker-runsc-cfc";
   dockerBinary: string;
@@ -12,6 +34,7 @@ export interface DockerRunscSandboxConfig {
   workspaceMountPath: string;
   shellPath: string;
   dockerNetworkMode: DockerNetworkMode;
+  additionalMounts: readonly DockerRunscAdditionalMount[];
   extraDockerArgs: readonly string[];
 }
 
@@ -26,6 +49,7 @@ export interface ResolveDockerRunscSandboxConfigOptions {
   workspaceMountPath?: string;
   shellPath?: string;
   dockerNetworkMode?: DockerNetworkMode;
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   extraDockerArgs?: readonly string[];
 }
 
@@ -57,6 +81,7 @@ export interface SandboxRuntimeDescription {
     runtimeRequested: boolean;
     runtimeName?: string;
     workspaceMountPath?: string;
+    mounts?: readonly SandboxRuntimeMountDescription[];
     networkMode?: DockerNetworkMode;
     extraDockerArgsCount?: number;
   };
@@ -67,6 +92,7 @@ export interface SandboxRuntime {
   describe?(): SandboxRuntimeDescription;
   resolvePath(path: string, cwd?: string): string;
   isPathWithinWorkspace(path: string): boolean;
+  isPathWithinAllowedRoots?(path: string): boolean;
   defaultWorkingDirectory(): string;
   run(request: SandboxCommandRequest): Promise<SandboxCommandResult>;
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult>;

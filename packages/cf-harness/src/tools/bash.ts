@@ -71,8 +71,11 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
       timeoutMs: input.timeoutMs,
     });
     const parsedResult = extractFinalWorkingDirectory(result.stdout, cwdMarker);
+    const isAllowedCurrentDir = parsedResult.cwd !== undefined &&
+      (context.sandbox.isPathWithinAllowedRoots?.(parsedResult.cwd) ??
+        context.sandbox.isPathWithinWorkspace(parsedResult.cwd));
     const nextCurrentDir = parsedResult.cwd !== undefined &&
-        context.sandbox.isPathWithinWorkspace(parsedResult.cwd)
+        isAllowedCurrentDir
       ? parsedResult.cwd
       : commandCwd;
     context.setCurrentDir(nextCurrentDir);
