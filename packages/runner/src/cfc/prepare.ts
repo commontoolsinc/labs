@@ -90,6 +90,26 @@ const hasLabelValues = (label: IFCLabel): boolean =>
   (label.confidentiality?.length ?? 0) > 0 ||
   (label.integrity?.length ?? 0) > 0;
 
+const metadataAppliesToPath = (
+  metadata: CfcMetadata,
+  path: readonly string[],
+): boolean => {
+  const logicalPath = canonicalizeLogicalPath(path);
+  // A labelMap entry is persisted whenever the source schema had label values
+  // OR a policy claim (writeAuthorizedBy / uiContract / exactCopyOf — see the
+  // entry-construction site). The mere presence of the entry signals "policy
+  // applies on this path"; do NOT filter on `hasLabelValues` here, or
+  // claim-only entries get silently bypassed.
+  return metadata.labelMap.entries.some((entry) =>
+    isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path)
+  );
+};
+
+const metadataAppliesToAnyPath = (
+  metadata: CfcMetadata,
+  paths: readonly (readonly string[])[],
+): boolean => paths.some((path) => metadataAppliesToPath(metadata, path));
+
 const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return false;
@@ -902,7 +922,11 @@ const derivePersistedLinkLabel = (
       input.source.path,
     )
     : undefined;
-  if (sourceMetadata === undefined && pendingSourceLabel === undefined) {
+  const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
+  if (
+    sourceMetadata === undefined && pendingSourceLabel === undefined &&
+    !hasLabelValues(linkSchemaLabel)
+  ) {
     return {
       reason: `missing link source metadata for ${input.target.id} at /${
         input.target.path.join("/")
@@ -916,7 +940,6 @@ const derivePersistedLinkLabel = (
     ) ?? {},
     pendingSourceLabel,
   );
-  const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
   const label: IFCLabel = {
     confidentiality: mergeLabelValues(
       sourceLabel.confidentiality,
@@ -1008,6 +1031,9 @@ export const prepareBoundaryCommit = (
       target.type,
     );
     if (existing === undefined) {
+      continue;
+    }
+    if (!metadataAppliesToAnyPath(existing, target.paths)) {
       continue;
     }
     const linkWriteInputs = linkWrites.get(key) ?? [];

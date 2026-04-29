@@ -25,8 +25,11 @@ export function connectInputAndOutputs(node: NodeRef) {
   node.inputs = traverseValue(node.inputs, connect);
   node.outputs = traverseValue(node.outputs, connect);
 
-  // We will also apply ifc tags from inputs to outputs
-  applyInputIfcToOutput(node.inputs, node.outputs);
+  // We will also apply ifc tags from inputs to outputs, unless the module has
+  // precise built-in flow handling for its result.
+  if (!isRecord(node.module) || node.module.propagateInputIfc !== false) {
+    applyInputIfcToOutput(node.inputs, node.outputs);
+  }
 }
 
 export function applyArgumentIfcToResult(

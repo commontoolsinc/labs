@@ -80,6 +80,9 @@ export default pattern(() => {
                         }
                     },
                     required: ["offset"]
+                },
+                useResultSchemaForObservation: {
+                    type: "boolean"
                 }
             },
             required: ["pattern", "extraParams"]

@@ -82,6 +82,9 @@ export default pattern(() => {
                         }
                     },
                     required: ["content"]
+                },
+                useResultSchemaForObservation: {
+                    type: "boolean"
                 }
             },
             required: ["pattern", "extraParams"]

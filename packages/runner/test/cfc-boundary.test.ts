@@ -1205,6 +1205,81 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("treats claim-only persisted entries as covering the path", async () => {
+    // Regression: persisted labelMap entries with empty labels (i.e., the
+    // schema only carried writeAuthorizedBy / uiContract / exactCopyOf
+    // claims, no confidentiality or integrity values) must still be
+    // recognized as "policy applies on this path". A previous version
+    // filtered on `hasLabelValues` and silently bypassed enforcement.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seededId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-stored-claim-only",
+          {
+            type: "object",
+            properties: {
+              auditedField: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+
+      const seed = runtime.edit();
+      const targetId = seededId;
+      seed.writeOrThrow(
+        {
+          space: signer.did(),
+          id: targetId,
+          type: "application/json",
+          path: ["value"],
+        },
+        { auditedField: "seed" },
+      );
+      seed.writeOrThrow(
+        {
+          space: signer.did(),
+          id: targetId,
+          type: "application/json",
+          path: ["cfc"],
+        },
+        {
+          version: 1,
+          schemaHash: "claim-only-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["auditedField"],
+              // Empty label: no confidentiality / integrity values, just
+              // the entry itself signaling the path was claim-tagged at
+              // persist time.
+              label: {},
+            }],
+          },
+        },
+      );
+      const seedResult = await seed.commit();
+      expect(seedResult.ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const targetLink = {
+        space: signer.did(),
+        id: targetId,
+        type: "application/json",
+        path: ["auditedField"],
+      } as const;
+      expect(storedCfcMetadataAppliesToPath(tx, targetLink)).toBe(true);
+      // Parent / prefix paths also see the entry.
+      expect(
+        storedCfcMetadataAppliesToPath(tx, { ...targetLink, path: [] }),
+      ).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("marks labeled writes as CFC-relevant", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -1276,6 +1351,72 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       );
       cell.key("secret").set("updated");
       expect(tx.getCfcState().relevant).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("allows unlabeled sibling writes in documents with stored CFC metadata", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seededId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-stored-sibling-write",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+              pending: { type: "boolean" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: seededId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed", pending: false },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-stored-sibling-write",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+            pending: { type: "boolean" },
+          },
+        },
+        tx,
+      );
+      cell.key("pending").set(true);
+      tx.markCfcRelevant("stored-sibling-write");
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
