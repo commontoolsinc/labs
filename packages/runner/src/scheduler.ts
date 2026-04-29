@@ -1,4 +1,3 @@
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
