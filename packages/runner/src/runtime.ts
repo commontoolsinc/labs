@@ -47,10 +47,12 @@ import {
   CellLink,
   isCellLink,
   isNormalizedFullLink,
+  isSigilLink,
   type NormalizedFullLink,
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import { LINK_V1_TAG } from "./sigil-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type CfcEnforcementMode,
@@ -818,14 +820,20 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
+    const carriedLabelView = cfcLabelView ??
+      (isSigilLink(cellLink)
+        ? (cellLink["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView
+        : isNormalizedFullLink(cellLink)
+        ? (cellLink as NormalizedLink & { cfcLabelView?: CfcLabelView })
+          .cfcLabelView
+        : undefined);
     let link = isCellLink(cellLink)
       ? parseLink(cellLink)
       : isNormalizedFullLink(cellLink)
       ? cellLink
       : undefined;
     if (!link) throw new Error("Invalid cell link");
-    const carriedLabelView =
-      (link as NormalizedLink & { cfcLabelView?: CfcLabelView }).cfcLabelView;
     if ("cfcLabelView" in link) {
       const { cfcLabelView: _cfcLabelView, ...cleanLink } = link as
         & NormalizedLink
@@ -839,7 +847,7 @@ export class Runtime {
       tx,
       false,
       undefined,
-      cfcLabelView ?? carriedLabelView,
+      carriedLabelView,
     );
   }
 

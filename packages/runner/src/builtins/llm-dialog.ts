@@ -2358,6 +2358,10 @@ async function handleInvoke(
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
     const concreteResult = result.resolveAsCell();
+    const concreteResultLink = createLLMFriendlyLink(
+      concreteResult.getAsNormalizedFullLink(),
+      space,
+    );
     const concreteResultSchema = getCellSchema(concreteResult) ?? resultSchema;
     const serialized = serializeForLLMObservation({
       value: concreteResult.get(),
@@ -2374,7 +2378,7 @@ async function handleInvoke(
       result: {
         type: "json",
         value: {
-          "@resultLocation": resultLink,
+          "@resultLocation": concreteResultLink,
           result: serialized.value,
           schema: concreteResultSchema,
         },

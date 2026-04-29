@@ -12,6 +12,7 @@ import { parseLink } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { UI } from "../src/builder/types.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 describe("CFC label view helpers", () => {
   it("collects labels that apply to a logical value path", () => {
@@ -47,6 +48,54 @@ describe("CFC label view helpers", () => {
         {
           path: ["summary"],
           label: { integrity: ["summarized-by-trusted-pattern"] },
+        },
+      ],
+    });
+  });
+
+  it("rebases wildcard label paths onto concrete array item paths", () => {
+    const metadata: CfcMetadata = {
+      version: 1,
+      schemaHash: "hash",
+      labelMap: {
+        version: 1,
+        entries: [
+          {
+            path: ["value", "*"],
+            label: { integrity: ["trusted-item"] },
+          },
+          {
+            path: ["value", "*", "title"],
+            label: { integrity: ["trusted-title"] },
+          },
+        ],
+      },
+    };
+
+    expect(cfcLabelViewFromMetadata(metadata, ["0"])).toEqual({
+      version: 1,
+      entries: [
+        {
+          path: [],
+          label: { integrity: ["trusted-item"] },
+        },
+        {
+          path: ["title"],
+          label: { integrity: ["trusted-title"] },
+        },
+      ],
+    });
+    expect(cfcLabelViewFromMetadata(metadata, ["0", "title"])).toEqual({
+      version: 1,
+      entries: [
+        {
+          path: [],
+          label: {
+            integrity: expect.arrayContaining([
+              "trusted-item",
+              "trusted-title",
+            ]),
+          },
         },
       ],
     });
@@ -133,6 +182,42 @@ describe("CFC label view helpers", () => {
       await tx.commit();
 
       expect(cfcLabelViewForCell(target)).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("preserves ref-carried label views when creating cells from sigil links", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cfc label view sigil carried state",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const view = {
+        version: 1,
+        entries: [{
+          path: [],
+          label: { integrity: ["carried-through-sigil"] },
+        }],
+      } as const;
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-carried-sigil",
+      );
+      const link = cell.getAsLink() as any;
+      link["/"][LINK_V1_TAG].cfcLabelView = view;
+
+      const recovered = runtime.getCellFromLink(link);
+      expect(cfcLabelViewForCell(recovered)).toEqual(view);
+      expect(recovered.getAsLink()["/"][LINK_V1_TAG]).not.toHaveProperty(
+        "cfcLabelView",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

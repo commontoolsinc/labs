@@ -522,7 +522,12 @@ function mergeClientCfcLabels(
 }
 
 function cfcPathKey(path: readonly string[]): string {
-  return JSON.stringify(canonicalizeCfcLogicalPath(path));
+  const logicalPath = canonicalizeCfcLogicalPath(path);
+  return logicalPath.length === 0 ? "" : `/${
+    logicalPath
+      .map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
+      .join("/")
+  }`;
 }
 
 function normalizeClientCfcLabelView(
