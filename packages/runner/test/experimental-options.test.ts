@@ -12,11 +12,6 @@ import {
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-native-instances";
-import {
-  hashOf,
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
 import { resetSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
 
 const signer = await Identity.fromPassphrase("test experimental");
@@ -30,7 +25,6 @@ const signer = await Identity.fromPassphrase("test experimental");
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetDataModelConfig();
-    resetModernHashConfig();
     resetSchemaHashConfig();
   });
 
@@ -43,7 +37,6 @@ describe("ExperimentalOptions", () => {
         experimental: {
           modernDataModel: false,
           unifiedJsonEncoding: false,
-          modernHash: false,
           modernSchemaHash: false,
         },
       });
@@ -51,9 +44,7 @@ describe("ExperimentalOptions", () => {
         modernDataModel: false,
         richStorableValues: undefined,
         unifiedJsonEncoding: false,
-        modernHash: false,
         modernSchemaHash: false,
-        canonicalHashing: undefined,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -68,7 +59,6 @@ describe("ExperimentalOptions", () => {
         experimental: {
           modernDataModel: true,
           unifiedJsonEncoding: true,
-          modernHash: true,
           modernSchemaHash: true,
         },
       });
@@ -76,9 +66,7 @@ describe("ExperimentalOptions", () => {
         modernDataModel: true,
         richStorableValues: undefined,
         unifiedJsonEncoding: true,
-        modernHash: true,
         modernSchemaHash: true,
-        canonicalHashing: undefined,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -92,16 +80,13 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: true,
-          modernHash: true,
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
         richStorableValues: undefined,
         unifiedJsonEncoding: undefined,
-        modernHash: true,
         modernSchemaHash: undefined,
-        canonicalHashing: undefined,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -115,26 +100,10 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           richStorableValues: true,
-          modernHash: true,
         },
       });
       expect(runtime.experimental.modernDataModel).toBe(true);
       expect(runtime.experimental.richStorableValues).toBe(true);
-      await runtime.dispose();
-      await sm.close();
-    });
-
-    it("maps canonicalHashing onto modernHash when the primary flag is unset", async () => {
-      const sm = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm,
-        experimental: {
-          canonicalHashing: true,
-        },
-      });
-      expect(runtime.experimental.modernHash).toBe(true);
-      expect(runtime.experimental.canonicalHashing).toBe(true);
       await runtime.dispose();
       await sm.close();
     });
@@ -356,7 +325,6 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: true,
-          modernHash: true,
         },
       });
 
@@ -385,7 +353,7 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { modernDataModel: true, modernHash: true },
+        experimental: { modernDataModel: true },
       });
 
       expect(getDataModelConfig()).toBe(true);
@@ -401,7 +369,6 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: true,
-          modernHash: true,
         },
       });
 
@@ -411,65 +378,6 @@ describe("ExperimentalOptions", () => {
       await sm.close();
 
       expect(getDataModelConfig()).toBe(false);
-    });
-  });
-
-  describe("hashOf() with modernHash flag", () => {
-    it("works normally when modernHash is false", () => {
-      setModernHashConfig(false);
-      const ref = hashOf("hello");
-      expect(ref).toBeDefined();
-      expect(typeof ref.toString()).toBe("string");
-    });
-
-    it("produces a valid reference when modernHash is true", () => {
-      setModernHashConfig(true);
-      const ref = hashOf("hello");
-      expect(ref).toBeDefined();
-      expect(typeof ref.toString()).toBe("string");
-    });
-
-    it("works again after reset", () => {
-      setModernHashConfig(true);
-      resetModernHashConfig();
-      const ref = hashOf("hello");
-      expect(ref).toBeDefined();
-    });
-  });
-
-  describe("Runtime sets and resets modernHash config", () => {
-    it("constructing Runtime with modernHash enables canonical hashOf()", async () => {
-      const sm = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm,
-        experimental: { modernHash: true },
-      });
-
-      const ref = hashOf("test");
-      expect(ref).toBeDefined();
-      expect(typeof ref.toString()).toBe("string");
-
-      await runtime.dispose();
-      await sm.close();
-    });
-
-    it("disposing Runtime resets modernHash so hashOf() uses default path", async () => {
-      const sm = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm,
-        experimental: { modernHash: true },
-      });
-
-      const canonicalRef = hashOf("test");
-      expect(canonicalRef).toBeDefined();
-
-      await runtime.dispose();
-      await sm.close();
-
-      const defaultRef = hashOf("test");
-      expect(defaultRef).toBeDefined();
     });
   });
 });

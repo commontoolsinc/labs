@@ -66,7 +66,6 @@ describe("frozen proxy target: v1 link resolution through frozen objects", () =>
       memoryVersion: "v1",
       experimental: {
         richStorableValues: true,
-        canonicalHashing: true,
       },
     });
     tx = runtime.edit();
@@ -139,7 +138,6 @@ describe("frozen proxy target: v1 proxy wrapping and trap behavior", () => {
       memoryVersion: "v1",
       experimental: {
         richStorableValues: true,
-        canonicalHashing: true,
       },
     });
     tx = runtime.edit();
@@ -468,7 +466,6 @@ describe("frozen proxy target: v2 committed reads with richStorableValues ON", (
       memoryVersion: "v2",
       experimental: {
         richStorableValues: true,
-        canonicalHashing: true,
       },
     });
     tx = runtime.edit();

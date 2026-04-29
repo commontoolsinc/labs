@@ -835,7 +835,7 @@ describe("runPattern", () => {
     const localRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
-      experimental: { modernDataModel: true, modernHash: true },
+      experimental: { modernDataModel: true },
     });
 
     const pattern: Pattern = {

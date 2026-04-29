@@ -49,7 +49,6 @@ The client MUST declare its protocol version in the first WebSocket message:
   "flags": {
     "richStorableValues": true,
     "unifiedJsonEncoding": true,
-    "canonicalHashing": true,
     "modernSchemaHash": false
   }
 }
@@ -64,7 +63,6 @@ If the server accepts the protocol, it returns:
   "flags": {
     "richStorableValues": true,
     "unifiedJsonEncoding": true,
-    "canonicalHashing": true,
     "modernSchemaHash": false
   }
 }
@@ -145,7 +143,6 @@ interface HelloMessage {
   flags: {
     richStorableValues: boolean;
     unifiedJsonEncoding: boolean;
-    canonicalHashing: boolean;
     modernSchemaHash: boolean;
   };
 }
