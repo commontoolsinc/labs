@@ -36,7 +36,7 @@ import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
-import type { ToolResultRef } from "./contracts/tool-result.ts";
+import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
 import type {
   BuiltinToolId,
   HarnessToolDescriptor,
@@ -66,9 +66,15 @@ import {
   type HarnessSubagentResult,
   type HarnessSubagentRunManifest,
   type HarnessSubagentRunStateSummary,
+  type HarnessSubagentStructuredReturn,
   isHarnessSubagentProfile,
   MAX_SUBAGENT_MAX_MODEL_TURNS,
 } from "./contracts/subagent.ts";
+import {
+  parseSubagentReturnJson,
+  parseSubagentReturnSchema,
+  validateAndSanitizeSubagentReturn,
+} from "./subagent-return.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 import {
   cwdMarkerForOutput,
@@ -432,6 +438,9 @@ const summarizeToolInput = async (
       const contextSummary = typeof input.context === "string"
         ? await summarizeSensitiveText(input.context)
         : undefined;
+      const returnSchemaSummary = input.returnSchema !== undefined
+        ? await summarizeSensitiveText(JSON.stringify(input.returnSchema))
+        : undefined;
       const profile = input.profile === undefined
         ? DEFAULT_SUBAGENT_PROFILE
         : typeof input.profile === "string" &&
@@ -452,6 +461,12 @@ const summarizeToolInput = async (
           ? {
             contextBytes: contextSummary.bytes,
             contextDigest: contextSummary.digest,
+          }
+          : {}),
+        ...(returnSchemaSummary !== undefined
+          ? {
+            returnSchemaBytes: returnSchemaSummary.bytes,
+            returnSchemaDigest: returnSchemaSummary.digest,
           }
           : {}),
         ...(isSafeNonNegativeInteger(input.maxModelTurns)
@@ -500,6 +515,7 @@ const parseDelegateTaskInput = (
       `delegate_task maxModelTurns must be an integer from 1 to ${MAX_SUBAGENT_MAX_MODEL_TURNS}`,
     );
   }
+  const parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
   return {
     goal: input.goal,
     profile,
@@ -507,6 +523,9 @@ const parseDelegateTaskInput = (
       ? { context: input.context }
       : {}),
     ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
+    ...(parsedReturnSchema !== undefined
+      ? { returnSchema: parsedReturnSchema.schema }
+      : {}),
   };
 };
 
@@ -517,6 +536,9 @@ const createSubagentInputSummary = async (
   const contextSummary = input.context === undefined
     ? undefined
     : await summarizeSensitiveText(input.context);
+  const returnSchemaSummary = input.returnSchema === undefined
+    ? undefined
+    : await summarizeSensitiveText(JSON.stringify(input.returnSchema));
   return {
     type: "cf-harness.subagent-input-summary",
     goalBytes: goalSummary.bytes,
@@ -525,6 +547,12 @@ const createSubagentInputSummary = async (
       ? {
         contextBytes: contextSummary.bytes,
         contextDigest: contextSummary.digest,
+      }
+      : {}),
+    ...(returnSchemaSummary !== undefined
+      ? {
+        returnSchemaBytes: returnSchemaSummary.bytes,
+        returnSchemaDigest: returnSchemaSummary.digest,
       }
       : {}),
   };
@@ -569,6 +597,16 @@ const buildSubagentUserPrompt = (input: DelegateTaskToolInput): string =>
     "Task:",
     input.goal,
     ...(input.context !== undefined ? ["", "Context:", input.context] : []),
+    ...(input.returnSchema !== undefined
+      ? [
+        "",
+        "Return schema:",
+        JSON.stringify(input.returnSchema, null, 2),
+        "",
+        "Final response requirement:",
+        "Return a single JSON value matching the return schema. Do not include markdown, prose, explanation, or any text outside the JSON value.",
+      ]
+      : []),
   ].join("\n");
 
 const summarizeSubagentRunState = (
@@ -607,6 +645,118 @@ const summarizeSubagentRunState = (
       ? { primaryFailure: summarizeSubagentFailure(runState.primaryFailure) }
       : {}),
   };
+};
+
+const createStructuredSubagentReturn = async (
+  options: {
+    childEngine: CfHarnessEngine;
+    childRunId: string;
+    rawFinalAssistantText: string;
+    schema: NonNullable<DelegateTaskToolInput["returnSchema"]>;
+  },
+): Promise<{
+  structuredReturn: HarnessSubagentStructuredReturn;
+  summary: string;
+  valid: boolean;
+}> => {
+  const schemaDigest = await digestJsonValue(options.schema);
+  const rawOutputId = `${options.childRunId}:subagent_return:1` as ToolOutputId;
+  let rawArtifactPath: string | undefined;
+  const persistRawReturn = async (
+    record: Record<string, unknown>,
+  ): Promise<void> => {
+    rawArtifactPath = await options.childEngine.artifactStore
+      ?.persistToolOutput(
+        "subagent-return",
+        rawOutputId,
+        record,
+      );
+  };
+
+  let parsedValue: unknown;
+  try {
+    parsedValue = parseSubagentReturnJson(options.rawFinalAssistantText);
+  } catch (error) {
+    const validationError = error instanceof Error
+      ? error.message
+      : "child final response was not valid JSON";
+    await persistRawReturn({
+      type: "cf-harness.subagent-raw-return",
+      childRunId: options.childRunId,
+      schemaDigest,
+      rawFinalAssistantText: options.rawFinalAssistantText,
+      validationStatus: "invalid",
+      validationError,
+    });
+    return {
+      valid: false,
+      summary: `Subagent return validation failed: ${validationError}`,
+      structuredReturn: {
+        type: "cf-harness.subagent-structured-return",
+        status: "invalid",
+        schemaDigest,
+        rawOutputId,
+        ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
+        validationError,
+      },
+    };
+  }
+
+  try {
+    const sanitized = validateAndSanitizeSubagentReturn({
+      schema: options.schema,
+      value: parsedValue,
+      childRunId: options.childRunId,
+    });
+    await persistRawReturn({
+      type: "cf-harness.subagent-raw-return",
+      childRunId: options.childRunId,
+      schemaDigest,
+      rawFinalAssistantText: options.rawFinalAssistantText,
+      value: parsedValue,
+      validationStatus: "valid",
+    });
+    return {
+      valid: true,
+      summary:
+        "Subagent returned structured data matching the requested schema.",
+      structuredReturn: {
+        type: "cf-harness.subagent-structured-return",
+        status: "valid",
+        schemaDigest,
+        rawOutputId,
+        ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
+        value: sanitized.value,
+        linkedStringCount: sanitized.linkedStringCount,
+      },
+    };
+  } catch (error) {
+    const rawValidationError = error instanceof Error
+      ? error.message
+      : "structured return did not match the schema";
+    const validationError = "structured return did not match the schema";
+    await persistRawReturn({
+      type: "cf-harness.subagent-raw-return",
+      childRunId: options.childRunId,
+      schemaDigest,
+      rawFinalAssistantText: options.rawFinalAssistantText,
+      value: parsedValue,
+      validationStatus: "invalid",
+      validationError: rawValidationError,
+    });
+    return {
+      valid: false,
+      summary: `Subagent return validation failed: ${validationError}`,
+      structuredReturn: {
+        type: "cf-harness.subagent-structured-return",
+        status: "invalid",
+        schemaDigest,
+        rawOutputId,
+        ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
+        validationError,
+      },
+    };
+  }
 };
 
 const createAssistantTranscriptMessage = (
@@ -1688,6 +1838,7 @@ export class CfHarnessPromptLoop {
     let subagentStatus: HarnessSubagentResult["status"] = "completed";
     let summary = "";
     let childModelTurns = 0;
+    let structuredReturn: HarnessSubagentStructuredReturn | undefined;
     try {
       const childResult = await childLoop.runPrompt({
         systemPrompt: buildSubagentSystemPrompt(
@@ -1704,6 +1855,22 @@ export class CfHarnessPromptLoop {
       if (childResult.runState.status !== "completed") {
         subagentStatus = "failed";
       }
+      if (
+        delegateInput.returnSchema !== undefined &&
+        subagentStatus === "completed"
+      ) {
+        const structured = await createStructuredSubagentReturn({
+          childEngine,
+          childRunId,
+          rawFinalAssistantText: childResult.finalAssistantText,
+          schema: delegateInput.returnSchema,
+        });
+        summary = structured.summary;
+        structuredReturn = structured.structuredReturn;
+        if (!structured.valid) {
+          subagentStatus = "failed";
+        }
+      }
     } catch (error) {
       subagentStatus = "failed";
       childModelTurns = promptLoopModelTurnsFromError(error) ?? childModelTurns;
@@ -1719,6 +1886,7 @@ export class CfHarnessPromptLoop {
       modelTurns: childModelTurns,
       runState: summarizeSubagentRunState(childRunState),
       manifest,
+      ...(structuredReturn !== undefined ? { structuredReturn } : {}),
     };
     const output: DelegateTaskToolOutput = {
       type: "cf-harness.delegate-task-output",
@@ -1739,6 +1907,7 @@ export class CfHarnessPromptLoop {
       summary: subagent.summary,
       manifest,
       runState: subagent.runState,
+      ...(structuredReturn !== undefined ? { structuredReturn } : {}),
     });
     return {
       output: result.output,

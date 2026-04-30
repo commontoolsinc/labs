@@ -2,6 +2,7 @@ export * from "./config.ts";
 export * from "./run-state.ts";
 export * from "./engine.ts";
 export * from "./prompt-loop.ts";
+export * from "./subagent-return.ts";
 export * from "./artifacts.ts";
 export * from "./cli.ts";
 export * from "./gateway/openai-client.ts";

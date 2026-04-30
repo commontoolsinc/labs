@@ -11,6 +11,7 @@
     "./config": "./src/config.ts",
     "./engine": "./src/engine.ts",
     "./prompt-loop": "./src/prompt-loop.ts",
+    "./subagent-return": "./src/subagent-return.ts",
     "./artifacts": "./src/artifacts.ts",
     "./cli": "./src/cli.ts",
     "./gateway/openai-client": "./src/gateway/openai-client.ts",

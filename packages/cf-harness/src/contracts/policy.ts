@@ -40,6 +40,8 @@ export interface HarnessDelegateTaskToolInputSummary {
   goalDigest?: string;
   contextBytes?: number;
   contextDigest?: string;
+  returnSchemaBytes?: number;
+  returnSchemaDigest?: string;
   maxModelTurns?: number;
 }
 
