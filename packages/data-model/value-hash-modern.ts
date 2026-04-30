@@ -5,7 +5,6 @@
  * Traverses the value tree directly and feeds type-tagged data into a single
  * SHA-256 context. See Section 6 of the formal spec and the byte-level spec for
  * the full algorithm.
- *
  */
 import {
   createHasher,

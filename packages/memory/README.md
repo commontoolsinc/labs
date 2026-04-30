@@ -108,8 +108,8 @@ Represents a unique identifier for a specific **mutable** memory and is
 represented by `of` field.
 
 At the moment entities are identified by an arbitrary string identifier,
-although it is recommended to derive them from seed data e.g. using
-[merkle reference]s.
+although it is recommended to derive them from seed data e.g. using [merkle
+reference]s.
 
 When determinism is not relevant, [UUID]s could be used instead.
 
