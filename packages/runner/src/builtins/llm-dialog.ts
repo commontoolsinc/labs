@@ -47,6 +47,7 @@ import {
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { type CfcLabelView, cfcLabelViewForCell } from "../cfc/label-view.ts";
+import { cfcLabelPathPrefixMatches } from "../cfc/label-view-core.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -402,14 +403,6 @@ function simplifySchemaForContext(
   return simplified as JSONSchema;
 }
 
-function isPathPrefix(
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean {
-  return prefix.length <= path.length &&
-    prefix.every((segment, index) => segment === path[index]);
-}
-
 function joinObservedConfidentiality(
   parts: Iterable<readonly unknown[] | undefined>,
 ): readonly unknown[] {
@@ -436,7 +429,7 @@ function confidentialityForCurrentNode(
 
   if (labelView !== undefined) {
     for (const entry of labelView.entries) {
-      if (!isPathPrefix(entry.path, logicalPath)) {
+      if (!cfcLabelPathPrefixMatches(entry.path, logicalPath)) {
         continue;
       }
       joined.push(...(entry.label.confidentiality ?? []));
@@ -2358,10 +2351,6 @@ async function handleInvoke(
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
     const concreteResult = result.resolveAsCell();
-    const concreteResultLink = createLLMFriendlyLink(
-      concreteResult.getAsNormalizedFullLink(),
-      space,
-    );
     const concreteResultSchema = getCellSchema(concreteResult) ?? resultSchema;
     const serialized = serializeForLLMObservation({
       value: concreteResult.get(),
@@ -2378,7 +2367,7 @@ async function handleInvoke(
       result: {
         type: "json",
         value: {
-          "@resultLocation": concreteResultLink,
+          "@resultLocation": resultLink,
           result: serialized.value,
           schema: concreteResultSchema,
         },

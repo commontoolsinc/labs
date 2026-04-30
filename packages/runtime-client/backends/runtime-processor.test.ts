@@ -5,7 +5,12 @@ import {
   RuntimeProcessor,
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
-import { type CellRef, RequestType } from "../protocol/mod.ts";
+import {
+  type CellRef,
+  type CfcLabelView,
+  RequestType,
+} from "../protocol/mod.ts";
+import { cellRefToSigilLink } from "./utils.ts";
 
 describe("sanitizeForPostMessage", () => {
   describe("primitives", () => {
@@ -634,6 +639,37 @@ describe("RuntimeProcessor CFC commit preparation", () => {
       type: RequestType.CellSend,
       cell: ref,
       event: "new value",
+    });
+  });
+});
+
+describe("runtime-client CellRef conversion", () => {
+  it("preserves carried label views in transient sigil links", () => {
+    const cfcLabelView: CfcLabelView = {
+      version: 1,
+      entries: [{
+        path: [],
+        label: { integrity: ["selected-by-alice"] },
+      }],
+    };
+    const ref: CellRef = {
+      id: "of:cfc-label-cell" as CellRef["id"],
+      space: "did:key:z6MkrX123abc" as CellRef["space"],
+      type: "application/json",
+      path: ["value"],
+      cfcLabelView,
+    };
+
+    expect(cellRefToSigilLink(ref)).toEqual({
+      "/": {
+        "link@1": {
+          id: ref.id,
+          space: ref.space,
+          type: ref.type,
+          path: ref.path,
+          cfcLabelView,
+        },
+      },
     });
   });
 });

@@ -31,7 +31,7 @@ export const cfcLabelViewPathKey = (path: readonly string[]): string => {
   }`;
 };
 
-const isPrefix = (
+export const cfcLabelPathPrefixMatches = (
   prefix: readonly string[],
   path: readonly string[],
 ): boolean =>
@@ -39,6 +39,13 @@ const isPrefix = (
   prefix.every((segment, index) =>
     segment === path[index] || segment === "*" || path[index] === "*"
   );
+
+export const cfcLabelPathsOverlap = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean =>
+  cfcLabelPathPrefixMatches(left, right) ||
+  cfcLabelPathPrefixMatches(right, left);
 
 export const cloneCfcLabel = (label: IFCLabel): IFCLabel => {
   const cloned: IFCLabel = {};
@@ -130,7 +137,7 @@ export const rebaseCfcLabelView = (
   const entries: CfcLabelViewEntry[] = [];
   for (const entry of view.entries) {
     const entryPath = canonicalizeCfcLogicalPath(entry.path);
-    if (isPrefix(logicalPath, entryPath)) {
+    if (cfcLabelPathPrefixMatches(logicalPath, entryPath)) {
       const label = cloneCfcLabel(entry.label);
       if (hasCfcLabelValues(label)) {
         entries.push({
@@ -138,7 +145,7 @@ export const rebaseCfcLabelView = (
           label,
         });
       }
-    } else if (isPrefix(entryPath, logicalPath)) {
+    } else if (cfcLabelPathPrefixMatches(entryPath, logicalPath)) {
       const label = cloneCfcLabel(entry.label);
       if (hasCfcLabelValues(label)) {
         entries.push({ path: [], label });

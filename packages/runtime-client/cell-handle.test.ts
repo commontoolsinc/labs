@@ -8,6 +8,7 @@ import {
   RequestType,
   type RuntimeClient,
 } from "./mod.ts";
+import { cellRefToKey } from "./shared/utils.ts";
 
 describe("CellHandle CFC label IPC", () => {
   it("queries the runtime for the label view behind a cell", async () => {
@@ -98,7 +99,7 @@ describe("CellHandle CFC label IPC", () => {
     }]);
   });
 
-  it("does not serialize ref-carried label views into sigil links", () => {
+  it("serializes ref-carried label views into transient sigil links", () => {
     const runtime = {
       [$conn]: () => ({
         request: () => Promise.resolve({}),
@@ -127,9 +128,44 @@ describe("CellHandle CFC label IPC", () => {
           space: "did:key:test",
           type: "application/json",
           path: ["value"],
+          cfcLabelView: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { integrity: ["selected-by-alice"] },
+            }],
+          },
         },
       },
     });
+  });
+
+  it("uses carried label views in subscription keys", () => {
+    const first: CellRef = {
+      id: "of:cfc-label-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      type: "application/json",
+      path: [],
+      cfcLabelView: {
+        version: 1 as const,
+        entries: [{
+          path: [],
+          label: { integrity: ["selected-first"] },
+        }],
+      },
+    };
+    const second: CellRef = {
+      ...first,
+      cfcLabelView: {
+        version: 1 as const,
+        entries: [{
+          path: [],
+          label: { integrity: ["selected-second"] },
+        }],
+      },
+    };
+
+    expect(cellRefToKey(first)).not.toEqual(cellRefToKey(second));
   });
 
   it("refreshes reused cell refs when carried label views change", async () => {

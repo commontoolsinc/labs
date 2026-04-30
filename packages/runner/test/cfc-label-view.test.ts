@@ -569,6 +569,84 @@ describe("CFC label view helpers", () => {
     }
   });
 
+  it("does not leak sibling labels on cross-document schema asCell children", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cfc label view cross doc sibling labels",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-sibling-source",
+        undefined,
+        tx,
+      );
+      const sourceLink = parseLink(source.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: sourceLink.id!,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { a: "first", b: "second" },
+        cfc: {
+          version: 1,
+          schemaHash: "source-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["a"],
+              label: { integrity: ["source-a"] },
+            }, {
+              path: ["b"],
+              label: { integrity: ["source-b"] },
+            }],
+          },
+        },
+      });
+
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-sibling-target",
+        {
+          type: "object",
+          properties: {
+            a: { type: "string", asCell: true },
+            b: { type: "string", asCell: true },
+          },
+        },
+        tx,
+      );
+      target.set(source);
+      await tx.commit();
+
+      const recovered = target.get() as { a: unknown; b: unknown };
+      expect(cfcLabelViewForCell(recovered.a)).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: { integrity: ["source-a"] },
+        }],
+      });
+      expect(cfcLabelViewForCell(recovered.b)).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: { integrity: ["source-b"] },
+        }],
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("keeps accumulated link labels on default-created asCell values", async () => {
     const signer = await Identity.fromPassphrase(
       "cfc label view default asCell",

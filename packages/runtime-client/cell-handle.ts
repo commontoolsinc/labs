@@ -302,6 +302,9 @@ export class CellHandle<T = unknown> {
           ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
           ...(this.#ref.overwrite !== undefined &&
             { overwrite: this.#ref.overwrite }),
+          ...(this.#ref.cfcLabelView !== undefined && {
+            cfcLabelView: this.#ref.cfcLabelView,
+          }),
         } as never,
       },
     };

@@ -20,6 +20,7 @@ import {
 import { flowPrecisionSchemaForBuiltin } from "../src/cfc/flow-precision.ts";
 import { CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION } from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -1185,7 +1186,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }).getReadActivities()];
       expect(readActivities).toContainEqual(
         expect.objectContaining({
-          path: [],
+          path: ["cfc"],
         }),
       );
 
@@ -1779,6 +1780,76 @@ describe("ExtendedStorageTransaction CFC gate", () => {
                 }),
               ]),
             }),
+          }),
+        ]),
+      );
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists carried link labels without storing transient label views", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-link-carried-only-source",
+        undefined,
+        seed,
+      );
+      source.set({ title: "plain source" });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const link = source.getAsLink() as any;
+      link["/"][LINK_V1_TAG].cfcLabelView = {
+        version: 1,
+        entries: [{
+          path: [],
+          label: { integrity: ["selected-by-alice"] },
+        }, {
+          path: ["title"],
+          label: { confidentiality: ["selected-title"] },
+        }],
+      };
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-link-carried-only-target",
+        undefined,
+        tx,
+      );
+      target.set(link);
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        id: target.getAsNormalizedFullLink().id,
+        type: "application/json",
+        path: [],
+      }) as {
+        value?: { "/": { [LINK_V1_TAG]: { cfcLabelView?: unknown } } };
+        cfc?: { labelMap?: { entries?: unknown[] } };
+      };
+      expect(stored.value?.["/"][LINK_V1_TAG]).not.toHaveProperty(
+        "cfcLabelView",
+      );
+      expect(stored.cfc?.labelMap?.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: [],
+            label: { integrity: ["selected-by-alice"] },
+          }),
+          expect.objectContaining({
+            path: ["title"],
+            label: { confidentiality: ["selected-title"] },
           }),
         ]),
       );

@@ -90,7 +90,7 @@ const labelViewForLink = (
   ) {
     return rebaseCfcLabelView(baseView, link.path.slice(baseLink.path.length));
   }
-  return cloneCfcLabelView(baseView);
+  return rebaseCfcLabelView(baseView, link.path);
 };
 
 /**
@@ -719,7 +719,7 @@ export function validateAndTransform(
       tx.getCfcState().dereferenceTraces.slice(valueTraceStart),
     ),
   ]);
-  objectCreator.setBase(link, cfcLabelView);
+  objectCreator.setBase(resolvedValueLink, cfcLabelView);
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.

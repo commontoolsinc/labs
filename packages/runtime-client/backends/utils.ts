@@ -35,6 +35,9 @@ export function cellRefToSigilLink(cell: CellRef): SigilLink {
         type: cell.type,
         ...(cell.schema !== undefined && { schema: cell.schema }),
         ...(cell.overwrite !== undefined && { overwrite: cell.overwrite }),
+        ...(cell.cfcLabelView !== undefined && {
+          cfcLabelView: cell.cfcLabelView,
+        }),
       } as never,
     },
   };
