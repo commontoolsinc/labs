@@ -16,6 +16,7 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 
@@ -58,6 +59,24 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
+class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: "/workspace",
+      cfc: {
+        runtimeRequested: true,
+        runtimeName: "runsc-cfc",
+        workspaceMountPath: "/workspace",
+        mounts: [
+          { kind: "workspace", sandboxPath: "/workspace", readOnly: false },
+          { kind: "fabric-fuse", sandboxPath: "/fabric", readOnly: false },
+        ],
+      },
+    };
+  }
+}
+
 Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities", async () => {
   const snapshot = await collectHarnessCapabilitySnapshot(
     new FakeSandboxRuntime(),
@@ -79,6 +98,19 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
         cfc: {
           runtimeRequested: true,
           workspaceMountPath: "/workspace",
+        },
+      },
+      mounts: {
+        workspace: {
+          kind: "workspace",
+          status: "configured",
+          sandboxPath: "/workspace",
+          readOnly: false,
+        },
+        fabric: {
+          kind: "fabric-fuse",
+          status: "not-configured",
+          sandboxPath: "/fabric",
         },
       },
       protectedXattrs: {
@@ -114,6 +146,29 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
         path: "/usr/bin/git",
         version: "git version 2.45.1",
       },
+    },
+  });
+});
+
+Deno.test("collectHarnessCapabilitySnapshot reports configured Fabric mounts", async () => {
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    new FakeFabricSandboxRuntime(),
+    "/workspace",
+    "2026-04-29T23:00:00.000Z",
+  );
+
+  assertEquals(snapshot.cfc.mounts, {
+    workspace: {
+      kind: "workspace",
+      status: "configured",
+      sandboxPath: "/workspace",
+      readOnly: false,
+    },
+    fabric: {
+      kind: "fabric-fuse",
+      status: "configured",
+      sandboxPath: "/fabric",
+      readOnly: false,
     },
   });
 });
@@ -234,6 +289,35 @@ Deno.test("classifyBuiltinToolFailure records host shell failures without sandbo
     command: "agent-browser --help",
     commandName: "agent-browser",
     exitCode: 127,
+  });
+});
+
+Deno.test("classifyBuiltinToolFailure records denied browser host commands", () => {
+  const failure = classifyBuiltinToolFailure(
+    "bash-no-sandbox",
+    { command: "git status" },
+    {
+      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+      stdout: "",
+      stderr:
+        "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+      exitCode: 126,
+      cwd: "/workspace",
+    },
+    "2026-04-23T18:26:00.000Z",
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "tool_not_allowed",
+    source: "tool_output",
+    detail:
+      "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+    at: "2026-04-23T18:26:00.000Z",
+    toolId: "bash-no-sandbox",
+    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+    command: "git status",
+    exitCode: 126,
   });
 });
 

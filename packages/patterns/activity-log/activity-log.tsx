@@ -121,7 +121,12 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
             style="padding: 0.75rem 1rem; align-items: center;"
           >
             <cf-label style="font-weight: 600; flex: 1;">Activity Log</cf-label>
-            <cf-button variant="ghost" size="sm" onClick={clearLog}>
+            <cf-button
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              onClick={clearLog}
+            >
               Clear
             </cf-button>
           </cf-hstack>
@@ -131,7 +136,8 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
               {/* Agent filter chips */}
               <cf-hstack gap="1" style="flex-wrap: wrap;">
                 <cf-button
-                  variant={filterAgent.get() === null ? "primary" : "ghost"}
+                  color={filterAgent.get() === null ? "primary" : "neutral"}
+                  variant={filterAgent.get() === null ? "solid" : "ghost"}
                   size="sm"
                   onClick={() => setFilter.send({ agent: null })}
                 >
@@ -139,7 +145,8 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
                 </cf-button>
                 {agents.map((agent: string) => (
                   <cf-button
-                    variant={filterAgent.get() === agent ? "primary" : "ghost"}
+                    color={filterAgent.get() === agent ? "primary" : "neutral"}
+                    variant={filterAgent.get() === agent ? "solid" : "ghost"}
                     size="sm"
                     onClick={() => setFilter.send({ agent })}
                   >

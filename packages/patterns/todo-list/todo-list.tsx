@@ -56,7 +56,11 @@ export const TodoItemPiece = pattern<
             style="flex: 1;"
             placeholder="Todo item..."
           />
-          <cf-button variant="ghost" onClick={() => removeItem.send({ item })}>
+          <cf-button
+            color="neutral"
+            variant="ghost"
+            onClick={() => removeItem.send({ item })}
+          >
             x
           </cf-button>
         </cf-hstack>
@@ -160,6 +164,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
                   {completedCards}
                   <cf-hstack justify="end">
                     <cf-button
+                      color="neutral"
                       variant="ghost"
                       size="sm"
                       style="font-size: 0.8rem; color: var(--cf-color-gray-500);"

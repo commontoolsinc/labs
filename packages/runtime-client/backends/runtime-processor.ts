@@ -453,6 +453,7 @@ export class RuntimeProcessor {
       includeSchema: true,
       keepAsCell: true,
       doNotConvertCellResults: true,
+      includeCfcLabelView: true,
     });
     return { value: converted };
   }
@@ -507,6 +508,7 @@ export class RuntimeProcessor {
         includeSchema: true,
         keepAsCell: true,
         doNotConvertCellResults: true,
+        includeCfcLabelView: true,
       });
 
       // `.sink` fires synchronously on invocation. Trigger the notification

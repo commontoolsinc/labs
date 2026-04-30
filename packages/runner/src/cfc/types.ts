@@ -1,6 +1,9 @@
 import type { JSONSchema } from "../builder/types.ts";
 import type { FabricValue, MemorySpace } from "@commonfabric/memory/interface";
 import type { Metadata } from "../storage/interface.ts";
+import type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
+
+export type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
 
 export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
   "runtime.setup.result-projection";
@@ -26,9 +29,77 @@ export const isCfcEnforcementMode = (
 
 export const DEFAULT_CFC_ENFORCEMENT_MODE: CfcEnforcementMode = "disabled";
 
-export type IFCLabel = {
-  confidentiality?: unknown[];
-  integrity?: unknown[];
+export type CfcSandboxJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | CfcSandboxJsonValue[]
+  | { [key: string]: CfcSandboxJsonValue };
+
+export type CfcSandboxOutputPolicy = "observed" | "opaque" | "denied";
+
+export type CfcStreamChannel = "stdout" | "stderr";
+
+export type CfcStreamSegment = {
+  text: string;
+  label: IFCLabel;
+  offset?: number;
+  byteLength?: number;
+};
+
+export type CfcStreamObservation =
+  | {
+    channel: CfcStreamChannel;
+    policy: "observed";
+    label: IFCLabel;
+    segments: CfcStreamSegment[];
+    truncated?: boolean;
+  }
+  | {
+    channel: CfcStreamChannel;
+    policy: "opaque";
+    label: IFCLabel;
+    byteLength?: number;
+    truncated?: boolean;
+  }
+  | {
+    channel: CfcStreamChannel;
+    policy: "denied";
+    label: IFCLabel;
+    reason?: string;
+  };
+
+export type CfcSandboxExitCodeObservation =
+  | {
+    policy: "observed";
+    label: IFCLabel;
+    value: number | null;
+  }
+  | {
+    policy: "opaque";
+    label: IFCLabel;
+  }
+  | {
+    policy: "denied";
+    label: IFCLabel;
+    reason?: string;
+  };
+
+export type CfcSandboxDiagnostic = {
+  level: "info" | "warning" | "error";
+  code: string;
+  message: string;
+  label?: IFCLabel;
+  details?: { [key: string]: CfcSandboxJsonValue };
+};
+
+export type CfcSandboxResult = {
+  version: 1;
+  stdout: CfcStreamObservation;
+  stderr: CfcStreamObservation;
+  exitCode: CfcSandboxExitCodeObservation;
+  diagnostics?: CfcSandboxDiagnostic[];
 };
 
 export type CfcMetadata = {
@@ -111,6 +182,7 @@ export type WritePolicyInput =
     target: CfcAddress;
     source: CfcAddress;
     linkSchema?: JSONSchema;
+    cfcLabelView?: CfcLabelView;
   }
   | {
     kind: "sink-request";

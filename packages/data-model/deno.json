@@ -3,8 +3,8 @@
   "tasks": {
     "check": "deno check .",
     "just-test": {
-      "description": "Just run unit tests without type checking",
-      "command": "deno test --no-check"
+      "description": "Run unit tests",
+      "command": "deno test"
     },
     "test": {
       "description": "Type check & run tests",
@@ -32,7 +32,6 @@
     "./explicit-tag-value": "./explicit-tag-value.ts",
     "./unknown-value": "./unknown-value.ts",
     "./problematic-value": "./problematic-value.ts",
-    "./value-hash-modern": "./value-hash-modern.ts",
     "./frozen-builtins": "./frozen-builtins.ts",
     "./fabric-bytes": "./fabric-bytes.ts",
     "./fabric-native-instances": "./fabric-native-instances.ts",
@@ -44,7 +43,6 @@
     "./array-utils": "./array-utils.ts",
     "./value-debug": "./value-debug.ts",
     "./value-hash": "./value-hash.ts",
-    "./value-hash-legacy": "./value-hash-legacy.ts",
     "./schema-hash": "./schema-hash.ts",
     "./schema-hash-legacy": "./schema-hash-legacy.ts",
     "./schema-hash-modern": "./schema-hash-modern.ts"

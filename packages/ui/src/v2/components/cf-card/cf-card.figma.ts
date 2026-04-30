@@ -30,21 +30,21 @@ export const figmaMapping = {
         "Status pills (Queued, Working, Link, Review, Alert, Login, Active, Done). Map State to variant + label.",
       props: {
         State: {
-          codeProp: "variant",
+          codeProps: ["color", "variant"],
           values: {
-            Queue: "default",
-            Progress: "default",
-            Link: "default",
-            Review: "outline",
-            Alert: "destructive",
-            Login: "secondary",
-            Active: "secondary",
-            Done: "secondary",
+            Queue: { color: "primary", variant: "solid" },
+            Progress: { color: "primary", variant: "solid" },
+            Link: { color: "primary", variant: "solid" },
+            Review: { color: "neutral", variant: "outline" },
+            Alert: { color: "danger", variant: "solid" },
+            Login: { color: "neutral", variant: "solid" },
+            Active: { color: "neutral", variant: "solid" },
+            Done: { color: "neutral", variant: "solid" },
           },
         },
       },
-      example: `<cf-badge variant="destructive">Alert</cf-badge>
-<cf-badge variant="default">Queued</cf-badge>`,
+      example: `<cf-badge color="danger" variant="solid">Alert</cf-badge>
+<cf-badge color="primary" variant="solid">Queued</cf-badge>`,
     },
     "tag.category": {
       element: "cf-chip",
@@ -58,6 +58,6 @@ export const figmaMapping = {
   example: `<cf-card>
   <span slot="header">Card Title</span>
   <p>Card body content goes here.</p>
-  <cf-button slot="footer" variant="primary">Action</cf-button>
+  <cf-button slot="footer" color="primary" variant="solid">Action</cf-button>
 </cf-card>`,
 };

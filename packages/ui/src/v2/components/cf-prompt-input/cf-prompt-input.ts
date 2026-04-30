@@ -684,7 +684,8 @@ export class CFPromptInput extends BaseElement {
                         ? html`
                           <cf-button
                             id="cf-prompt-input-stop-button"
-                            variant="secondary"
+                            color="neutral"
+                            variant="outline"
                             size="${this.size === "sm"
                               ? "sm"
                               : this.size === "lg"
@@ -700,7 +701,8 @@ export class CFPromptInput extends BaseElement {
                         : html`
                           <cf-button
                             id="cf-prompt-input-send-button"
-                            variant="primary"
+                            color="primary"
+                            variant="solid"
                             size="${this.size === "sm"
                               ? "sm"
                               : this.size === "lg"

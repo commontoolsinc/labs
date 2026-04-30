@@ -23,7 +23,7 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "../native-type-tags.ts";
-import { hashOfModern } from "../value-hash-modern.ts";
+import { hashOf } from "../value-hash.ts";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {
@@ -293,10 +293,10 @@ describe("FabricRegExp", () => {
   // Hash
   // --------------------------------------------------------------------------
 
-  describe("hashOfModern", () => {
+  describe("hashOf", () => {
     it("produces a hash for FabricRegExp", () => {
       const sr = new FabricRegExp(/abc/gi);
-      const hash = hashOfModern(sr);
+      const hash = hashOf(sr);
       expect(hash.bytes).toBeInstanceOf(Uint8Array);
       expect(hash.length).toBe(32); // SHA-256
     });
@@ -304,20 +304,20 @@ describe("FabricRegExp", () => {
     it("same regex produces same hash", () => {
       const sr1 = new FabricRegExp(/abc/gi);
       const sr2 = new FabricRegExp(/abc/gi);
-      const h1 = hashOfModern(sr1).bytes;
-      const h2 = hashOfModern(sr2).bytes;
+      const h1 = hashOf(sr1).bytes;
+      const h2 = hashOf(sr2).bytes;
       expect(h1).toEqual(h2);
     });
 
     it("different source produces different hash", () => {
-      const h1 = hashOfModern(new FabricRegExp(/abc/)).bytes;
-      const h2 = hashOfModern(new FabricRegExp(/def/)).bytes;
+      const h1 = hashOf(new FabricRegExp(/abc/)).bytes;
+      const h2 = hashOf(new FabricRegExp(/def/)).bytes;
       expect(h1).not.toEqual(h2);
     });
 
     it("different flags produce different hash", () => {
-      const h1 = hashOfModern(new FabricRegExp(/abc/g)).bytes;
-      const h2 = hashOfModern(new FabricRegExp(/abc/i)).bytes;
+      const h1 = hashOf(new FabricRegExp(/abc/g)).bytes;
+      const h2 = hashOf(new FabricRegExp(/abc/i)).bytes;
       expect(h1).not.toEqual(h2);
     });
   });

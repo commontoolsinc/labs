@@ -145,7 +145,9 @@ deno task run -- \
 The provisional browser profile is the only CLI-supported path to
 `bash-no-sandbox`. It gives the child a host shell so it can invoke
 `agent-browser`, while the parent still receives only the normal sanitized
-subagent result:
+subagent result. The host shell is policy-restricted to `agent-browser`,
+`agent-browser` discovery (`which agent-browser`, `command -v agent-browser`),
+`pwd`, `ls`, and bounded workspace-local `find` commands:
 
 ```bash
 deno task run -- \
@@ -186,10 +188,46 @@ The integration suite requires a working local Docker + `runsc-cfc` environment.
 By default it also uses the published kitchen-sink image above, unless you
 override `CF_HARNESS_INTEGRATION_IMAGE`.
 
+To also exercise a real host Fabric FUSE mount bind-mounted into the sandbox at
+`/fabric`, start `cf fuse mount` separately and pass the mountpoint:
+
+```bash
+cd packages/cf-harness
+CF_HARNESS_INTEGRATION_FABRIC_MOUNT=/tmp/cf deno task test:integration
+```
+
+That opt-in case verifies that cf-harness can navigate `/fabric` through
+`runsc-cfc` and read the FUSE `.status` file. Without
+`CF_HARNESS_INTEGRATION_FABRIC_MOUNT`, the Fabric mount case is skipped.
+
 On Linux, Docker/runsc runs default to the host UID/GID. On macOS, the default
 omits `--user` because Docker Desktop bind mounts may expose host files as
 `root:root`, which prevents non-root container users from writing mounted Loom
 workspaces. An explicit `containerUser` still overrides the platform default.
+
+CFC sandbox result mediation requires the installed `runsc-cfc` runtime to use
+the same host result directory that `cf-harness` reads. Configure runsc with
+`--cfc-result-dir=/path/to/results`, then set
+`CF_HARNESS_RUNSC_CFC_RESULT_DIR=/path/to/results` or pass `cfcResultDir` in the
+explicit sandbox config.
+
+CFC invocation context transport is similarly coordinated through a host sidecar
+directory. Configure runsc with
+`--cfc-invocation-context-dir=/path/to/invocations`, then set
+`CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR=/path/to/invocations` or pass
+`cfcInvocationContextDir` in the explicit sandbox config. `cf-harness` writes
+`<containerID>.json` after `docker create` and before `docker start`; the
+current payload is an audit/provenance context, not yet an argv/stdin/cwd/env
+label enforcement contract.
+
+On Docker Desktop for macOS, use the host path for `cf-harness` and the
+`/host_mnt/...` projection for Docker's runtime args. The gVisor
+`docker-desktop-cfc-setup` helper defaults to:
+
+```bash
+export CF_HARNESS_RUNSC_CFC_RESULT_DIR="$HOME/.local/share/runsc-cfc/cfc-results"
+export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc/cfc-invocations"
+```
 
 ## Related Docs
 

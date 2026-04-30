@@ -368,7 +368,8 @@ ${notesXml}
               <cf-vstack gap="4">
                 {/* Go to Today */}
                 <cf-button
-                  variant="primary"
+                  color="primary"
+                  variant="solid"
                   onClick={handleGoToToday({
                     entries,
                     template,
@@ -409,7 +410,11 @@ ${notesXml}
                     }}
                   >
                     <h3 style={{ margin: 0, fontSize: "16px" }}>Entries</h3>
-                    <cf-button variant="ghost" onClick={toggleSettings}>
+                    <cf-button
+                      color="neutral"
+                      variant="ghost"
+                      onClick={toggleSettings}
+                    >
                       Settings
                     </cf-button>
                   </div>
@@ -437,6 +442,7 @@ ${notesXml}
                         Weekly Rollup
                       </h3>
                       <cf-button
+                        color="neutral"
                         variant="ghost"
                         size="sm"
                         onClick={triggerRollup({
@@ -653,7 +659,7 @@ ${notesXml}
               wordWrap
               style={{ minHeight: "300px" }}
             />
-            <cf-button variant="primary" onClick={toggleSettings}>
+            <cf-button color="primary" variant="solid" onClick={toggleSettings}>
               Done
             </cf-button>
           </cf-vstack>

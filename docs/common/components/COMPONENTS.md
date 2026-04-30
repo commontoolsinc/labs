@@ -414,7 +414,7 @@ const activeTab = Writable.of("home");
 ```tsx
 <cf-tab-bar $value={activeTab} variant="inset">
   {/* ... tab items ... */}
-  <cf-button slot="action" variant="primary" onClick={openSheet}
+  <cf-button slot="action" color="primary" variant="solid" onClick={openSheet}
     style="border-radius: var(--cf-border-radius-xl); width: 3.5rem; height: 100%; padding: 0;">
     ＋
   </cf-button>
@@ -465,10 +465,10 @@ Floating ephemeral notifications. Place a `cf-toast-provider` at the app root an
 
 ```tsx
 <cf-toast-provider position="bottom">
-  <cf-toast open={saved} variant="success" duration={4000}
+  <cf-toast open={saved} status="success" duration={4000}
     oncf-toast-dismiss={action(() => saved.set(false))}>
     Changes saved.
-    <cf-button slot="action" variant="ghost" style="padding: 2px 8px; font-size: 13px;">
+    <cf-button slot="action" color="neutral" variant="ghost" style="padding: 2px 8px; font-size: 13px;">
       View
     </cf-button>
   </cf-toast>
@@ -482,7 +482,7 @@ Floating ephemeral notifications. Place a `cf-toast-provider` at the app root an
 
 ### cf-toast
 
-- `variant` — `"default"`, `"success"`, `"error"`, `"warning"`
+- `status` — `"info"`, `"success"`, `"warning"`, `"error"`
 - `duration` — auto-dismiss in ms (default 5000, `0` for persistent)
 - `dismissible` — show X button (`dismissable` is a deprecated alias)
 - `open` — visibility

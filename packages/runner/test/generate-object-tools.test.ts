@@ -24,6 +24,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
+import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -78,6 +79,35 @@ describe("generateObject with tools", () => {
     await runtime.idle();
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("redacts wildcard label paths during LLM observation serialization", () => {
+    const rootLink = {
+      id: "of:llm-wildcard-label-root",
+      space,
+      type: "application/json",
+      path: [],
+    } as const;
+    const serialized = llmToolExecutionHelpers.serializeForLLMObservation({
+      value: [{ body: "do not inline" }],
+      contextSpace: space,
+      rootLink,
+      labelView: {
+        version: 1,
+        entries: [{
+          path: ["*", "body"],
+          label: { confidentiality: ["secret"] },
+        }],
+      },
+      observationMaxConfidentiality: ["public"],
+    });
+
+    expect(serialized.value).toEqual([{
+      body: {
+        "@link": "/of:llm-wildcard-label-root/0/body",
+      },
+    }]);
+    expect(serialized.observedConfidentiality).toEqual([]);
   });
 
   it("should add presentResult tool to catalog and extract structured result", async () => {
@@ -978,6 +1008,91 @@ describe("generateObject with tools", () => {
       analysis: "Data contains 5 numeric values",
       total: 5,
     });
+  });
+
+  it("keeps pattern tool resultLocation on the tool result cell when result is a link", async () => {
+    const linkedCell = runtime.getCell(
+      space,
+      "generateObject-pattern-tool-linked-result",
+      undefined,
+      tx,
+    );
+    linkedCell.set({ message: "linked" });
+    const linkedLocation = `/${linkedCell.getAsNormalizedFullLink().id}`;
+    let toolResultLocation: unknown;
+
+    addMockResponse(
+      (req) =>
+        req.messages.some((message) =>
+          typeof message.content === "string" &&
+          message.content.includes("test-pattern-tool-result-location-link")
+        ) &&
+        req.tools?.["returnLinked"] !== undefined &&
+        req.tools?.["presentResult"] !== undefined,
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_returnLinked_1",
+          toolName: "returnLinked",
+          input: {},
+        }],
+        id: "return-linked-1",
+      },
+    );
+    addMockResponse(
+      (req) => {
+        const toolMessage = req.messages.find((message) =>
+          message.role === "tool"
+        ) as BuiltInLLMMessage | undefined;
+        const content = Array.isArray(toolMessage?.content)
+          ? toolMessage.content[0] as any
+          : undefined;
+        toolResultLocation = content?.output?.value?.["@resultLocation"];
+        return toolResultLocation !== undefined;
+      },
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_present_link_result",
+          toolName: "presentResult",
+          input: { ok: true },
+        }],
+        id: "return-linked-2",
+      },
+    );
+
+    const resultSchema: JSONSchema = {
+      type: "object",
+      properties: { ok: { type: "boolean" } },
+      required: ["ok"],
+    };
+    const returnLinked = pattern<Record<string, never>>(() => linkedCell);
+    const testPattern = pattern<Record<string, never>>(() =>
+      generateObject({
+        prompt: "test-pattern-tool-result-location-link",
+        schema: resultSchema,
+        tools: {
+          returnLinked: patternTool(returnLinked) as unknown as BuiltInLLMTool,
+        },
+      })
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-pattern-tool-result-location",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+    await runtime.idle();
+
+    expect(result.key("result").get()).toEqual({ ok: true });
+    expect(toolResultLocation).not.toBe(linkedLocation);
   });
 
   it("should handle parallel tool calls before presentResult", async () => {
@@ -1893,13 +2008,14 @@ describe("generateObject with tools", () => {
 
       const liveResult = generatedResult.withTx();
       await liveResult.sync();
-      expect(liveResult.key("result").get()).toEqual({
+      const resolvedResult = liveResult.key("result").resolveAsCell();
+      expect(resolvedResult.get()).toEqual({
         action: "reject",
         approved: false,
         confidence: 0.91,
         reasoning: "The briefing was not approved.",
       });
-      expect(cfcLabelViewForCell(liveResult.key("result"))).toMatchObject({
+      expect(cfcLabelViewForCell(resolvedResult)).toMatchObject({
         entries: expect.arrayContaining([
           {
             path: ["action"],

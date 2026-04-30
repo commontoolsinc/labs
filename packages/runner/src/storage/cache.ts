@@ -1,5 +1,5 @@
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { hashObjectFromString } from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import {
   toCompactDebugString,
   toIndentedDebugString,
@@ -317,8 +317,10 @@ class RevisionCodec {
     return cause == null
       ? { the, of, since }
       : is === undefined
-      ? { the, of, since, cause: hashObjectFromString(cause) } as Revision<Fact>
-      : { the, of, is, since, cause: hashObjectFromString(cause) } as Revision<
+      ? { the, of, since, cause: FabricHash.fromString(cause) } as Revision<
+        Fact
+      >
+      : { the, of, is, since, cause: FabricHash.fromString(cause) } as Revision<
         Fact
       >;
   }

@@ -8,6 +8,7 @@ import {
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
+  appendHarnessCfcInvocationContext,
   appendHarnessFailureRecord,
   appendHarnessPolicyDecision,
   appendHarnessPolicyEvent,
@@ -39,6 +40,12 @@ import {
   createHarnessPolicyEvent,
   type HarnessPolicyEvent,
 } from "./contracts/policy.ts";
+import {
+  createHarnessCfcInvocationContext,
+  type HarnessCfcInvocationContext,
+  type HarnessCfcInvocationOperation,
+  summarizeCfcInvocationRunManifest,
+} from "./contracts/cfc-invocation-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import {
   createHarnessPolicyDecisionRecord,
@@ -191,6 +198,19 @@ const isHostPathWithinRoot = (root: string, path: string): boolean => {
     (!relativePath.startsWith("..") && !relativePath.startsWith("/"));
 };
 
+const isSandboxPathWithinRoot = (root: string, path: string): boolean => {
+  const normalizedRoot = normalizeSandboxRoot(root);
+  const normalizedPath = normalizeSandboxRoot(path);
+  return normalizedPath === normalizedRoot ||
+    normalizedPath.startsWith(`${normalizedRoot}/`);
+};
+
+type HostSandboxMount = {
+  kind: string;
+  hostPath: string;
+  sandboxPath: string;
+};
+
 export class CfHarnessEngine {
   readonly config: HarnessConfig;
   readonly sandbox: SandboxRuntime;
@@ -202,6 +222,7 @@ export class CfHarnessEngine {
   #runState: HarnessRunState;
   #outputSequence: number;
   readonly #now: () => string;
+  readonly #hostMounts: readonly HostSandboxMount[];
 
   constructor(options: CreateHarnessEngineOptions = {}) {
     this.#now = options.now ?? (() => new Date().toISOString());
@@ -220,6 +241,26 @@ export class CfHarnessEngine {
       sandboxConfig?.workspaceMountPath ??
         this.sandbox.defaultWorkingDirectory(),
     );
+    this.#hostMounts = sandboxConfig !== undefined
+      ? [
+        {
+          kind: "workspace",
+          hostPath: sandboxConfig.workspaceHostPath,
+          sandboxPath: sandboxConfig.workspaceMountPath,
+        },
+        ...sandboxConfig.additionalMounts.map((mount) => ({
+          kind: mount.kind,
+          hostPath: mount.hostPath,
+          sandboxPath: mount.sandboxPath,
+        })),
+      ]
+      : this.workspaceHostPath !== undefined
+      ? [{
+        kind: "workspace",
+        hostPath: this.workspaceHostPath,
+        sandboxPath: this.workspaceMountPath,
+      }]
+      : [];
     this.artifactStore = options.artifactStore ??
       ((this.config.artifactRoot ?? options.runState?.artifactRoot) !==
           undefined
@@ -643,46 +684,152 @@ export class CfHarnessEngine {
   }
 
   #resolveHostPath(path: string): string {
-    if (this.workspaceHostPath === undefined) {
+    if (this.#hostMounts.length === 0) {
       throw new Error(
-        "bash-no-sandbox requires a workspace host path to map sandbox paths",
+        "bash-no-sandbox requires a host mount path to map sandbox paths",
       );
     }
     const sandboxPath = this.sandbox.resolvePath(
       path,
       this.#runState.currentDir,
     );
-    const mountPath = this.workspaceMountPath;
-    if (sandboxPath === mountPath) {
-      return normalizeHostPath(this.workspaceHostPath);
+    const mount = this.#hostMounts.find((candidate) =>
+      isSandboxPathWithinRoot(candidate.sandboxPath, sandboxPath)
+    );
+    if (mount === undefined) {
+      throw new Error(`path escapes host-backed sandbox roots: ${path}`);
     }
-    if (!sandboxPath.startsWith(`${mountPath}/`)) {
-      throw new Error(`path escapes workspace root: ${path}`);
+    const sandboxRoot = normalizeSandboxRoot(mount.sandboxPath);
+    if (sandboxPath === sandboxRoot) {
+      return normalizeHostPath(mount.hostPath);
     }
     return normalizeHostPath(
       joinHostPath(
-        this.workspaceHostPath,
-        sandboxPath.slice(mountPath.length + 1),
+        mount.hostPath,
+        sandboxPath.slice(sandboxRoot.length + 1),
       ),
     );
   }
 
   #hostPathToWorkspacePath(path: string): string | undefined {
-    if (this.workspaceHostPath === undefined) {
-      return undefined;
-    }
-    const hostRoot = normalizeHostPath(this.workspaceHostPath);
     const hostPath = normalizeHostPath(path);
-    if (!isHostPathWithinRoot(hostRoot, hostPath)) {
-      return undefined;
+    for (const mount of this.#hostMounts) {
+      const hostRoot = normalizeHostPath(mount.hostPath);
+      if (!isHostPathWithinRoot(hostRoot, hostPath)) {
+        continue;
+      }
+      const relativePath = relativeHostPath(hostRoot, hostPath);
+      if (relativePath === "") {
+        return normalizeSandboxRoot(mount.sandboxPath);
+      }
+      return normalizeSandboxPath(
+        `${normalizeSandboxRoot(mount.sandboxPath)}/${
+          relativePath.replaceAll("\\", "/")
+        }`,
+      );
     }
-    const relativePath = relativeHostPath(hostRoot, hostPath);
-    if (relativePath === "") {
-      return this.workspaceMountPath;
+    return undefined;
+  }
+
+  async #isHostPathWithinWorkspace(
+    path: string,
+    options: { allowMissing?: boolean } = {},
+  ): Promise<boolean> {
+    if (this.workspaceHostPath === undefined) {
+      return false;
     }
-    return normalizeSandboxPath(
-      `${this.workspaceMountPath}/${relativePath.replaceAll("\\", "/")}`,
+    const normalizedPath = normalizeHostPath(path);
+    try {
+      const hostRoot = await Deno.realPath(this.workspaceHostPath);
+      const hostPath = await Deno.realPath(normalizedPath);
+      return isHostPathWithinRoot(hostRoot, hostPath);
+    } catch (error) {
+      if (!options.allowMissing || !(error instanceof Deno.errors.NotFound)) {
+        return false;
+      }
+      return await this.#missingHostPathCanResolveWithinWorkspace(
+        normalizedPath,
+      );
+    }
+  }
+
+  async #missingHostPathCanResolveWithinWorkspace(path: string): Promise<
+    boolean
+  > {
+    if (this.workspaceHostPath === undefined) {
+      return false;
+    }
+    const lexicalRoot = normalizeHostPath(this.workspaceHostPath);
+    let realRoot: string;
+    try {
+      realRoot = await Deno.realPath(this.workspaceHostPath);
+    } catch {
+      return false;
+    }
+    let candidate = normalizeHostPath(path);
+    while (isHostPathWithinRoot(lexicalRoot, candidate)) {
+      try {
+        const realCandidate = await Deno.realPath(candidate);
+        return isHostPathWithinRoot(realRoot, realCandidate);
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) {
+          return false;
+        }
+      }
+      const parent = dirname(candidate);
+      if (parent === candidate) {
+        return false;
+      }
+      candidate = parent;
+    }
+    return false;
+  }
+
+  async #createCfcInvocationContext(options: {
+    toolId: string;
+    toolOutputId?: ToolOutputId;
+    operation: HarnessCfcInvocationOperation;
+    cwd: string;
+    command?: string;
+    argv?: readonly string[];
+    args?: readonly string[];
+    stdinText?: string;
+    env?: Record<string, string>;
+  }): Promise<HarnessCfcInvocationContext> {
+    const now = this.#now();
+    const invocation = await createHarnessCfcInvocationContext({
+      sequence: (this.#runState.cfcInvocationContexts ?? []).length + 1,
+      runId: this.#runState.runId,
+      createdAt: now,
+      toolId: options.toolId,
+      ...(options.toolOutputId !== undefined
+        ? { toolOutputId: options.toolOutputId }
+        : {}),
+      operation: options.operation,
+      cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+      cwd: options.cwd,
+      ...(this.#runState.promptSlotBinding !== undefined
+        ? { promptSlot: this.#runState.promptSlotBinding }
+        : {}),
+      runManifest: summarizeCfcInvocationRunManifest(
+        this.#runState.runManifest,
+        this.#runState.runManifestPath,
+      ),
+      ...(options.command !== undefined ? { command: options.command } : {}),
+      ...(options.argv !== undefined ? { argv: options.argv } : {}),
+      ...(options.args !== undefined ? { args: options.args } : {}),
+      ...(options.stdinText !== undefined
+        ? { stdinText: options.stdinText }
+        : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
+    });
+    this.#runState = appendHarnessCfcInvocationContext(
+      this.#runState,
+      invocation,
+      now,
     );
+    await this.persistRunState();
+    return invocation;
   }
 
   #createToolContext() {
@@ -697,6 +844,10 @@ export class CfHarnessEngine {
       resolveHostPath: (path: string) => this.#resolveHostPath(path),
       hostPathToWorkspacePath: (path: string) =>
         this.#hostPathToWorkspacePath(path),
+      isHostPathWithinWorkspace: (
+        path: string,
+        options?: { allowMissing?: boolean },
+      ) => this.#isHostPathWithinWorkspace(path, options),
       setCurrentDir: (path: string) => {
         const resolved = this.sandbox.resolvePath(
           path,
@@ -711,6 +862,17 @@ export class CfHarnessEngine {
       nextOutputId: (toolId: string) => {
         return this.nextToolOutputId(toolId);
       },
+      createCfcInvocationContext: (options: {
+        toolId: string;
+        toolOutputId?: ToolOutputId;
+        operation: HarnessCfcInvocationOperation;
+        cwd: string;
+        command?: string;
+        argv?: readonly string[];
+        args?: readonly string[];
+        stdinText?: string;
+        env?: Record<string, string>;
+      }) => this.#createCfcInvocationContext(options),
     };
   }
 }

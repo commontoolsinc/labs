@@ -35,7 +35,8 @@ describe("CFButton", () => {
 
   it("should have default properties", () => {
     const element = new CFButton();
-    expect(element.variant).toBe("primary");
+    expect(element.color).toBe("primary");
+    expect(element.variant).toBe("solid");
     expect(element.size).toBe("md");
     expect(element.disabled).toBe(false);
     expect(element.type).toBe("button");

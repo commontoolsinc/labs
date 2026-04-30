@@ -4,10 +4,16 @@ import { ProcessTimeoutError } from "./sandbox/process-runner.ts";
 import type {
   SandboxRuntime,
   SandboxRuntimeDescription,
+  SandboxRuntimeMountDescription,
+  SandboxRuntimeMountKind,
 } from "./sandbox/types.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { BashToolInput, BashToolOutput } from "./tools/bash.ts";
+import {
+  BROWSER_HOST_COMMAND_DENIED_EXIT_CODE,
+  BROWSER_HOST_COMMAND_DENIED_PREFIX,
+} from "./tools/browser-host-command-policy.ts";
 import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
 import {
   isStructuredFileToolErrorOutput,
@@ -52,6 +58,15 @@ export type HarnessCfcSubstrateStatus =
   | "not-attested"
   | "missing";
 
+export type HarnessCfcMountStatus = "configured" | "not-configured";
+
+export interface HarnessCfcMountSnapshot {
+  kind: SandboxRuntimeMountKind;
+  status: HarnessCfcMountStatus;
+  sandboxPath: string;
+  readOnly?: boolean;
+}
+
 export interface HarnessCfcCapabilitySnapshot {
   enforcementMode: CfcEnforcementMode;
   absenceBehavior: HarnessCfcAbsenceBehavior;
@@ -62,6 +77,10 @@ export interface HarnessCfcCapabilitySnapshot {
     path?: string;
   };
   sandbox: SandboxRuntimeDescription;
+  mounts: {
+    workspace: HarnessCfcMountSnapshot;
+    fabric: HarnessCfcMountSnapshot;
+  };
   protectedXattrs: {
     expectedSandboxVisible: false;
     sandboxVisibility: "not-probed";
@@ -232,12 +251,54 @@ const describeSandbox = (
     },
   };
 
+const findMountDescription = (
+  mounts: readonly SandboxRuntimeMountDescription[] | undefined,
+  kind: SandboxRuntimeMountKind,
+): SandboxRuntimeMountDescription | undefined =>
+  mounts?.find((mount) => mount.kind === kind);
+
+const createCfcMountSnapshots = (
+  sandboxDescription: SandboxRuntimeDescription,
+): HarnessCfcCapabilitySnapshot["mounts"] => {
+  const workspaceMount = findMountDescription(
+    sandboxDescription.cfc?.mounts,
+    "workspace",
+  );
+  const fabricMount = findMountDescription(
+    sandboxDescription.cfc?.mounts,
+    "fabric-fuse",
+  );
+  return {
+    workspace: {
+      kind: "workspace",
+      status: "configured",
+      sandboxPath: workspaceMount?.sandboxPath ??
+        sandboxDescription.cfc?.workspaceMountPath ??
+        sandboxDescription.defaultWorkingDirectory,
+      readOnly: workspaceMount?.readOnly ?? false,
+    },
+    fabric: fabricMount
+      ? {
+        kind: "fabric-fuse",
+        status: "configured",
+        sandboxPath: fabricMount.sandboxPath,
+        readOnly: fabricMount.readOnly,
+      }
+      : {
+        kind: "fabric-fuse",
+        status: "not-configured",
+        sandboxPath: "/fabric",
+      },
+  };
+};
+
 const createCfcCapabilitySnapshot = (
   sandbox: SandboxRuntime,
   cwd: string,
   options: CollectHarnessCapabilitySnapshotOptions,
 ): HarnessCfcCapabilitySnapshot => {
   const mode = options.cfcEnforcementMode ?? "enforce-explicit";
+  const sandboxDescription = describeSandbox(sandbox, cwd);
   return {
     enforcementMode: mode,
     absenceBehavior: cfcAbsenceBehaviorForMode(mode),
@@ -254,7 +315,8 @@ const createCfcCapabilitySnapshot = (
         ? { path: options.runManifestPath }
         : {}),
     },
-    sandbox: describeSandbox(sandbox, cwd),
+    sandbox: sandboxDescription,
+    mounts: createCfcMountSnapshots(sandboxDescription),
     protectedXattrs: {
       expectedSandboxVisible: false,
       sandboxVisibility: "not-probed",
@@ -426,6 +488,22 @@ export const classifyBashToolFailure = (
   capabilitySnapshot?: HarnessCapabilitySnapshot,
   toolId = "bash",
 ): HarnessFailureRecord | undefined => {
+  if (
+    toolId === "bash-no-sandbox" &&
+    output.exitCode === BROWSER_HOST_COMMAND_DENIED_EXIT_CODE &&
+    output.stderr.startsWith(BROWSER_HOST_COMMAND_DENIED_PREFIX)
+  ) {
+    return createHarnessFailureRecord({
+      kind: "tool_not_allowed",
+      source: "tool_output",
+      detail: output.stderr,
+      at,
+      toolId,
+      outputId: output.outputId as ToolOutputId,
+      command: input.command,
+      exitCode: output.exitCode,
+    });
+  }
   if (output.exitCode !== 127) {
     return undefined;
   }

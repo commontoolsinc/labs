@@ -297,7 +297,11 @@ export default pattern<Input, Output>(
                       Get started with demo data or click on the map to add your
                       first stop.
                     </p>
-                    <cf-button variant="primary" onClick={initializeDemo}>
+                    <cf-button
+                      color="primary"
+                      variant="solid"
+                      onClick={initializeDemo}
+                    >
                       Load Demo Data
                     </cf-button>
                   </cf-vstack>
@@ -330,7 +334,8 @@ export default pattern<Input, Output>(
                   <cf-heading level={5}>Map Controls</cf-heading>
                   <cf-hstack gap="2" wrap>
                     <cf-button
-                      variant="secondary"
+                      color="neutral"
+                      variant="outline"
                       onClick={() => {
                         fitBoundsTrigger.set(fitBoundsTrigger.get() + 1);
                       }}
@@ -338,7 +343,8 @@ export default pattern<Input, Output>(
                       Fit to All Stops
                     </cf-button>
                     <cf-button
-                      variant="secondary"
+                      color="neutral"
+                      variant="outline"
                       onClick={() => {
                         center.set({ lat: 37.6, lng: -122.2 });
                         zoom.set(9);
@@ -409,6 +415,7 @@ export default pattern<Input, Output>(
                         </span>
                       </cf-vstack>
                       <cf-button
+                        color="neutral"
                         variant="ghost"
                         onClick={() => {
                           center.set(stop.position);
@@ -418,6 +425,7 @@ export default pattern<Input, Output>(
                         Go
                       </cf-button>
                       <cf-button
+                        color="neutral"
                         variant="ghost"
                         onClick={removeStopHandler({ stops, index })}
                       >
@@ -442,7 +450,8 @@ export default pattern<Input, Output>(
                   <cf-hstack justify="between" align="center">
                     <cf-heading level={5}>Areas of Interest</cf-heading>
                     <cf-button
-                      variant="secondary"
+                      color="neutral"
+                      variant="outline"
                       size="sm"
                       onClick={addAreaHandler({
                         areas: areasOfInterest,
@@ -474,6 +483,7 @@ export default pattern<Input, Output>(
                         </span>
                       </cf-vstack>
                       <cf-button
+                        color="neutral"
                         variant="ghost"
                         onClick={() => {
                           center.set(area.center);
@@ -483,6 +493,7 @@ export default pattern<Input, Output>(
                         Go
                       </cf-button>
                       <cf-button
+                        color="neutral"
                         variant="ghost"
                         onClick={() => {
                           const current = areasOfInterest.get();
@@ -561,7 +572,8 @@ export default pattern<Input, Output>(
 
           <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
             <cf-button
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               style="flex: 1;"
               onClick={() => {
                 stops.set([]);
@@ -572,7 +584,8 @@ export default pattern<Input, Output>(
               Clear All
             </cf-button>
             <cf-button
-              variant="primary"
+              color="primary"
+              variant="solid"
               style="flex: 1;"
               onClick={() => {
                 stops.set(DEFAULT_STOPS);

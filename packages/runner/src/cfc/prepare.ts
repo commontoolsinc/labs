@@ -923,15 +923,24 @@ const derivePersistedLinkLabel = (
     )
     : undefined;
   const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
+  const hasCarriedLabel =
+    input.cfcLabelView?.entries.some((entry) => hasLabelValues(entry.label)) ??
+      false;
   if (
     sourceMetadata === undefined && pendingSourceLabel === undefined &&
-    !hasLabelValues(linkSchemaLabel)
+    !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
   ) {
     return {
       reason: `missing link source metadata for ${input.target.id} at /${
         input.target.path.join("/")
       }`,
     };
+  }
+  if (
+    sourceMetadata === undefined && pendingSourceLabel === undefined &&
+    !hasLabelValues(linkSchemaLabel) && hasCarriedLabel
+  ) {
+    return {};
   }
   const sourceLabel = mergeLabels(
     sourceMetadata === undefined ? undefined : labelAtPath(
@@ -960,6 +969,24 @@ const cloneLabel = (label: IFCLabel): IFCLabel => ({
     : {}),
   ...(label.integrity !== undefined ? { integrity: [...label.integrity] } : {}),
 });
+
+const coalesceLabelEntries = (
+  entries: Array<{ path: string[]; label: IFCLabel }>,
+): Array<{ path: string[]; label: IFCLabel }> => {
+  const byPath = new Map<string, { path: string[]; label: IFCLabel }>();
+  for (const entry of entries) {
+    const path = [...entry.path];
+    const key = pathKey(path);
+    const existing = byPath.get(key);
+    byPath.set(key, {
+      path,
+      label: mergeLabels(existing?.label, cloneLabel(entry.label)),
+    });
+  }
+  return [...byPath.values()].sort((left, right) =>
+    pathKey(left.path).localeCompare(pathKey(right.path))
+  );
+};
 
 const ensureSchemaDocument = (
   tx: IExtendedStorageTransaction,
@@ -1181,9 +1208,24 @@ export const prepareBoundaryCommit = (
           label: result.label,
         });
       }
+      const targetPath = canonicalizeLogicalPath(input.target.path);
+      for (const entry of input.cfcLabelView?.entries ?? []) {
+        if (!hasLabelValues(entry.label)) {
+          continue;
+        }
+        persistedLabelEntries.push({
+          path: [
+            ...targetPath,
+            ...canonicalizeLogicalPath(entry.path),
+          ],
+          label: cloneLabel(entry.label),
+        });
+      }
     }
 
-    if (persistedLabelEntries.length === 0) {
+    const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
+
+    if (coalescedLabelEntries.length === 0) {
       continue;
     }
 
@@ -1198,7 +1240,7 @@ export const prepareBoundaryCommit = (
       schemaHash: schemaAndHash.hashString,
       labelMap: {
         version: 1,
-        entries: persistedLabelEntries,
+        entries: coalescedLabelEntries,
       },
     };
 

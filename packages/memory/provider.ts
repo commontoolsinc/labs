@@ -28,7 +28,6 @@ import {
   Revision,
   SchemaQuery,
   Selection,
-  Subscribe,
   Subscriber,
   Transaction,
   UCAN,
@@ -40,11 +39,8 @@ import {
 } from "@commonfabric/data-model/value-debug";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
-import {
-  type HashObject,
-  hashObjectFromString as causeFromString,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   redactCommitData,
   selectFact,
@@ -206,7 +202,7 @@ export * as Subscription from "./subscription.ts";
 export * from "./util.ts";
 
 // Convenient shorthand so I don't need this long type for this string
-type JobId = InvocationURL<HashObject<ConsumerCommandInvocation<Protocol>>>;
+type JobId = InvocationURL<FabricHash>;
 export type Options = Memory.Options;
 
 export const open = async (
@@ -339,11 +335,10 @@ class MemoryProviderSession<
     | ReadableStreamDefaultController<ProviderCommand<MemoryProtocol>>
     | undefined;
 
-  channels: Map<InvocationURL<HashObject<Subscribe>>, Set<string>> = new Map();
+  channels: Map<InvocationURL<FabricHash>, Set<string>> = new Map();
   // Reverse index: watchAddress → Set of channel IDs that watch it.
   // Allows O(changes) commit matching instead of O(channels × changes).
-  private watchIndex: Map<string, Set<InvocationURL<HashObject<Subscribe>>>> =
-    new Map();
+  private watchIndex: Map<string, Set<InvocationURL<FabricHash>>> = new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
   // Mapping from fact key to since value of the last fact sent to the client
   lastRevision: Map<string, number> = new Map();
@@ -541,16 +536,12 @@ class MemoryProviderSession<
       );
       return this.perform({
         the: "task/return",
-        of: `job:${hashOf(invocation)}` as InvocationURL<
-          HashObject<ConsumerCommandInvocation<MemoryProtocol>>
-        >,
+        of: `job:${hashOf(invocation)}` as InvocationURL<FabricHash>,
         is: { error },
       });
     }
 
-    const of = `job:${hashOf(invocation)}` as InvocationURL<
-      HashObject<ConsumerCommandInvocation<Protocol>>
-    >;
+    const of = `job:${hashOf(invocation)}` as InvocationURL<FabricHash>;
 
     switch (invocation.cmd) {
       case "/memory/query": {
@@ -923,10 +914,10 @@ class MemoryProviderSession<
    */
   private findMatchingChannels(
     transaction: Transaction<MemorySpace>,
-  ): InvocationURL<HashObject<Subscribe>>[] {
+  ): InvocationURL<FabricHash>[] {
     if (this.watchIndex.size === 0) return [];
 
-    const matched = new Set<InvocationURL<HashObject<Subscribe>>>();
+    const matched = new Set<InvocationURL<FabricHash>>();
     const space = transaction.sub;
 
     // Check commit-log watchers first
@@ -944,7 +935,7 @@ class MemoryProviderSession<
 
   /** Look up the 4 watch address variants and add matching channel IDs. */
   private collectWatchMatches(
-    matched: Set<InvocationURL<HashObject<Subscribe>>>,
+    matched: Set<InvocationURL<FabricHash>>,
     space: string,
     of: string,
     the: string,
@@ -970,7 +961,7 @@ class MemoryProviderSession<
   }
 
   private addWatchHits(
-    matched: Set<InvocationURL<HashObject<Subscribe>>>,
+    matched: Set<InvocationURL<FabricHash>>,
     addr: string,
   ) {
     const ids = this.watchIndex.get(addr);
@@ -980,7 +971,7 @@ class MemoryProviderSession<
   }
 
   /** Remove a channel and clean up its entries in the watchIndex. */
-  private removeChannel(id: InvocationURL<HashObject<Subscribe>>) {
+  private removeChannel(id: InvocationURL<FabricHash>) {
     const addresses = this.channels.get(id);
     if (addresses) {
       for (const addr of addresses) {
@@ -1122,7 +1113,7 @@ class MemoryProviderSession<
       revisions.push({
         of: selected.of,
         the: selected.the,
-        cause: causeFromString(selected.cause),
+        cause: FabricHash.fromString(selected.cause),
         is: selected.is,
         since: selected.since,
       });
@@ -1301,8 +1292,8 @@ class MemoryProviderSession<
    */
   private findCommitLogChannels(
     space: MemorySpace,
-  ): InvocationURL<HashObject<Subscribe>>[] {
-    const matched = new Set<InvocationURL<HashObject<Subscribe>>>();
+  ): InvocationURL<FabricHash>[] {
+    const matched = new Set<InvocationURL<FabricHash>>();
     this.collectWatchMatches(matched, space, space, COMMIT_LOG_TYPE);
     return [...matched];
   }
@@ -1498,7 +1489,7 @@ class MemoryProviderSession<
               newFacts.set(docKey, {
                 of: loaded.address.id,
                 the: loaded.address.type,
-                cause: causeFromString(details.cause),
+                cause: FabricHash.fromString(details.cause),
                 is: loaded.value,
                 since: details.since,
               });
@@ -1525,7 +1516,7 @@ class MemoryProviderSession<
         newFacts.set(factKey, {
           of: address.id,
           the: address.type,
-          cause: causeFromString(details.cause),
+          cause: FabricHash.fromString(details.cause),
           is: loaded.value,
           since: details.since,
         });

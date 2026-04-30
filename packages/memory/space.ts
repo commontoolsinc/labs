@@ -8,15 +8,11 @@ import {
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
-import {
-  type HashObject,
-  hashObjectFromString,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
-  Assertion,
   AsyncResult,
   AuthorizationError,
   CauseString,
@@ -551,8 +547,8 @@ const recall = <Space extends MemorySpace>(
       the,
       of,
       cause: (row.cause
-        ? hashObjectFromString(row.cause)
-        : unclaimedRef({ the, of })) as HashObject<Assertion>,
+        ? FabricHash.fromString(row.cause)
+        : unclaimedRef({ the, of })) as FabricHash,
       since: row.since,
       fact: row.fact, // Include stored hash to avoid recomputing with hashOf()
     };
@@ -637,8 +633,8 @@ const getFact = <Space extends MemorySpace>(
     of: row.of as URI,
     cause:
       (row.cause
-        ? hashObjectFromString(row.cause)
-        : unclaimedRef(row as FactAddress)) as HashObject<Assertion>,
+        ? FabricHash.fromString(row.cause)
+        : unclaimedRef(row as FactAddress)) as FabricHash,
     since: row.since,
   };
   if (row.is) {
@@ -757,7 +753,7 @@ export const selectFact = function <Space extends MemorySpace>(
  * special `"undefined"` for which `datum` table will have row with `NULL`
  * source. If `datum` already contains row for matching `datum` insert is
  * ignored because existing record will parse to same `datum` since primary
- * key is merkle-reference for it or an "undefined" for the `undefined`.
+ * key is a hash for it or an "undefined" for the `undefined`.
  */
 const importDatum = <Space extends MemorySpace>(
   session: Session<Space>,
@@ -789,11 +785,11 @@ const iterateTransaction = function* (
       for (const [cause, change] of Object.entries(revisions)) {
         if (change == true) {
           yield {
-            claim: { the, of, fact: hashObjectFromString(cause) },
+            claim: { the, of, fact: FabricHash.fromString(cause) },
           } as Claim;
         } else if (change.is === undefined) {
           yield {
-            retract: { the, of, cause: hashObjectFromString(cause) },
+            retract: { the, of, cause: FabricHash.fromString(cause) },
           } as Retract;
         } else {
           yield {
@@ -801,7 +797,7 @@ const iterateTransaction = function* (
               the,
               of,
               is: change.is,
-              cause: hashObjectFromString(cause),
+              cause: FabricHash.fromString(cause),
             },
           } as Assert;
         }
@@ -830,7 +826,7 @@ const swap = <Space extends MemorySpace>(
     : [source.claim, source.claim.fact];
   const cause = expect.toString();
   const base = unclaimedRef({ the, of }).toString();
-  const expected = cause === base ? null : (expect as HashObject<Fact>);
+  const expected = cause === base ? null : (expect as FabricHash);
 
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
@@ -951,9 +947,9 @@ const commit = <Space extends MemorySpace>(
   const [since, cause] = row
     ? [
       plainObjectFromJson<CommitData>(row.is as string).since + 1,
-      hashObjectFromString(row.fact) as HashObject<Assertion>,
+      FabricHash.fromString(row.fact),
     ]
-    : [0, unclaimedRef({ the, of }) as HashObject as HashObject<Assertion>];
+    : [0, unclaimedRef({ the, of }) as FabricHash];
 
   const commit = createCommit({
     space: of,

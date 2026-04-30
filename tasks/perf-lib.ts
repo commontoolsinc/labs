@@ -772,6 +772,30 @@ export function formatMetricValue(name: string, value: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Event helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads and parses the GHA event. Returns `undefined` if it can't be done.
+ */
+export async function readAndParseEvent(
+  eventPath?: string,
+): Promise<object | undefined> {
+  eventPath ??= Deno.env.get("GITHUB_EVENT_PATH");
+
+  if (!eventPath) {
+    return undefined;
+  }
+
+  try {
+    const result = JSON.parse(await Deno.readTextFile(eventPath));
+    return (typeof result === "object") ? result : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // PR helpers
 // ---------------------------------------------------------------------------
 
@@ -795,7 +819,7 @@ export async function fetchPRForCommit(
 /** Fetch the full body of a PR by number. */
 export async function fetchPRBody(
   prNumber: number,
-  eventPath = Deno.env.get("GITHUB_EVENT_PATH"),
+  eventPath?: string | undefined,
 ): Promise<string> {
   const bodyFromEvent = await readPRBodyFromEventPayload(prNumber, eventPath);
   if (bodyFromEvent !== undefined) {
@@ -809,21 +833,19 @@ export async function fetchPRBody(
 
 export async function readPRBodyFromEventPayload(
   prNumber: number,
-  eventPath: string | undefined,
+  eventPath?: string | undefined,
 ): Promise<string | undefined> {
-  if (eventPath === undefined || eventPath === "") {
-    return undefined;
+  const payload = await readAndParseEvent(eventPath);
+
+  if (payload !== undefined) {
+    const prInfo = (payload as PullRequestEventPayload).pull_request;
+    if (prInfo?.number === prNumber) {
+      const body = prInfo?.body;
+      return (body && (body !== "")) ? body : undefined;
+    }
   }
-  try {
-    const payload = JSON.parse(
-      await Deno.readTextFile(eventPath),
-    ) as PullRequestEventPayload;
-    return payload.pull_request?.number === prNumber
-      ? payload.pull_request.body ?? undefined
-      : undefined;
-  } catch {
-    return undefined;
-  }
+
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

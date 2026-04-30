@@ -1,5 +1,14 @@
 export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
-export { cfcLabelViewForCell, cfcLabelViewFromMetadata } from "./label-view.ts";
+export {
+  cfcLabelViewForCell,
+  cfcLabelViewForDereference,
+  cfcLabelViewForDereferenceTraces,
+  cfcLabelViewFromMetadata,
+  cloneCfcLabelView,
+  getCarriedCfcLabelView,
+  mergeCfcLabelViews,
+  rebaseCfcLabelView,
+} from "./label-view.ts";
 export type {
   AttemptedWrite,
   CfcAddress,
@@ -7,6 +16,14 @@ export type {
   CfcEnforcementMode,
   CfcMetadata,
   CfcPrepareState,
+  CfcSandboxDiagnostic,
+  CfcSandboxExitCodeObservation,
+  CfcSandboxJsonValue,
+  CfcSandboxOutputPolicy,
+  CfcSandboxResult,
+  CfcStreamChannel,
+  CfcStreamObservation,
+  CfcStreamSegment,
   CfcTxState,
   ConsumedRead,
   EntityDocumentWithCfc,

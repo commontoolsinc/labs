@@ -134,6 +134,27 @@ Deno.test({
         endedAt: "2026-04-15T21:00:05.000Z",
         terminalReason: "tool_completed",
         cfcEnforcementMode: "observe",
+        cfcInvocationContexts: [{
+          type: "cf-harness.cfc-invocation-context",
+          version: 1,
+          sequence: 1,
+          runId: "run-artifacts",
+          createdAt: "2026-04-15T21:00:04.000Z",
+          toolId: "bash",
+          toolOutputId: createToolOutputId("run-artifacts", "bash", 1),
+          operation: "shell",
+          cfcEnforcementMode: "observe",
+          cwd: "/workspace",
+          runManifest: { present: false },
+          inputs: {
+            command: {
+              type: "cf-harness.redacted-text-summary",
+              bytes: 205,
+              digest:
+                "sha256:6bb6cd56e7da813533d74d7817e27d52c502178533187fe96132f5804f2a7d15",
+            },
+          },
+        }],
         currentDir: "/workspace",
         artifactRoot: runRoot,
         capabilitySnapshot: {
@@ -150,6 +171,19 @@ Deno.test({
               cfc: {
                 runtimeRequested: true,
                 workspaceMountPath: "/workspace",
+              },
+            },
+            mounts: {
+              workspace: {
+                kind: "workspace",
+                status: "configured",
+                sandboxPath: "/workspace",
+                readOnly: false,
+              },
+              fabric: {
+                kind: "fabric-fuse",
+                status: "not-configured",
+                sandboxPath: "/fabric",
               },
             },
             protectedXattrs: {
@@ -436,6 +470,19 @@ Deno.test({
           path: "notes/todo.txt",
         },
       });
+      assertEquals(persistedPolicyTrace.cfcInvocationContexts?.length, 1);
+      assertEquals(
+        persistedPolicyTrace.cfcInvocationContexts?.[0].toolId,
+        "read_file",
+      );
+      assertEquals(
+        persistedPolicyTrace.cfcInvocationContexts?.[0].inputs.args?.count,
+        2,
+      );
+      assertEquals(
+        JSON.stringify(persistedPolicyTrace).includes("hello from file"),
+        false,
+      );
       assertEquals(persistedReport.type, "cf-harness.run-report");
       assertEquals(persistedReport.runId, "run-loop-persisted");
       assertEquals(persistedReport.status, "completed");
@@ -891,21 +938,15 @@ Deno.test({
         throw new Error("expected sanitized parent failure summary");
       }
 
-      assertEquals(delegateToolOutput.subagent.runState.failureCount, 1);
+      assertEquals(delegateToolOutput.subagent.runState.failureCount, 2);
       assertEquals(parentFailure.type, "cf-harness.subagent-failure-summary");
-      assertEquals(parentFailure.kind, "missing_binary");
-      assertEquals(parentFailure.source, "tool_output");
+      assertEquals(parentFailure.kind, "tool_not_allowed");
+      assertEquals(parentFailure.source, "policy_event");
       assertEquals(parentFailure.toolId, "bash");
-      assertEquals(
-        parentFailure.outputId,
-        createToolOutputId(
-          "run-subagent-sanitized-failure.subagent.1",
-          "bash",
-          1,
-        ),
-      );
-      assertEquals(parentFailure.commandName, "secret-child-command");
-      assertEquals(parentFailure.exitCode, 127);
+      assertEquals(parentFailure.toolCallId, "call-child-bash-failure");
+      assertEquals("outputId" in parentFailure, false);
+      assertEquals("commandName" in parentFailure, false);
+      assertEquals("exitCode" in parentFailure, false);
       assertEquals("command" in parentFailure, false);
       assertEquals("detail" in parentFailure, false);
       assertEquals("at" in parentFailure, false);
@@ -924,15 +965,32 @@ Deno.test({
           | undefined,
       );
 
-      assertEquals(childState.primaryFailure?.command, rawChildCommand);
-      assertEquals(childState.primaryFailure?.kind, "missing_binary");
+      assertEquals(childState.primaryFailure?.kind, "tool_not_allowed");
       assertEquals(
-        childState.primaryFailure?.detail.includes(
+        JSON.stringify(childState.primaryFailure).includes(rawChildCommand),
+        false,
+      );
+      const missingBinaryFailure = childState.failureRecords?.find((failure) =>
+        failure.kind === "missing_binary"
+      );
+      const deniedFailure = childState.failureRecords?.find((failure) =>
+        failure.kind === "tool_not_allowed"
+      );
+      assertEquals(missingBinaryFailure?.command, rawChildCommand);
+      assertEquals(
+        missingBinaryFailure?.detail.includes(
           "secret-child-command",
         ),
         true,
       );
-      assertEquals(childState.failureRecords?.[0]?.command, rawChildCommand);
+      assertEquals(deniedFailure?.source, "policy_event");
+      assertEquals(deniedFailure?.toolId, "bash");
+      assertEquals(
+        JSON.stringify(deniedFailure).includes(
+          rawChildCommand,
+        ),
+        false,
+      );
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }
@@ -1164,6 +1222,120 @@ Deno.test({
       );
       assertEquals(JSON.stringify(runReport).includes("nope"), false);
       assertEquals(JSON.stringify(policyTrace).includes("nope"), false);
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "CfHarnessPromptLoop records output mediation denials in persisted tool activity",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-missing-cfc-report-",
+    });
+    try {
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          artifactRoot,
+          sandboxRuntime: new FakeSandboxRuntime([
+            { stdout: "secret from sandbox\n", stderr: "", exitCode: 0 },
+          ]),
+          runId: "run-missing-cfc-report",
+          model: "gpt-5.4",
+          cfcEnforcementMode: "enforce-explicit",
+        }),
+        fetchFn: (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as {
+            messages: Array<{ role: string }>;
+          };
+          const payload = body.messages.some((message) =>
+              message.role === "tool"
+            )
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Handled denied output.",
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-missing-cfc-report",
+                    type: "function",
+                    function: {
+                      name: "bash",
+                      arguments: JSON.stringify({
+                        command: "cat secret.txt",
+                      }),
+                    },
+                  }],
+                },
+              }],
+            };
+          return Promise.resolve(
+            new Response(JSON.stringify(payload), { status: 200 }),
+          );
+        },
+      });
+
+      const promptSlotBinding = {
+        type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+        source: { type: "test.prompt-slot", subject: "artifact-test" },
+        role: "direct-command",
+        kernelName: "cf-harness",
+        surface: "test",
+        subject: "artifact-test",
+        eventId: "event-artifact",
+      } as const;
+      const result = await loop.runPrompt({
+        prompt: "Run the direct command.",
+        promptSlotBinding,
+      });
+      const toolMessage = result.transcript.at(-2);
+      if (toolMessage?.role !== "tool") {
+        throw new Error("expected bash tool message");
+      }
+      const denied = JSON.parse(toolMessage.content) as {
+        type: string;
+        handle?: { metadataRef?: unknown };
+      };
+      const runRoot = join(artifactRoot, "run-missing-cfc-report");
+      const runReport = await readHarnessRunReport(
+        join(runRoot, "run-report.json"),
+      );
+
+      assertEquals(denied.type, "cf-harness.observation-denied");
+      assertEquals(denied.handle?.metadataRef, undefined);
+      assertEquals(toolMessage.content.includes("secret from sandbox"), false);
+      assertEquals(toolMessage.content.includes(artifactRoot), false);
+      assertEquals(runReport.policyEventCounts, {
+        total: 1,
+        warnings: 0,
+        denied: 1,
+      });
+      assertEquals(runReport.toolActivity.length, 1);
+      assertEquals(runReport.toolActivity[0]?.policyDecision, "denied");
+      assertEquals(runReport.toolActivity[0]?.executionStatus, "completed");
+      assertEquals(runReport.toolActivity[0]?.policyEventIndexes, [0]);
+      assertEquals(
+        runReport.toolActivity[0]?.resultRef?.artifactPath,
+        join(
+          runRoot,
+          "tool-outputs",
+          "run-missing-cfc-report_bash_1-bash.json",
+        ),
+      );
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }

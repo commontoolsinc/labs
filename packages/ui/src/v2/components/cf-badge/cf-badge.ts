@@ -1,13 +1,14 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import type { ComponentSize } from "../theme-context.ts";
+import type { ColorIntent, ComponentSize } from "../theme-context.ts";
 
 /**
  * CFBadge - Status indicator or label with multiple visual variants
  *
  * @element cf-badge
  *
- * @attr {string} variant - Visual style variant: "default" | "secondary" | "destructive" | "outline"
+ * @attr {string} variant - Visual style variant: "solid" | "outline"
+ * @attr {string} color - Color intent: "neutral" | "primary" | "accent" | "danger"
  * @attr {string} size - Size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "sm")
  * @attr {boolean} removable - Shows an X button to remove the badge
  *
@@ -16,10 +17,10 @@ import type { ComponentSize } from "../theme-context.ts";
  * @fires cf-remove - Fired when X button is clicked (if removable)
  *
  * @example
- * <cf-badge variant="secondary" removable>Status</cf-badge>
+ * <cf-badge variant="solid" color="neutral" removable>Status</cf-badge>
  */
 
-export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
+export type BadgeVariant = "solid" | "outline";
 
 export class CFBadge extends BaseElement {
   static override styles = [
@@ -142,26 +143,51 @@ export class CFBadge extends BaseElement {
           gap: var(--cf-pill-xl-gap, var(--cf-size-xl-spacing));
         }
 
-        /* Variant styles */
-        .badge.default {
-          background-color: var(--cf-badge-color-primary, hsl(212, 100%, 47%));
-          color: var(--cf-badge-color-primary-foreground, hsl(0, 0%, 100%));
+        /* Variant: solid */
+        .badge.solid {
+          border-color: transparent;
         }
 
-        .badge.secondary {
+        .badge.solid.neutral {
           background-color: var(--cf-badge-color-secondary, hsl(0, 0%, 96%));
           color: var(--cf-badge-color-secondary-foreground, hsl(0, 0%, 9%));
         }
 
-        .badge.destructive {
+        .badge.solid.primary {
+          background-color: var(--cf-badge-color-primary, hsl(212, 100%, 47%));
+          color: var(--cf-badge-color-primary-foreground, hsl(0, 0%, 100%));
+        }
+
+        .badge.solid.accent {
+          background-color: var(--cf-theme-color-accent, #8952fd);
+          color: var(--cf-theme-color-accent-foreground, hsl(0, 0%, 100%));
+        }
+
+        .badge.solid.danger {
           background-color: var(--cf-badge-color-destructive, hsl(0, 100%, 50%));
           color: var(--cf-badge-color-destructive-foreground, hsl(0, 0%, 100%));
         }
 
+        /* Variant: outline */
         .badge.outline {
           background-color: transparent;
           border-color: var(--cf-badge-color-border, hsl(0, 0%, 89%));
           color: var(--cf-badge-color-text, hsl(0, 0%, 9%));
+        }
+
+        .badge.outline.primary {
+          border-color: var(--cf-badge-color-primary, hsl(212, 100%, 47%));
+          color: var(--cf-badge-color-primary, hsl(212, 100%, 47%));
+        }
+
+        .badge.outline.accent {
+          border-color: var(--cf-theme-color-accent, #8952fd);
+          color: var(--cf-theme-color-accent, #8952fd);
+        }
+
+        .badge.outline.danger {
+          border-color: var(--cf-badge-color-destructive, hsl(0, 100%, 50%));
+          color: var(--cf-badge-color-destructive, hsl(0, 100%, 50%));
         }
 
         /* Close button */
@@ -219,18 +245,21 @@ export class CFBadge extends BaseElement {
     ];
 
     static override properties = {
+      color: { type: String },
       variant: { type: String },
       removable: { type: Boolean },
       size: { type: String, reflect: true },
     };
 
+    declare color: ColorIntent;
     declare variant: BadgeVariant;
     declare removable: boolean;
     declare size: ComponentSize;
 
     constructor() {
       super();
-      this.variant = "default";
+      this.color = "neutral";
+      this.variant = "solid";
       this.removable = false;
       this.size = "sm";
     }
@@ -238,7 +267,7 @@ export class CFBadge extends BaseElement {
     override render() {
       return html`
         <div
-          class="badge ${this.variant}"
+          class="badge ${this.variant} ${this.color}"
           part="badge"
         >
           <slot></slot>
@@ -278,6 +307,7 @@ export class CFBadge extends BaseElement {
 
       // Emit cf-remove event
       this.emit("cf-remove", {
+        color: this.color,
         variant: this.variant,
       });
     }

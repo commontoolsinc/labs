@@ -14,7 +14,6 @@ import type { ReconstructionContext } from "@commonfabric/data-model/interface";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
-export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
 export const DEFAULT_BRANCH = "" as const;
 
 export type EntityId = string;
@@ -402,8 +401,7 @@ export const toValuePath = (path: readonly string[]): ValuePath =>
  * schema path selector. The result is interned-and-frozen via
  * `internPathSelector`, so callers can feed it directly to
  * `MapSetStringToPathSelectors` (or any other `hashSchemaItem`-keyed
- * cache) and get the `hashOfModernInternal` WeakMap fast-path on
- * repeat hashes.
+ * cache) and get the `hashOf()` `WeakMap` fast-path on repeat hashes.
  */
 export const toDocumentSelector = (
   selector: Pick<SchemaPathSelector, "path" | "schema">,

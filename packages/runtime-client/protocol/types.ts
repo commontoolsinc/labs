@@ -11,7 +11,7 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
@@ -23,7 +23,9 @@ export type { CfcLabelView };
 
 export type MessageId = number;
 
-export type CellRef = NormalizedFullLink;
+export type CellRef = NormalizedFullLink & {
+  cfcLabelView?: CfcLabelView;
+};
 
 export type PageRef = {
   cell: CellRef;

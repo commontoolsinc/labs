@@ -9,6 +9,11 @@ import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import type {
+  ProcessRunner,
+  ProcessRunRequest,
+  ProcessRunResult,
+} from "../src/sandbox/process-runner.ts";
+import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
@@ -66,6 +71,25 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
+class FakeProcessRunner implements ProcessRunner {
+  readonly calls: ProcessRunRequest[] = [];
+
+  constructor(
+    private readonly results: ProcessRunResult[] = [{
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+    }],
+  ) {}
+
+  run(request: ProcessRunRequest): Promise<ProcessRunResult> {
+    this.calls.push(request);
+    return Promise.resolve(
+      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
+  }
+}
+
 Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a workspace path", () => {
   const engine = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
@@ -84,6 +108,80 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     policyEvents: [],
     toolOutputs: [],
     failureRecords: [],
+  });
+});
+
+Deno.test("CfHarnessEngine lets bash-no-sandbox host commands handle missing workspace paths", async () => {
+  const workspaceHostPath = await Deno.makeTempDir({
+    prefix: "cf-harness-engine-missing-",
+  });
+  const runner = new FakeProcessRunner([{
+    stdout: "",
+    stderr: "ls: missing.txt: No such file or directory\n",
+    exitCode: 1,
+  }]);
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath,
+    sandboxRuntime: new FakeSandboxRuntime(),
+    processRunner: runner,
+    cfcEnforcementMode: "observe",
+    now: () => "2026-04-29T23:20:00.000Z",
+  });
+
+  const result = await engine.invokeBuiltinTool("bash-no-sandbox", {
+    command: "ls missing.txt",
+  });
+
+  assertEquals(runner.calls, [{
+    command: "ls",
+    args: ["missing.txt"],
+    cwd: workspaceHostPath,
+    timeoutMs: 30_000,
+  }]);
+  assertEquals(result.output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr: "ls: missing.txt: No such file or directory\n",
+    exitCode: 1,
+    cwd: "/workspace",
+  });
+});
+
+Deno.test("CfHarnessEngine denies bash-no-sandbox missing paths below escaping symlinks", async () => {
+  const workspaceHostPath = await Deno.makeTempDir({
+    prefix: "cf-harness-engine-workspace-",
+  });
+  const outsideHostPath = await Deno.makeTempDir({
+    prefix: "cf-harness-engine-outside-",
+  });
+  await Deno.symlink(
+    outsideHostPath,
+    `${workspaceHostPath}/outside-link`,
+    { type: "dir" },
+  );
+  const runner = new FakeProcessRunner();
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath,
+    sandboxRuntime: new FakeSandboxRuntime(),
+    processRunner: runner,
+    cfcEnforcementMode: "observe",
+    now: () => "2026-04-29T23:20:00.000Z",
+  });
+
+  const result = await engine.invokeBuiltinTool("bash-no-sandbox", {
+    command: "ls outside-link/missing.txt",
+  });
+
+  assertEquals(runner.calls, []);
+  assertEquals(result.output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr:
+      "bash-no-sandbox command denied: path outside-link/missing.txt must resolve within or below the workspace",
+    exitCode: 126,
+    cwd: "/workspace",
   });
 });
 
@@ -251,6 +349,71 @@ Deno.test("CfHarnessEngine stamps policy snapshot state changes with mutation ti
     persistedStates.at(-1)?.updatedAt,
     "2026-04-17T20:30:02.000Z",
   );
+});
+
+Deno.test("CfHarnessEngine timestamps CFC invocation contexts with mutation time", async () => {
+  const persistedStates: HarnessRunState[] = [];
+  const runRoot = "/tmp/cf-harness-artifacts/run-cfc-invocation-time";
+  const artifactStore: HarnessArtifactStore = {
+    artifactRoot: "/tmp/cf-harness-artifacts",
+    runRoot,
+    persistRunState(state) {
+      persistedStates.push(structuredClone(state));
+      return Promise.resolve(`${runRoot}/run-state.json`);
+    },
+    persistTranscript() {
+      return Promise.resolve(`${runRoot}/transcript.json`);
+    },
+    persistCapabilitySnapshot() {
+      return Promise.resolve(`${runRoot}/capabilities.json`);
+    },
+    persistCfcPolicySnapshot() {
+      return Promise.resolve(`${runRoot}/policy-snapshot.json`);
+    },
+    persistPolicyTrace() {
+      return Promise.resolve(`${runRoot}/policy-trace.json`);
+    },
+    persistRunReport() {
+      return Promise.resolve(`${runRoot}/run-report.json`);
+    },
+    persistToolOutput() {
+      return Promise.resolve(`${runRoot}/tool-output.json`);
+    },
+  };
+  const engine = new CfHarnessEngine({
+    artifactStore,
+    sandboxRuntime: new FakeSandboxRuntime([{
+      stdout: "hello",
+      stderr: "",
+      exitCode: 0,
+    }]),
+    runId: "run-cfc-invocation-time",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-04-17T21:00:00.000Z",
+        "2026-04-17T21:00:01.000Z",
+        "2026-04-17T21:00:02.000Z",
+        "2026-04-17T21:00:03.000Z",
+        "2026-04-17T21:00:04.000Z",
+        "2026-04-17T21:00:05.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-17T21:00:06.000Z";
+    })(),
+  });
+
+  await engine.invokeBuiltinTool("read_file", { path: "notes/todo.txt" });
+
+  const invocationState = persistedStates.find((state) =>
+    state.cfcInvocationContexts?.length === 1 &&
+    state.toolOutputs.length === 0
+  );
+  assertEquals(invocationState?.updatedAt, "2026-04-17T21:00:04.000Z");
+  assertEquals(
+    invocationState?.cfcInvocationContexts?.[0]?.createdAt,
+    "2026-04-17T21:00:04.000Z",
+  );
+  assertEquals(engine.getRunState().updatedAt, "2026-04-17T21:00:05.000Z");
 });
 
 Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors", async () => {

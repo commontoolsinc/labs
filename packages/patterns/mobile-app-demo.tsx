@@ -159,16 +159,16 @@ const tabContent: Record<string, TabContent> = {
   },
 };
 
-function chipVariant(
+function chipColor(
   tone: "blue" | "coral" | "graphite",
-): "default" | "primary" | "accent" {
+): "primary" | "accent" | "neutral" {
   if (tone === "blue") {
     return "primary";
   }
   if (tone === "coral") {
     return "accent";
   }
-  return "default";
+  return "neutral";
 }
 
 export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
@@ -246,7 +246,7 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                                   <cf-chip
                                     label={task.actionLabel}
                                     size="sm"
-                                    variant={chipVariant(task.actionTone)}
+                                    color={chipColor(task.actionTone)}
                                   />
                                 </cf-hstack>
                               </cf-card>
@@ -366,7 +366,8 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
             </cf-tab-bar-item>
             <cf-button
               slot="action"
-              variant="primary"
+              color="primary"
+              variant="solid"
               size="icon"
               onClick={openSheet}
             >
@@ -392,10 +393,18 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
             </cf-vstack>
             <div slot="footer">
               <cf-hstack gap="2" justify="end" style="width: 100%;">
-                <cf-button variant="secondary" onClick={closeSheet}>
+                <cf-button
+                  color="neutral"
+                  variant="outline"
+                  onClick={closeSheet}
+                >
                   Cancel
                 </cf-button>
-                <cf-button variant="primary" onClick={handleCreate}>
+                <cf-button
+                  color="primary"
+                  variant="solid"
+                  onClick={handleCreate}
+                >
                   Create
                 </cf-button>
               </cf-hstack>
@@ -405,13 +414,14 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
           <cf-toast-provider position="bottom">
             <cf-toast
               open={toastOpen}
-              variant="success"
+              status="success"
               duration={4000}
               oncf-toast-dismiss={dismissToast}
             >
               Task created.
               <cf-button
                 slot="action"
+                color="neutral"
                 variant="ghost"
                 size="sm"
               >

@@ -12,11 +12,11 @@ export const figmaMapping = {
   // Figma prop name → code prop + value mapping
   props: {
     Style: {
-      codeProp: "variant",
+      codeProps: ["color", "variant"],
       values: {
-        Primary: "primary",
-        Secondary: "secondary",
-        Muted: "ghost",
+        Primary: { color: "primary", variant: "solid" },
+        Secondary: { color: "neutral", variant: "outline" },
+        Muted: { color: "neutral", variant: "ghost" },
       },
     },
     State: {
@@ -38,12 +38,12 @@ export const figmaMapping = {
   // Figma color themes → how to achieve in code
   themes: {
     "button": "default theme (no extra props needed)",
-    "button.accent": "TODO: map to theme context or variant",
-    "button.brand": "TODO: map to theme context or variant",
-    "button.alert": 'variant="destructive"',
+    "button.accent": 'color="accent" variant="solid"',
+    "button.brand": "TODO: map to theme context or prop",
+    "button.alert": 'color="danger" variant="solid"',
   },
 
-  example: `<cf-button variant="primary">Label</cf-button>
-<cf-button variant="secondary" disabled>Save</cf-button>
+  example: `<cf-button color="primary" variant="solid">Label</cf-button>
+<cf-button color="neutral" variant="outline" disabled>Save</cf-button>
 <cf-button variant="ghost">Cancel</cf-button>`,
 };

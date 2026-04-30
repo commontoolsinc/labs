@@ -11,14 +11,14 @@ export const figmaMapping = {
 
   props: {
     State: {
-      codeProp: "variant",
+      codeProp: "status",
       values: {
         Queue: "info",
         Progress: "info",
-        Link: "default",
+        Link: "info",
         Login: "warning",
         Review: "warning",
-        Alert: "destructive",
+        Alert: "error",
       },
     },
   },
@@ -37,7 +37,7 @@ export const figmaMapping = {
     button: "no action slot yet — Figma has a trailing action button",
   },
 
-  example: `<cf-alert variant="info">
+  example: `<cf-alert status="info">
   <span slot="icon">⏳</span>
   <span slot="title">Wish is now in queue</span>
   <span slot="description">dispatched</span>

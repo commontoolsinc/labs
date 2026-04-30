@@ -91,7 +91,7 @@ async function waitForAuthorshipStates(
           !host.lightText.includes("Imported ticket thread")
         )
       );
-    }, { timeout: 15_000 });
+    });
   } catch (cause) {
     throw new Error(
       `Timed out waiting for CFC authorship states. Last probe: ${

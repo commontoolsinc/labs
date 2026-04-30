@@ -1,4 +1,4 @@
-import { NAME, pattern, UI } from "commonfabric";
+import { NAME, pattern, toIndentedDebugString, UI } from "commonfabric";
 
 interface Node {
   label: string;
@@ -38,7 +38,7 @@ export default pattern<Record<string, never>>((_) => {
     [UI]: (
       <div>
         <p>This pattern exports a recursive mentionable tree:</p>
-        <pre>{JSON.stringify(TREE, null, 2)}</pre>
+        <pre>{toIndentedDebugString(TREE)}</pre>
       </div>
     ),
     mentionable: mentionables,

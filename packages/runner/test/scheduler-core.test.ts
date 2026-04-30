@@ -865,7 +865,7 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
   });
 
-  it("should not react to stored CFC metadata updates read through verifier helpers", async () => {
+  it("should react to stored CFC metadata updates read through verifier helpers", async () => {
     const sourceCell = runtime.getCell<{ secret: string }>(
       space,
       "source-cell-for-cfc-metadata-reactivity-test",
@@ -938,8 +938,8 @@ describe("scheduler", () => {
     tx = runtime.edit();
     await resultCell.pull();
 
-    expect(actionRunCount).toBe(1);
-    expect(resultCell.get()).toEqual({ count: 1, applies: false });
+    expect(actionRunCount).toBe(2);
+    expect(resultCell.get()).toEqual({ count: 2, applies: true });
 
     const verifyTx = runtime.edit();
     expect(storedCfcMetadataAppliesToPath(verifyTx, secretLink)).toBe(true);

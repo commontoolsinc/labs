@@ -47,12 +47,18 @@ import {
   CellLink,
   isCellLink,
   isNormalizedFullLink,
+  isSigilLink,
   type NormalizedFullLink,
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import { LINK_V1_TAG } from "./sigil-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { type CfcEnforcementMode, type TrustSnapshot } from "./cfc/mod.ts";
+import {
+  type CfcEnforcementMode,
+  type CfcLabelView,
+  type TrustSnapshot,
+} from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -800,25 +806,49 @@ export class Runtime {
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema: S,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<Schema<S>>;
   getCellFromLink(
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<any> {
+    const carriedLabelView = cfcLabelView ??
+      (isSigilLink(cellLink)
+        ? (cellLink["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView
+        : isNormalizedFullLink(cellLink)
+        ? (cellLink as NormalizedLink & { cfcLabelView?: CfcLabelView })
+          .cfcLabelView
+        : undefined);
     let link = isCellLink(cellLink)
       ? parseLink(cellLink)
       : isNormalizedFullLink(cellLink)
       ? cellLink
       : undefined;
     if (!link) throw new Error("Invalid cell link");
+    if ("cfcLabelView" in link) {
+      const { cfcLabelView: _cfcLabelView, ...cleanLink } = link as
+        & NormalizedLink
+        & { cfcLabelView?: CfcLabelView };
+      link = cleanLink;
+    }
     if (schema !== undefined) link = { ...link, schema };
-    return createCell(this, link as NormalizedFullLink, tx);
+    return createCell(
+      this,
+      link as NormalizedFullLink,
+      tx,
+      false,
+      undefined,
+      carriedLabelView,
+    );
   }
 
   getImmutableCell<T>(
@@ -826,29 +856,39 @@ export class Runtime {
     data: T,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     data: any,
     schema: S,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<Schema<S>>;
   getImmutableCell(
     space: MemorySpace,
     data: any,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<any> {
     const asDataURI = `data:application/json,${
       encodeURIComponent(JSON.stringify({ value: data }))
     }` as const as `${string}:${string}`;
-    return createCell(this, {
-      space,
-      path: [],
-      id: asDataURI,
-      type: "application/json",
-      schema,
-    }, tx);
+    return createCell(
+      this,
+      {
+        space,
+        path: [],
+        id: asDataURI,
+        type: "application/json",
+        schema,
+      },
+      tx,
+      false,
+      undefined,
+      cfcLabelView,
+    );
   }
 
   getHomeSpaceCell(

@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import env from "@/env.ts";
 import app from "../../../app.ts";
-import { refer } from "merkle-reference";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   ChangesBuilder,
   CommitBuilder,
@@ -19,7 +19,7 @@ if (env.ENV !== "test") {
 }
 
 const the = "application/json";
-const doc = `of:${refer({ hello: "world" })}` as const;
+const doc = `of:${hashOf({ hello: "world" })}` as const;
 
 export const alice = await Identity.fromString(
   "MU+bzp2GaFQHso587iSFWPSeCzbSfn/CbNHEz7ilKRZ0=",
@@ -202,8 +202,8 @@ Deno.test("memory websocket preserves early v1 frames during negotiation", async
   const address = new URL(
     `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
   );
-  const docA = `of:${refer({ one: "a" })}` as const;
-  const docB = `of:${refer({ two: "b" })}` as const;
+  const docA = `of:${hashOf({ one: "a" })}` as const;
+  const docB = `of:${hashOf({ two: "b" })}` as const;
 
   try {
     const consumer = Consumer.create({ as: alice });
