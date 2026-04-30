@@ -4,6 +4,7 @@ import {
   fetchProgram,
   NAME,
   pattern,
+  toIndentedDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -50,7 +51,7 @@ export default pattern(() => {
         {result && (
           <div style="color: green">
             Successfully compiled pattern! Piece ID: {result}
-            <pre>{computed(() => JSON.stringify(result, null, 2))}</pre>
+            <pre>{computed(() => toIndentedDebugString(result))}</pre>
           </div>
         )}
       </div>

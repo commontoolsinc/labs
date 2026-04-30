@@ -14,6 +14,7 @@ import {
   type PatternToolResult,
   SELF,
   type Stream,
+  toCompactDebugString,
   UI,
   type VNode,
   wish,
@@ -273,7 +274,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         if (typeof value !== "string") {
           console.error(
             `editContent: invalid input shape. Expected { detail: { value: string } }, got: ${
-              JSON.stringify(rawInput)
+              toCompactDebugString(rawInput)
             }`,
           );
           return;

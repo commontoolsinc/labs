@@ -26,6 +26,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  toIndentedDebugString,
   UI,
   wish,
   Writable,
@@ -891,7 +892,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                       whiteSpace: "pre-wrap",
                     }}
                   >
-                    {computed(() => JSON.stringify(allEvents, null, 2))}
+                    {computed(() => toIndentedDebugString(allEvents))}
                   </pre>
                 </div>
               </div>

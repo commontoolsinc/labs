@@ -11,6 +11,7 @@ import {
   patternTool,
   safeDateNow,
   type Stream,
+  toIndentedDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -308,7 +309,7 @@ type LabelPreviewProps = {
 };
 
 const formatLabelAtom = (atom: unknown) =>
-  typeof atom === "string" ? atom : JSON.stringify(atom, null, 2);
+  typeof atom === "string" ? atom : toIndentedDebugString(atom);
 
 function LabelPreview(
   { confidentiality = [], integrity = [] }: LabelPreviewProps,

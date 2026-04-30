@@ -26,6 +26,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  toIndentedDebugString,
   UI,
 } from "commonfabric";
 
@@ -51,9 +52,7 @@ export default pattern<Input, Input>(({ userInput }) => {
   const errorMessage = derive(
     idea.error,
     (err) =>
-      err
-        ? (typeof err === "string" ? err : JSON.stringify(err, null, 2))
-        : null,
+      err ? (typeof err === "string" ? err : toIndentedDebugString(err)) : null,
   );
 
   return {
