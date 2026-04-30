@@ -292,6 +292,35 @@ Deno.test("classifyBuiltinToolFailure records host shell failures without sandbo
   });
 });
 
+Deno.test("classifyBuiltinToolFailure records denied browser host commands", () => {
+  const failure = classifyBuiltinToolFailure(
+    "bash-no-sandbox",
+    { command: "git status" },
+    {
+      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+      stdout: "",
+      stderr:
+        "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+      exitCode: 126,
+      cwd: "/workspace",
+    },
+    "2026-04-23T18:26:00.000Z",
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "tool_not_allowed",
+    source: "tool_output",
+    detail:
+      "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+    at: "2026-04-23T18:26:00.000Z",
+    toolId: "bash-no-sandbox",
+    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+    command: "git status",
+    exitCode: 126,
+  });
+});
+
 Deno.test("classifyBuiltinToolFailure handles delegate_task outputs defensively", () => {
   assertEquals(
     classifyBuiltinToolFailure(

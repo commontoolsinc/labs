@@ -53,6 +53,7 @@ import {
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
 import {
+  BROWSER_SUBAGENT_PROFILE,
   DEFAULT_SUBAGENT_PROFILE,
   type DelegateTaskToolInput,
   type DelegateTaskToolOutput,
@@ -546,6 +547,12 @@ const buildSubagentSystemPrompt = (
           profileConfig.hostToolIds.join(", ")
         }`,
         "Host execution is outside the sandbox. Use it only for the delegated task and prefer agent-browser commands when browser access is needed.",
+        ...(profileConfig.profile === BROWSER_SUBAGENT_PROFILE
+          ? [
+            "Browser profile host commands are restricted to agent-browser, agent-browser discovery, pwd, ls, and bounded workspace-local find commands.",
+            "Do not chain host shell commands; call the tool once per host command.",
+          ]
+          : []),
       ]
       : []),
     `Current sandbox directory: ${currentDir}`,

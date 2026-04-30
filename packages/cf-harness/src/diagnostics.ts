@@ -10,6 +10,10 @@ import type {
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { BashToolInput, BashToolOutput } from "./tools/bash.ts";
+import {
+  BROWSER_HOST_COMMAND_DENIED_EXIT_CODE,
+  BROWSER_HOST_COMMAND_DENIED_PREFIX,
+} from "./tools/browser-host-command-policy.ts";
 import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
 import {
   isStructuredFileToolErrorOutput,
@@ -484,6 +488,22 @@ export const classifyBashToolFailure = (
   capabilitySnapshot?: HarnessCapabilitySnapshot,
   toolId = "bash",
 ): HarnessFailureRecord | undefined => {
+  if (
+    toolId === "bash-no-sandbox" &&
+    output.exitCode === BROWSER_HOST_COMMAND_DENIED_EXIT_CODE &&
+    output.stderr.startsWith(BROWSER_HOST_COMMAND_DENIED_PREFIX)
+  ) {
+    return createHarnessFailureRecord({
+      kind: "tool_not_allowed",
+      source: "tool_output",
+      detail: output.stderr,
+      at,
+      toolId,
+      outputId: output.outputId as ToolOutputId,
+      command: input.command,
+      exitCode: output.exitCode,
+    });
+  }
   if (output.exitCode !== 127) {
     return undefined;
   }

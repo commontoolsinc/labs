@@ -124,6 +124,12 @@ const createContext = (
         ? workspaceHostPath
         : `${workspaceHostPath}${sandboxPath.slice("/workspace".length)}`;
     },
+    isHostPathWithinWorkspace(path: string) {
+      return Promise.resolve(
+        path === workspaceHostPath ||
+          path.startsWith(`${workspaceHostPath}/`),
+      );
+    },
     hostPathToWorkspacePath(path: string) {
       return path === workspaceHostPath
         ? "/workspace"
@@ -239,8 +245,7 @@ Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout
 
 Deno.test("bash-no-sandbox tool executes the command through the host process runner", async () => {
   const hostRunner = new FakeProcessRunner([{
-    stdout:
-      "host ok\n__CF_HARNESS_HOST_CWD__run-1:bash-no-sandbox:1__/tmp/cf-harness-workspace/browser",
+    stdout: "host ok\n",
     stderr: "",
     exitCode: 0,
   }]);
@@ -261,24 +266,65 @@ Deno.test("bash-no-sandbox tool executes the command through the host process ru
   });
   assertEquals(sandbox.calls, []);
   assertEquals(hostRunner.calls, [{
-    command: "bash",
-    args: [
-      "-lc",
-      [
-        '__cf_harness_cwd_marker="__CF_HARNESS_HOST_CWD__run-1:bash-no-sandbox:1__"',
-        'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
-        "agent-browser --help",
-      ].join("\n"),
-    ],
+    command: "agent-browser",
+    args: ["--help"],
     cwd: "/tmp/cf-harness-workspace/browser",
     timeoutMs: 1000,
   }]);
   assertEquals(context.currentDir, "/workspace/browser");
 });
 
-Deno.test("bash-no-sandbox keeps currentDir inside the workspace if the host command exits elsewhere", async () => {
+Deno.test("bash-no-sandbox defaults and caps host command timeouts", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+
+  await bashNoSandboxTool.invoke(context, {
+    command: "agent-browser --help",
+  });
+  await bashNoSandboxTool.invoke(context, {
+    command: "agent-browser --help",
+    timeoutMs: 999_999,
+  });
+
+  assertEquals(hostRunner.calls.map((call) => call.timeoutMs), [
+    30_000,
+    120_000,
+  ]);
+});
+
+Deno.test("bash-no-sandbox caps returned host output", async () => {
   const hostRunner = new FakeProcessRunner([{
-    stdout: "__CF_HARNESS_HOST_CWD__run-1:bash-no-sandbox:1__/tmp/outside",
+    stdout: "x".repeat(20_010),
+    stderr: "y".repeat(20_001),
+    exitCode: 0,
+  }]);
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "agent-browser --help",
+  });
+
+  assertEquals(
+    output.stdout,
+    `${"x".repeat(20_000)}\n[cf-harness truncated stdout: 10 chars omitted]`,
+  );
+  assertEquals(
+    output.stderr,
+    `${"y".repeat(20_000)}\n[cf-harness truncated stderr: 1 chars omitted]`,
+  );
+});
+
+Deno.test("bash-no-sandbox keeps currentDir at the command cwd", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: "",
     stderr: "",
     exitCode: 0,
   }]);
@@ -288,11 +334,123 @@ Deno.test("bash-no-sandbox keeps currentDir inside the workspace if the host com
     hostRunner,
   );
   const output = await bashNoSandboxTool.invoke(context, {
-    command: "cd /tmp/outside",
+    command: "agent-browser --help",
   });
 
   assertEquals(output.cwd, "/workspace/repo");
   assertEquals(context.currentDir, "/workspace/repo");
+});
+
+Deno.test("bash-no-sandbox translates command -v agent-browser to direct argv", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: "/usr/local/bin/agent-browser\n",
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "command -v agent-browser",
+  });
+
+  assertEquals(output.stdout, "/usr/local/bin/agent-browser\n");
+  assertEquals(hostRunner.calls, [{
+    command: "which",
+    args: ["agent-browser"],
+    cwd: "/tmp/cf-harness-workspace/repo",
+    timeoutMs: 30_000,
+  }]);
+});
+
+Deno.test("bash-no-sandbox lets allowed host commands handle missing workspace paths", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: "",
+    stderr: "ls: missing.txt: No such file or directory\n",
+    exitCode: 1,
+  }]);
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+  context.isHostPathWithinWorkspace = (
+    path: string,
+    options?: { allowMissing?: boolean },
+  ) =>
+    Promise.resolve(
+      path === "/tmp/cf-harness-workspace/repo" ||
+        (path.endsWith("/missing.txt") && options?.allowMissing === true),
+    );
+
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "ls missing.txt",
+  });
+
+  assertEquals(hostRunner.calls, [{
+    command: "ls",
+    args: ["missing.txt"],
+    cwd: "/tmp/cf-harness-workspace/repo",
+    timeoutMs: 30_000,
+  }]);
+  assertEquals(output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr: "ls: missing.txt: No such file or directory\n",
+    exitCode: 1,
+    cwd: "/workspace/repo",
+  });
+});
+
+Deno.test("bash-no-sandbox denies ls and find paths that realpath outside the workspace", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+  context.isHostPathWithinWorkspace = (path: string) =>
+    Promise.resolve(!path.endsWith("/outside-link"));
+
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "ls outside-link",
+  });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr:
+      "bash-no-sandbox command denied: path outside-link must resolve within or below the workspace",
+    exitCode: 126,
+    cwd: "/workspace/repo",
+  });
+});
+
+Deno.test("bash-no-sandbox denies host commands outside the browser policy", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+  );
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "git status",
+    cwd: "browser",
+  });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr:
+      "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+    exitCode: 126,
+    cwd: "/workspace/repo/browser",
+  });
+  assertEquals(context.currentDir, "/workspace/repo/browser");
 });
 
 Deno.test("read_file tool resolves relative paths from the session currentDir", async () => {

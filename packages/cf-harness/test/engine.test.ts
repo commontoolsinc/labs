@@ -9,6 +9,11 @@ import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import type {
+  ProcessRunner,
+  ProcessRunRequest,
+  ProcessRunResult,
+} from "../src/sandbox/process-runner.ts";
+import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
@@ -66,6 +71,25 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
+class FakeProcessRunner implements ProcessRunner {
+  readonly calls: ProcessRunRequest[] = [];
+
+  constructor(
+    private readonly results: ProcessRunResult[] = [{
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+    }],
+  ) {}
+
+  run(request: ProcessRunRequest): Promise<ProcessRunResult> {
+    this.calls.push(request);
+    return Promise.resolve(
+      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
+  }
+}
+
 Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a workspace path", () => {
   const engine = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
@@ -84,6 +108,80 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     policyEvents: [],
     toolOutputs: [],
     failureRecords: [],
+  });
+});
+
+Deno.test("CfHarnessEngine lets bash-no-sandbox host commands handle missing workspace paths", async () => {
+  const workspaceHostPath = await Deno.makeTempDir({
+    prefix: "cf-harness-engine-missing-",
+  });
+  const runner = new FakeProcessRunner([{
+    stdout: "",
+    stderr: "ls: missing.txt: No such file or directory\n",
+    exitCode: 1,
+  }]);
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath,
+    sandboxRuntime: new FakeSandboxRuntime(),
+    processRunner: runner,
+    cfcEnforcementMode: "observe",
+    now: () => "2026-04-29T23:20:00.000Z",
+  });
+
+  const result = await engine.invokeBuiltinTool("bash-no-sandbox", {
+    command: "ls missing.txt",
+  });
+
+  assertEquals(runner.calls, [{
+    command: "ls",
+    args: ["missing.txt"],
+    cwd: workspaceHostPath,
+    timeoutMs: 30_000,
+  }]);
+  assertEquals(result.output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr: "ls: missing.txt: No such file or directory\n",
+    exitCode: 1,
+    cwd: "/workspace",
+  });
+});
+
+Deno.test("CfHarnessEngine denies bash-no-sandbox missing paths below escaping symlinks", async () => {
+  const workspaceHostPath = await Deno.makeTempDir({
+    prefix: "cf-harness-engine-workspace-",
+  });
+  const outsideHostPath = await Deno.makeTempDir({
+    prefix: "cf-harness-engine-outside-",
+  });
+  await Deno.symlink(
+    outsideHostPath,
+    `${workspaceHostPath}/outside-link`,
+    { type: "dir" },
+  );
+  const runner = new FakeProcessRunner();
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath,
+    sandboxRuntime: new FakeSandboxRuntime(),
+    processRunner: runner,
+    cfcEnforcementMode: "observe",
+    now: () => "2026-04-29T23:20:00.000Z",
+  });
+
+  const result = await engine.invokeBuiltinTool("bash-no-sandbox", {
+    command: "ls outside-link/missing.txt",
+  });
+
+  assertEquals(runner.calls, []);
+  assertEquals(result.output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr:
+      "bash-no-sandbox command denied: path outside-link/missing.txt must resolve within or below the workspace",
+    exitCode: 126,
+    cwd: "/workspace",
   });
 });
 
