@@ -5,6 +5,7 @@ import { hashOfModern as modernHashRaw } from "../value-hash-modern.ts";
 import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { FabricHash } from "../fabric-hash.ts";
+import { FabricValue } from "../interface.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError, FabricRegExp } from "../fabric-native-instances.ts";
 import { FabricBytes } from "../fabric-bytes.ts";
@@ -1093,7 +1094,7 @@ describe("hashStringOf", () => {
   });
 
   it("matches FabricHash.hashString for primitives", () => {
-    const values: unknown[] = [
+    const values: FabricValue[] = [
       null,
       true,
       false,

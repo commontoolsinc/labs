@@ -243,7 +243,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     case "number":
       if (!Number.isFinite(value)) {
         throw new Error(
-          `hashOfModern: non-finite number not allowed: ${value}`,
+          `hashOf: non-finite number not allowed: ${value}`,
         );
       }
       hasher.update(TAG_NUMBER_BYTES);
@@ -279,7 +279,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 
     default:
       throw new Error(
-        `hashOfModern: unsupported type: ${typeof value}`,
+        `hashOf: unsupported type: ${typeof value}`,
       );
   }
 }
@@ -351,7 +351,7 @@ function feedObjectValue(
       const typeTag = (value as { typeTag?: unknown }).typeTag;
       if (typeof typeTag !== "string") {
         throw new Error(
-          `hashOfModern: FabricInstance missing typeTag property`,
+          `hashOf: FabricInstance missing typeTag property`,
         );
       }
       hasher.update(getStringRep(typeTag));
@@ -374,7 +374,7 @@ function feedObjectValue(
       // Nothing else is handled. As of this writing, specifically missing are
       // `Map`, `Set`, `Error`, and `HasToJSON`.
       throw new Error(
-        `hashOfModern: unsupported object type: ${
+        `hashOf: unsupported object type: ${
           value?.constructor?.name ?? typeof value
         }`,
       );
