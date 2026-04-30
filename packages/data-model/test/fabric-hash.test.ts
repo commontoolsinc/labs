@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricHash } from "../fabric-hash.ts";
-import { hashObjectFromJson, hashOf } from "../value-hash.ts";
+import { hashOf } from "../value-hash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);
@@ -100,15 +100,14 @@ describe("FabricHash", () => {
 // -----------------------------------------------------------------
 
 describe("stuff from value-hash.ts", () => {
-  it("hashObjectFromJson round-trips through FabricHash", () => {
+  it("FabricHash.fromJson() works on the result of instance method FabricHash.toJSON()", () => {
     const original = new FabricHash(SAMPLE_HASH, "fid1");
     const json = original.toJSON();
-    const reconstructed = hashObjectFromJson(json);
+    const reconstructed = FabricHash.fromJson(json);
 
     expect(reconstructed).toBeInstanceOf(FabricHash);
-    const cid = reconstructed as unknown as FabricHash;
-    expect(cid.toString()).toBe(original.toString());
-    expect(cid.bytes).toEqual(original.bytes);
+    expect(reconstructed.toString()).toBe(original.toString());
+    expect(reconstructed.bytes).toEqual(original.bytes);
   });
 
   it("FabricHash.fromString() works on the result of instance method FabricHash.toString()", () => {
