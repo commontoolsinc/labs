@@ -373,11 +373,7 @@ Deno.test("DockerRunscSandboxRuntime accepts workspace paths when the mount path
 });
 
 Deno.test("DockerRunscSandboxRuntime mounts Fabric separately and accepts Fabric paths", async () => {
-  const runner = new FakeProcessRunner({
-    stdout: "",
-    stderr: "",
-    exitCode: 0,
-  });
+  const runner = new FakeProcessRunner(dockerLifecycleResults({ stdout: "" }));
   const runtime = new DockerRunscSandboxRuntime(
     resolveDockerRunscSandboxConfig({
       workspaceHostPath: "/host/project",
@@ -410,8 +406,7 @@ Deno.test("DockerRunscSandboxRuntime mounts Fabric separately and accepts Fabric
   });
 
   assertEquals(runner.requests[0]?.args, [
-    "run",
-    "--rm",
+    "create",
     "--runtime",
     "runsc-cfc",
     "--network",
