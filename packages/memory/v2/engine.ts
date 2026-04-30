@@ -1,6 +1,4 @@
 import { Database } from "@db/sqlite";
-import { fromDigest } from "merkle-reference";
-import { sha256 } from "@commonfabric/content-hash";
 import type { FabricValue } from "../interface.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
@@ -758,25 +756,6 @@ export const serverSeq = (engine: Engine): number => {
   return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
 };
 
-export const putBlob = (
-  engine: Engine,
-  options: PutBlobOptions,
-): Blob => {
-  const hash = hashBlobBytes(options.value);
-  engine.statements.insertBlob.run({
-    hash,
-    data: options.value,
-    content_type: options.contentType,
-    size: options.value.byteLength,
-  });
-  return {
-    hash,
-    value: new Uint8Array(options.value),
-    contentType: options.contentType,
-    size: options.value.byteLength,
-  };
-};
-
 export const getBlob = (engine: Engine, hash: Reference): Blob | null => {
   const row = engine.statements.selectBlob.get({ hash }) as BlobRow | undefined;
   if (!row) {
@@ -1442,10 +1421,6 @@ const commitMetadataRefsRequired = (database: Database): boolean => {
   const byName = new Map(rows.map((row) => [row.name, row.notnull] as const));
   return byName.get("invocation_ref") === 1 ||
     byName.get("authorization_ref") === 1;
-};
-
-export const hashBlobBytes = (value: Uint8Array): Reference => {
-  return fromDigest(sha256(value)).toString() as Reference;
 };
 
 const toDatabaseAddress = (url: URL): URL | string => {

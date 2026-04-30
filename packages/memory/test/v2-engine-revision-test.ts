@@ -6,7 +6,6 @@ import {
   getBlob,
   open,
   ProtocolError,
-  putBlob,
   read,
 } from "../v2/engine.ts";
 
@@ -112,30 +111,6 @@ Deno.test("memory v2 engine replays identical (sessionId, localSeq) commits and 
       ProtocolError,
       "commit replay mismatch",
     );
-  } finally {
-    close(engine);
-    await Deno.remove(path);
-  }
-});
-
-Deno.test("memory v2 engine keeps blob payloads separate from JSON entity revisions", async () => {
-  const { engine, path } = await createEngine();
-
-  try {
-    const payload = new Uint8Array([1, 2, 3, 4]);
-    const blob = putBlob(engine, {
-      value: payload,
-      contentType: "application/octet-stream",
-    });
-
-    assertEquals(blob.size, payload.byteLength);
-    assertEquals(blob.contentType, "application/octet-stream");
-    assertEquals(getBlob(engine, blob.hash), {
-      hash: blob.hash,
-      value: payload,
-      contentType: "application/octet-stream",
-      size: payload.byteLength,
-    });
   } finally {
     close(engine);
     await Deno.remove(path);

@@ -905,22 +905,6 @@ export class Server {
     };
   }
 
-  async putBlob(
-    space: string,
-    expectedHash: string,
-    options: Engine.PutBlobOptions,
-  ): Promise<{ created: boolean; blob: Blob }> {
-    const engine = await this.openEngine(space);
-    const actualHash = Engine.hashBlobBytes(options.value);
-    if (actualHash !== expectedHash) {
-      throw new Error("blob hash mismatch");
-    }
-
-    const existing = Engine.getBlob(engine, actualHash);
-    const blob = Engine.putBlob(engine, options);
-    return { created: existing === null, blob };
-  }
-
   async getBlob(space: string, hash: string): Promise<Blob | null> {
     const engine = await this.openEngine(space);
     return Engine.getBlob(engine, hash as Reference);
