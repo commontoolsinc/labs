@@ -67,4 +67,7 @@ export {
   isInitialSinkInventoryName,
 } from "./sink-inventory.ts";
 export { markRendererTrustedEvent } from "./ui-contract.ts";
-export { validateAgainstSchema } from "./schema-sanitization.ts";
+export {
+  resolveSchemaForValidation,
+  validateAgainstSchema,
+} from "./schema-sanitization.ts";

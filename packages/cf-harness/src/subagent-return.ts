@@ -1,5 +1,8 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { validateAgainstSchema } from "@commonfabric/runner/cfc";
+import {
+  resolveSchemaForValidation,
+  validateAgainstSchema,
+} from "@commonfabric/runner/cfc";
 
 export const MAX_SUBAGENT_RETURN_SCHEMA_BYTES = 32 * 1024;
 
@@ -32,8 +35,8 @@ const returnLink = (
   childRunId: string,
   path: readonly (string | number)[],
 ): { "@link": string } => ({
-  "@link": `cf-harness://subagent-return/${encodeURIComponent(childRunId)}#${
-    jsonPointer(path)
+  "@link": `opaque:${encodeURIComponent(childRunId)}${
+    path.length === 0 ? "" : `#${jsonPointer(path)}`
   }`,
 });
 
@@ -46,25 +49,75 @@ const primitiveJsonValue = (value: unknown): boolean =>
 const schemaAllowsRawString = (
   schema: JSONSchema,
   value: string,
+  fullSchema: JSONSchema,
 ): boolean => {
-  if (!isRecord(schema)) {
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
+  if (!isRecord(resolved)) {
     return false;
   }
-  if (Array.isArray(schema.enum)) {
-    return schema.enum.some((entry) => entry === value);
+  if (Array.isArray(resolved.enum)) {
+    return resolved.enum.some((entry) => entry === value);
   }
-  return "const" in schema && schema.const === value &&
-    primitiveJsonValue(schema.const);
+  if (
+    "const" in resolved && resolved.const === value &&
+    primitiveJsonValue(resolved.const)
+  ) {
+    return true;
+  }
+  if (Array.isArray(resolved.allOf)) {
+    return resolved.allOf.some((branch) =>
+      schemaAllowsRawString(branch, value, fullSchema)
+    );
+  }
+  const oneOf = matchingBranch(resolved.oneOf, value, fullSchema);
+  if (oneOf !== undefined) {
+    return schemaAllowsRawString(oneOf, value, fullSchema);
+  }
+  if (Array.isArray(resolved.anyOf)) {
+    return resolved.anyOf.some((branch) =>
+      validateAgainstSchema(branch, value, fullSchema) === undefined &&
+      schemaAllowsRawString(branch, value, fullSchema)
+    );
+  }
+  return false;
 };
 
-const schemaDeclaresOpaqueLinkObject = (schema: JSONSchema): boolean =>
-  isRecord(schema) &&
-  isRecord(schema.properties) &&
-  isRecord(schema.properties["@link"]) &&
-  schema.properties["@link"].type === "string" &&
-  Array.isArray(schema.required) &&
-  schema.required.includes("@link") &&
-  schema.additionalProperties === false;
+const schemaDeclaresOpaqueLinkObject = (
+  schema: JSONSchema,
+  fullSchema: JSONSchema,
+): boolean => {
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
+  if (!isRecord(resolved)) {
+    return false;
+  }
+  if (
+    isRecord(resolved.properties) &&
+    isRecord(resolved.properties["@link"]) &&
+    resolved.properties["@link"].type === "string" &&
+    Array.isArray(resolved.required) &&
+    resolved.required.includes("@link") &&
+    resolved.additionalProperties === false
+  ) {
+    return true;
+  }
+  if (Array.isArray(resolved.allOf)) {
+    return resolved.allOf.some((branch) =>
+      schemaDeclaresOpaqueLinkObject(branch, fullSchema)
+    );
+  }
+  const oneOf = matchingBranch(
+    resolved.oneOf,
+    { "@link": "opaque:subagent-return" },
+    fullSchema,
+  );
+  if (oneOf !== undefined) {
+    return schemaDeclaresOpaqueLinkObject(oneOf, fullSchema);
+  }
+  return Array.isArray(resolved.anyOf) &&
+    resolved.anyOf.some((branch) =>
+      schemaDeclaresOpaqueLinkObject(branch, fullSchema)
+    );
+};
 
 const valueIsOpaqueLinkObject = (
   value: unknown,
@@ -81,10 +134,13 @@ const matchingBranch = (
   if (!Array.isArray(branches)) {
     return undefined;
   }
-  return branches.find((branch): branch is JSONSchema =>
+  const branch = branches.find((branch): branch is JSONSchema =>
     (typeof branch === "boolean" || isRecord(branch)) &&
     validateAgainstSchema(branch, value, fullSchema) === undefined
   );
+  return branch === undefined
+    ? undefined
+    : resolveSchemaForValidation(branch, fullSchema);
 };
 
 const schemaForValue = (
@@ -92,40 +148,87 @@ const schemaForValue = (
   value: unknown,
   fullSchema: JSONSchema,
 ): JSONSchema => {
-  if (!isRecord(schema)) {
-    return schema;
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
+  if (!isRecord(resolved)) {
+    return resolved;
   }
-  const oneOf = matchingBranch(schema.oneOf, value, fullSchema);
+  const oneOf = matchingBranch(resolved.oneOf, value, fullSchema);
   if (oneOf !== undefined) {
     return oneOf;
   }
-  const anyOf = matchingBranch(schema.anyOf, value, fullSchema);
+  const anyOf = matchingBranch(resolved.anyOf, value, fullSchema);
   if (anyOf !== undefined) {
     return anyOf;
   }
-  return schema;
+  return resolved;
 };
 
 const childSchemaForKey = (
   schema: JSONSchema,
   key: string,
+  fullSchema: JSONSchema,
 ): JSONSchema => {
-  if (!isRecord(schema)) {
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
+  if (!isRecord(resolved)) {
     return true;
   }
-  if (isRecord(schema.properties)) {
-    const child = schema.properties[key];
+  const childSchemas: JSONSchema[] = [];
+  if (isRecord(resolved.properties)) {
+    const child = resolved.properties[key];
     if (typeof child === "boolean" || isRecord(child)) {
-      return child;
+      childSchemas.push(child);
     }
   }
+  if (Array.isArray(resolved.allOf)) {
+    for (const branch of resolved.allOf) {
+      const child = childSchemaForKey(branch, key, fullSchema);
+      if (child !== true) {
+        childSchemas.push(child);
+      }
+    }
+  }
+  if (childSchemas.length === 1) {
+    return childSchemas[0]!;
+  }
+  if (childSchemas.length > 1) {
+    return { allOf: childSchemas };
+  }
   if (
-    typeof schema.additionalProperties === "boolean" ||
-    isRecord(schema.additionalProperties)
+    typeof resolved.additionalProperties === "boolean" ||
+    isRecord(resolved.additionalProperties)
   ) {
-    return schema.additionalProperties;
+    return resolved.additionalProperties;
   }
   return true;
+};
+
+const knownPropertyNames = (
+  schema: JSONSchema,
+  fullSchema: JSONSchema,
+): Set<string> => {
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
+  const known = new Set<string>();
+  if (!isRecord(resolved)) {
+    return known;
+  }
+  if (isRecord(resolved.properties)) {
+    for (const key of Object.keys(resolved.properties)) {
+      known.add(key);
+    }
+  }
+  for (
+    const branches of [resolved.allOf, resolved.anyOf, resolved.oneOf] as const
+  ) {
+    if (!Array.isArray(branches)) {
+      continue;
+    }
+    for (const branch of branches) {
+      for (const key of knownPropertyNames(branch, fullSchema)) {
+        known.add(key);
+      }
+    }
+  }
+  return known;
 };
 
 const itemSchemaForIndex = (
@@ -149,7 +252,7 @@ const sanitizeValue = (
 ): SanitizedSubagentReturn => {
   const effectiveSchema = schemaForValue(schema, value, fullSchema);
   if (typeof value === "string") {
-    if (schemaAllowsRawString(effectiveSchema, value)) {
+    if (schemaAllowsRawString(effectiveSchema, value, fullSchema)) {
       return { value, linkedStringCount: 0 };
     }
     return { value: returnLink(childRunId, path), linkedStringCount: 1 };
@@ -172,15 +275,19 @@ const sanitizeValue = (
   if (isRecord(value)) {
     if (
       valueIsOpaqueLinkObject(value) &&
-      schemaDeclaresOpaqueLinkObject(effectiveSchema)
+      schemaDeclaresOpaqueLinkObject(effectiveSchema, fullSchema)
     ) {
       return { value, linkedStringCount: 0 };
+    }
+    const knownKeys = knownPropertyNames(effectiveSchema, fullSchema);
+    if (Object.keys(value).some((key) => !knownKeys.has(key))) {
+      return { value: returnLink(childRunId, path), linkedStringCount: 0 };
     }
     let linkedStringCount = 0;
     const entries = Object.entries(value).map(([key, child]) => {
       const sanitized = sanitizeValue(
         child,
-        childSchemaForKey(effectiveSchema, key),
+        childSchemaForKey(effectiveSchema, key, fullSchema),
         fullSchema,
         childRunId,
         [...path, key],

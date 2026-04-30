@@ -353,7 +353,8 @@ sandbox shell/file only; the provisional browser profile adds host shell access
 for `agent-browser`-style commands. `delegate_task` can also take an optional
 `returnSchema`; when supplied, the harness validates the child JSON return,
 keeps the raw return in child artifacts, and exposes only a sanitized structured
-value with free-form strings linkified.
+value with free-form strings and objects with unmodeled keys linkified through
+opaque `@link` handles.
 
 The remaining subagent work is still substantial:
 

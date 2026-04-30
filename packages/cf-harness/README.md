@@ -166,7 +166,8 @@ Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
 object or boolean. In that mode the child is required to return a single JSON
 value. The harness validates it, stores the raw child return under the child
 artifact root, and exposes `subagent.structuredReturn.value` to the parent with
-free-form strings replaced by pass-through link objects:
+free-form strings and objects with unmodeled keys replaced by opaque `@link`
+objects such as `opaque:<child-run-id>#/json/pointer`:
 
 ```json
 {

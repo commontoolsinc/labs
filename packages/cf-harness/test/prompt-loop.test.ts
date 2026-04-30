@@ -840,8 +840,7 @@ Deno.test("CfHarnessPromptLoop validates structured subagent returns and linkifi
       approved: false,
       status: "not_approved",
       summary: {
-        "@link":
-          "cf-harness://subagent-return/run-structured-return.subagent.1#/summary",
+        "@link": "opaque:run-structured-return.subagent.1#/summary",
       },
     });
     assertEquals(
