@@ -1685,12 +1685,13 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
       output.subagent.structuredReturn.schemaDigest,
       output.subagent.manifest.inputSummary.returnSchemaDigest,
     );
+    const childArtifactRoot = output.subagent.runState.artifactRoot;
     assertEquals(
-      output.subagent.runState.artifactRoot.startsWith(
-        `${workspaceHostPath}/`,
-      ),
+      childArtifactRoot === workspaceHostPath ||
+        childArtifactRoot.startsWith(`${workspaceHostPath}/`),
       false,
     );
+    assertEquals(childArtifactRoot.startsWith(`${artifactRoot}/`), true);
     assertEquals(output.subagent.structuredReturn.status, "valid");
     assertEquals(output.subagent.structuredReturn.linkedStringCount, 1);
     assertEquals(output.subagent.structuredReturn.value, {
