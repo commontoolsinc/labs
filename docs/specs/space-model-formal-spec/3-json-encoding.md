@@ -1,9 +1,9 @@
 # JSON Encoding for Fabric Values
 
 This document specifies the JSON-compatible wire format used to represent
-fabric values, including the tagged-object convention, escaping mechanisms,
-serialization context responsibilities, and the reservation rules for
-`/`-prefixed keys.
+fabric values, including the `fvj1:` encoding prefix, the tagged-object
+convention, escaping mechanisms, serialization context responsibilities, and
+the reservation rules for `/`-prefixed keys.
 
 ## Status
 
@@ -17,6 +17,36 @@ This section specifies the JSON-compatible wire format for special types. While
 the system will maintain a JSON encoding indefinitely (for debugging and
 interoperability), other wire and storage formats (e.g., CBOR) may represent
 types more directly without layering on JSON.
+
+### 1.1 Encoding Prefix
+
+Every encoded fabric value carries an unambiguous textual prefix, before the
+JSON itself:
+
+```
+fvj1:<json>
+```
+
+The literal string `fvj1:` stands for "Fabric Value JSON, version 1". Its
+purpose is to make the encoded form distinguishable, on inspection, from
+arbitrary JSON produced by some other source — a brief peek at the start of
+a string is sufficient to tell whether it carries a fabric-value payload.
+
+- A conforming **encoder** emits the prefix exactly once, immediately before
+  the JSON body, on every encoded value (including encoded primitives — e.g.,
+  the number `42` encodes as the eight-character string `fvj1:42`).
+- A conforming **decoder** verifies the prefix is present before parsing the
+  remainder as JSON, and strips the prefix before processing.
+- A short detection helper (`seemsLikeJsonEncodedFabricValue`) tests for the
+  prefix without parsing — useful for routing arbitrary input through the
+  right decode path.
+
+**Forward compatibility.** The trailing `1` is a version digit, reserving the
+prefix space for future incompatible revisions of the wire format. Should the
+encoding ever evolve in a way older decoders cannot interpret, a new prefix
+(`fvj2:`, etc.) signals the change; older decoders can reject the input
+cleanly rather than parsing it incorrectly. The current spec defines only
+`fvj1:`.
 
 ## 2. Key Convention: `/<Type>@<Version>`
 
