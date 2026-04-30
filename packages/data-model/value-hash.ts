@@ -487,12 +487,12 @@ const frozenObjectHashCache = new WeakMap<object, FabricHash>();
  * Common helper for the two exported hash functions, which _might_ return a
  * plain `string` when passed `stringOkay = true`.
  */
-function hashOfModernInternal(value: unknown, stringOkay: false): FabricHash;
-function hashOfModernInternal(
+function hashOfInternal(value: unknown, stringOkay: false): FabricHash;
+function hashOfInternal(
   value: unknown,
   stringOkay: true,
 ): FabricHash | string;
-function hashOfModernInternal(
+function hashOfInternal(
   value: unknown,
   stringOkay: boolean,
 ): FabricHash | string {
@@ -539,7 +539,7 @@ function hashOfModernInternal(
  * Caches results for primitives (LRU) and deep-frozen objects (`WeakMap`).
  */
 export function hashOf(value: unknown): FabricHash {
-  return hashOfModernInternal(value, false);
+  return hashOfInternal(value, false);
 }
 
 /**
@@ -547,6 +547,6 @@ export function hashOf(value: unknown): FabricHash {
  * base64url (no `<type>:` prefix).
  */
 export function hashStringOf(value: unknown): string {
-  const result = hashOfModernInternal(value, true);
+  const result = hashOfInternal(value, true);
   return (typeof result === "string") ? result : result.hashString;
 }
