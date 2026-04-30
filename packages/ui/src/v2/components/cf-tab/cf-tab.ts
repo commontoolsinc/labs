@@ -96,12 +96,12 @@ export class CFTab extends BaseElement {
       /* ===== Chip variant styles ===== */
 
       /* Suppress underline indicator in chip mode */
-      :host-context(cf-tab-list[variant="chip"]) .tab[data-selected="true"]::after {
+      :host([data-variant="chip"]) .tab[data-selected="true"]::after {
         display: none;
       }
 
       /* Base chip tab styling */
-      :host-context(cf-tab-list[variant="chip"]) .tab {
+      :host([data-variant="chip"]) .tab {
         border-radius: var(--cf-border-radius-full, 9999px);
         padding: var(--cf-pill-sm-padding-v, 2px) var(--cf-pill-sm-padding-h, 10px);
         font-size: var(--cf-pill-sm-font-size, var(--cf-size-sm-font-size, 11px));
@@ -123,7 +123,7 @@ export class CFTab extends BaseElement {
         }
 
         /* Hover on unselected chip tab */
-        :host-context(cf-tab-list[variant="chip"])
+        :host([data-variant="chip"])
           .tab:hover:not(:disabled):not([data-selected="true"]) {
           background: var(
             --cf-theme-color-surface-hover,
@@ -133,7 +133,7 @@ export class CFTab extends BaseElement {
         }
 
         /* Selected chip tab - filled pill appearance */
-        :host-context(cf-tab-list[variant="chip"]) .tab[data-selected="true"] {
+        :host([data-variant="chip"]) .tab[data-selected="true"] {
           background: var(
             --cf-theme-color-surface,
             var(--cf-colors-gray-100, #f2f3f6)

@@ -114,11 +114,34 @@ export class CFTabList extends BaseElement {
     this.setAttribute("aria-orientation", this.orientation);
   }
 
+  override firstUpdated() {
+    const slot = this.shadowRoot?.querySelector("slot");
+    slot?.addEventListener("slotchange", () => this._propagateVariant());
+    this._propagateVariant();
+  }
+
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
 
     if (changedProperties.has("orientation")) {
       this.setAttribute("aria-orientation", this.orientation);
+    }
+    if (changedProperties.has("variant")) {
+      this._propagateVariant();
+    }
+  }
+
+  /** Push variant down to child cf-tab elements so they can style without :host-context */
+  private _propagateVariant(): void {
+    const slot = this.shadowRoot?.querySelector("slot");
+    const tabs = slot?.assignedElements()
+      .filter((el) => el.tagName === "CF-TAB") ?? [];
+    for (const tab of tabs) {
+      if (this.variant === "underline") {
+        tab.removeAttribute("data-variant");
+      } else {
+        tab.setAttribute("data-variant", this.variant);
+      }
     }
   }
 
