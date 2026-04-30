@@ -2,8 +2,7 @@
  * Content hash public API.
  *
  * Re-exports the modern (`value-hash-modern.ts`) implementation under the
- * stable names `hashOf`, `isHashObject`, `hashObjectFromJson`, and
- * `hashObjectFromString`.
+ * stable names `hashOf`, `hashObjectFromJson`, and `hashObjectFromString`.
  */
 import { hashOfModern } from "./value-hash-modern.ts";
 import { FabricHash } from "./fabric-hash.ts";
@@ -16,11 +15,6 @@ import type { FabricValue } from "./interface.ts";
 /** Parse a hash object from its string representation. */
 export function hashObjectFromString(source: string): FabricHash {
   return FabricHash.fromString(source);
-}
-
-/** Type guard: returns true if the value is a content hash. */
-export function isHashObject(value: unknown): value is FabricHash {
-  return value instanceof FabricHash;
 }
 
 /** Reconstructs a hash object from its JSON representation. */

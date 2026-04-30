@@ -5,7 +5,6 @@ import {
   hashObjectFromJson,
   hashObjectFromString,
   hashOf,
-  isHashObject,
 } from "../value-hash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
@@ -133,11 +132,6 @@ describe("stuff from value-hash.ts", () => {
     expect(() => hashObjectFromString("nocolonhere")).toThrow(
       "Invalid content hash string",
     );
-  });
-
-  it("isHashObject returns true for FabricHash", () => {
-    const cid = new FabricHash(SAMPLE_HASH, "fid1");
-    expect(isHashObject(cid)).toBe(true);
   });
 
   it("hashOf() returns FabricHash", () => {
