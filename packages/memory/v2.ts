@@ -14,7 +14,6 @@ import type { ReconstructionContext } from "@commonfabric/data-model/interface";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
-export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
 export const DEFAULT_BRANCH = "" as const;
 
 export type EntityId = string;
