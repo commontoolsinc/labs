@@ -60,11 +60,32 @@ export type HarnessCfcSubstrateStatus =
 
 export type HarnessCfcMountStatus = "configured" | "not-configured";
 
+export type HarnessFabricStatusProbeStatus =
+  | "not-probed"
+  | "missing"
+  | "present"
+  | "invalid";
+
+export type HarnessFabricWriteGovernancePolicy =
+  | "not-configured"
+  | "host-read-only"
+  | "host-writable-non-strict"
+  | "host-writable-cfc-strict-attested"
+  | "host-writable-cfc-strict-unattested";
+
+export interface HarnessFabricWriteGovernanceSnapshot {
+  policy: HarnessFabricWriteGovernancePolicy;
+  statusProbe: HarnessFabricStatusProbeStatus;
+  delegatedToCfc: boolean;
+  attestedMode?: CfcEnforcementMode;
+}
+
 export interface HarnessCfcMountSnapshot {
   kind: SandboxRuntimeMountKind;
   status: HarnessCfcMountStatus;
   sandboxPath: string;
   readOnly?: boolean;
+  writeGovernance?: HarnessFabricWriteGovernanceSnapshot;
 }
 
 export interface HarnessCfcCapabilitySnapshot {
@@ -132,6 +153,8 @@ export interface ClassifyHarnessRunErrorOptions {
 }
 
 export const CAPABILITY_PROBE_SENTINEL = "__CF_HARNESS_CAPABILITY_PROBE__";
+export const FABRIC_STATUS_PROBE_SENTINEL =
+  "__CF_HARNESS_FABRIC_STATUS_PROBE__";
 
 const CAPABILITY_PROBE_SCRIPT = [
   `# ${CAPABILITY_PROBE_SENTINEL}`,
@@ -148,6 +171,23 @@ const CAPABILITY_PROBE_SCRIPT = [
   "}",
   ...HARNESS_CAPABILITY_COMMANDS.map((command) => `probe ${command}`),
 ].join("\n");
+
+const shellSingleQuote = (value: string): string =>
+  `'${value.replaceAll("'", "'\\''")}'`;
+
+const createFabricStatusProbeScript = (sandboxPath: string): string =>
+  [
+    `# ${FABRIC_STATUS_PROBE_SENTINEL}`,
+    "set +e",
+    `status_file=${shellSingleQuote(`${sandboxPath}/.status`)}`,
+    'if [ -r "$status_file" ]; then',
+    "  printf 'present\\t'",
+    '  cat "$status_file"',
+    "  printf '\\n'",
+    "else",
+    "  printf 'missing\\t\\n'",
+    "fi",
+  ].join("\n");
 
 const isHarnessCapabilityCommand = (
   input: string,
@@ -168,6 +208,12 @@ const createEmptyCapabilitySnapshot = (
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isCfcEnforcementMode = (
+  value: unknown,
+): value is CfcEnforcementMode =>
+  value === "disabled" || value === "observe" ||
+  value === "enforce-explicit" || value === "enforce-strict";
 
 const isFailedDelegateTaskOutput = (
   output: unknown,
@@ -259,6 +305,7 @@ const findMountDescription = (
 
 const createCfcMountSnapshots = (
   sandboxDescription: SandboxRuntimeDescription,
+  mode: CfcEnforcementMode,
 ): HarnessCfcCapabilitySnapshot["mounts"] => {
   const workspaceMount = findMountDescription(
     sandboxDescription.cfc?.mounts,
@@ -283,12 +330,95 @@ const createCfcMountSnapshots = (
         status: "configured",
         sandboxPath: fabricMount.sandboxPath,
         readOnly: fabricMount.readOnly,
+        writeGovernance: createFabricWriteGovernance({
+          mode,
+          readOnly: fabricMount.readOnly,
+          statusProbe: "not-probed",
+        }),
       }
       : {
         kind: "fabric-fuse",
         status: "not-configured",
         sandboxPath: "/fabric",
+        writeGovernance: {
+          policy: "not-configured",
+          statusProbe: "not-probed",
+          delegatedToCfc: false,
+        },
       },
+  };
+};
+
+interface FabricStatusProbeResult {
+  statusProbe: HarnessFabricStatusProbeStatus;
+  attestedMode?: CfcEnforcementMode;
+}
+
+const parseFabricStatusProbeOutput = (
+  stdout: string,
+): FabricStatusProbeResult => {
+  const trimmed = stdout.trimEnd();
+  const separator = trimmed.indexOf("\t");
+  const status = separator === -1 ? trimmed : trimmed.slice(0, separator);
+  const payload = separator === -1 ? "" : trimmed.slice(separator + 1).trim();
+  if (status === "missing") {
+    return { statusProbe: "missing" };
+  }
+  if (status !== "present") {
+    return { statusProbe: "invalid" };
+  }
+  try {
+    const parsed = JSON.parse(payload);
+    const cfc = isRecord(parsed) ? parsed.cfc : undefined;
+    const mode = isRecord(cfc) ? cfc.mode : undefined;
+    return {
+      statusProbe: "present",
+      ...(isCfcEnforcementMode(mode) ? { attestedMode: mode } : {}),
+    };
+  } catch {
+    return { statusProbe: "invalid" };
+  }
+};
+
+const createFabricWriteGovernance = (options: {
+  mode: CfcEnforcementMode;
+  readOnly: boolean;
+  statusProbe: HarnessFabricStatusProbeStatus;
+  attestedMode?: CfcEnforcementMode;
+}): HarnessFabricWriteGovernanceSnapshot => {
+  if (options.readOnly) {
+    return {
+      policy: "host-read-only",
+      statusProbe: options.statusProbe,
+      delegatedToCfc: false,
+      ...(options.attestedMode !== undefined
+        ? { attestedMode: options.attestedMode }
+        : {}),
+    };
+  }
+
+  if (options.mode !== "enforce-strict") {
+    return {
+      policy: "host-writable-non-strict",
+      statusProbe: options.statusProbe,
+      delegatedToCfc: false,
+      ...(options.attestedMode !== undefined
+        ? { attestedMode: options.attestedMode }
+        : {}),
+    };
+  }
+
+  const strictAttested = options.statusProbe === "present" &&
+    options.attestedMode === "enforce-strict";
+  return {
+    policy: strictAttested
+      ? "host-writable-cfc-strict-attested"
+      : "host-writable-cfc-strict-unattested",
+    statusProbe: options.statusProbe,
+    delegatedToCfc: true,
+    ...(options.attestedMode !== undefined
+      ? { attestedMode: options.attestedMode }
+      : {}),
   };
 };
 
@@ -316,7 +446,7 @@ const createCfcCapabilitySnapshot = (
         : {}),
     },
     sandbox: sandboxDescription,
-    mounts: createCfcMountSnapshots(sandboxDescription),
+    mounts: createCfcMountSnapshots(sandboxDescription, mode),
     protectedXattrs: {
       expectedSandboxVisible: false,
       sandboxVisibility: "not-probed",
@@ -348,7 +478,23 @@ export const collectHarnessCapabilitySnapshot = async (
       }`,
     );
   }
-  return parseCapabilityProbeOutput(result.stdout, at, cfc);
+  const snapshot = parseCapabilityProbeOutput(result.stdout, at, cfc);
+  const fabricMount = snapshot.cfc.mounts.fabric;
+  if (fabricMount.status === "configured") {
+    const fabricStatus = await sandbox.runShell({
+      command: createFabricStatusProbeScript(fabricMount.sandboxPath),
+      cwd,
+    });
+    const statusProbe = fabricStatus.exitCode === 0
+      ? parseFabricStatusProbeOutput(fabricStatus.stdout)
+      : { statusProbe: "invalid" as const };
+    fabricMount.writeGovernance = createFabricWriteGovernance({
+      mode: snapshot.cfc.enforcementMode,
+      readOnly: fabricMount.readOnly ?? false,
+      ...statusProbe,
+    });
+  }
+  return snapshot;
 };
 
 export const createHarnessFailureRecord = (

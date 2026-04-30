@@ -9,6 +9,7 @@ import {
 import {
   buildJsonTree,
   buildJsonTreeAsync,
+  buildPendingJsonTreeAsync,
   isHandlerCell,
   isSigilLink,
   isStreamValue,
@@ -84,6 +85,83 @@ Deno.test("buildJsonTree - object creates directory with children", () => {
   // Should have .json sibling
   const jsonContent = getFileContent(tree, tree.rootIno, "user.json");
   assertEquals(JSON.parse(jsonContent), obj);
+});
+
+Deno.test("buildJsonTree - encodes unsafe object keys in path names", () => {
+  const tree = new FsTree();
+  const data = {
+    "has/slash": 1,
+    "of:entity": 2,
+    "literal%": 3,
+    ".hidden": 4,
+    "..": 5,
+    "value.json": 6,
+  };
+
+  buildJsonTree(tree, tree.rootIno, "data", data);
+
+  const dataIno = tree.lookup(tree.rootIno, "data")!;
+  assertEquals(getFileContent(tree, dataIno, "has%2Fslash"), "1");
+  assertEquals(getFileContent(tree, dataIno, "of%3Aentity"), "2");
+  assertEquals(getFileContent(tree, dataIno, "literal%25"), "3");
+  assertEquals(getFileContent(tree, dataIno, "%2Ehidden"), "4");
+  assertEquals(getFileContent(tree, dataIno, "%2E%2E"), "5");
+  assertEquals(getFileContent(tree, dataIno, "value%2Ejson"), "6");
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "data.json")),
+    data,
+  );
+});
+
+Deno.test("buildJsonTree - encodes user keys that look like internal pending roots", () => {
+  const tree = new FsTree();
+  const data = {
+    ".input.pending": 1,
+    ".result.pending": 2,
+  };
+
+  buildJsonTree(tree, tree.rootIno, "data", data);
+
+  const dataIno = tree.lookup(tree.rootIno, "data")!;
+  assertEquals(tree.lookup(dataIno, ".input.pending"), undefined);
+  assertEquals(tree.lookup(dataIno, ".result.pending"), undefined);
+  assertEquals(getFileContent(tree, dataIno, "%2Einput.pending"), "1");
+  assertEquals(getFileContent(tree, dataIno, "%2Eresult.pending"), "2");
+});
+
+Deno.test("buildJsonTree - encodes depth-zero names that look like internal pending roots by default", () => {
+  const tree = new FsTree();
+
+  buildJsonTree(tree, tree.rootIno, ".result.pending", { value: 1 });
+
+  assertEquals(tree.lookup(tree.rootIno, ".result.pending"), undefined);
+  const dataIno = tree.lookup(tree.rootIno, "%2Eresult.pending")!;
+  assertEquals(getFileContent(tree, dataIno, "value"), "1");
+});
+
+Deno.test("buildJsonTreeAsync - encodes depth-zero names that look like internal pending roots by default", async () => {
+  const tree = new FsTree();
+
+  await buildJsonTreeAsync(tree, tree.rootIno, ".input.pending", { value: 1 });
+
+  assertEquals(tree.lookup(tree.rootIno, ".input.pending"), undefined);
+  const dataIno = tree.lookup(tree.rootIno, "%2Einput.pending")!;
+  assertEquals(getFileContent(tree, dataIno, "value"), "1");
+});
+
+Deno.test("buildPendingJsonTreeAsync - preserves pending roots for rebuild staging", async () => {
+  const tree = new FsTree();
+
+  await buildPendingJsonTreeAsync(
+    tree,
+    tree.rootIno,
+    "result",
+    { value: 1 },
+  );
+
+  const dataIno = tree.lookup(tree.rootIno, ".result.pending")!;
+  assertEquals(getFileContent(tree, dataIno, "value"), "1");
+  assertEquals(tree.lookup(tree.rootIno, "%2Eresult.pending"), undefined);
 });
 
 Deno.test("buildJsonTree - array creates directory with numeric indices", () => {
@@ -196,6 +274,44 @@ Deno.test("buildJsonTree - circular references become [Circular]", () => {
   assertEquals(parsed.self, "[Circular]");
 });
 
+Deno.test("buildJsonTree - shared DAG objects are not circular", () => {
+  const tree = new FsTree();
+  const shared = { leaf: "same" };
+  const data = { a: shared, b: shared };
+
+  buildJsonTree(tree, tree.rootIno, "dag", data);
+
+  const dagIno = tree.lookup(tree.rootIno, "dag")!;
+  const aIno = tree.lookup(dagIno, "a")!;
+  const bIno = tree.lookup(dagIno, "b")!;
+
+  assertEquals(getFileContent(tree, aIno, "leaf"), "same");
+  assertEquals(getFileContent(tree, bIno, "leaf"), "same");
+  assertEquals(JSON.parse(getFileContent(tree, tree.rootIno, "dag.json")), {
+    a: { leaf: "same" },
+    b: { leaf: "same" },
+  });
+});
+
+Deno.test("buildJsonTreeAsync - shared DAG objects are not circular", async () => {
+  const tree = new FsTree();
+  const shared = { leaf: "same" };
+  const data = { a: shared, b: shared };
+
+  await buildJsonTreeAsync(tree, tree.rootIno, "dag", data);
+
+  const dagIno = tree.lookup(tree.rootIno, "dag")!;
+  const aIno = tree.lookup(dagIno, "a")!;
+  const bIno = tree.lookup(dagIno, "b")!;
+
+  assertEquals(getFileContent(tree, aIno, "leaf"), "same");
+  assertEquals(getFileContent(tree, bIno, "leaf"), "same");
+  assertEquals(JSON.parse(getFileContent(tree, tree.rootIno, "dag.json")), {
+    a: { leaf: "same" },
+    b: { leaf: "same" },
+  });
+});
+
 Deno.test("safeStringify - handles circular refs", () => {
   // deno-lint-ignore no-explicit-any
   const a: any = { x: 1 };
@@ -203,6 +319,15 @@ Deno.test("safeStringify - handles circular refs", () => {
   const result = JSON.parse(safeStringify(a));
   assertEquals(result.x, 1);
   assertEquals(result.y, "[Circular]");
+});
+
+Deno.test("safeStringify - preserves shared DAG objects", () => {
+  const shared = { leaf: "same" };
+  const result = JSON.parse(safeStringify({ a: shared, b: shared }));
+  assertEquals(result, {
+    a: { leaf: "same" },
+    b: { leaf: "same" },
+  });
 });
 
 Deno.test("FsTree - addSymlink", () => {
@@ -1248,4 +1373,47 @@ Deno.test("parseSymlinkTarget - unknown cross-space uses name as fallback", () =
   );
 
   assertEquals(result, { id: "abc", space: "unknown" });
+});
+
+type MakeLinkResolver = (
+  spaceName: string,
+) => (value: unknown, depth: number) => string | null;
+
+Deno.test("makeLinkResolver encodes unsafe link components", () => {
+  const bridge = new CellBridge(new FsTree());
+  const resolveLink =
+    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
+      .makeLinkResolver("home");
+
+  assertEquals(
+    resolveLink({
+      "/": {
+        "link@1": {
+          id: "of:abc",
+          space: "other:space",
+          path: ["..", "has/slash", ":mac"],
+        },
+      },
+    }, 0),
+    "../../../other%3Aspace/entities/of%3Aabc/%2E%2E/has%2Fslash/%3Amac",
+  );
+});
+
+Deno.test("makeLinkResolver leaves malformed link paths inert", () => {
+  const bridge = new CellBridge(new FsTree());
+  const resolveLink =
+    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
+      .makeLinkResolver("home");
+
+  assertEquals(
+    resolveLink({
+      "/": {
+        "link@1": {
+          id: "of:abc",
+          path: ["ok", 1],
+        },
+      },
+    }, 0),
+    null,
+  );
 });
