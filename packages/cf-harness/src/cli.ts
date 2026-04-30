@@ -568,7 +568,7 @@ export const parseCfHarnessCliArgs = async (
     ...(skillsRoot !== undefined ? { skillsRoot } : {}),
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
-    skillCatalogEnabled: !Boolean(args["no-skill-catalog"]),
+    skillCatalogEnabled: args["no-skill-catalog"] !== true,
     ...(typeof args.model === "string"
       ? { model: args.model }
       : resumeRun === undefined
