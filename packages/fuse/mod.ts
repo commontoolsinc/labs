@@ -107,7 +107,8 @@ globalThis.addEventListener("error", (e) => {
 type HandleWriteTarget =
   | { kind: "handler"; target: HandlerTarget }
   | { kind: "value"; target: WritePath }
-  | { kind: "source"; target: SourceWritePath };
+  | { kind: "source"; target: SourceWritePath }
+  | { kind: "ignored" };
 
 export const DEFAULT_CFC_XATTR_NAMESPACE: CfcXattrNamespace = "both";
 
@@ -928,8 +929,11 @@ export async function main(argv: string[] = Deno.args) {
       const cfcAuthorizedOperations: CfcExistingWritebackOperation[] = [];
       const cfcAuthorizationAnnotation = node.cfc;
       if (isWriting && bridge) {
+        const nodeName = tree.getNameForIno(inode) ?? "";
         const sourceWritePath = bridge.resolveSourceWritePath(inode);
-        if (sourceWritePath) {
+        if (nodeName.startsWith("._")) {
+          writeTarget = { kind: "ignored" };
+        } else if (sourceWritePath) {
           writeTarget = { kind: "source", target: sourceWritePath };
         } else {
           const writePath = bridge.resolveWritePath(inode);
@@ -944,7 +948,7 @@ export async function main(argv: string[] = Deno.args) {
       // Get current content for the handle buffer
       const content = node.kind === "file" ? node.content : new Uint8Array(0);
       const truncate = (flags & O_TRUNC) !== 0;
-      if (isWriting) {
+      if (isWriting && writeTarget?.kind !== "ignored") {
         const operation: CfcExistingWritebackOperation = truncate
           ? "truncate"
           : "write";
@@ -1202,6 +1206,15 @@ export async function main(argv: string[] = Deno.args) {
       }
     };
     try {
+      if (writeTarget?.kind === "ignored") {
+        if (handle.version === flushVersion) {
+          handle.dirty = false;
+          handle.truncatePending = false;
+          handle.buffer = new Uint8Array(0);
+        }
+        return 0;
+      }
+
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
         const trimmed = text.trim();
@@ -1527,7 +1540,11 @@ export async function main(argv: string[] = Deno.args) {
         view.copyInto(data);
       }
 
-      if (!authorizeHandleCfcWrite(fh, handle, "write")) {
+      const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+      if (
+        writeTarget?.kind !== "ignored" &&
+        !authorizeHandleCfcWrite(fh, handle, "write")
+      ) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
@@ -1601,6 +1618,16 @@ export async function main(argv: string[] = Deno.args) {
       const node = tree.getNode(inode);
       if (!node) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
+        return;
+      }
+      if ((tree.getNameForIno(inode) ?? "").startsWith("._")) {
+        const statBuf = new ArrayBuffer(STAT_SIZE);
+        writeStat(statBuf, buildStat(node, inode));
+        fuse.symbols.fuse_reply_attr(
+          req,
+          Deno.UnsafePointer.of(new Uint8Array(statBuf)),
+          0,
+        );
         return;
       }
       const sizeChange = (toSet & FUSE_SET_ATTR_SIZE) !== 0;
@@ -1677,50 +1704,55 @@ export async function main(argv: string[] = Deno.args) {
             return;
           }
         } else {
-          if (!bridge || node.kind !== "file") {
+          if (node.kind === "callable" && node.callableKind === "handler") {
+            // FUSE-T may issue O_TRUNC as a separate setattr without a file
+            // handle. Handler contents are delivered through write/flush, so
+            // this size-only setattr is just the shell clearing the send buffer.
+          } else if (!bridge || node.kind !== "file") {
             fuse.symbols.fuse_reply_err(req, EACCES);
             return;
-          }
-          const sourceWritePath = bridge.resolveSourceWritePath(inode);
-          const valueWritePath = sourceWritePath === null
-            ? bridge.resolveWritePath(inode)
-            : null;
-          const writeTarget: HandleWriteTarget | undefined = sourceWritePath
-            ? { kind: "source", target: sourceWritePath }
-            : valueWritePath
-            ? { kind: "value", target: valueWritePath }
-            : undefined;
-          if (!writeTarget) {
-            fuse.symbols.fuse_reply_err(req, EACCES);
-            return;
-          }
+          } else {
+            const sourceWritePath = bridge.resolveSourceWritePath(inode);
+            const valueWritePath = sourceWritePath === null
+              ? bridge.resolveWritePath(inode)
+              : null;
+            const writeTarget: HandleWriteTarget | undefined = sourceWritePath
+              ? { kind: "source", target: sourceWritePath }
+              : valueWritePath
+              ? { kind: "value", target: valueWritePath }
+              : undefined;
+            if (!writeTarget) {
+              fuse.symbols.fuse_reply_err(req, EACCES);
+              return;
+            }
 
-          const truncateFh = handles.open(
-            inode,
-            O_WRONLY,
-            bufferForNoHandleTruncate(node.content, newSize),
-            {
-              writeTarget,
-              cfcAuthorizedOperations: ["truncate"],
-              cfcAuthorizationAnnotation: node.cfc,
-            },
-          );
-          if (!handles.truncate(truncateFh, newSize)) {
-            handles.close(truncateFh);
-            fuse.symbols.fuse_reply_err(req, EIO);
-            return;
+            const truncateFh = handles.open(
+              inode,
+              O_WRONLY,
+              bufferForNoHandleTruncate(node.content, newSize),
+              {
+                writeTarget,
+                cfcAuthorizedOperations: ["truncate"],
+                cfcAuthorizationAnnotation: node.cfc,
+              },
+            );
+            if (!handles.truncate(truncateFh, newSize)) {
+              handles.close(truncateFh);
+              fuse.symbols.fuse_reply_err(req, EIO);
+              return;
+            }
+            const truncateHandle = handles.get(truncateFh);
+            if (!truncateHandle) {
+              fuse.symbols.fuse_reply_err(req, EIO);
+              return;
+            }
+            tree.updateFile(inode, truncateHandle.buffer, node.jsonType);
+            flushHandle(truncateHandle).catch((e) => {
+              console.error(`[fuse] truncate write error: ${e}`);
+            }).finally(() => {
+              handles.close(truncateFh);
+            });
           }
-          const truncateHandle = handles.get(truncateFh);
-          if (!truncateHandle) {
-            fuse.symbols.fuse_reply_err(req, EIO);
-            return;
-          }
-          tree.updateFile(inode, truncateHandle.buffer, node.jsonType);
-          flushHandle(truncateHandle).catch((e) => {
-            console.error(`[fuse] truncate write error: ${e}`);
-          }).finally(() => {
-            handles.close(truncateFh);
-          });
         }
       }
 
@@ -1989,9 +2021,29 @@ export async function main(argv: string[] = Deno.args) {
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
 
-      // Reject macOS resource fork / metadata files
       if (name.startsWith("._")) {
-        fuse.symbols.fuse_reply_err(req, EACCES);
+        // FUSE-T/macOS may create AppleDouble sidecars before opening the real
+        // file. Keep them local so they don't block writes or persist into cells.
+        const existingIno = tree.lookup(parent, name);
+        const ino = existingIno ?? tree.addFile(parent, name, "", "string");
+        const fh = handles.open(ino, O_RDWR, new Uint8Array(0), {
+          writeTarget: { kind: "ignored" } satisfies HandleWriteTarget,
+        });
+        writeFileInfo(fi, fh);
+
+        const node = tree.getNode(ino);
+        const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
+        writeEntryParam(entryBuf, {
+          ino,
+          attr: buildStat(node!, ino),
+          attrTimeout: 0,
+          entryTimeout: 0,
+        });
+        fuse.symbols.fuse_reply_create(
+          req,
+          Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+          fi,
+        );
         return;
       }
 
@@ -2143,6 +2195,11 @@ export async function main(argv: string[] = Deno.args) {
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
+      if (name.startsWith("._")) {
+        tree.removeChild(parent, name);
+        fuse.symbols.fuse_reply_err(req, 0);
+        return;
+      }
 
       let parentPath = null as ReturnType<CellBridge["resolveWritePath"]>;
       let authorization = undefined as

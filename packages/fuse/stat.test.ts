@@ -73,3 +73,26 @@ Deno.test("nodeMode exposes writable directories with write bits", () => {
 
   assertEquals(nodeMode(node, true), DIR_MODE_RW);
 });
+
+Deno.test("nodeMode gives writable nodes user-independent write bits", () => {
+  const file: FsNode = {
+    kind: "file",
+    content: new Uint8Array(),
+    jsonType: "string",
+  };
+  const dir: FsNode = {
+    kind: "dir",
+    children: new Map(),
+  };
+  const handler: FsNode = {
+    kind: "callable",
+    callableKind: "handler",
+    cellKey: "addItem",
+    cellProp: "result",
+    script: new Uint8Array(),
+  };
+
+  assertEquals(nodeMode(file, true) & 0o777, 0o666);
+  assertEquals(nodeMode(dir, true) & 0o777, 0o777);
+  assertEquals(nodeMode(handler) & 0o777, 0o777);
+});
