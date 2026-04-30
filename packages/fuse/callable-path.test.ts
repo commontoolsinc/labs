@@ -46,6 +46,15 @@ Deno.test("parseMountedCallablePath accepts root-level result callables", () => 
   );
 });
 
+Deno.test("parseMountedCallablePath decodes encoded space names", () => {
+  assertEquals(
+    parseMountedCallablePath(
+      "did%3Akey%3AzSpace/pieces/notes/result/search.tool",
+    )?.spaceName,
+    "did:key:zSpace",
+  );
+});
+
 Deno.test("parseMountedCallablePath accepts entity handler paths", () => {
   assertEquals(
     parseMountedCallablePath("home/entities/of:abc123/result/addItem.handler"),

@@ -70,6 +70,7 @@ import {
   type HandleState,
   validateVirtualFileRange,
 } from "./handles.ts";
+import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
 const encoder = new TextEncoder();
@@ -141,6 +142,40 @@ export function defaultCfcWritebackStatePath(
     .replace(/[^A-Za-z0-9_.-]/g, "_")
     .slice(0, 120) || "mount";
   return `${stateDir}/cfc-writeback-${safeMount}.json`;
+}
+
+export function decodeFuseNamespaceName(name: string): string {
+  return decodeFuseComponent(name);
+}
+
+export function appendDecodedJsonPath(
+  basePath: readonly (string | number)[],
+  name: string,
+): (string | number)[] {
+  return [...basePath, decodeFuseNamespaceName(name)];
+}
+
+export function sourceRelPathToTreeSegments(relPath: string): string[] {
+  return encodeFusePathSegments(relPath.split("/"));
+}
+
+export function bufferForNoHandleTruncate(
+  content: Uint8Array,
+  newSize: number,
+): Uint8Array {
+  if (newSize <= 0) return new Uint8Array(0);
+  return content.slice(0, Math.min(newSize, content.length));
+}
+
+export function rootSpaceLookupNames(name: string): {
+  spaceName: string;
+  directoryName: string;
+} {
+  const spaceName = decodeFuseNamespaceName(name);
+  return {
+    spaceName,
+    directoryName: encodeFusePathSegments([spaceName])[0],
+  };
 }
 
 function readBuffer(ptr: Deno.PointerValue, size: bigint): Uint8Array {
@@ -720,11 +755,12 @@ export async function main(argv: string[] = Deno.args) {
       // If at root and bridge is available, try async space connection.
       // Reply from tree synchronously if space is already connected.
       if (parent === tree.rootIno && bridge && !name.startsWith(".")) {
-        if (replyLookupFromTree(req, parent, name)) {
+        const lookup = rootSpaceLookupNames(name);
+        if (replyLookupFromTree(req, parent, lookup.directoryName)) {
           return;
         }
-        bridge.connectSpace(name).then(() => {
-          if (!replyLookupFromTree(req, parent, name)) {
+        bridge.connectSpace(lookup.spaceName).then(() => {
+          if (!replyLookupFromTree(req, parent, lookup.directoryName)) {
             fuse.symbols.fuse_reply_err(req, ENOENT);
           }
         }).catch(() => {
@@ -1197,7 +1233,7 @@ export async function main(argv: string[] = Deno.args) {
 
         // Optimistically update the file content in the tree
         let fileIno: bigint | undefined = srcIno;
-        for (const part of relPath.split("/")) {
+        for (const part of sourceRelPathToTreeSegments(relPath)) {
           fileIno = fileIno !== undefined
             ? tree.lookup(fileIno, part)
             : undefined;
@@ -1662,7 +1698,7 @@ export async function main(argv: string[] = Deno.args) {
           const truncateFh = handles.open(
             inode,
             O_WRONLY,
-            node.content,
+            bufferForNoHandleTruncate(node.content, newSize),
             {
               writeTarget,
               cfcAuthorizedOperations: ["truncate"],
@@ -1984,7 +2020,10 @@ export async function main(argv: string[] = Deno.args) {
         {
           writeTarget: {
             kind: "value",
-            target: { ...parentPath, jsonPath: [...parentPath.jsonPath, name] },
+            target: {
+              ...parentPath,
+              jsonPath: appendDecodedJsonPath(parentPath.jsonPath, name),
+            },
           } satisfies HandleWriteTarget,
         },
       );
@@ -2012,7 +2051,7 @@ export async function main(argv: string[] = Deno.args) {
       );
 
       // Fire-and-forget write to cell
-      const newPath = [...parentPath.jsonPath, name];
+      const newPath = appendDecodedJsonPath(parentPath.jsonPath, name);
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         "",
@@ -2071,7 +2110,7 @@ export async function main(argv: string[] = Deno.args) {
       replyEntry(req, ino, node);
 
       // Fire-and-forget write to cell
-      const newPath = [...parentPath.jsonPath, name];
+      const newPath = appendDecodedJsonPath(parentPath.jsonPath, name);
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         {},
@@ -2175,7 +2214,7 @@ export async function main(argv: string[] = Deno.args) {
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
           if (Array.isArray(currentValue)) {
-            const idx = Number(name);
+            const idx = Number(decodeFuseNamespaceName(name));
             if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
               currentValue.splice(idx, 1);
               await bridge!.writeValue(parentPath, currentValue);
@@ -2202,7 +2241,7 @@ export async function main(argv: string[] = Deno.args) {
             !Array.isArray(currentValue)
           ) {
             const obj = { ...(currentValue as Record<string, unknown>) };
-            delete obj[name];
+            delete obj[decodeFuseNamespaceName(name)];
             await bridge!.writeValue(parentPath, obj);
             cfcWritebacks.markReadyForExactRecomputation(
               parent,
@@ -2312,7 +2351,7 @@ export async function main(argv: string[] = Deno.args) {
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
           if (Array.isArray(currentValue)) {
-            const idx = Number(name);
+            const idx = Number(decodeFuseNamespaceName(name));
             if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
               currentValue.splice(idx, 1);
               await bridge!.writeValue(parentPath, currentValue);
@@ -2339,7 +2378,7 @@ export async function main(argv: string[] = Deno.args) {
             !Array.isArray(currentValue)
           ) {
             const obj = { ...(currentValue as Record<string, unknown>) };
-            delete obj[name];
+            delete obj[decodeFuseNamespaceName(name)];
             await bridge!.writeValue(parentPath, obj);
             cfcWritebacks.markReadyForExactRecomputation(
               parent,
@@ -2463,7 +2502,10 @@ export async function main(argv: string[] = Deno.args) {
         );
 
         // Write at new path
-        const destPath = [...newParentPath.jsonPath, newName];
+        const destPath = appendDecodedJsonPath(
+          newParentPath.jsonPath,
+          newName,
+        );
         await bridge!.writeValue(
           { ...newParentPath, jsonPath: destPath },
           value,
@@ -2480,10 +2522,10 @@ export async function main(argv: string[] = Deno.args) {
           !Array.isArray(parentValue)
         ) {
           const obj = { ...(parentValue as Record<string, unknown>) };
-          delete obj[oldName];
+          delete obj[decodeFuseNamespaceName(oldName)];
           await bridge!.writeValue(oldParentWritePath, obj);
         } else if (Array.isArray(parentValue)) {
-          const idx = Number(oldName);
+          const idx = Number(decodeFuseNamespaceName(oldName));
           if (!isNaN(idx)) {
             parentValue.splice(idx, 1);
             await bridge!.writeValue(oldParentWritePath, parentValue);
@@ -2653,7 +2695,7 @@ export async function main(argv: string[] = Deno.args) {
       const sigilValue = { "/": { "link@1": sigil } };
       const writePath = {
         ...parentPath,
-        jsonPath: [...parentPath.jsonPath, name],
+        jsonPath: appendDecodedJsonPath(parentPath.jsonPath, name),
       };
 
       // Optimistic: add to tree and reply immediately, then write to cell.

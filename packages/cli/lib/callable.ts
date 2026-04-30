@@ -235,7 +235,8 @@ export function detectCallableKind(
 
   const callableKind =
     classifyCallableEntry(callableValue, callableCell?.schema) ??
-      classifyCallableEntry(resolvedValue, callableCell?.schema);
+      classifyCallableEntry(resolvedValue, callableCell?.schema) ??
+      classifyCallableEntry(callableCell, callableCell?.schema);
   if (callableKind) {
     return callableKind;
   }
@@ -298,7 +299,7 @@ export async function executeResolvedCallable(
       const tx = await new Promise<CallableTransactionLike>(
         (resolve, reject) => {
           try {
-            send(input, resolve);
+            send.call(resolved.callableCell, input, resolve);
           } catch (error) {
             reject(error);
           }

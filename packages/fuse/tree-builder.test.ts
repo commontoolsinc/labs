@@ -112,6 +112,22 @@ Deno.test("buildJsonTree - encodes unsafe object keys in path names", () => {
   );
 });
 
+Deno.test("buildJsonTree - encodes user keys that look like internal pending roots", () => {
+  const tree = new FsTree();
+  const data = {
+    ".input.pending": 1,
+    ".result.pending": 2,
+  };
+
+  buildJsonTree(tree, tree.rootIno, "data", data);
+
+  const dataIno = tree.lookup(tree.rootIno, "data")!;
+  assertEquals(tree.lookup(dataIno, ".input.pending"), undefined);
+  assertEquals(tree.lookup(dataIno, ".result.pending"), undefined);
+  assertEquals(getFileContent(tree, dataIno, "%2Einput.pending"), "1");
+  assertEquals(getFileContent(tree, dataIno, "%2Eresult.pending"), "2");
+});
+
 Deno.test("buildJsonTree - array creates directory with numeric indices", () => {
   const tree = new FsTree();
   const arr = ["a", "b", "c"];

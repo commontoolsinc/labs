@@ -15,8 +15,8 @@ const INTERNAL_JSON_ENTRY_NAMES = new Set([
   ".result.pending",
 ]);
 
-function encodeJsonEntryName(name: string): string {
-  return INTERNAL_JSON_ENTRY_NAMES.has(name)
+function encodeJsonEntryName(name: string, allowInternal = false): string {
+  return allowInternal && INTERNAL_JSON_ENTRY_NAMES.has(name)
     ? name
     : encodeFuseComponent(name, { reserveJsonSuffix: true });
 }
@@ -295,8 +295,9 @@ function buildJsonLeaf(
   name: string,
   value: unknown,
   annotation?: CfcJsonAnnotationContext,
+  allowInternalName = false,
 ): bigint {
-  const fsName = encodeJsonEntryName(name);
+  const fsName = encodeJsonEntryName(name, allowInternalName);
   return addJsonScalarEntry(tree, parentIno, fsName, value, annotation);
 }
 
@@ -380,7 +381,7 @@ function buildJsonTreeWithAncestors(
     | undefined,
   annotation?: CfcJsonAnnotationContext,
 ): bigint {
-  const fsName = encodeJsonEntryName(name);
+  const fsName = encodeJsonEntryName(name, depth === 0);
 
   if (value === null || value === undefined || typeof value !== "object") {
     return addJsonScalarEntry(tree, parentIno, fsName, value, annotation);
@@ -514,7 +515,7 @@ export async function buildJsonTreeAsync(
     const task = queue[nextIndex++];
     const d = task.depth;
     const candidate = task.value;
-    const fsName = encodeJsonEntryName(task.name);
+    const fsName = encodeJsonEntryName(task.name, task.depth === 0);
 
     let builtIno: bigint | undefined;
 
@@ -525,6 +526,7 @@ export async function buildJsonTreeAsync(
         task.name,
         candidate,
         task.annotation,
+        task.depth === 0,
       );
     } else if (typeof candidate === "object") {
       const objectValue = candidate as object;
@@ -628,6 +630,7 @@ export async function buildJsonTreeAsync(
         task.name,
         candidate,
         task.annotation,
+        task.depth === 0,
       );
     }
 

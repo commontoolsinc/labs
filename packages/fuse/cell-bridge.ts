@@ -147,6 +147,14 @@ function resolveProjectedPieceName(
   return fallback || "piece";
 }
 
+function encodeSpaceDirectoryName(spaceName: string): string {
+  return encodeFuseComponent(spaceName);
+}
+
+function decodeSpaceDirectoryName(spaceName: string): string {
+  return decodeFuseComponent(spaceName);
+}
+
 type Cancel = () => void;
 
 type ResolveLink = (value: unknown, depth: number) => string | null;
@@ -790,7 +798,7 @@ export class CellBridge {
     // Minimum: spaceName/pieces/pieceName/cell = 4 segments
     if (segments.length < 4) return null;
 
-    const spaceName = segments[0];
+    const spaceName = decodeSpaceDirectoryName(segments[0]);
     if (segments[1] !== "pieces") return null;
     const pieceName = segments[2];
 
@@ -894,7 +902,7 @@ export class CellBridge {
     if (segments[1] !== "pieces") return null;
     if (segments[3] !== ".src") return null;
 
-    const spaceName = segments[0];
+    const spaceName = decodeSpaceDirectoryName(segments[0]);
     const pieceName = segments[2];
     const relPath = decodeFusePathSegments(segments.slice(4)).join("/");
 
@@ -1525,7 +1533,7 @@ export class CellBridge {
 
     // Determine current space from parent's path
     const currentSpace = parentSegments.length > 0
-      ? parentSegments[0]
+      ? decodeSpaceDirectoryName(parentSegments[0])
       : undefined;
 
     // Match: /<space>/entities/<hash>[/<path...>]
@@ -1544,7 +1552,7 @@ export class CellBridge {
       }
 
       // Omit space if same as current
-      if (targetSpace !== currentSpace) {
+      if (decodedTargetSpace !== currentSpace) {
         const did = this.knownSpaces.get(decodedTargetSpace);
         result.space = did || decodedTargetSpace;
       }
@@ -1699,7 +1707,10 @@ export class CellBridge {
     const pieces = new PiecesController(manager);
 
     // Create space directory structure
-    const spaceIno = this.tree.addDir(this.tree.rootIno, spaceName);
+    const spaceIno = this.tree.addDir(
+      this.tree.rootIno,
+      encodeSpaceDirectoryName(spaceName),
+    );
     const piecesIno = this.tree.addDir(spaceIno, "pieces");
     const entitiesIno = this.tree.addDir(spaceIno, "entities");
 
@@ -1798,6 +1809,11 @@ export class CellBridge {
     entitiesIno: bigint,
     entityId: string,
   ): Promise<boolean> {
+    const decodedEntityId = decodeFuseComponent(entityId);
+    if (encodeFuseComponent(decodedEntityId) !== entityId) {
+      return false;
+    }
+
     const existingEntityIno = this.tree.lookup(entitiesIno, entityId);
     if (existingEntityIno !== undefined) {
       return true;
@@ -1816,7 +1832,6 @@ export class CellBridge {
     if (!state || !spaceName) return false;
 
     // Match entity ID against known pieces (with or without of: prefix)
-    const decodedEntityId = decodeFuseComponent(entityId);
     const bareId = decodedEntityId.startsWith("of:")
       ? decodedEntityId.slice(3)
       : decodedEntityId;
@@ -1831,11 +1846,12 @@ export class CellBridge {
       }
     }
     if (!matchedPiece) return false;
+    if (encodeFuseComponent(matchedPiece.id) !== entityId) return false;
 
     await this.loadPieceTree(
       matchedPiece,
       entitiesIno,
-      entityId,
+      encodeFuseComponent(matchedPiece.id),
       spaceName,
       existingEntityIno,
       "entities",

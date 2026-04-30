@@ -776,6 +776,40 @@ describe("mounted callable resolution and execution", () => {
     ).rejects.toThrow(/not a mounted callable file/i);
   });
 
+  it("rejects suffix-only callable paths whose cell kind does not match", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/title.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "title",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await expect(
+      resolveMountedCallableFile(filePath, {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+      }),
+    ).rejects.toThrow(/does not resolve to a handler/i);
+  });
+
   it("rejects fabricated mounted callable paths whose file is missing", async () => {
     const mountpoint = join(tmpDir, "mount");
     const pieceDir = join(mountpoint, "home/pieces/notes-2");
@@ -1029,6 +1063,35 @@ describe("mounted callable resolution and execution", () => {
     expect(resolved.pieceId).toBe("of:piece-123");
   });
 
+  it("resolves sparse stream handler cells whose value is undefined", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      sparseHandlerCell: true,
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+    });
+
+    expect(resolved.callablePath.callableKind).toBe("handler");
+  });
+
   it("resolves callable paths through a symlinked alias of the mountpoint", async () => {
     const realRoot = join(tmpDir, "real");
     const mountpoint = join(realRoot, "mount");
@@ -1065,6 +1128,50 @@ describe("mounted callable resolution and execution", () => {
 
     expect(resolved.callablePath.rootKind).toBe("pieces");
     expect(resolved.pieceId).toBe("of:piece-123");
+  });
+
+  it("reads mounted metadata from the canonical target of symlinked callable paths", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const realPath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:real-piece",
+    });
+    const aliasDir = join(tmpDir, "alias", "result");
+    await Deno.mkdir(aliasDir, { recursive: true });
+    const aliasPath = join(aliasDir, "add.handler");
+    await Deno.symlink(realPath, aliasPath);
+    await Deno.writeTextFile(
+      join(tmpDir, "alias", "meta.json"),
+      JSON.stringify({
+        id: "of:fake-piece",
+        entityId: "of:fake-piece",
+        name: "Fake Piece",
+        patternName: "fake",
+      }),
+    );
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:real-piece",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const resolved = await resolveMountedCallableFile(aliasPath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: (_manager, pieceId) => {
+        expect(pieceId).toBe("of:real-piece");
+        return Promise.resolve(harness.piece);
+      },
+    });
+
+    expect(resolved.pieceId).toBe("of:real-piece");
   });
 
   it("calls asSchemaFromLinks on the resolved child cell", async () => {
@@ -1174,6 +1281,41 @@ describe("mounted callable resolution and execution", () => {
     );
 
     expect(result.outputText).toBeUndefined();
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["add"],
+        value: { query: "milk" },
+      },
+    ]);
+  });
+
+  it("preserves the Cell.send receiver when dispatching mounted handlers", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      handlerSendRequiresReceiver: true,
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(filePath, ["--query", "milk"], {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+    });
+
     expect(harness.tracker.handlerWrites).toEqual([
       {
         cellProp: "result",
@@ -1846,6 +1988,8 @@ function createExecHarness(options: {
   toolResultGetValue?: unknown;
   toolResultPullValue?: unknown;
   handlerFailureMessage?: string;
+  handlerSendRequiresReceiver?: boolean;
+  sparseHandlerCell?: boolean;
 }) {
   const tracker = {
     asSchemaFromLinksCalls: 0,
@@ -1872,9 +2016,40 @@ function createExecHarness(options: {
       pattern: options.pattern,
       extraParams: options.extraParams ?? {},
     }
+    : options.sparseHandlerCell
+    ? undefined
     : { $stream: true };
   const runtimeErrors: Array<{ message: string }> = [];
-  const callableCell = createMockCell(
+  let callableCell: ReturnType<typeof createMockCell>;
+  const handlerSend = function (
+    this: unknown,
+    value: unknown,
+    onCommit?: (
+      tx: { status: () => { status: string; error?: Error } },
+    ) => void,
+  ) {
+    if (options.handlerSendRequiresReceiver && this !== callableCell) {
+      throw new Error("Cell.send receiver lost");
+    }
+    tracker.handlerWrites.push({
+      cellProp: "result",
+      path: [options.cellKey],
+      value,
+    });
+    if (options.handlerFailureMessage) {
+      runtimeErrors.push({ message: options.handlerFailureMessage });
+    }
+    onCommit?.({
+      status: () =>
+        options.handlerFailureMessage
+          ? {
+            status: "error",
+            error: new Error(options.handlerFailureMessage),
+          }
+          : { status: "done" },
+    });
+  };
+  callableCell = createMockCell(
     callableValue,
     callableSchema,
     options.callableKind === "handler"
@@ -1882,30 +2057,8 @@ function createExecHarness(options: {
         onSchemaFromLinks: () => {
           tracker.asSchemaFromLinksCalls++;
         },
-        send: (
-          value: unknown,
-          onCommit?: (
-            tx: { status: () => { status: string; error?: Error } },
-          ) => void,
-        ) => {
-          tracker.handlerWrites.push({
-            cellProp: "result",
-            path: [options.cellKey],
-            value,
-          });
-          if (options.handlerFailureMessage) {
-            runtimeErrors.push({ message: options.handlerFailureMessage });
-          }
-          onCommit?.({
-            status: () =>
-              options.handlerFailureMessage
-                ? {
-                  status: "error",
-                  error: new Error(options.handlerFailureMessage),
-                }
-                : { status: "done" },
-          });
-        },
+        isStream: () => options.sparseHandlerCell === true,
+        send: handlerSend,
       }
       : {
         onSchemaFromLinks: () => {
@@ -2011,6 +2164,7 @@ function createMockCell(
         tx: { status: () => { status: string; error?: Error } },
       ) => void,
     ) => void;
+    isStream?: () => boolean;
   },
 ) {
   const cell = {
@@ -2022,6 +2176,7 @@ function createMockCell(
       return cell;
     },
     send: options?.send,
+    isStream: options?.isStream,
     key: (key: string) => {
       if (options?.childOverrides?.[key]) {
         return options.childOverrides[key];

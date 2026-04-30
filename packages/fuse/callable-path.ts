@@ -32,7 +32,7 @@ export function parseMountedCallablePath(
     if (!cellKey) return null;
 
     return {
-      spaceName,
+      spaceName: decodeFuseComponent(spaceName),
       rootKind,
       rootName: decodeFuseComponent(rootName),
       cellProp: "result",
@@ -55,7 +55,7 @@ export function parseMountedCallablePath(
   if (!cellKey) return null;
 
   return {
-    spaceName,
+    spaceName: decodeFuseComponent(spaceName),
     rootKind,
     rootName: decodeFuseComponent(rootName),
     cellProp,

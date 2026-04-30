@@ -10,6 +10,7 @@ import {
   callableCommandSpec,
   type CallableManagerLike,
   type CallablePieceLike,
+  detectCallableKind,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
@@ -157,17 +158,21 @@ export async function resolveMountedCallableFile(
     );
   }
 
+  const canonicalMountpoint = await canonicalizeMountLookupPath(
+    mount.entry.mountpoint,
+  );
+  const canonicalAbsPath = await canonicalizeMountLookupPath(absPath);
   const relativePath = relative(
-    await canonicalizeMountLookupPath(mount.entry.mountpoint),
-    await canonicalizeMountLookupPath(absPath),
+    canonicalMountpoint,
+    canonicalAbsPath,
   );
   const callablePath = parseMountedCallablePath(relativePath);
   if (!callablePath) {
     throw new Error(`Path is not a mounted callable file: ${absPath}`);
   }
 
-  await assertMountedCallableFileExists(absPath);
-  const pieceMeta = await readMountedPieceMeta(absPath, callablePath);
+  await assertMountedCallableFileExists(canonicalAbsPath);
+  const pieceMeta = await readMountedPieceMeta(canonicalAbsPath, callablePath);
   const manager = deps.loadManager
     ? await deps.loadManager({
       apiUrl: mount.entry.apiUrl,
@@ -186,6 +191,12 @@ export async function resolveMountedCallableFile(
   const rootCell = await piece[callablePath.cellProp].getCell();
   const childCell = rootCell.key(callablePath.cellKey);
   const callableCell = childCell.asSchemaFromLinks?.() ?? childCell;
+  const actualKind = detectCallableKind(undefined, callableCell);
+  if (actualKind !== callablePath.callableKind) {
+    throw new Error(
+      `Mounted callable path "${absPath}" does not resolve to a ${callablePath.callableKind}`,
+    );
+  }
 
   return {
     absPath,
