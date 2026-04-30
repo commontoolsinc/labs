@@ -983,6 +983,52 @@ describe("mounted callable resolution and execution", () => {
     expect(entitiesResolved.pieceId).toBe("of:piece-123");
   });
 
+  it("resolves root-level FS projection callables as result callables", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const pieceDir = join(mountpoint, "home/pieces/notes-2");
+    const filePath = join(pieceDir, "add.handler");
+    await Deno.mkdir(pieceDir, { recursive: true });
+    await Deno.writeTextFile(filePath, "");
+    await Deno.writeTextFile(
+      join(pieceDir, "meta.json"),
+      JSON.stringify({
+        id: "of:piece-123",
+        entityId: "of:piece-123",
+        name: "Fixture Piece",
+        patternName: "fixture",
+      }),
+    );
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+    });
+
+    expect(resolved.callablePath).toEqual({
+      spaceName: "home",
+      rootKind: "pieces",
+      rootName: "notes-2",
+      cellProp: "result",
+      cellKey: "add",
+      callableKind: "handler",
+      rootLevel: true,
+    });
+    expect(resolved.pieceId).toBe("of:piece-123");
+  });
+
   it("resolves callable paths through a symlinked alias of the mountpoint", async () => {
     const realRoot = join(tmpDir, "real");
     const mountpoint = join(realRoot, "mount");

@@ -65,8 +65,14 @@ async function defaultLoadPiece(manager: any, pieceId: string) {
 
 async function readMountedPieceMeta(
   absFilePath: string,
+  callablePath: MountedCallablePath,
 ): Promise<MountedPieceMeta> {
-  const metaPath = join(dirname(dirname(absFilePath)), "meta.json");
+  const metaPath = join(
+    callablePath.rootLevel
+      ? dirname(absFilePath)
+      : dirname(dirname(absFilePath)),
+    "meta.json",
+  );
   let parsed: unknown;
   try {
     parsed = JSON.parse(await Deno.readTextFile(metaPath));
@@ -143,7 +149,7 @@ export async function resolveMountedCallableFile(
   }
 
   await assertMountedCallableFileExists(absPath);
-  const pieceMeta = await readMountedPieceMeta(absPath);
+  const pieceMeta = await readMountedPieceMeta(absPath, callablePath);
   const manager = await (deps.loadManager ?? loadManager)({
     apiUrl: mount.entry.apiUrl,
     identity: mount.entry.identity,

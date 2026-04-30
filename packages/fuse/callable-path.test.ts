@@ -11,6 +11,7 @@ Deno.test("parseMountedCallablePath accepts piece handler paths", () => {
       cellProp: "input",
       cellKey: "addItem",
       callableKind: "handler",
+      rootLevel: false,
     },
   );
 });
@@ -25,6 +26,22 @@ Deno.test("parseMountedCallablePath accepts piece tool paths", () => {
       cellProp: "result",
       cellKey: "search",
       callableKind: "tool",
+      rootLevel: false,
+    },
+  );
+});
+
+Deno.test("parseMountedCallablePath accepts root-level result callables", () => {
+  assertEquals(
+    parseMountedCallablePath("home/pieces/notes/add%3Aitem.handler"),
+    {
+      spaceName: "home",
+      rootKind: "pieces",
+      rootName: "notes",
+      cellProp: "result",
+      cellKey: "add:item",
+      callableKind: "handler",
+      rootLevel: true,
     },
   );
 });
@@ -39,6 +56,7 @@ Deno.test("parseMountedCallablePath accepts entity handler paths", () => {
       cellProp: "result",
       cellKey: "addItem",
       callableKind: "handler",
+      rootLevel: false,
     },
   );
 });
@@ -53,6 +71,7 @@ Deno.test("parseMountedCallablePath accepts entity tool paths", () => {
       cellProp: "input",
       cellKey: "search",
       callableKind: "tool",
+      rootLevel: false,
     },
   );
 });
