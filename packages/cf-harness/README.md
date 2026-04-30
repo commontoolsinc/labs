@@ -49,6 +49,7 @@ What works today:
 - transcript-based resumability
 - package-local operator CLI
 - explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
+- runtime-generated supporting-resource indexes in `skill-registry.json`
 - CFC mode plumbing with:
   - `disabled`
   - `observe`
@@ -71,7 +72,7 @@ What is not done yet:
 - first-class browser operation policy on top of the provisional browser
   subagent profile
 - dynamic/model-driven Agent Skills activation and supporting-file resource
-  loading
+  reads
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses

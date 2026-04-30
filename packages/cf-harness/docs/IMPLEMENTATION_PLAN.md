@@ -244,13 +244,15 @@ Why:
 - explicit `skillsRoot` configuration and CLI flags
 - explicit skill preload for batch/product runs
 - persisted skill registry and activation artifacts
+- runtime-generated supporting-resource indexes in skill registry artifacts
 - CFC classification of skill content as context, not direct-command authority
 - context message insertion before the final task prompt
 
 Still planned:
 
 - eventual dedicated `load_skill` tool for model-driven activation
-- supporting-file/resource loading from skill directories
+- supporting-file/resource reads from skill directories
+- script execution through a separately permissioned boundary
 - explicit subagent skill activation policy
 
 Why:
