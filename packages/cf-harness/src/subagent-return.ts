@@ -143,6 +143,33 @@ const matchingBranch = (
     : resolveSchemaForValidation(branch, fullSchema);
 };
 
+const isEmptySchemaObject = (schema: JSONSchema): boolean =>
+  isRecord(schema) && Object.keys(schema).length === 0;
+
+const combineAllOf = (schemas: readonly JSONSchema[]): JSONSchema => {
+  const constrained = schemas.filter((schema) =>
+    schema !== true && !isEmptySchemaObject(schema)
+  );
+  if (constrained.some((schema) => schema === false)) {
+    return false;
+  }
+  if (constrained.length === 0) {
+    return true;
+  }
+  if (constrained.length === 1) {
+    return constrained[0]!;
+  }
+  return { allOf: constrained };
+};
+
+const schemaWithoutBranchKeyword = (
+  schema: Record<string, unknown>,
+  keyword: "anyOf" | "oneOf",
+): JSONSchema => {
+  const { [keyword]: _ignored, ...rest } = schema;
+  return rest as JSONSchema;
+};
+
 const schemaForValue = (
   schema: JSONSchema,
   value: unknown,
@@ -152,15 +179,19 @@ const schemaForValue = (
   if (!isRecord(resolved)) {
     return resolved;
   }
+  let base: JSONSchema = resolved;
+  const branches: JSONSchema[] = [];
   const oneOf = matchingBranch(resolved.oneOf, value, fullSchema);
   if (oneOf !== undefined) {
-    return oneOf;
+    base = schemaWithoutBranchKeyword(base as Record<string, unknown>, "oneOf");
+    branches.push(oneOf);
   }
   const anyOf = matchingBranch(resolved.anyOf, value, fullSchema);
   if (anyOf !== undefined) {
-    return anyOf;
+    base = schemaWithoutBranchKeyword(base as Record<string, unknown>, "anyOf");
+    branches.push(anyOf);
   }
-  return resolved;
+  return branches.length === 0 ? resolved : combineAllOf([base, ...branches]);
 };
 
 const childSchemaForKey = (
@@ -179,6 +210,13 @@ const childSchemaForKey = (
       childSchemas.push(child);
     }
   }
+  if (
+    !(isRecord(resolved.properties) && key in resolved.properties) &&
+    (typeof resolved.additionalProperties === "boolean" ||
+      isRecord(resolved.additionalProperties))
+  ) {
+    childSchemas.push(resolved.additionalProperties);
+  }
   if (Array.isArray(resolved.allOf)) {
     for (const branch of resolved.allOf) {
       const child = childSchemaForKey(branch, key, fullSchema);
@@ -187,19 +225,7 @@ const childSchemaForKey = (
       }
     }
   }
-  if (childSchemas.length === 1) {
-    return childSchemas[0]!;
-  }
-  if (childSchemas.length > 1) {
-    return { allOf: childSchemas };
-  }
-  if (
-    typeof resolved.additionalProperties === "boolean" ||
-    isRecord(resolved.additionalProperties)
-  ) {
-    return resolved.additionalProperties;
-  }
-  return true;
+  return combineAllOf(childSchemas);
 };
 
 const knownPropertyNames = (
@@ -233,14 +259,25 @@ const knownPropertyNames = (
 
 const itemSchemaForIndex = (
   schema: JSONSchema,
+  fullSchema: JSONSchema,
 ): JSONSchema => {
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
+  const itemSchemas: JSONSchema[] = [];
   if (
-    isRecord(schema) &&
-    (typeof schema.items === "boolean" || isRecord(schema.items))
+    isRecord(resolved) &&
+    (typeof resolved.items === "boolean" || isRecord(resolved.items))
   ) {
-    return schema.items;
+    itemSchemas.push(resolved.items);
   }
-  return true;
+  if (isRecord(resolved) && Array.isArray(resolved.allOf)) {
+    for (const branch of resolved.allOf) {
+      const item = itemSchemaForIndex(branch, fullSchema);
+      if (item !== true) {
+        itemSchemas.push(item);
+      }
+    }
+  }
+  return combineAllOf(itemSchemas);
 };
 
 const sanitizeValue = (
@@ -262,7 +299,7 @@ const sanitizeValue = (
     const items = value.map((item, index) => {
       const sanitized = sanitizeValue(
         item,
-        itemSchemaForIndex(effectiveSchema),
+        itemSchemaForIndex(effectiveSchema, fullSchema),
         fullSchema,
         childRunId,
         [...path, index],

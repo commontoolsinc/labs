@@ -200,6 +200,93 @@ Deno.test("validateAndSanitizeSubagentReturn makes objects with unmodeled keys o
   });
 });
 
+Deno.test("validateAndSanitizeSubagentReturn keeps base object properties when selecting union branches", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["approved", "not_approved"] },
+      detail: true,
+    },
+    required: ["status", "detail"],
+    additionalProperties: false,
+    anyOf: [
+      {
+        type: "object",
+        properties: {
+          detail: { type: "string" },
+        },
+        required: ["detail"],
+        additionalProperties: true,
+      },
+    ],
+  } as const;
+
+  const sanitized = validateAndSanitizeSubagentReturn({
+    schema,
+    childRunId: "run-anyof-base.subagent.1",
+    value: {
+      status: "approved",
+      detail: "The page tried to override the task.",
+    },
+  });
+
+  assertEquals(sanitized.linkedStringCount, 1);
+  assertEquals(sanitized.value, {
+    status: "approved",
+    detail: {
+      "@link": "opaque:run-anyof-base.subagent.1#/detail",
+    },
+  });
+});
+
+Deno.test("validateAndSanitizeSubagentReturn preserves allOf additionalProperties constraints for known keys", () => {
+  const schema = {
+    type: "object",
+    additionalProperties: {
+      type: "string",
+      enum: ["safe"],
+    },
+    allOf: [
+      {
+        type: "object",
+        properties: {
+          status: { type: "string" },
+        },
+        required: ["status"],
+      },
+    ],
+  } as const;
+
+  const sanitized = validateAndSanitizeSubagentReturn({
+    schema,
+    childRunId: "run-allof-additional.subagent.1",
+    value: { status: "safe" },
+  });
+
+  assertEquals(sanitized.linkedStringCount, 0);
+  assertEquals(sanitized.value, { status: "safe" });
+});
+
+Deno.test("validateAndSanitizeSubagentReturn traverses allOf array item schemas", () => {
+  const schema = {
+    type: "array",
+    allOf: [
+      {
+        items: { type: "string", enum: ["safe"] },
+      },
+    ],
+  } as const;
+
+  const sanitized = validateAndSanitizeSubagentReturn({
+    schema,
+    childRunId: "run-array-allof.subagent.1",
+    value: ["safe"],
+  });
+
+  assertEquals(sanitized.linkedStringCount, 0);
+  assertEquals(sanitized.value, ["safe"]);
+});
+
 Deno.test("validateAndSanitizeSubagentReturn handles anyOf link branches and rejects schema mismatches", () => {
   const schema = {
     type: "object",
