@@ -1,13 +1,14 @@
 import { css, html } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
+import type { StatusIntent } from "../theme-context.ts";
 
 /**
  * CFAlert - Alert message display component with variants and dismissible option
  *
  * @element cf-alert
  *
- * @attr {string} variant - Visual style variant: "default" | "destructive" | "warning" | "success" | "info"
+ * @attr {string} status - Status intent: "info" | "error" | "warning" | "success"
  * @attr {boolean} dismissible - Whether the alert can be dismissed with an X button
  *
  * @slot icon - Alert icon
@@ -19,19 +20,12 @@ import { BaseElement } from "../../core/base-element.ts";
  * @fires cf-alert-dismiss - Fired when alert is dismissed
  *
  * @example
- * <cf-alert variant="destructive" dismissible>
+ * <cf-alert status="error" dismissible>
  *   <span slot="icon">⚠️</span>
  *   <h4 slot="title">Error</h4>
  *   <p slot="description">Something went wrong</p>
  * </cf-alert>
  */
-
-export type AlertVariant =
-  | "default"
-  | "destructive"
-  | "warning"
-  | "success"
-  | "info";
 
 export class CFAlert extends BaseElement {
   static override styles = css`
@@ -163,94 +157,83 @@ export class CFAlert extends BaseElement {
       height: var(--cf-size-xs-height, 16px);
     }
 
-    /* Default variant */
-    .alert.variant-default {
-      background-color: var(--cf-alert-color-background, #ffffff);
-      color: var(--cf-alert-color-foreground, #0f172a);
-      border-color: var(--cf-alert-color-border, #e2e8f0);
-    }
-
-    .alert.variant-default .alert-icon {
-      color: var(--cf-alert-color-foreground, #0f172a);
-    }
-
-    /* Destructive variant */
-    .alert.variant-destructive {
-      background-color: var(--cf-alert-color-destructive-foreground, #fef2f2);
-      color: var(--cf-alert-color-destructive, #dc2626);
-      border-color: var(--cf-alert-color-destructive, #dc2626);
-    }
-
-    .alert.variant-destructive .alert-icon {
-      color: var(--cf-alert-color-destructive, #dc2626);
-    }
-
-    .alert.variant-destructive .alert-title {
-      color: var(--cf-alert-color-destructive, #dc2626);
-    }
-
-    .alert.variant-destructive .alert-description {
-      color: var(--cf-alert-color-destructive, #dc2626);
-      opacity: 0.8;
-    }
-
-    /* Warning variant */
-    .alert.variant-warning {
-      background-color: var(--cf-alert-color-warning-foreground, #fffbeb);
-      color: var(--cf-alert-color-warning-text, #92400e);
-      border-color: var(--cf-alert-color-warning, #f59e0b);
-    }
-
-    .alert.variant-warning .alert-icon {
-      color: var(--cf-alert-color-warning, #f59e0b);
-    }
-
-    .alert.variant-warning .alert-title {
-      color: var(--cf-alert-color-warning-text, #92400e);
-    }
-
-    .alert.variant-warning .alert-description {
-      color: var(--cf-alert-color-warning-text, #92400e);
-      opacity: 0.8;
-    }
-
-    /* Success variant */
-    .alert.variant-success {
-      background-color: var(--cf-alert-color-success-foreground, #f0fdf4);
-      color: var(--cf-alert-color-success, #10b981);
-      border-color: var(--cf-alert-color-success, #10b981);
-    }
-
-    .alert.variant-success .alert-icon {
-      color: var(--cf-alert-color-success, #10b981);
-    }
-
-    .alert.variant-success .alert-title {
-      color: var(--cf-alert-color-success, #10b981);
-    }
-
-    .alert.variant-success .alert-description {
-      color: var(--cf-alert-color-success, #10b981);
-      opacity: 0.8;
-    }
-
-    /* Info variant */
-    .alert.variant-info {
+    /* Info status (default) */
+    .alert.status-info {
       background-color: var(--cf-alert-color-info-foreground, #eff6ff);
       color: var(--cf-alert-color-info, #3b82f6);
       border-color: var(--cf-alert-color-info, #3b82f6);
     }
 
-    .alert.variant-info .alert-icon {
+    .alert.status-info .alert-icon {
       color: var(--cf-alert-color-info, #3b82f6);
     }
 
-    .alert.variant-info .alert-title {
+    .alert.status-info .alert-title {
       color: var(--cf-alert-color-info, #3b82f6);
     }
 
-    .alert.variant-info .alert-description {
+    .alert.status-info .alert-description {
       color: var(--cf-alert-color-info, #3b82f6);
+      opacity: 0.8;
+    }
+
+    /* Error status */
+    .alert.status-error {
+      background-color: var(--cf-alert-color-destructive-foreground, #fef2f2);
+      color: var(--cf-alert-color-destructive, #dc2626);
+      border-color: var(--cf-alert-color-destructive, #dc2626);
+    }
+
+    .alert.status-error .alert-icon {
+      color: var(--cf-alert-color-destructive, #dc2626);
+    }
+
+    .alert.status-error .alert-title {
+      color: var(--cf-alert-color-destructive, #dc2626);
+    }
+
+    .alert.status-error .alert-description {
+      color: var(--cf-alert-color-destructive, #dc2626);
+      opacity: 0.8;
+    }
+
+    /* Warning status */
+    .alert.status-warning {
+      background-color: var(--cf-alert-color-warning-foreground, #fffbeb);
+      color: var(--cf-alert-color-warning-text, #92400e);
+      border-color: var(--cf-alert-color-warning, #f59e0b);
+    }
+
+    .alert.status-warning .alert-icon {
+      color: var(--cf-alert-color-warning, #f59e0b);
+    }
+
+    .alert.status-warning .alert-title {
+      color: var(--cf-alert-color-warning-text, #92400e);
+    }
+
+    .alert.status-warning .alert-description {
+      color: var(--cf-alert-color-warning-text, #92400e);
+      opacity: 0.8;
+    }
+
+    /* Success status */
+    .alert.status-success {
+      background-color: var(--cf-alert-color-success-foreground, #f0fdf4);
+      color: var(--cf-alert-color-success, #10b981);
+      border-color: var(--cf-alert-color-success, #10b981);
+    }
+
+    .alert.status-success .alert-icon {
+      color: var(--cf-alert-color-success, #10b981);
+    }
+
+    .alert.status-success .alert-title {
+      color: var(--cf-alert-color-success, #10b981);
+    }
+
+    .alert.status-success .alert-description {
+      color: var(--cf-alert-color-success, #10b981);
       opacity: 0.8;
     }
 
@@ -272,18 +255,18 @@ export class CFAlert extends BaseElement {
   `;
 
   static override properties = {
-    variant: { type: String },
+    status: { type: String },
     dismissible: { type: Boolean, reflect: true },
     dismissable: { type: Boolean, reflect: true },
   };
 
-  declare variant: AlertVariant;
+  declare status: StatusIntent;
   declare dismissible: boolean;
   declare dismissable: boolean;
 
   constructor() {
     super();
-    this.variant = "default";
+    this.status = "info";
     this.dismissible = false;
     this.dismissable = false;
   }
@@ -306,7 +289,7 @@ export class CFAlert extends BaseElement {
   override render() {
     const classes = {
       alert: true,
-      [`variant-${this.variant}`]: true,
+      [`status-${this.status}`]: true,
     };
 
     return html`
@@ -362,7 +345,7 @@ export class CFAlert extends BaseElement {
     event.stopPropagation();
 
     const detail = {
-      variant: this.variant,
+      status: this.status,
       reason: "user",
     } as const;
     this.emit("cf-dismiss", detail);

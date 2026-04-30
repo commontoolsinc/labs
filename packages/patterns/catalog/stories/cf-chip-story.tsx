@@ -22,16 +22,16 @@ export default pattern<ChipStoryInput, ChipStoryOutput>(() => {
         }}
       >
         <cf-chip label="Default" />
-        <cf-chip label="Primary" variant="primary" />
-        <cf-chip label="Accent" variant="accent" />
+        <cf-chip label="Primary" color="primary" />
+        <cf-chip label="Accent" color="accent" />
         <cf-chip label="Removable" removable />
         <cf-chip label="Interactive" interactive />
       </div>
     ),
     controls: (
       <div style={{ color: "#6b7280", fontSize: "13px", padding: "8px 12px" }}>
-        No interactive controls. Variants: default, primary, accent. Attributes:
-        removable, interactive.
+        No interactive controls. Colors: neutral, primary, accent, danger.
+        Attributes: removable, interactive.
       </div>
     ),
   };

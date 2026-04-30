@@ -8,6 +8,7 @@ import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
+  type ColorIntent,
   type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
@@ -17,7 +18,8 @@ import {
  *
  * @element cf-button
  *
- * @attr {string} variant - Visual style variant: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill"
+ * @attr {string} color - Color intent: "neutral" | "primary" | "accent" | "danger"
+ * @attr {string} variant - Visual style variant: "solid" | "outline" | "ghost"
  * @attr {string} size - Button size: "xs" | "sm" | "md" | "lg" | "xl" | "icon"
  * @attr {boolean} disabled - Whether the button is disabled
  * @attr {string} type - Button type: "button" | "submit" | "reset"
@@ -25,17 +27,10 @@ import {
  * @slot - Default slot for button content
  *
  * @example
- * <cf-button variant="primary" size="lg" @click=${() => console.log('Button clicked')}>Click Me</cf-button>
+ * <cf-button color="primary" variant="solid" size="lg" @click=${() => console.log('Button clicked')}>Click Me</cf-button>
  */
 
-export type ButtonVariant =
-  | "primary"
-  | "secondary"
-  | "destructive"
-  | "outline"
-  | "ghost"
-  | "link"
-  | "pill";
+export type ButtonVariant = "solid" | "outline" | "ghost";
 
 export type ButtonSize = ComponentSize | "icon";
 
@@ -66,13 +61,15 @@ export class CFButton extends BaseElement {
   // aria-hidden on a focused element").
 
   static override properties = {
-    variant: { type: String },
+    color: { type: String, reflect: true },
+    variant: { type: String, reflect: true },
     size: { type: String, reflect: true },
     disabled: { type: Boolean, reflect: true },
     type: { type: String },
     theme: { type: Object, attribute: false },
   };
 
+  declare color: ColorIntent;
   declare variant: ButtonVariant;
   declare size: ButtonSize;
   declare disabled: boolean;
@@ -84,7 +81,8 @@ export class CFButton extends BaseElement {
 
   constructor() {
     super();
-    this.variant = "primary";
+    this.color = "primary";
+    this.variant = "solid";
     this.size = "md";
     this.disabled = false;
     this.type = "button";
@@ -202,10 +200,8 @@ export class CFButton extends BaseElement {
     const classes: { [key: string]: true } = {
       button: true,
     };
-    if (typeof this.variant === "string" && this.variant) {
-      classes[this.variant] = true;
-    }
-    if (typeof this.size === "string" && this.size) classes[this.size] = true;
+    if (this.variant) classes[this.variant] = true;
+    if (this.size) classes[this.size] = true;
 
     // The inner <button> is aria-hidden so only the host appears in the
     // a11y tree with role="button". delegatesFocus forwards focus to the

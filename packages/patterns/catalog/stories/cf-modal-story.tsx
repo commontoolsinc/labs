@@ -32,10 +32,10 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <cf-hstack gap="3">
-          <cf-button variant="primary" onClick={openDialog}>
+          <cf-button color="primary" variant="solid" onClick={openDialog}>
             Open Dialog
           </cf-button>
-          <cf-button variant="secondary" onClick={openSheet}>
+          <cf-button color="neutral" variant="outline" onClick={openSheet}>
             Open Sheet
           </cf-button>
         </cf-hstack>
@@ -58,10 +58,14 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
           </cf-vstack>
           <div slot="footer">
             <cf-hstack gap="2" justify="end">
-              <cf-button variant="secondary" onClick={closeDialog}>
+              <cf-button
+                color="neutral"
+                variant="outline"
+                onClick={closeDialog}
+              >
                 Cancel
               </cf-button>
-              <cf-button variant="primary" onClick={closeDialog}>
+              <cf-button color="primary" variant="solid" onClick={closeDialog}>
                 Confirm
               </cf-button>
             </cf-hstack>
@@ -87,10 +91,10 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
           </cf-vstack>
           <div slot="footer">
             <cf-hstack gap="2" justify="end">
-              <cf-button variant="secondary" onClick={closeSheet}>
+              <cf-button color="neutral" variant="outline" onClick={closeSheet}>
                 Cancel
               </cf-button>
-              <cf-button variant="primary" onClick={closeSheet}>
+              <cf-button color="primary" variant="solid" onClick={closeSheet}>
                 Done
               </cf-button>
             </cf-hstack>

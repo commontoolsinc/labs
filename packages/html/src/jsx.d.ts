@@ -3355,7 +3355,7 @@ interface CFSvgAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFAlertAttributes<T> extends CFHTMLAttributes<T> {
-  "variant"?: "default" | "destructive" | "warning" | "success" | "info";
+  "status"?: "info" | "success" | "warning" | "error" | CellLike<string>;
   "dismissible"?: boolean;
   "dismissable"?: boolean;
   "oncf-dismiss"?: EventHandler<{}>;
@@ -3363,7 +3363,7 @@ interface CFAlertAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFToastAttributes<T> extends CFHTMLAttributes<T> {
-  "variant"?: "default" | "success" | "error" | "warning";
+  "status"?: "info" | "success" | "warning" | "error" | CellLike<string>;
   "duration"?: number;
   "dismissible"?: boolean;
   "dismissable"?: boolean;
@@ -3424,15 +3424,8 @@ interface CFQuestionAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFButtonAttributes<T> extends CFHTMLAttributes<T> {
-  "variant"?:
-    | "default"
-    | "primary"
-    | "destructive"
-    | "outline"
-    | "secondary"
-    | "ghost"
-    | "link"
-    | "pill";
+  "color"?: "neutral" | "primary" | "accent" | "danger";
+  "variant"?: "solid" | "outline" | "ghost" | CellLike<string>;
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | "icon" | "default" | "sm" | "lg";
   "disabled"?: boolean;
   "outline"?: boolean;
@@ -4179,12 +4172,11 @@ interface CFTextAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
+  "color"?: "neutral" | "primary" | "accent" | "danger";
   "variant"?:
-    | "default"
-    | "secondary"
-    | "destructive"
+    | "solid"
     | "outline"
-    | CellLike<"default" | "secondary" | "destructive" | "outline">;
+    | CellLike<"solid" | "outline">;
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "removable"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
@@ -4192,6 +4184,8 @@ interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
   "label"?: string | CellLike<string>;
+  "color"?: "neutral" | "primary" | "accent" | "danger";
+  /** @deprecated Use color instead */
   "variant"?:
     | "default"
     | "primary"

@@ -54,9 +54,9 @@ export const figmaMapping = {
         },
       },
       example: `<cf-list-item label="Project Name" expandable>
-  <cf-badge slot="action" variant="default">3 tasks</cf-badge>
+  <cf-badge slot="action" color="primary" variant="solid">3 tasks</cf-badge>
   <div slot="detail">
-    <cf-alert variant="info">
+    <cf-alert status="info">
       <span slot="icon">⏳</span>
       <span slot="title">Building UI · 29 tokens</span>
     </cf-alert>

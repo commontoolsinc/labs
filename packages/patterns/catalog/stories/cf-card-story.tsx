@@ -38,7 +38,7 @@ export default pattern<CardStoryInput, CardStoryOutput>(() => {
                 Horizontal layout with icon and text
               </span>
             </cf-vstack>
-            <cf-button variant="secondary">Action</cf-button>
+            <cf-button color="neutral" variant="outline">Action</cf-button>
           </cf-hstack>
         </cf-card>
 
@@ -46,8 +46,8 @@ export default pattern<CardStoryInput, CardStoryOutput>(() => {
           <cf-vstack gap="2">
             <cf-heading level={5}>Card with Nested Elements</cf-heading>
             <cf-hstack gap="2">
-              <cf-button variant="primary">Save</cf-button>
-              <cf-button variant="secondary">Cancel</cf-button>
+              <cf-button color="primary" variant="solid">Save</cf-button>
+              <cf-button color="neutral" variant="outline">Cancel</cf-button>
             </cf-hstack>
             <cf-input placeholder="Input inside a card" />
           </cf-vstack>

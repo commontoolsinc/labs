@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import type { ComponentSize } from "../theme-context.ts";
+import type { ColorIntent, ComponentSize } from "../theme-context.ts";
 
 /**
  * CFChip - Reusable pill/chip component
@@ -9,7 +9,7 @@ import type { ComponentSize } from "../theme-context.ts";
  * @element cf-chip
  *
  * @attr {string} label - Chip label text to display
- * @attr {string} variant - Visual variant: "default" | "primary" | "accent" (default: "default")
+ * @attr {string} color - Color intent: "neutral" | "primary" | "accent" | "danger" (default: "neutral")
  * @attr {string} size - Size variant: "xs" | "sm" | "md" | "lg" | "xl" (default: "sm")
  * @attr {boolean} removable - Whether to show remove button (default: false)
  * @attr {boolean} interactive - Whether chip is clickable (default: false)
@@ -21,8 +21,8 @@ import type { ComponentSize } from "../theme-context.ts";
  * @slot - Main content (overrides label)
  *
  * @example
- * <cf-chip label="Tools" variant="default"></cf-chip>
- * <cf-chip label="Alice" variant="primary" removable></cf-chip>
+ * <cf-chip label="Tools" color="neutral"></cf-chip>
+ * <cf-chip label="Alice" color="primary" removable></cf-chip>
  */
 export class CFChip extends BaseElement {
   static override styles = [
@@ -153,7 +153,7 @@ export class CFChip extends BaseElement {
           );
         }
 
-        /* Variant: primary (blue - for mentions) */
+        /* Color: primary (blue - for mentions) */
         .chip.primary {
           background: var(
             --cf-chip-primary-background,
@@ -183,7 +183,7 @@ export class CFChip extends BaseElement {
           );
         }
 
-        /* Variant: accent (purple - for clipboard) */
+        /* Color: accent (purple - for clipboard) */
         .chip.accent {
           background: var(
             --cf-chip-accent-background,
@@ -204,6 +204,30 @@ export class CFChip extends BaseElement {
           color: var(
             --cf-chip-accent-color,
             var(--cf-theme-color-accent, var(--cf-colors-purple, #8952fd))
+          );
+        }
+
+        /* Color: danger (red) */
+        .chip.danger {
+          background: var(
+            --cf-chip-danger-background,
+            color-mix(
+              in srgb,
+              var(--cf-theme-color-error, #dc2626) 12%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
+          );
+          border-color: var(
+            --cf-chip-danger-border-color,
+            color-mix(
+              in srgb,
+              var(--cf-theme-color-error, #dc2626) 28%,
+              var(--cf-theme-color-surface, var(--cf-colors-gray-50, #ffffff))
+            )
+          );
+          color: var(
+            --cf-chip-danger-color,
+            var(--cf-theme-color-error, #dc2626)
           );
         }
 
@@ -248,8 +272,8 @@ export class CFChip extends BaseElement {
     @property({ type: String })
     accessor label = "";
 
-    @property({ type: String })
-    accessor variant: "default" | "primary" | "accent" = "default";
+    @property({ type: String, reflect: true })
+    accessor color: ColorIntent = "neutral";
 
     @property({ type: Boolean })
     accessor removable = false;
@@ -274,7 +298,7 @@ export class CFChip extends BaseElement {
     override render() {
       const classes = [
         "chip",
-        this.variant,
+        this.color,
         this.interactive && "interactive",
       ].filter(Boolean).join(" ");
 

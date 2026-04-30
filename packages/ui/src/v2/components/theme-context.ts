@@ -18,6 +18,12 @@ export type ColorToken = string | {
  */
 export type ComponentSize = "xs" | "sm" | "md" | "lg" | "xl";
 
+/** Color intent for interactive components (buttons, chips, badges). */
+export type ColorIntent = "neutral" | "primary" | "accent" | "danger";
+
+/** Status intent for feedback components (toasts, alerts). */
+export type StatusIntent = "info" | "success" | "warning" | "error";
+
 /**
  * Coordinated sizing scale from Figma design system.
  * Each size bundles height, radius, icon sizes, spacing, padding, and typography.
@@ -104,6 +110,12 @@ export interface CFTheme {
   colorScheme: ColorScheme;
   /** Animation speed preference */
   animationSpeed: "none" | "slow" | "normal" | "fast";
+  /** Roundness scalar (0-1). Scales all structural radii. */
+  roundness: number;
+  /** Typography scale factor (0.8-1.2). */
+  scale: number;
+  /** Motion scalar (0-1). Scales transition durations. 0 = instant. */
+  motion: number;
   /** Color palette with semantic tokens that adapt to light/dark */
   colors: {
     /** Primary brand color */
@@ -253,6 +265,23 @@ export function getSemanticSpacing(
 }
 
 /**
+ * Derive interaction state variants from a base color.
+ */
+export function deriveColorFamily(base: string): {
+  default: string;
+  pressed: string;
+  soft: string;
+  subtle: string;
+} {
+  return {
+    default: base,
+    pressed: `color-mix(in srgb, ${base} 85%, black)`,
+    soft: `color-mix(in srgb, ${base} 20%, transparent)`,
+    subtle: `color-mix(in srgb, ${base} 10%, transparent)`,
+  };
+}
+
+/**
  * Default theme values with SwiftUI-style adaptive colors
  */
 export const defaultTheme: CFTheme = {
@@ -264,6 +293,9 @@ export const defaultTheme: CFTheme = {
   density: "comfortable",
   colorScheme: "auto",
   animationSpeed: "normal",
+  roundness: 1,
+  scale: 1,
+  motion: 1,
   colors: {
     primary: {
       light: "#4979fa",
@@ -530,6 +562,14 @@ export function mergeWithDefaultTheme(
     mergedTheme.animationSpeed = partialTheme.animationSpeed;
   }
 
+  if (partialTheme.roundness !== undefined) {
+    mergedTheme.roundness = partialTheme.roundness;
+  }
+  if (partialTheme.scale !== undefined) mergedTheme.scale = partialTheme.scale;
+  if (partialTheme.motion !== undefined) {
+    mergedTheme.motion = partialTheme.motion;
+  }
+
   if (partialTheme.colors) {
     mergedTheme.colors = {
       ...mergedTheme.colors,
@@ -603,15 +643,28 @@ export function applyThemeToElement(
       theme.monoFontFamily,
     );
     element.style.setProperty("--cf-theme-font-mono", theme.monoFontFamily);
-    element.style.setProperty("--cf-theme-font-size", theme.fontSize);
-    element.style.setProperty("--cf-theme-border-radius", theme.borderRadius);
+    const effectiveBorderRadius =
+      theme.borderRadius !== defaultTheme.borderRadius
+        ? theme.borderRadius
+        : `${theme.roundness * 0.5}rem`;
+    element.style.setProperty(
+      "--cf-theme-border-radius",
+      effectiveBorderRadius,
+    );
     element.style.setProperty(
       "--cf-theme-border-radius-full",
       "var(--cf-border-radius-full, 9999px)",
     );
+    const effectiveFontSize = theme.fontSize !== defaultTheme.fontSize
+      ? theme.fontSize
+      : `${theme.scale}rem`;
+    element.style.setProperty("--cf-theme-font-size", effectiveFontSize);
+    const effectiveDuration = theme.animationSpeed !== "normal"
+      ? getAnimationDuration(theme.animationSpeed)
+      : `${Math.round(200 * theme.motion)}ms`;
     element.style.setProperty(
       "--cf-theme-animation-duration",
-      getAnimationDuration(theme.animationSpeed),
+      effectiveDuration,
     );
   }
 
@@ -706,6 +759,73 @@ export function applyThemeToElement(
       "--cf-theme-color-text-secondary",
       resolveColor(theme.colors.textMuted, colorScheme),
     );
+
+    // Derived color families for ColorIntent
+    const intentMap: Array<{ name: string; base: ColorToken }> = [
+      { name: "primary", base: theme.colors.primary },
+      { name: "accent", base: theme.colors.accent },
+      { name: "danger", base: theme.colors.error },
+    ];
+    for (const { name, base: token } of intentMap) {
+      const base = resolveColor(token, colorScheme);
+      const family = deriveColorFamily(base);
+      element.style.setProperty(
+        `--cf-theme-color-${name}-pressed`,
+        family.pressed,
+      );
+      element.style.setProperty(`--cf-theme-color-${name}-soft`, family.soft);
+      element.style.setProperty(
+        `--cf-theme-color-${name}-subtle`,
+        family.subtle,
+      );
+    }
+
+    // Derived color families for StatusIntent
+    const statusEntries: Array<
+      { name: string; base: ColorToken; fg: ColorToken }
+    > = [
+      {
+        name: "info",
+        base: theme.colors.primary,
+        fg: theme.colors.primaryForeground,
+      },
+      {
+        name: "success",
+        base: theme.colors.success,
+        fg: theme.colors.successForeground,
+      },
+      {
+        name: "warning",
+        base: theme.colors.warning,
+        fg: theme.colors.warningForeground,
+      },
+      {
+        name: "error",
+        base: theme.colors.error,
+        fg: theme.colors.errorForeground,
+      },
+    ];
+    for (const { name, base: baseToken, fg: fgToken } of statusEntries) {
+      const base = resolveColor(baseToken, colorScheme);
+      const family = deriveColorFamily(base);
+      element.style.setProperty(`--cf-theme-color-status-${name}`, base);
+      element.style.setProperty(
+        `--cf-theme-color-status-${name}-pressed`,
+        family.pressed,
+      );
+      element.style.setProperty(
+        `--cf-theme-color-status-${name}-soft`,
+        family.soft,
+      );
+      element.style.setProperty(
+        `--cf-theme-color-status-${name}-subtle`,
+        family.subtle,
+      );
+      element.style.setProperty(
+        `--cf-theme-color-status-${name}-foreground`,
+        resolveColor(fgToken, colorScheme),
+      );
+    }
   }
 
   // Semantic spacing
