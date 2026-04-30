@@ -55,4 +55,32 @@ export const tabStyles = `
     width: 100%;
     justify-content: flex-start;
   }
+
+  /* Chip variant styles */
+  :host-context(cf-tab-list[variant="chip"]) .tab[data-selected="true"]::after {
+    display: none;
+  }
+
+  :host-context(cf-tab-list[variant="chip"]) .tab {
+    border-radius: var(--cf-border-radius-full, 9999px);
+    padding: var(--cf-pill-sm-padding-v, 2px) var(--cf-pill-sm-padding-h, 10px);
+    font-size: var(--cf-pill-sm-font-size, var(--cf-size-sm-font-size, 11px));
+    line-height: var(--cf-pill-sm-line-height, var(--cf-size-sm-line-height, 16px));
+    min-height: var(--cf-pill-sm-min-height, var(--cf-size-sm-height, 24px));
+    color: var(--cf-theme-color-text-muted, #6b7280);
+    background: transparent;
+    border: 1px solid transparent;
+  }
+
+  :host-context(cf-tab-list[variant="chip"]) .tab:hover:not([data-disabled="true"]):not([data-selected="true"]) {
+    background: var(--cf-theme-color-surface-hover, var(--cf-colors-gray-200, #eceef1));
+    color: var(--cf-theme-color-text, #111827);
+  }
+
+  :host-context(cf-tab-list[variant="chip"]) .tab[data-selected="true"] {
+    background: var(--cf-theme-color-surface, var(--cf-colors-gray-100, #f2f3f6));
+    border: 1px solid var(--cf-theme-color-border, var(--cf-colors-gray-300, #d5d7dd));
+    color: var(--cf-theme-color-text, var(--cf-colors-gray-900, #16181d));
+    font-weight: var(--cf-font-weight-medium, 500);
+  }
 `;

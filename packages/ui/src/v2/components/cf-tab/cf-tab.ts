@@ -92,104 +92,160 @@ export class CFTab extends BaseElement {
         width: 2px;
         height: auto;
       }
-    `,
-  ];
 
-  declare value: string;
-  declare disabled: boolean;
-  declare selected: boolean;
+      /* ===== Chip variant styles ===== */
 
-  private _button: HTMLButtonElement | null = null;
+      /* Suppress underline indicator in chip mode */
+      :host-context(cf-tab-list[variant="chip"]) .tab[data-selected="true"]::after {
+        display: none;
+      }
 
-  constructor() {
-    super();
-    this.value = "";
-    this.disabled = false;
-    this.selected = false;
-  }
+      /* Base chip tab styling */
+      :host-context(cf-tab-list[variant="chip"]) .tab {
+        border-radius: var(--cf-border-radius-full, 9999px);
+        padding: var(--cf-pill-sm-padding-v, 2px) var(--cf-pill-sm-padding-h, 10px);
+        font-size: var(--cf-pill-sm-font-size, var(--cf-size-sm-font-size, 11px));
+        line-height: var(
+          --cf-pill-sm-line-height,
+          var(--cf-size-sm-line-height, 16px)
+        );
+        min-height: var(--cf-pill-sm-min-height, var(--cf-size-sm-height, 24px));
+        color: var(--cf-theme-color-text-muted, #6b7280);
+        background: transparent;
+        border: 1px solid transparent;
+        transition:
+          background-color var(--cf-transition-duration-fast, 150ms)
+          var(--cf-transition-timing-ease, ease),
+          border-color var(--cf-transition-duration-fast, 150ms)
+          var(--cf-transition-timing-ease, ease),
+          color var(--cf-transition-duration-fast, 150ms)
+          var(--cf-transition-timing-ease, ease);
+        }
 
-  get button(): HTMLButtonElement | null {
-    if (!this._button) {
-      this._button =
-        this.shadowRoot?.querySelector(".tab") as HTMLButtonElement || null;
+        /* Hover on unselected chip tab */
+        :host-context(cf-tab-list[variant="chip"])
+          .tab:hover:not(:disabled):not([data-selected="true"]) {
+          background: var(
+            --cf-theme-color-surface-hover,
+            var(--cf-colors-gray-200, #eceef1)
+          );
+          color: var(--cf-theme-color-text, #111827);
+        }
+
+        /* Selected chip tab - filled pill appearance */
+        :host-context(cf-tab-list[variant="chip"]) .tab[data-selected="true"] {
+          background: var(
+            --cf-theme-color-surface,
+            var(--cf-colors-gray-100, #f2f3f6)
+          );
+          border: 1px solid
+            var(
+              --cf-theme-color-border,
+              var(--cf-colors-gray-300, #d5d7dd)
+            );
+          color: var(--cf-theme-color-text, var(--cf-colors-gray-900, #16181d));
+          font-weight: var(--cf-font-weight-medium, 500);
+        }
+      `,
+    ];
+
+    declare value: string;
+    declare disabled: boolean;
+    declare selected: boolean;
+
+    private _button: HTMLButtonElement | null = null;
+
+    constructor() {
+      super();
+      this.value = "";
+      this.disabled = false;
+      this.selected = false;
     }
-    return this._button;
-  }
 
-  override connectedCallback() {
-    super.connectedCallback();
+    get button(): HTMLButtonElement | null {
+      if (!this._button) {
+        this._button =
+          this.shadowRoot?.querySelector(".tab") as HTMLButtonElement || null;
+      }
+      return this._button;
+    }
 
-    // Set ARIA attributes
-    this.setAttribute("role", "tab");
-    this.updateAriaAttributes();
-  }
+    override connectedCallback() {
+      super.connectedCallback();
 
-  override updated(changedProperties: Map<string | number | symbol, unknown>) {
-    super.updated(changedProperties);
-
-    if (
-      changedProperties.has("selected") || changedProperties.has("disabled")
-    ) {
+      // Set ARIA attributes
+      this.setAttribute("role", "tab");
       this.updateAriaAttributes();
     }
-  }
 
-  override render() {
-    return html`
-      <button
-        class="tab"
-        part="tab"
-        ?disabled="${this.disabled}"
-        data-selected="${this.selected}"
-        data-disabled="${this.disabled}"
-        @click="${this.handleClick}"
-        @keydown="${this.handleKeydown}"
-      >
-        <slot></slot>
-      </button>
-    `;
-  }
+    override updated(
+      changedProperties: Map<string | number | symbol, unknown>,
+    ) {
+      super.updated(changedProperties);
 
-  private updateAriaAttributes(): void {
-    this.setAttribute("aria-selected", String(this.selected));
-    this.setAttribute("aria-disabled", String(this.disabled));
-    this.setAttribute(
-      "tabindex",
-      this.selected && !this.disabled ? "0" : "-1",
-    );
-  }
-
-  private handleClick = (event: Event): void => {
-    if (this.disabled) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
+      if (
+        changedProperties.has("selected") || changedProperties.has("disabled")
+      ) {
+        this.updateAriaAttributes();
+      }
     }
 
-    // Emit custom event for parent tabs component
-    this.emit("tab-click", { tab: this });
-  };
-
-  private handleKeydown = (event: KeyboardEvent): void => {
-    if (event.key === " " || event.key === "Enter") {
-      event.preventDefault();
-      this.click();
+    override render() {
+      return html`
+        <button
+          class="tab"
+          part="tab"
+          ?disabled="${this.disabled}"
+          data-selected="${this.selected}"
+          data-disabled="${this.disabled}"
+          @click="${this.handleClick}"
+          @keydown="${this.handleKeydown}"
+        >
+          <slot></slot>
+        </button>
+      `;
     }
-  };
 
-  /**
-   * Focus the tab button
-   */
-  override focus(): void {
-    this.button?.focus();
+    private updateAriaAttributes(): void {
+      this.setAttribute("aria-selected", String(this.selected));
+      this.setAttribute("aria-disabled", String(this.disabled));
+      this.setAttribute(
+        "tabindex",
+        this.selected && !this.disabled ? "0" : "-1",
+      );
+    }
+
+    private handleClick = (event: Event): void => {
+      if (this.disabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      // Emit custom event for parent tabs component
+      this.emit("tab-click", { tab: this });
+    };
+
+    private handleKeydown = (event: KeyboardEvent): void => {
+      if (event.key === " " || event.key === "Enter") {
+        event.preventDefault();
+        this.click();
+      }
+    };
+
+    /**
+     * Focus the tab button
+     */
+    override focus(): void {
+      this.button?.focus();
+    }
+
+    /**
+     * Blur the tab button
+     */
+    override blur(): void {
+      this.button?.blur();
+    }
   }
 
-  /**
-   * Blur the tab button
-   */
-  override blur(): void {
-    this.button?.blur();
-  }
-}
-
-globalThis.customElements.define("cf-tab", CFTab);
+  globalThis.customElements.define("cf-tab", CFTab);
