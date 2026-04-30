@@ -1,11 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricHash } from "../fabric-hash.ts";
-import {
-  hashObjectFromJson,
-  hashObjectFromString,
-  hashOf,
-} from "../value-hash.ts";
+import { hashObjectFromJson, hashOf } from "../value-hash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);
@@ -115,21 +111,20 @@ describe("stuff from value-hash.ts", () => {
     expect(cid.bytes).toEqual(original.bytes);
   });
 
-  it("hashObjectFromString round-trips through FabricHash", () => {
+  it("FabricHash.fromString() works on the result of instance method FabricHash.toString()", () => {
     // Use a non-fid1 tag to verify the parser doesn't hardcode it.
     const original = new FabricHash(SAMPLE_HASH, "sha3");
     const str = original.toString();
-    const reconstructed = hashObjectFromString(str);
+    const reconstructed = FabricHash.fromString(str);
 
     expect(reconstructed).toBeInstanceOf(FabricHash);
-    const cid = reconstructed as unknown as FabricHash;
-    expect(cid.toString()).toBe(original.toString());
-    expect(cid.bytes).toEqual(original.bytes);
-    expect(cid.tag).toBe("sha3");
+    expect(reconstructed.toString()).toBe(original.toString());
+    expect(reconstructed.bytes).toEqual(original.bytes);
+    expect(reconstructed.tag).toBe("sha3");
   });
 
-  it("hashObjectFromString throws on invalid format (no colon)", () => {
-    expect(() => hashObjectFromString("nocolonhere")).toThrow(
+  it("FabricHash.fromString() throws on invalid format (no colon)", () => {
+    expect(() => FabricHash.fromString("nocolonhere")).toThrow(
       "Invalid content hash string",
     );
   });
