@@ -1850,7 +1850,7 @@ regardless of nibble range.
 ### 6.4 Hashing Algorithm
 
 ```typescript
-// file: packages/data-model/value-hash-modern.ts
+// file: packages/data-model/value-hash.ts
 
 /**
  * Compute a hash for a fabric value. The hash is encoding-independent:
