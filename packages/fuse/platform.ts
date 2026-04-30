@@ -221,6 +221,7 @@ export const EXDEV = 18;
 export const ENOTDIR = 20;
 export const EISDIR = 21;
 export const EINVAL = 22;
+export const EFBIG = 27;
 export const ENOSPC = 28;
 export const EROFS = 30;
 export const ERANGE = 34;

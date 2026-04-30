@@ -47,6 +47,7 @@ import {
 import {
   DIR_MODE,
   EACCES,
+  EFBIG,
   EINVAL,
   EIO,
   EISDIR,
@@ -67,6 +68,7 @@ import {
   handleHasPendingChanges,
   HandleMap,
   type HandleState,
+  validateVirtualFileRange,
 } from "./handles.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
@@ -328,6 +330,15 @@ export async function main(argv: string[] = Deno.args) {
 
   // File handle tracking for write support
   const handles = new HandleMap();
+
+  function virtualFileRangeErrno(
+    offset: number,
+    length: number,
+  ): number | null {
+    const validation = validateVirtualFileRange(offset, length);
+    if (validation.ok) return null;
+    return validation.reason === "too-large" ? EFBIG : EINVAL;
+  }
 
   function buildStat(
     node: NonNullable<ReturnType<typeof tree.getNode>>,
@@ -1467,6 +1478,11 @@ export async function main(argv: string[] = Deno.args) {
 
       const sz = Number(size);
       const off = Number(offset);
+      const rangeErrno = virtualFileRangeErrno(off, sz);
+      if (rangeErrno !== null) {
+        fuse.symbols.fuse_reply_err(req, rangeErrno);
+        return;
+      }
 
       // Read data from the FUSE-provided buffer
       const data = new Uint8Array(sz);
@@ -1480,7 +1496,10 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
-      handles.write(fh, data, off);
+      if (!handles.write(fh, data, off)) {
+        fuse.symbols.fuse_reply_err(req, EIO);
+        return;
+      }
       fuse.symbols.fuse_reply_write(req, BigInt(sz));
     },
   );
@@ -1554,6 +1573,16 @@ export async function main(argv: string[] = Deno.args) {
       const metadataFields = metadataChange
         ? metadataFieldsForSetattrFlags(metadataFlags)
         : [];
+      let newSize = 0;
+      if (sizeChange) {
+        const attrView = new Deno.UnsafePointerView(_attrPtr!);
+        newSize = Number(attrView.getBigInt64(STAT_ST_SIZE_OFFSET));
+        const rangeErrno = virtualFileRangeErrno(0, newSize);
+        if (rangeErrno !== null) {
+          fuse.symbols.fuse_reply_err(req, rangeErrno);
+          return;
+        }
+      }
 
       let truncateAuthorization = undefined as
         | ReturnType<typeof authorizeExistingWriteback>
@@ -1604,23 +1633,58 @@ export async function main(argv: string[] = Deno.args) {
 
       // Handle truncate / size change
       if (sizeChange) {
-        // Read new size from attr struct
-        const attrView = new Deno.UnsafePointerView(_attrPtr!);
-        const newSize = Number(attrView.getBigInt64(STAT_ST_SIZE_OFFSET));
         const { fh } = readFileInfo(fi);
         const handle = handles.get(fh);
         if (handle) {
-          handles.truncate(fh, newSize);
-        } else {
-          // No valid fh — NFS/FUSE-T calls setattr(size=0) separately.
-          // Truncate all open handles for this inode and the tree node.
-          handles.truncateByIno(inode, newSize);
-          if (node.kind === "file") {
-            tree.updateFile(
-              inode,
-              newSize === 0 ? "" : node.content.slice(0, newSize),
-            );
+          if (!handles.truncate(fh, newSize)) {
+            fuse.symbols.fuse_reply_err(req, EIO);
+            return;
           }
+        } else {
+          if (!bridge || node.kind !== "file") {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
+          const sourceWritePath = bridge.resolveSourceWritePath(inode);
+          const valueWritePath = sourceWritePath === null
+            ? bridge.resolveWritePath(inode)
+            : null;
+          const writeTarget: HandleWriteTarget | undefined = sourceWritePath
+            ? { kind: "source", target: sourceWritePath }
+            : valueWritePath
+            ? { kind: "value", target: valueWritePath }
+            : undefined;
+          if (!writeTarget) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
+
+          const truncateFh = handles.open(
+            inode,
+            O_WRONLY,
+            node.content,
+            {
+              writeTarget,
+              cfcAuthorizedOperations: ["truncate"],
+              cfcAuthorizationAnnotation: node.cfc,
+            },
+          );
+          if (!handles.truncate(truncateFh, newSize)) {
+            handles.close(truncateFh);
+            fuse.symbols.fuse_reply_err(req, EIO);
+            return;
+          }
+          const truncateHandle = handles.get(truncateFh);
+          if (!truncateHandle) {
+            fuse.symbols.fuse_reply_err(req, EIO);
+            return;
+          }
+          tree.updateFile(inode, truncateHandle.buffer, node.jsonType);
+          flushHandle(truncateHandle).catch((e) => {
+            console.error(`[fuse] truncate write error: ${e}`);
+          }).finally(() => {
+            handles.close(truncateFh);
+          });
         }
       }
 

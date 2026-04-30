@@ -3,6 +3,8 @@ import {
   handleHasBufferedContent,
   handleHasPendingChanges,
   HandleMap,
+  MAX_VIRTUAL_FILE_SIZE,
+  validateVirtualFileRange,
 } from "./handles.ts";
 import { O_RDWR } from "./platform.ts";
 
@@ -36,6 +38,48 @@ Deno.test("HandleMap clears pending truncates when content arrives", () => {
   assertEquals(handle?.dirty, true);
   assertEquals(handle?.truncatePending, false);
   assertEquals(handleHasPendingChanges(handle), true);
+});
+
+Deno.test("HandleMap rejects invalid and oversized write allocations", () => {
+  const handles = new HandleMap();
+  const fh = handles.open(1n, O_RDWR, new Uint8Array(0));
+
+  assertEquals(handles.write(fh, encoder.encode("x"), -1), false);
+  assertEquals(
+    handles.write(fh, encoder.encode("x"), MAX_VIRTUAL_FILE_SIZE),
+    false,
+  );
+
+  const handle = handles.get(fh);
+  assertEquals(handle?.buffer.length, 0);
+  assertEquals(handle?.dirty, false);
+});
+
+Deno.test("HandleMap rejects oversized truncates without resizing buffers", () => {
+  const handles = new HandleMap();
+  const fh = handles.open(1n, O_RDWR, encoder.encode("hello"));
+
+  assertEquals(handles.truncate(fh, MAX_VIRTUAL_FILE_SIZE + 1), false);
+  assertEquals(handles.truncate(fh, -1), false);
+  assertEquals(new TextDecoder().decode(handles.get(fh)?.buffer), "hello");
+});
+
+Deno.test("validateVirtualFileRange classifies invalid and too-large ranges", () => {
+  assertEquals(validateVirtualFileRange(-1, 1), {
+    ok: false,
+    reason: "invalid",
+  });
+  assertEquals(validateVirtualFileRange(0, -1), {
+    ok: false,
+    reason: "invalid",
+  });
+  assertEquals(validateVirtualFileRange(MAX_VIRTUAL_FILE_SIZE, 1), {
+    ok: false,
+    reason: "too-large",
+  });
+  assertEquals(validateVirtualFileRange(MAX_VIRTUAL_FILE_SIZE - 1, 1), {
+    ok: true,
+  });
 });
 
 Deno.test("HandleMap stores stable write targets on open handles", () => {

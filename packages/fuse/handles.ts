@@ -4,6 +4,30 @@ import type { CfcNodeAnnotation } from "./annotations.ts";
 import type { CfcExistingWritebackOperation } from "./cfc-writeback.ts";
 import { O_RDWR, O_WRONLY } from "./platform.ts";
 
+export const MAX_VIRTUAL_FILE_SIZE = 64 * 1024 * 1024;
+
+export type VirtualFileRangeValidation =
+  | { ok: true }
+  | { ok: false; reason: "invalid" | "too-large" };
+
+export function validateVirtualFileRange(
+  offset: number,
+  length: number,
+  maxSize = MAX_VIRTUAL_FILE_SIZE,
+): VirtualFileRangeValidation {
+  if (
+    !Number.isSafeInteger(offset) || !Number.isSafeInteger(length) ||
+    offset < 0 || length < 0
+  ) {
+    return { ok: false, reason: "invalid" };
+  }
+  const end = offset + length;
+  if (!Number.isSafeInteger(end) || end > maxSize) {
+    return { ok: false, reason: "too-large" };
+  }
+  return { ok: true };
+}
+
 export interface HandleState {
   ino: bigint;
   flags: number;
@@ -99,6 +123,7 @@ export class HandleMap {
     const state = this.handles.get(fh);
     if (!state) return false;
 
+    if (!validateVirtualFileRange(offset, data.length).ok) return false;
     const end = offset + data.length;
     if (end > state.buffer.length) {
       // Extend buffer
@@ -125,7 +150,8 @@ export class HandleMap {
   }
 
   /** Truncate all handles for a given inode to the specified size. */
-  truncateByIno(ino: bigint, size: number): void {
+  truncateByIno(ino: bigint, size: number): boolean {
+    if (!validateVirtualFileRange(0, size).ok) return false;
     for (const [, state] of this.handles) {
       if (state.ino === ino) {
         if (size === 0) {
@@ -146,12 +172,14 @@ export class HandleMap {
         state.version++;
       }
     }
+    return true;
   }
 
   /** Truncate the handle's buffer to the given size. */
   truncate(fh: bigint, size: number): boolean {
     const state = this.handles.get(fh);
     if (!state) return false;
+    if (!validateVirtualFileRange(0, size).ok) return false;
 
     if (size === 0) {
       state.buffer = new Uint8Array(0);

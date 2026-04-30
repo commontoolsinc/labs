@@ -95,8 +95,12 @@ target path parsing rules and examples.
    [JSON Mapping](./3-json-mapping.md#type-preservation-on-write)).
 3. Construct a cell write: navigate to the parent object/array, set the
    key/index to the new value.
-4. Execute via `cell.set()` or `cell.update()`.
-5. Wait for the write to be acknowledged before returning from `flush`.
+4. Validate deterministic local policy first. Invalid sizes, invalid JSON, and
+   CFC/writeback denials fail immediately.
+5. Return success from `flush` after the mutation has been accepted into the
+   local write pipeline. The backend cell write is optimistic and may complete
+   after the syscall returns; later conflicts or transport failures are exposed
+   through mount status, logs, and CFC writeback reconciliation.
 
 ### `write` to `.json` File
 
@@ -104,7 +108,8 @@ target path parsing rules and examples.
 2. On flush: parse the buffer as JSON.
 3. If the path is `result.json`, replace the entire result cell.
 4. If the path is `result/items/0.json`, replace just that subtree.
-5. Execute via `cell.set()` at the appropriate path.
+5. Queue `cell.set()` at the appropriate path using the same optimistic
+   acknowledgement contract as scalar writes.
 
 ### `write` to `.handler` File
 
@@ -114,7 +119,8 @@ target path parsing rules and examples.
    handler writes elsewhere in FUSE.
 4. Deduplicate `flush`/`release` so one buffered write triggers one handler
    invocation.
-5. Return success after the write has been handed to the runtime.
+5. Return success after the write has been handed to the runtime, subject to
+   immediate local/CFC validation failures.
 
 Handlers remain writable so legacy flows like
 `echo '{"message":"hi"}' > result/addItem.handler` keep working.
@@ -206,7 +212,9 @@ Cross-cell renames (moving between `input/` and `result/`) are rejected with
 ### `truncate`
 
 Truncating a file to 0 bytes sets the value to an empty string (`""`).
-Truncating a `.json` file to 0 is an error (`EINVAL`).
+Truncating a `.json` file to 0 is an error (`EINVAL`). Path-based truncate
+without a file handle must either queue the same writeback as handle-based
+truncate or fail immediately; it must not be memory-only.
 
 ## Atomicity
 
@@ -226,8 +234,10 @@ updates, write to the appropriate `.json` file instead.
 | Permission denied | `EACCES` |
 | Write to read-only cell | `EROFS` |
 | Invalid JSON on write | `EINVAL` |
+| Invalid offset/size | `EINVAL` |
+| Exceeds virtual file size limit | `EFBIG` |
 | Cross-cell rename | `EXDEV` |
-| Network/timeout | `EIO` |
+| Immediate network/timeout before local acceptance | `EIO` |
 | Space not available | `ENOENT` |
 
 ---
