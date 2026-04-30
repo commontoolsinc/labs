@@ -33,6 +33,7 @@ export async function clickTrustedAction(
     }, { timeout, delay: 250 });
   } catch (cause) {
     probe ??= await readTrustedActionProbe(page, action).catch(() => undefined);
+    // Indented for readable test-log output
     throw new Error(
       `Timed out clicking trusted action "${action}". Last probe: ${
         toIndentedDebugString(probe)

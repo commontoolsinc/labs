@@ -389,7 +389,7 @@ function isEmpty(value: unknown): boolean {
 /**
  * Format a value for display in the diff view
  */
-function formatValue(value: unknown): string {
+function debugFormatValue(value: unknown): string {
   if (isEmpty(value)) return "(empty)";
   if (Array.isArray(value)) return toCompactDebugString(value);
   if (typeof value === "object") return toCompactDebugString(value);
@@ -2993,8 +2993,8 @@ export const ExtractorModule = pattern<
                             fontFamily: "monospace",
                           }}
                         >
-                          {formatValue(f.currentValue)} -&gt;{" "}
-                          {formatValue(f.extractedValue)}
+                          {debugFormatValue(f.currentValue)} -&gt;{" "}
+                          {debugFormatValue(f.extractedValue)}
                         </div>
                         {ifElse(
                           f.explanation !== undefined && f.explanation !== "",
