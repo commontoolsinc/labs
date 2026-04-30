@@ -4157,10 +4157,9 @@ export class Scheduler {
             "pullDepCommitStart",
           );
           // Commit the read-only inspection tx as a no-op so dependency discovery
-          // does not participate in CFC prepare or commit gating.
-          if (!shouldSkipEvent) {
-            depTx.commit();
-          }
+          // does not participate in CFC prepare or commit gating. Do this even
+          // after populateDependencies errors so the transaction is closed.
+          depTx.commit();
           logger.timeEnd(
             "scheduler",
             "execute",
