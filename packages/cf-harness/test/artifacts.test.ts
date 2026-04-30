@@ -184,6 +184,11 @@ Deno.test({
                 kind: "fabric-fuse",
                 status: "not-configured",
                 sandboxPath: "/fabric",
+                writeGovernance: {
+                  policy: "not-configured",
+                  statusProbe: "not-probed",
+                  delegatedToCfc: false,
+                },
               },
             },
             protectedXattrs: {

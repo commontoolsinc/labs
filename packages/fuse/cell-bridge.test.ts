@@ -12,6 +12,7 @@ import {
   CFC_FAIL_CLOSED_ATOM_CLASS,
   listCfcXattrNames,
 } from "./annotations.ts";
+import { encodeFuseComponent } from "./path-codec.ts";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -132,7 +133,7 @@ function buildTestSpace(
   fakePieces: unknown[],
 ): SpaceState {
   const tree = bridge.tree;
-  const spaceIno = tree.addDir(tree.rootIno, spaceName);
+  const spaceIno = tree.addDir(tree.rootIno, encodeFuseComponent(spaceName));
   const piecesIno = tree.addDir(spaceIno, "pieces");
   const entitiesIno = tree.addDir(spaceIno, "entities");
 
@@ -206,6 +207,13 @@ type RebuildPieceProp = (args: {
   resolveLink: (value: unknown, depth: number) => string | null;
   spaceName: string;
 }) => Promise<void>;
+
+type BuildSourceTree = (
+  pieceIno: bigint,
+  piece: unknown,
+  state: SpaceState,
+  pieceName: string,
+) => Promise<void>;
 
 type WriteFsFile = (
   writePath: unknown,
@@ -1326,14 +1334,14 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
       name: "Alpha",
       pattern: "alpha-pattern",
       summary: "alpha summary",
-      entityPath: "entities/of:alpha",
+      entityPath: "entities/of%3Aalpha",
     },
     {
       id: "of:beta",
       name: "Beta",
       pattern: "beta-pattern",
       summary: "beta summary",
-      entityPath: "entities/of:beta",
+      entityPath: "entities/of%3Abeta",
     },
   ]);
 });
@@ -1496,6 +1504,90 @@ Deno.test("CellBridge.writeFsFile removes deleted keys from application/json pro
     { path: ["$FS", "content", "title"], value: "New" },
     { path: ["$FS", "content", "stale"], value: undefined },
   ]);
+});
+
+Deno.test("CellBridge.buildSourceTree encodes source path segments and decodes write paths", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  const piece = {
+    id: "of:source-piece",
+    getPatternMeta: () =>
+      Promise.resolve({
+        program: {
+          main: "/src/has:colon.tsx",
+          files: [
+            { name: "/src/has:colon.tsx", contents: "export default 1;" },
+          ],
+        },
+      }),
+  };
+  state.pieceControllers.set("notes", piece as never);
+  state.srcInos.set("notes", pieceIno);
+
+  await (bridge as unknown as { buildSourceTree: BuildSourceTree })
+    .buildSourceTree(pieceIno, piece, state, "notes");
+
+  const srcIno = tree.lookup(pieceIno, ".src")!;
+  const srcDirIno = tree.lookup(srcIno, "src")!;
+  const sourceIno = tree.lookup(srcDirIno, "has%3Acolon.tsx")!;
+  assertEquals(
+    bridge.resolveSourceWritePath(sourceIno)?.relPath,
+    "src/has:colon.tsx",
+  );
+});
+
+Deno.test("CellBridge decodes encoded space directory names for write paths", () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "did:key:zSpace", []);
+  const piece = {
+    id: "of:encoded-space-piece",
+    name: () => "Encoded Space Piece",
+  };
+  state.pieceControllers.set("notes", piece as never);
+
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  const resultIno = tree.addDir(pieceIno, "result");
+  const titleIno = tree.addFile(resultIno, "title", "hello", "string");
+
+  const writePath = bridge.resolveWritePath(titleIno);
+  assertEquals(writePath?.spaceName, "did:key:zSpace");
+  assertEquals(writePath?.pieceName, "notes");
+  assertEquals(writePath?.cell, "result");
+  assertEquals(writePath?.jsonPath, ["title"]);
+});
+
+Deno.test("CellBridge decodes encoded space directory names for source write paths", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "did:key:zSource", []);
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  const piece = {
+    id: "of:encoded-source-piece",
+    getPatternMeta: () =>
+      Promise.resolve({
+        program: {
+          main: "/src/main.ts",
+          files: [{ name: "/src/main.ts", contents: "export default 1;" }],
+        },
+      }),
+  };
+  state.pieceControllers.set("notes", piece as never);
+  state.srcInos.set("notes", pieceIno);
+
+  await (bridge as unknown as { buildSourceTree: BuildSourceTree })
+    .buildSourceTree(pieceIno, piece, state, "notes");
+
+  const srcIno = tree.lookup(pieceIno, ".src")!;
+  const srcDirIno = tree.lookup(srcIno, "src")!;
+  const sourceIno = tree.lookup(srcDirIno, "main.ts")!;
+  const sourcePath = bridge.resolveSourceWritePath(sourceIno);
+
+  assertEquals(sourcePath?.spaceName, "did:key:zSource");
+  assertEquals(sourcePath?.pieceName, "notes");
+  assertEquals(sourcePath?.relPath, "src/main.ts");
 });
 
 // ---------------------------------------------------------------------------
@@ -2151,8 +2243,11 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
-  await bridge.resolveEntity(state.entitiesIno, piece.id);
-  const entityIno = tree.lookup(state.entitiesIno, piece.id)!;
+  await bridge.resolveEntity(state.entitiesIno, "of%3Aentity-handler-piece");
+  const entityIno = tree.lookup(
+    state.entitiesIno,
+    "of%3Aentity-handler-piece",
+  )!;
   await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
     .hydratePieceProp.call(bridge, entityIno, "result");
   assertEquals(tree.lookup(entityIno, "result") !== undefined, true);
@@ -2169,6 +2264,50 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
     tree.getChildren(resultIno!).length,
     0,
     "entity result/ should be restored as an empty stub after handler invalidation",
+  );
+});
+
+Deno.test("CellBridge.resolveEntity rejects non-canonical entity aliases", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const piece = {
+    id: "of:alias-piece",
+    name: () => "Alias Piece",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    manager: () => ({
+      runtime: { idle: () => Promise.resolve() },
+      synced: () => Promise.resolve(),
+    }),
+  };
+  state.pieceControllers.set("Alias-Piece", piece as never);
+
+  assertEquals(
+    await bridge.resolveEntity(state.entitiesIno, "of:alias-piece"),
+    false,
+  );
+  assertEquals(
+    await bridge.resolveEntity(state.entitiesIno, "%6Ff%3Aalias-piece"),
+    false,
+  );
+  assertEquals(tree.lookup(state.entitiesIno, "of:alias-piece"), undefined);
+  assertEquals(tree.lookup(state.entitiesIno, "%6Ff%3Aalias-piece"), undefined);
+
+  assertEquals(
+    await bridge.resolveEntity(state.entitiesIno, "of%3Aalias-piece"),
+    true,
+  );
+  assertEquals(
+    tree.lookup(state.entitiesIno, "of%3Aalias-piece") !== undefined,
+    true,
   );
 });
 

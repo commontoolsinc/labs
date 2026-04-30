@@ -8,6 +8,7 @@ import {
   classifyHarnessRunError,
   collectHarnessCapabilitySnapshot,
   createHarnessFailureRecord,
+  FABRIC_STATUS_PROBE_SENTINEL,
   selectPrimaryHarnessFailure,
 } from "../src/diagnostics.ts";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
@@ -60,6 +61,27 @@ class FakeSandboxRuntime implements SandboxRuntime {
 }
 
 class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
+  constructor(private readonly fabricStatusJson?: string) {
+    super();
+  }
+
+  override runShell(
+    request: SandboxShellRequest,
+  ): Promise<SandboxCommandResult> {
+    if (request.command.includes(FABRIC_STATUS_PROBE_SENTINEL)) {
+      return Promise.resolve(
+        this.fabricStatusJson === undefined
+          ? { stdout: "missing\t\n", stderr: "", exitCode: 0 }
+          : {
+            stdout: `present\t${this.fabricStatusJson}\n`,
+            stderr: "",
+            exitCode: 0,
+          },
+      );
+    }
+    return super.runShell(request);
+  }
+
   describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
@@ -111,6 +133,11 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
           kind: "fabric-fuse",
           status: "not-configured",
           sandboxPath: "/fabric",
+          writeGovernance: {
+            policy: "not-configured",
+            statusProbe: "not-probed",
+            delegatedToCfc: false,
+          },
         },
       },
       protectedXattrs: {
@@ -169,7 +196,45 @@ Deno.test("collectHarnessCapabilitySnapshot reports configured Fabric mounts", a
       status: "configured",
       sandboxPath: "/fabric",
       readOnly: false,
+      writeGovernance: {
+        policy: "host-writable-non-strict",
+        statusProbe: "missing",
+        delegatedToCfc: false,
+      },
     },
+  });
+});
+
+Deno.test("collectHarnessCapabilitySnapshot records strict CFC attestation for writable Fabric mounts", async () => {
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    new FakeFabricSandboxRuntime(
+      JSON.stringify({ cfc: { mode: "enforce-strict" } }),
+    ),
+    "/workspace",
+    "2026-04-29T23:05:00.000Z",
+    { cfcEnforcementMode: "enforce-strict" },
+  );
+
+  assertEquals(snapshot.cfc.mounts.fabric.writeGovernance, {
+    policy: "host-writable-cfc-strict-attested",
+    statusProbe: "present",
+    delegatedToCfc: true,
+    attestedMode: "enforce-strict",
+  });
+});
+
+Deno.test("collectHarnessCapabilitySnapshot records strict writable Fabric mounts without attestation", async () => {
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    new FakeFabricSandboxRuntime(),
+    "/workspace",
+    "2026-04-29T23:10:00.000Z",
+    { cfcEnforcementMode: "enforce-strict" },
+  );
+
+  assertEquals(snapshot.cfc.mounts.fabric.writeGovernance, {
+    policy: "host-writable-cfc-strict-unattested",
+    statusProbe: "missing",
+    delegatedToCfc: true,
   });
 });
 

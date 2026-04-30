@@ -221,6 +221,7 @@ export const EXDEV = 18;
 export const ENOTDIR = 20;
 export const EISDIR = 21;
 export const EINVAL = 22;
+export const EFBIG = 27;
 export const ENOSPC = 28;
 export const EROFS = 30;
 export const ERANGE = 34;
@@ -288,12 +289,12 @@ export const S_IRWXO = 0o007;
 
 // Common modes
 export const DIR_MODE = S_IFDIR | 0o555;
-export const DIR_MODE_RW = S_IFDIR | 0o755;
+export const DIR_MODE_RW = S_IFDIR | 0o777;
 export const FILE_MODE = S_IFREG | 0o444;
-export const FILE_MODE_RW = S_IFREG | 0o644;
+export const FILE_MODE_RW = S_IFREG | 0o666;
 export const FILE_MODE_RX = S_IFREG | 0o555;
-export const FILE_MODE_RWX = S_IFREG | 0o755;
-export const FILE_MODE_WO = S_IFREG | 0o200;
+export const FILE_MODE_RWX = S_IFREG | 0o777;
+export const FILE_MODE_WO = S_IFREG | 0o222;
 export const SYMLINK_MODE = S_IFLNK | 0o777;
 
 // --- Shared utility ---
