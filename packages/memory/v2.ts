@@ -402,8 +402,7 @@ export const toValuePath = (path: readonly string[]): ValuePath =>
  * schema path selector. The result is interned-and-frozen via
  * `internPathSelector`, so callers can feed it directly to
  * `MapSetStringToPathSelectors` (or any other `hashSchemaItem`-keyed
- * cache) and get the `hashOfModernInternal` WeakMap fast-path on
- * repeat hashes.
+ * cache) and get the `hashOf()` `WeakMap` fast-path on repeat hashes.
  */
 export const toDocumentSelector = (
   selector: Pick<SchemaPathSelector, "path" | "schema">,

@@ -1,4 +1,4 @@
-import { hashOfModernAsString } from "@commonfabric/data-model/value-hash-modern";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { stableHash } from "../traverse.ts";
 import type {
@@ -129,4 +129,4 @@ export const canonicalizePreparedDigestInput = (
 });
 
 export const preparedDigestFor = (input: PreparedDigestInput): string =>
-  hashOfModernAsString(canonicalizePreparedDigestInput(input));
+  hashStringOf(canonicalizePreparedDigestInput(input));

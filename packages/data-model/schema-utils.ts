@@ -309,14 +309,11 @@ export function emptySchemaObject() {
  * Idempotent on repeat calls: `internPathSelector(internPathSelector(x)) ===
  * internPathSelector(x)`.
  *
- * Exists so that callers who feed selectors into
- * `MapSetStringToPathSelectors` (or any other cache keyed on
- * `hashSchemaItem` of a selector) can hand in an already-interned,
- * deep-frozen selector. That satisfies the `isDeepFrozen` guard in
- * `hashOfModernInternal` and lets the modern-hash WeakMap cache retain
- * its hash across repeat calls. See
- * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §4
- * Phase 2 "DEFEAT-8" for the motivating analysis.
+ * Exists so that callers who feed selectors into `MapSetStringToPathSelectors`
+ * (or any other cache keyed on `hashSchemaItem` of a selector) can hand in an
+ * already-interned, deep-frozen selector. That satisfies the `isDeepFrozen`
+ * guard internal to `hashOf()` and lets its `WeakMap` cache retain its hash
+ * across repeat calls.
  */
 export function internPathSelector(
   selector: SchemaPathSelector,

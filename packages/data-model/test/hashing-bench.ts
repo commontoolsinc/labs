@@ -5,7 +5,6 @@
  */
 
 import { hashOf } from "../value-hash.ts";
-import { hashOfModern } from "../value-hash-modern.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 
 // ---------------------------------------------------------------------------
@@ -260,7 +259,7 @@ Deno.bench({
   name: "sparse array (100 slots, 34 filled)",
   group: "sparse-array",
   fn() {
-    hashOfModern(sparseArray);
+    hashOf(sparseArray);
   },
 });
 
