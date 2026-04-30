@@ -5,6 +5,8 @@ import {
   resolveDefaultContainerUser,
   resolveDockerRunscSandboxConfig,
 } from "../src/sandbox/docker-runsc.ts";
+import { createHarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
+import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -73,6 +75,7 @@ Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   assertEquals(config.additionalMounts, []);
   assertEquals(config.extraDockerArgs, []);
   assertEquals(config.cfcResultDir, undefined);
+  assertEquals(config.cfcInvocationContextTransport, undefined);
 });
 
 Deno.test("resolveDefaultContainerUser omits default --user on macOS", () => {
@@ -199,6 +202,30 @@ Deno.test("resolveDockerRunscSandboxConfig rejects overlapping sandbox roots", (
   );
 });
 
+Deno.test("resolveDockerRunscSandboxConfig resolves invocation context sidecar transport", () => {
+  const config = resolveDockerRunscSandboxConfig({
+    workspaceHostPath: "/host/project",
+    cfcInvocationContextDir: "/tmp/cfc-invocations",
+  });
+
+  assertEquals(config.cfcInvocationContextTransport, {
+    kind: "sidecar",
+    dir: "/tmp/cfc-invocations",
+  });
+});
+
+Deno.test("resolveDockerRunscSandboxConfig rejects relative invocation context sidecar dirs", () => {
+  assertThrows(
+    () =>
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir: "relative/cfc-invocations",
+      }),
+    Error,
+    "cfcInvocationContextDir must be an absolute host path",
+  );
+});
+
 Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user override", async () => {
   const runner = new FakeProcessRunner(dockerLifecycleResults({ stdout: "" }));
   const runtime = new DockerRunscSandboxRuntime(
@@ -238,6 +265,106 @@ Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user 
       "arg-2",
     ],
   });
+});
+
+Deno.test("DockerRunscSandboxRuntime writes invocation context sidecars before start", async () => {
+  const cfcInvocationContextDir = await Deno.makeTempDir();
+  try {
+    const cfcInvocationContext = await createHarnessCfcInvocationContext({
+      sequence: 1,
+      runId: "run-1",
+      createdAt: "2026-04-30T00:00:00.000Z",
+      toolId: "bash",
+      toolOutputId: createToolOutputId("run-1", "bash", 1),
+      operation: "shell",
+      cfcEnforcementMode: "observe",
+      cwd: "/workspace",
+      runManifest: { present: false },
+      command: "echo hello",
+    });
+    const runner = new FakeProcessRunner(dockerLifecycleResults());
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir,
+      }),
+      runner,
+    );
+
+    await runtime.run({
+      argv: ["/bin/echo", "hello"],
+      cfcInvocationContext,
+    });
+
+    assertEquals(
+      JSON.parse(
+        await Deno.readTextFile(
+          `${cfcInvocationContextDir}/container-123.json`,
+        ),
+      ),
+      cfcInvocationContext,
+    );
+    assertEquals(runner.requests[1]?.args, [
+      "start",
+      "--attach",
+      "container-123",
+    ]);
+  } finally {
+    await Deno.remove(cfcInvocationContextDir, { recursive: true });
+  }
+});
+
+Deno.test("DockerRunscSandboxRuntime reports sidecar write failures before start", async () => {
+  const cfcInvocationContextDir = await Deno.makeTempDir();
+  try {
+    const cfcInvocationContext = await createHarnessCfcInvocationContext({
+      sequence: 1,
+      runId: "run-1",
+      createdAt: "2026-04-30T00:00:00.000Z",
+      toolId: "bash",
+      operation: "shell",
+      cfcEnforcementMode: "observe",
+      cwd: "/workspace",
+      runManifest: { present: false },
+      command: "echo hello",
+    });
+    const runner = new FakeProcessRunner([
+      {
+        stdout: "../container\n",
+        stderr: "",
+        exitCode: 0,
+      },
+      {
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+      },
+    ]);
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({
+      argv: ["/bin/echo", "hello"],
+      cfcInvocationContext,
+    });
+
+    assertEquals(result.exitCode, 125);
+    assertMatch(
+      result.stderr,
+      /failed to write CFC invocation context sidecar/,
+    );
+    assertEquals(runner.requests.map((request) => request.args[0]), [
+      "create",
+      "rm",
+    ]);
+  } finally {
+    await Deno.remove(cfcInvocationContextDir, { recursive: true });
+  }
 });
 
 Deno.test("DockerRunscSandboxRuntime attaches observed CFC sidecar output", async () => {

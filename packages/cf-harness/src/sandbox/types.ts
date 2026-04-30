@@ -27,6 +27,14 @@ export interface DockerRunscAdditionalMount {
   readOnly: boolean;
 }
 
+export interface DockerRunscCfcInvocationContextSidecarTransport {
+  kind: "sidecar";
+  dir: string;
+}
+
+export type DockerRunscCfcInvocationContextTransport =
+  DockerRunscCfcInvocationContextSidecarTransport;
+
 export interface DockerRunscSandboxConfig {
   kind: "docker-runsc-cfc";
   dockerBinary: string;
@@ -40,6 +48,7 @@ export interface DockerRunscSandboxConfig {
   additionalMounts: readonly DockerRunscAdditionalMount[];
   extraDockerArgs: readonly string[];
   cfcResultDir?: string;
+  cfcInvocationContextTransport?: DockerRunscCfcInvocationContextTransport;
 }
 
 export type HarnessSandboxConfig = DockerRunscSandboxConfig;
@@ -56,6 +65,8 @@ export interface ResolveDockerRunscSandboxConfigOptions {
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   extraDockerArgs?: readonly string[];
   cfcResultDir?: string;
+  cfcInvocationContextDir?: string;
+  cfcInvocationContextTransport?: DockerRunscCfcInvocationContextTransport;
 }
 
 export interface SandboxCommandRequest {
@@ -92,6 +103,7 @@ export interface SandboxRuntimeDescription {
     mounts?: readonly SandboxRuntimeMountDescription[];
     networkMode?: DockerNetworkMode;
     extraDockerArgsCount?: number;
+    invocationContextTransport?: string;
   };
 }
 
