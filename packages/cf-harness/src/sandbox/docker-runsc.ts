@@ -1,6 +1,9 @@
-import { join as joinHostPath } from "@std/path";
 import {
-  isAbsolute,
+  isAbsolute as isAbsoluteHostPath,
+  join as joinHostPath,
+} from "@std/path";
+import {
+  isAbsolute as isAbsoluteSandboxPath,
   join as joinSandboxPath,
   normalize,
 } from "@std/path/posix";
@@ -8,6 +11,7 @@ import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
 import type {
   DockerRunscAdditionalMount,
   DockerRunscAdditionalMountConfig,
+  DockerRunscCfcInvocationContextTransport,
   DockerRunscSandboxConfig,
   ResolveDockerRunscSandboxConfigOptions,
   SandboxCommandRequest,
@@ -33,6 +37,8 @@ export const DEFAULT_SANDBOX_SHELL = "/bin/sh";
 export const DEFAULT_DOCKER_NETWORK_MODE = "none" as const;
 export const DEFAULT_FABRIC_MOUNT_PATH = "/fabric";
 export const CFC_RESULT_DIR_ENV = "CF_HARNESS_RUNSC_CFC_RESULT_DIR";
+export const CFC_INVOCATION_CONTEXT_DIR_ENV =
+  "CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR";
 
 interface RunscCfcLabelSidecar {
   string?: unknown;
@@ -61,6 +67,16 @@ const optionalNonEmptyString = (
   value: string | undefined,
 ): string | undefined =>
   value !== undefined && value.length > 0 ? value : undefined;
+
+const validateAbsoluteHostDir = (path: string, label: string): string => {
+  if (path.trim() === "") {
+    throw new Error(`${label} must not be empty`);
+  }
+  if (!isAbsoluteHostPath(path)) {
+    throw new Error(`${label} must be an absolute host path`);
+  }
+  return path;
+};
 
 export const resolveDefaultContainerUser = (
   hostOs: typeof Deno.build.os = Deno.build.os,
@@ -114,7 +130,7 @@ const normalizeWorkspacePath = (path: string): string => {
 
 const validateSandboxRoot = (path: string, label: string): string => {
   const normalized = normalizeWorkspacePath(path);
-  if (!isAbsolute(normalized) || normalized === "/") {
+  if (!isAbsoluteSandboxPath(normalized) || normalized === "/") {
     throw new Error(`${label} must be an absolute non-root sandbox path`);
   }
   return normalized;
@@ -172,6 +188,28 @@ const dockerMountArg = (mount: {
     mount.readOnly ? ",readonly" : ""
   }`;
 
+const resolveCfcInvocationContextTransport = (
+  options: ResolveDockerRunscSandboxConfigOptions,
+): DockerRunscCfcInvocationContextTransport | undefined => {
+  if (options.cfcInvocationContextTransport !== undefined) {
+    return {
+      kind: "sidecar",
+      dir: validateAbsoluteHostDir(
+        options.cfcInvocationContextTransport.dir,
+        "cfcInvocationContextTransport.dir",
+      ),
+    };
+  }
+  const dir = optionalNonEmptyString(
+    options.cfcInvocationContextDir ??
+      readEnvVar(CFC_INVOCATION_CONTEXT_DIR_ENV),
+  );
+  return dir === undefined ? undefined : {
+    kind: "sidecar",
+    dir: validateAbsoluteHostDir(dir, "cfcInvocationContextDir"),
+  };
+};
+
 export const resolveDockerRunscSandboxConfig = (
   options: ResolveDockerRunscSandboxConfigOptions,
 ): DockerRunscSandboxConfig => {
@@ -190,6 +228,9 @@ export const resolveDockerRunscSandboxConfig = (
   const cfcResultDir = optionalNonEmptyString(
     options.cfcResultDir ?? readEnvVar(CFC_RESULT_DIR_ENV),
   );
+  const cfcInvocationContextTransport = resolveCfcInvocationContextTransport(
+    options,
+  );
   return {
     kind: "docker-runsc-cfc",
     dockerBinary: options.dockerBinary ?? DEFAULT_DOCKER_BINARY,
@@ -203,6 +244,9 @@ export const resolveDockerRunscSandboxConfig = (
     additionalMounts,
     extraDockerArgs: options.extraDockerArgs ?? [],
     ...(cfcResultDir !== undefined ? { cfcResultDir } : {}),
+    ...(cfcInvocationContextTransport !== undefined
+      ? { cfcInvocationContextTransport }
+      : {}),
   };
 };
 
@@ -221,6 +265,20 @@ const parseDockerContainerID = (stdout: string): string | undefined => {
   return firstLine !== undefined && firstLine.length > 0
     ? firstLine
     : undefined;
+};
+
+const cfcSidecarPath = (dir: string, containerID: string): string => {
+  if (
+    containerID === "" ||
+    containerID === "." ||
+    containerID === ".." ||
+    /[/\\]/.test(containerID)
+  ) {
+    throw new Error(
+      `invalid Docker container ID for CFC sidecar: ${containerID}`,
+    );
+  }
+  return joinHostPath(dir, `${containerID}.json`);
 };
 
 const parseDockerWaitExitCode = (stdout: string): number | undefined => {
@@ -454,6 +512,12 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         mounts: this.#mountDescriptions(),
         networkMode: this.config.dockerNetworkMode,
         extraDockerArgsCount: this.config.extraDockerArgs.length,
+        ...(this.config.cfcInvocationContextTransport !== undefined
+          ? {
+            invocationContextTransport:
+              this.config.cfcInvocationContextTransport.kind,
+          }
+          : {}),
       },
     };
   }
@@ -469,7 +533,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
   }
 
   resolvePath(path: string, cwd?: string): string {
-    const normalized = isAbsolute(path)
+    const normalized = isAbsoluteSandboxPath(path)
       ? normalize(path)
       : normalize(joinSandboxPath(cwd ?? this.defaultWorkingDirectory(), path));
     if (!this.isPathWithinAllowedRoots(normalized)) {
@@ -521,6 +585,14 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     }
 
     try {
+      const sidecarFailure = await this.writeCfcInvocationContextSidecar(
+        containerID,
+        request,
+        createResult,
+      );
+      if (sidecarFailure !== undefined) {
+        return sidecarFailure;
+      }
       const startResult = await this.runner.run({
         command: this.config.dockerBinary,
         args: [
@@ -583,10 +655,19 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     if (this.config.cfcResultDir === undefined) {
       return undefined;
     }
-    const sidecarPath = joinHostPath(
-      this.config.cfcResultDir,
-      `${containerID}.json`,
-    );
+    let sidecarPath: string;
+    try {
+      sidecarPath = cfcSidecarPath(this.config.cfcResultDir, containerID);
+    } catch (error) {
+      return deniedCfcResult(
+        "runsc_cfc_sidecar_container_id",
+        "runsc CFC sidecar path could not be derived from the Docker container ID",
+        {
+          containerId: containerID,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
     let text: string;
     try {
       text = await Deno.readTextFile(sidecarPath);
@@ -617,6 +698,43 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
           error: error instanceof Error ? error.message : String(error),
         },
       );
+    }
+  }
+
+  private async writeCfcInvocationContextSidecar(
+    containerID: string,
+    request: SandboxCommandRequest,
+    createResult: SandboxCommandResult,
+  ): Promise<SandboxCommandResult | undefined> {
+    if (
+      this.config.cfcInvocationContextTransport === undefined ||
+      request.cfcInvocationContext === undefined
+    ) {
+      return undefined;
+    }
+    const transport = this.config.cfcInvocationContextTransport;
+    switch (transport.kind) {
+      case "sidecar": {
+        try {
+          await Deno.mkdir(transport.dir, { recursive: true });
+          await Deno.writeTextFile(
+            cfcSidecarPath(transport.dir, containerID),
+            `${JSON.stringify(request.cfcInvocationContext, null, 2)}\n`,
+          );
+          return undefined;
+        } catch (error) {
+          return {
+            stdout: createResult.stdout,
+            stderr: appendStderr(
+              createResult.stderr,
+              `failed to write CFC invocation context sidecar: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            ),
+            exitCode: 125,
+          };
+        }
+      }
     }
   }
 }

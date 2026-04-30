@@ -211,12 +211,22 @@ the same host result directory that `cf-harness` reads. Configure runsc with
 `CF_HARNESS_RUNSC_CFC_RESULT_DIR=/path/to/results` or pass `cfcResultDir` in the
 explicit sandbox config.
 
+CFC invocation context transport is similarly coordinated through a host sidecar
+directory. Configure runsc with
+`--cfc-invocation-context-dir=/path/to/invocations`, then set
+`CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR=/path/to/invocations` or pass
+`cfcInvocationContextDir` in the explicit sandbox config. `cf-harness` writes
+`<containerID>.json` after `docker create` and before `docker start`; the
+current payload is an audit/provenance context, not yet an argv/stdin/cwd/env
+label enforcement contract.
+
 On Docker Desktop for macOS, use the host path for `cf-harness` and the
 `/host_mnt/...` projection for Docker's runtime args. The gVisor
 `docker-desktop-cfc-setup` helper defaults to:
 
 ```bash
 export CF_HARNESS_RUNSC_CFC_RESULT_DIR="$HOME/.local/share/runsc-cfc/cfc-results"
+export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc/cfc-invocations"
 ```
 
 ## Related Docs
