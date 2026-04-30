@@ -103,6 +103,7 @@ const DISALLOWED_AGENT_BROWSER_COMMANDS = new Set([
   "profiler",
   "record",
   "screenshot",
+  "state",
   "trace",
   "upload",
 ]);

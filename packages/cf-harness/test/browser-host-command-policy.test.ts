@@ -87,6 +87,8 @@ Deno.test("validateBrowserHostCommand rejects high-risk agent-browser host surfa
   assertDenied("agent-browser eval 'location.href'");
   assertDenied("agent-browser upload '#file' ./secret.txt");
   assertDenied("agent-browser screenshot page.png");
+  assertDenied("agent-browser state save ./browser-state.json");
+  assertDenied("agent-browser --session demo state load ./browser-state.json");
   assertDenied("agent-browser open file:///etc/passwd");
   assertDenied("agent-browser --cdp 9222 snapshot");
   assertDenied("agent-browser --extension ./extension snapshot");
