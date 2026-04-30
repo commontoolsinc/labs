@@ -659,8 +659,7 @@ export class FabricEpochDays extends FabricPrimitive {
  * system (always frozen, passes through conversion unchanged).
  *
  * The first algorithm tag is `fid1` ("fabric ID, v1"), which corresponds
- * to the SHA-256-based hash produced by `hashOfModern()`
- * (Section 6.4).
+ * to the SHA-256-based hash produced by `hashOf()` (Section 6.4).
  *
  * Stringification produces `<tag>:<base64urlHash>` where `<base64urlHash>`
  * is the unpadded base64url encoding (RFC 4648 Section 5) of the hash
@@ -1871,8 +1870,8 @@ regardless of nibble range.
  * Section 3 of `3-json-encoding.md`).
  *
  * Two public entry points are provided:
- * - `hashOfModern(value)` — returns a `FabricHash`.
- * - `hashOfModernAsString(value)` — returns a plain `string` (the hash
+ * - `hashOf(value)` — returns a `FabricHash`.
+ * - `hashStringOf(value)` — returns a plain `string` (the hash
  *   as base64url, without the algorithm tag). This avoids `FabricHash`
  *   allocation when only the string form is needed.
  *
@@ -1885,7 +1884,7 @@ regardless of nibble range.
  * (`shallowFabricFromNativeValueModern`), then hashed in their converted
  * form.
  */
-export function hashOfModern(value: unknown): FabricHash {
+export function hashOf(value: unknown): FabricHash {
   // Type tag bytes — see Section 6.3 for the full table.
   // Tag categories: meta (0x0N), compound (0x1N), primitive (0x2N),
   // optimized (0xFN).
@@ -1921,7 +1920,7 @@ export function hashOfModern(value: unknown): FabricHash {
   //                        (algorithm tag as a tagged string, then raw hash bytes)
   // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
   //                        Elements are hashed in index order:
-  //                          if `i in array`: hashOfModern(array[i])
+  //                          if `i in array`: hashOf(array[i])
   //                          else (hole run): hash(TAG_HOLE, leb128(N))
   //                        TAG_END marks the end of the element sequence.
   //                        (order-preserving)
@@ -1952,7 +1951,7 @@ export function hashOfModern(value: unknown): FabricHash {
   //                        Each pair: hashStr(key) + tagged value.
   //                        TAG_END marks the end of the pair sequence.
   // - `FabricInstance`:  hash(TAG_INSTANCE, hashStr(typeTag),
-  //                              hashOfModern(deconstructedState))
+  //                              hashOf(deconstructedState))
   //
   // The native object wrappers and temporal types are hashed as follows:
   //
@@ -1960,7 +1959,7 @@ export function hashOfModern(value: unknown): FabricHash {
   //   and other `FabricInstance`s with recursively-processable
   //   deconstructed state are hashed via TAG_INSTANCE:
   //     hash(TAG_INSTANCE, hashStr(typeTag),
-  //          hashOfModern(deconstructedState))
+  //          hashOf(deconstructedState))
   //
   // - `FabricBytes` uses TAG_BYTES (dedicated primitive tag).
   // - `FabricEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
@@ -1970,12 +1969,12 @@ export function hashOfModern(value: unknown): FabricHash {
   // Examples (existing type tags are all short enough for the direct
   // string form, so `hashStr(tag)` below expands to
   // `TAG_STRING, leb128(utf8ByteLen), utf8Bytes`):
-  // - `FabricError`:      hash(TAG_INSTANCE, hashStr("Error@1"), hashOfModern(errorState))
-  // - `FabricMap`:        hash(TAG_INSTANCE, hashStr("Map@1"), hashOfModern(entries))
+  // - `FabricError`:      hash(TAG_INSTANCE, hashStr("Error@1"), hashOf(errorState))
+  // - `FabricMap`:        hash(TAG_INSTANCE, hashStr("Map@1"), hashOf(entries))
   //                         where entries are hashed in insertion order
-  // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOfModern(elements))
+  // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOf(elements))
   //                         where elements are hashed in insertion order
-  // - `FabricRegExp`:     hash(TAG_INSTANCE, hashStr("RegExp@1"), hashOfModern({source, flags, flavor}))
+  // - `FabricRegExp`:     hash(TAG_INSTANCE, hashStr("RegExp@1"), hashOf({source, flags, flavor}))
   // - `FabricEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `FabricEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   // - `FabricHash`:  hash(TAG_CONTENT_ID, hashStr(algTag),
