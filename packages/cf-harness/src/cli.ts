@@ -323,6 +323,37 @@ const parseSkillNames = (
   ];
 };
 
+const assertSkillsRootRealPathWithinWorkspace = async (
+  workspace: string,
+  skillsRoot: string,
+): Promise<void> => {
+  let workspaceRealPath: string;
+  try {
+    workspaceRealPath = await Deno.realPath(workspace);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      throw new Error(`workspace must exist: ${workspace}`);
+    }
+    throw error;
+  }
+
+  let skillsRootRealPath: string;
+  try {
+    skillsRootRealPath = await Deno.realPath(skillsRoot);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      throw new Error(`--skills-root must exist: ${skillsRoot}`);
+    }
+    throw error;
+  }
+
+  if (
+    !isHarnessSkillRootWithinWorkspace(workspaceRealPath, skillsRootRealPath)
+  ) {
+    throw new Error("--skills-root must stay within the workspace");
+  }
+};
+
 const resolvePrompt = async (
   args: ReturnType<typeof parseArgs>,
   cwd: string,
@@ -490,6 +521,9 @@ export const parseCfHarnessCliArgs = async (
   if (resumeRun !== undefined && skillNames.length > 0) {
     throw new Error("--skill preloading is not supported with --resume-run");
   }
+  if (skillsRoot !== undefined) {
+    await assertSkillsRootRealPathWithinWorkspace(workspace, skillsRoot);
+  }
   const artifactRoot = resolve(
     typeof args["artifact-root"] === "string"
       ? args["artifact-root"]
@@ -652,12 +686,18 @@ export const resolveCfHarnessCliSystemPrompt = (
       CfHarnessCliConfig,
       "workspace" | "focusRoot" | "systemPrompt" | "outputMode"
     >
-    & { skillNames?: readonly string[] },
+    & {
+      skillCatalogEnabled?: boolean;
+      skillNames?: readonly string[];
+    },
 ): string | undefined => {
   const base = config.outputMode === "batch"
     ? config.systemPrompt
     : buildCfHarnessOperatorSystemPrompt(config);
-  if ((config.skillNames ?? []).length === 0) {
+  if (
+    (config.skillNames ?? []).length === 0 ||
+    config.skillCatalogEnabled === false
+  ) {
     return base;
   }
   const skillGuidance = [

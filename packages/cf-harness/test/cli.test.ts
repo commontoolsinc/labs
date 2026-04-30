@@ -185,36 +185,50 @@ Deno.test("parseCfHarnessCliArgs supports stream-events flag", async () => {
   assertEquals(parsed.streamEvents, true);
 });
 
-Deno.test("parseCfHarnessCliArgs supports skills root and skill preloads", async () => {
-  const parsed = await parseCfHarnessCliArgs(
-    [
-      "--workspace",
-      "/tmp/project",
-      "--prompt",
-      "hi",
-      "--skills-root",
-      "labs/skills",
-      "--skill",
-      "pattern-dev",
-      "--skill",
-      "pattern-dev",
-      "--skill",
-      "cf",
-      "--no-skill-catalog",
-    ],
-    {
-      cwd: "/tmp/project/packages/cf-harness",
-      env: {},
-    },
-  );
+Deno.test({
+  name: "parseCfHarnessCliArgs supports skills root and skill preloads",
+  permissions: { read: true, write: true },
+  async fn() {
+    const workspace = await Deno.makeTempDir({
+      prefix: "cf-harness-cli-skills-",
+    });
+    try {
+      await Deno.mkdir(join(workspace, "labs", "skills"), {
+        recursive: true,
+      });
+      const parsed = await parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--prompt",
+          "hi",
+          "--skills-root",
+          "labs/skills",
+          "--skill",
+          "pattern-dev",
+          "--skill",
+          "pattern-dev",
+          "--skill",
+          "cf",
+          "--no-skill-catalog",
+        ],
+        {
+          cwd: join(workspace, "packages", "cf-harness"),
+          env: {},
+        },
+      );
 
-  if ("help" in parsed) {
-    throw new Error("expected config result");
-  }
-  assertEquals(parsed.skillsRoot, "/tmp/project/labs/skills");
-  assertEquals(parsed.skillsRootSandboxPath, "/workspace/labs/skills");
-  assertEquals(parsed.skillNames, ["pattern-dev", "cf"]);
-  assertEquals(parsed.skillCatalogEnabled, false);
+      if ("help" in parsed) {
+        throw new Error("expected config result");
+      }
+      assertEquals(parsed.skillsRoot, join(workspace, "labs", "skills"));
+      assertEquals(parsed.skillsRootSandboxPath, "/workspace/labs/skills");
+      assertEquals(parsed.skillNames, ["pattern-dev", "cf"]);
+      assertEquals(parsed.skillCatalogEnabled, false);
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+    }
+  },
 });
 
 Deno.test("parseCfHarnessCliArgs rejects skill preloads without a skills root", async () => {
@@ -252,6 +266,51 @@ Deno.test("parseCfHarnessCliArgs rejects skills root outside workspace", async (
     Error,
     "--skills-root must stay within the workspace",
   );
+});
+
+Deno.test({
+  name:
+    "parseCfHarnessCliArgs rejects skills root symlinks that resolve outside workspace",
+  permissions: { read: true, write: true },
+  async fn() {
+    const workspace = await Deno.makeTempDir({
+      prefix: "cf-harness-workspace-",
+    });
+    const outside = await Deno.makeTempDir({
+      prefix: "cf-harness-outside-skills-",
+    });
+    try {
+      await Deno.mkdir(join(outside, "pattern-dev"), { recursive: true });
+      await Deno.symlink(outside, join(workspace, "skills-link"), {
+        type: "dir",
+      });
+
+      await assertRejects(
+        () =>
+          parseCfHarnessCliArgs(
+            [
+              "--workspace",
+              workspace,
+              "--prompt",
+              "hi",
+              "--skills-root",
+              "skills-link",
+              "--skill",
+              "pattern-dev",
+            ],
+            {
+              cwd: workspace,
+              env: {},
+            },
+          ),
+        Error,
+        "--skills-root must stay within the workspace",
+      );
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(outside, { recursive: true });
+    }
+  },
 });
 
 Deno.test("parseCfHarnessCliArgs rejects skill preloads while resuming", async () => {
@@ -1534,6 +1593,30 @@ Deno.test("resolveCfHarnessCliSystemPrompt bypasses operator guidance in batch m
     }),
     "You are a Loom batch worker.",
   );
+});
+
+Deno.test("resolveCfHarnessCliSystemPrompt honors disabled skill catalog guidance", () => {
+  const prompt = resolveCfHarnessCliSystemPrompt({
+    workspace: "/tmp/project",
+    focusRoot: "/tmp/project/packages/cf-harness",
+    outputMode: "operator",
+    skillCatalogEnabled: false,
+    skillNames: ["pattern-dev"],
+  });
+
+  assertEquals(prompt?.includes("Configured skills guidance:"), false);
+});
+
+Deno.test("resolveCfHarnessCliSystemPrompt includes enabled skill guidance", () => {
+  const prompt = resolveCfHarnessCliSystemPrompt({
+    workspace: "/tmp/project",
+    focusRoot: "/tmp/project/packages/cf-harness",
+    outputMode: "operator",
+    skillCatalogEnabled: true,
+    skillNames: ["pattern-dev"],
+  });
+
+  assertEquals(prompt?.includes("Configured skills guidance:"), true);
 });
 
 Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool results", () => {
