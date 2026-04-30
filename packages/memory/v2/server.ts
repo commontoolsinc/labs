@@ -3,7 +3,6 @@ import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
 import {
-  type Blob,
   type ClientCommit,
   type ClientMessage,
   decodeMemoryV2Boundary,
@@ -13,7 +12,6 @@ import {
   type GraphQueryResult,
   type HelloMessage,
   isMemoryV2Flags,
-  type Reference,
   type ResponseMessage,
   type ServerMessage,
   type SessionAckRequest,
@@ -903,11 +901,6 @@ export class Server {
       sessionId,
       effect: sync,
     };
-  }
-
-  async getBlob(space: string, hash: string): Promise<Blob | null> {
-    const engine = await this.openEngine(space);
-    return Engine.getBlob(engine, hash as Reference);
   }
 
   markSpaceDirty(space: string, dirtyIds?: Iterable<string>): void {

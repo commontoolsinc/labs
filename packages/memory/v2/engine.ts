@@ -3,7 +3,6 @@ import type { FabricValue } from "../interface.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
 import {
-  type Blob,
   type BranchName,
   type ClientCommit,
   decodeMemoryV2Boundary,
@@ -754,19 +753,6 @@ export const headSeq = (
 
 export const serverSeq = (engine: Engine): number => {
   return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
-};
-
-export const getBlob = (engine: Engine, hash: Reference): Blob | null => {
-  const row = engine.statements.selectBlob.get({ hash }) as BlobRow | undefined;
-  if (!row) {
-    return null;
-  }
-  return {
-    hash,
-    value: new Uint8Array(row.data),
-    contentType: row.content_type,
-    size: row.size,
-  };
 };
 
 export const applyCommit = (

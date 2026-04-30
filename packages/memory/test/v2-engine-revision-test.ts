@@ -1,13 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
-import {
-  applyCommit,
-  close,
-  getBlob,
-  open,
-  ProtocolError,
-  read,
-} from "../v2/engine.ts";
+import { applyCommit, close, open, ProtocolError, read } from "../v2/engine.ts";
 
 const createEngine = async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
