@@ -783,6 +783,18 @@ Deno.test("CfHarnessPromptLoop validates structured subagent returns and linkifi
       true,
     );
     assertEquals(
+      requestBodies[1].messages[0].content.includes(
+        "return only the JSON value requested",
+      ),
+      true,
+    );
+    assertEquals(
+      requestBodies[1].messages[0].content.includes(
+        "return a concise summary",
+      ),
+      false,
+    );
+    assertEquals(
       requestBodies[1].messages[1].content.includes(
         "Return a single JSON value matching the return schema",
       ),

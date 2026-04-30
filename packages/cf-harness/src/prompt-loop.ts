@@ -561,6 +561,7 @@ const createSubagentInputSummary = async (
 const buildSubagentSystemPrompt = (
   currentDir: string,
   profileConfig: HarnessSubagentProfileConfig,
+  options: { structuredReturn: boolean } = { structuredReturn: false },
 ): string =>
   [
     "You are a focused cf-harness subagent working on one delegated task.",
@@ -585,11 +586,18 @@ const buildSubagentSystemPrompt = (
       : []),
     `Current sandbox directory: ${currentDir}`,
     "",
-    "When finished, return a concise summary with:",
-    "- what you did or investigated",
-    "- what you found or changed",
-    "- files modified, if any",
-    "- issues or blockers, if any",
+    ...(options.structuredReturn
+      ? [
+        "When finished, return only the JSON value requested by the task's return schema.",
+        "Do not include markdown, prose, explanations, summaries, or text outside that JSON value.",
+      ]
+      : [
+        "When finished, return a concise summary with:",
+        "- what you did or investigated",
+        "- what you found or changed",
+        "- files modified, if any",
+        "- issues or blockers, if any",
+      ]),
   ].join("\n");
 
 const buildSubagentUserPrompt = (input: DelegateTaskToolInput): string =>
@@ -1844,6 +1852,7 @@ export class CfHarnessPromptLoop {
         systemPrompt: buildSubagentSystemPrompt(
           childEngine.getRunState().currentDir,
           profileConfig,
+          { structuredReturn: delegateInput.returnSchema !== undefined },
         ),
         prompt: buildSubagentUserPrompt(delegateInput),
         model: options.model,
