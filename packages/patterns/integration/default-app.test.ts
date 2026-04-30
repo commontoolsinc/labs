@@ -2,7 +2,7 @@ import { env, Page, waitFor } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -29,6 +29,22 @@ type BrowserActionRunTraceAddress = {
 };
 
 const { FRONTEND_URL, SPACE_NAME } = env;
+
+export function parseCaptureSeriesCount(raw: string | undefined): number {
+  if (!raw) return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.floor(value);
+}
+
+Deno.test("parseCaptureSeriesCount clamps invalid capture env values", () => {
+  assertEquals(parseCaptureSeriesCount(undefined), 0);
+  assertEquals(parseCaptureSeriesCount(""), 0);
+  assertEquals(parseCaptureSeriesCount("foo"), 0);
+  assertEquals(parseCaptureSeriesCount("-1"), 0);
+  assertEquals(parseCaptureSeriesCount("2.8"), 2);
+});
+
 const CAPTURE_TRIGGER_TRACE = (() => {
   try {
     return Deno.env.get("CF_CAPTURE_TRIGGER_TRACE") === "1";
@@ -73,40 +89,43 @@ const CAPTURE_SOURCE_LOCATION_LOG = (() => {
 })();
 const CAPTURE_ACTION_RUN_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_CAPTURE_ACTION_RUN_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_CAPTURE_ACTION_RUN_SERIES"),
+    );
   } catch {
     return 0;
   }
 })();
 const CAPTURE_HOME_LOAD_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_CAPTURE_HOME_LOAD_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(Deno.env.get("CF_CAPTURE_HOME_LOAD_SERIES"));
   } catch {
     return 0;
   }
 })();
 const NOTE_CREATE_TIMING_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_NOTE_CREATE_TIMING_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_NOTE_CREATE_TIMING_SERIES"),
+    );
   } catch {
     return 0;
   }
 })();
 const CAPTURE_NOTE_CREATE_PROFILE_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_CAPTURE_NOTE_CREATE_PROFILE_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_CAPTURE_NOTE_CREATE_PROFILE_SERIES"),
+    );
   } catch {
     return 0;
   }
 })();
 const CAPTURE_EVENT_INVOCATION_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_CAPTURE_EVENT_INVOCATION_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_CAPTURE_EVENT_INVOCATION_SERIES"),
+    );
   } catch {
     return 0;
   }
