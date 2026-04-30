@@ -7,7 +7,7 @@
  * the full algorithm.
  */
 
- import {
+import {
   createHasher,
   type IncrementalHasher,
   sha256,
