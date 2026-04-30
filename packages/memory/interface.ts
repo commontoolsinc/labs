@@ -776,10 +776,8 @@ export type ACL = {
 export type URI = `${string}:${string}`;
 // Mime type or Media Type -- often called 'the'
 export type MIME = `${string}/${string}`;
-// TODO(danfuzz): The `b`-prefixed (legacy merkle-reference) format is no
-// longer produced; once existing data has been migrated, this branch can be
-// removed.
-export type CauseString = `b${string}` | `fid1:${string}`;
+// Fact cause. Matches the content hash string format defined by `data-model`.
+export type CauseString = `fid1:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/transact",

@@ -1,6 +1,6 @@
 import type { URI } from "./interface.ts";
 import type { FabricValue } from "@commonfabric/api";
-import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import {
   Assertion,
   Fact,
@@ -12,12 +12,7 @@ import {
   State,
   Unclaimed,
 } from "./interface.ts";
-import {
-  hashObjectFromJson,
-  hashObjectFromString,
-  hashOf,
-  isHashObject,
-} from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 /**
  * Creates an unclaimed fact.
@@ -72,7 +67,7 @@ export const assert = <
     the,
     of,
     is,
-    cause: isHashObject(cause)
+    cause: (cause instanceof FabricHash)
       ? cause
       : cause == null
       ? unclaimedRef({ the, of })
@@ -113,7 +108,7 @@ export const iterate = function* (
         yield {
           the: the as MIME,
           of: of as URI,
-          cause: hashObjectFromString(cause),
+          cause: FabricHash.fromString(cause),
           since,
           ...(is ? { is } : undefined),
         };
@@ -171,12 +166,12 @@ export function normalizeFact<
       | { "/": string };
   },
 ): Assertion<T, Of, Is> | Retraction<T, Of, Is> {
-  const newCause = isHashObject(arg.cause)
+  const newCause = (arg.cause instanceof FabricHash)
     ? arg.cause
     : arg.cause == null
     ? unclaimedRef({ the: arg.the, of: arg.of })
     : "/" in arg.cause
-    ? hashObjectFromJson(arg.cause as unknown as { "/": string })
+    ? FabricHash.fromJson(arg.cause as unknown as { "/": string })
     : hashOf({
       the: arg.cause.the,
       of: arg.cause.of,

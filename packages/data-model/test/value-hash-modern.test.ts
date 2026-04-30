@@ -880,6 +880,19 @@ describe("modernHash", () => {
     expect(hex(modernHash(cid1))).not.toBe(hex(modernHash(cid2)));
   });
 
+  it("FabricHash in a plain object works (doesn't `throw`)", () => {
+    // This is meant to capture the essence of using `FabricHash` instances as
+    // things like content IDs inside `Fact` objects.
+    const fact = {
+      cause: new FabricHash(new Uint8Array([0x05, 0x06]), "fid1"),
+      the: "text/plain",
+      of: "entity:456",
+      is: { value: 914 },
+    };
+
+    expect(() => modernHashRaw(fact)).not.toThrow();
+  });
+
   // =========================================================================
   // modernHash returns FabricHash
   // =========================================================================

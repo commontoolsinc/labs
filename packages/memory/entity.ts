@@ -1,7 +1,5 @@
-import {
-  hashObjectFromJson,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 export interface Entity<T extends null | NonNullable<unknown>> {
@@ -33,7 +31,7 @@ export const fromString = <T extends null | NonNullable<unknown>>(
       }`,
     );
   } else {
-    return { "@": hashObjectFromJson({ "/": source.slice(1) }).toJSON()["/"] };
+    return { "@": FabricHash.fromJson({ "/": source.slice(1) }).toJSON()["/"] };
   }
 };
 

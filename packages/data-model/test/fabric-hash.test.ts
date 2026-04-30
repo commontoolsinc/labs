@@ -1,12 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricHash } from "../fabric-hash.ts";
-import {
-  hashObjectFromJson,
-  hashObjectFromString,
-  hashOf,
-  isHashObject,
-} from "../value-hash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);
@@ -105,60 +99,31 @@ describe("FabricHash", () => {
 // -----------------------------------------------------------------
 
 describe("stuff from value-hash.ts", () => {
-  it("hashObjectFromJson round-trips through FabricHash", () => {
+  it("FabricHash.fromJson() works on the result of instance method FabricHash.toJSON()", () => {
     const original = new FabricHash(SAMPLE_HASH, "fid1");
     const json = original.toJSON();
-    const reconstructed = hashObjectFromJson(json);
+    const reconstructed = FabricHash.fromJson(json);
 
     expect(reconstructed).toBeInstanceOf(FabricHash);
-    const cid = reconstructed as unknown as FabricHash;
-    expect(cid.toString()).toBe(original.toString());
-    expect(cid.bytes).toEqual(original.bytes);
+    expect(reconstructed.toString()).toBe(original.toString());
+    expect(reconstructed.bytes).toEqual(original.bytes);
   });
 
-  it("hashObjectFromString round-trips through FabricHash", () => {
+  it("FabricHash.fromString() works on the result of instance method FabricHash.toString()", () => {
     // Use a non-fid1 tag to verify the parser doesn't hardcode it.
     const original = new FabricHash(SAMPLE_HASH, "sha3");
     const str = original.toString();
-    const reconstructed = hashObjectFromString(str);
+    const reconstructed = FabricHash.fromString(str);
 
     expect(reconstructed).toBeInstanceOf(FabricHash);
-    const cid = reconstructed as unknown as FabricHash;
-    expect(cid.toString()).toBe(original.toString());
-    expect(cid.bytes).toEqual(original.bytes);
-    expect(cid.tag).toBe("sha3");
+    expect(reconstructed.toString()).toBe(original.toString());
+    expect(reconstructed.bytes).toEqual(original.bytes);
+    expect(reconstructed.tag).toBe("sha3");
   });
 
-  it("hashObjectFromString throws on invalid format (no colon)", () => {
-    expect(() => hashObjectFromString("nocolonhere")).toThrow(
+  it("FabricHash.fromString() throws on invalid format (no colon)", () => {
+    expect(() => FabricHash.fromString("nocolonhere")).toThrow(
       "Invalid content hash string",
     );
-  });
-
-  it("isHashObject returns true for FabricHash", () => {
-    const cid = new FabricHash(SAMPLE_HASH, "fid1");
-    expect(isHashObject(cid)).toBe(true);
-  });
-
-  it("hashOf() returns FabricHash", () => {
-    const result = hashOf({ hello: "world" });
-    expect(result).toBeInstanceOf(FabricHash);
-  });
-
-  it("nested hashOf() works (no throw on FabricHash in value tree)", () => {
-    // First hashOf produces a FabricHash.
-    const innerRef = hashOf({ the: "text/plain", of: "entity:123" });
-    expect(innerRef).toBeInstanceOf(FabricHash);
-
-    // Wrap it in a fact-like structure and hashOf again. hashOfModern
-    // handles FabricHash via TAG_CONTENT_ID, so this must not throw.
-    const outerSource = {
-      cause: innerRef,
-      the: "text/plain",
-      of: "entity:456",
-      is: { value: 42 },
-    };
-    const outerRef = hashOf(outerSource);
-    expect(outerRef).toBeInstanceOf(FabricHash);
   });
 });
