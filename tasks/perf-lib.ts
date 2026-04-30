@@ -779,7 +779,7 @@ export function formatMetricValue(name: string, value: number): string {
  * Reads and parses the GHA event. Returns `undefined` if it can't be done.
  */
 export async function readAndParseEvent(
-  eventPath?: string
+  eventPath?: string,
 ): Promise<object | undefined> {
   eventPath ??= Deno.env.get("GITHUB_EVENT_PATH");
 
@@ -819,7 +819,7 @@ export async function fetchPRForCommit(
 /** Fetch the full body of a PR by number. */
 export async function fetchPRBody(
   prNumber: number,
-  eventPath?: string | undefined
+  eventPath?: string | undefined,
 ): Promise<string> {
   const bodyFromEvent = await readPRBodyFromEventPayload(prNumber, eventPath);
   if (bodyFromEvent !== undefined) {
