@@ -2,8 +2,6 @@ import { assertAlmostEquals, assertEquals } from "@std/assert";
 import {
   computeBaseline,
   extractMetrics,
-  GithubApiError,
-  isGithubRateLimitError,
   type Job,
   readPRBodyFromEventPayload,
   type Step,
@@ -126,31 +124,4 @@ Deno.test("readPRBodyFromEventPayload reads matching pull request bodies", async
   } finally {
     await Deno.remove(eventPath);
   }
-});
-
-Deno.test("isGithubRateLimitError recognizes GitHub API quota failures", () => {
-  assertEquals(
-    isGithubRateLimitError(
-      new GithubApiError(
-        403,
-        "/repos/commontoolsinc/labs/actions/runs/1/jobs",
-        '{"message":"API rate limit exceeded for installation"}',
-      ),
-    ),
-    true,
-  );
-  assertEquals(
-    isGithubRateLimitError(
-      new GithubApiError(
-        403,
-        "/repos/commontoolsinc/labs/actions/runs/1/jobs",
-        '{"message":"Resource not accessible by integration"}',
-      ),
-    ),
-    false,
-  );
-  assertEquals(
-    isGithubRateLimitError(new Error("API rate limit exceeded")),
-    false,
-  );
 });

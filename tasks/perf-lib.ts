@@ -172,33 +172,12 @@ export function apiHeaders(): Record<string, string> {
   };
 }
 
-export class GithubApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly path: string,
-    readonly body: string,
-    options?: { method?: string },
-  ) {
-    super(
-      `GitHub API${
-        options?.method === undefined ? "" : ` ${options.method}`
-      } ${status}: ${path}\n${body}`,
-    );
-    this.name = "GithubApiError";
-  }
-}
-
-export function isGithubRateLimitError(error: unknown): boolean {
-  return error instanceof GithubApiError && error.status === 403 &&
-    /rate limit/i.test(error.body);
-}
-
 export async function githubGet<T>(path: string): Promise<T> {
   const url = path.startsWith("http") ? path : `https://api.github.com${path}`;
   const resp = await fetch(url, { headers: apiHeaders() });
   if (!resp.ok) {
     const body = await resp.text();
-    throw new GithubApiError(resp.status, path, body);
+    throw new Error(`GitHub API ${resp.status}: ${path}\n${body}`);
   }
   return resp.json();
 }
@@ -214,7 +193,7 @@ export async function githubPost<T>(
   });
   if (!resp.ok) {
     const text = await resp.text();
-    throw new GithubApiError(resp.status, path, text, { method: "POST" });
+    throw new Error(`GitHub API POST ${resp.status}: ${path}\n${text}`);
   }
   return resp.json();
 }
@@ -230,7 +209,7 @@ export async function githubPatch<T>(
   });
   if (!resp.ok) {
     const text = await resp.text();
-    throw new GithubApiError(resp.status, path, text, { method: "PATCH" });
+    throw new Error(`GitHub API PATCH ${resp.status}: ${path}\n${text}`);
   }
   return resp.json();
 }
