@@ -108,8 +108,8 @@ Represents a unique identifier for a specific **mutable** memory and is
 represented by `of` field.
 
 At the moment entities are identified by an arbitrary string identifier,
-although it is recommended to derive them from seed data e.g. using
-[merkle reference]s.
+although it is recommended to derive them from seed data e.g. using [merkle
+reference]s.
 
 When determinism is not relevant, [UUID]s could be used instead.
 
@@ -195,7 +195,6 @@ type Notification = { [space: string]: State };
 ```
 
 [did:key]: https://w3c-ccg.github.io/did-method-key/
-[merkle reference]: https://github.com/Gozala/merkle-reference/blob/main/docs/spec.md
 [UUID]: https://en.wikipedia.org/wiki/Universally_unique_identifier
 [CAS]: https://en.wikipedia.org/wiki/Compare-and-swap
 [IPLD Links in DAG-JSON]: https://ipld.io/specs/codecs/dag-json/spec/#links
