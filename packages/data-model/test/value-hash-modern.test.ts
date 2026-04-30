@@ -38,7 +38,7 @@ function modernHash(value: FabricValue): Uint8Array {
 // Primitive types
 // =========================================================================
 
-describe("modernHash", () => {
+describe("hashOf()", () => {
   // --- null ---
 
   it("null produces TAG_NULL byte stream", () => {
@@ -396,7 +396,7 @@ describe("modernHash", () => {
   it("FabricError matches byte stream built from DECONSTRUCT output", () => {
     // Build the expected byte stream programmatically because the
     // deconstructed state includes `stack` which is environment-dependent.
-    // We construct the stream the same way modernHash does, then SHA-256 it.
+    // We construct the stream the same way `hashOf()` does, then SHA-256 it.
     const error = new FabricError(new Error("test"));
     const enc = new TextEncoder();
 
@@ -892,10 +892,10 @@ describe("modernHash", () => {
   });
 
   // =========================================================================
-  // modernHash returns FabricHash
+  // hashOf() returns FabricHash
   // =========================================================================
 
-  it("modernHash returns FabricHash with fid1 tag", () => {
+  it("hashOf() returns FabricHash with fid1 tag", () => {
     const result = hashOf(42);
     expect(result).toBeInstanceOf(FabricHash);
     expect(result.tag).toBe("fid1");
@@ -920,7 +920,7 @@ describe("modernHash", () => {
 // Caching behavior
 // ---------------------------------------------------------------------------
 
-describe("modernHash caching", () => {
+describe("hashOf() caching", () => {
   it("null returns same object (precomputed constant)", () => {
     const a = hashOf(null);
     const b = hashOf(null);
@@ -991,7 +991,7 @@ describe("modernHash caching", () => {
 // Native instance hashing (on-the-fly conversion)
 // ---------------------------------------------------------------------------
 
-describe("modernHash native instances", () => {
+describe("hashOf() native instances", () => {
   // --- Date ---
 
   it("native Date hashes without throwing", () => {
