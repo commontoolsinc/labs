@@ -172,16 +172,27 @@ The provisional browser profile is the only CLI-supported path to
 `agent-browser`, while the parent still receives only the normal sanitized
 subagent result. Browser/page output is treated as untrusted child-local data;
 with a `returnSchema`, parent-visible free-form strings are replaced by opaque
-links while raw observations stay in child artifacts. The host shell is
-policy-restricted to `agent-browser`, `agent-browser` discovery
-(`which agent-browser`, `command -v agent-browser`), `pwd`, `ls`, and bounded
-workspace-local `find` commands. `agent-browser eval` is not available in this
-profile; browser subagents should inspect pages with commands such as
-`snapshot`, `get`, `find`, locator actions, and normal browser interactions.
+links while raw observations stay in child artifacts. The browser child can read
+workspace files but does not receive `write_file`, so it should return findings
+through the structured return channel rather than by writing browser
+observations into the workspace. The host shell is policy-restricted to
+`agent-browser`, `agent-browser` discovery (`which agent-browser`,
+`command -v agent-browser`), `pwd`, `ls`, and bounded workspace-local `find`
+commands. `agent-browser eval` is not available in this profile; browser
+subagents should inspect pages with commands such as `snapshot`, `get`, `find`,
+locator actions, and normal browser interactions.
+
+For browser-profile runs, prefer a host artifact root outside the workspace. Raw
+child artifacts are retained for operator analysis, but they are not meant to
+become ordinary workspace inputs for the parent model.
 
 ```bash
+ROOT=/tmp/cf-harness-browser-demo
+mkdir -p "$ROOT/workspace" "$ROOT/artifacts"
+
 deno task run -- \
-  --workspace /path/to/workspace \
+  --workspace "$ROOT/workspace" \
+  --artifact-root "$ROOT/artifacts" \
   --gateway-auth-mode none \
   --allow-tool delegate_task \
   --allow-subagent-profile browser \
