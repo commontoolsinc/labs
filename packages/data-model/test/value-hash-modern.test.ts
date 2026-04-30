@@ -1,7 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashStringOf } from "../value-hash.ts";
-import { hashOfModern as modernHashRaw } from "../value-hash-modern.ts";
+import { hashOf, hashStringOf } from "../value-hash.ts";
 import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { FabricHash } from "../fabric-hash.ts";
@@ -31,8 +30,8 @@ function hex(hash: Uint8Array): string {
 }
 
 /** Extract the raw hash bytes from modernHash for comparison. */
-function modernHash(value: unknown): Uint8Array {
-  return modernHashRaw(value).bytes;
+function modernHash(value: FabricValue): Uint8Array {
+  return hashOf(value).bytes;
 }
 
 // =========================================================================
@@ -652,7 +651,7 @@ describe("modernHash", () => {
   });
 
   it("all hashes are 32 bytes (SHA-256)", () => {
-    const values: unknown[] = [
+    const values: FabricValue[] = [
       null,
       true,
       false,
@@ -889,7 +888,7 @@ describe("modernHash", () => {
       is: { value: 914 },
     };
 
-    expect(() => modernHashRaw(fact)).not.toThrow();
+    expect(() => hashOf(fact)).not.toThrow();
   });
 
   // =========================================================================
@@ -897,14 +896,14 @@ describe("modernHash", () => {
   // =========================================================================
 
   it("modernHash returns FabricHash with fid1 tag", () => {
-    const result = modernHashRaw(42);
+    const result = hashOf(42);
     expect(result).toBeInstanceOf(FabricHash);
     expect(result.tag).toBe("fid1");
     expect(result.length).toBe(32);
   });
 
   it("FabricHash.toString() produces fid1:<base64>", () => {
-    const result = modernHashRaw(42);
+    const result = hashOf(42);
     const str = result.toString();
     expect(str.startsWith("fid1:")).toBe(true);
     // Should not contain padding (unpadded base64).
@@ -912,7 +911,7 @@ describe("modernHash", () => {
   });
 
   it("FabricHash is frozen (FabricPrimitive)", () => {
-    const result = modernHashRaw(42);
+    const result = hashOf(42);
     expect(Object.isFrozen(result)).toBe(true);
   });
 });
@@ -923,67 +922,67 @@ describe("modernHash", () => {
 
 describe("modernHash caching", () => {
   it("null returns same object (precomputed constant)", () => {
-    const a = modernHashRaw(null);
-    const b = modernHashRaw(null);
+    const a = hashOf(null);
+    const b = hashOf(null);
     expect(a).toBe(b);
   });
 
   it("undefined returns same object (precomputed constant)", () => {
-    const a = modernHashRaw(undefined);
-    const b = modernHashRaw(undefined);
+    const a = hashOf(undefined);
+    const b = hashOf(undefined);
     expect(a).toBe(b);
   });
 
   it("true returns same object (precomputed constant)", () => {
-    const a = modernHashRaw(true);
-    const b = modernHashRaw(true);
+    const a = hashOf(true);
+    const b = hashOf(true);
     expect(a).toBe(b);
   });
 
   it("false returns same object (precomputed constant)", () => {
-    const a = modernHashRaw(false);
-    const b = modernHashRaw(false);
+    const a = hashOf(false);
+    const b = hashOf(false);
     expect(a).toBe(b);
   });
 
   it("primitive string cache returns same object", () => {
-    const a = modernHashRaw("cache-test-string");
-    const b = modernHashRaw("cache-test-string");
+    const a = hashOf("cache-test-string");
+    const b = hashOf("cache-test-string");
     expect(a).toBe(b);
   });
 
   it("primitive number cache returns same object", () => {
-    const a = modernHashRaw(98765);
-    const b = modernHashRaw(98765);
+    const a = hashOf(98765);
+    const b = hashOf(98765);
     expect(a).toBe(b);
   });
 
   it("primitive bigint cache returns same object", () => {
-    const a = modernHashRaw(99887766n);
-    const b = modernHashRaw(99887766n);
+    const a = hashOf(99887766n);
+    const b = hashOf(99887766n);
     expect(a).toBe(b);
   });
 
   it("deep-frozen object cache returns same object", () => {
     const obj = Object.freeze({ a: 1, b: Object.freeze({ c: 2 }) });
-    const a = modernHashRaw(obj);
-    const b = modernHashRaw(obj);
+    const a = hashOf(obj);
+    const b = hashOf(obj);
     expect(a).toBe(b);
   });
 
   it("mutable object is not cached (recomputed each time)", () => {
     const obj = { a: 1 };
-    const a = modernHashRaw(obj);
+    const a = hashOf(obj);
     // Mutate
     obj.a = 2;
-    const b = modernHashRaw(obj);
+    const b = hashOf(obj);
     // Hashes should differ because the object changed
     expect(hex(a.bytes)).not.toEqual(hex(b.bytes));
   });
 
   it("different primitives with same type produce different hashes", () => {
-    const a = modernHashRaw("hello");
-    const b = modernHashRaw("world");
+    const a = hashOf("hello");
+    const b = hashOf("world");
     expect(hex(a.bytes)).not.toEqual(hex(b.bytes));
   });
 });
@@ -1060,26 +1059,26 @@ describe("modernHash native instances", () => {
   // --- Deferred types (not yet handled — these document known gaps) ---
 
   it("Map throws (deferred — needs recursive translation)", () => {
-    expect(() => modernHashRaw(new Map([["a", 1]]))).toThrow(
+    expect(() => hashOf(new Map([["a", 1]]))).toThrow(
       "unsupported object type",
     );
   });
 
   it("Set throws (deferred — needs recursive translation)", () => {
-    expect(() => modernHashRaw(new Set([1, 2, 3]))).toThrow(
+    expect(() => hashOf(new Set([1, 2, 3]))).toThrow(
       "unsupported object type",
     );
   });
 
   it("Error throws (deferred — needs recursive translation)", () => {
-    expect(() => modernHashRaw(new Error("test"))).toThrow(
+    expect(() => hashOf(new Error("test"))).toThrow(
       "unsupported object type",
     );
   });
 
   it("HasToJSON throws (deferred — needs recursive translation)", () => {
     const obj = { toJSON: () => "hello" };
-    expect(() => modernHashRaw(obj)).toThrow("unsupported object type");
+    expect(() => hashOf(obj)).toThrow("unsupported object type");
   });
 });
 
@@ -1107,18 +1106,18 @@ describe("hashStringOf", () => {
       undefined,
     ];
     for (const v of values) {
-      expect(hashStringOf(v)).toBe(modernHashRaw(v).hashString);
+      expect(hashStringOf(v)).toBe(hashOf(v).hashString);
     }
   });
 
   it("matches FabricHash.hashString for frozen objects", () => {
     const obj = Object.freeze({ a: 1, b: Object.freeze({ c: 2 }) });
-    expect(hashStringOf(obj)).toBe(modernHashRaw(obj).hashString);
+    expect(hashStringOf(obj)).toBe(hashOf(obj).hashString);
   });
 
   it("matches FabricHash.hashString for mutable objects", () => {
     const obj = { x: [1, 2, 3] };
-    expect(hashStringOf(obj)).toBe(modernHashRaw(obj).hashString);
+    expect(hashStringOf(obj)).toBe(hashOf(obj).hashString);
   });
 
   it("returns consistent results", () => {
