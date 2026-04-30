@@ -79,7 +79,10 @@ async function main() {
     Deno.exit(1);
   }
 
-  console.log("Triggered by event:\n%o\n", await readAndParseEvent());
+  console.log(
+    "::group::Triggered by event:\n%o\n::endgroup::",
+    await readAndParseEvent(),
+  );
 
   // 1. Check PR description for overrides, if there's a PR to check.
   let prOverrides;
