@@ -170,9 +170,12 @@ deno task run -- \
 The provisional browser profile is the only CLI-supported path to
 `bash-no-sandbox`. It gives the child a host shell so it can invoke
 `agent-browser`, while the parent still receives only the normal sanitized
-subagent result. The host shell is policy-restricted to `agent-browser`,
-`agent-browser` discovery (`which agent-browser`, `command -v agent-browser`),
-`pwd`, `ls`, and bounded workspace-local `find` commands:
+subagent result. Browser/page output is treated as untrusted child-local data;
+with a `returnSchema`, parent-visible free-form strings are replaced by opaque
+links while raw observations stay in child artifacts. The host shell is
+policy-restricted to `agent-browser`, `agent-browser` discovery
+(`which agent-browser`, `command -v agent-browser`), `pwd`, `ls`, and bounded
+workspace-local `find` commands:
 
 ```bash
 deno task run -- \
