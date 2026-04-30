@@ -13,6 +13,10 @@ import type { HarnessPolicyTrace } from "./contracts/policy-trace.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
+import type {
+  HarnessSkillActivations,
+  HarnessSkillRegistry,
+} from "./contracts/skill.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { HarnessCapabilitySnapshot } from "./diagnostics.ts";
@@ -77,6 +81,12 @@ export interface HarnessArtifactStore {
     report: HarnessRunReport,
   ): Promise<string>;
   persistRunManifest?(manifest: HarnessRunManifest): Promise<string>;
+  persistSkillRegistry?(
+    registry: HarnessSkillRegistry,
+  ): Promise<string>;
+  persistSkillActivations?(
+    activations: HarnessSkillActivations,
+  ): Promise<string>;
   persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,
@@ -154,6 +164,24 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     await ensureDir(this.runRoot);
     const path = join(this.runRoot, "run-manifest.json");
     await writeJsonFile(path, manifest);
+    return path;
+  }
+
+  async persistSkillRegistry(
+    registry: HarnessSkillRegistry,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "skill-registry.json");
+    await writeJsonFile(path, registry);
+    return path;
+  }
+
+  async persistSkillActivations(
+    activations: HarnessSkillActivations,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "skill-activations.json");
+    await writeJsonFile(path, activations);
     return path;
   }
 

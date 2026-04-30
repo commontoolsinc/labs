@@ -35,6 +35,7 @@ Current Loom migration judgment:
 See also:
 
 - [LOOM_MIGRATION_NOTES.md](LOOM_MIGRATION_NOTES.md)
+- [SKILLS_SUPPORT_SPEC.md](SKILLS_SUPPORT_SPEC.md)
 
 ## Design Principles
 
@@ -237,6 +238,32 @@ Why:
   transition before broader browser policy exists
 - to avoid silently making host execution part of the parent/default tool
   surface
+
+### Stage K: Explicit Agent Skills preload
+
+- explicit `skillsRoot` configuration and CLI flags
+- explicit skill preload for batch/product runs
+- persisted skill registry and activation artifacts
+- CFC classification of skill content as context, not direct-command authority
+- context message insertion before the final task prompt
+
+Still planned:
+
+- eventual dedicated `load_skill` tool for model-driven activation
+- supporting-file/resource loading from skill directories
+- explicit subagent skill activation policy
+
+Why:
+
+- Pattern Factory depends on repo-local skills for acceptable implementation
+  quality
+- `cf-harness` should not need broad parent `bash` just to discover or load task
+  guidance
+- skill loading must be inspectable, resumable, and aligned with CFC policy
+
+See the package-local spec:
+
+- [SKILLS_SUPPORT_SPEC.md](SKILLS_SUPPORT_SPEC.md)
 
 ## Current Verified State
 

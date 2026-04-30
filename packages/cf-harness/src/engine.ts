@@ -25,6 +25,8 @@ import {
   setHarnessRunManifestPath,
   setHarnessRunReportPath,
   setHarnessRunStatus,
+  setHarnessSkillActivations,
+  setHarnessSkillRegistry,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
 import {
@@ -54,6 +56,10 @@ import {
 } from "./contracts/policy-trace.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
+import type {
+  HarnessSkillActivations,
+  HarnessSkillRegistry,
+} from "./contracts/skill.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import {
   createToolResultRef,
@@ -398,6 +404,36 @@ export class CfHarnessEngine {
       await this.persistRunState();
     }
     return manifestPath ?? this.#runState.runManifestPath;
+  }
+
+  async persistSkillRegistry(
+    registry: HarnessSkillRegistry,
+  ): Promise<string | undefined> {
+    const skillRegistryPath = await this.artifactStore
+      ?.persistSkillRegistry?.(registry);
+    this.#runState = setHarnessSkillRegistry(
+      this.#runState,
+      registry,
+      skillRegistryPath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return skillRegistryPath;
+  }
+
+  async persistSkillActivations(
+    activations: HarnessSkillActivations,
+  ): Promise<string | undefined> {
+    const skillActivationsPath = await this.artifactStore
+      ?.persistSkillActivations?.(activations);
+    this.#runState = setHarnessSkillActivations(
+      this.#runState,
+      activations,
+      skillActivationsPath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return skillActivationsPath;
   }
 
   nextToolOutputId(toolId: string): ToolOutputId {

@@ -6,7 +6,8 @@ use case.
 
 The package is intentionally early and experimental. It already has a real
 execution core, a bounded prompt/tool loop, persistence, resumability, a thin
-operator CLI, and the first pass of CFC-aware deny/recovery shaping.
+operator CLI, explicit Agent Skills preload, and the first pass of CFC-aware
+deny/recovery shaping.
 
 ## Why This Exists
 
@@ -44,9 +45,10 @@ What works today:
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
 - persisted run state, transcript, Loom run manifests, capability snapshots, and
-  tool outputs
+  tool outputs, plus explicit skill registry and activation artifacts
 - transcript-based resumability
 - package-local operator CLI
+- explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
 - CFC mode plumbing with:
   - `disabled`
   - `observe`
@@ -68,6 +70,8 @@ What is not done yet:
   returns
 - first-class browser operation policy on top of the provisional browser
   subagent profile
+- dynamic/model-driven Agent Skills activation and supporting-file resource
+  loading
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses
@@ -86,11 +90,15 @@ What is not done yet:
 - [src/artifacts.ts](src/artifacts.ts)
   - persisted run state, run manifest, transcript, capability snapshot, and tool
     output storage
+- [src/skills/](src/skills/)
+  - Agent Skills registry scanning, validation, and explicit preload context
 - [src/contracts/](src/contracts/)
-  - prompt-slot, run-manifest, observation, policy, run-report, subagent,
+  - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
     transcript, and tool-result contracts
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
+- [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
+  - staged Agent Skills support design
 
 ## Commands
 
@@ -122,6 +130,19 @@ deno task run -- \
   --gateway-auth-mode none \
   --prompt "Summarize the cf-harness package structure." \
   --print-transcript
+```
+
+Explicit skill preload:
+
+```bash
+deno task run -- \
+  --workspace /path/to/common-fabric-2 \
+  --cwd pattern-factory \
+  --gateway-auth-mode none \
+  --skills-root labs/skills \
+  --skill pattern-dev \
+  --skill pattern-implement \
+  --prompt "Build this pattern."
 ```
 
 Loom-backed batch runs may also pass a retained manifest:
@@ -194,6 +215,10 @@ Current caveat:
   - Loom's `cf-harness` adapter defaults to `none`
 - confirm the intended gateway/auth mode for the environment you are testing
   against
+- skills support is explicit preload only for now:
+  - `--skill` requires `--skills-root`
+  - skill preload is not supported with `--resume-run`
+  - dynamic `load_skill` activation is still planned
 
 ## Testing
 

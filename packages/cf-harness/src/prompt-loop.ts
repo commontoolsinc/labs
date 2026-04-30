@@ -101,6 +101,7 @@ export interface CreateHarnessPromptLoopOptions
 export interface RunHarnessPromptOptions {
   prompt: string;
   systemPrompt?: string;
+  contextMessages?: readonly string[];
   maxModelTurns?: number;
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
@@ -1196,6 +1197,9 @@ export class CfHarnessPromptLoop {
         ...(options.systemPrompt !== undefined
           ? [{ role: "system", content: options.systemPrompt } as const]
           : []),
+        ...(options.contextMessages ?? []).map((
+          content,
+        ) => ({ role: "user", content } as const)),
         { role: "user", content: options.prompt },
       ],
       model: options.model,
