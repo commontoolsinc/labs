@@ -1,6 +1,9 @@
 import type { JSONSchema } from "../builder/types.ts";
 import type { FabricValue, MemorySpace } from "@commonfabric/memory/interface";
 import type { Metadata } from "../storage/interface.ts";
+import type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
+
+export type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
 
 export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
   "runtime.setup.result-projection";
@@ -25,11 +28,6 @@ export const isCfcEnforcementMode = (
   CFC_ENFORCEMENT_MODES.includes(input as CfcEnforcementMode);
 
 export const DEFAULT_CFC_ENFORCEMENT_MODE: CfcEnforcementMode = "disabled";
-
-export type IFCLabel = {
-  confidentiality?: unknown[];
-  integrity?: unknown[];
-};
 
 export type CfcSandboxJsonValue =
   | null
@@ -184,6 +182,7 @@ export type WritePolicyInput =
     target: CfcAddress;
     source: CfcAddress;
     linkSchema?: JSONSchema;
+    cfcLabelView?: CfcLabelView;
   }
   | {
     kind: "sink-request";

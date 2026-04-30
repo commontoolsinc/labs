@@ -10,6 +10,7 @@ import type {
   PreparedDigestInput,
   WritePolicyInput,
 } from "./types.ts";
+import { cloneCfcLabelView } from "./label-view-core.ts";
 
 export const canonicalizeLogicalPath = (path: readonly string[]): string[] =>
   path[0] === "value" ? [...path.slice(1)] : [...path];
@@ -65,12 +66,15 @@ export const canonicalizeWritePolicyInput = (
       };
     case "trusted-event":
       return { ...input, target: canonicalizeAttemptedWrite(input.target) };
-    case "link-write":
+    case "link-write": {
+      const cfcLabelView = cloneCfcLabelView(input.cfcLabelView);
       return {
         ...input,
         target: canonicalizeAttemptedWrite(input.target),
         source: canonicalizeAttemptedWrite(input.source),
+        ...(cfcLabelView !== undefined && { cfcLabelView }),
       };
+    }
     case "custom":
       return input.target === undefined
         ? input

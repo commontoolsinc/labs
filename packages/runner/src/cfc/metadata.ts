@@ -1,7 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";
 import type { NormalizedFullLink } from "../link-utils.ts";
-import { ignoreReadForScheduling } from "../scheduler.ts";
 import type {
   IExtendedStorageTransaction,
   MediaType,
@@ -12,7 +11,6 @@ import { canonicalizeLogicalPath } from "./canonical.ts";
 import type { CfcMetadata } from "./types.ts";
 
 const INTERNAL_VERIFIER_META = {
-  ...ignoreReadForScheduling,
   ...internalVerifierRead,
 };
 
@@ -22,6 +20,10 @@ const isPrefix = (
 ): boolean =>
   left.length <= right.length &&
   left.every((segment, index) => segment === right[index]);
+
+const isCfcMetadata = (value: unknown): value is CfcMetadata =>
+  isRecord(value) && value.version === 1 && isRecord(value.labelMap) &&
+  Array.isArray(value.labelMap.entries);
 
 export const readStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,
@@ -35,12 +37,15 @@ export const readStoredCfcMetadata = (
     space: target.space,
     id: target.id as URI,
     type: target.type as MediaType,
-    path: [],
+    path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  return isRecord(document) && isRecord(document.cfc)
-    ? document.cfc as CfcMetadata
+  if (isCfcMetadata(document)) {
+    return document;
+  }
+  return isRecord(document) && isCfcMetadata(document.cfc)
+    ? document.cfc
     : undefined;
 };
 
