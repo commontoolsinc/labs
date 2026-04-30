@@ -20,6 +20,7 @@ export const tabListStyles = `
   .tab-list[data-orientation="horizontal"] {
     flex-direction: row;
     width: 100%;
+    min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
@@ -29,6 +30,10 @@ export const tabListStyles = `
 
   .tab-list[data-orientation="horizontal"]::-webkit-scrollbar {
     display: none;
+  }
+
+  .tab-list[data-orientation="horizontal"] ::slotted(cf-tab) {
+    flex-shrink: 0;
   }
 
   .tab-list[data-variant="chip"] {

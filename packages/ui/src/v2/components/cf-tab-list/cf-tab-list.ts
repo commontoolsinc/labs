@@ -51,6 +51,7 @@ export class CFTabList extends BaseElement {
 
       .tab-list[data-orientation="horizontal"] {
         flex-direction: row;
+        min-width: 0;
         overflow-x: auto;
         overflow-y: hidden;
         -webkit-overflow-scrolling: touch;
@@ -61,6 +62,11 @@ export class CFTabList extends BaseElement {
       /* Hide scrollbar for webkit browsers */
       .tab-list[data-orientation="horizontal"]::-webkit-scrollbar {
         display: none;
+      }
+
+      /* Prevent tabs from collapsing inside scroll container */
+      .tab-list[data-orientation="horizontal"] ::slotted(cf-tab) {
+        flex-shrink: 0;
       }
 
       /* Chip variant container */
