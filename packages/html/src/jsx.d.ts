@@ -4004,6 +4004,10 @@ interface CFTabListAttributes<T> extends CFHTMLAttributes<T> {
     | "horizontal"
     | "vertical"
     | CellLike<"horizontal" | "vertical">;
+  "variant"?:
+    | "underline"
+    | "chip"
+    | CellLike<"underline" | "chip">;
 }
 
 interface CFTabPanelAttributes<T> extends CFHTMLAttributes<T> {

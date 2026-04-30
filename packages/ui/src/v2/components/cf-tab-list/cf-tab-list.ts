@@ -7,11 +7,18 @@ import { BaseElement } from "../../core/base-element.ts";
  * @element cf-tab-list
  *
  * @attr {string} orientation - Layout orientation: "horizontal" | "vertical" (default: "horizontal")
+ * @attr {string} variant - Visual style variant: "underline" | "chip" (default: "underline")
  *
  * @slot - Default slot for cf-tab elements
  *
  * @example
  * <cf-tab-list orientation="horizontal">
+ *   <cf-tab value="tab1">Tab 1</cf-tab>
+ *   <cf-tab value="tab2">Tab 2</cf-tab>
+ * </cf-tab-list>
+ *
+ * @example
+ * <cf-tab-list orientation="horizontal" variant="chip">
  *   <cf-tab value="tab1">Tab 1</cf-tab>
  *   <cf-tab value="tab2">Tab 2</cf-tab>
  * </cf-tab-list>
@@ -44,6 +51,31 @@ export class CFTabList extends BaseElement {
 
       .tab-list[data-orientation="horizontal"] {
         flex-direction: row;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+      }
+
+      /* Hide scrollbar for webkit browsers */
+      .tab-list[data-orientation="horizontal"]::-webkit-scrollbar {
+        display: none;
+      }
+
+      /* Prevent tabs from collapsing inside scroll container */
+      .tab-list[data-orientation="horizontal"] ::slotted(cf-tab) {
+        flex-shrink: 0;
+      }
+
+      /* Chip variant container */
+      .tab-list[data-variant="chip"] {
+        background-color: transparent;
+        border-radius: 0;
+        padding: 0;
+        height: auto;
+        gap: var(--cf-spacing-2, 0.5rem);
       }
 
       .tab-list[data-orientation="vertical"] {
@@ -62,13 +94,16 @@ export class CFTabList extends BaseElement {
 
   static override properties = {
     orientation: { type: String },
+    variant: { type: String, reflect: true },
   };
 
   declare orientation: "horizontal" | "vertical";
+  declare variant: "underline" | "chip";
 
   constructor() {
     super();
     this.orientation = "horizontal";
+    this.variant = "underline";
   }
 
   override connectedCallback() {
@@ -79,17 +114,45 @@ export class CFTabList extends BaseElement {
     this.setAttribute("aria-orientation", this.orientation);
   }
 
+  override firstUpdated() {
+    const slot = this.shadowRoot?.querySelector("slot");
+    slot?.addEventListener("slotchange", () => this._propagateVariant());
+    this._propagateVariant();
+  }
+
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
 
     if (changedProperties.has("orientation")) {
       this.setAttribute("aria-orientation", this.orientation);
     }
+    if (changedProperties.has("variant")) {
+      this._propagateVariant();
+    }
+  }
+
+  /** Push variant down to child cf-tab elements so they can style without :host-context */
+  private _propagateVariant(): void {
+    const slot = this.shadowRoot?.querySelector("slot");
+    const tabs = slot?.assignedElements()
+      .filter((el) => el.tagName === "CF-TAB") ?? [];
+    for (const tab of tabs) {
+      if (this.variant === "underline") {
+        tab.removeAttribute("data-variant");
+      } else {
+        tab.setAttribute("data-variant", this.variant);
+      }
+    }
   }
 
   override render() {
     return html`
-      <div class="tab-list" part="list" data-orientation="${this.orientation}">
+      <div
+        class="tab-list"
+        part="list"
+        data-orientation="${this.orientation}"
+        data-variant="${this.variant}"
+      >
         <slot></slot>
       </div>
     `;
