@@ -175,7 +175,9 @@ with a `returnSchema`, parent-visible free-form strings are replaced by opaque
 links while raw observations stay in child artifacts. The host shell is
 policy-restricted to `agent-browser`, `agent-browser` discovery
 (`which agent-browser`, `command -v agent-browser`), `pwd`, `ls`, and bounded
-workspace-local `find` commands:
+workspace-local `find` commands. `agent-browser eval` is not available in this
+profile; browser subagents should inspect pages with commands such as
+`snapshot`, `get`, `find`, locator actions, and normal browser interactions.
 
 ```bash
 deno task run -- \

@@ -1465,6 +1465,12 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
     ),
     true,
   );
+  assertEquals(
+    requestBodies[1].messages[0].content.includes(
+      "Do not use agent-browser eval",
+    ),
+    true,
+  );
   assertEquals(output.subagent.manifest.profile, "browser");
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash-no-sandbox",
