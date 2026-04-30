@@ -48,12 +48,9 @@ import type {
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import {
-  hashObjectFromJson,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
@@ -900,7 +897,7 @@ class QuerySubscriptionInvocation<
     // This is a bit strange, but the revisions in here aren't proper
     // They've lost their Reference methods, so recreate them
     commit.revisions.forEach((item) => {
-      item.cause = hashObjectFromJson(JSON.parse(JSON.stringify(item.cause)));
+      item.cause = FabricHash.fromJson(JSON.parse(JSON.stringify(item.cause)));
     });
 
     return { ok: {} };
