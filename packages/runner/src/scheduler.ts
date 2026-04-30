@@ -534,6 +534,7 @@ export class Scheduler {
   private actionRunTrace: ActionRunTraceEntry[] = [];
   private collectTriggerTrace = false;
   private triggerTrace: TriggerTraceEntry[] = [];
+  private eventPreflightTelemetryEnabled = false;
   private changedWritesHistory: IMemorySpaceAddress[] = [];
   private conditionallyScheduledEffects = new Map<Action, number>();
 
@@ -1711,7 +1712,6 @@ export class Scheduler {
 
   queueExecution(): void {
     if (this.disposed) return;
-    this.cancelEventQueueWake();
     if (this.scheduled) return;
     this.pendingQueueTaskTimer = queueTask(() => {
       this.pendingQueueTaskTimer = null;
@@ -2595,6 +2595,14 @@ export class Scheduler {
     return this.pullMode;
   }
 
+  setEventPreflightTelemetryEnabled(enabled: boolean): void {
+    this.eventPreflightTelemetryEnabled = enabled;
+  }
+
+  isEventPreflightTelemetryEnabled(): boolean {
+    return this.eventPreflightTelemetryEnabled;
+  }
+
   /**
    * Marks an action as dirty.
    *
@@ -3133,7 +3141,10 @@ export class Scheduler {
 
     for (const action of this.dirty) {
       if (this.effects.has(action)) {
-        workSet.add(action);
+        if (!this.isThrottled(action)) {
+          this.pending.add(action);
+          workSet.add(action);
+        }
       }
     }
   }
@@ -4107,6 +4118,10 @@ export class Scheduler {
           );
           try {
             handler.populateDependencies(depTx, eventValue);
+          } catch (error) {
+            this.eventQueue.shift();
+            this.handleError(error as Error, handler);
+            shouldSkipEvent = true;
           } finally {
             logger.timeEnd(
               "scheduler",
@@ -4123,7 +4138,9 @@ export class Scheduler {
             "event",
             "pullTxToReactivityLog",
           );
-          const deps = txToReactivityLog(depTx);
+          const deps: ReactivityLog = shouldSkipEvent
+            ? { reads: [], shallowReads: [], writes: [] }
+            : txToReactivityLog(depTx);
           logger.timeEnd(
             "scheduler",
             "execute",
@@ -4141,7 +4158,9 @@ export class Scheduler {
           );
           // Commit the read-only inspection tx as a no-op so dependency discovery
           // does not participate in CFC prepare or commit gating.
-          depTx.commit();
+          if (!shouldSkipEvent) {
+            depTx.commit();
+          }
           logger.timeEnd(
             "scheduler",
             "execute",
@@ -4178,7 +4197,7 @@ export class Scheduler {
           }
           collectMs = performance.now() - stepStart;
 
-          if (hasDirtyDependencies) {
+          if (!shouldSkipEvent && hasDirtyDependencies) {
             let nextEligibleAt: number | undefined;
             let hasRunnableDirtyDependency = false;
 
@@ -4235,24 +4254,26 @@ export class Scheduler {
             }
           }
 
-          this.runtime.telemetry.submit({
-            type: "scheduler.event.preflight",
-            handlerId,
-            handlerInfo: this.getActionTelemetryInfo(handler),
-            readCount: deps.reads.length,
-            shallowReadCount: deps.shallowReads.length,
-            dirtySizeBefore,
-            pendingSizeBefore,
-            dirtyDependencyCount: dirtyDeps.size,
-            hasDirtyDependencies,
-            skipped: shouldSkipEvent,
-            populateMs,
-            txToLogMs,
-            depCommitMs,
-            collectMs,
-            scheduleMs,
-            stats: this.snapshotDirtyDependencyTraceContext(preflightStats),
-          });
+          if (this.eventPreflightTelemetryEnabled) {
+            this.runtime.telemetry.submit({
+              type: "scheduler.event.preflight",
+              handlerId,
+              handlerInfo: this.getActionTelemetryInfo(handler),
+              readCount: deps.reads.length,
+              shallowReadCount: deps.shallowReads.length,
+              dirtySizeBefore,
+              pendingSizeBefore,
+              dirtyDependencyCount: dirtyDeps.size,
+              hasDirtyDependencies,
+              skipped: shouldSkipEvent,
+              populateMs,
+              txToLogMs,
+              depCommitMs,
+              collectMs,
+              scheduleMs,
+              stats: this.snapshotDirtyDependencyTraceContext(preflightStats),
+            });
+          }
         }
 
         if (!shouldSkipEvent) {
@@ -4628,7 +4649,10 @@ export class Scheduler {
           // Don't clear from pending or dirty - action stays in its current state
           // but we remove from pending so it doesn't run this cycle
           this.pending.delete(fn);
-          // Keep dirty flag so it can be pulled later
+          // Keep pull-mode effects dirty so they wake when the throttle expires.
+          if (this.pullMode && this.effects.has(fn)) {
+            this.markDirectDirty(fn);
+          }
           continue;
         }
 
@@ -4828,13 +4852,31 @@ export class Scheduler {
     const hasPendingEffects = this.pullMode
       ? [...this.pending].some((a) => this.effects.has(a))
       : this.pending.size > 0;
+    let nextDirtyEffectRunAt: number | undefined;
     const hasDirtyEffects = this.pullMode &&
-      [...this.dirty].some((a) => this.effects.has(a));
+      [...this.dirty].some((action) => {
+        if (!this.effects.has(action)) return false;
+        const nextEligibleAt = this.getNextEligibleRunTime(action);
+        if (
+          nextEligibleAt !== undefined &&
+          nextEligibleAt > performance.now()
+        ) {
+          nextDirtyEffectRunAt = nextDirtyEffectRunAt === undefined
+            ? nextEligibleAt
+            : Math.min(nextDirtyEffectRunAt, nextEligibleAt);
+          return false;
+        }
+        return true;
+      });
     const hasQueuedEventReadyNow = this.eventQueue.length > 0 &&
       !this.isHeadEventParked();
 
     if (!hasPendingEffects && !hasDirtyEffects && !hasQueuedEventReadyNow) {
-      if (this.eventQueueWakeTimer !== null) {
+      if (nextDirtyEffectRunAt !== undefined) {
+        this.scheduleEventQueueWake(nextDirtyEffectRunAt);
+        this.loopCounter = new WeakMap();
+        this.scheduled = false;
+      } else if (this.eventQueueWakeTimer !== null) {
         this.loopCounter = new WeakMap();
         this.scheduled = false;
 

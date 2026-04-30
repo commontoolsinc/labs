@@ -7,6 +7,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   type Action,
+  type ErrorWithContext,
   type EventHandler,
   type TelemetryAnnotations,
 } from "../src/scheduler.ts";
@@ -1415,6 +1416,7 @@ describe("pull-based scheduling", () => {
 
   it("should not recursively walk clean broad event preflight dependencies", async () => {
     runtime.scheduler.enablePullMode();
+    runtime.scheduler.setEventPreflightTelemetryEnabled(true);
 
     const preflights: EventPreflightMarker[] = [];
     const listener = (event: Event) => {
@@ -2706,6 +2708,230 @@ describe("handler dependency pulling", () => {
     expect(computedRuns).toBe(2);
     expect(handlerRuns).toBe(1);
     expect(result.get()).toBe(23);
+  });
+
+  it("should keep parked event wake when unrelated work queues execution", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const computed = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-computed",
+      undefined,
+      tx,
+    );
+    const unrelated = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-unrelated",
+      undefined,
+      tx,
+    );
+    unrelated.set(0);
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+    const result = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computedRuns = 0;
+    let handlerRuns = 0;
+    let unrelatedRuns = 0;
+
+    const computation: Action = (actionTx) => {
+      computedRuns++;
+      computed.withTx(actionTx).send(
+        (source.withTx(actionTx).get() ?? 0) * 10,
+      );
+    };
+    const unrelatedEffect: Action = (actionTx) => {
+      unrelatedRuns++;
+      unrelated.withTx(actionTx).send(unrelatedRuns);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(computed.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      unrelatedEffect,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(unrelated.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+
+    await computed.pull();
+    await unrelated.pull();
+    expect(computedRuns).toBe(1);
+
+    runtime.scheduler.setThrottle(computation, 100);
+    runtime.scheduler.addEventHandler(
+      (handlerTx, event: number) => {
+        handlerRuns++;
+        result.withTx(handlerTx).send(
+          (computed.withTx(handlerTx).get() ?? 0) + event,
+        );
+      },
+      eventStream.getAsNormalizedFullLink(),
+      (depTx) => {
+        computed.withTx(depTx).get();
+      },
+    );
+
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 3);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    runtime.scheduler.queueExecution();
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await runtime.scheduler.idle();
+
+    expect(computedRuns).toBe(2);
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(23);
+  });
+
+  it("should report preflight dependency errors without wedging the scheduler", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-preflight-error-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+    const result = runtime.getCell<number>(
+      space,
+      "handler-preflight-error-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const errors: string[] = [];
+    runtime.scheduler.onError((error: ErrorWithContext) => {
+      errors.push(error.message);
+    });
+
+    let handlerRuns = 0;
+    runtime.scheduler.addEventHandler(
+      (handlerTx, event: number) => {
+        handlerRuns++;
+        result.withTx(handlerTx).send(event);
+      },
+      eventStream.getAsNormalizedFullLink(),
+      () => {
+        throw new Error("preflight dependency failed");
+      },
+    );
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 7);
+    await runtime.scheduler.idle();
+
+    expect(handlerRuns).toBe(0);
+    expect(result.get()).toBe(0);
+    expect(
+      errors.some((message) => message.includes("preflight dependency failed")),
+    ).toBe(true);
+
+    const followup: Action = (actionTx) => {
+      result.withTx(actionTx).send(9);
+    };
+    runtime.scheduler.subscribe(
+      followup,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+    await result.pull();
+    expect(result.get()).toBe(9);
+  });
+
+  it("should not emit event preflight telemetry unless enabled", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const preflights: EventPreflightMarker[] = [];
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{ marker: RuntimeTelemetryMarker }>)
+        .detail.marker;
+      if (marker.type === "scheduler.event.preflight") {
+        preflights.push(marker);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+
+    try {
+      const eventStream = runtime.getCell<number>(
+        space,
+        "handler-preflight-telemetry-events",
+        undefined,
+        tx,
+      );
+      eventStream.set(0);
+      const result = runtime.getCell<number>(
+        space,
+        "handler-preflight-telemetry-result",
+        undefined,
+        tx,
+      );
+      result.set(0);
+      await tx.commit();
+      tx = runtime.edit();
+
+      runtime.scheduler.addEventHandler(
+        (handlerTx, event: number) => {
+          result.withTx(handlerTx).send(event);
+        },
+        eventStream.getAsNormalizedFullLink(),
+        (depTx) => {
+          result.withTx(depTx).get();
+        },
+      );
+
+      runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 1);
+      await result.pull();
+      expect(preflights).toEqual([]);
+
+      runtime.scheduler.setEventPreflightTelemetryEnabled(true);
+      runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 2);
+      await result.pull();
+      expect(preflights.length).toBe(1);
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
   });
 
   it("should preserve FIFO order while the head event is parked", async () => {
