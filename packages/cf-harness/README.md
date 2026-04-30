@@ -64,6 +64,7 @@ What is not done yet:
 - richer opaque-handle/pass-through behavior
 - first-class browser operation policy on top of the provisional browser
   subagent profile
+- first-class Agent Skills support
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses
@@ -87,6 +88,8 @@ What is not done yet:
     transcript, and tool-result contracts
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
+- [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
+  - proposed first-class Agent Skills support design
 
 ## Commands
 
