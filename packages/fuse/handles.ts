@@ -34,6 +34,7 @@ export interface HandleState {
   dirty: boolean;
   flushing: boolean;
   buffer: Uint8Array;
+  bufferValid: boolean;
   truncatePending: boolean;
   version: number;
   writeTarget?: unknown;
@@ -52,7 +53,7 @@ export function handleHasBufferedContent(
 ): boolean {
   return Boolean(
     handle &&
-      (handle.buffer.length > 0 || handle.dirty || handle.truncatePending),
+      (handle.bufferValid || handle.dirty || handle.truncatePending),
   );
 }
 
@@ -79,6 +80,7 @@ export class HandleMap {
       dirty: false,
       flushing: false,
       buffer: isWritable ? new Uint8Array(content ?? []) : new Uint8Array(0),
+      bufferValid: isWritable,
       truncatePending: false,
       version: 0,
       writeTarget: options?.writeTarget,
@@ -132,6 +134,7 @@ export class HandleMap {
       state.buffer = newBuf;
     }
     state.buffer.set(data, offset);
+    state.bufferValid = true;
     state.dirty = true;
     state.truncatePending = false;
     state.version++;
@@ -143,6 +146,7 @@ export class HandleMap {
     const state = this.handles.get(fh);
     if (!state) return false;
     state.buffer = new Uint8Array(0);
+    state.bufferValid = true;
     state.dirty = false;
     state.truncatePending = true;
     state.version++;
@@ -162,6 +166,7 @@ export class HandleMap {
           options.pendingFh === fh;
         if (size === 0) {
           state.buffer = new Uint8Array(0);
+          state.bufferValid = true;
           state.dirty = false;
           state.truncatePending = shouldFlush;
         } else {
@@ -172,6 +177,7 @@ export class HandleMap {
             newBuf.set(state.buffer);
             state.buffer = newBuf;
           }
+          state.bufferValid = true;
           state.dirty = shouldFlush;
           state.truncatePending = false;
         }
@@ -189,6 +195,7 @@ export class HandleMap {
 
     if (size === 0) {
       state.buffer = new Uint8Array(0);
+      state.bufferValid = true;
       state.dirty = false;
       state.truncatePending = true;
     } else {
@@ -199,6 +206,7 @@ export class HandleMap {
         newBuf.set(state.buffer);
         state.buffer = newBuf;
       }
+      state.bufferValid = true;
       state.dirty = true;
       state.truncatePending = false;
     }

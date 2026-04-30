@@ -1215,6 +1215,7 @@ export async function main(argv: string[] = Deno.args) {
           handle.dirty = false;
           handle.truncatePending = false;
           handle.buffer = new Uint8Array(0);
+          handle.bufferValid = false;
         }
         return 0;
       }
@@ -1240,6 +1241,7 @@ export async function main(argv: string[] = Deno.args) {
           handle.dirty = false;
           handle.truncatePending = false;
           handle.buffer = new Uint8Array(0); // fire-and-forget
+          handle.bufferValid = false;
         }
         return 0;
       }

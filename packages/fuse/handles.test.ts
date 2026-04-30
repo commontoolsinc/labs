@@ -78,11 +78,15 @@ Deno.test("HandleMap only marks the truncating handle pending when provided", ()
   assertEquals(staleHandle?.buffer.length, 0);
   assertEquals(staleHandle?.dirty, false);
   assertEquals(staleHandle?.truncatePending, false);
+  assertEquals(handleHasPendingChanges(staleHandle), false);
+  assertEquals(handleHasBufferedContent(staleHandle), true);
 
   const truncatingHandle = handles.get(truncating);
   assertEquals(truncatingHandle?.buffer.length, 0);
   assertEquals(truncatingHandle?.dirty, false);
   assertEquals(truncatingHandle?.truncatePending, true);
+  assertEquals(handleHasPendingChanges(truncatingHandle), true);
+  assertEquals(handleHasBufferedContent(truncatingHandle), true);
 });
 
 Deno.test("HandleMap rejects invalid and oversized write allocations", () => {
