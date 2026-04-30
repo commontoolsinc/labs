@@ -2,7 +2,7 @@
  * Content hash public API.
  *
  * Re-exports the modern (`value-hash-modern.ts`) implementation under the
- * stable names `hashOf` and `hashObjectFromJson`.
+ * stable name `hashOf`.
  */
 import { hashOfModern } from "./value-hash-modern.ts";
 import { FabricHash } from "./fabric-hash.ts";
