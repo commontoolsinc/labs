@@ -117,6 +117,7 @@ export const writeFileTool: HarnessToolDefinition<
     const result = await context.sandbox.runShell({
       command,
       args,
+      cwd: context.currentDir,
       stdinText: input.content,
       cfcInvocationContext: await context.createCfcInvocationContext({
         toolId: "write_file",

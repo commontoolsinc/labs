@@ -102,6 +102,7 @@ export const readFileTool: HarnessToolDefinition<
     const result = await context.sandbox.runShell({
       command,
       args,
+      cwd: context.currentDir,
       cfcInvocationContext: await context.createCfcInvocationContext({
         toolId: "read_file",
         operation: "shell",

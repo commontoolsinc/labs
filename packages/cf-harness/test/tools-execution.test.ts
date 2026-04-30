@@ -530,6 +530,7 @@ Deno.test("read_file tool resolves relative paths from the session currentDir", 
         'exec cat "$1"',
       ].join("\n"),
       args: ["/workspace/notes/todo.txt", "32"],
+      cwd: "/workspace/.ops",
     },
   });
   assertEquals(
@@ -539,6 +540,10 @@ Deno.test("read_file tool resolves relative paths from the session currentDir", 
   assertEquals(
     sandbox.calls[0]?.request.cfcInvocationContext?.inputs.args?.count,
     2,
+  );
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.cwd,
+    "/workspace/.ops",
   );
 });
 
@@ -679,6 +684,7 @@ Deno.test("write_file tool supports append mode and passes content over stdin", 
         "esac",
       ].join("\n"),
       args: ["/workspace/notes/log.txt", "append", "true"],
+      cwd: "/workspace",
       stdinText: "line one\n",
     },
   });
@@ -689,6 +695,10 @@ Deno.test("write_file tool supports append mode and passes content over stdin", 
   assertEquals(
     sandbox.calls[0]?.request.cfcInvocationContext?.inputs.stdin?.bytes,
     "line one\n".length,
+  );
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.cwd,
+    "/workspace",
   );
 });
 
@@ -742,9 +752,14 @@ Deno.test("write_file uses the cwd established by an earlier bash call", async (
         "esac",
       ].join("\n"),
       args: ["/workspace/repo/notes/log.txt", "replace", "false"],
+      cwd: "/workspace/repo",
       stdinText: "line one\n",
     },
   });
+  assertEquals(
+    sandbox.calls[1]?.request.cfcInvocationContext?.cwd,
+    "/workspace/repo",
+  );
 });
 
 Deno.test("write_file tool returns a recoverable permission_denied result", async () => {

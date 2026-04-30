@@ -796,10 +796,11 @@ export class CfHarnessEngine {
     stdinText?: string;
     env?: Record<string, string>;
   }): Promise<HarnessCfcInvocationContext> {
+    const now = this.#now();
     const invocation = await createHarnessCfcInvocationContext({
       sequence: (this.#runState.cfcInvocationContexts ?? []).length + 1,
       runId: this.#runState.runId,
-      createdAt: this.#runState.updatedAt,
+      createdAt: now,
       toolId: options.toolId,
       ...(options.toolOutputId !== undefined
         ? { toolOutputId: options.toolOutputId }
@@ -825,7 +826,7 @@ export class CfHarnessEngine {
     this.#runState = appendHarnessCfcInvocationContext(
       this.#runState,
       invocation,
-      this.#runState.updatedAt,
+      now,
     );
     await this.persistRunState();
     return invocation;

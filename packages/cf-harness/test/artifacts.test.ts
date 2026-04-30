@@ -139,7 +139,7 @@ Deno.test({
           version: 1,
           sequence: 1,
           runId: "run-artifacts",
-          createdAt: "2026-04-15T21:00:03.000Z",
+          createdAt: "2026-04-15T21:00:04.000Z",
           toolId: "bash",
           toolOutputId: createToolOutputId("run-artifacts", "bash", 1),
           operation: "shell",
