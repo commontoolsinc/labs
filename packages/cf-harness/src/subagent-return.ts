@@ -86,41 +86,61 @@ const objectSchemaIsClosed = (schema: Record<string, unknown>): boolean =>
   schema.additionalProperties !== true &&
   typeof schema.additionalProperties !== "object";
 
-const schemaDeclaresOpaqueLinkObject = (
+const schemaDirectlyDeclaresOpaqueLinkObject = (
+  schema: Record<string, unknown>,
+): boolean =>
+  isRecord(schema.properties) &&
+  isRecord(schema.properties["@link"]) &&
+  schema.properties["@link"].type === "string" &&
+  Array.isArray(schema.required) &&
+  schema.required.includes("@link") &&
+  objectSchemaIsClosed(schema);
+
+const matchingBranches = (
+  branches: unknown,
+  value: unknown,
+  fullSchema: JSONSchema,
+): JSONSchema[] => {
+  if (!Array.isArray(branches)) {
+    return [];
+  }
+  return branches
+    .filter((branch): branch is JSONSchema =>
+      (typeof branch === "boolean" || isRecord(branch)) &&
+      validateAgainstSchema(branch, value, fullSchema) === undefined
+    )
+    .map((branch) => resolveSchemaForValidation(branch, fullSchema));
+};
+
+const schemaAcceptsOpaqueLinkObject = (
   schema: JSONSchema,
+  value: { "@link": string },
   fullSchema: JSONSchema,
 ): boolean => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
   if (!isRecord(resolved)) {
     return false;
   }
-  if (
-    isRecord(resolved.properties) &&
-    isRecord(resolved.properties["@link"]) &&
-    resolved.properties["@link"].type === "string" &&
-    Array.isArray(resolved.required) &&
-    resolved.required.includes("@link") &&
-    objectSchemaIsClosed(resolved)
-  ) {
+  if (validateAgainstSchema(resolved, value, fullSchema) !== undefined) {
+    return false;
+  }
+  if (schemaDirectlyDeclaresOpaqueLinkObject(resolved)) {
     return true;
   }
   if (Array.isArray(resolved.allOf)) {
     return resolved.allOf.some((branch) =>
-      schemaDeclaresOpaqueLinkObject(branch, fullSchema)
+      schemaAcceptsOpaqueLinkObject(branch, value, fullSchema)
     );
   }
-  const oneOf = matchingBranch(
-    resolved.oneOf,
-    { "@link": "opaque:subagent-return" },
-    fullSchema,
+  const oneOfBranches = matchingBranches(resolved.oneOf, value, fullSchema);
+  if (oneOfBranches.length > 0) {
+    return oneOfBranches.some((branch) =>
+      schemaAcceptsOpaqueLinkObject(branch, value, fullSchema)
+    );
+  }
+  return matchingBranches(resolved.anyOf, value, fullSchema).some((branch) =>
+    schemaAcceptsOpaqueLinkObject(branch, value, fullSchema)
   );
-  if (oneOf !== undefined) {
-    return schemaDeclaresOpaqueLinkObject(oneOf, fullSchema);
-  }
-  return Array.isArray(resolved.anyOf) &&
-    resolved.anyOf.some((branch) =>
-      schemaDeclaresOpaqueLinkObject(branch, fullSchema)
-    );
 };
 
 const valueIsOpaqueLinkObject = (
@@ -316,7 +336,7 @@ const sanitizeValue = (
   if (isRecord(value)) {
     if (
       valueIsOpaqueLinkObject(value) &&
-      schemaDeclaresOpaqueLinkObject(effectiveSchema, fullSchema)
+      schemaAcceptsOpaqueLinkObject(schema, value, fullSchema)
     ) {
       return { value, linkedStringCount: 0 };
     }

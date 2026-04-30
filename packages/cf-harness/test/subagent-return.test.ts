@@ -341,3 +341,39 @@ Deno.test("validateAndSanitizeSubagentReturn handles anyOf link branches and rej
     "body: value does not match anyOf",
   );
 });
+
+Deno.test("validateAndSanitizeSubagentReturn preserves link objects when anyOf object branches overlap", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      body: {
+        anyOf: [
+          {
+            type: "object",
+            additionalProperties: true,
+          },
+          {
+            type: "object",
+            properties: {
+              "@link": { type: "string" },
+            },
+            required: ["@link"],
+          },
+        ],
+      },
+    },
+    required: ["body"],
+    additionalProperties: false,
+  } as const;
+
+  const sanitized = validateAndSanitizeSubagentReturn({
+    schema,
+    childRunId: "run-overlap.subagent.1",
+    value: { body: { "@link": "opaque:child#/summary" } },
+  });
+
+  assertEquals(sanitized.linkedStringCount, 0);
+  assertEquals(sanitized.value, {
+    body: { "@link": "opaque:child#/summary" },
+  });
+});
