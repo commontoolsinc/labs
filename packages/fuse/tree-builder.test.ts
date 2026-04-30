@@ -86,6 +86,32 @@ Deno.test("buildJsonTree - object creates directory with children", () => {
   assertEquals(JSON.parse(jsonContent), obj);
 });
 
+Deno.test("buildJsonTree - encodes unsafe object keys in path names", () => {
+  const tree = new FsTree();
+  const data = {
+    "has/slash": 1,
+    "of:entity": 2,
+    "literal%": 3,
+    ".hidden": 4,
+    "..": 5,
+    "value.json": 6,
+  };
+
+  buildJsonTree(tree, tree.rootIno, "data", data);
+
+  const dataIno = tree.lookup(tree.rootIno, "data")!;
+  assertEquals(getFileContent(tree, dataIno, "has%2Fslash"), "1");
+  assertEquals(getFileContent(tree, dataIno, "of%3Aentity"), "2");
+  assertEquals(getFileContent(tree, dataIno, "literal%25"), "3");
+  assertEquals(getFileContent(tree, dataIno, "%2Ehidden"), "4");
+  assertEquals(getFileContent(tree, dataIno, "%2E%2E"), "5");
+  assertEquals(getFileContent(tree, dataIno, "value%2Ejson"), "6");
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "data.json")),
+    data,
+  );
+});
+
 Deno.test("buildJsonTree - array creates directory with numeric indices", () => {
   const tree = new FsTree();
   const arr = ["a", "b", "c"];
@@ -1248,4 +1274,47 @@ Deno.test("parseSymlinkTarget - unknown cross-space uses name as fallback", () =
   );
 
   assertEquals(result, { id: "abc", space: "unknown" });
+});
+
+type MakeLinkResolver = (
+  spaceName: string,
+) => (value: unknown, depth: number) => string | null;
+
+Deno.test("makeLinkResolver encodes unsafe link components", () => {
+  const bridge = new CellBridge(new FsTree());
+  const resolveLink =
+    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
+      .makeLinkResolver("home");
+
+  assertEquals(
+    resolveLink({
+      "/": {
+        "link@1": {
+          id: "of:abc",
+          space: "other:space",
+          path: ["..", "has/slash", ":mac"],
+        },
+      },
+    }, 0),
+    "../../../other%3Aspace/entities/of%3Aabc/%2E%2E/has%2Fslash/%3Amac",
+  );
+});
+
+Deno.test("makeLinkResolver leaves malformed link paths inert", () => {
+  const bridge = new CellBridge(new FsTree());
+  const resolveLink =
+    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
+      .makeLinkResolver("home");
+
+  assertEquals(
+    resolveLink({
+      "/": {
+        "link@1": {
+          id: "of:abc",
+          path: ["ok", 1],
+        },
+      },
+    }, 0),
+    null,
+  );
 });

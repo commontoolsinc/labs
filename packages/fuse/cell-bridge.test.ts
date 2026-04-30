@@ -207,6 +207,13 @@ type RebuildPieceProp = (args: {
   spaceName: string;
 }) => Promise<void>;
 
+type BuildSourceTree = (
+  pieceIno: bigint,
+  piece: unknown,
+  state: SpaceState,
+  pieceName: string,
+) => Promise<void>;
+
 type WriteFsFile = (
   writePath: unknown,
   text: string,
@@ -1326,14 +1333,14 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
       name: "Alpha",
       pattern: "alpha-pattern",
       summary: "alpha summary",
-      entityPath: "entities/of:alpha",
+      entityPath: "entities/of%3Aalpha",
     },
     {
       id: "of:beta",
       name: "Beta",
       pattern: "beta-pattern",
       summary: "beta summary",
-      entityPath: "entities/of:beta",
+      entityPath: "entities/of%3Abeta",
     },
   ]);
 });
@@ -1496,6 +1503,38 @@ Deno.test("CellBridge.writeFsFile removes deleted keys from application/json pro
     { path: ["$FS", "content", "title"], value: "New" },
     { path: ["$FS", "content", "stale"], value: undefined },
   ]);
+});
+
+Deno.test("CellBridge.buildSourceTree encodes source path segments and decodes write paths", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  const piece = {
+    id: "of:source-piece",
+    getPatternMeta: () =>
+      Promise.resolve({
+        program: {
+          main: "/src/has:colon.tsx",
+          files: [
+            { name: "/src/has:colon.tsx", contents: "export default 1;" },
+          ],
+        },
+      }),
+  };
+  state.pieceControllers.set("notes", piece as never);
+  state.srcInos.set("notes", pieceIno);
+
+  await (bridge as unknown as { buildSourceTree: BuildSourceTree })
+    .buildSourceTree(pieceIno, piece, state, "notes");
+
+  const srcIno = tree.lookup(pieceIno, ".src")!;
+  const srcDirIno = tree.lookup(srcIno, "src")!;
+  const sourceIno = tree.lookup(srcDirIno, "has%3Acolon.tsx")!;
+  assertEquals(
+    bridge.resolveSourceWritePath(sourceIno)?.relPath,
+    "src/has:colon.tsx",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -2151,8 +2190,11 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
-  await bridge.resolveEntity(state.entitiesIno, piece.id);
-  const entityIno = tree.lookup(state.entitiesIno, piece.id)!;
+  await bridge.resolveEntity(state.entitiesIno, "of%3Aentity-handler-piece");
+  const entityIno = tree.lookup(
+    state.entitiesIno,
+    "of%3Aentity-handler-piece",
+  )!;
   await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
     .hydratePieceProp.call(bridge, entityIno, "result");
   assertEquals(tree.lookup(entityIno, "result") !== undefined, true);

@@ -1,3 +1,5 @@
+import { decodeFuseComponent } from "./path-codec.ts";
+
 export interface MountedCallablePath {
   spaceName: string;
   rootKind: "pieces" | "entities";
@@ -24,7 +26,8 @@ export function parseMountedCallablePath(
   const match = /^(.+)\.(handler|tool)$/.exec(fileName);
   if (!match) return null;
 
-  const [, cellKey, callableKind] = match;
+  const [, encodedCellKey, callableKind] = match;
+  const cellKey = decodeFuseComponent(encodedCellKey);
   if (!cellKey) return null;
 
   return {
