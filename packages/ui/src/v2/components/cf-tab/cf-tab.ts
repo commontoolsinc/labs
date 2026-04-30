@@ -199,7 +199,6 @@ export class CFTab extends BaseElement {
           data-selected="${this.selected}"
           data-disabled="${this.disabled}"
           @click="${this.handleClick}"
-          @keydown="${this.handleKeydown}"
         >
           <slot></slot>
         </button>
@@ -224,13 +223,6 @@ export class CFTab extends BaseElement {
 
       // Emit custom event for parent tabs component
       this.emit("tab-click", { tab: this });
-    };
-
-    private handleKeydown = (event: KeyboardEvent): void => {
-      if (event.key === " " || event.key === "Enter") {
-        event.preventDefault();
-        this.click();
-      }
     };
 
     /**
