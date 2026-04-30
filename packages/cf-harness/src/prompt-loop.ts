@@ -1087,6 +1087,9 @@ export class CfHarnessPromptLoop {
           ? { cfcPolicySnapshotDigest }
           : {}),
         decisions: runState.policyDecisions ?? [],
+        ...((runState.cfcInvocationContexts?.length ?? 0) > 0
+          ? { cfcInvocationContexts: runState.cfcInvocationContexts }
+          : {}),
       });
     };
     const persistRunReport = async (

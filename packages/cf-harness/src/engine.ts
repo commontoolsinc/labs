@@ -8,6 +8,7 @@ import {
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
+  appendHarnessCfcInvocationContext,
   appendHarnessFailureRecord,
   appendHarnessPolicyDecision,
   appendHarnessPolicyEvent,
@@ -39,6 +40,12 @@ import {
   createHarnessPolicyEvent,
   type HarnessPolicyEvent,
 } from "./contracts/policy.ts";
+import {
+  createHarnessCfcInvocationContext,
+  type HarnessCfcInvocationContext,
+  type HarnessCfcInvocationOperation,
+  summarizeCfcInvocationRunManifest,
+} from "./contracts/cfc-invocation-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import {
   createHarnessPolicyDecisionRecord,
@@ -778,6 +785,52 @@ export class CfHarnessEngine {
     return false;
   }
 
+  async #createCfcInvocationContext(options: {
+    toolId: string;
+    toolOutputId?: ToolOutputId;
+    operation: HarnessCfcInvocationOperation;
+    cwd: string;
+    command?: string;
+    argv?: readonly string[];
+    args?: readonly string[];
+    stdinText?: string;
+    env?: Record<string, string>;
+  }): Promise<HarnessCfcInvocationContext> {
+    const invocation = await createHarnessCfcInvocationContext({
+      sequence: (this.#runState.cfcInvocationContexts ?? []).length + 1,
+      runId: this.#runState.runId,
+      createdAt: this.#runState.updatedAt,
+      toolId: options.toolId,
+      ...(options.toolOutputId !== undefined
+        ? { toolOutputId: options.toolOutputId }
+        : {}),
+      operation: options.operation,
+      cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+      cwd: options.cwd,
+      ...(this.#runState.promptSlotBinding !== undefined
+        ? { promptSlot: this.#runState.promptSlotBinding }
+        : {}),
+      runManifest: summarizeCfcInvocationRunManifest(
+        this.#runState.runManifest,
+        this.#runState.runManifestPath,
+      ),
+      ...(options.command !== undefined ? { command: options.command } : {}),
+      ...(options.argv !== undefined ? { argv: options.argv } : {}),
+      ...(options.args !== undefined ? { args: options.args } : {}),
+      ...(options.stdinText !== undefined
+        ? { stdinText: options.stdinText }
+        : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
+    });
+    this.#runState = appendHarnessCfcInvocationContext(
+      this.#runState,
+      invocation,
+      this.#runState.updatedAt,
+    );
+    await this.persistRunState();
+    return invocation;
+  }
+
   #createToolContext() {
     return {
       runId: this.#runState.runId,
@@ -808,6 +861,17 @@ export class CfHarnessEngine {
       nextOutputId: (toolId: string) => {
         return this.nextToolOutputId(toolId);
       },
+      createCfcInvocationContext: (options: {
+        toolId: string;
+        toolOutputId?: ToolOutputId;
+        operation: HarnessCfcInvocationOperation;
+        cwd: string;
+        command?: string;
+        argv?: readonly string[];
+        args?: readonly string[];
+        stdinText?: string;
+        env?: Record<string, string>;
+      }) => this.#createCfcInvocationContext(options),
     };
   }
 }

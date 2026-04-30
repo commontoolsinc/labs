@@ -1,4 +1,5 @@
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+import type { HarnessCfcInvocationContext } from "../contracts/cfc-invocation-context.ts";
 
 export type HarnessSandboxKind = "docker-runsc-cfc";
 
@@ -62,6 +63,7 @@ export interface SandboxCommandRequest {
   cwd?: string;
   stdinText?: string;
   timeoutMs?: number;
+  cfcInvocationContext?: HarnessCfcInvocationContext;
 }
 
 export interface SandboxShellRequest {
@@ -70,6 +72,7 @@ export interface SandboxShellRequest {
   cwd?: string;
   stdinText?: string;
   timeoutMs?: number;
+  cfcInvocationContext?: HarnessCfcInvocationContext;
 }
 
 export interface SandboxCommandResult {

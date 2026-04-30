@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessCfcInvocationContext } from "./contracts/cfc-invocation-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
@@ -51,6 +52,7 @@ export interface HarnessRunState {
   cfcPolicySnapshotPath?: string;
   policyTrace?: HarnessPolicyTrace;
   policyTracePath?: string;
+  cfcInvocationContexts?: HarnessCfcInvocationContext[];
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
@@ -79,6 +81,7 @@ export interface CreateHarnessRunStateOptions {
   cfcPolicySnapshotPath?: string;
   policyTrace?: HarnessPolicyTrace;
   policyTracePath?: string;
+  cfcInvocationContexts?: HarnessCfcInvocationContext[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
@@ -137,6 +140,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.policyTracePath !== undefined
       ? { policyTracePath: options.policyTracePath }
+      : {}),
+    ...(options.cfcInvocationContexts !== undefined
+      ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
       : {}),
     policyEvents: [],
     ...(options.policyDecisions !== undefined
@@ -206,6 +212,16 @@ export const appendHarnessPolicyDecision = (
   ...state,
   updatedAt: now,
   policyDecisions: [...(state.policyDecisions ?? []), decision],
+});
+
+export const appendHarnessCfcInvocationContext = (
+  state: HarnessRunState,
+  context: HarnessCfcInvocationContext,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  updatedAt: now,
+  cfcInvocationContexts: [...(state.cfcInvocationContexts ?? []), context],
 });
 
 export const appendHarnessSubagentRun = (
