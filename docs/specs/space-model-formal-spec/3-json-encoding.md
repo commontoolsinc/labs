@@ -34,7 +34,7 @@ a string is sufficient to tell whether it carries a fabric-value payload.
 
 - A conforming **encoder** emits the prefix exactly once, immediately before
   the JSON body, on every encoded value (including encoded primitives — e.g.,
-  the number `42` encodes as the eight-character string `fvj1:42`).
+  the number `42` encodes as the seven-character string `fvj1:42`).
 - A conforming **decoder** verifies the prefix is present before parsing the
   remainder as JSON, and strips the prefix before processing.
 - A short detection helper (`seemsLikeJsonEncodedFabricValue`) tests for the
