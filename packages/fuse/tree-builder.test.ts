@@ -222,6 +222,44 @@ Deno.test("buildJsonTree - circular references become [Circular]", () => {
   assertEquals(parsed.self, "[Circular]");
 });
 
+Deno.test("buildJsonTree - shared DAG objects are not circular", () => {
+  const tree = new FsTree();
+  const shared = { leaf: "same" };
+  const data = { a: shared, b: shared };
+
+  buildJsonTree(tree, tree.rootIno, "dag", data);
+
+  const dagIno = tree.lookup(tree.rootIno, "dag")!;
+  const aIno = tree.lookup(dagIno, "a")!;
+  const bIno = tree.lookup(dagIno, "b")!;
+
+  assertEquals(getFileContent(tree, aIno, "leaf"), "same");
+  assertEquals(getFileContent(tree, bIno, "leaf"), "same");
+  assertEquals(JSON.parse(getFileContent(tree, tree.rootIno, "dag.json")), {
+    a: { leaf: "same" },
+    b: { leaf: "same" },
+  });
+});
+
+Deno.test("buildJsonTreeAsync - shared DAG objects are not circular", async () => {
+  const tree = new FsTree();
+  const shared = { leaf: "same" };
+  const data = { a: shared, b: shared };
+
+  await buildJsonTreeAsync(tree, tree.rootIno, "dag", data);
+
+  const dagIno = tree.lookup(tree.rootIno, "dag")!;
+  const aIno = tree.lookup(dagIno, "a")!;
+  const bIno = tree.lookup(dagIno, "b")!;
+
+  assertEquals(getFileContent(tree, aIno, "leaf"), "same");
+  assertEquals(getFileContent(tree, bIno, "leaf"), "same");
+  assertEquals(JSON.parse(getFileContent(tree, tree.rootIno, "dag.json")), {
+    a: { leaf: "same" },
+    b: { leaf: "same" },
+  });
+});
+
 Deno.test("safeStringify - handles circular refs", () => {
   // deno-lint-ignore no-explicit-any
   const a: any = { x: 1 };
@@ -229,6 +267,15 @@ Deno.test("safeStringify - handles circular refs", () => {
   const result = JSON.parse(safeStringify(a));
   assertEquals(result.x, 1);
   assertEquals(result.y, "[Circular]");
+});
+
+Deno.test("safeStringify - preserves shared DAG objects", () => {
+  const shared = { leaf: "same" };
+  const result = JSON.parse(safeStringify({ a: shared, b: shared }));
+  assertEquals(result, {
+    a: { leaf: "same" },
+    b: { leaf: "same" },
+  });
 });
 
 Deno.test("FsTree - addSymlink", () => {
