@@ -7,9 +7,9 @@ import {
   isPatternToolValue,
 } from "./callables.ts";
 import {
-  buildInternalJsonTreeAsync,
   buildJsonTree,
   buildJsonTreeAsync,
+  buildPendingJsonTreeAsync,
   isHandlerCell,
   isSigilLink,
   isStreamValue,
@@ -149,13 +149,13 @@ Deno.test("buildJsonTreeAsync - encodes depth-zero names that look like internal
   assertEquals(getFileContent(tree, dataIno, "value"), "1");
 });
 
-Deno.test("buildInternalJsonTreeAsync - preserves pending roots for rebuild staging", async () => {
+Deno.test("buildPendingJsonTreeAsync - preserves pending roots for rebuild staging", async () => {
   const tree = new FsTree();
 
-  await buildInternalJsonTreeAsync(
+  await buildPendingJsonTreeAsync(
     tree,
     tree.rootIno,
-    ".result.pending",
+    "result",
     { value: 1 },
   );
 

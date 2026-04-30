@@ -10,13 +10,18 @@ import type { CfcJsonAnnotationContext } from "./annotations.ts";
 import { FsTree } from "./tree.ts";
 import { encodeFuseComponent } from "./path-codec.ts";
 
-const INTERNAL_JSON_ENTRY_NAMES = new Set([
-  ".input.pending",
-  ".result.pending",
-]);
+type JsonPropName = "input" | "result";
+type PendingJsonRootName = ".input.pending" | ".result.pending";
 
-function encodeJsonEntryName(name: string, allowInternal = false): string {
-  return allowInternal && INTERNAL_JSON_ENTRY_NAMES.has(name)
+function pendingJsonRootName(propName: JsonPropName): PendingJsonRootName {
+  return `.${propName}.pending`;
+}
+
+function encodeJsonEntryName(
+  name: string,
+  internalRootName?: PendingJsonRootName,
+): string {
+  return internalRootName !== undefined && name === internalRootName
     ? name
     : encodeFuseComponent(name, { reserveJsonSuffix: true });
 }
@@ -179,7 +184,7 @@ interface BuildJsonTreeTask {
   ancestors: readonly object[];
   depth: number;
   annotation?: CfcJsonAnnotationContext;
-  allowInternalName?: boolean;
+  internalRootName?: PendingJsonRootName;
   onBuilt?: (ino: bigint) => void;
 }
 
@@ -296,9 +301,9 @@ function buildJsonLeaf(
   name: string,
   value: unknown,
   annotation?: CfcJsonAnnotationContext,
-  allowInternalName = false,
+  internalRootName?: PendingJsonRootName,
 ): bigint {
-  const fsName = encodeJsonEntryName(name, allowInternalName);
+  const fsName = encodeJsonEntryName(name, internalRootName);
   return addJsonScalarEntry(tree, parentIno, fsName, value, annotation);
 }
 
@@ -346,7 +351,7 @@ export function buildJsonTree(
     skipEntry,
     classifyCallableEntry,
     annotation,
-    false,
+    undefined,
   );
 }
 
@@ -382,11 +387,11 @@ function buildJsonTreeWithAncestors(
     | ((key: string, value: unknown) => CallableKind | null)
     | undefined,
   annotation?: CfcJsonAnnotationContext,
-  allowInternalRootName = false,
+  internalRootName?: PendingJsonRootName,
 ): bigint {
   const fsName = encodeJsonEntryName(
     name,
-    depth === 0 && allowInternalRootName,
+    depth === 0 ? internalRootName : undefined,
   );
 
   if (value === null || value === undefined || typeof value !== "object") {
@@ -512,15 +517,15 @@ export function buildJsonTreeAsync(
     skipEntry,
     classifyCallableEntry,
     annotation,
-    false,
+    undefined,
   );
 }
 
 /** Build a pending rebuild root with reserved internal staging names intact. */
-export function buildInternalJsonTreeAsync(
+export function buildPendingJsonTreeAsync(
   tree: FsTree,
   parentIno: bigint,
-  name: string,
+  propName: JsonPropName,
   value: unknown,
   seen?: WeakSet<object>,
   resolveLink?: (value: unknown, depth: number) => string | null,
@@ -529,10 +534,11 @@ export function buildInternalJsonTreeAsync(
   classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
   annotation?: CfcJsonAnnotationContext,
 ): Promise<bigint> {
+  const rootName = pendingJsonRootName(propName);
   return buildJsonTreeAsyncImpl(
     tree,
     parentIno,
-    name,
+    rootName,
     value,
     seen,
     resolveLink,
@@ -540,7 +546,7 @@ export function buildInternalJsonTreeAsync(
     skipEntry,
     classifyCallableEntry,
     annotation,
-    true,
+    rootName,
   );
 }
 
@@ -557,7 +563,7 @@ async function buildJsonTreeAsyncImpl(
     | ((key: string, value: unknown) => CallableKind | null)
     | undefined,
   annotation: CfcJsonAnnotationContext | undefined,
-  allowInternalRootName: boolean,
+  internalRootName?: PendingJsonRootName,
 ): Promise<bigint> {
   const queue: BuildJsonTreeTask[] = [{
     parentIno,
@@ -566,7 +572,7 @@ async function buildJsonTreeAsyncImpl(
     ancestors: legacySeenContains(value, seen) ? [value as object] : [],
     depth: depth ?? 0,
     annotation,
-    allowInternalName: allowInternalRootName,
+    internalRootName,
   }];
   let nextIndex = 0;
   let processed = 0;
@@ -580,9 +586,10 @@ async function buildJsonTreeAsyncImpl(
     const task = queue[nextIndex++];
     const d = task.depth;
     const candidate = task.value;
-    const allowInternalName = task.depth === 0 &&
-      task.allowInternalName === true;
-    const fsName = encodeJsonEntryName(task.name, allowInternalName);
+    const taskInternalRootName = task.depth === 0
+      ? task.internalRootName
+      : undefined;
+    const fsName = encodeJsonEntryName(task.name, taskInternalRootName);
 
     let builtIno: bigint | undefined;
 
@@ -593,7 +600,7 @@ async function buildJsonTreeAsyncImpl(
         task.name,
         candidate,
         task.annotation,
-        allowInternalName,
+        taskInternalRootName,
       );
     } else if (typeof candidate === "object") {
       const objectValue = candidate as object;
@@ -697,7 +704,7 @@ async function buildJsonTreeAsyncImpl(
         task.name,
         candidate,
         task.annotation,
-        allowInternalName,
+        taskInternalRootName,
       );
     }
 

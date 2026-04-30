@@ -25,9 +25,9 @@ import {
 import { parseMountedCallablePath } from "./callable-path.ts";
 import {
   buildFsProjection,
-  buildInternalJsonTreeAsync,
   buildJsonTree,
   buildJsonTreeAsync,
+  buildPendingJsonTreeAsync,
   type FsValue,
   isSigilLink,
   isVNode,
@@ -1203,21 +1203,31 @@ export class CellBridge {
       const buildRootName = existingIno !== undefined || jsonIno !== undefined
         ? pendingPropName
         : propName;
-      const buildPropTree = buildRootName === pendingPropName
-        ? buildInternalJsonTreeAsync
-        : buildJsonTreeAsync;
-      const propIno = await buildPropTree(
-        this.tree,
-        pieceIno,
-        buildRootName,
-        treeValue,
-        undefined,
-        resolveLink,
-        0,
-        skipEntry,
-        classifyEntry,
-        cfcAnnotator?.jsonContext([]),
-      );
+      const propIno = buildRootName === pendingPropName
+        ? await buildPendingJsonTreeAsync(
+          this.tree,
+          pieceIno,
+          propName,
+          treeValue,
+          undefined,
+          resolveLink,
+          0,
+          skipEntry,
+          classifyEntry,
+          cfcAnnotator?.jsonContext([]),
+        )
+        : await buildJsonTreeAsync(
+          this.tree,
+          pieceIno,
+          propName,
+          treeValue,
+          undefined,
+          resolveLink,
+          0,
+          skipEntry,
+          classifyEntry,
+          cfcAnnotator?.jsonContext([]),
+        );
       this.addCallableFiles(propIno, callables, propName, cfcAnnotator);
       if (propName === "result") {
         this.addVNodeJsonFiles(propIno, treeValue, cfcAnnotator);
