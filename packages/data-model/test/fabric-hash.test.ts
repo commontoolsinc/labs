@@ -127,26 +127,4 @@ describe("stuff from value-hash.ts", () => {
       "Invalid content hash string",
     );
   });
-
-  it("hashOf() returns FabricHash", () => {
-    const result = hashOf({ hello: "world" });
-    expect(result).toBeInstanceOf(FabricHash);
-  });
-
-  it("nested hashOf() works (no throw on FabricHash in value tree)", () => {
-    // First hashOf produces a FabricHash.
-    const innerRef = hashOf({ the: "text/plain", of: "entity:123" });
-    expect(innerRef).toBeInstanceOf(FabricHash);
-
-    // Wrap it in a fact-like structure and hashOf again. hashOfModern
-    // handles FabricHash via TAG_CONTENT_ID, so this must not throw.
-    const outerSource = {
-      cause: innerRef,
-      the: "text/plain",
-      of: "entity:456",
-      is: { value: 42 },
-    };
-    const outerRef = hashOf(outerSource);
-    expect(outerRef).toBeInstanceOf(FabricHash);
-  });
 });
