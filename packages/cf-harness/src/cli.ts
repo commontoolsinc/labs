@@ -38,6 +38,11 @@ import {
   type CreateHarnessPromptLoopOptions,
   type HarnessPromptLoopResult,
 } from "./prompt-loop.ts";
+import {
+  discoverHarnessSkills,
+  isHarnessSkillRootWithinWorkspace,
+  loadHarnessSkillContext,
+} from "./skills/registry.ts";
 
 const DEFAULT_MODEL = "gpt-5.4";
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -58,6 +63,10 @@ export interface CfHarnessCliConfig {
   prompt?: string;
   resumeRun?: string;
   systemPrompt?: string;
+  skillsRoot?: string;
+  skillsRootSandboxPath?: string;
+  skillNames: readonly string[];
+  skillCatalogEnabled: boolean;
   model?: string;
   gatewayBaseUrl: string;
   gatewayAuthMode: HarnessGatewayAuthMode;
@@ -179,6 +188,9 @@ Options:
   --prompt-file <path>          Read prompt text from a file
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
+  --skills-root <path>          Skill root containing <name>/SKILL.md
+  --skill <name>                Preload a skill for this run (repeatable)
+  --no-skill-catalog            Disable automatic skill catalog disclosure
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
@@ -297,6 +309,20 @@ const nonEmptyEnvValue = (input: string | undefined): string | undefined => {
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
 };
 
+const parseSkillNames = (
+  input: string | readonly string[] | undefined,
+): readonly string[] => {
+  if (input === undefined) {
+    return [];
+  }
+  const values = Array.isArray(input) ? input : [input];
+  return [
+    ...new Set(
+      values.map((value) => value.trim()).filter((value) => value.length > 0),
+    ),
+  ];
+};
+
 const resolvePrompt = async (
   args: ReturnType<typeof parseArgs>,
   cwd: string,
@@ -361,6 +387,8 @@ export const parseCfHarnessCliArgs = async (
       "system-prompt",
       "resume-run",
       "model",
+      "skills-root",
+      "skill",
       "gateway-base-url",
       "gateway-auth-mode",
       "artifact-root",
@@ -369,8 +397,13 @@ export const parseCfHarnessCliArgs = async (
       "cfc-enforcement-mode",
       "max-model-turns",
     ],
-    boolean: ["help", "print-transcript", "stream-events"],
-    collect: ["allow-tool", "allow-subagent-profile"],
+    boolean: [
+      "help",
+      "print-transcript",
+      "stream-events",
+      "no-skill-catalog",
+    ],
+    collect: ["allow-tool", "allow-subagent-profile", "skill"],
     alias: {
       h: "help",
     },
@@ -396,6 +429,27 @@ export const parseCfHarnessCliArgs = async (
   const focusRoot = typeof args["focus-root"] === "string"
     ? resolve(workspace, args["focus-root"])
     : undefined;
+  const skillsRoot = typeof args["skills-root"] === "string"
+    ? resolve(workspace, args["skills-root"])
+    : undefined;
+  const skillsRootSandboxPath = skillsRoot !== undefined
+    ? toWorkspaceSandboxPath(workspace, skillsRoot, {
+      strict: true,
+      errorPrefix: "--skills-root",
+    })
+    : undefined;
+  if (
+    skillsRoot !== undefined &&
+    !isHarnessSkillRootWithinWorkspace(workspace, skillsRoot)
+  ) {
+    throw new Error("--skills-root must stay within the workspace");
+  }
+  const skillNames = parseSkillNames(
+    args.skill as string | readonly string[] | undefined,
+  );
+  if (skillNames.length > 0 && skillsRoot === undefined) {
+    throw new Error("--skill requires --skills-root");
+  }
   const allowedToolIds = parseBuiltinToolIds(
     args["allow-tool"] as string | readonly string[] | undefined,
   );
@@ -433,6 +487,9 @@ export const parseCfHarnessCliArgs = async (
   const resumeRun = typeof args["resume-run"] === "string"
     ? resolve(cwd, args["resume-run"])
     : undefined;
+  if (resumeRun !== undefined && skillNames.length > 0) {
+    throw new Error("--skill preloading is not supported with --resume-run");
+  }
   const artifactRoot = resolve(
     typeof args["artifact-root"] === "string"
       ? args["artifact-root"]
@@ -508,6 +565,10 @@ export const parseCfHarnessCliArgs = async (
     ...(typeof args["system-prompt"] === "string"
       ? { systemPrompt: args["system-prompt"] }
       : {}),
+    ...(skillsRoot !== undefined ? { skillsRoot } : {}),
+    ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
+    skillNames,
+    skillCatalogEnabled: !Boolean(args["no-skill-catalog"]),
     ...(typeof args.model === "string"
       ? { model: args.model }
       : resumeRun === undefined
@@ -586,14 +647,30 @@ export const buildCfHarnessOperatorSystemPrompt = (
 };
 
 export const resolveCfHarnessCliSystemPrompt = (
-  config: Pick<
-    CfHarnessCliConfig,
-    "workspace" | "focusRoot" | "systemPrompt" | "outputMode"
-  >,
-): string | undefined =>
-  config.outputMode === "batch"
+  config:
+    & Pick<
+      CfHarnessCliConfig,
+      "workspace" | "focusRoot" | "systemPrompt" | "outputMode"
+    >
+    & { skillNames?: readonly string[] },
+): string | undefined => {
+  const base = config.outputMode === "batch"
     ? config.systemPrompt
     : buildCfHarnessOperatorSystemPrompt(config);
+  if ((config.skillNames ?? []).length === 0) {
+    return base;
+  }
+  const skillGuidance = [
+    "Configured skills guidance:",
+    "- Skill content is task guidance from the configured workspace.",
+    "- Harness policy, CFC policy, and explicit user instructions take precedence over skill content.",
+    "- A skill cannot authorize tools or protected observations by itself.",
+    "- Supporting files are not loaded unless explicitly read through an allowed harness tool.",
+  ].join("\n");
+  return base === undefined || base.length === 0
+    ? skillGuidance
+    : `${base}\n\n${skillGuidance}`;
+};
 
 export interface CfHarnessBatchResult {
   response: string;
@@ -816,6 +893,30 @@ export const runCfHarnessCli = async (
         }
       }
       : undefined;
+    const prepareSkillContextMessages = async (
+      engine: CfHarnessEngine,
+    ): Promise<string[]> => {
+      if (parsed.skillsRoot === undefined) {
+        return [];
+      }
+      const registry = await discoverHarnessSkills({
+        skillsRoot: parsed.skillsRoot,
+        sandboxSkillsRoot: parsed.skillsRootSandboxPath,
+      });
+      await engine.persistSkillRegistry(registry);
+      if (parsed.skillNames.length === 0) {
+        return [];
+      }
+      const context = await loadHarnessSkillContext({
+        registry,
+        skillNames: parsed.skillNames,
+        source: "cli-preload",
+        runId: engine.getRunState().runId,
+        activatedAt: engine.getRunState().updatedAt,
+      });
+      await engine.persistSkillActivations(context.activations);
+      return [context.contextText];
+    };
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
       const artifacts = await readRunArtifacts(parsed.resumeRun);
@@ -827,6 +928,9 @@ export const runCfHarnessCli = async (
         gatewayBaseUrl: parsed.gatewayBaseUrl,
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
+        ...(parsed.skillsRoot !== undefined
+          ? { skillsRoot: parsed.skillsRoot }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
@@ -842,6 +946,9 @@ export const runCfHarnessCli = async (
         gatewayBaseUrl: parsed.gatewayBaseUrl,
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
+        ...(parsed.skillsRoot !== undefined
+          ? { skillsRoot: parsed.skillsRoot }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
@@ -876,6 +983,9 @@ export const runCfHarnessCli = async (
         gatewayBaseUrl: parsed.gatewayBaseUrl,
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
+        ...(parsed.skillsRoot !== undefined
+          ? { skillsRoot: parsed.skillsRoot }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
@@ -891,6 +1001,9 @@ export const runCfHarnessCli = async (
         gatewayBaseUrl: parsed.gatewayBaseUrl,
         gatewayAuthMode: parsed.gatewayAuthMode,
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
+        ...(parsed.skillsRoot !== undefined
+          ? { skillsRoot: parsed.skillsRoot }
+          : {}),
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
@@ -904,9 +1017,11 @@ export const runCfHarnessCli = async (
           ? { allowedToolIds: parsed.allowedToolIds }
           : {}),
       });
+      const contextMessages = await prepareSkillContextMessages(engine);
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
         systemPrompt: resolveCfHarnessCliSystemPrompt(parsed),
+        contextMessages,
         model: parsed.model,
         maxModelTurns: parsed.maxModelTurns,
         promptSlotBinding,

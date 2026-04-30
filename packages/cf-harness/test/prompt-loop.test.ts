@@ -16,6 +16,7 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import type { OpenAIChatCompletionRequest } from "../src/gateway/openai-client.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
@@ -296,6 +297,50 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       }),
     },
   );
+});
+
+Deno.test("CfHarnessPromptLoop inserts context messages before the user prompt", async () => {
+  let request: OpenAIChatCompletionRequest | undefined;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-context",
+      model: "gpt-5.4",
+    }),
+    fetchFn: (_input, init) => {
+      request = JSON.parse(String(init?.body)) as OpenAIChatCompletionRequest;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Done.",
+              },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  await loop.runPrompt({
+    systemPrompt: "System guidance.",
+    contextMessages: ["Configured skills context."],
+    prompt: "Do the task.",
+    model: "gpt-5.4",
+  });
+
+  assertEquals(request?.messages.map((message) => message.role), [
+    "system",
+    "user",
+    "user",
+  ]);
+  assertEquals(request?.messages[1].content, "Configured skills context.");
+  assertEquals(request?.messages[2].content, "Do the task.");
 });
 
 Deno.test("CfHarnessPromptLoop surfaces recoverable file-tool failures to the model", async () => {

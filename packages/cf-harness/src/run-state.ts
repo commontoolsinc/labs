@@ -8,6 +8,10 @@ import type {
 } from "./contracts/policy-trace.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import type {
+  HarnessSkillActivations,
+  HarnessSkillRegistry,
+} from "./contracts/skill.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
 import type {
@@ -44,6 +48,10 @@ export interface HarnessRunState {
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
+  skillRegistry?: HarnessSkillRegistry;
+  skillRegistryPath?: string;
+  skillActivations?: HarnessSkillActivations;
+  skillActivationsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -73,6 +81,10 @@ export interface CreateHarnessRunStateOptions {
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
+  skillRegistry?: HarnessSkillRegistry;
+  skillRegistryPath?: string;
+  skillActivations?: HarnessSkillActivations;
+  skillActivationsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -116,6 +128,18 @@ export const createHarnessRunState = (
       : {}),
     ...(options.runManifestPath !== undefined
       ? { runManifestPath: options.runManifestPath }
+      : {}),
+    ...(options.skillRegistry !== undefined
+      ? { skillRegistry: options.skillRegistry }
+      : {}),
+    ...(options.skillRegistryPath !== undefined
+      ? { skillRegistryPath: options.skillRegistryPath }
+      : {}),
+    ...(options.skillActivations !== undefined
+      ? { skillActivations: options.skillActivations }
+      : {}),
+    ...(options.skillActivationsPath !== undefined
+      ? { skillActivationsPath: options.skillActivationsPath }
       : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
@@ -296,6 +320,30 @@ export const setHarnessRunManifestPath = (
 ): HarnessRunState => ({
   ...state,
   runManifestPath,
+  updatedAt: now,
+});
+
+export const setHarnessSkillRegistry = (
+  state: HarnessRunState,
+  skillRegistry: HarnessSkillRegistry,
+  skillRegistryPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  skillRegistry,
+  ...(skillRegistryPath !== undefined ? { skillRegistryPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessSkillActivations = (
+  state: HarnessRunState,
+  skillActivations: HarnessSkillActivations,
+  skillActivationsPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  skillActivations,
+  ...(skillActivationsPath !== undefined ? { skillActivationsPath } : {}),
   updatedAt: now,
 });
 

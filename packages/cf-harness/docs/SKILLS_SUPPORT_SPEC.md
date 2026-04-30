@@ -178,6 +178,11 @@ trust boundary simple and avoids host-specific behavior in batch/product runs.
 The first slice should implement explicit skill preloading, not fully dynamic
 model-driven activation.
 
+Status: implemented for package CLI runs. The harness now scans an explicitly
+configured `--skills-root`, accepts repeatable `--skill` preload names, injects
+the selected `SKILL.md` files as configured context before the task prompt, and
+persists `skill-registry.json` and `skill-activations.json`.
+
 This is enough for Pattern Factory to invoke `cf-harness` with phase-relevant
 skills:
 

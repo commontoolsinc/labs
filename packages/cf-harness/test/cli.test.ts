@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { join } from "@std/path";
 import {
   buildCfHarnessOperatorSystemPrompt,
   type CfHarnessCliIO,
@@ -57,6 +58,8 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.streamEvents, false);
   assertEquals(parsed.promptSlotRole, "direct-command");
   assertEquals(parsed.allowedSubagentProfiles, ["default"]);
+  assertEquals(parsed.skillNames, []);
+  assertEquals(parsed.skillCatalogEnabled, true);
   assertEquals(parsed.artifactRoot, "/tmp/project/.cf-harness-artifacts");
   assertEquals(parsed.maxModelTurns, 8);
   assertEquals(parsed.printTranscript, false);
@@ -180,6 +183,99 @@ Deno.test("parseCfHarnessCliArgs supports stream-events flag", async () => {
     throw new Error("expected config result");
   }
   assertEquals(parsed.streamEvents, true);
+});
+
+Deno.test("parseCfHarnessCliArgs supports skills root and skill preloads", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "hi",
+      "--skills-root",
+      "labs/skills",
+      "--skill",
+      "pattern-dev",
+      "--skill",
+      "pattern-dev",
+      "--skill",
+      "cf",
+      "--no-skill-catalog",
+    ],
+    {
+      cwd: "/tmp/project/packages/cf-harness",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsRoot, "/tmp/project/labs/skills");
+  assertEquals(parsed.skillsRootSandboxPath, "/workspace/labs/skills");
+  assertEquals(parsed.skillNames, ["pattern-dev", "cf"]);
+  assertEquals(parsed.skillCatalogEnabled, false);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects skill preloads without a skills root", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skill", "pattern-dev"],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--skill requires --skills-root",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects skills root outside workspace", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          "/tmp/project",
+          "--prompt",
+          "hi",
+          "--skills-root",
+          "../other/skills",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--skills-root must stay within the workspace",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects skill preloads while resuming", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          "/tmp/project",
+          "--resume-run",
+          "run-state.json",
+          "--skills-root",
+          "skills",
+          "--skill",
+          "pattern-dev",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--skill preloading is not supported with --resume-run",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs supports allowed tools and result json path", async () => {
@@ -1295,6 +1391,116 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
       },
     }, JSON.parse(writes[0].text).duration_ms),
   );
+});
+
+Deno.test({
+  name:
+    "runCfHarnessCli preloads configured skills and persists skill artifacts",
+  permissions: { read: true, write: true },
+  async fn() {
+    const workspace = await Deno.makeTempDir({
+      prefix: "cf-harness-cli-skills-",
+    });
+    try {
+      const skillDir = join(workspace, "labs", "skills", "pattern-dev");
+      await Deno.mkdir(skillDir, { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: pattern-dev",
+          "description: Build Common Fabric patterns",
+          "---",
+          "",
+          "# Pattern Dev",
+          "",
+          "Read the pattern development guide first.",
+        ].join("\n"),
+      );
+      const { io, stdout, stderr } = createIoBuffers();
+      let runPromptOptions: RunHarnessPromptOptions | undefined;
+      let engine: CfHarnessEngine | undefined;
+
+      const exitCode = await runCfHarnessCli(
+        [
+          "--workspace",
+          workspace,
+          "--prompt",
+          "Build a pattern",
+          "--gateway-auth-mode",
+          "none",
+          "--skills-root",
+          "labs/skills",
+          "--skill",
+          "pattern-dev",
+        ],
+        {
+          io,
+          env: {},
+          createPromptLoop: (options) => {
+            engine = options.engine;
+            return {
+              runPrompt: (promptOptions) => {
+                runPromptOptions = promptOptions;
+                return Promise.resolve(
+                  ({
+                    model: "gpt-5.4",
+                    finalAssistantText: "Done.",
+                    transcript: [
+                      ...(promptOptions.contextMessages ?? []).map((
+                        content,
+                      ) => ({ role: "user" as const, content })),
+                      { role: "user", content: promptOptions.prompt },
+                      { role: "assistant", content: "Done." },
+                    ],
+                    modelTurns: 1,
+                    runState: options.engine!.getRunState(),
+                  }) satisfies HarnessPromptLoopResult,
+                );
+              },
+              runTranscript: () =>
+                Promise.reject(new Error("unexpected resume path")),
+            };
+          },
+        },
+      );
+
+      assertEquals(exitCode, 0);
+      assertEquals(stderr, []);
+      assertEquals(stdout[0].includes("Done."), true);
+      assertEquals(runPromptOptions?.contextMessages?.length, 1);
+      assertEquals(
+        runPromptOptions?.contextMessages?.[0].includes(
+          '<skill_context name="pattern-dev" source="/workspace/labs/skills/pattern-dev/SKILL.md">',
+        ),
+        true,
+      );
+      assertEquals(
+        runPromptOptions?.systemPrompt?.includes(
+          "Configured skills guidance:",
+        ),
+        true,
+      );
+
+      const runState = engine!.getRunState();
+      assertEquals(runState.skillRegistry?.skills[0].name, "pattern-dev");
+      assertEquals(
+        runState.skillActivations?.activations[0].cfcPromptRole,
+        "context",
+      );
+      assertEquals(
+        JSON.parse(await Deno.readTextFile(runState.skillRegistryPath!)).type,
+        "cf-harness.skill-registry",
+      );
+      assertEquals(
+        JSON.parse(await Deno.readTextFile(runState.skillActivationsPath!))
+          .type,
+        "cf-harness.skill-activations",
+      );
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+    }
+  },
 });
 
 Deno.test("buildCfHarnessOperatorSystemPrompt appends user instructions after guardrails", () => {

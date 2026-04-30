@@ -239,13 +239,19 @@ Why:
 - to avoid silently making host execution part of the parent/default tool
   surface
 
-### Proposed Stage K: First-class Agent Skills
+### Stage K: Explicit Agent Skills preload
 
 - explicit `skillsRoot` configuration and CLI flags
 - explicit skill preload for batch/product runs
 - persisted skill registry and activation artifacts
-- eventual dedicated `load_skill` tool for model-driven activation
 - CFC classification of skill content as context, not direct-command authority
+- context message insertion before the final task prompt
+
+Still planned:
+
+- eventual dedicated `load_skill` tool for model-driven activation
+- supporting-file/resource loading from skill directories
+- explicit subagent skill activation policy
 
 Why:
 
