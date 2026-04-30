@@ -13,6 +13,8 @@ import {
   nonPrivateRandom,
   pattern,
   safeDateNow,
+  toCompactDebugString,
+  toIndentedDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -58,7 +60,7 @@ const selectByIndex = handler<
     log.push(`items.get() returned array of length: ${itemsArray.length}`);
 
     const targetItem = itemsArray[index];
-    log.push(`itemsArray[${index}] = ${JSON.stringify(targetItem)}`);
+    log.push(`itemsArray[${index}] = ${toCompactDebugString(targetItem)}`);
     log.push(`typeof targetItem: ${typeof targetItem}`);
     log.push(`targetItem constructor: ${targetItem?.constructor?.name}`);
 
@@ -72,11 +74,11 @@ const selectByIndex = handler<
 
     // Read back
     const readBack = selectedItem.get();
-    log.push(`selectedItem.get() = ${JSON.stringify(readBack)}`);
+    log.push(`selectedItem.get() = ${toCompactDebugString(readBack)}`);
 
     // Check items again
     const itemsAfter = items.get();
-    log.push(`items after set: ${JSON.stringify(itemsAfter)}`);
+    log.push(`items after set: ${toCompactDebugString(itemsAfter)}`);
   },
 );
 
@@ -159,7 +161,7 @@ export default pattern<DiagInput, DiagInput>(
                 marginTop: "0.25rem",
               }}
             >
-              <pre>{JSON.stringify(selectedItem, null, 2)}</pre>
+              <pre>{toIndentedDebugString(selectedItem)}</pre>
             </div>
           </div>
 

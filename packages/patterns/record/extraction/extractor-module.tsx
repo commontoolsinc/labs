@@ -25,6 +25,7 @@ import {
   NAME,
   pattern,
   safeDateNow,
+  toCompactDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -388,10 +389,10 @@ function isEmpty(value: unknown): boolean {
 /**
  * Format a value for display in the diff view
  */
-function formatValue(value: unknown): string {
+function debugFormatValue(value: unknown): string {
   if (isEmpty(value)) return "(empty)";
-  if (Array.isArray(value)) return JSON.stringify(value);
-  if (typeof value === "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return toCompactDebugString(value);
+  if (typeof value === "object") return toCompactDebugString(value);
   return String(value);
 }
 
@@ -1125,7 +1126,7 @@ function applyFieldToModule(
     console.warn(
       `[Extract] Type mismatch for ${moduleType}.${actualFieldName}: ` +
         `expected ${fieldSchema?.type}, got ${actualType}. ` +
-        `Value: ${JSON.stringify(extractedValue)}. Skipping field.`,
+        `Value: ${toCompactDebugString(extractedValue)}. Skipping field.`,
     );
     return false;
   }
@@ -1175,7 +1176,9 @@ function createModuleWithFields(
       console.warn(
         `[Extract] Type mismatch for new module ${moduleType}.${actualFieldName}: ` +
           `expected ${fieldSchema?.type}, got ${actualType}. ` +
-          `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
+          `Value: ${
+            toCompactDebugString(field.extractedValue)
+          }. Skipping field.`,
       );
       continue;
     }
@@ -1531,7 +1534,7 @@ const applySelected = handler<
               anySuccess = true;
               console.debug(
                 `[Extract] Created new ${moduleType} instance: ${
-                  JSON.stringify(initialValues)
+                  toCompactDebugString(initialValues)
                 }`,
               );
             } catch (e) {
@@ -2990,8 +2993,8 @@ export const ExtractorModule = pattern<
                             fontFamily: "monospace",
                           }}
                         >
-                          {formatValue(f.currentValue)} -&gt;{" "}
-                          {formatValue(f.extractedValue)}
+                          {debugFormatValue(f.currentValue)} -&gt;{" "}
+                          {debugFormatValue(f.extractedValue)}
                         </div>
                         {ifElse(
                           f.explanation !== undefined && f.explanation !== "",

@@ -572,6 +572,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       cwd: request.cwd,
       stdinText: request.stdinText,
       timeoutMs: request.timeoutMs,
+      cfcInvocationContext: request.cfcInvocationContext,
     });
   }
 

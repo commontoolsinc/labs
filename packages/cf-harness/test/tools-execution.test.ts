@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+import { createHarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
@@ -106,6 +107,7 @@ const createContext = (
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
+  let cfcInvocationSequence = 0;
   const workspaceHostPath = "/tmp/cf-harness-workspace";
   return {
     runId: "run-1",
@@ -144,8 +146,33 @@ const createContext = (
       sequence += 1;
       return createToolOutputId("run-1", toolId, sequence);
     },
+    createCfcInvocationContext(options) {
+      cfcInvocationSequence += 1;
+      return createHarnessCfcInvocationContext({
+        sequence: cfcInvocationSequence,
+        runId: "run-1",
+        createdAt: "2026-04-30T00:00:00.000Z",
+        cfcEnforcementMode,
+        runManifest: { present: false },
+        ...options,
+      });
+    },
   };
 };
+
+const stripCfcInvocationContexts = (
+  calls: FakeSandboxRuntime["calls"],
+): FakeSandboxRuntime["calls"] =>
+  calls.map((call) => {
+    if (call.type === "run") {
+      const { cfcInvocationContext: _cfcInvocationContext, ...request } =
+        call.request;
+      return { type: "run", request };
+    }
+    const { cfcInvocationContext: _cfcInvocationContext, ...request } =
+      call.request;
+    return { type: "runShell", request };
+  });
 
 const observedCfcResult = (stdout: string): CfcSandboxResult => ({
   version: 1,
@@ -188,7 +215,7 @@ Deno.test("bash tool executes the command through the sandbox shell runtime", as
     exitCode: 0,
     cwd: "/workspace/repo",
   });
-  assertEquals(sandbox.calls, [{
+  assertEquals(stripCfcInvocationContexts(sandbox.calls), [{
     type: "runShell",
     request: {
       command: [
@@ -200,6 +227,18 @@ Deno.test("bash tool executes the command through the sandbox shell runtime", as
       timeoutMs: 1000,
     },
   }]);
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.toolOutputId,
+    "run-1:bash:1",
+  );
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.inputs.command?.bytes,
+    [
+      '__cf_harness_cwd_marker="__CF_HARNESS_CWD__run-1:bash:1__"',
+      'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+      "pwd",
+    ].join("\n").length,
+  );
   assertEquals(context.currentDir, "/workspace/repo");
 });
 
@@ -472,7 +511,7 @@ Deno.test("read_file tool resolves relative paths from the session currentDir", 
     path: "/workspace/notes/todo.txt",
     content: "hello",
   });
-  assertEquals(sandbox.calls[0], {
+  assertEquals(stripCfcInvocationContexts(sandbox.calls)[0], {
     type: "runShell",
     request: {
       command: [
@@ -491,8 +530,21 @@ Deno.test("read_file tool resolves relative paths from the session currentDir", 
         'exec cat "$1"',
       ].join("\n"),
       args: ["/workspace/notes/todo.txt", "32"],
+      cwd: "/workspace/.ops",
     },
   });
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.toolId,
+    "read_file",
+  );
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.inputs.args?.count,
+    2,
+  );
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.cwd,
+    "/workspace/.ops",
+  );
 });
 
 Deno.test("read_file tool rejects non-integer maxBytes", async () => {
@@ -599,7 +651,7 @@ Deno.test("write_file tool supports append mode and passes content over stdin", 
     path: "/workspace/notes/log.txt",
     mode: "append",
   });
-  assertEquals(sandbox.calls[0], {
+  assertEquals(stripCfcInvocationContexts(sandbox.calls)[0], {
     type: "runShell",
     request: {
       command: [
@@ -632,9 +684,22 @@ Deno.test("write_file tool supports append mode and passes content over stdin", 
         "esac",
       ].join("\n"),
       args: ["/workspace/notes/log.txt", "append", "true"],
+      cwd: "/workspace",
       stdinText: "line one\n",
     },
   });
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.toolId,
+    "write_file",
+  );
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.inputs.stdin?.bytes,
+    "line one\n".length,
+  );
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.cwd,
+    "/workspace",
+  );
 });
 
 Deno.test("write_file uses the cwd established by an earlier bash call", async () => {
@@ -654,7 +719,7 @@ Deno.test("write_file uses the cwd established by an earlier bash call", async (
   });
 
   assertEquals(context.currentDir, "/workspace/repo");
-  assertEquals(sandbox.calls[1], {
+  assertEquals(stripCfcInvocationContexts(sandbox.calls)[1], {
     type: "runShell",
     request: {
       command: [
@@ -687,9 +752,14 @@ Deno.test("write_file uses the cwd established by an earlier bash call", async (
         "esac",
       ].join("\n"),
       args: ["/workspace/repo/notes/log.txt", "replace", "false"],
+      cwd: "/workspace/repo",
       stdinText: "line one\n",
     },
   });
+  assertEquals(
+    sandbox.calls[1]?.request.cfcInvocationContext?.cwd,
+    "/workspace/repo",
+  );
 });
 
 Deno.test("write_file tool returns a recoverable permission_denied result", async () => {

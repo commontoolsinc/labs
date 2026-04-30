@@ -72,13 +72,21 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
       ? context.resolvePath(input.cwd)
       : context.currentDir;
     const cwdMarker = cwdMarkerForOutput(CWD_MARKER_PREFIX, outputId);
+    const command = commandWithFinalWorkingDirectoryMarker(
+      input.command,
+      cwdMarker,
+    );
     const result = await context.sandbox.runShell({
-      command: commandWithFinalWorkingDirectoryMarker(
-        input.command,
-        cwdMarker,
-      ),
+      command,
       cwd: commandCwd,
       timeoutMs: input.timeoutMs,
+      cfcInvocationContext: await context.createCfcInvocationContext({
+        toolId: "bash",
+        toolOutputId: outputId,
+        operation: "shell",
+        cwd: commandCwd,
+        command,
+      }),
     });
     const mayTrustCwdMarker = context.cfcEnforcementMode === "disabled" ||
       context.cfcEnforcementMode === "observe";

@@ -25,6 +25,7 @@ import {
   pattern,
   safeDateNow,
   Stream,
+  toIndentedDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -2195,10 +2196,10 @@ Each suggestion should have:
                       {computed(() => {
                         const result = currentClassificationResult;
                         if (result) {
-                          return JSON.stringify(result.item.fields, null, 2);
+                          return toIndentedDebugString(result.item.fields);
                         }
                         const item = currentItem.get();
-                        return item ? JSON.stringify(item.fields, null, 2) : "";
+                        return item ? toIndentedDebugString(item.fields) : "";
                       })}
                     </pre>
 
@@ -2309,7 +2310,7 @@ Each suggestion should have:
                       {computed(() => {
                         const undone = undoneAutoItem.get();
                         return undone
-                          ? JSON.stringify(undone.input.fields, null, 2)
+                          ? toIndentedDebugString(undone.input.fields)
                           : "";
                       })}
                     </pre>
@@ -2391,7 +2392,7 @@ Each suggestion should have:
                         <cf-vstack gap="2">
                           <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0;">
                             {computed(() =>
-                              JSON.stringify(pending.input.fields, null, 2)
+                              toIndentedDebugString(pending.input.fields)
                             )}
                           </pre>
 
@@ -2769,10 +2770,8 @@ Each suggestion should have:
                                 </span>
                                 <pre style="font-size: 0.75rem; overflow: auto; max-height: 150px; margin: 0; background: white; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--cf-color-gray-200);">
                                   {computed(() =>
-                                    JSON.stringify(
+                                    toIndentedDebugString(
                                       example.input.fields,
-                                      null,
-                                      2,
                                     )
                                   )}
                                 </pre>

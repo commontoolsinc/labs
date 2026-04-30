@@ -35,6 +35,7 @@ import {
   pattern,
   safeDateNow,
   Stream,
+  toIndentedDebugString,
   UI,
   wish,
   Writable,
@@ -2100,7 +2101,7 @@ When you're done searching, STOP calling tools and produce your final structured
                                   fontSize: "10px",
                                 }}
                               >
-                                {JSON.stringify(entry.details, null, 2)}
+                                {toIndentedDebugString(entry.details)}
                               </div>
                             )}
                           </div>
