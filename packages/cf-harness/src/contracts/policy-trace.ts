@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessCfcInvocationContext } from "./cfc-invocation-context.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessToolInputSummary } from "./policy.ts";
@@ -61,6 +62,7 @@ export interface HarnessPolicyTrace {
   cfcPolicySnapshotDigest?: string;
   decisionCounts: HarnessPolicyDecisionCounts;
   decisions: readonly HarnessPolicyDecisionRecord[];
+  cfcInvocationContexts?: readonly HarnessCfcInvocationContext[];
 }
 
 export interface CreateHarnessPolicyDecisionRecordOptions
@@ -76,6 +78,7 @@ export interface CreateHarnessPolicyTraceOptions {
   cfcPolicySnapshotPath?: string;
   cfcPolicySnapshotDigest?: string;
   decisions?: readonly HarnessPolicyDecisionRecord[];
+  cfcInvocationContexts?: readonly HarnessCfcInvocationContext[];
 }
 
 export const createHarnessPolicyDecisionRecord = (
@@ -140,5 +143,8 @@ export const createHarnessPolicyTrace = (
       : {}),
     decisionCounts: countHarnessPolicyDecisions(decisions),
     decisions,
+    ...(options.cfcInvocationContexts !== undefined
+      ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
+      : {}),
   };
 };

@@ -134,6 +134,27 @@ Deno.test({
         endedAt: "2026-04-15T21:00:05.000Z",
         terminalReason: "tool_completed",
         cfcEnforcementMode: "observe",
+        cfcInvocationContexts: [{
+          type: "cf-harness.cfc-invocation-context",
+          version: 1,
+          sequence: 1,
+          runId: "run-artifacts",
+          createdAt: "2026-04-15T21:00:04.000Z",
+          toolId: "bash",
+          toolOutputId: createToolOutputId("run-artifacts", "bash", 1),
+          operation: "shell",
+          cfcEnforcementMode: "observe",
+          cwd: "/workspace",
+          runManifest: { present: false },
+          inputs: {
+            command: {
+              type: "cf-harness.redacted-text-summary",
+              bytes: 205,
+              digest:
+                "sha256:6bb6cd56e7da813533d74d7817e27d52c502178533187fe96132f5804f2a7d15",
+            },
+          },
+        }],
         currentDir: "/workspace",
         artifactRoot: runRoot,
         capabilitySnapshot: {
@@ -449,6 +470,19 @@ Deno.test({
           path: "notes/todo.txt",
         },
       });
+      assertEquals(persistedPolicyTrace.cfcInvocationContexts?.length, 1);
+      assertEquals(
+        persistedPolicyTrace.cfcInvocationContexts?.[0].toolId,
+        "read_file",
+      );
+      assertEquals(
+        persistedPolicyTrace.cfcInvocationContexts?.[0].inputs.args?.count,
+        2,
+      );
+      assertEquals(
+        JSON.stringify(persistedPolicyTrace).includes("hello from file"),
+        false,
+      );
       assertEquals(persistedReport.type, "cf-harness.run-report");
       assertEquals(persistedReport.runId, "run-loop-persisted");
       assertEquals(persistedReport.status, "completed");

@@ -1,4 +1,8 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  HarnessCfcInvocationContext,
+  HarnessCfcInvocationOperation,
+} from "../contracts/cfc-invocation-context.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -19,6 +23,17 @@ export interface HarnessToolContext {
   ): Promise<boolean>;
   setCurrentDir(path: string): void;
   nextOutputId(toolId: string): ToolOutputId;
+  createCfcInvocationContext(options: {
+    toolId: string;
+    toolOutputId?: ToolOutputId;
+    operation: HarnessCfcInvocationOperation;
+    cwd: string;
+    command?: string;
+    argv?: readonly string[];
+    args?: readonly string[];
+    stdinText?: string;
+    env?: Record<string, string>;
+  }): Promise<HarnessCfcInvocationContext>;
 }
 
 export interface HarnessToolDefinition<Input = unknown, Output = unknown> {

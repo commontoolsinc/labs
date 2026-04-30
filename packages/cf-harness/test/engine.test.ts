@@ -351,6 +351,71 @@ Deno.test("CfHarnessEngine stamps policy snapshot state changes with mutation ti
   );
 });
 
+Deno.test("CfHarnessEngine timestamps CFC invocation contexts with mutation time", async () => {
+  const persistedStates: HarnessRunState[] = [];
+  const runRoot = "/tmp/cf-harness-artifacts/run-cfc-invocation-time";
+  const artifactStore: HarnessArtifactStore = {
+    artifactRoot: "/tmp/cf-harness-artifacts",
+    runRoot,
+    persistRunState(state) {
+      persistedStates.push(structuredClone(state));
+      return Promise.resolve(`${runRoot}/run-state.json`);
+    },
+    persistTranscript() {
+      return Promise.resolve(`${runRoot}/transcript.json`);
+    },
+    persistCapabilitySnapshot() {
+      return Promise.resolve(`${runRoot}/capabilities.json`);
+    },
+    persistCfcPolicySnapshot() {
+      return Promise.resolve(`${runRoot}/policy-snapshot.json`);
+    },
+    persistPolicyTrace() {
+      return Promise.resolve(`${runRoot}/policy-trace.json`);
+    },
+    persistRunReport() {
+      return Promise.resolve(`${runRoot}/run-report.json`);
+    },
+    persistToolOutput() {
+      return Promise.resolve(`${runRoot}/tool-output.json`);
+    },
+  };
+  const engine = new CfHarnessEngine({
+    artifactStore,
+    sandboxRuntime: new FakeSandboxRuntime([{
+      stdout: "hello",
+      stderr: "",
+      exitCode: 0,
+    }]),
+    runId: "run-cfc-invocation-time",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-04-17T21:00:00.000Z",
+        "2026-04-17T21:00:01.000Z",
+        "2026-04-17T21:00:02.000Z",
+        "2026-04-17T21:00:03.000Z",
+        "2026-04-17T21:00:04.000Z",
+        "2026-04-17T21:00:05.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-17T21:00:06.000Z";
+    })(),
+  });
+
+  await engine.invokeBuiltinTool("read_file", { path: "notes/todo.txt" });
+
+  const invocationState = persistedStates.find((state) =>
+    state.cfcInvocationContexts?.length === 1 &&
+    state.toolOutputs.length === 0
+  );
+  assertEquals(invocationState?.updatedAt, "2026-04-17T21:00:04.000Z");
+  assertEquals(
+    invocationState?.cfcInvocationContexts?.[0]?.createdAt,
+    "2026-04-17T21:00:04.000Z",
+  );
+  assertEquals(engine.getRunState().updatedAt, "2026-04-17T21:00:05.000Z");
+});
+
 Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors", async () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime([], new Error("sandbox boom")),
