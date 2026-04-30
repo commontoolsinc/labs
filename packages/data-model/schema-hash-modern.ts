@@ -1,7 +1,7 @@
 /**
  * Modern schema hashing via content identification.
  *
- * Delegates to `hashOfModern()` from `value-hash-modern.ts` to produce
+ * Delegates to `hashOf()` from `value-hash-modern.ts` to produce
  * deterministic hashes using the main value hashing pipeline. Returns
  * `FabricHash` directly.
  *
