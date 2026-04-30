@@ -19,6 +19,7 @@ type CfcLabelSubscribableValue = {
 type CfcReadableClaimValue = {
   get?(): unknown;
   sync?(): Promise<unknown>;
+  resolveAsCell?(): Promise<unknown> | unknown;
 };
 
 const DEFAULT_AUTHORSHIP_KIND = "authored-by";
@@ -65,6 +66,64 @@ const hasReadableClaim = (
   typeof value === "object" && value !== null &&
   (typeof (value as { get?: unknown }).get === "function" ||
     typeof (value as { sync?: unknown }).sync === "function");
+
+const isConcreteAuthorClaim = (value: unknown): boolean => {
+  if (
+    typeof value === "string" || typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return AUTHOR_FIELDS.some((field) => {
+    const fieldValue = record[field];
+    return typeof fieldValue === "string" ||
+      typeof fieldValue === "number" ||
+      typeof fieldValue === "boolean";
+  });
+};
+
+const readClaimValue = async (
+  value: CfcReadableClaimValue,
+): Promise<unknown> => {
+  const readCandidate = async (candidate: unknown): Promise<unknown> => {
+    if (!hasReadableClaim(candidate)) {
+      return isConcreteAuthorClaim(candidate) ? candidate : undefined;
+    }
+
+    const beforeSync = candidate.get?.();
+    if (beforeSync !== undefined) {
+      return beforeSync;
+    }
+
+    const synced = typeof candidate.sync === "function"
+      ? await candidate.sync()
+      : undefined;
+    if (synced !== undefined && synced !== candidate) {
+      const syncedClaim = await readCandidate(synced);
+      if (syncedClaim !== undefined) {
+        return syncedClaim;
+      }
+    }
+
+    return candidate.get?.();
+  };
+
+  const directClaim = await readCandidate(value);
+  if (directClaim !== undefined) {
+    return directClaim;
+  }
+
+  if (typeof value.resolveAsCell === "function") {
+    const resolved = await value.resolveAsCell();
+    return await readCandidate(resolved);
+  }
+
+  return undefined;
+};
 
 const primitiveToString = (value: unknown): string | undefined => {
   if (typeof value === "string") {
@@ -143,9 +202,21 @@ export const integrityAtomMatchesAuthor = (
   });
 };
 
-const hasAnyIntegrity = (view: CfcLabelView): boolean =>
-  view.entries.some((entry) =>
-    Array.isArray(entry.label.integrity) && entry.label.integrity.length > 0
+const rootEntries = (view: CfcLabelView) =>
+  view.entries.filter((entry) => entry.path.length === 0);
+
+const hasAuthorshipIntegrity = (
+  entries: ReturnType<typeof rootEntries>,
+  kind: string,
+): boolean =>
+  entries.some((entry) =>
+    (entry.label.integrity ?? []).some((atom) =>
+      typeof atom === "string"
+        ? atom.startsWith(`${kind}:`)
+        : typeof atom === "object" && atom !== null &&
+          !Array.isArray(atom) &&
+          objectField(atom as Record<string, unknown>, "kind") === kind
+    )
   );
 
 export const authorshipStateForLabel = (
@@ -157,7 +228,8 @@ export const authorshipStateForLabel = (
     return "unknown";
   }
 
-  for (const entry of view.entries) {
+  const entries = rootEntries(view);
+  for (const entry of entries) {
     const integrity = entry.label.integrity;
     if (!Array.isArray(integrity)) {
       continue;
@@ -169,7 +241,7 @@ export const authorshipStateForLabel = (
     }
   }
 
-  return hasAnyIntegrity(view) ? "unverified" : "unknown";
+  return hasAuthorshipIntegrity(entries, kind) ? "unverified" : "unknown";
 };
 
 const initialsForName = (name: string | undefined): string => {
@@ -510,9 +582,7 @@ export class CFCFCAuthorship extends BaseElement {
 
     let authorClaim: unknown;
     try {
-      authorClaim = typeof this.author.sync === "function"
-        ? await this.author.sync()
-        : this.author.get?.();
+      authorClaim = await readClaimValue(this.author);
     } catch {
       authorClaim = undefined;
     }

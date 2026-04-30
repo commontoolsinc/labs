@@ -29,14 +29,7 @@ import {
   type SharedParticipantsValue,
   TrustedChatSendSurface,
   TrustedProfileSaveSurface,
-  VerifiedChatBubble0,
-  VerifiedChatBubble1,
-  VerifiedChatBubble2,
-  VerifiedChatBubble3,
-  VerifiedChatBubble4,
-  VerifiedChatBubble5,
-  VerifiedChatBubble6,
-  VerifiedChatBubble7,
+  VerifiedChatBubble,
 } from "./trusted.tsx";
 
 type LobbyPiece = any;
@@ -49,27 +42,6 @@ const writeDraftText = handler<string, { value: Writable<string> }>(
 
 const messageCountText = (count: number): string =>
   count === 0 ? "No messages yet" : `${count} message${count === 1 ? "" : "s"}`;
-
-const sharedWritableOf = <Value,>(
-  value: Value,
-  name: string,
-): Writable<Value> => Writable.of<Value>(value).for(name);
-
-const transcriptRowStyle = (
-  messageList: readonly SharedChatMessage[],
-  viewerSlotId: SlotId,
-  index: number,
-) => {
-  const message = messageList[index];
-  const orderedIds = sortDisplayMessages(messageList).map((entry) => entry.id);
-  const order = message ? orderedIds.indexOf(message.id) : index;
-  return {
-    display: message ? "block" : "none",
-    order: order < 0 ? orderedIds.length : order,
-    alignSelf: message?.author.id === viewerSlotId ? "flex-end" : "flex-start",
-    width: "min(34rem, 100%)",
-  };
-};
 
 interface ParticipantStatusChipInput {
   participants: SharedParticipantsCell;
@@ -98,7 +70,6 @@ const ParticipantStatusChip = pattern<
 
 interface SharedTranscriptInput {
   messages: SharedMessagesCell;
-  viewerSlotId: SlotId;
   id: string;
 }
 
@@ -106,35 +77,18 @@ const SharedTranscript = pattern<
   SharedTranscriptInput,
   { [NAME]: string; [UI]: any }
 >((
-  { messages, viewerSlotId, id }: SharedTranscriptInput,
+  { messages, id }: SharedTranscriptInput,
 ): { [NAME]: string; [UI]: any } => {
-  const messageCountLabel = computed(() =>
-    messageCountText(messagesValue(messages).length)
-  );
-  const rowStyle0 = computed(() =>
-    transcriptRowStyle(messagesValue(messages), viewerSlotId, 0)
-  );
-  const rowStyle1 = computed(() =>
-    transcriptRowStyle(messagesValue(messages), viewerSlotId, 1)
-  );
-  const rowStyle2 = computed(() =>
-    transcriptRowStyle(messagesValue(messages), viewerSlotId, 2)
-  );
-  const rowStyle3 = computed(() =>
-    transcriptRowStyle(messagesValue(messages), viewerSlotId, 3)
-  );
-  const rowStyle4 = computed(() =>
-    transcriptRowStyle(messagesValue(messages), viewerSlotId, 4)
-  );
-  const rowStyle5 = computed(() =>
-    transcriptRowStyle(messagesValue(messages), viewerSlotId, 5)
-  );
-  const rowStyle6 = computed(() =>
-    transcriptRowStyle(messagesValue(messages), viewerSlotId, 6)
-  );
-  const rowStyle7 = computed(() =>
-    transcriptRowStyle(messagesValue(messages), viewerSlotId, 7)
-  );
+  const messageCountLabel = computed(() => {
+    return messageCountText(messagesValue(messages).length);
+  });
+  const transcriptRows = messages.map((messageCell) => (
+    <div style={{ width: "min(34rem, 100%)" }}>
+      {VerifiedChatBubble({
+        message: messageCell,
+      })}
+    </div>
+  ));
 
   return {
     [NAME]: computed(() => `${id} transcript`),
@@ -152,30 +106,7 @@ const SharedTranscript = pattern<
             paddingRight: "0.25rem",
           }}
         >
-          <div style={rowStyle0}>
-            {VerifiedChatBubble0({ messages, viewerSlotId })}
-          </div>
-          <div style={rowStyle1}>
-            {VerifiedChatBubble1({ messages, viewerSlotId })}
-          </div>
-          <div style={rowStyle2}>
-            {VerifiedChatBubble2({ messages, viewerSlotId })}
-          </div>
-          <div style={rowStyle3}>
-            {VerifiedChatBubble3({ messages, viewerSlotId })}
-          </div>
-          <div style={rowStyle4}>
-            {VerifiedChatBubble4({ messages, viewerSlotId })}
-          </div>
-          <div style={rowStyle5}>
-            {VerifiedChatBubble5({ messages, viewerSlotId })}
-          </div>
-          <div style={rowStyle6}>
-            {VerifiedChatBubble6({ messages, viewerSlotId })}
-          </div>
-          <div style={rowStyle7}>
-            {VerifiedChatBubble7({ messages, viewerSlotId })}
-          </div>
+          {transcriptRows}
         </div>
       </cf-vstack>
     ),
@@ -290,7 +221,6 @@ export const ParticipantRoom = pattern<
             <cf-vstack slot="content" gap="3">
               {SharedTranscript({
                 messages,
-                viewerSlotId: slotId,
                 id: `trusted-conversation-preview-${slotId}`,
               })}
               {trustedSend}
@@ -364,14 +294,12 @@ export interface GroupChatDemoOutput {
 export default pattern<unknown, GroupChatDemoOutput>(({
   [SELF]: self,
 }): GroupChatDemoOutput => {
-  const participants = sharedWritableOf<SharedParticipantsValue>(
+  const participants = Writable.of<SharedParticipantsValue>(
     [] as SharedParticipantsValue,
-    "participants",
-  ) as SharedParticipantsCell;
-  const messages = sharedWritableOf<SharedMessagesValue>(
+  ).for("participants") as SharedParticipantsCell;
+  const messages = Writable.of<SharedMessagesValue>(
     [] as SharedMessagesValue,
-    "messages",
-  ) as SharedMessagesCell;
+  ).for("messages") as SharedMessagesCell;
   const openParticipantOne = openGroupChatRoom({
     slotId: "participant-1",
     participants,

@@ -698,6 +698,9 @@ export class WorkerReconciler {
     let labelView: CfcLabelView | undefined;
     try {
       labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
     } catch {
       return false;
     }
@@ -858,6 +861,9 @@ export class WorkerReconciler {
     let labelView: CfcLabelView | undefined;
     try {
       labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
     } catch {
       return false;
     }
@@ -873,9 +879,9 @@ export class WorkerReconciler {
 
   private integrityLabels(labelView: CfcLabelView): readonly unknown[] {
     return ContextualFlowControl.uniqueAtoms(
-      labelView.entries.flatMap((entry) => [
-        ...(entry.label.integrity ?? []),
-      ]),
+      labelView.entries.flatMap((entry) =>
+        entry.path.length === 0 ? [...(entry.label.integrity ?? [])] : []
+      ),
     );
   }
 

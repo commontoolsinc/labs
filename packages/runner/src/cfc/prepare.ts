@@ -500,12 +500,17 @@ const schemaEnvelopeForTargetPath = (
 ): JSONSchema => {
   let envelope = schema;
   for (const segment of [...canonicalizeLogicalPath(path)].reverse()) {
-    envelope = {
-      type: "object",
-      properties: {
-        [segment]: envelope,
-      },
-    };
+    envelope = segment === "*"
+      ? {
+        type: "array",
+        items: envelope,
+      }
+      : {
+        type: "object",
+        properties: {
+          [segment]: envelope,
+        },
+      };
   }
   return envelope;
 };
@@ -637,6 +642,18 @@ const policyOnlySchema = (schema: JSONSchema): JSONSchema => {
   return { ifc: { ...schema.ifc } } as JSONSchema;
 };
 
+const linkWritePolicyOnlySchema = (
+  schema: JSONSchema,
+  path: readonly string[],
+): JSONSchema => {
+  const policy = policyOnlySchema(schema);
+  if (!isRecord(policy) || !isRecord(policy.ifc) || !path.includes("*")) {
+    return policy;
+  }
+  const { integrity: _integrity, ...ifc } = policy.ifc;
+  return Object.keys(ifc).length === 0 ? {} : { ifc } as JSONSchema;
+};
+
 const storedSchemaClaimsForLinkWrites = (
   schema: JSONSchema,
   inputs: readonly LinkWritePolicyInput[],
@@ -651,8 +668,12 @@ const storedSchemaClaimsForLinkWrites = (
     ) {
       continue;
     }
+    const policySchema = linkWritePolicyOnlySchema(entry.schema, entry.path);
+    if (isRecord(policySchema) && Object.keys(policySchema).length === 0) {
+      continue;
+    }
     const envelope = schemaEnvelopeForTargetPath(
-      policyOnlySchema(entry.schema),
+      policySchema,
       entry.path,
     );
     result = result === undefined

@@ -1372,6 +1372,116 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "strict text integrity ignores sibling labels for visible props",
+      async () => {
+        const tx = runtime.edit();
+        const messages = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-sibling-label-messages",
+          { type: "array", items: true },
+          tx,
+        );
+        const messagesLink = messages.getAsNormalizedFullLink();
+        tx.writeOrThrow({
+          space: signer.did(),
+          id: messagesLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: [
+            { body: "Signed sibling" },
+            { body: "Unsigned visible child" },
+          ],
+          cfc: {
+            version: 1,
+            schemaHash: "test-sibling-label-message-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: ["0"],
+                label: {
+                  integrity: [signedReleaseAtom],
+                },
+              }],
+            },
+          },
+        });
+        const requiredIntegrity = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-sibling-required-integrity",
+          undefined,
+          tx,
+        );
+        requiredIntegrity.set(signedReleaseAtom);
+        const root = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-sibling-vdom-root",
+          undefined,
+          tx,
+        );
+        root.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            $value: messages.key(1).getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: requiredIntegrity.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+          },
+          children: [{
+            type: "vnode",
+            name: "cf-chat-message",
+            props: {
+              role: "assistant",
+              content: messages.key(1).key("body").getAsLink({
+                includeSchema: true,
+              }),
+            },
+            children: [],
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-sibling-vdom-root",
+        ).asSchema(rendererVDOMSchema);
+
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" &&
+              op.value === "Content hidden by integrity policy"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" && op.value === "Unsigned visible child"
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "strict text integrity recomputes reactive required integrity before refreshing children",
       async () => {
         const tx = runtime.edit();

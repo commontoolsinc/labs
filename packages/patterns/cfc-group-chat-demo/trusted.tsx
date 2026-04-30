@@ -283,20 +283,21 @@ export const commitTrustedProfileSave = handler<
     participants: SharedParticipantsWritable;
   }
 >((_, { slotId, nameDraft, participants }) => {
-  const sharedParticipants = participants
-    .resolveAsCell() as SharedParticipantsWritable;
-  const { trimmedName, nextParticipants } = applyTrustedProfileSave(
-    participantsValue(sharedParticipants),
-    slotId,
-    nameDraft.get(),
-  );
+  const participantList = participantsValue(participants);
+  const trimmedName = nameDraft.get().trim();
   if (!trimmedName) {
     return;
   }
 
-  sharedParticipants.set(
-    nextParticipants as TrustedParticipant[] | Default<[]>,
+  const participant = makeTrustedParticipant(slotId, trimmedName);
+  const existingIndex = participantList.findIndex((saved) =>
+    saved.id === slotId
   );
+  if (existingIndex >= 0) {
+    participants.key(existingIndex).set(participant);
+    return;
+  }
+  participants.push(participant);
 });
 
 export const commitTrustedMessageSend = handler<
@@ -308,11 +309,8 @@ export const commitTrustedMessageSend = handler<
     messages: SharedMessagesWritable;
   }
 >((_, { slotId, messageDraft, participants, messages }) => {
-  const sharedParticipants = participants
-    .resolveAsCell() as SharedParticipantsWritable;
-  const sharedMessages = messages.resolveAsCell() as SharedMessagesWritable;
   const { trimmedBody, message } = prepareTrustedMessageSend(
-    participantsValue(sharedParticipants),
+    participantsValue(participants),
     slotId,
     messageDraft.get(),
   );
@@ -320,7 +318,7 @@ export const commitTrustedMessageSend = handler<
     return;
   }
 
-  sharedMessages.push(message as SharedChatMessage);
+  messages.push(message as SharedChatMessage);
   messageDraft.set("");
 });
 
@@ -531,317 +529,37 @@ export const TrustedChatSendSurface = pattern<
   };
 });
 
-interface VerifiedIndexedChatBubbleInput {
-  messages: SharedMessagesCell;
-  viewerSlotId: SlotId;
+interface VerifiedChatBubbleInput {
+  message: any;
 }
 
-export const VerifiedChatBubble0 = pattern<
-  VerifiedIndexedChatBubbleInput,
+export const VerifiedChatBubble = pattern<
+  VerifiedChatBubbleInput,
   { [NAME]: string; [UI]: any }
 >((
-  { messages, viewerSlotId }: VerifiedIndexedChatBubbleInput,
+  { message }: VerifiedChatBubbleInput,
 ): { [NAME]: string; [UI]: any } => {
-  const message = messages.key(0) as Writable<SharedChatMessage>;
-  const authorCell = message.key("author") as Writable<
-    SharedChatMessage["author"]
-  >;
   const requiredTextIntegrity = computed(() => ({
     kind: "authored-by",
-    subject: `${authorCell.key("id").get()}`,
+    subject: `${message.author.id}`,
   } satisfies AuthorshipIntegrity<string>));
-  const messageRole = computed(() =>
-    authorCell.key("id").get() === viewerSlotId ? "user" : "assistant"
-  );
   return {
-    [NAME]: "verified message bubble 0",
+    [NAME]: "verified message bubble",
     [UI]: (
       <cf-cfc-authorship
-        data-authorship-surface={message.key("id")}
+        data-authorship-surface={message.id}
         $value={message}
-        $author={authorCell}
+        author={message.author.id}
+        authorName={message.author.name}
         verifyTextIntegrity
         allowLiteralText={false}
         requiredTextIntegrity={requiredTextIntegrity}
       >
         <cf-chat-message
           compact
-          role={messageRole}
-          name={authorCell.key("name")}
-          content={message.key("body")}
-        />
-      </cf-cfc-authorship>
-    ),
-  };
-});
-
-export const VerifiedChatBubble1 = pattern<
-  VerifiedIndexedChatBubbleInput,
-  { [NAME]: string; [UI]: any }
->((
-  { messages, viewerSlotId }: VerifiedIndexedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => {
-  const message = messages.key(1) as Writable<SharedChatMessage>;
-  const authorCell = message.key("author") as Writable<
-    SharedChatMessage["author"]
-  >;
-  const requiredTextIntegrity = computed(() => ({
-    kind: "authored-by",
-    subject: `${authorCell.key("id").get()}`,
-  } satisfies AuthorshipIntegrity<string>));
-  const messageRole = computed(() =>
-    authorCell.key("id").get() === viewerSlotId ? "user" : "assistant"
-  );
-  return {
-    [NAME]: "verified message bubble 1",
-    [UI]: (
-      <cf-cfc-authorship
-        data-authorship-surface={message.key("id")}
-        $value={message}
-        $author={authorCell}
-        verifyTextIntegrity
-        allowLiteralText={false}
-        requiredTextIntegrity={requiredTextIntegrity}
-      >
-        <cf-chat-message
-          compact
-          role={messageRole}
-          name={authorCell.key("name")}
-          content={message.key("body")}
-        />
-      </cf-cfc-authorship>
-    ),
-  };
-});
-
-export const VerifiedChatBubble2 = pattern<
-  VerifiedIndexedChatBubbleInput,
-  { [NAME]: string; [UI]: any }
->((
-  { messages, viewerSlotId }: VerifiedIndexedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => {
-  const message = messages.key(2) as Writable<SharedChatMessage>;
-  const authorCell = message.key("author") as Writable<
-    SharedChatMessage["author"]
-  >;
-  const requiredTextIntegrity = computed(() => ({
-    kind: "authored-by",
-    subject: `${authorCell.key("id").get()}`,
-  } satisfies AuthorshipIntegrity<string>));
-  const messageRole = computed(() =>
-    authorCell.key("id").get() === viewerSlotId ? "user" : "assistant"
-  );
-  return {
-    [NAME]: "verified message bubble 2",
-    [UI]: (
-      <cf-cfc-authorship
-        data-authorship-surface={message.key("id")}
-        $value={message}
-        $author={authorCell}
-        verifyTextIntegrity
-        allowLiteralText={false}
-        requiredTextIntegrity={requiredTextIntegrity}
-      >
-        <cf-chat-message
-          compact
-          role={messageRole}
-          name={authorCell.key("name")}
-          content={message.key("body")}
-        />
-      </cf-cfc-authorship>
-    ),
-  };
-});
-
-export const VerifiedChatBubble3 = pattern<
-  VerifiedIndexedChatBubbleInput,
-  { [NAME]: string; [UI]: any }
->((
-  { messages, viewerSlotId }: VerifiedIndexedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => {
-  const message = messages.key(3) as Writable<SharedChatMessage>;
-  const authorCell = message.key("author") as Writable<
-    SharedChatMessage["author"]
-  >;
-  const requiredTextIntegrity = computed(() => ({
-    kind: "authored-by",
-    subject: `${authorCell.key("id").get()}`,
-  } satisfies AuthorshipIntegrity<string>));
-  const messageRole = computed(() =>
-    authorCell.key("id").get() === viewerSlotId ? "user" : "assistant"
-  );
-  return {
-    [NAME]: "verified message bubble 3",
-    [UI]: (
-      <cf-cfc-authorship
-        data-authorship-surface={message.key("id")}
-        $value={message}
-        $author={authorCell}
-        verifyTextIntegrity
-        allowLiteralText={false}
-        requiredTextIntegrity={requiredTextIntegrity}
-      >
-        <cf-chat-message
-          compact
-          role={messageRole}
-          name={authorCell.key("name")}
-          content={message.key("body")}
-        />
-      </cf-cfc-authorship>
-    ),
-  };
-});
-
-export const VerifiedChatBubble4 = pattern<
-  VerifiedIndexedChatBubbleInput,
-  { [NAME]: string; [UI]: any }
->((
-  { messages, viewerSlotId }: VerifiedIndexedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => {
-  const message = messages.key(4) as Writable<SharedChatMessage>;
-  const authorCell = message.key("author") as Writable<
-    SharedChatMessage["author"]
-  >;
-  const requiredTextIntegrity = computed(() => ({
-    kind: "authored-by",
-    subject: `${authorCell.key("id").get()}`,
-  } satisfies AuthorshipIntegrity<string>));
-  const messageRole = computed(() =>
-    authorCell.key("id").get() === viewerSlotId ? "user" : "assistant"
-  );
-  return {
-    [NAME]: "verified message bubble 4",
-    [UI]: (
-      <cf-cfc-authorship
-        data-authorship-surface={message.key("id")}
-        $value={message}
-        $author={authorCell}
-        verifyTextIntegrity
-        allowLiteralText={false}
-        requiredTextIntegrity={requiredTextIntegrity}
-      >
-        <cf-chat-message
-          compact
-          role={messageRole}
-          name={authorCell.key("name")}
-          content={message.key("body")}
-        />
-      </cf-cfc-authorship>
-    ),
-  };
-});
-
-export const VerifiedChatBubble5 = pattern<
-  VerifiedIndexedChatBubbleInput,
-  { [NAME]: string; [UI]: any }
->((
-  { messages, viewerSlotId }: VerifiedIndexedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => {
-  const message = messages.key(5) as Writable<SharedChatMessage>;
-  const authorCell = message.key("author") as Writable<
-    SharedChatMessage["author"]
-  >;
-  const requiredTextIntegrity = computed(() => ({
-    kind: "authored-by",
-    subject: `${authorCell.key("id").get()}`,
-  } satisfies AuthorshipIntegrity<string>));
-  const messageRole = computed(() =>
-    authorCell.key("id").get() === viewerSlotId ? "user" : "assistant"
-  );
-  return {
-    [NAME]: "verified message bubble 5",
-    [UI]: (
-      <cf-cfc-authorship
-        data-authorship-surface={message.key("id")}
-        $value={message}
-        $author={authorCell}
-        verifyTextIntegrity
-        allowLiteralText={false}
-        requiredTextIntegrity={requiredTextIntegrity}
-      >
-        <cf-chat-message
-          compact
-          role={messageRole}
-          name={authorCell.key("name")}
-          content={message.key("body")}
-        />
-      </cf-cfc-authorship>
-    ),
-  };
-});
-
-export const VerifiedChatBubble6 = pattern<
-  VerifiedIndexedChatBubbleInput,
-  { [NAME]: string; [UI]: any }
->((
-  { messages, viewerSlotId }: VerifiedIndexedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => {
-  const message = messages.key(6) as Writable<SharedChatMessage>;
-  const authorCell = message.key("author") as Writable<
-    SharedChatMessage["author"]
-  >;
-  const requiredTextIntegrity = computed(() => ({
-    kind: "authored-by",
-    subject: `${authorCell.key("id").get()}`,
-  } satisfies AuthorshipIntegrity<string>));
-  const messageRole = computed(() =>
-    authorCell.key("id").get() === viewerSlotId ? "user" : "assistant"
-  );
-  return {
-    [NAME]: "verified message bubble 6",
-    [UI]: (
-      <cf-cfc-authorship
-        data-authorship-surface={message.key("id")}
-        $value={message}
-        $author={authorCell}
-        verifyTextIntegrity
-        allowLiteralText={false}
-        requiredTextIntegrity={requiredTextIntegrity}
-      >
-        <cf-chat-message
-          compact
-          role={messageRole}
-          name={authorCell.key("name")}
-          content={message.key("body")}
-        />
-      </cf-cfc-authorship>
-    ),
-  };
-});
-
-export const VerifiedChatBubble7 = pattern<
-  VerifiedIndexedChatBubbleInput,
-  { [NAME]: string; [UI]: any }
->((
-  { messages, viewerSlotId }: VerifiedIndexedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => {
-  const message = messages.key(7) as Writable<SharedChatMessage>;
-  const authorCell = message.key("author") as Writable<
-    SharedChatMessage["author"]
-  >;
-  const requiredTextIntegrity = computed(() => ({
-    kind: "authored-by",
-    subject: `${authorCell.key("id").get()}`,
-  } satisfies AuthorshipIntegrity<string>));
-  const messageRole = computed(() =>
-    authorCell.key("id").get() === viewerSlotId ? "user" : "assistant"
-  );
-  return {
-    [NAME]: "verified message bubble 7",
-    [UI]: (
-      <cf-cfc-authorship
-        data-authorship-surface={message.key("id")}
-        $value={message}
-        $author={authorCell}
-        verifyTextIntegrity
-        allowLiteralText={false}
-        requiredTextIntegrity={requiredTextIntegrity}
-      >
-        <cf-chat-message
-          compact
-          role={messageRole}
-          name={authorCell.key("name")}
-          content={message.key("body")}
+          role="assistant"
+          name={message.author.name}
+          content={message.body}
         />
       </cf-cfc-authorship>
     ),

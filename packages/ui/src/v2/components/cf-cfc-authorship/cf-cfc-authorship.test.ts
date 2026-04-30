@@ -139,6 +139,69 @@ describe("CFCFCAuthorship", () => {
     expect(element.authorshipState).toBe("verified");
   });
 
+  it("verifies author cells whose sync returns the cell object", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      }],
+    };
+    const authorCell = {
+      get: () => ({ id: "alice", name: "Alice Nguyen" }),
+      sync: () => Promise.resolve(authorCell),
+      subscribe: () => () => {},
+    };
+    const element = new CFCFCAuthorship();
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+    element.author = authorCell;
+
+    await element.refreshLabel();
+    await element.refreshAuthorClaim();
+
+    expect(element.authorshipState).toBe("verified");
+  });
+
+  it("verifies resolved author cells that need sync before get", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      }],
+    };
+    let synced = false;
+    const resolvedAuthorCell = {
+      get: () => synced ? { id: "alice", name: "Alice Nguyen" } : undefined,
+      sync: () => {
+        synced = true;
+        return Promise.resolve(resolvedAuthorCell);
+      },
+    };
+    const authorCell = {
+      get: () => undefined,
+      sync: () => Promise.resolve({ opaqueCellHandle: true }),
+      resolveAsCell: () => resolvedAuthorCell,
+      subscribe: () => () => {},
+    };
+    const element = new CFCFCAuthorship();
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+    };
+    element.author = authorCell;
+
+    await element.refreshLabel();
+    await element.refreshAuthorClaim();
+
+    expect(element.authorshipState).toBe("verified");
+  });
+
   it("fails closed when a bound author claim cell changes away from the integrity subject", async () => {
     const cfcLabel = {
       version: 1 as const,
@@ -262,5 +325,39 @@ describe("CFCFCAuthorship integrity matching", () => {
       "bob",
       "authored-by",
     )).toBe("unverified");
+  });
+
+  it("keeps non-authorship integrity unknown instead of unverified", () => {
+    expect(authorshipStateForLabel(
+      {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            integrity: [{
+              type: "https://commonfabric.org/cfc/atom/LinkReference",
+            }],
+          },
+        }],
+      },
+      "alice",
+      "authored-by",
+    )).toBe("unknown");
+  });
+
+  it("does not use child path authorship to certify the root value", () => {
+    expect(authorshipStateForLabel(
+      {
+        version: 1,
+        entries: [{
+          path: ["author", "id"],
+          label: {
+            integrity: [{ kind: "authored-by", subject: "alice" }],
+          },
+        }],
+      },
+      "alice",
+      "authored-by",
+    )).toBe("unknown");
   });
 });
