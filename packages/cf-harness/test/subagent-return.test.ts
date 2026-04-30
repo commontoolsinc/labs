@@ -300,7 +300,6 @@ Deno.test("validateAndSanitizeSubagentReturn handles anyOf link branches and rej
               "@link": { type: "string" },
             },
             required: ["@link"],
-            additionalProperties: false,
           },
         ],
       },

@@ -82,6 +82,10 @@ const schemaAllowsRawString = (
   return false;
 };
 
+const objectSchemaIsClosed = (schema: Record<string, unknown>): boolean =>
+  schema.additionalProperties !== true &&
+  typeof schema.additionalProperties !== "object";
+
 const schemaDeclaresOpaqueLinkObject = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
@@ -96,7 +100,7 @@ const schemaDeclaresOpaqueLinkObject = (
     resolved.properties["@link"].type === "string" &&
     Array.isArray(resolved.required) &&
     resolved.required.includes("@link") &&
-    resolved.additionalProperties === false
+    objectSchemaIsClosed(resolved)
   ) {
     return true;
   }
