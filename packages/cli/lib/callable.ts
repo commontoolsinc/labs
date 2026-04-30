@@ -16,24 +16,107 @@ export interface CliRuntimeErrorRecord {
   space?: string;
 }
 
+export interface CallableTransactionStatus {
+  status: string;
+  error?: Error;
+}
+
+export interface CallableTransactionLike {
+  status?: () => CallableTransactionStatus;
+  commit?: () => Promise<unknown>;
+}
+
+export interface CallableCellLike {
+  schema?: JSONSchema;
+  get: () => unknown;
+  getRaw?: () => unknown;
+  asSchemaFromLinks?: () => CallableCellLike;
+  key: (segment: string) => CallableCellLike;
+  pull?: () => Promise<unknown>;
+  send?: (
+    value: unknown,
+    onCommit?: (tx: CallableTransactionLike) => void,
+  ) => void;
+}
+
+export interface CallablePieceIoLike {
+  getCell: () => Promise<CallableCellLike>;
+  set: (value: unknown, path?: (string | number)[]) => Promise<void>;
+}
+
+export interface CallableRuntimeLike {
+  [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[];
+  storageManager?: { synced: () => Promise<void> };
+  idle: () => Promise<void>;
+  edit: () => CallableTransactionLike;
+  getCell: (
+    space: string,
+    id: string,
+    schema: JSONSchema | undefined,
+    tx: CallableTransactionLike,
+  ) => CallableCellLike;
+  run: (
+    tx: CallableTransactionLike,
+    pattern: unknown,
+    input: unknown,
+    resultCell: CallableCellLike,
+  ) => { sink?: (fn: (value: unknown) => void) => (() => void) | void } | void;
+  prepareTxForCommit?: (tx: CallableTransactionLike) => void;
+}
+
+export interface CallableManagerLike {
+  runtime: CallableRuntimeLike;
+  synced: () => Promise<void>;
+  getSpace?: () => string;
+}
+
+export interface CallablePieceLike {
+  input: CallablePieceIoLike;
+  result: CallablePieceIoLike;
+  getCell?: () => { pull?: () => Promise<unknown> };
+}
+
 export interface CallableResolution {
-  callableCell: any;
+  callableCell: CallableCellLike;
   callableKind: CallableKind;
   cellKey: string;
   cellProp: "input" | "result";
-  manager: any;
-  piece: any;
+  manager: CallableManagerLike;
+  piece: CallablePieceLike;
   space: string;
 }
 
 export interface CallableExecutionDeps {
   timeoutMs?: number;
   uuid?: () => string;
-  waitForResult?: (resultCell: any, timeoutMs: number) => Promise<unknown>;
+  waitForResult?: (
+    resultCell: CallableCellLike,
+    timeoutMs: number,
+  ) => Promise<unknown>;
 }
 
 export interface ExecutedCallable {
   outputText?: string;
+}
+
+interface CallablePatternLike {
+  argumentSchema?: JSONSchema;
+  resultSchema?: JSONSchema;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+function asCallablePattern(value: unknown): CallablePatternLike | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    argumentSchema: value.argumentSchema as JSONSchema | undefined,
+    resultSchema: value.resultSchema as JSONSchema | undefined,
+  };
+}
+
+function asExtraParams(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
 }
 
 function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
@@ -121,9 +204,12 @@ function mergeToolInput(
 }
 
 async function defaultWaitForResult(
-  resultCell: { pull: () => Promise<unknown> },
+  resultCell: CallableCellLike,
   timeoutMs: number,
 ): Promise<unknown> {
+  if (typeof resultCell.pull !== "function") {
+    throw new Error("Callable result cell cannot be pulled");
+  }
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
     const value = await resultCell.pull();
@@ -137,7 +223,7 @@ async function defaultWaitForResult(
 
 export function detectCallableKind(
   callableValue: unknown,
-  callableCell: any,
+  callableCell: CallableCellLike,
 ): CallableKind | null {
   let resolvedValue = callableValue;
   try {
@@ -169,7 +255,7 @@ export function detectCallableKind(
 }
 
 export function callableCommandSpec(
-  callableCell: any,
+  callableCell: CallableCellLike,
   callableKind: CallableKind,
 ): ExecCommandSpec {
   if (callableKind === "handler") {
@@ -180,9 +266,13 @@ export function callableCommandSpec(
     };
   }
 
-  const pattern = callableCell.key("pattern").getRaw?.() ??
-    callableCell.key("pattern").get();
-  const extraParams = callableCell.key("extraParams").get() ?? {};
+  const pattern = asCallablePattern(
+    callableCell.key("pattern").getRaw?.() ??
+      callableCell.key("pattern").get(),
+  );
+  const extraParams = asExtraParams(
+    callableCell.key("extraParams").get?.(),
+  );
 
   return {
     callableKind: "tool",
@@ -201,16 +291,19 @@ export async function executeResolvedCallable(
   deps: CallableExecutionDeps = {},
 ): Promise<ExecutedCallable> {
   if (resolved.callableKind === "handler") {
-    if (typeof resolved.callableCell?.send === "function") {
+    const send = resolved.callableCell.send;
+    if (typeof send === "function") {
       const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
       const errorCountBefore = runtimeErrors.length;
-      const tx = await new Promise<any>((resolve, reject) => {
-        try {
-          resolved.callableCell.send(input, resolve);
-        } catch (error) {
-          reject(error);
-        }
-      });
+      const tx = await new Promise<CallableTransactionLike>(
+        (resolve, reject) => {
+          try {
+            send(input, resolve);
+          } catch (error) {
+            reject(error);
+          }
+        },
+      );
       await resolved.manager.runtime.idle();
       await resolved.manager.synced();
 
@@ -235,9 +328,13 @@ export async function executeResolvedCallable(
     return {};
   }
 
-  const pattern = resolved.callableCell.key("pattern").getRaw?.() ??
-    resolved.callableCell.key("pattern").get();
-  const extraParams = resolved.callableCell.key("extraParams").get() ?? {};
+  const pattern = asCallablePattern(
+    resolved.callableCell.key("pattern").getRaw?.() ??
+      resolved.callableCell.key("pattern").get(),
+  );
+  const extraParams = asExtraParams(
+    resolved.callableCell.key("extraParams").get?.(),
+  );
   const tx = resolved.manager.runtime.edit();
   const resultCell = resolved.manager.runtime.getCell(
     resolved.space,
@@ -258,6 +355,9 @@ export async function executeResolvedCallable(
   let outputValue: unknown;
   try {
     resolved.manager.runtime.prepareTxForCommit?.(tx);
+    if (typeof tx.commit !== "function") {
+      throw new Error("Callable runtime transaction is not committable");
+    }
     await tx.commit();
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
@@ -265,7 +365,7 @@ export async function executeResolvedCallable(
     const timeoutMs = deps.timeoutMs ?? 5000;
 
     await waitForResult(resultCell, timeoutMs);
-    await resolved.manager.runtime.storageManager.synced();
+    await resolved.manager.runtime.storageManager?.synced();
     outputValue = await waitForResult(resultCell, timeoutMs);
   } finally {
     cancelSink?.();
