@@ -87,7 +87,7 @@ describe("CFCFCLabel", () => {
 
     element.value = {
       getCfcLabel: () =>
-        Promise.resolve(labelCalls++ === 0 ? undefined : cfcLabel),
+        Promise.resolve(labelCalls++ < 2 ? undefined : cfcLabel),
       subscribe: (callback: () => void) => {
         emitUpdate = () => callback();
         callback();
@@ -104,6 +104,76 @@ describe("CFCFCLabel", () => {
     await Promise.resolve();
 
     expect(element.cfcLabel).toEqual(cfcLabel);
+  });
+
+  it("loads the initial label for a subscribable bound value", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["prompt-influence"] },
+      }],
+    };
+    const element = new CFCFCLabel();
+
+    element.value = {
+      getCfcLabel: () => Promise.resolve(cfcLabel),
+      subscribe: () => () => {},
+    };
+    await Promise.resolve();
+
+    expect(element.cfcLabel).toEqual(cfcLabel);
+  });
+
+  it("does not duplicate label refreshes for the same bound value", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["prompt-influence"] },
+      }],
+    };
+    let labelCalls = 0;
+    const requestedProperties: (PropertyKey | undefined)[] = [];
+    const element = new CFCFCLabel();
+    element.value = {
+      getCfcLabel: () => {
+        labelCalls += 1;
+        return Promise.resolve(cfcLabel);
+      },
+      subscribe: () => () => {},
+    };
+    const lifecycle = element as unknown as {
+      firstUpdated(changedProperties: Map<PropertyKey, unknown>): void;
+      updated(changedProperties: Map<PropertyKey, unknown>): void;
+    };
+    const updateHost = element as unknown as {
+      requestUpdate(
+        name?: PropertyKey,
+        oldValue?: unknown,
+        options?: unknown,
+      ): void;
+    };
+    const requestUpdate = updateHost.requestUpdate.bind(updateHost);
+
+    lifecycle.firstUpdated(new Map());
+    await Promise.resolve();
+    updateHost.requestUpdate = ((
+      name?: PropertyKey,
+      oldValue?: unknown,
+      options?: unknown,
+    ) => {
+      requestedProperties.push(name);
+      requestUpdate(name, oldValue, options);
+    }) as typeof updateHost.requestUpdate;
+    lifecycle.updated(
+      new Map<PropertyKey, unknown>([["value", element.value]]),
+    );
+    await Promise.resolve();
+
+    expect(labelCalls).toBe(1);
+    expect(element.cfcLabel).toEqual(cfcLabel);
+    expect(requestedProperties).toContain("cfcLabel");
   });
 });
 

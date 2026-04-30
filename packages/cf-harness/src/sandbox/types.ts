@@ -1,3 +1,5 @@
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+
 export type HarnessSandboxKind = "docker-runsc-cfc";
 
 export type DockerNetworkMode = "none" | "bridge" | "host";
@@ -36,6 +38,7 @@ export interface DockerRunscSandboxConfig {
   dockerNetworkMode: DockerNetworkMode;
   additionalMounts: readonly DockerRunscAdditionalMount[];
   extraDockerArgs: readonly string[];
+  cfcResultDir?: string;
 }
 
 export type HarnessSandboxConfig = DockerRunscSandboxConfig;
@@ -51,6 +54,7 @@ export interface ResolveDockerRunscSandboxConfigOptions {
   dockerNetworkMode?: DockerNetworkMode;
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   extraDockerArgs?: readonly string[];
+  cfcResultDir?: string;
 }
 
 export interface SandboxCommandRequest {
@@ -72,6 +76,7 @@ export interface SandboxCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  cfcResult?: CfcSandboxResult;
 }
 
 export interface SandboxRuntimeDescription {

@@ -191,6 +191,20 @@ omits `--user` because Docker Desktop bind mounts may expose host files as
 `root:root`, which prevents non-root container users from writing mounted Loom
 workspaces. An explicit `containerUser` still overrides the platform default.
 
+CFC sandbox result mediation requires the installed `runsc-cfc` runtime to use
+the same host result directory that `cf-harness` reads. Configure runsc with
+`--cfc-result-dir=/path/to/results`, then set
+`CF_HARNESS_RUNSC_CFC_RESULT_DIR=/path/to/results` or pass `cfcResultDir` in the
+explicit sandbox config.
+
+On Docker Desktop for macOS, use the host path for `cf-harness` and the
+`/host_mnt/...` projection for Docker's runtime args. The gVisor
+`docker-desktop-cfc-setup` helper defaults to:
+
+```bash
+export CF_HARNESS_RUNSC_CFC_RESULT_DIR="$HOME/.local/share/runsc-cfc/cfc-results"
+```
+
 ## Related Docs
 
 - [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
