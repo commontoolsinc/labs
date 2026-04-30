@@ -125,6 +125,73 @@ describe("CFCFCLabel", () => {
     expect(element.cfcLabel).toEqual(cfcLabel);
   });
 
+  it("retries when label metadata arrives after the first value query", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["prompt-influence"] },
+      }],
+    };
+    let labelAvailable = false;
+    const element = new CFCFCLabel();
+    Object.defineProperty(element, "isConnected", {
+      value: true,
+      configurable: true,
+    });
+
+    try {
+      element.value = {
+        getCfcLabel: () =>
+          Promise.resolve(labelAvailable ? cfcLabel : undefined),
+        subscribe: () => () => {},
+      };
+      await Promise.resolve();
+      expect(element.cfcLabel).toBeUndefined();
+
+      labelAvailable = true;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(element.cfcLabel).toEqual(cfcLabel);
+    } finally {
+      element.disconnectedCallback();
+    }
+  });
+
+  it("replaces stale pending retries after a newer refresh", async () => {
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["prompt-influence"] },
+      }],
+    };
+    let labelAvailable = false;
+    const element = new CFCFCLabel();
+    Object.defineProperty(element, "isConnected", {
+      value: true,
+      configurable: true,
+    });
+
+    try {
+      element.value = {
+        getCfcLabel: () =>
+          Promise.resolve(labelAvailable ? cfcLabel : undefined),
+        subscribe: () => () => {},
+      };
+      await Promise.resolve();
+      expect(element.cfcLabel).toBeUndefined();
+
+      await element.refreshLabel();
+      labelAvailable = true;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(element.cfcLabel).toEqual(cfcLabel);
+    } finally {
+      element.disconnectedCallback();
+    }
+  });
+
   it("does not duplicate label refreshes for the same bound value", async () => {
     const cfcLabel = {
       version: 1 as const,
