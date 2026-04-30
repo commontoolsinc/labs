@@ -2,11 +2,11 @@
  * Modern schema hashing via content identification.
  *
  * Delegates to `hashOfModern()` from `value-hash-modern.ts` to produce
- * deterministic hashes using the modern (non-merkle-reference) hashing
- * pipeline. Returns `FabricHash` directly.
+ * deterministic hashes using the main value hashing pipeline. Returns
+ * `FabricHash` directly.
  *
  * Follows the same modern/legacy split pattern used by
- * `value-hash-modern.ts` and `fabric-value-modern.ts`.
+ * `fabric-value-modern.ts`.
  */
 
 import type { JSONSchema } from "@commonfabric/api";

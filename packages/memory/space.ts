@@ -756,7 +756,7 @@ export const selectFact = function <Space extends MemorySpace>(
  * special `"undefined"` for which `datum` table will have row with `NULL`
  * source. If `datum` already contains row for matching `datum` insert is
  * ignored because existing record will parse to same `datum` since primary
- * key is merkle-reference for it or an "undefined" for the `undefined`.
+ * key is a hash for it or an "undefined" for the `undefined`.
  */
 const importDatum = <Space extends MemorySpace>(
   session: Session<Space>,

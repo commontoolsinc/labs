@@ -2,10 +2,10 @@
  * Hash of an arbitrary value, producing a deterministic digest based on the
  * value's logical structure.
  *
- * Replaces merkle-reference's CID-based hashing. Traverses the value tree
- * directly (no intermediate serialization) and feeds type-tagged data into
- * a single SHA-256 context. See Section 6 of the formal spec and the
- * byte-level spec for the full algorithm.
+ * Traverses the value tree directly and feeds type-tagged data into a single
+ * SHA-256 context. See Section 6 of the formal spec and the byte-level spec for
+ * the full algorithm.
+ *
  */
 import {
   createHasher,
@@ -462,9 +462,8 @@ const FALSE_HASH = computeHash(false);
 
 /**
  * LRU cache for primitive value hashes. Primitives (strings, numbers,
- * bigints) can't be WeakMap keys, so they use a bounded cache.
- * The legacy `merkle-reference` uses a 50K-entry LRU with a reported 97%+
- * hit rate -- we match that sizing.
+ * bigints) can't be WeakMap keys, so they use a bounded cache. Sizing is based
+ * on historical testing (expected ~97% hit rate in practice).
  */
 const primitiveHashCache = new LRUCache<
   string | number | bigint,
