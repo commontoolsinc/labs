@@ -583,8 +583,14 @@ export const parseCfHarnessCliArgs = async (
       "cfc enforcement mode must be one of disabled, observe, enforce-explicit, enforce-strict",
     );
   }
-  const fabricMount = typeof args["fabric-mount"] === "string"
-    ? resolve(cwd, args["fabric-mount"])
+  const rawFabricMount = typeof args["fabric-mount"] === "string"
+    ? args["fabric-mount"].trim()
+    : undefined;
+  if (rawFabricMount !== undefined && rawFabricMount === "") {
+    throw new Error("--fabric-mount requires a non-empty path");
+  }
+  const fabricMount = rawFabricMount !== undefined
+    ? resolve(cwd, rawFabricMount)
     : undefined;
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
   const apiKeySource = env.CF_HARNESS_API_KEY !== undefined

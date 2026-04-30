@@ -1981,6 +1981,18 @@ Deno.test("parseCfHarnessCliArgs resolves relative fabric-mount against cwd", as
   assertEquals(parsed.fabricMount, "/tmp/project/fuse-dir");
 });
 
+Deno.test("parseCfHarnessCliArgs rejects empty fabric-mount value", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--fabric-mount", ""],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-mount requires a non-empty path",
+  );
+});
+
 Deno.test("buildCfHarnessOperatorSystemPrompt includes fabric mount guidance", () => {
   const prompt = buildCfHarnessOperatorSystemPrompt({
     workspace: "/tmp/project",
