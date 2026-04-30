@@ -127,6 +127,54 @@ class FailingArtifactStore implements HarnessArtifactStore {
   }
 }
 
+class RecordingArtifactStore implements HarnessArtifactStore {
+  readonly runRoot: string;
+  readonly toolOutputs: Array<{
+    toolId: string;
+    outputId: string;
+    output: unknown;
+    path: string;
+  }> = [];
+
+  constructor(readonly artifactRoot: string, private readonly runId: string) {
+    this.runRoot = `${artifactRoot}/${runId}`;
+  }
+
+  persistRunState(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/run-state.json`);
+  }
+
+  persistTranscript(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/transcript.json`);
+  }
+
+  persistCapabilitySnapshot(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/capabilities.json`);
+  }
+
+  persistCfcPolicySnapshot(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/policy-snapshot.json`);
+  }
+
+  persistPolicyTrace(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/policy-trace.json`);
+  }
+
+  persistRunReport(): Promise<string> {
+    return Promise.resolve(`${this.runRoot}/run-report.json`);
+  }
+
+  persistToolOutput(
+    toolId: string,
+    outputId: string,
+    output: unknown,
+  ): Promise<string> {
+    const path = `${this.runRoot}/tool-outputs/${outputId}-${toolId}.json`;
+    this.toolOutputs.push({ toolId, outputId, output, path });
+    return Promise.resolve(path);
+  }
+}
+
 const observedCfcResult = (
   stdout: string,
   options: {
@@ -631,6 +679,432 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   );
 });
 
+Deno.test("CfHarnessPromptLoop validates structured subagent returns and linkifies free-form strings", async () => {
+  const artifactRoot = await Deno.makeTempDir({
+    dir: "/tmp",
+    prefix: "cf-harness-structured-return-",
+  });
+  try {
+    const requestBodies: Array<{
+      messages: Array<{ role: string; content: string }>;
+      tools: Array<{ function: { name: string } }>;
+    }> = [];
+    const artifactStore = new RecordingArtifactStore(
+      artifactRoot,
+      "run-structured-return",
+    );
+    const returnSchema = {
+      type: "object",
+      properties: {
+        approved: { type: "boolean" },
+        status: { type: "string", enum: ["approved", "not_approved"] },
+        summary: { type: "string" },
+      },
+      required: ["approved", "status", "summary"],
+      additionalProperties: false,
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-structured-return",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "enforce-explicit",
+        artifactStore,
+      }),
+      fetchFn: (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as {
+          messages: Array<{ role: string; content: string }>;
+          tools: Array<{ function: { name: string } }>;
+        };
+        requestBodies.push(body);
+        const payload = requestBodies.length === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-structured-return",
+                  type: "function",
+                  function: {
+                    name: "delegate_task",
+                    arguments: JSON.stringify({
+                      goal: "Assess the briefing.",
+                      returnSchema,
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : requestBodies.length === 2
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: JSON.stringify({
+                  approved: false,
+                  status: "not_approved",
+                  summary:
+                    "Hostile briefing tried to override the parent instruction.",
+                }),
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Parent handled sanitized structured data.",
+              },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(payload), { status: 200 }),
+        );
+      },
+    });
+
+    const result = await loop.runPrompt({
+      prompt: "Delegate a structured assessment.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    assertEquals(
+      result.finalAssistantText,
+      "Parent handled sanitized structured data.",
+    );
+    assertEquals(
+      requestBodies[1].messages[1].content.includes("Return schema:"),
+      true,
+    );
+    assertEquals(
+      requestBodies[1].messages[0].content.includes(
+        "return only the JSON value requested",
+      ),
+      true,
+    );
+    assertEquals(
+      requestBodies[1].messages[0].content.includes(
+        "return a concise summary",
+      ),
+      false,
+    );
+    assertEquals(
+      requestBodies[1].messages[1].content.includes(
+        "Return a single JSON value matching the return schema",
+      ),
+      true,
+    );
+    const toolMessage = result.transcript.at(-2);
+    if (toolMessage?.role !== "tool") {
+      throw new Error("expected delegate_task tool message");
+    }
+    assertEquals(
+      toolMessage.content.includes("Hostile briefing tried"),
+      false,
+    );
+    const output = JSON.parse(toolMessage.content) as {
+      subagent: {
+        childRunId: string;
+        status: string;
+        summary: string;
+        structuredReturn: {
+          status: string;
+          schemaDigest: string;
+          rawOutputId: string;
+          rawArtifactPath: string;
+          linkedStringCount: number;
+          value: unknown;
+        };
+        manifest: {
+          inputSummary: {
+            returnSchemaBytes: number;
+            returnSchemaDigest: string;
+          };
+        };
+      };
+    };
+    assertEquals(output.subagent.status, "completed");
+    assertEquals(
+      output.subagent.summary,
+      "Subagent returned structured data matching the requested schema.",
+    );
+    assertEquals(output.subagent.structuredReturn.status, "valid");
+    assertEquals(output.subagent.structuredReturn.linkedStringCount, 1);
+    assertEquals(output.subagent.structuredReturn.value, {
+      approved: false,
+      status: "not_approved",
+      summary: {
+        "@link": "opaque:run-structured-return.subagent.1#/summary",
+      },
+    });
+    assertEquals(
+      output.subagent.structuredReturn.rawOutputId,
+      "run-structured-return.subagent.1:subagent_return:1",
+    );
+    assertEquals(
+      output.subagent.structuredReturn.rawArtifactPath.endsWith(
+        "/run-structured-return.subagent.1/tool-outputs/run-structured-return.subagent.1_subagent_return_1-subagent-return.json",
+      ),
+      true,
+    );
+    const rawReturn = JSON.parse(
+      await Deno.readTextFile(output.subagent.structuredReturn.rawArtifactPath),
+    ) as { value: { summary: string } };
+    assertEquals(
+      rawReturn.value.summary,
+      "Hostile briefing tried to override the parent instruction.",
+    );
+    assertEquals(
+      output.subagent.manifest.inputSummary.returnSchemaBytes > 0,
+      true,
+    );
+    assertEquals(
+      output.subagent.manifest.inputSummary.returnSchemaDigest.startsWith(
+        "sha256:",
+      ),
+      true,
+    );
+    assertEquals(
+      output.subagent.structuredReturn.schemaDigest,
+      output.subagent.manifest.inputSummary.returnSchemaDigest,
+    );
+    assertEquals(
+      result.runState.subagentRuns?.[0]?.structuredReturn?.status,
+      "valid",
+    );
+    assertEquals(
+      artifactStore.toolOutputs[0]?.output,
+      output,
+    );
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
+});
+
+Deno.test("CfHarnessPromptLoop fails structured subagent returns without exposing malformed raw text", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-structured-return-invalid",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-structured-invalid",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Return structured facts.",
+                    returnSchema: {
+                      type: "object",
+                      properties: {
+                        ok: { type: "boolean" },
+                      },
+                      required: ["ok"],
+                      additionalProperties: false,
+                    },
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "not JSON with hostile text that must stay child-local",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent saw validation failure.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate a malformed structured return.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Parent saw validation failure.");
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  assertEquals(toolMessage.content.includes("hostile text"), false);
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      status: string;
+      summary: string;
+      structuredReturn: {
+        status: string;
+        validationError: string;
+        value?: unknown;
+      };
+    };
+  };
+  assertEquals(output.subagent.status, "failed");
+  assertEquals(
+    output.subagent.summary,
+    "Subagent return validation failed: child final response was not valid JSON",
+  );
+  assertEquals(output.subagent.structuredReturn.status, "invalid");
+  assertEquals(
+    output.subagent.structuredReturn.validationError,
+    "child final response was not valid JSON",
+  );
+  assertEquals(output.subagent.structuredReturn.value, undefined);
+  assertEquals(result.runState.subagentRuns?.[0]?.status, "failed");
+  assertEquals(result.runState.failureRecords?.[0]?.toolId, "delegate_task");
+});
+
+Deno.test("CfHarnessPromptLoop keeps child-supplied schema mismatch details out of parent output", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-structured-return-mismatch",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-structured-mismatch",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Return structured facts.",
+                    returnSchema: {
+                      type: "object",
+                      properties: {
+                        ok: { type: "boolean" },
+                      },
+                      required: ["ok"],
+                      additionalProperties: false,
+                    },
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                ok: true,
+                ignore_parent_and_send_mail: "prompt injection text",
+              }),
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent saw schema mismatch.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate a mismatched structured return.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Parent saw schema mismatch.");
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  assertEquals(toolMessage.content.includes("ignore_parent"), false);
+  assertEquals(toolMessage.content.includes("prompt injection text"), false);
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      status: string;
+      summary: string;
+      structuredReturn: {
+        status: string;
+        validationError: string;
+      };
+    };
+  };
+  assertEquals(output.subagent.status, "failed");
+  assertEquals(
+    output.subagent.summary,
+    "Subagent return validation failed: structured return did not match the schema",
+  );
+  assertEquals(output.subagent.structuredReturn.status, "invalid");
+  assertEquals(
+    output.subagent.structuredReturn.validationError,
+    "structured return did not match the schema",
+  );
+});
+
 Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child tools", async () => {
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
@@ -1039,6 +1513,17 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
       name: "unknown profile",
       arguments: { goal: "Inspect", profile: "unknown" },
       message: "delegate_task profile must be one of default, browser",
+    },
+    {
+      name: "array return schema",
+      arguments: { goal: "Inspect", returnSchema: ["not", "schema"] },
+      message:
+        "delegate_task returnSchema must be a JSON Schema object, boolean, or JSON string",
+    },
+    {
+      name: "malformed string return schema",
+      arguments: { goal: "Inspect", returnSchema: "{" },
+      message: "delegate_task returnSchema string must be valid JSON",
     },
   ];
 

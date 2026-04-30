@@ -40,6 +40,9 @@ What works today:
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser child profiles, retained child run references, and a sanitized
   summary/state return channel
+- optional schema-validated subagent structured returns, with raw child return
+  artifacts retained in the child run and open-ended strings linkified before
+  the parent sees them
 - persisted run state, transcript, Loom run manifests, capability snapshots, and
   tool outputs
 - transcript-based resumability
@@ -61,7 +64,8 @@ What works today:
 What is not done yet:
 
 - real runner-driven CFC feedback integration
-- richer opaque-handle/pass-through behavior
+- richer opaque-handle/pass-through behavior outside schema-validated subagent
+  returns
 - first-class browser operation policy on top of the provisional browser
   subagent profile
 - parallel child orchestration
@@ -156,6 +160,29 @@ deno task run -- \
   --allow-tool delegate_task \
   --allow-subagent-profile browser \
   --prompt "Delegate browser inspection of the local app and summarize the result."
+```
+
+Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
+object or boolean. In that mode the child is required to return a single JSON
+value. The harness validates it, stores the raw child return under the child
+artifact root, and exposes `subagent.structuredReturn.value` to the parent with
+free-form strings and objects with unmodeled keys replaced by opaque `@link`
+objects such as `opaque:<child-run-id>#/json/pointer`:
+
+```json
+{
+  "goal": "Assess the briefing and return only the decision facts.",
+  "returnSchema": {
+    "type": "object",
+    "properties": {
+      "approved": { "type": "boolean" },
+      "status": { "type": "string", "enum": ["approved", "not_approved"] },
+      "summary": { "type": "string" }
+    },
+    "required": ["approved", "status", "summary"],
+    "additionalProperties": false
+  }
+}
 ```
 
 Current caveat:

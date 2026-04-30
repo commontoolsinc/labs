@@ -136,7 +136,7 @@ const objectSchemaIsClosed = (schema: Record<string, unknown>): boolean =>
   schema.additionalProperties !== true &&
   typeof schema.additionalProperties !== "object";
 
-const resolveSchema = (
+export const resolveSchemaForValidation = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
 ): JSONSchema =>
@@ -175,7 +175,7 @@ const annotateSchema = (
     ? new Set([...visitedRefs, directRef])
     : visitedRefs;
 
-  const resolved = resolveSchema(schema, fullSchema);
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
   if (resolved !== schema) {
     const annotated = annotateSchema(
       resolved,
@@ -386,7 +386,7 @@ export const validateAgainstSchema = (
   if (schema === true) return undefined;
   if (schema === false) return "schema rejects all values";
 
-  const resolved = resolveSchema(schema, fullSchema);
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
   if (resolved !== schema) {
     // Keep the original root as `fullSchema` so nested $refs in the resolved
     // branch can still find sibling $defs entries.

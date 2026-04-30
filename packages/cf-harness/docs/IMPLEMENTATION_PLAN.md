@@ -350,7 +350,11 @@ The package now has a first minimal subagent path: a parent can delegate one
 focused child run through `delegate_task`, and the child receives a fresh prompt
 context plus the selected profile's tool set. The default profile remains
 sandbox shell/file only; the provisional browser profile adds host shell access
-for `agent-browser`-style commands.
+for `agent-browser`-style commands. `delegate_task` can also take an optional
+`returnSchema`; when supplied, the harness validates the child JSON return,
+keeps the raw return in child artifacts, and exposes only a sanitized structured
+value with free-form strings and objects with unmodeled keys linkified through
+opaque `@link` handles.
 
 The remaining subagent work is still substantial:
 

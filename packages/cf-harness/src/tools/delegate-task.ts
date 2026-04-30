@@ -47,6 +47,14 @@ export const delegateTaskTool: HarnessToolDefinition<
           description:
             "Optional child model-turn cap. Defaults to the harness subagent cap.",
         },
+        returnSchema: {
+          anyOf: [
+            { type: "boolean" },
+            { type: "object", additionalProperties: true },
+          ],
+          description:
+            "Optional JSON Schema for a structured child return. When provided, the child must return only JSON matching this schema; open-ended strings are linkified before the parent sees them.",
+        },
       },
     },
     tags: ["subagent", "orchestration"],
