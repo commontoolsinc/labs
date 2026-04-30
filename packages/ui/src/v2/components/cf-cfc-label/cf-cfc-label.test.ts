@@ -134,6 +134,7 @@ describe("CFCFCLabel", () => {
       }],
     };
     let labelCalls = 0;
+    const requestedProperties: (PropertyKey | undefined)[] = [];
     const element = new CFCFCLabel();
     element.value = {
       getCfcLabel: () => {
@@ -146,9 +147,25 @@ describe("CFCFCLabel", () => {
       firstUpdated(changedProperties: Map<PropertyKey, unknown>): void;
       updated(changedProperties: Map<PropertyKey, unknown>): void;
     };
+    const updateHost = element as unknown as {
+      requestUpdate(
+        name?: PropertyKey,
+        oldValue?: unknown,
+        options?: unknown,
+      ): void;
+    };
+    const requestUpdate = updateHost.requestUpdate.bind(updateHost);
 
     lifecycle.firstUpdated(new Map());
     await Promise.resolve();
+    updateHost.requestUpdate = ((
+      name?: PropertyKey,
+      oldValue?: unknown,
+      options?: unknown,
+    ) => {
+      requestedProperties.push(name);
+      requestUpdate(name, oldValue, options);
+    }) as typeof updateHost.requestUpdate;
     lifecycle.updated(
       new Map<PropertyKey, unknown>([["value", element.value]]),
     );
@@ -156,6 +173,7 @@ describe("CFCFCLabel", () => {
 
     expect(labelCalls).toBe(1);
     expect(element.cfcLabel).toEqual(cfcLabel);
+    expect(requestedProperties).toContain("cfcLabel");
   });
 });
 

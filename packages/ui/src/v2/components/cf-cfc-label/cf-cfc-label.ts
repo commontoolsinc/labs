@@ -253,6 +253,8 @@ export class CFCFCLabel extends BaseElement {
     this.observeValue(this.value);
     if (!isSameValue) {
       void this.refreshLabel();
+    } else if (this.cfcLabel !== undefined) {
+      this.requestUpdate("cfcLabel");
     }
   }
 
