@@ -1,9 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  hashOfModern as modernHashRaw,
-  hashOfModernAsString,
-} from "../value-hash-modern.ts";
+import { hashStringOf } from "../value-hash.ts";
+import { hashOfModern as modernHashRaw } from "../value-hash-modern.ts";
 import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { FabricHash } from "../fabric-hash.ts";
@@ -1085,12 +1083,12 @@ describe("modernHash native instances", () => {
 });
 
 // ---------------------------------------------------------------------------
-// hashOfModernAsString
+// hashStringOf
 // ---------------------------------------------------------------------------
 
-describe("hashOfModernAsString", () => {
+describe("hashStringOf", () => {
   it("returns a string", () => {
-    const result = hashOfModernAsString(42);
+    const result = hashStringOf(42);
     expect(typeof result).toBe("string");
   });
 
@@ -1108,38 +1106,38 @@ describe("hashOfModernAsString", () => {
       undefined,
     ];
     for (const v of values) {
-      expect(hashOfModernAsString(v)).toBe(modernHashRaw(v).hashString);
+      expect(hashStringOf(v)).toBe(modernHashRaw(v).hashString);
     }
   });
 
   it("matches FabricHash.hashString for frozen objects", () => {
     const obj = Object.freeze({ a: 1, b: Object.freeze({ c: 2 }) });
-    expect(hashOfModernAsString(obj)).toBe(modernHashRaw(obj).hashString);
+    expect(hashStringOf(obj)).toBe(modernHashRaw(obj).hashString);
   });
 
   it("matches FabricHash.hashString for mutable objects", () => {
     const obj = { x: [1, 2, 3] };
-    expect(hashOfModernAsString(obj)).toBe(modernHashRaw(obj).hashString);
+    expect(hashStringOf(obj)).toBe(modernHashRaw(obj).hashString);
   });
 
   it("returns consistent results", () => {
-    expect(hashOfModernAsString("test")).toBe(hashOfModernAsString("test"));
+    expect(hashStringOf("test")).toBe(hashStringOf("test"));
   });
 
   it("different values produce different strings", () => {
-    const a = hashOfModernAsString(1);
-    const b = hashOfModernAsString(2);
+    const a = hashStringOf(1);
+    const b = hashStringOf(2);
     expect(a).not.toBe(b);
   });
 
   it("result does not contain algorithm tag or colon", () => {
-    const result = hashOfModernAsString({ hello: "world" });
+    const result = hashStringOf({ hello: "world" });
     expect(result.includes("fid1")).toBe(false);
     expect(result.includes(":")).toBe(false);
   });
 
   it("result is valid unpadded base64url", () => {
-    const result = hashOfModernAsString(42);
+    const result = hashStringOf(42);
     // No padding characters.
     expect(result.includes("=")).toBe(false);
     // Only base64url characters.

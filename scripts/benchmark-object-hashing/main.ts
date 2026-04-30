@@ -12,7 +12,7 @@
  */
 
 // Import our own hasher for comparison
-import { hashOfModernAsString } from "../../packages/data-model/value-hash-modern.ts";
+import { hashStringOf } from "../../packages/data-model/value-hash.ts";
 
 // Import libraries from esm.sh to avoid adding dependencies
 // @ts-ignore - dynamic import from esm.sh
@@ -915,9 +915,9 @@ async function createStrategies() {
     return cid.toString();
   };
 
-  // hashOfModernAsString (our own hasher)
-  strategies["hashOfModernAsString"] = (obj: any) => {
-    return hashOfModernAsString(obj);
+  // hashStringOf (our own hasher)
+  strategies["hashStringOf"] = (obj: any) => {
+    return hashStringOf(obj);
   };
 
   return strategies;
