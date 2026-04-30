@@ -39,11 +39,8 @@ import {
 } from "@commonfabric/data-model/value-debug";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
-import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
-import {
-  hashObjectFromString as causeFromString,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   redactCommitData,
   selectFact,
@@ -1116,7 +1113,7 @@ class MemoryProviderSession<
       revisions.push({
         of: selected.of,
         the: selected.the,
-        cause: causeFromString(selected.cause),
+        cause: FabricHash.fromString(selected.cause),
         is: selected.is,
         since: selected.since,
       });
@@ -1492,7 +1489,7 @@ class MemoryProviderSession<
               newFacts.set(docKey, {
                 of: loaded.address.id,
                 the: loaded.address.type,
-                cause: causeFromString(details.cause),
+                cause: FabricHash.fromString(details.cause),
                 is: loaded.value,
                 since: details.since,
               });
@@ -1519,7 +1516,7 @@ class MemoryProviderSession<
         newFacts.set(factKey, {
           of: address.id,
           the: address.type,
-          cause: causeFromString(details.cause),
+          cause: FabricHash.fromString(details.cause),
           is: loaded.value,
           since: details.since,
         });

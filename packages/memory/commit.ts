@@ -8,9 +8,8 @@ import type {
   Revision,
   Transaction,
 } from "./interface.ts";
-import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import { assert } from "./fact.ts";
-import { hashObjectFromString } from "@commonfabric/data-model/value-hash";
 
 export const COMMIT_LOG_TYPE = "application/commit+json" as const;
 export const create = <Space extends MemorySpace>({
@@ -45,7 +44,7 @@ export const toRevision = (
       the: COMMIT_LOG_TYPE,
       of: space as MemorySpace,
       is,
-      cause: hashObjectFromString(cause) as FabricHash,
+      cause: FabricHash.fromString(cause),
     }),
     since: is.since,
   };
@@ -66,8 +65,8 @@ export const toChanges = function* (
         if (state !== true) {
           const { is } = state;
           const change = is == null
-            ? { the, of, cause: hashObjectFromString(cause), since }
-            : { the, of, is, cause: hashObjectFromString(cause), since };
+            ? { the, of, cause: FabricHash.fromString(cause), since }
+            : { the, of, is, cause: FabricHash.fromString(cause), since };
           yield change as Revision<Fact>;
         }
       }

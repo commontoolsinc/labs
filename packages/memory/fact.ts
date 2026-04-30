@@ -12,11 +12,7 @@ import {
   State,
   Unclaimed,
 } from "./interface.ts";
-import {
-  hashObjectFromJson,
-  hashObjectFromString,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { hashObjectFromJson, hashOf } from "@commonfabric/data-model/value-hash";
 
 /**
  * Creates an unclaimed fact.
@@ -112,7 +108,7 @@ export const iterate = function* (
         yield {
           the: the as MIME,
           of: of as URI,
-          cause: hashObjectFromString(cause),
+          cause: FabricHash.fromString(cause),
           since,
           ...(is ? { is } : undefined),
         };

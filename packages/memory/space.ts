@@ -8,11 +8,8 @@ import {
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
-import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
-import {
-  hashObjectFromString,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
@@ -550,7 +547,7 @@ const recall = <Space extends MemorySpace>(
       the,
       of,
       cause: (row.cause
-        ? hashObjectFromString(row.cause)
+        ? FabricHash.fromString(row.cause)
         : unclaimedRef({ the, of })) as FabricHash,
       since: row.since,
       fact: row.fact, // Include stored hash to avoid recomputing with hashOf()
@@ -636,7 +633,7 @@ const getFact = <Space extends MemorySpace>(
     of: row.of as URI,
     cause:
       (row.cause
-        ? hashObjectFromString(row.cause)
+        ? FabricHash.fromString(row.cause)
         : unclaimedRef(row as FactAddress)) as FabricHash,
     since: row.since,
   };
@@ -788,11 +785,11 @@ const iterateTransaction = function* (
       for (const [cause, change] of Object.entries(revisions)) {
         if (change == true) {
           yield {
-            claim: { the, of, fact: hashObjectFromString(cause) },
+            claim: { the, of, fact: FabricHash.fromString(cause) },
           } as Claim;
         } else if (change.is === undefined) {
           yield {
-            retract: { the, of, cause: hashObjectFromString(cause) },
+            retract: { the, of, cause: FabricHash.fromString(cause) },
           } as Retract;
         } else {
           yield {
@@ -800,7 +797,7 @@ const iterateTransaction = function* (
               the,
               of,
               is: change.is,
-              cause: hashObjectFromString(cause),
+              cause: FabricHash.fromString(cause),
             },
           } as Assert;
         }
@@ -950,7 +947,7 @@ const commit = <Space extends MemorySpace>(
   const [since, cause] = row
     ? [
       plainObjectFromJson<CommitData>(row.is as string).since + 1,
-      hashObjectFromString(row.fact) as FabricHash,
+      FabricHash.fromString(row.fact),
     ]
     : [0, unclaimedRef({ the, of }) as FabricHash];
 
