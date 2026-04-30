@@ -31,6 +31,7 @@ import {
   formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
+  isGithubRateLimitError,
   mapConcurrent,
   type MetricTimeline,
   MIN_ABSOLUTE_DELTA,
@@ -485,4 +486,12 @@ async function main() {
   Deno.exit(1);
 }
 
-main();
+main().catch((error) => {
+  if (isGithubRateLimitError(error)) {
+    console.warn(
+      `GitHub API rate limit reached while gathering performance data; skipping PR performance check.\n${error.message}`,
+    );
+    Deno.exit(0);
+  }
+  throw error;
+});
