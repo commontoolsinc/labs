@@ -179,6 +179,7 @@ interface BuildJsonTreeTask {
   ancestors: readonly object[];
   depth: number;
   annotation?: CfcJsonAnnotationContext;
+  allowInternalName?: boolean;
   onBuilt?: (ino: bigint) => void;
 }
 
@@ -345,6 +346,7 @@ export function buildJsonTree(
     skipEntry,
     classifyCallableEntry,
     annotation,
+    false,
   );
 }
 
@@ -380,8 +382,12 @@ function buildJsonTreeWithAncestors(
     | ((key: string, value: unknown) => CallableKind | null)
     | undefined,
   annotation?: CfcJsonAnnotationContext,
+  allowInternalRootName = false,
 ): bigint {
-  const fsName = encodeJsonEntryName(name, depth === 0);
+  const fsName = encodeJsonEntryName(
+    name,
+    depth === 0 && allowInternalRootName,
+  );
 
   if (value === null || value === undefined || typeof value !== "object") {
     return addJsonScalarEntry(tree, parentIno, fsName, value, annotation);
@@ -495,6 +501,64 @@ export async function buildJsonTreeAsync(
   classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
   annotation?: CfcJsonAnnotationContext,
 ): Promise<bigint> {
+  return buildJsonTreeAsyncImpl(
+    tree,
+    parentIno,
+    name,
+    value,
+    seen,
+    resolveLink,
+    depth,
+    skipEntry,
+    classifyCallableEntry,
+    annotation,
+    false,
+  );
+}
+
+/** Build a pending rebuild root with reserved internal staging names intact. */
+export async function buildInternalJsonTreeAsync(
+  tree: FsTree,
+  parentIno: bigint,
+  name: string,
+  value: unknown,
+  seen?: WeakSet<object>,
+  resolveLink?: (value: unknown, depth: number) => string | null,
+  depth?: number,
+  skipEntry?: (value: unknown) => boolean,
+  classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
+  annotation?: CfcJsonAnnotationContext,
+): Promise<bigint> {
+  return buildJsonTreeAsyncImpl(
+    tree,
+    parentIno,
+    name,
+    value,
+    seen,
+    resolveLink,
+    depth,
+    skipEntry,
+    classifyCallableEntry,
+    annotation,
+    true,
+  );
+}
+
+async function buildJsonTreeAsyncImpl(
+  tree: FsTree,
+  parentIno: bigint,
+  name: string,
+  value: unknown,
+  seen: WeakSet<object> | undefined,
+  resolveLink: ((value: unknown, depth: number) => string | null) | undefined,
+  depth: number | undefined,
+  skipEntry: ((value: unknown) => boolean) | undefined,
+  classifyCallableEntry:
+    | ((key: string, value: unknown) => CallableKind | null)
+    | undefined,
+  annotation: CfcJsonAnnotationContext | undefined,
+  allowInternalRootName: boolean,
+): Promise<bigint> {
   const queue: BuildJsonTreeTask[] = [{
     parentIno,
     name,
@@ -502,6 +566,7 @@ export async function buildJsonTreeAsync(
     ancestors: legacySeenContains(value, seen) ? [value as object] : [],
     depth: depth ?? 0,
     annotation,
+    allowInternalName: allowInternalRootName,
   }];
   let nextIndex = 0;
   let processed = 0;
@@ -515,7 +580,9 @@ export async function buildJsonTreeAsync(
     const task = queue[nextIndex++];
     const d = task.depth;
     const candidate = task.value;
-    const fsName = encodeJsonEntryName(task.name, task.depth === 0);
+    const allowInternalName = task.depth === 0 &&
+      task.allowInternalName === true;
+    const fsName = encodeJsonEntryName(task.name, allowInternalName);
 
     let builtIno: bigint | undefined;
 
@@ -526,7 +593,7 @@ export async function buildJsonTreeAsync(
         task.name,
         candidate,
         task.annotation,
-        task.depth === 0,
+        allowInternalName,
       );
     } else if (typeof candidate === "object") {
       const objectValue = candidate as object;
@@ -630,7 +697,7 @@ export async function buildJsonTreeAsync(
         task.name,
         candidate,
         task.annotation,
-        task.depth === 0,
+        allowInternalName,
       );
     }
 

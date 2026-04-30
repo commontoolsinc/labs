@@ -268,6 +268,8 @@ wait_for_path "$MOUNTPOINT/$SPACE/pieces"
 
 PIECE_NAME="Fuse-Exec-Fixture"
 PIECE_DIR="$MOUNTPOINT/$SPACE/pieces/$PIECE_NAME"
+INPUT_DIR="$PIECE_DIR/input"
+INPUT_LAST_MESSAGE="$INPUT_DIR/lastMessage"
 RESULT_DIR="$PIECE_DIR/result"
 RESULT_JSON="$PIECE_DIR/result.json"
 META_JSON="$PIECE_DIR/meta.json"
@@ -448,5 +450,18 @@ LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "legacyCount" "0")
 echo '{}' > "$LEGACY_HANDLER_FILE"
 wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE + 1))"
 success "Legacy handler write-through still works"
+
+wait_for_path "$INPUT_LAST_MESSAGE"
+exec 9<> "$INPUT_LAST_MESSAGE"
+printf 'open-stale' >&9
+: > "$INPUT_LAST_MESSAGE"
+exec 9>&-
+wait_for_piece_value "lastMessage" '""'
+sleep 0.5
+LAST_MESSAGE_AFTER_TRUNCATE=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "lastMessage" 2>/dev/null || true)
+if [ "$LAST_MESSAGE_AFTER_TRUNCATE" != '""' ]; then
+  error "Path truncate should not be undone by a stale open file handle. Got: $LAST_MESSAGE_AFTER_TRUNCATE"
+fi
+success "Path truncate clears stale open write handles"
 
 echo "FUSE exec integration passed."

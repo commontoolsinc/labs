@@ -965,7 +965,11 @@ export async function main(argv: string[] = Deno.args) {
         { writeTarget, cfcAuthorizedOperations, cfcAuthorizationAnnotation },
       );
       if (truncate) {
-        handles.markTruncated(fh);
+        if (!handles.truncateByIno(inode, 0, { pendingFh: fh })) {
+          handles.close(fh);
+          fuse.symbols.fuse_reply_err(req, EIO);
+          return;
+        }
       }
       writeFileInfo(fi, fh);
       fuse.symbols.fuse_reply_open(req, fi);
@@ -1699,7 +1703,10 @@ export async function main(argv: string[] = Deno.args) {
         const { fh } = readFileInfo(fi);
         const handle = handles.get(fh);
         if (handle) {
-          if (!handles.truncate(fh, newSize)) {
+          const truncated = node.kind === "file"
+            ? handles.truncateByIno(inode, newSize, { pendingFh: fh })
+            : handles.truncate(fh, newSize);
+          if (!truncated) {
             fuse.symbols.fuse_reply_err(req, EIO);
             return;
           }
@@ -1736,7 +1743,11 @@ export async function main(argv: string[] = Deno.args) {
                 cfcAuthorizationAnnotation: node.cfc,
               },
             );
-            if (!handles.truncate(truncateFh, newSize)) {
+            if (
+              !handles.truncateByIno(inode, newSize, {
+                pendingFh: truncateFh,
+              })
+            ) {
               handles.close(truncateFh);
               fuse.symbols.fuse_reply_err(req, EIO);
               return;

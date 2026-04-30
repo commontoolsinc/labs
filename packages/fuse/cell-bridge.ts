@@ -25,6 +25,7 @@ import {
 import { parseMountedCallablePath } from "./callable-path.ts";
 import {
   buildFsProjection,
+  buildInternalJsonTreeAsync,
   buildJsonTree,
   buildJsonTreeAsync,
   type FsValue,
@@ -1202,7 +1203,10 @@ export class CellBridge {
       const buildRootName = existingIno !== undefined || jsonIno !== undefined
         ? pendingPropName
         : propName;
-      const propIno = await buildJsonTreeAsync(
+      const buildPropTree = buildRootName === pendingPropName
+        ? buildInternalJsonTreeAsync
+        : buildJsonTreeAsync;
+      const propIno = await buildPropTree(
         this.tree,
         pieceIno,
         buildRootName,

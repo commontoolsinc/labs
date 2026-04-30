@@ -40,6 +40,51 @@ Deno.test("HandleMap clears pending truncates when content arrives", () => {
   assertEquals(handleHasPendingChanges(handle), true);
 });
 
+Deno.test("HandleMap truncates every open handle for an inode", () => {
+  const handles = new HandleMap();
+  const first = handles.open(1n, O_RDWR, encoder.encode("first"));
+  const second = handles.open(1n, O_RDWR, encoder.encode("second"));
+  const other = handles.open(2n, O_RDWR, encoder.encode("other"));
+
+  handles.write(first, encoder.encode("stale"), 0);
+
+  assertEquals(handles.truncateByIno(1n, 0), true);
+
+  for (const fh of [first, second]) {
+    const handle = handles.get(fh);
+    assertEquals(handle?.buffer.length, 0);
+    assertEquals(handle?.dirty, false);
+    assertEquals(handle?.truncatePending, true);
+  }
+  assertEquals(new TextDecoder().decode(handles.get(other)?.buffer), "other");
+
+  handles.write(first, encoder.encode("fresh"), 0);
+  const firstHandle = handles.get(first);
+  assertEquals(new TextDecoder().decode(firstHandle?.buffer), "fresh");
+  assertEquals(firstHandle?.dirty, true);
+  assertEquals(firstHandle?.truncatePending, false);
+});
+
+Deno.test("HandleMap only marks the truncating handle pending when provided", () => {
+  const handles = new HandleMap();
+  const stale = handles.open(1n, O_RDWR, encoder.encode("stale"));
+  const truncating = handles.open(1n, O_RDWR, encoder.encode("current"));
+
+  handles.write(stale, encoder.encode("dirty"), 0);
+
+  assertEquals(handles.truncateByIno(1n, 0, { pendingFh: truncating }), true);
+
+  const staleHandle = handles.get(stale);
+  assertEquals(staleHandle?.buffer.length, 0);
+  assertEquals(staleHandle?.dirty, false);
+  assertEquals(staleHandle?.truncatePending, false);
+
+  const truncatingHandle = handles.get(truncating);
+  assertEquals(truncatingHandle?.buffer.length, 0);
+  assertEquals(truncatingHandle?.dirty, false);
+  assertEquals(truncatingHandle?.truncatePending, true);
+});
+
 Deno.test("HandleMap rejects invalid and oversized write allocations", () => {
   const handles = new HandleMap();
   const fh = handles.open(1n, O_RDWR, new Uint8Array(0));

@@ -150,14 +150,20 @@ export class HandleMap {
   }
 
   /** Truncate all handles for a given inode to the specified size. */
-  truncateByIno(ino: bigint, size: number): boolean {
+  truncateByIno(
+    ino: bigint,
+    size: number,
+    options?: { pendingFh?: bigint },
+  ): boolean {
     if (!validateVirtualFileRange(0, size).ok) return false;
-    for (const [, state] of this.handles) {
+    for (const [fh, state] of this.handles) {
       if (state.ino === ino) {
+        const shouldFlush = options?.pendingFh === undefined ||
+          options.pendingFh === fh;
         if (size === 0) {
           state.buffer = new Uint8Array(0);
           state.dirty = false;
-          state.truncatePending = true;
+          state.truncatePending = shouldFlush;
         } else {
           if (size < state.buffer.length) {
             state.buffer = state.buffer.slice(0, size);
@@ -166,7 +172,7 @@ export class HandleMap {
             newBuf.set(state.buffer);
             state.buffer = newBuf;
           }
-          state.dirty = true;
+          state.dirty = shouldFlush;
           state.truncatePending = false;
         }
         state.version++;

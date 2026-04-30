@@ -7,6 +7,7 @@ import {
   isPatternToolValue,
 } from "./callables.ts";
 import {
+  buildInternalJsonTreeAsync,
   buildJsonTree,
   buildJsonTreeAsync,
   isHandlerCell,
@@ -126,6 +127,41 @@ Deno.test("buildJsonTree - encodes user keys that look like internal pending roo
   assertEquals(tree.lookup(dataIno, ".result.pending"), undefined);
   assertEquals(getFileContent(tree, dataIno, "%2Einput.pending"), "1");
   assertEquals(getFileContent(tree, dataIno, "%2Eresult.pending"), "2");
+});
+
+Deno.test("buildJsonTree - encodes depth-zero names that look like internal pending roots by default", () => {
+  const tree = new FsTree();
+
+  buildJsonTree(tree, tree.rootIno, ".result.pending", { value: 1 });
+
+  assertEquals(tree.lookup(tree.rootIno, ".result.pending"), undefined);
+  const dataIno = tree.lookup(tree.rootIno, "%2Eresult.pending")!;
+  assertEquals(getFileContent(tree, dataIno, "value"), "1");
+});
+
+Deno.test("buildJsonTreeAsync - encodes depth-zero names that look like internal pending roots by default", async () => {
+  const tree = new FsTree();
+
+  await buildJsonTreeAsync(tree, tree.rootIno, ".input.pending", { value: 1 });
+
+  assertEquals(tree.lookup(tree.rootIno, ".input.pending"), undefined);
+  const dataIno = tree.lookup(tree.rootIno, "%2Einput.pending")!;
+  assertEquals(getFileContent(tree, dataIno, "value"), "1");
+});
+
+Deno.test("buildInternalJsonTreeAsync - preserves pending roots for rebuild staging", async () => {
+  const tree = new FsTree();
+
+  await buildInternalJsonTreeAsync(
+    tree,
+    tree.rootIno,
+    ".result.pending",
+    { value: 1 },
+  );
+
+  const dataIno = tree.lookup(tree.rootIno, ".result.pending")!;
+  assertEquals(getFileContent(tree, dataIno, "value"), "1");
+  assertEquals(tree.lookup(tree.rootIno, "%2Eresult.pending"), undefined);
 });
 
 Deno.test("buildJsonTree - array creates directory with numeric indices", () => {
