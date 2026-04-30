@@ -700,7 +700,7 @@ export class FabricHash extends FabricPrimitive {
     return this.#hash.length;
   }
 
-  /** The algorithm tag (e.g., `"fid1"`, `"legacy"`). */
+  /** The algorithm tag (e.g., `"fid1"`). */
   get tag(): string {
     return this.#tag;
   }

@@ -15,8 +15,9 @@ This spec covers:
 - **Unknown types** (Section 3) -- forward-compatibility via `UnknownValue`
 - **Serialization contexts** (Section 4) -- boundary-crossing serialization
   strategy, the `serialize()`/`deserialize()` functions, and boundary inventory
-- **JSON encoding** -- the `/<Type>@<Version>` wire format for special types,
-  escaping, detection rules, and the `/`-key reservation rule
+- **JSON encoding** -- the `fvj1:` encoding prefix, the `/<Type>@<Version>`
+  wire format for special types, escaping, detection rules, and the `/`-key
+  reservation rule
 - **Hashing** (Section 6) -- content-based identity for fabric values
 - **Implementation guidance** (Section 7) -- migration from legacy formats
 
@@ -32,5 +33,6 @@ system, schemas.
 - [2-hash-byte-format.md](./2-hash-byte-format.md) --
   Byte-level encoding for the hash algorithm.
 - [3-json-encoding.md](./3-json-encoding.md) -- The JSON wire format for
-  fabric values: `/<Type>@<Version>` tagged objects, standard type encodings,
-  detection, escaping, and the `/`-key reservation rule.
+  fabric values: the `fvj1:` encoding prefix, `/<Type>@<Version>` tagged
+  objects, standard type encodings, detection, escaping, and the `/`-key
+  reservation rule.
