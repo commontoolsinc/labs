@@ -317,7 +317,9 @@ class RevisionCodec {
     return cause == null
       ? { the, of, since }
       : is === undefined
-      ? { the, of, since, cause: FabricHash.fromString(cause) } as Revision<Fact>
+      ? { the, of, since, cause: FabricHash.fromString(cause) } as Revision<
+        Fact
+      >
       : { the, of, is, since, cause: FabricHash.fromString(cause) } as Revision<
         Fact
       >;
