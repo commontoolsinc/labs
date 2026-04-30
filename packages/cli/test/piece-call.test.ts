@@ -45,6 +45,29 @@ describe("executePieceCallable", () => {
   });
 
   it("runs tools from schema-derived flags and returns JSON output", async () => {
+    const toolPattern: {
+      nodes: Array<{ module: string }>;
+      argumentSchema: JSONSchema;
+      resultSchema: JSONSchema;
+    } = {
+      nodes: [{ module: "sentinel-node" }],
+      argumentSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          help: { type: "string" },
+          source: { type: "string" },
+        },
+        required: ["query", "source"],
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          summary: { type: "string" },
+          source: { type: "string" },
+        },
+      },
+    };
     const harness = createPieceCallableHarness({
       callableKind: "tool",
       cellKey: "search",
@@ -56,24 +79,7 @@ describe("executePieceCallable", () => {
         },
         required: ["query"],
       },
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            help: { type: "string" },
-            source: { type: "string" },
-          },
-          required: ["query", "source"],
-        },
-        resultSchema: {
-          type: "object",
-          properties: {
-            summary: { type: "string" },
-            source: { type: "string" },
-          },
-        },
-      },
+      pattern: toolPattern,
       extraParams: {
         source: "bound-source",
       },
@@ -100,6 +106,7 @@ describe("executePieceCallable", () => {
     );
 
     expect(result.resolved.callableKind).toBe("tool");
+    expect(harness.tracker.toolRunPattern).toBe(toolPattern);
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
       help: "",
@@ -496,7 +503,7 @@ function createPieceCallableHarness(options: {
   pattern?: {
     argumentSchema: JSONSchema;
     resultSchema?: JSONSchema;
-  };
+  } & Record<string, unknown>;
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   handlerFailureMessage?: string;
@@ -507,6 +514,7 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
+    toolRunPattern: undefined as unknown,
     toolRunInput: undefined as unknown,
   };
 
@@ -630,10 +638,11 @@ function createPieceCallableHarness(options: {
       ) => resultCell,
       run: (
         _tx: unknown,
-        _pattern: unknown,
+        pattern: unknown,
         input: unknown,
         _result: unknown,
       ) => {
+        tracker.toolRunPattern = pattern;
         tracker.toolRunInput = input;
         state.value = options.toolResult;
         return {

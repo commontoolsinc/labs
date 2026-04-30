@@ -99,7 +99,7 @@ export interface ExecutedCallable {
   outputText?: string;
 }
 
-interface CallablePatternLike {
+interface CallablePatternLike extends Record<string, unknown> {
   argumentSchema?: JSONSchema;
   resultSchema?: JSONSchema;
 }
@@ -109,10 +109,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 function asCallablePattern(value: unknown): CallablePatternLike | undefined {
   if (!isRecord(value)) return undefined;
-  return {
-    argumentSchema: value.argumentSchema as JSONSchema | undefined,
-    resultSchema: value.resultSchema as JSONSchema | undefined,
-  };
+  return value as CallablePatternLike;
 }
 
 function asExtraParams(value: unknown): Record<string, unknown> {
