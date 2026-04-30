@@ -32,7 +32,6 @@
     "./explicit-tag-value": "./explicit-tag-value.ts",
     "./unknown-value": "./unknown-value.ts",
     "./problematic-value": "./problematic-value.ts",
-    "./value-hash-modern": "./value-hash-modern.ts",
     "./frozen-builtins": "./frozen-builtins.ts",
     "./fabric-bytes": "./fabric-bytes.ts",
     "./fabric-native-instances": "./fabric-native-instances.ts",

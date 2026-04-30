@@ -106,7 +106,7 @@ because their sparse support was part of the original design:
   `fabricFromNativeValueModern` use `i in arr` checks.
 - **`packages/memory/serialization.ts`** — Encodes holes as run-length-encoded
   `/hole` entries; decodes them back to true holes via `new Array(len)`.
-- **`packages/data-model/value-hash-modern.ts`** — Handles holes in hash computation.
+- **`packages/data-model/value-hash.ts`** — Handles holes in hash computation.
 
 ### Value validation (`packages/data-model/fabric-value.ts`)
 
@@ -181,7 +181,7 @@ The merkle-reference library cannot hash sparse array holes (it throws
 `TypeError: Unknown type undefined`). The `wrappedNodeBuilder.toTree` wrapper
 detects sparse arrays and densifies them (holes → `null`) before passing to the
 default node builder. This only affects hash computation — the actual data in
-storage remains sparse. The modern hash path (`value-hash-modern.ts`) handles
+storage remains sparse. The modern hash path (`value-hash.ts`) handles
 holes natively and does not need this workaround.
 
 ## Writing new code that handles arrays
