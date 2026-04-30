@@ -14,7 +14,7 @@ import type { FabricValue } from "./interface.ts";
 
 /** Reconstructs a hash object from its JSON representation. */
 export function hashObjectFromJson(source: { "/": string }): FabricHash {
-  return FabricHash.fromString(source["/"]);
+  return FabricHash.fromJson(source);
 }
 
 /** Compute a content hash for the given source value. */

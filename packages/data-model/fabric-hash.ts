@@ -104,7 +104,16 @@ export class FabricHash extends FabricPrimitive implements ApiFabricHash {
   }
 
   /**
-   * Parse an instance from its string representation
+   * Parses an instance from its legacy JSON representation
+   * `{ '/': '<tag>:<base64urlHash>' }` (same as what is _produced_ by
+   * `toJSON()`).
+   */
+  static fromJson(source: { "/": string }): FabricHash {
+    return this.fromString(source["/"]);
+  }
+
+  /**
+   * Parses an instance from its string representation
    * (`<tag>:<base64urlHash>`).
    */
   static fromString(source: string): FabricHash {
