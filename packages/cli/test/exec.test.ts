@@ -2020,7 +2020,6 @@ function createExecHarness(options: {
     ? undefined
     : { $stream: true };
   const runtimeErrors: Array<{ message: string }> = [];
-  let callableCell: ReturnType<typeof createMockCell>;
   const handlerSend = function (
     this: unknown,
     value: unknown,
@@ -2049,7 +2048,7 @@ function createExecHarness(options: {
           : { status: "done" },
     });
   };
-  callableCell = createMockCell(
+  const callableCell = createMockCell(
     callableValue,
     callableSchema,
     options.callableKind === "handler"

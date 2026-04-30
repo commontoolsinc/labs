@@ -489,7 +489,7 @@ function buildJsonTreeWithAncestors(
   return dirIno;
 }
 
-export async function buildJsonTreeAsync(
+export function buildJsonTreeAsync(
   tree: FsTree,
   parentIno: bigint,
   name: string,
@@ -517,7 +517,7 @@ export async function buildJsonTreeAsync(
 }
 
 /** Build a pending rebuild root with reserved internal staging names intact. */
-export async function buildInternalJsonTreeAsync(
+export function buildInternalJsonTreeAsync(
   tree: FsTree,
   parentIno: bigint,
   name: string,
