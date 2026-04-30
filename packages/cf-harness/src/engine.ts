@@ -83,7 +83,11 @@ import {
   DenoProcessRunner,
   type ProcessRunner,
 } from "./sandbox/process-runner.ts";
-import type { HarnessSandboxConfig, SandboxRuntime } from "./sandbox/types.ts";
+import type {
+  DockerRunscAdditionalMountConfig,
+  HarnessSandboxConfig,
+  SandboxRuntime,
+} from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
   type DelegateTaskToolInput,
@@ -124,6 +128,7 @@ export interface CreateHarnessEngineOptions
   runId?: string;
   runState?: HarnessRunState;
   workspaceHostPath?: string;
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
   processRunner?: ProcessRunner;
@@ -147,6 +152,7 @@ const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
 const resolveSandboxConfig = (
   config: HarnessConfig,
   workspaceHostPath?: string,
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[],
 ): HarnessSandboxConfig => {
   if (config.sandbox !== undefined) {
     return config.sandbox;
@@ -156,7 +162,12 @@ const resolveSandboxConfig = (
       "sandbox config is required when no workspaceHostPath default is provided",
     );
   }
-  return resolveDockerRunscSandboxConfig({ workspaceHostPath });
+  return resolveDockerRunscSandboxConfig({
+    workspaceHostPath,
+    ...(additionalMounts !== undefined && additionalMounts.length > 0
+      ? { additionalMounts }
+      : {}),
+  });
 };
 
 const createSandboxRuntime = (
@@ -236,7 +247,11 @@ export class CfHarnessEngine {
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
     const sandboxConfig = options.sandboxRuntime === undefined
-      ? resolveSandboxConfig(this.config, options.workspaceHostPath)
+      ? resolveSandboxConfig(
+        this.config,
+        options.workspaceHostPath,
+        options.additionalMounts,
+      )
       : this.config.sandbox;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
     this.sandbox = options.sandboxRuntime ??
