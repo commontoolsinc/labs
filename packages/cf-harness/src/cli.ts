@@ -33,6 +33,7 @@ import type {
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import { CfHarnessEngine } from "./engine.ts";
+import { DEFAULT_FABRIC_MOUNT_PATH } from "./sandbox/docker-runsc.ts";
 import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
@@ -78,6 +79,7 @@ export interface CfHarnessCliConfig {
   printTranscript: boolean;
   apiKey?: string;
   apiKeySource?: "CF_HARNESS_API_KEY" | "OPENAI_API_KEY";
+  fabricMount?: string;
 }
 
 export interface CfHarnessCliIO {
@@ -198,6 +200,7 @@ Options:
   --result-json-path <path>     Optional structured result sidecar path
   --run-manifest <path>         Optional Loom run manifest JSON path
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
+  --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
   --help                        Show this help text
@@ -427,6 +430,7 @@ export const parseCfHarnessCliArgs = async (
       "run-manifest",
       "cfc-enforcement-mode",
       "max-model-turns",
+      "fabric-mount",
     ],
     boolean: [
       "help",
@@ -579,6 +583,15 @@ export const parseCfHarnessCliArgs = async (
       "cfc enforcement mode must be one of disabled, observe, enforce-explicit, enforce-strict",
     );
   }
+  const rawFabricMount = typeof args["fabric-mount"] === "string"
+    ? args["fabric-mount"].trim()
+    : undefined;
+  if (rawFabricMount !== undefined && rawFabricMount === "") {
+    throw new Error("--fabric-mount requires a non-empty path");
+  }
+  const fabricMount = rawFabricMount !== undefined
+    ? resolve(cwd, rawFabricMount)
+    : undefined;
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
   const apiKeySource = env.CF_HARNESS_API_KEY !== undefined
     ? "CF_HARNESS_API_KEY"
@@ -625,6 +638,7 @@ export const parseCfHarnessCliArgs = async (
     printTranscript: Boolean(args["print-transcript"]),
     ...(apiKey !== undefined ? { apiKey } : {}),
     ...(apiKeySource !== undefined ? { apiKeySource } : {}),
+    ...(fabricMount !== undefined ? { fabricMount } : {}),
   };
 };
 
@@ -663,7 +677,11 @@ const toWorkspaceSandboxPath = (
 };
 
 export const buildCfHarnessOperatorSystemPrompt = (
-  config: Pick<CfHarnessCliConfig, "workspace" | "focusRoot" | "systemPrompt">,
+  config:
+    & Pick<CfHarnessCliConfig, "workspace" | "focusRoot" | "systemPrompt">
+    & {
+      fabricMountPath?: string;
+    },
 ): string => {
   const focusRoot = toWorkspaceSandboxPath(config.workspace, config.focusRoot);
   const lines = [
@@ -674,6 +692,11 @@ export const buildCfHarnessOperatorSystemPrompt = (
     "- Read source files only when needed to answer the prompt accurately.",
     "- Stop once you have enough evidence to answer.",
   ];
+  if (config.fabricMountPath !== undefined) {
+    lines.push(
+      `- A Common Fabric space is mounted at ${config.fabricMountPath}. You may browse its contents for context.`,
+    );
+  }
   if (config.systemPrompt !== undefined) {
     lines.push("", "Additional instructions:", config.systemPrompt);
   }
@@ -687,6 +710,7 @@ export const resolveCfHarnessCliSystemPrompt = (
       "workspace" | "focusRoot" | "systemPrompt" | "outputMode"
     >
     & {
+      fabricMountPath?: string;
       skillCatalogEnabled?: boolean;
       skillNames?: readonly string[];
     },
@@ -976,6 +1000,14 @@ export const runCfHarnessCli = async (
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
+        ...(parsed.fabricMount !== undefined
+          ? {
+            additionalMounts: [{
+              kind: "fabric-fuse" as const,
+              hostPath: parsed.fabricMount,
+            }],
+          }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -1031,6 +1063,14 @@ export const runCfHarnessCli = async (
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
+        ...(parsed.fabricMount !== undefined
+          ? {
+            additionalMounts: [{
+              kind: "fabric-fuse" as const,
+              hostPath: parsed.fabricMount,
+            }],
+          }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -1060,7 +1100,12 @@ export const runCfHarnessCli = async (
       const contextMessages = await prepareSkillContextMessages(engine);
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
-        systemPrompt: resolveCfHarnessCliSystemPrompt(parsed),
+        systemPrompt: resolveCfHarnessCliSystemPrompt({
+          ...parsed,
+          fabricMountPath: parsed.fabricMount !== undefined
+            ? DEFAULT_FABRIC_MOUNT_PATH
+            : undefined,
+        }),
         contextMessages,
         model: parsed.model,
         maxModelTurns: parsed.maxModelTurns,
