@@ -1,5 +1,5 @@
-import * as Memory from "@commonfabric/memory";
 import { MEMORY_V2_PROTOCOL } from "@commonfabric/memory/v2";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
@@ -115,28 +115,19 @@ if (env.DB_PATH) {
   console.log(`Memory: Using directory mode: ${env.MEMORY_DIR}`);
 }
 
-// Initialize memory provider using top-level await
-console.log("Memory: Initializing provider...");
-const result = await Memory.Provider.open({
-  store: storeUrl,
-  serviceDid: identity.did(),
-  memoryVersion: "v1",
-});
-
-if (result.error) {
-  throw result.error;
-}
-
 const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
   singleFileMode: Boolean(env.DB_PATH),
 });
 await FS.ensureDir(memoryEngineStoreUrl);
 
-export const memory = result.ok;
-export const memoryV2Server = new Memory.V2Server.Server({
+export const memoryV2Server = new MemoryV2Server.Server({
   store: memoryEngineStoreUrl,
   authorizeSessionOpen,
 });
+export const memory = {
+  async close(): Promise<{ ok: {} } | { error: unknown }> {
+    await memoryV2Server.close();
+    return { ok: {} };
+  },
+};
 console.log("Memory: Provider initialized successfully");
-
-export { Memory };

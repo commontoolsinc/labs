@@ -56,7 +56,7 @@ import type {
   StorageTransactionRejected,
   Unit,
 } from "./interface.ts";
-import { SelectorTracker } from "./cache.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";

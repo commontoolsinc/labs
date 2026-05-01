@@ -1,7 +1,6 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import { resolveSpaceStoreUrl } from "../memory.ts";
-import type { Protocol, Provider } from "../provider.ts";
+import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
   type ClientCommit,
   type ClientMessage,
@@ -357,7 +356,6 @@ export class Server {
 
   constructor(
     readonly options: {
-      memory?: Provider<Protocol>;
       sessions?: SessionRegistry;
       store?: URL;
       subscriptionRefreshDelayMs?: number;
@@ -1082,7 +1080,10 @@ export class Server {
     }
 
     const url = this.#store
-      ? resolveSpaceStoreUrl(this.#store, space as any, "v2")
+      ? resolveSpaceStoreUrl(
+        this.#store,
+        space as `did:${string}:${string}`,
+      )
       : new URL(`memory:///${encodeURIComponent(space)}`);
     const opened = (async () => {
       if (url.protocol === "file:") {
