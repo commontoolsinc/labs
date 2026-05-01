@@ -1456,9 +1456,6 @@ export class CellImpl<T extends FabricValue>
       sourceCellId = toURI(sourceCellId);
     }
 
-    if (typeof sourceCellId !== "string" || !sourceCellId.startsWith("of:")) {
-      throw new Error("Source cell ID must start with 'of:'");
-    }
     return createCell(this.runtime, {
       space: this.link.space,
       path: [],
