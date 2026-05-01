@@ -13,6 +13,7 @@ import type { HarnessSubagentRunRef } from "./subagent.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
 import type { ToolResultRef } from "./tool-result.ts";
+import type { OpenAIChatCompletionAttemptDiagnostic } from "../gateway/openai-client.ts";
 
 export type HarnessToolPolicyDecision = "allowed" | "warned" | "denied";
 export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
@@ -42,6 +43,13 @@ export interface HarnessToolActivity {
   policyEventIndexes?: number[];
   resultRef?: ToolResultRef;
   errorDetail?: string;
+}
+
+export interface HarnessGatewayAttempt
+  extends OpenAIChatCompletionAttemptDiagnostic {
+  runId: string;
+  sequence: number;
+  modelTurn: number;
 }
 
 export interface HarnessRunTimelineEntry {
@@ -106,6 +114,7 @@ export interface HarnessRunReport {
   policyDecisions: HarnessPolicyDecisionRecord[];
   timeline: HarnessRunTimelineEntry[];
   toolActivity: HarnessToolActivity[];
+  gatewayAttempts?: HarnessGatewayAttempt[];
   toolOutputs: ToolResultRef[];
   subagentRuns?: HarnessSubagentRunRef[];
 }
@@ -137,6 +146,7 @@ export interface CreateHarnessRunReportOptions {
   finalAssistantText?: string;
   timeline?: readonly HarnessRunTimelineEntryInput[];
   toolActivity: readonly HarnessToolActivity[];
+  gatewayAttempts?: readonly HarnessGatewayAttempt[];
 }
 
 export const createHarnessRunTimeline = (
@@ -307,6 +317,9 @@ export const createHarnessRunReport = (
       toolActivity: options.toolActivity,
     }),
     toolActivity: [...options.toolActivity],
+    ...((options.gatewayAttempts?.length ?? 0) > 0
+      ? { gatewayAttempts: [...(options.gatewayAttempts ?? [])] }
+      : {}),
     toolOutputs: [...options.runState.toolOutputs],
     ...(options.runState.subagentRuns !== undefined &&
         options.runState.subagentRuns.length > 0

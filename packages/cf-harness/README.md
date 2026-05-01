@@ -45,8 +45,12 @@ What works today:
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
-- persisted run state, transcript, Loom run manifests, capability snapshots, and
-  tool outputs, plus explicit skill registry and activation artifacts
+- persisted run state, transcript, run reports, Loom run manifests, capability
+  snapshots, and tool outputs, plus explicit skill registry and activation
+  artifacts
+- run-report gateway attempt diagnostics with chat-completion request size,
+  timing, HTTP status, selected response headers/request IDs, and non-OK
+  response body excerpts
 - transcript-based resumability
 - package-local operator CLI
 - explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
@@ -92,8 +96,8 @@ What is not done yet:
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
 - [src/artifacts.ts](src/artifacts.ts)
-  - persisted run state, run manifest, transcript, capability snapshot, and tool
-    output storage
+  - persisted run state, run manifest, transcript, run report, capability
+    snapshot, and tool output storage
 - [src/skills/](src/skills/)
   - Agent Skills registry scanning, validation, and explicit preload context
 - [src/contracts/](src/contracts/)
