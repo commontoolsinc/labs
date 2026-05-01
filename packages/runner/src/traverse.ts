@@ -3154,13 +3154,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (doc.value === undefined) {
       return "undefined";
     }
-    return JSON.stringify(
+    return toIndentedDebugString(
       this.traverseWithSelector(doc, {
         path: doc.address.path,
         schema: true,
       }),
-      getCircularReplacer(),
-      2,
     );
   }
 }
@@ -3404,23 +3402,6 @@ function _mergeAnyOfBranchSchemasUncached(
     ...((outerSchema.asCell || outerSchema.asStream) &&
       { asCell: outerSchema.asCell ?? ["stream"] }),
   } as JSONSchemaObj;
-}
-
-// Utility function used for debugging so we can convert proxy objects into
-// regular objects when there's circular references.
-function getCircularReplacer() {
-  const ancestors: object[] = [];
-  return function (_key: string, value: any) {
-    if (typeof value !== "object" || value === null) {
-      return value;
-    }
-    // Check if the value has been seen before in the current ancestry path
-    if (ancestors.includes(value)) {
-      return "[Circular]"; // Replace cyclic reference with a string
-    }
-    ancestors.push(value);
-    return value;
-  };
 }
 
 /**
