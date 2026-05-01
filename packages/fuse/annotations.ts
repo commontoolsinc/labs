@@ -1,5 +1,5 @@
 import { cfcAtom } from "@commonfabric/runner";
-import { sha256 } from "@noble/hashes/sha2.js";
+import { sha256 } from "@commonfabric/content-hash";
 import { encodeHex } from "@std/encoding/hex";
 import type { CallableKind } from "./callables.ts";
 

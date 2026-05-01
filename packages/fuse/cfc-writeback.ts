@@ -2,7 +2,7 @@ import {
   type CfcEnforcementMode as RunnerCfcEnforcementMode,
   DEFAULT_CFC_ENFORCEMENT_MODE,
 } from "@commonfabric/runner/cfc";
-import { sha256 } from "@noble/hashes/sha2.js";
+import { sha256 } from "@commonfabric/content-hash";
 import { encodeHex } from "@std/encoding/hex";
 import {
   canonicalCfcJsonStringify,
