@@ -378,7 +378,8 @@ export class CellBridge {
         );
       }
     }
-    // All probes failed — retry
+    // All probes failed — retry with increasing backoff
+    this._disconnectCount++;
     console.error(
       `[FUSE] Reconnect failed, retrying in ${this._reconnectDelayMs()}ms`,
     );
