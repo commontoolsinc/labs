@@ -317,8 +317,74 @@ export class CellBridge {
    * Set to true when a write fails due to a transport/connection error.
    * Once disconnected, all files appear read-only (EACCES on write)
    * so agents get immediate feedback rather than silent data loss.
+   * Reconnection is attempted automatically with exponential backoff.
    */
-  disconnected = false;
+  private _disconnected = false;
+  private _disconnectCount = 0;
+  private _lastDisconnectReason: string | null = null;
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  get disconnected(): boolean {
+    return this._disconnected;
+  }
+
+  /** Mark the bridge as disconnected and schedule reconnection. */
+  markDisconnected(reason: string): void {
+    if (this._disconnected) return;
+    this._disconnected = true;
+    this._disconnectCount++;
+    this._lastDisconnectReason = reason;
+    console.error(
+      `[FUSE] Backend connection lost (${reason}) — mount is READ-ONLY. ` +
+        `Will attempt reconnection in ${this._reconnectDelayMs()}ms.`,
+    );
+    this._scheduleReconnect();
+    this.updateStatus();
+  }
+
+  private _reconnectDelayMs(): number {
+    // Exponential backoff: 2s, 4s, 8s, 16s, cap at 30s
+    return Math.min(2000 * Math.pow(2, this._disconnectCount - 1), 30_000);
+  }
+
+  private _scheduleReconnect(): void {
+    if (this._reconnectTimer !== null) clearTimeout(this._reconnectTimer);
+    const timerId = setTimeout(() => {
+      this._reconnectTimer = null;
+      this._attemptReconnect();
+    }, this._reconnectDelayMs());
+    // Don't prevent Deno process from exiting while waiting to reconnect
+    Deno.unrefTimer(timerId);
+    this._reconnectTimer = timerId;
+  }
+
+  private async _attemptReconnect(): Promise<void> {
+    for (const [spaceName, state] of this.spaces) {
+      try {
+        await state.manager.synced();
+        // If synced() succeeds, connection is back
+        this._disconnected = false;
+        this._disconnectCount = 0;
+        console.error(
+          `[FUSE] Backend connection restored — write access resumed.`,
+        );
+        this.updateStatus();
+        return;
+      } catch (e) {
+        console.error(
+          `[FUSE] Reconnect probe to ${spaceName} failed: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+    // All probes failed — retry with increasing backoff
+    this._disconnectCount++;
+    console.error(
+      `[FUSE] Reconnect failed, retrying in ${this._reconnectDelayMs()}ms`,
+    );
+    this._scheduleReconnect();
+  }
 
   constructor(tree: FsTree, execCli = "", options: CellBridgeOptions = {}) {
     this.tree = tree;
@@ -469,6 +535,11 @@ export class CellBridge {
         },
         startedAt: this.startedAt,
         spaces,
+        connection: {
+          disconnected: this._disconnected,
+          disconnectCount: this._disconnectCount,
+          lastDisconnectReason: this._lastDisconnectReason,
+        },
         ...extra,
       },
       null,

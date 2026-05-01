@@ -1953,3 +1953,132 @@ Deno.test("formatCfHarnessCliResult returns plain final text in batch mode", () 
     "Batch result.\n",
   );
 });
+
+Deno.test("parseCfHarnessCliArgs resolves fabric-mount to an absolute path", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--fabric-mount", "/tmp/cf-fuse"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.fabricMount, "/tmp/cf-fuse");
+});
+
+Deno.test("parseCfHarnessCliArgs omits fabricMount when flag is absent", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.fabricMount, undefined);
+});
+
+Deno.test("parseCfHarnessCliArgs resolves relative fabric-mount against cwd", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--fabric-mount", "fuse-dir"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.fabricMount, "/tmp/project/fuse-dir");
+});
+
+Deno.test("parseCfHarnessCliArgs rejects empty fabric-mount value", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--fabric-mount", ""],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-mount requires a non-empty path",
+  );
+});
+
+Deno.test("buildCfHarnessOperatorSystemPrompt includes fabric mount guidance", () => {
+  const prompt = buildCfHarnessOperatorSystemPrompt({
+    workspace: "/tmp/project",
+    systemPrompt: undefined,
+    fabricMountPath: "/fabric",
+  });
+  assertEquals(
+    prompt.includes(
+      "A Common Fabric space is mounted at /fabric. You may browse its contents for context.",
+    ),
+    true,
+  );
+});
+
+Deno.test("buildCfHarnessOperatorSystemPrompt omits fabric guidance without mount", () => {
+  const prompt = buildCfHarnessOperatorSystemPrompt({
+    workspace: "/tmp/project",
+    systemPrompt: undefined,
+  });
+  assertEquals(prompt.includes("fabric"), false);
+  assertEquals(prompt.includes("Fabric"), false);
+});
+
+Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", async () => {
+  const { io, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Browse fabric",
+      "--fabric-mount",
+      "/tmp/cf-fuse",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: (options) => {
+            runPromptOptions = options;
+            return Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "Done.",
+                transcript: [
+                  { role: "user", content: "Browse fabric" },
+                  { role: "assistant", content: "Done." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-fabric",
+                  status: "completed",
+                  createdAt: "2026-04-30T00:00:00.000Z",
+                  updatedAt: "2026-04-30T00:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            );
+          },
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  const engine = createdOptions?.engine as CfHarnessEngine | undefined;
+  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  assertEquals(mounts?.length, 2);
+  assertEquals(mounts?.[1]?.kind, "fabric-fuse");
+  assertEquals(mounts?.[1]?.sandboxPath, "/fabric");
+  assertEquals(
+    runPromptOptions?.systemPrompt?.includes(
+      "A Common Fabric space is mounted at /fabric",
+    ),
+    true,
+  );
+});
