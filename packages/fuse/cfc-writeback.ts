@@ -67,6 +67,26 @@ export type CfcMetadataLabelKey = keyof CfcMetadataLabels;
 
 export const CFC_WRITEBACK_PREPARE_XATTR = "trusted.cfc.writeback.prepare";
 export const CFC_WRITEBACK_FINALIZE_XATTR = "trusted.cfc.writeback.finalize";
+export const CFC_COMPAT_WRITEBACK_PREPARE_XATTR =
+  "user.commonfabric.cfc.writeback.prepare";
+export const CFC_COMPAT_WRITEBACK_FINALIZE_XATTR =
+  "user.commonfabric.cfc.writeback.finalize";
+
+export function normalizeCfcWritebackXattrName(name: string): string | null {
+  if (
+    name === CFC_WRITEBACK_PREPARE_XATTR ||
+    name === CFC_COMPAT_WRITEBACK_PREPARE_XATTR
+  ) {
+    return CFC_WRITEBACK_PREPARE_XATTR;
+  }
+  if (
+    name === CFC_WRITEBACK_FINALIZE_XATTR ||
+    name === CFC_COMPAT_WRITEBACK_FINALIZE_XATTR
+  ) {
+    return CFC_WRITEBACK_FINALIZE_XATTR;
+  }
+  return null;
+}
 
 export type CfcPreparedWritebackLabels = {
   contentLabel?: CfcLabel;
@@ -854,7 +874,7 @@ export class CfcWritebackStore {
     ok: false;
     reason: string;
   } {
-    if (name !== CFC_WRITEBACK_PREPARE_XATTR) {
+    if (normalizeCfcWritebackXattrName(name) !== CFC_WRITEBACK_PREPARE_XATTR) {
       this.recordMalformed(ino, name, "unsupported writeback xattr");
       return { ok: false, reason: "unsupported writeback xattr" };
     }
@@ -893,7 +913,9 @@ export class CfcWritebackStore {
     ok: false;
     reason: string;
   } {
-    if (name !== CFC_WRITEBACK_FINALIZE_XATTR) {
+    if (
+      normalizeCfcWritebackXattrName(name) !== CFC_WRITEBACK_FINALIZE_XATTR
+    ) {
       return { ok: false, reason: "unsupported writeback xattr" };
     }
     const parsed = parseFinalizedWriteback(value);

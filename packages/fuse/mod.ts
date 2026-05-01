@@ -40,6 +40,7 @@ import {
   CfcWritebackStore,
   isCfcEnforcing,
   metadataFieldsForSetattrFlags,
+  normalizeCfcWritebackXattrName,
   parseCfcMode,
   resolveCfcMode,
   shouldEnableCfcAnnotations,
@@ -413,7 +414,8 @@ export async function main(argv: string[] = Deno.args) {
       // When the backend transport is dead, report all files as read-only
       // so writes fail with EACCES instead of silently succeeding.
       isWritable: !bridge?.disconnected && Boolean(
-        bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
+        cfcWritebackXattrs ||
+          bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
       ),
       ownership: mountOwnership,
     });
@@ -2050,13 +2052,14 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
       const name = readCString(namePtr);
+      const normalizedName = normalizeCfcWritebackXattrName(name);
       const value = new TextDecoder().decode(readBuffer(valuePtr, size));
       let result:
         | ReturnType<CfcWritebackStore["setPreparedXattr"]>
         | ReturnType<CfcWritebackStore["setFinalizeXattr"]>;
-      if (name === CFC_WRITEBACK_PREPARE_XATTR) {
+      if (normalizedName === CFC_WRITEBACK_PREPARE_XATTR) {
         result = cfcWritebacks.setPreparedXattr(ino, name, value);
-      } else if (name === CFC_WRITEBACK_FINALIZE_XATTR) {
+      } else if (normalizedName === CFC_WRITEBACK_FINALIZE_XATTR) {
         result = cfcWritebacks.setFinalizeXattr(ino, name, value);
       } else {
         fuse.symbols.fuse_reply_err(req, EACCES);
@@ -2087,9 +2090,10 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
       const name = readCString(namePtr);
+      const normalizedName = normalizeCfcWritebackXattrName(name);
       if (
-        name !== CFC_WRITEBACK_PREPARE_XATTR &&
-        name !== CFC_WRITEBACK_FINALIZE_XATTR
+        normalizedName !== CFC_WRITEBACK_PREPARE_XATTR &&
+        normalizedName !== CFC_WRITEBACK_FINALIZE_XATTR
       ) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -2946,7 +2950,10 @@ export async function main(argv: string[] = Deno.args) {
   // --- Mount ---
   const fuseArgs = ["fuse_ct"];
   if (Deno.build.os === "linux" && args["allow-other"]) {
-    fuseArgs.push("-o", "allow_other", "-o", "default_permissions");
+    fuseArgs.push("-o", "allow_other");
+    if (!cfcWritebackXattrs) {
+      fuseArgs.push("-o", "default_permissions");
+    }
   }
   const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs(
     fuseArgs,
