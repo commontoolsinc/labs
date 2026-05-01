@@ -19,7 +19,10 @@ import {
 } from "../src/builder/types.ts";
 import { isPrimitiveCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IMemorySpaceAddress,
+} from "../src/storage/interface.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -1093,3 +1096,144 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     expect(copy2.val).toBe(1);
   });
 });
+
+// Source-cell round-trip across commit + fresh-tx reload, parameterized over
+// `unifiedJsonEncoding` flag state. These tests pin the current behavior of
+// the two defensive `JSON.parse` sites that handle `path: ["source"]` reads:
+//
+//   - `runner/src/storage/transaction.ts:280` — defensive parse in `read()`.
+//   - `runner/src/cell.ts:1460` — defensive parse in `getSourceCell()`.
+//
+// Both sites guard the parse with `typeof value === "string" &&
+// value.startsWith('{"/":')`. Under both flag states, the upstream
+// `valueFromJson` decode in `memory/space.ts` (called on every read of the
+// `is` storage column) turns the JSON-encoded link record back into an
+// object before either guard is checked — `valueFromJsonLegacy` (flag-OFF)
+// is literally `JSON.parse(json)`, and `valueFromJsonModern` (flag-ON)
+// strips the `fvj1:` prefix and decodes. So the value the guard sees is an
+// object with own-property `"/"`, the `typeof` check fails, and the
+// defensive parse is bypassed.
+//
+// The tests below exercise the standard `setSourceCell` → commit →
+// `getSourceCell` round-trip in a fresh transaction, asserting end-to-end
+// correctness in both flag states. Implicitly, both tests also confirm the
+// defensive parse branch is not entered: if the guard ever fired on a
+// non-link-record value, `JSON.parse` would throw and the test would fail.
+//
+// See `coordination/docs/2026-04-30-fvj1-parse-site-kickoff.md` (project
+// kickoff doc, session 2026-067) for the full liveness analysis.
+for (const unifiedJsonEncoding of [false, true]) {
+  describe(
+    `Cell source-cell round-trip with \`unifiedJsonEncoding = ${unifiedJsonEncoding}\``,
+    () => {
+      let runtime: Runtime;
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+      let tx: IExtendedStorageTransaction;
+
+      beforeEach(() => {
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          experimental: { unifiedJsonEncoding },
+        });
+        tx = runtime.edit();
+      });
+
+      afterEach(async () => {
+        await runtime?.dispose();
+        await storageManager?.close();
+      });
+
+      it(
+        "setSourceCell + commit + getSourceCell round-trips correctly across a fresh tx",
+        async () => {
+          // Set up a source/target pair via the standard API.
+          const sourceCell = runtime.getCell<{ foo: number }>(
+            space,
+            "fvj1 source-cell round-trip: source",
+            undefined,
+            tx,
+          );
+          sourceCell.set({ foo: 123 });
+
+          const targetCell = runtime.getCell<{ bar: string }>(
+            space,
+            "fvj1 source-cell round-trip: target",
+            undefined,
+            tx,
+          );
+          targetCell.set({ bar: "baz" });
+          targetCell.setSourceCell(sourceCell);
+
+          // Commit, then start a fresh tx. This forces the `path: ["source"]`
+          // read to go through the storage layer (rather than the in-tx
+          // novelty cache, which short-circuits serialization), so
+          // `valueFromJson` runs upstream of the defensive parse sites.
+          await tx.commit();
+          tx = runtime.edit();
+
+          // Fresh-tx getSourceCell: exercises both Site 1 (transaction.ts:280
+          // defensive parse, in the read() wrapper invoked by readOrThrow)
+          // and Site 2 (cell.ts:1460 defensive parse, in getSourceCell's
+          // `else if` branch). With `valueFromJson` having decoded the row
+          // upstream, the value at this point is an object with own-property
+          // `"/"`, and getSourceCell takes the `isRecord` branch.
+          const retrievedSource = targetCell.withTx(tx).getSourceCell();
+          expect(isCell(retrievedSource)).toBe(true);
+          expect(retrievedSource?.withTx(tx).get()).toEqual({ foo: 123 });
+        },
+      );
+
+      it(
+        "raw read of path: ['source'] returns an object link record (defensive parse guard fails)",
+        async () => {
+          // Set up a source/target pair and commit.
+          const sourceCell = runtime.getCell<{ foo: number }>(
+            space,
+            "fvj1 source-cell raw read: source",
+            undefined,
+            tx,
+          );
+          sourceCell.set({ foo: 123 });
+
+          const targetCell = runtime.getCell<{ bar: string }>(
+            space,
+            "fvj1 source-cell raw read: target",
+            undefined,
+            tx,
+          );
+          targetCell.set({ bar: "baz" });
+          targetCell.setSourceCell(sourceCell);
+
+          await tx.commit();
+          tx = runtime.edit();
+
+          // Raw read of `path: ["source"]` exercises the same code path as
+          // `getSourceCell`'s underlying `readOrThrow`, including the
+          // defensive parse at `transaction.ts:280`. Inspect the value the
+          // storage layer returns: under either flag state we expect an
+          // object link record, NOT a JSON-stringified form. This pins the
+          // observable behavior that makes the defensive parse unreachable.
+          const targetLink = targetCell.getAsNormalizedFullLink();
+          const sourceAddress = {
+            space,
+            id: targetLink.id,
+            type: targetLink.type,
+            path: ["source"],
+          } as IMemorySpaceAddress;
+          const readResult = tx.read(sourceAddress);
+          expect(readResult.ok).toBeDefined();
+
+          const value = readResult.ok!.value;
+          // `typeof value === "string"` would route into the defensive parse
+          // branch. We assert it never does — under both flag states.
+          expect(typeof value).not.toBe("string");
+          expect(typeof value).toBe("object");
+          expect(value).not.toBeNull();
+          expect(Object.prototype.hasOwnProperty.call(value, "/")).toBe(true);
+        },
+      );
+    },
+  );
+}
