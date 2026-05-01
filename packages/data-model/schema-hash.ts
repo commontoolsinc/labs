@@ -107,12 +107,8 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
 
   const maybeRef = hashToRef.get(hashStr);
 
-  if (maybeRef) {
-    // We know it's a `WeakRef` (not a `boolean`), because if the given `schema`
-    // were a `boolean` we'd never hav made it here.
-    const ref = maybeRef as WeakRef<JSONSchemaObj>;
-
-    const existing = ref.deref();
+  if (typeof maybeRef === "object") {
+    const existing = maybeRef.deref();
     if (existing !== undefined) {
       const existingSah = schemaToSah.get(existing)!;
 
@@ -133,6 +129,12 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
     hashToRef.delete(hashStr);
 
     // ...and fall through to add `frozen` to the cache.
+  } else if (typeof maybeRef === "boolean") {
+    // Shouldn't happen! This implies a hash collision between a `boolean`
+    // schema and an `object` schema.
+    throw new Error(
+      "Shouldn't happen: Schema hash collision, object vs. boolean.",
+    );
   }
 
   // Not interned yet (or interned but later collected).
@@ -209,9 +211,7 @@ export function findInternedSchema(
   switch (typeof refOrBoolean) {
     case "boolean": {
       if (wantSchemaAndHash) {
-        return refOrBoolean
-          ? booleanInterns.true
-          : booleanInterns.false;
+        return refOrBoolean ? booleanInterns.true : booleanInterns.false;
       } else {
         return refOrBoolean;
       }
