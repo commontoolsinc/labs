@@ -12,7 +12,6 @@ import {
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-native-instances";
-import { resetSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -25,7 +24,6 @@ const signer = await Identity.fromPassphrase("test experimental");
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetDataModelConfig();
-    resetSchemaHashConfig();
   });
 
   describe("Runtime construction", () => {
@@ -37,14 +35,12 @@ describe("ExperimentalOptions", () => {
         experimental: {
           modernDataModel: false,
           unifiedJsonEncoding: false,
-          modernSchemaHash: false,
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
         richStorableValues: undefined,
         unifiedJsonEncoding: false,
-        modernSchemaHash: false,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -59,14 +55,12 @@ describe("ExperimentalOptions", () => {
         experimental: {
           modernDataModel: true,
           unifiedJsonEncoding: true,
-          modernSchemaHash: true,
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
         richStorableValues: undefined,
         unifiedJsonEncoding: true,
-        modernSchemaHash: true,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -86,7 +80,6 @@ describe("ExperimentalOptions", () => {
         modernDataModel: true,
         richStorableValues: undefined,
         unifiedJsonEncoding: undefined,
-        modernSchemaHash: undefined,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();

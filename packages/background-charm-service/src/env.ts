@@ -45,7 +45,6 @@ const envSchema = z.object({
   // env vars in this file have the same latent bug.
   EXPERIMENTAL_MODERN_DATA_MODEL: flagValue(),
   EXPERIMENTAL_UNIFIED_JSON_ENCODING: flagValue(),
-  EXPERIMENTAL_MODERN_SCHEMA_HASH: flagValue(),
   // Background Charm Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",
