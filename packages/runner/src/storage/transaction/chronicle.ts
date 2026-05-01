@@ -162,7 +162,10 @@ export class Chronicle {
 
     // Initialize working copy from replica if needed (only happens once per document)
     if (!changes.getWorkingCopy()) {
-      const state = this.load({ id: address.id, type: address.type });
+      const state = this.load({
+        id: address.id,
+        type: address.type ?? "application/json",
+      });
       const loaded = attest(state);
       changes.initFromReplica(loaded);
     }

@@ -521,7 +521,7 @@ const valueWriteTargets = (
         result.set(key, {
           space: write.address.space,
           id: write.address.id as URI,
-          type: write.address.type as MediaType,
+          type: (write.address.type ?? "application/json") as MediaType,
           paths: [writePath],
         });
       }

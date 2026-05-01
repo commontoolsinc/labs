@@ -993,8 +993,9 @@ class SpaceReplica implements ISpaceReplica {
     };
     const cfc = new ContextualFlowControl();
     const newEntries = normalizedEntries.filter(([address, selector]) => {
+      const baseAddress = { id: address.id, type: DOCUMENT_MIME };
       const [superset] = this.#watchSelectorTracker.getSupersetSelector(
-        { id: address.id, type: address.type },
+        baseAddress,
         selector,
         cfc,
       );
@@ -1008,8 +1009,9 @@ class SpaceReplica implements ISpaceReplica {
     const promise = this.enqueueWatchRefresh("pull", newEntries);
     task.promise = promise;
     for (const [address, selector] of newEntries) {
+      const baseAddress = { id: address.id, type: DOCUMENT_MIME };
       this.#watchSelectorTracker.add(
-        { id: address.id, type: address.type },
+        baseAddress,
         selector,
         promise,
       );
@@ -1023,8 +1025,9 @@ class SpaceReplica implements ISpaceReplica {
       const result = await Promise.resolve(task.promise);
       if (result.error) {
         for (const [address, selector] of newEntries) {
+          const baseAddress = { id: address.id, type: DOCUMENT_MIME };
           this.#watchSelectorTracker.delete(
-            { id: address.id, type: address.type },
+            baseAddress,
             selector,
           );
         }

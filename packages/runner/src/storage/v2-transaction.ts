@@ -74,6 +74,8 @@ import { recordWriteStackTrace } from "./write-stack-trace.ts";
 
 type RootAttestation = IAttestation;
 
+const DOCUMENT_MIME = "application/json" as const;
+
 type ReadDocumentEntry = {
   initial: RootAttestation;
   seq?: number;
@@ -837,7 +839,6 @@ class V2TransactionJournal implements ITransactionJournal {
         yield {
           address: {
             id: detail.address.id,
-            type: detail.address.type,
             path: detail.address.path,
           },
           value: detail.value,
@@ -852,7 +853,6 @@ class V2TransactionJournal implements ITransactionJournal {
         yield {
           address: {
             id: detail.address.id,
-            type: detail.address.type,
             path: detail.address.path,
           },
           value: detail.previousValue,
@@ -1049,7 +1049,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       const readActivity = {
         space: address.space,
         id: address.id,
-        type: address.type,
         path: address.path,
         meta: readMeta,
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
@@ -1319,7 +1318,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       {
         address: {
           id: address.id,
-          type: address.type,
+          type: address.type ?? DOCUMENT_MIME,
           path: lastExistingPath,
         },
         value: seededParent,
@@ -1501,7 +1500,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       {
         space,
         id: address.id,
-        type: address.type,
         path: address.path,
       },
       value,
@@ -1547,7 +1545,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     const writeActivity = {
       space,
       id: address.id,
-      type: address.type,
       path: address.path,
     };
     const key = encodePointer(address.path);
@@ -1677,7 +1674,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       const address = {
         space: read.space,
         id: read.id,
-        type: read.type,
         path: read.path,
       };
 
@@ -1700,7 +1696,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           continue;
         }
 
-        const { id, type } = this.parseDocKey(key);
+        const { id } = this.parseDocKey(key);
         const reactivityPaths = new Map<string, readonly string[]>();
         for (const detail of doc.patchDetails.values()) {
           for (
@@ -1720,7 +1716,6 @@ export class V2StorageTransaction implements IStorageTransaction {
           writes.push({
             space,
             id,
-            type,
             path,
           });
         }
@@ -1783,7 +1778,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (
       this.#lastDocument?.branch === branch &&
       this.#lastDocument.id === address.id &&
-      this.#lastDocument.type === (address.type ?? "application/json")
+      this.#lastDocument.type === (address.type ?? DOCUMENT_MIME)
     ) {
       return {
         doc: this.#lastDocument.doc,
@@ -1810,7 +1805,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#lastDocument = {
       branch,
       id: address.id,
-      type: address.type ?? "application/json",
+      type: address.type ?? DOCUMENT_MIME,
       doc,
     };
     return {
@@ -1823,7 +1818,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type">,
   ): RootAttestation {
-    const type = address.type ?? "application/json";
+    const type = address.type ?? DOCUMENT_MIME;
     if (address.id.startsWith("data:")) {
       const loaded = loadInline({ id: address.id, type });
       if (loaded.error) {
@@ -1855,7 +1850,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     const state = branch.replica.get({
       id: address.id,
-      type: address.type,
+      type: address.type ?? DOCUMENT_MIME,
     }) as { since?: number } | undefined;
     return typeof state?.since === "number" ? state.since : undefined;
   }
@@ -1880,8 +1875,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   private parseDocKey(key: string): { id: URI; type: MediaType } {
-    const [id, type] = key.split("|");
-    return { id: id as URI, type: type as MediaType };
+    return { id: key as URI, type: DOCUMENT_MIME };
   }
 
   private buildPatchOperation(

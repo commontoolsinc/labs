@@ -339,7 +339,7 @@ export const extendTrackedGraph = (
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
   const previouslyLoaded = new Set(
-    manager.loadedAddresses().map((address) => `${address.id}/${address.type}`),
+    manager.loadedAddresses().map((address) => address.id),
   );
   const touched = new Set<QueryDocKey>();
 
@@ -359,7 +359,7 @@ export const extendTrackedGraph = (
   }
 
   for (const address of manager.loadedAddresses()) {
-    const key = `${address.id}/${address.type}`;
+    const key = address.id;
     if (previouslyLoaded.has(key)) {
       continue;
     }
@@ -601,7 +601,7 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     schemaTracker.add(
-      toDocKey(space, address.id, address.type),
+      toDocKey(space, address.id, "application/json"),
       internPathSelector(selector),
     );
     return;
