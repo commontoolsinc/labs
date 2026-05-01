@@ -32,11 +32,6 @@ export function hashSchemaItem(item: FabricValue): string {
   return hashStringOf(item);
 }
 
-/** Hash a schema-related item as a FabricHash (for intern cache). */
-export function hashSchemaItemAsFabricHash(item: FabricValue): FabricHash {
-  return hashOf(item);
-}
-
 // ---------------------------------------------------------------------------
 // Schema interning
 // ---------------------------------------------------------------------------
@@ -64,8 +59,8 @@ const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
 const hashToRef = new Map<string, WeakRef<JSONSchemaObj> | boolean>();
 
 const booleanInterns = {
-  true: new SchemaAndHash(true, hashSchemaItemAsFabricHash(true)),
-  false: new SchemaAndHash(false, hashSchemaItemAsFabricHash(false)),
+  true: new SchemaAndHash(true, hashOf(true)),
+  false: new SchemaAndHash(false, hashOf(false)),
 };
 
 const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
@@ -98,7 +93,7 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
   const frozen = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
   // Check the hash-keyed reverse map (structurally-equal but different object).
-  const hash = hashSchemaItemAsFabricHash(frozen);
+  const hash = hashOf(frozen);
   const hashStr = hash.toString();
 
   const maybeRef = hashToRef.get(hashStr);

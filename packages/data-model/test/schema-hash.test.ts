@@ -11,13 +11,13 @@ import {
   findInternedSchema,
   hashSchema,
   hashSchemaItem,
-  hashSchemaItemAsFabricHash,
   internSchema,
   internSchemaAsHashString,
   isInternedSchema,
 } from "../schema-hash.ts";
 import { SchemaAndHash } from "../schema-and-hash.ts";
 import { FabricHash } from "../fabric-hash.ts";
+import { hashStringOf } from "../value-hash.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
 import { toDeepFrozenSchema } from "../schema-utils.ts";
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
@@ -27,6 +27,12 @@ describe("schema-hash dispatch", () => {
     it("returns a string", () => {
       const result = hashSchema({ type: "number" });
       assertStrictEquals(typeof result, "string");
+    });
+
+    it("agrees with general `hashStringOf()`", () => {
+      const result1 = hashSchema({ type: "number", title: "Yes!" });
+      const result2 = hashStringOf({ type: "number", title: "Yes!" });
+      expect(result1).toBe(result2);
     });
 
     it("is deterministic (same input produces same result)", () => {
@@ -68,59 +74,6 @@ describe("schema-hash dispatch", () => {
       const a = hashSchemaItem("foo");
       const b = hashSchemaItem("bar");
       assertNotEquals(a, b);
-    });
-  });
-
-  describe("hashSchemaItemAsFabricHash()", () => {
-    it("returns a `FabricHash`", () => {
-      const result = hashSchemaItemAsFabricHash("hello");
-      assert(result instanceof FabricHash);
-    });
-
-    it("uses the expected algorithm tag", () => {
-      const expectedTag = "fid1";
-      assertStrictEquals(
-        hashSchemaItemAsFabricHash(42).tag,
-        expectedTag,
-      );
-    });
-
-    it("is deterministic (same input → same hash)", () => {
-      const a = hashSchemaItemAsFabricHash(42);
-      const b = hashSchemaItemAsFabricHash(42);
-      assertStrictEquals(a.toString(), b.toString());
-    });
-
-    it("produces different hashes for different values", () => {
-      const a = hashSchemaItemAsFabricHash("foo");
-      const b = hashSchemaItemAsFabricHash("bar");
-      assertNotEquals(a.toString(), b.toString());
-    });
-
-    it("handles primitive, array, and object inputs", () => {
-      assert(hashSchemaItemAsFabricHash(null) instanceof FabricHash);
-      assert(hashSchemaItemAsFabricHash(true) instanceof FabricHash);
-      assert(hashSchemaItemAsFabricHash([1, 2, 3]) instanceof FabricHash);
-      assert(
-        hashSchemaItemAsFabricHash({ a: 1, b: "two" }) instanceof
-          FabricHash,
-      );
-    });
-
-    it("is key-order independent for object inputs", () => {
-      const a = hashSchemaItemAsFabricHash({ type: "object", title: "A" });
-      const b = hashSchemaItemAsFabricHash({ title: "A", type: "object" });
-      assertStrictEquals(a.toString(), b.toString());
-    });
-
-    it("agrees with the hash stored by `internSchema()`", () => {
-      const schema = toDeepFrozenSchema({
-        type: "object",
-        properties: { x: { type: "number" } },
-      }) as JSONSchemaObj;
-      const internedHash = internSchema(schema, true).hash;
-      const directHash = hashSchemaItemAsFabricHash(schema);
-      assertStrictEquals(internedHash.toString(), directHash.toString());
     });
   });
 
