@@ -1,4 +1,5 @@
 import { FrozenMap, FrozenSet } from "@commonfabric/data-model/frozen-builtins";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 // Resolve `entries`/`values` from the prototype chain so own-property shadows
 // on Map/Set instances cannot interfere, while still working correctly for
@@ -487,7 +488,7 @@ function pathForIndex(path: string, index: number): string {
 function pathForProperty(path: string, name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)
     ? `${path}.${name}`
-    : `${path}[${JSON.stringify(name)}]`;
+    : `${path}[${toCompactDebugString(name)}]`;
 }
 
 function validationError(
