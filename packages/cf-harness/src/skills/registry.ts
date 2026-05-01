@@ -20,11 +20,18 @@ import {
   type HarnessSkillFrontmatterValue,
   type HarnessSkillRecord,
   type HarnessSkillRegistry,
+  type HarnessSkillResourceContentKind,
+  type HarnessSkillResourceKind,
+  type HarnessSkillResourceRecord,
 } from "../contracts/skill.ts";
 
 const SKILL_FILE_NAME = "SKILL.md";
 const MAX_SKILL_SCAN_DEPTH = 6;
 const MAX_SKILL_SCAN_DIRECTORIES = 2000;
+const MAX_SKILL_RESOURCE_SCAN_DEPTH = 8;
+const MAX_SKILL_RESOURCE_SCAN_DIRECTORIES = 1000;
+const MAX_SKILL_RESOURCE_FILES = 2000;
+const TEXT_DETECTION_SAMPLE_BYTES = 8192;
 const EXCLUDED_SKILL_DIRS = new Set([
   ".git",
   ".github",
@@ -160,10 +167,12 @@ const firstBodyParagraph = (body: string): string | undefined => {
   return undefined;
 };
 
-const sha256Digest = async (content: string): Promise<string> => {
+const sha256BytesDigest = async (content: Uint8Array): Promise<string> => {
+  const buffer = new ArrayBuffer(content.byteLength);
+  new Uint8Array(buffer).set(content);
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(content),
+    buffer,
   );
   return `sha256:${
     [...new Uint8Array(digest)]
@@ -171,6 +180,9 @@ const sha256Digest = async (content: string): Promise<string> => {
       .join("")
   }`;
 };
+
+const sha256Digest = async (content: string): Promise<string> =>
+  await sha256BytesDigest(new TextEncoder().encode(content));
 
 const pathExists = async (path: string): Promise<boolean> => {
   try {
@@ -275,6 +287,233 @@ const collectSkillFiles = async (
   return { skillFiles, diagnostics };
 };
 
+const normalizeSkillResourcePath = (path: string): string =>
+  path.replaceAll("\\", "/");
+
+const classifySkillResourceKind = (
+  relativePath: string,
+): HarnessSkillResourceKind => {
+  const [firstSegment] = normalizeSkillResourcePath(relativePath).split("/");
+  switch (firstSegment) {
+    case "references":
+      return "reference";
+    case "assets":
+      return "asset";
+    case "templates":
+      return "template";
+    case "scripts":
+      return "script";
+    default:
+      return "other";
+  }
+};
+
+const guessSkillResourceContentKind = (
+  content: Uint8Array,
+): HarnessSkillResourceContentKind => {
+  const sample = content.slice(0, TEXT_DETECTION_SAMPLE_BYTES);
+  if (sample.includes(0)) {
+    return "binary";
+  }
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(sample);
+    return "text";
+  } catch {
+    return "binary";
+  }
+};
+
+const collectSkillResources = async (
+  options: {
+    skillsRoot: string;
+    resolvedSkillsRoot: string;
+    sandboxSkillsRoot: string;
+    skillDir: string;
+    resolvedSkillDir: string;
+  },
+): Promise<{
+  resources: HarnessSkillResourceRecord[];
+  diagnostics: HarnessSkillDiagnostic[];
+}> => {
+  const resources: HarnessSkillResourceRecord[] = [];
+  const diagnostics: HarnessSkillDiagnostic[] = [];
+  const visitedDirectories = new Set<string>();
+  let directoriesVisited = 0;
+  let filesVisited = 0;
+  const rootSkillPath = resolve(options.skillDir, SKILL_FILE_NAME);
+
+  const visit = async (dir: string, depth: number): Promise<void> => {
+    let resolvedDir: string;
+    try {
+      resolvedDir = await Deno.realPath(dir);
+    } catch {
+      diagnostics.push(createDiagnostic({
+        severity: "warning",
+        code: "unresolvable-skill-resource-scan-path",
+        detail: `Could not resolve skill resource scan path: ${dir}`,
+        path: dir,
+      }));
+      return;
+    }
+    if (
+      !isPathWithinRoot(options.resolvedSkillDir, resolvedDir) ||
+      !isPathWithinRoot(options.resolvedSkillsRoot, resolvedDir)
+    ) {
+      diagnostics.push(createDiagnostic({
+        severity: "warning",
+        code: "skill-resource-scan-outside-root",
+        detail:
+          `Skipped skill resource scan path because it resolves outside the skill directory or configured skills root.`,
+        path: dir,
+      }));
+      return;
+    }
+    if (visitedDirectories.has(resolvedDir)) {
+      return;
+    }
+    visitedDirectories.add(resolvedDir);
+    directoriesVisited += 1;
+    if (directoriesVisited > MAX_SKILL_RESOURCE_SCAN_DIRECTORIES) {
+      diagnostics.push(createDiagnostic({
+        severity: "warning",
+        code: "resource-scan-limit-exceeded",
+        detail:
+          `Stopped scanning skill resources after ${MAX_SKILL_RESOURCE_SCAN_DIRECTORIES} directories.`,
+        path: dir,
+      }));
+      return;
+    }
+    if (depth > MAX_SKILL_RESOURCE_SCAN_DEPTH) {
+      diagnostics.push(createDiagnostic({
+        severity: "warning",
+        code: "resource-max-depth-exceeded",
+        detail:
+          `Skipped skill resource scan path beyond max depth ${MAX_SKILL_RESOURCE_SCAN_DEPTH}.`,
+        path: dir,
+      }));
+      return;
+    }
+
+    let entries: Deno.DirEntry[];
+    try {
+      entries = [];
+      for await (const entry of Deno.readDir(dir)) {
+        entries.push(entry);
+      }
+    } catch (error) {
+      diagnostics.push(createDiagnostic({
+        severity: "warning",
+        code: "unreadable-skill-resource-directory",
+        detail: error instanceof Error ? error.message : String(error),
+        path: dir,
+      }));
+      return;
+    }
+
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (EXCLUDED_SKILL_DIRS.has(entry.name)) {
+        continue;
+      }
+      const entryPath = join(dir, entry.name);
+      let stat: Deno.FileInfo;
+      try {
+        stat = await Deno.stat(entryPath);
+      } catch {
+        diagnostics.push(createDiagnostic({
+          severity: "warning",
+          code: "unstatable-skill-resource",
+          detail: `Could not stat skill resource path: ${entryPath}`,
+          path: entryPath,
+        }));
+        continue;
+      }
+      if (stat.isDirectory) {
+        await visit(entryPath, depth + 1);
+        continue;
+      }
+      if (!stat.isFile) {
+        continue;
+      }
+      if (resolve(entryPath) === rootSkillPath) {
+        continue;
+      }
+      filesVisited += 1;
+      if (filesVisited > MAX_SKILL_RESOURCE_FILES) {
+        diagnostics.push(createDiagnostic({
+          severity: "warning",
+          code: "resource-file-limit-exceeded",
+          detail:
+            `Stopped indexing skill resources after ${MAX_SKILL_RESOURCE_FILES} files.`,
+          path: entryPath,
+        }));
+        return;
+      }
+
+      let resolvedResourcePath: string;
+      try {
+        resolvedResourcePath = await Deno.realPath(entryPath);
+      } catch {
+        diagnostics.push(createDiagnostic({
+          severity: "warning",
+          code: "unresolvable-skill-resource",
+          detail: `Could not resolve skill resource path: ${entryPath}`,
+          path: entryPath,
+        }));
+        continue;
+      }
+      if (
+        !isPathWithinRoot(options.resolvedSkillDir, resolvedResourcePath) ||
+        !isPathWithinRoot(options.resolvedSkillsRoot, resolvedResourcePath)
+      ) {
+        diagnostics.push(createDiagnostic({
+          severity: "warning",
+          code: "skill-resource-outside-root",
+          detail:
+            `Skipped skill resource because its resolved path is outside the skill directory or configured skills root.`,
+          path: entryPath,
+        }));
+        continue;
+      }
+
+      let content: Uint8Array;
+      try {
+        content = await Deno.readFile(entryPath);
+      } catch (error) {
+        diagnostics.push(createDiagnostic({
+          severity: "warning",
+          code: "unreadable-skill-resource",
+          detail: error instanceof Error ? error.message : String(error),
+          path: entryPath,
+        }));
+        continue;
+      }
+
+      const resourcePath = normalizeSkillResourcePath(
+        relative(options.skillDir, entryPath),
+      );
+      resources.push({
+        path: resourcePath,
+        kind: classifySkillResourceKind(resourcePath),
+        resourcePath: entryPath,
+        sandboxResourcePath: hostPathToSandboxPath(
+          options.skillsRoot,
+          options.sandboxSkillsRoot,
+          entryPath,
+        ),
+        sizeBytes: stat.size,
+        digest: await sha256BytesDigest(content),
+        contentKind: guessSkillResourceContentKind(content),
+        diagnostics: [],
+      });
+    }
+  };
+
+  await visit(options.skillDir, 0);
+  resources.sort((a, b) => a.path.localeCompare(b.path));
+  return { resources, diagnostics };
+};
+
 export const discoverHarnessSkills = async (
   options: DiscoverHarnessSkillsOptions,
 ): Promise<HarnessSkillRegistry> => {
@@ -320,6 +559,7 @@ export const discoverHarnessSkills = async (
       }));
       continue;
     }
+    const resolvedSkillDir = dirname(resolvedSkillPath);
     let content: string;
     try {
       content = await Deno.readTextFile(skillPath);
@@ -390,6 +630,15 @@ export const discoverHarnessSkills = async (
       continue;
     }
     seenNames.add(name);
+    const { resources, diagnostics: resourceDiagnostics } =
+      await collectSkillResources({
+        skillsRoot,
+        resolvedSkillsRoot,
+        sandboxSkillsRoot,
+        skillDir,
+        resolvedSkillDir,
+      });
+    recordDiagnostics.push(...resourceDiagnostics);
     skills.push({
       name,
       description,
@@ -406,6 +655,7 @@ export const discoverHarnessSkills = async (
         skillDir,
       ),
       digest: await sha256Digest(content),
+      resources,
       frontmatter: parsed.frontmatter,
       diagnostics: recordDiagnostics,
     });

@@ -15,6 +15,26 @@ export type HarnessSkillFrontmatterValue =
   | boolean
   | readonly string[];
 
+export type HarnessSkillResourceKind =
+  | "reference"
+  | "asset"
+  | "template"
+  | "script"
+  | "other";
+
+export type HarnessSkillResourceContentKind = "text" | "binary";
+
+export interface HarnessSkillResourceRecord {
+  path: string;
+  kind: HarnessSkillResourceKind;
+  resourcePath: string;
+  sandboxResourcePath: string;
+  sizeBytes: number;
+  digest: string;
+  contentKind: HarnessSkillResourceContentKind;
+  diagnostics: HarnessSkillDiagnostic[];
+}
+
 export interface HarnessSkillRecord {
   name: string;
   description: string;
@@ -23,6 +43,7 @@ export interface HarnessSkillRecord {
   sandboxSkillPath: string;
   sandboxSkillDir: string;
   digest: string;
+  resources: HarnessSkillResourceRecord[];
   frontmatter: Record<string, HarnessSkillFrontmatterValue>;
   diagnostics: HarnessSkillDiagnostic[];
 }

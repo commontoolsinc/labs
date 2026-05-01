@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import {
   discoverHarnessSkills,
   loadHarnessSkillContext,
@@ -14,6 +14,21 @@ const writeSkill = async (
   const dir = join(root, name);
   await Deno.mkdir(dir, { recursive: true });
   await Deno.writeTextFile(join(dir, "SKILL.md"), content);
+};
+
+const writeSkillResource = async (
+  root: string,
+  skillName: string,
+  resourcePath: string,
+  content: string | Uint8Array,
+): Promise<void> => {
+  const path = join(root, skillName, resourcePath);
+  await Deno.mkdir(dirname(path), { recursive: true });
+  if (typeof content === "string") {
+    await Deno.writeTextFile(path, content);
+  } else {
+    await Deno.writeFile(path, content);
+  }
 };
 
 Deno.test("parseHarnessSkillFile handles simple frontmatter and continued descriptions", () => {
@@ -57,6 +72,36 @@ Deno.test({
           "",
           "# Pattern Dev",
         ].join("\n"),
+      );
+      await writeSkillResource(
+        root,
+        "pattern-dev",
+        "references/guide.md",
+        "# Guide\n",
+      );
+      await writeSkillResource(
+        root,
+        "pattern-dev",
+        "assets/logo.bin",
+        new Uint8Array([0, 159, 146, 150]),
+      );
+      await writeSkillResource(
+        root,
+        "pattern-dev",
+        "templates/scaffold.sh",
+        "#!/usr/bin/env bash\n",
+      );
+      await writeSkillResource(
+        root,
+        "pattern-dev",
+        "scripts/check.ts",
+        "console.log('ok');\n",
+      );
+      await writeSkillResource(
+        root,
+        "pattern-dev",
+        "notes.txt",
+        "Other local note\n",
       );
       await writeSkill(
         root,
@@ -122,6 +167,57 @@ Deno.test({
           ?.frontmatter["user-invocable"],
         false,
       );
+      const patternDev = registry.skills.find((skill) =>
+        skill.name === "pattern-dev"
+      );
+      assertEquals(
+        patternDev?.resources.map((resource) => [
+          resource.path,
+          resource.kind,
+          resource.contentKind,
+          resource.sandboxResourcePath,
+        ]),
+        [
+          [
+            "assets/logo.bin",
+            "asset",
+            "binary",
+            "/workspace/labs/skills/pattern-dev/assets/logo.bin",
+          ],
+          [
+            "notes.txt",
+            "other",
+            "text",
+            "/workspace/labs/skills/pattern-dev/notes.txt",
+          ],
+          [
+            "references/guide.md",
+            "reference",
+            "text",
+            "/workspace/labs/skills/pattern-dev/references/guide.md",
+          ],
+          [
+            "scripts/check.ts",
+            "script",
+            "text",
+            "/workspace/labs/skills/pattern-dev/scripts/check.ts",
+          ],
+          [
+            "templates/scaffold.sh",
+            "template",
+            "text",
+            "/workspace/labs/skills/pattern-dev/templates/scaffold.sh",
+          ],
+        ],
+      );
+      assertEquals(patternDev?.resources[0].sizeBytes, 4);
+      assertEquals(patternDev?.resources[0].digest.startsWith("sha256:"), true);
+      assertEquals(
+        patternDev?.resources.every((resource) =>
+          resource.diagnostics.length === 0
+        ),
+        true,
+      );
       assertEquals(
         registry.diagnostics.map((diagnostic) => diagnostic.code).sort(),
         ["duplicate-skill-name", "missing-description"],
@@ -167,6 +263,51 @@ Deno.test({
       assertEquals(
         registry.diagnostics.map((diagnostic) => diagnostic.code),
         ["skill-scan-outside-root"],
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+      await Deno.remove(outside, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "discoverHarnessSkills skips resources that resolve outside the skill directory",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({ prefix: "cf-harness-skills-" });
+    const outside = await Deno.makeTempDir({
+      prefix: "cf-harness-outside-resource-",
+    });
+    try {
+      await writeSkill(
+        root,
+        "pattern-dev",
+        [
+          "---",
+          "name: pattern-dev",
+          "description: Build Common Fabric patterns",
+          "---",
+          "",
+          "# Pattern Dev",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(join(outside, "external.md"), "# External\n");
+      await Deno.mkdir(join(root, "pattern-dev", "references"), {
+        recursive: true,
+      });
+      await Deno.symlink(
+        join(outside, "external.md"),
+        join(root, "pattern-dev", "references", "external.md"),
+      );
+
+      const registry = await discoverHarnessSkills({ skillsRoot: root });
+
+      assertEquals(registry.skills[0].resources, []);
+      assertEquals(
+        registry.skills[0].diagnostics.map((diagnostic) => diagnostic.code),
+        ["skill-resource-outside-root"],
       );
     } finally {
       await Deno.remove(root, { recursive: true });

@@ -38,9 +38,11 @@ and `description`, then point to canonical repo docs. Examples:
   `docs/common/ai/pattern-testing-guide.md`.
 - `skills/cf/SKILL.md` provides current CLI command guidance.
 
-`cf-harness` already has a dormant `skillsRoot?: string` field in
-`src/config.ts`, but the CLI, prompt loop, artifacts, and tool surface do not
-use it yet.
+`cf-harness` now uses `skillsRoot?: string` in `src/config.ts` for explicit
+skill preload. The CLI, prompt loop, and artifact store persist the discovered
+registry and activation artifacts. The registry is also being extended to
+snapshot supporting resources that are actually present in the configured skill
+directories at run start.
 
 ## External Models Reviewed
 
@@ -143,6 +145,50 @@ Validation should be lenient where that improves compatibility:
 - Symlinked skill directories are allowed only when the resolved `SKILL.md`
   stays under the configured skill root or another explicitly allowed root.
 
+## Supporting Resource Index
+
+Supporting resources should be discovered automatically from the filesystem at
+runtime. Normal skills should not need a hand-authored resource manifest.
+
+At run start, `cf-harness` should snapshot every accepted skill directory and
+record a resource index inside `skill-registry.json`. This index is bounded by
+the configured `skillsRoot` and the resolved skill directory, not by global host
+filesystem discovery.
+
+Resource classification is path-convention based:
+
+- `references/**` -> `reference`
+- `assets/**` -> `asset`
+- `templates/**` -> `template`
+- `scripts/**` -> `script`
+- any other accepted file under the skill directory -> `other`
+
+Each resource record should include:
+
+- path relative to the skill directory
+- kind
+- host path
+- sandbox path
+- byte size
+- digest
+- text/binary content guess
+- diagnostics
+
+Resource discovery must:
+
+- skip the root `SKILL.md`
+- sort paths deterministically
+- reject or skip resources whose resolved paths escape the skill directory or
+  configured skills root
+- avoid following cyclic directory structures
+- preserve diagnostics for unreadable, unresolvable, out-of-bound, or
+  scan-limited resources
+
+The registry is a snapshot. A later `read_skill_resource` tool should stat/read
+the actual file at call time. If the file differs from the run-start snapshot,
+the tool should report the mismatch in its output and artifacts rather than
+silently treating the snapshot as exact.
+
 ## CLI and Config Surface
 
 Use the existing config field:
@@ -201,10 +247,12 @@ Behavior:
 1. Resolve and validate `skillsRoot`.
 2. Build a registry of `skillsRoot/**/SKILL.md` with bounded traversal.
 3. Validate frontmatter and produce diagnostics.
-4. For each explicit `--skill`, read the full `SKILL.md`.
-5. Inject a structured skill context block before the user task.
-6. Record skill registry and skill activation artifacts.
-7. Preserve the activated skill context in transcript/resume state.
+4. For each accepted skill, index supporting resources from the runtime
+   filesystem and record them in `skill-registry.json`.
+5. For each explicit `--skill`, read the full `SKILL.md`.
+6. Inject a structured skill context block before the user task.
+7. Record skill registry and skill activation artifacts.
+8. Preserve the activated skill context in transcript/resume state.
 
 The injected block should be labeled as configured context, not as a direct user
 command:
