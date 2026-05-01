@@ -1098,27 +1098,33 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
 });
 
 // Source-cell round-trip across commit + fresh-tx reload, parameterized over
-// `unifiedJsonEncoding` flag state. These tests pin the current behavior of
-// the two defensive `JSON.parse` sites that handle `path: ["source"]` reads:
+// `unifiedJsonEncoding` flag state. These tests assert end-to-end correctness
+// of the standard `setSourceCell` → commit → `getSourceCell` round-trip:
+// the round-trip preserves the source-link object, and a raw `tx.read` of
+// `path: ["source"]` returns it as an object link record (with own-property
+// `"/"`), never as a string.
 //
-//   - `runner/src/storage/transaction.ts:280` — defensive parse in `read()`.
-//   - `runner/src/cell.ts:1460` — defensive parse in `getSourceCell()`.
+// Historical context: these tests were authored alongside the deletion of
+// two defensive `JSON.parse` blocks that previously existed in
+// `runner/src/storage/transaction.ts` (in `read()`) and `runner/src/cell.ts`
+// (in `getSourceCell`). Both blocks guarded a parse with the same shape —
+// `typeof value === "string" && value.startsWith('{"/":')` — and were
+// originally added (PRs #1472, #1562) to handle string-form values
+// returned from a previous shape of the storage layer. PR #2971 in
+// March 2026 wired `valueFromJson` into the storage-boundary read path
+// (`memory/space.ts`), unconditionally decoding the `is` column to an
+// object before reaching either defensive parse: under flag-OFF
+// `valueFromJsonLegacy` is literally `JSON.parse(json)`, and under flag-ON
+// `valueFromJsonModern` strips the `fvj1:` prefix and decodes. From that
+// point on, neither guard could fire through the standard public API, and
+// the defensive parses became orphaned — which is what motivated their
+// deletion.
 //
-// Both sites guard the parse with `typeof value === "string" &&
-// value.startsWith('{"/":')`. Under both flag states, the upstream
-// `valueFromJson` decode in `memory/space.ts` (called on every read of the
-// `is` storage column) turns the JSON-encoded link record back into an
-// object before either guard is checked — `valueFromJsonLegacy` (flag-OFF)
-// is literally `JSON.parse(json)`, and `valueFromJsonModern` (flag-ON)
-// strips the `fvj1:` prefix and decodes. So the value the guard sees is an
-// object with own-property `"/"`, the `typeof` check fails, and the
-// defensive parse is bypassed.
-//
-// The tests below exercise the standard `setSourceCell` → commit →
-// `getSourceCell` round-trip in a fresh transaction, asserting end-to-end
-// correctness in both flag states. Implicitly, both tests also confirm the
-// defensive parse branch is not entered: if the guard ever fired on a
-// non-link-record value, `JSON.parse` would throw and the test would fail.
+// The tests below pin the round-trip behavior that, post-deletion, is the
+// observable contract — and that, pre-deletion, was being maintained
+// gratuitously by the now-removed parses. They serve as a passive
+// regression net for any future change that might re-introduce a
+// non-object value at `path: ["source"]`.
 //
 // See `coordination/docs/2026-04-30-fvj1-parse-site-kickoff.md` (project
 // kickoff doc, session 2026-067) for the full liveness analysis.
@@ -1169,16 +1175,14 @@ for (const unifiedJsonEncoding of [false, true]) {
           // Commit, then start a fresh tx. This forces the `path: ["source"]`
           // read to go through the storage layer (rather than the in-tx
           // novelty cache, which short-circuits serialization), so
-          // `valueFromJson` runs upstream of the defensive parse sites.
+          // `valueFromJson` runs as the actual decode step.
           await tx.commit();
           tx = runtime.edit();
 
-          // Fresh-tx getSourceCell: exercises both Site 1 (transaction.ts:280
-          // defensive parse, in the read() wrapper invoked by readOrThrow)
-          // and Site 2 (cell.ts:1460 defensive parse, in getSourceCell's
-          // `else if` branch). With `valueFromJson` having decoded the row
-          // upstream, the value at this point is an object with own-property
-          // `"/"`, and getSourceCell takes the `isRecord` branch.
+          // Fresh-tx getSourceCell: reads `path: ["source"]` through the
+          // storage layer, where `valueFromJson` decodes the row to an
+          // object before it surfaces here. `getSourceCell` then takes its
+          // `isRecord` branch and converts the link record to a URI string.
           const retrievedSource = targetCell.withTx(tx).getSourceCell();
           expect(isCell(retrievedSource)).toBe(true);
           expect(retrievedSource?.withTx(tx).get()).toEqual({ foo: 123 });
@@ -1186,7 +1190,7 @@ for (const unifiedJsonEncoding of [false, true]) {
       );
 
       it(
-        "raw read of path: ['source'] returns an object link record (defensive parse guard fails)",
+        "raw read of path: ['source'] returns an object link record",
         async () => {
           // Set up a source/target pair and commit.
           const sourceCell = runtime.getCell<{ foo: number }>(
@@ -1209,12 +1213,11 @@ for (const unifiedJsonEncoding of [false, true]) {
           await tx.commit();
           tx = runtime.edit();
 
-          // Raw read of `path: ["source"]` exercises the same code path as
-          // `getSourceCell`'s underlying `readOrThrow`, including the
-          // defensive parse at `transaction.ts:280`. Inspect the value the
-          // storage layer returns: under either flag state we expect an
-          // object link record, NOT a JSON-stringified form. This pins the
-          // observable behavior that makes the defensive parse unreachable.
+          // Raw read of `path: ["source"]` exercises the same storage-layer
+          // code path as `getSourceCell`'s underlying `readOrThrow`. The
+          // value the storage layer surfaces should be an object link
+          // record (with own-property `"/"`), never a JSON-stringified
+          // form, under both flag states.
           const targetLink = targetCell.getAsNormalizedFullLink();
           const sourceAddress = {
             space,
@@ -1226,8 +1229,6 @@ for (const unifiedJsonEncoding of [false, true]) {
           expect(readResult.ok).toBeDefined();
 
           const value = readResult.ok!.value;
-          // `typeof value === "string"` would route into the defensive parse
-          // branch. We assert it never does — under both flag states.
           expect(typeof value).not.toBe("string");
           expect(typeof value).toBe("object");
           expect(value).not.toBeNull();
