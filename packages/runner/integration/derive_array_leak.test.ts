@@ -11,7 +11,7 @@
  */
 import { Identity, Session } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
-import { StorageManager } from "../src/storage/cache.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import { compileAndSavePattern, Runtime } from "../src/index.ts";
 import { PieceManager } from "@commonfabric/piece";
 
