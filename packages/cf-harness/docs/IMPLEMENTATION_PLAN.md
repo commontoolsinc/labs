@@ -247,12 +247,12 @@ Why:
   child artifacts for audit/debugging
 - local/browser examples should place `--artifact-root` outside `--workspace` so
   raw child artifacts do not become ordinary parent-readable workspace files
+- when artifacts are physically placed under a workspace, the artifact root is
+  reserved from `read_file`, `write_file`, and browser-profile host `ls`/`find`
+  discovery paths
 
 Still planned:
 
-- reserve artifact roots from `read_file`, `write_file`, and browser-profile
-  host discovery commands when a host physically places artifacts under a
-  workspace
 - stop treating raw host artifact paths as model-facing references; prefer
   opaque output IDs/handles for parent-visible results and keep paths in
   operator-facing run state/report data

@@ -10,6 +10,10 @@ import {
   type StructuredFileToolErrorOutput,
   structuredFileToolErrorOutputSchema,
 } from "./file-errors.ts";
+import {
+  isResolvedPathInsideArtifactRoot,
+  RESERVED_ARTIFACT_PATH_DETAIL,
+} from "./reserved-artifacts.ts";
 
 export type WriteFileMode = "replace" | "append";
 
@@ -81,6 +85,13 @@ export const writeFileTool: HarnessToolDefinition<
         path: input.path,
         code: classifyPathResolutionError(error),
         detail: detailFromUnknownError(error),
+      });
+    }
+    if (await isResolvedPathInsideArtifactRoot(context, resolvedPath)) {
+      return createStructuredFileToolErrorOutput(context, "write_file", {
+        path: resolvedPath,
+        code: "permission_denied",
+        detail: RESERVED_ARTIFACT_PATH_DETAIL,
       });
     }
     const mode = input.mode ?? "replace";
