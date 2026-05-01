@@ -209,7 +209,6 @@ Why:
 - named `browser` subagent profile limited to:
   - `bash-no-sandbox`
   - `read_file`
-  - `write_file`
 - subagent manifests record `hostToolIds` so host execution capability is
   visible in retained provenance
 - child prompt explicitly labels host execution as outside the sandbox and
@@ -239,7 +238,38 @@ Why:
 - to avoid silently making host execution part of the parent/default tool
   surface
 
-### Stage K: Explicit Agent Skills preload
+### Stage K: Browser write posture and artifact placement
+
+- browser-profile children do not receive `write_file`; browser observations
+  should return through schema-validated structured returns rather than normal
+  workspace files
+- raw browser host-tool outputs and raw structured returns are still retained in
+  child artifacts for audit/debugging
+- local/browser examples should place `--artifact-root` outside `--workspace` so
+  raw child artifacts do not become ordinary parent-readable workspace files
+
+Still planned:
+
+- reserve artifact roots from `read_file`, `write_file`, and browser-profile
+  host discovery commands when a host physically places artifacts under a
+  workspace
+- stop treating raw host artifact paths as model-facing references; prefer
+  opaque output IDs/handles for parent-visible results and keep paths in
+  operator-facing run state/report data
+- introduce an explicit declassification/readback mechanism for raw child
+  artifacts before exposing them to a parent model
+
+Why:
+
+- removing `write_file` prevents the browser child from directly turning tainted
+  page observations into normal workspace files, but it does not by itself make
+  raw retained artifacts confidential if the artifact directory is mounted
+  inside the workspace
+- the long-term sandbox/infrastructure design should make raw browser artifacts
+  operator-inspectable while keeping them out of the parent prompt unless a
+  deliberate declassification step occurs
+
+### Stage L: Explicit Agent Skills preload
 
 - explicit `skillsRoot` configuration and CLI flags
 - explicit skill preload for batch/product runs

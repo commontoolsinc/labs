@@ -17,7 +17,6 @@ export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
 export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash-no-sandbox",
   "read_file",
-  "write_file",
 ] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
