@@ -28,5 +28,6 @@ export * from "./tools/bash.ts";
 export * from "./tools/delegate-task.ts";
 export * from "./tools/file-errors.ts";
 export * from "./tools/read-file.ts";
+export * from "./tools/read-skill-resource.ts";
 export * from "./tools/write-file.ts";
 export * from "./skills/registry.ts";

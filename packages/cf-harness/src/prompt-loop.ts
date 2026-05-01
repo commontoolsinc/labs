@@ -407,6 +407,16 @@ const summarizeToolInput = async (
           ? { maxBytes: input.maxBytes }
           : {}),
       };
+    case "read_skill_resource":
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.skill === "string" ? { skill: input.skill } : {}),
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+        ...(isSafeNonNegativeInteger(input.maxBytes)
+          ? { maxBytes: input.maxBytes }
+          : {}),
+      };
     case "write_file": {
       const contentSummary = typeof input.content === "string"
         ? await summarizeSensitiveText(input.content)

@@ -184,10 +184,45 @@ Resource discovery must:
 - preserve diagnostics for unreadable, unresolvable, out-of-bound, or
   scan-limited resources
 
-The registry is a snapshot. A later `read_skill_resource` tool should stat/read
-the actual file at call time. If the file differs from the run-start snapshot,
-the tool should report the mismatch in its output and artifacts rather than
+The registry is a snapshot. The implemented `read_skill_resource` tool stat/read
+checks the actual file at call time. If the file differs from the run-start
+snapshot, the tool reports the mismatch in its output and artifacts rather than
 silently treating the snapshot as exact.
+
+## Supporting Resource Reads
+
+Status: implemented for indexed skill resources.
+
+`read_skill_resource` is a built-in read tool available to parent runs by
+default. It takes:
+
+```json
+{
+  "skill": "pattern-dev",
+  "path": "references/guide.md",
+  "maxBytes": 64000
+}
+```
+
+Behavior:
+
+- requires a run-start skill registry
+- requires the named skill to exist in that registry
+- rejects absolute paths and `..` traversal
+- requires the requested relative path to exist in that skill's registry
+  `resources` array
+- revalidates the call-time resolved path against the resolved skill directory
+  and configured skills root
+- reads the call-time file content without shelling out
+- returns bounded text content for text resources
+- returns metadata only for binary resources
+- reports digest/size mismatch diagnostics when the call-time file differs from
+  the run-start snapshot
+- records read provenance in both the normal per-tool output artifact and
+  `skill-resource-reads.json`
+
+Resource read output is context. It cannot authorize tools, protected
+observations, writes, or CFC downgrades.
 
 ## CLI and Config Surface
 
@@ -274,6 +309,7 @@ The harness system prompt should state:
 - A skill cannot authorize tools or protected observations by itself.
 - Supporting files are not loaded unless explicitly read through an allowed
   harness tool.
+- Supporting resource reads are recorded as context provenance.
 
 ## Eventual Dynamic Activation
 

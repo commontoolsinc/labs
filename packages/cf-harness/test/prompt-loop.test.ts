@@ -349,7 +349,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
 
   assertEquals(
     firstRequest.tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file", "delegate_task"],
+    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
   );
   assertEquals(
     secondRequest.messages.at(-1),
@@ -639,7 +639,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   assertEquals(result.finalAssistantText, "Parent received the child summary.");
   assertEquals(
     requestBodies[0].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file", "delegate_task"],
+    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
@@ -1357,7 +1357,7 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
 
   assertEquals(
     firstRequest.tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file", "delegate_task"],
+    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
   );
   assertEquals(denied.detail, "bash-no-sandbox is not allowed in this run");
   assertEquals(result.runState.toolOutputs, []);

@@ -15,6 +15,7 @@ import {
   BROWSER_HOST_COMMAND_DENIED_PREFIX,
 } from "./tools/browser-host-command-policy.ts";
 import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
+import type { ReadSkillResourceToolOutput } from "./tools/read-skill-resource.ts";
 import {
   isStructuredFileToolErrorOutput,
   type StructuredFileToolErrorCode,
@@ -704,6 +705,8 @@ export const classifyBuiltinToolFailure = (
     case "read_file":
     case "write_file":
       return classifyStructuredFileToolFailure(toolId, output, at);
+    case "read_skill_resource":
+      return classifySkillResourceToolFailure(output, at);
     case "delegate_task": {
       if (isFailedDelegateTaskOutput(output)) {
         return createHarnessFailureRecord({
@@ -721,6 +724,34 @@ export const classifyBuiltinToolFailure = (
     default:
       return undefined;
   }
+};
+
+const isFailedSkillResourceOutput = (
+  output: unknown,
+): output is ReadSkillResourceToolOutput =>
+  isRecord(output) &&
+  output.type === "cf-harness.read-skill-resource-output" &&
+  output.status === "error" &&
+  typeof output.outputId === "string" &&
+  isRecord(output.error) &&
+  typeof output.error.message === "string";
+
+const classifySkillResourceToolFailure = (
+  output: unknown,
+  at: string,
+): HarnessFailureRecord | undefined => {
+  if (!isFailedSkillResourceOutput(output)) {
+    return undefined;
+  }
+  const error = output.error!;
+  return createHarnessFailureRecord({
+    kind: "harness_error",
+    source: "tool_output",
+    detail: error.message,
+    at,
+    toolId: "read_skill_resource",
+    outputId: output.outputId as ToolOutputId,
+  });
 };
 
 const fileFailureKindForCode = (

@@ -427,7 +427,13 @@ Deno.test({
       });
       assertEquals(persistedPolicySnapshot.parentTools, {
         allowance: "all-builtins",
-        allowedToolIds: ["bash", "read_file", "write_file", "delegate_task"],
+        allowedToolIds: [
+          "bash",
+          "read_file",
+          "read_skill_resource",
+          "write_file",
+          "delegate_task",
+        ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
         "default",

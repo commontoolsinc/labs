@@ -29,6 +29,7 @@
     "./contracts/audit": "./src/contracts/audit.ts",
     "./sandbox": "./src/sandbox/docker-runsc.ts",
     "./tools": "./src/tools/registry.ts",
+    "./tools/read-skill-resource": "./src/tools/read-skill-resource.ts",
     "./skills/registry": "./src/skills/registry.ts"
   }
 }

@@ -34,6 +34,7 @@ What works today:
   - `bash`
   - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
+  - `read_skill_resource`
   - `write_file`
   - `delegate_task`
 - whole-file replace/create plus append writes
@@ -50,6 +51,8 @@ What works today:
 - package-local operator CLI
 - explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
 - runtime-generated supporting-resource indexes in `skill-registry.json`
+- text-first supporting-resource reads through `read_skill_resource`, recorded
+  in `skill-resource-reads.json`
 - CFC mode plumbing with:
   - `disabled`
   - `observe`
@@ -71,8 +74,8 @@ What is not done yet:
   returns
 - first-class browser operation policy on top of the provisional browser
   subagent profile
-- dynamic/model-driven Agent Skills activation and supporting-file resource
-  reads
+- dynamic/model-driven Agent Skills activation
+- skill script execution
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses
