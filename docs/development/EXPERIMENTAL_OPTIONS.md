@@ -64,7 +64,7 @@ Server Process (Deno)
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
                                     +-- setDataModelConfig(...)
-                                    +-- setSchemaHashConfig(...)
+                                    +-- setJsonEncodingConfig(...)
 ```
 
 ### Browser-side (build-time injection)

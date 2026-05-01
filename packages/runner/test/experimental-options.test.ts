@@ -12,7 +12,6 @@ import {
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-native-instances";
-import { resetSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -25,7 +24,6 @@ const signer = await Identity.fromPassphrase("test experimental");
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetDataModelConfig();
-    resetSchemaHashConfig();
   });
 
   describe("Runtime construction", () => {
