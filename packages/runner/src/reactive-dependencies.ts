@@ -40,11 +40,7 @@ export function sortAndCompactPaths(
 
   const sorted = unsorted.toSorted((a, b) =>
     a.space === b.space
-      ? a.id === b.id
-        ? comparePaths(a.path, b.path)
-        : a.id < b.id
-        ? -1
-        : 1
+      ? a.id === b.id ? comparePaths(a.path, b.path) : a.id < b.id ? -1 : 1
       : a.space < b.space
       ? -1
       : 1

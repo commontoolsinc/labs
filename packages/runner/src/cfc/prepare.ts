@@ -690,7 +690,12 @@ const verifyInputRequirements = (
     ...read,
     path: canonicalizeLogicalPath(read.path),
     label: labelAtPath(
-      storedMetadataFor(tx, read.space, read.id, read.type ?? "application/json"),
+      storedMetadataFor(
+        tx,
+        read.space,
+        read.id,
+        read.type ?? "application/json",
+      ),
       canonicalizeLogicalPath(read.path),
     ),
   })).filter((read) => read.label !== undefined);

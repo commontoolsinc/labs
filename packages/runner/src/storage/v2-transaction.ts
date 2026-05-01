@@ -1176,8 +1176,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
 
     for (const write of writes) {
-    const key =
-        `${write.address.space}|${write.address.id}`;
+      const key = `${write.address.space}|${write.address.id}`;
       if (runKey === undefined || key === runKey) {
         run.push(write);
         runKey = key;

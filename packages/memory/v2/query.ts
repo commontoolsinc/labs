@@ -133,7 +133,9 @@ export class EngineObjectManager implements ObjectStorageManager {
   }
 
   detail(address: { id: string; type?: string }) {
-    return this.#details.get(`${address.id}/${address.type ?? "application/json"}`);
+    return this.#details.get(
+      `${address.id}/${address.type ?? "application/json"}`,
+    );
   }
 
   get readCount(): number {

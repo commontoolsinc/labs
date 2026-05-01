@@ -13,10 +13,7 @@ import {
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { getLogger } from "@commonfabric/utils/logger";
 import { AppView, navigate } from "../../shared/mod.ts";
-import {
-  COMPILATION_CACHE_CLIENT,
-  EXPERIMENTAL,
-} from "./env.ts";
+import { COMPILATION_CACHE_CLIENT, EXPERIMENTAL } from "./env.ts";
 
 const logger = getLogger("shell.runtime", {
   enabled: false,
