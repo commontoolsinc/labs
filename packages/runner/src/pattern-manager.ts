@@ -225,7 +225,7 @@ export class PatternManager {
       return legacyPatternCell.get();
     }
 
-    return cell.get();
+    throw new Error("missing pattern meta cell");
   }
 
   getPatternMeta(

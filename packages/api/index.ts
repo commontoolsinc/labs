@@ -249,7 +249,7 @@ export type MetaField =
   | "process";
 
 export interface IMetaCell {
-  getMetaRaw(metaField: MetaField): FabricValue;
+  getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;
   setMetaRaw(metaField: MetaField, value: FabricValue): void;
 }
 

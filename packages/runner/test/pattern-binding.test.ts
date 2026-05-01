@@ -127,32 +127,41 @@ describe("pattern-binding", () => {
 
   describe("mapBindingToCell", () => {
     it("should map bindings to cell aliases", () => {
-      const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
+      // Bindings are pseudo-links; the initial "internal" or "argument" determines how they are resolved
+      const binding = {
+        x: { $alias: { path: ["internal", "a"] } },
+        y: { $alias: { path: ["argument", "b", "c"] } },
+        z: 3,
+      };
+      const argumentCell = runtime.getCell<{ b: { c: number } }>(
         space,
-        "should map bindings to cell aliases 1",
+        "argument cell",
         undefined,
         tx,
       );
-      testCell.set({ a: 1, b: { c: 2 } });
-      const binding = {
-        x: { $alias: { path: ["a"] } },
-        y: { $alias: { path: ["b", "c"] } },
-        z: 3,
-      };
-
-      const result = unwrapOneLevelAndBindtoDoc(binding, testCell);
+      argumentCell.set({ b: { c: 2 } });
+      const internalCell = runtime.getCell<{ a: number }>(
+        space,
+        "internal cell",
+        undefined,
+        tx,
+      );
+      internalCell.set({ a: 1 });
+      const result = unwrapOneLevelAndBindtoDoc(
+        binding,
+        argumentCell.getAsNormalizedFullLink(),
+        internalCell.getAsNormalizedFullLink(),
+      );
       expect(
         areLinksSame(
           result.x,
-          testCell.key("a").getAsWriteRedirectLink(),
-          testCell,
+          internalCell.key("a").getAsWriteRedirectLink(),
         ),
       ).toBe(true);
       expect(
         areLinksSame(
           result.y,
-          testCell.key("b").key("c").getAsWriteRedirectLink(),
-          testCell,
+          argumentCell.key("b").key("c").getAsWriteRedirectLink(),
         ),
       ).toBe(true);
     });

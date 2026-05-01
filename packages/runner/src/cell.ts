@@ -86,6 +86,7 @@ import {
   isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
+  parseLink,
   type SanitizeSchemaForLinksOptions,
 } from "./link-utils.ts";
 import type {
@@ -1443,15 +1444,14 @@ export class CellImpl<T extends FabricValue>
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
-    const sourceCell = this.getSourceCell();
-    if (!sourceCell) return undefined;
-    // Kick off sync, since when used in a pattern, this wasn't automatically
-    // subscribed to yet. So we might still get a conflict on first write, but will
-    // get the correct version on retry.
-    sourceCell.sync();
-    // TODO(seefeld): Ideally we intersect this schema with the actual argument
-    // schema, so that get isn't for any.
-    return sourceCell.key("argument").asSchema<U>(schema);
+    const metaReadOptions = {
+      meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+    };
+    const linkObj = this.getMetaRaw("argument", metaReadOptions);
+    if (linkObj === undefined) return undefined;
+    const link = parseLink(linkObj, this._link);
+    if (link === undefined) return undefined;
+    return this.runtime.getCellFromLink(link).asSchema<U>(schema);
   }
 
   freeze(reason: string): void {
@@ -1462,7 +1462,10 @@ export class CellImpl<T extends FabricValue>
     return !!this.readOnlyReason;
   }
 
-  getMetaRaw(metaField: MetaField): FabricValue | undefined {
+  getMetaRaw(
+    metaField: MetaField,
+    options?: IReadOptions,
+  ): FabricValue | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const metaAddr = {
       space: this.link.space,
@@ -1470,7 +1473,7 @@ export class CellImpl<T extends FabricValue>
       type: this.link.type as MediaType,
       path: [metaField],
     };
-    return this.runtime.readTx(this.tx).readOrThrow(metaAddr);
+    return this.runtime.readTx(this.tx).readOrThrow(metaAddr, options);
   }
 
   setMetaRaw(metaField: MetaField, value: FabricValue): void {

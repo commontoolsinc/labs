@@ -231,10 +231,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await runtime.setup(undefined, pattern, {}, resultCell);
 
       expect(resultCell.getSourceCell()).toBeDefined();
-      expect((resultCell.getRaw() as any)?.savedTitle?.$alias?.path).toEqual([
-        "internal",
-        "savedTitle",
-      ]);
+      const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
+      const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
+      expect(internalCellLink).toBeDefined();
+      expect(savedTitleLink?.id).toBe(internalCellLink?.id);
+      expect(savedTitleLink?.path).toEqual(["savedTitle"]);
 
       const replica = storageManager.open(signer.did()).replica as unknown as {
         getDocument(id: string): {
@@ -316,10 +317,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await runtime.setup(undefined, pattern, {}, resultCell);
 
       expect(resultCell.getSourceCell()).toBeDefined();
-      expect((resultCell.getRaw() as any)?.savedTitle?.$alias?.path).toEqual([
-        "internal",
-        "savedTitle",
-      ]);
+      const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
+      const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
+      expect(internalCellLink).toBeDefined();
+      expect(savedTitleLink?.id).toBe(internalCellLink?.id);
+      expect(savedTitleLink?.path).toEqual(["savedTitle"]);
 
       const replica = storageManager.open(signer.did()).replica as unknown as {
         getDocument(id: string): {

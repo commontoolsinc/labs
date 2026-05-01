@@ -7,7 +7,7 @@ import {
   unsafe_parentPattern,
   unsafe_verifiedLoadId,
 } from "./builder/types.ts";
-import { type AnyCell, type Cell } from "./cell.ts";
+import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -97,7 +97,7 @@ export function sendValueToBinding<T>(
  */
 export function unwrapOneLevelAndBindtoDoc<T, U>(
   binding: T,
-  cell: Cell<U>,
+  cellEntityId: { "/": string },
   options?: { bindPatterns?: boolean },
 ): T {
   const bindPatterns = options?.bindPatterns !== false;
@@ -114,7 +114,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           alias.cell = alias.cell - 1;
         }
       } else if (!alias.cell && bindToDoc) {
-        alias.cell = cell.entityId;
+        alias.cell = cellEntityId;
       } else if (
         // CT-1230 WORKAROUND: Rebind local pattern aliases to the current doc.
         //
@@ -137,8 +137,8 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           alias.path[0] === "resultRef")
       ) {
         const currentId = (alias.cell as { "/": string })["/"];
-        if (currentId !== cell.entityId["/"]) {
-          alias.cell = cell.entityId;
+        if (currentId !== cellEntityId["/"]) {
+          alias.cell = cellEntityId;
         }
       } else if (!bindToDoc && alias.cell) {
         // CT-1230 WORKAROUND: Clear previously-bound alias when not binding to doc.

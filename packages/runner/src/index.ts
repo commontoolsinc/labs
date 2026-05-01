@@ -126,7 +126,6 @@ export {
   type toJSON,
   TYPE,
   UI,
-  unsafe_materializeFactory,
   unsafe_originalPattern,
   unsafe_parentPattern,
   type UnsafeBinding,

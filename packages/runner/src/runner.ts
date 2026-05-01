@@ -26,7 +26,6 @@ import {
 } from "./builder/pattern.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
-import { diffAndUpdate } from "./data-updating.ts";
 import {
   findAllWriteRedirectCells,
   unsafe_noteParentOnPatterns,
@@ -81,6 +80,7 @@ import {
   type ImplementationIdentity,
 } from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
+import { type MetaField } from "@commonfabric/api";
 export {
   cellAwareDeepCopy,
   extractDefaultValues,
@@ -107,23 +107,10 @@ type ProcessCellData<T> = {
   resultRef: SigilLink;
 };
 
-const processCellSetupSchema = (pattern: Pattern): JSONSchema => ({
-  type: "object",
-  properties: {
-    argument: pattern.argumentSchema ?? true,
-    resultRef: { type: "unknown", asCell: ["cell"] as const },
-    pattern: {
-      // treat this as a raw object instead of as a cell
-      type: "object",
-      properties: { "/": true },
-      required: ["/"],
-    },
-    ...(pattern.internalSchema !== undefined
-      ? { internal: pattern.internalSchema }
-      : {}),
-  },
-  required: ["pattern"] as const,
-});
+const metaReadOptions = {
+  meta: ignoreReadForScheduling,
+  frozen: false,
+} as const;
 
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
@@ -451,24 +438,9 @@ export class Runner {
     return { pattern, patternId, resolvedPatternOrModule };
   }
 
-  private updateProcessArgument<T>(
-    tx: IExtendedStorageTransaction,
-    processCell: Cell<ProcessCellData<T>>,
-    argument: T,
-  ): void {
-    diffAndUpdate(
-      this.runtime,
-      tx,
-      processCell.key("argument").getAsNormalizedFullLink(),
-      argument,
-      processCell.getAsNormalizedFullLink(),
-    );
-  }
-
   private maybeReuseRunningSetup<T, R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
-    processCell: Cell<ProcessCellData<T>>,
     argument: T,
     patternId: string,
     previousPatternId: string | undefined,
@@ -481,9 +453,7 @@ export class Runner {
     }
 
     if (previousPatternId === patternId) {
-      this.updateProcessArgument(tx, processCell, argument);
-      const argumentValue = fabricFromNativeValue(argument);
-      resultCell.withTx(tx).setMetaRaw("argument", argumentValue);
+      this.getMetaLinkedCell(resultCell, "argument")?.withTx(tx).set(argument);
       return { resultCell, needsStart: false };
     }
 
@@ -502,7 +472,7 @@ export class Runner {
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       pattern.result as R,
-      processCell,
+      processCell.entityId,
     );
     const previousResult = writableResultCell.getRaw({
       meta: ignoreReadForScheduling,
@@ -540,6 +510,22 @@ export class Runner {
         processCell.getAsQueryResult(path as PropertyKey[], tx);
   }
 
+  // Our internal and argument cells are linked to by the result cell.
+  private getMetaLinkedCell(
+    resultCell: Cell<any>,
+    field: MetaField,
+  ): Cell<unknown> | undefined {
+    const linkObj = resultCell.getMetaRaw(field, metaReadOptions);
+    if (linkObj === undefined) return undefined;
+    const link = parseLink(linkObj, resultCell);
+    if (link === undefined) return undefined;
+    return this.runtime.getCellFromLink(link);
+  }
+
+  /**
+   * When this function is first called, the resultCell may not have its
+   * internal, argument, and pattern cells set up, so do that here.
+   */
   private applySetupState<T, R>(
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
@@ -550,53 +536,59 @@ export class Runner {
     processCell: Cell<ProcessCellData<T>>,
   ): void {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
-    const previousInternal = processCell.key("internal").getRawUntyped({
+    const internalCell = this.getMetaLinkedCell(resultCell, "internal");
+    const argumentCell = this.getMetaLinkedCell(resultCell, "argument");
+    const previousInternal = internalCell?.getRawUntyped({
       meta: ignoreReadForScheduling,
-      frozen: false,
     });
-    const internal = Object.assign(
-      {},
-      cellAwareDeepCopy(
-        (defaults as unknown as { internal: FabricValue })?.internal,
-      ),
-      cellAwareDeepCopy(
-        isRecord(pattern.initial) && isRecord(pattern.initial.internal)
-          ? pattern.initial.internal
-          : {},
-      ),
-      isRecord(previousInternal) ? previousInternal : {},
-    ) as FabricValue;
+    if (internalCell === undefined) {
+      const newInternalCell = this.runtime.getCell<unknown>(
+        resultCell.space,
+        { type: "internal", parent: resultCell },
+        pattern.internalSchema,
+        tx,
+      );
+      const internal = Object.assign(
+        {},
+        cellAwareDeepCopy(
+          (defaults as unknown as { internal: FabricValue })?.internal,
+        ),
+        cellAwareDeepCopy(
+          isRecord(pattern.initial) && isRecord(pattern.initial.internal)
+            ? pattern.initial.internal
+            : {},
+        ),
+        isRecord(previousInternal) ? previousInternal : {},
+      ) as FabricValue;
+      newInternalCell.setRawUntyped(internal);
+      resultCell.withTx(tx).setMetaRaw(
+        "internal",
+        newInternalCell.getAsNormalizedFullLink(),
+      );
+    }
 
     let nextArgument = argument;
-    if (
-      !processCell.key("argument").getRaw({ meta: ignoreReadForScheduling })
-    ) {
-      nextArgument = mergeObjects<T>(argument as any, defaults);
+    // The argument meta field of the result cell should be a link to the
+    // argument cell. If it doesn't exist, we need to apply the defaults
+    if (argumentCell === undefined) {
+      const newArgumentCell = this.runtime.getCell<T>(
+        resultCell.space,
+        { type: "argument", parent: resultCell },
+        pattern.argumentSchema,
+        tx,
+      );
+      nextArgument = mergeObjects<T>(argument, defaults);
+      newArgumentCell.set(nextArgument);
+      resultCell.withTx(tx).setMetaRaw(
+        "argument",
+        newArgumentCell.getAsNormalizedFullLink(),
+      );
+    } else if (nextArgument !== argument) {
+      argumentCell.withTx(tx).set(nextArgument);
     }
 
-    const patternCellLink = getSigilLink(patternId);
-    processCell.withTx(tx).asSchema(processCellSetupSchema(pattern))
-      .setRawUntyped(fabricFromNativeValue({
-        ...processCell.getRaw({ meta: ignoreReadForScheduling }),
-        resultRef: pattern.resultSchema !== undefined
-          ? resultCell.asSchema(pattern.resultSchema).getAsLink({
-            base: processCell,
-            includeSchema: true,
-            keepAsCell: true,
-          })
-          : resultCell.getAsLink({
-            base: processCell,
-          }),
-        internal,
-        pattern: patternCellLink,
-      }, false));
-
-    // Set the pattern in the resultCell as well -- we'll remove the process cell later.
-    resultCell.withTx(tx).setMetaRaw("pattern", patternCellLink);
-
-    if (nextArgument) {
-      this.updateProcessArgument(tx, processCell, nextArgument);
-    }
+    // Set the pattern in the resultCell as well
+    resultCell.withTx(tx).setMetaRaw("pattern", getSigilLink(patternId));
 
     this.updateResultProjection(tx, pattern, processCell, resultCell, {
       preserveName: previousPatternId === patternId,
@@ -665,7 +657,6 @@ export class Runner {
     const runningSetup = this.maybeReuseRunningSetup(
       tx,
       resultCell,
-      processCell,
       argument,
       patternId,
       previousPatternId,
@@ -1607,8 +1598,14 @@ export class Runner {
     outputBindings: FabricValue,
     processCell: Cell<any>,
   ): BoundNodeIO {
-    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
+    const inputs = unwrapOneLevelAndBindtoDoc(
+      inputBindings,
+      processCell.entityId,
+    );
+    const outputs = unwrapOneLevelAndBindtoDoc(
+      outputBindings,
+      processCell.entityId,
+    );
     return {
       inputs,
       outputs,
@@ -1672,7 +1669,7 @@ export class Runner {
 
   private resolveJavaScriptStreamLink(
     inputs: FabricValue,
-    processCell: Cell<any>,
+    base: NormalizedFullLink,
     tx: IExtendedStorageTransaction,
   ): NormalizedFullLink | undefined {
     if (!isRecord(inputs) || !("$event" in inputs)) return undefined;
@@ -1682,15 +1679,13 @@ export class Runner {
       const maybeStreamLink = resolveLink(
         this.runtime,
         tx,
-        parseLink(value, processCell),
+        parseLink(value, base),
         "writeRedirect",
       );
       value = tx.readValueOrThrow(maybeStreamLink);
     }
 
-    return isStreamValue(value)
-      ? parseLink(inputs.$event, processCell)
-      : undefined;
+    return isStreamValue(value) ? parseLink(inputs.$event, base) : undefined;
   }
 
   private createPatternFrame(
@@ -2377,7 +2372,7 @@ export class Runner {
 
     const streamLink = this.resolveJavaScriptStreamLink(
       io.inputs,
-      processCell,
+      processCell.getAsNormalizedFullLink(),
       tx,
     );
     if (streamLink) {
@@ -2473,12 +2468,12 @@ export class Runner {
     // is actually instantiated for each mapped item.
     const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
       inputBindings,
-      processCell,
+      processCell.entityId,
       { bindPatterns: false },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       outputBindings,
-      processCell,
+      processCell.entityId,
     );
 
     // For `map` and future other node types that take closures, we need to
@@ -2624,7 +2619,10 @@ export class Runner {
     _addCancel: AddCancel,
     _pattern: Pattern,
   ) {
-    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
+    const inputs = unwrapOneLevelAndBindtoDoc(
+      inputBindings,
+      processCell.entityId,
+    );
 
     sendValueToBinding(tx, processCell, outputBindings, inputs);
   }
@@ -2641,9 +2639,12 @@ export class Runner {
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindtoDoc(
       module.implementation,
-      processCell,
+      processCell.entityId,
     );
-    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
+    const inputs = unwrapOneLevelAndBindtoDoc(
+      inputBindings,
+      processCell.entityId,
+    );
 
     // If output bindings is a link to a non-redirect cell,
     // use that instead of creating a new cell.

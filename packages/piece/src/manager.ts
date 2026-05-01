@@ -735,8 +735,6 @@ export class PieceManager {
     // Result Cell through getMetaRaw.
     // With this approach, we aren't using the argumentSchema from the pattern
     // but that should have been written into the Result Cell's argument link.
-    // @FIXME(@ubik2) - this works if argument is a direct link, but it will
-    // generally not be set up this way.
     const argumentValue = piece.getMetaRaw("argument");
     const pieceLink = piece.getAsNormalizedFullLink();
     const argumentLink = parseLink(argumentValue, pieceLink);
