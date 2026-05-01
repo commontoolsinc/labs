@@ -62,7 +62,6 @@ const NO_PRECOMPUTED = Symbol("no-precomputed");
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
   id: link.id,
-  type: link.type,
   path: [...link.path],
 });
 
@@ -151,7 +150,6 @@ const hasPendingSchemaPolicyInput = (
     input.kind === "schema" &&
     input.target.space === source.space &&
     input.target.id === source.id &&
-    input.target.type === source.type &&
     pathsOverlap(canonicalizeLogicalPath(input.target.path), sourcePath) &&
     schemaIfcOverlapsPath(
       input.schema,
@@ -644,7 +642,6 @@ export function normalizeAndDiff(
       id: toURI(entityId),
       space: link.space,
       path: [],
-      type: link.type,
     };
 
     seen.set(newValue, newEntryLink);
@@ -917,7 +914,6 @@ export function compactChangeSet(changes: ChangeSet): ChangeSet {
     const key = JSON.stringify([
       change.location.space,
       change.location.id,
-      change.location.type,
     ]);
     if (!byDocument.has(key)) byDocument.set(key, []);
     byDocument.get(key)!.push(change);

@@ -72,7 +72,6 @@ describe("CFC canonicalization helpers", () => {
       target: {
         space: signer.did(),
         id: "of:target",
-        type: "application/json",
         path: ["value", "items"],
       },
       claim: "projection",
@@ -80,13 +79,11 @@ describe("CFC canonicalization helpers", () => {
         {
           space: signer.did(),
           id: "of:b",
-          type: "application/json",
           path: ["value", "items", "1"],
         },
         {
           space: signer.did(),
           id: "of:a",
-          type: "application/json",
           path: ["value", "items", "0"],
         },
       ],
@@ -106,12 +103,10 @@ describe("CFC canonicalization helpers", () => {
       consumedReads: [{
         space: signer.did(),
         id: "of:doc",
-        type: "application/json",
         path: ["value", "z"],
       }, {
         space: signer.did(),
         id: "of:doc",
-        type: "application/json",
         path: ["value", "a"],
       }],
       potentialWrites: [],
@@ -145,13 +140,11 @@ describe("CFC canonicalization helpers", () => {
       target: {
         space: signer.did(),
         id: "of:target",
-        type: "application/json",
         path: ["value", "bookmark"],
       },
       source: {
         space: signer.did(),
         id: "of:source",
-        type: "application/json",
         path: ["value", "title"],
       },
     });
@@ -441,13 +434,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         target: {
           space: target.space,
           id: target.id,
-          type: target.type,
           path: ["savedTitle"],
         },
         sources: [{
           space: signer.did(),
           id: "of:source",
-          type: "application/json",
           path: ["internal", "savedTitle"],
         }],
       });
@@ -497,13 +488,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         target: {
           space: target.space,
           id: target.id,
-          type: target.type,
           path: [],
         },
         sources: [{
           space: signer.did(),
           id: "of:source",
-          type: "application/json",
           path: ["internal", "saved"],
         }],
       });
@@ -528,7 +517,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-enforce",
-        type: "application/json",
         path: [],
       }, { ok: true });
 
@@ -601,7 +589,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-disabled",
-        type: "application/json",
         path: [],
       }, { ok: true });
 
@@ -623,7 +610,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-observe",
-        type: "application/json",
         path: [],
       }, { ok: true });
 
@@ -645,7 +631,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-enforce-strict",
-        type: "application/json",
         path: [],
       }, { ok: true });
 
@@ -668,7 +653,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-prepare",
-        type: "application/json",
         path: [],
       }, { count: 1 });
 
@@ -812,14 +796,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       readTx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-read-invalidate",
-        type: "application/json",
         path: [],
       }, { count: 1 });
       readTx.prepareCfc();
       readTx.readValueOrThrow({
         space: signer.did(),
         id: "of:cfc-read-invalidate",
-        type: "application/json",
         path: [],
       });
       expect(readTx.getCfcState().prepare.status).toBe("invalidated");
@@ -830,14 +812,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       writeTx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-write-invalidate",
-        type: "application/json",
         path: [],
       }, { count: 1 });
       writeTx.prepareCfc();
       writeTx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-write-invalidate",
-        type: "application/json",
         path: [],
       }, { count: 2 });
       expect(writeTx.getCfcState().prepare.status).toBe("invalidated");
@@ -862,7 +842,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-outbox",
-        type: "application/json",
         path: [],
       }, { ok: true });
 
@@ -883,7 +862,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       rejected.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-outbox-reject",
-        type: "application/json",
         path: [],
       }, { ok: false });
 
@@ -903,7 +881,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       throwing.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-outbox-effect-throws",
-        type: "application/json",
         path: [],
       }, { ok: "committed" });
 
@@ -924,7 +901,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(verify.readOrThrow({
         space: signer.did(),
         id: "of:cfc-outbox-effect-throws",
-        type: "application/json",
         path: [],
       })).toMatchObject({ value: { ok: "committed" } });
       verify.abort();
@@ -1000,7 +976,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: sourceId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed" },
@@ -1075,7 +1050,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: seededId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed" },
@@ -1123,7 +1097,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         {
           space: signer.did(),
           id: targetId,
-          type: "application/json",
           path: [],
         },
         {
@@ -1134,7 +1107,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         {
           space: signer.did(),
           id: targetId,
-          type: "application/json",
           path: ["cfc"],
         },
         {
@@ -1156,7 +1128,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const targetLink = {
         space: signer.did(),
         id: targetId,
-        type: "application/json",
         path: [],
       } as const;
       expect(
@@ -1221,7 +1192,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         {
           space: signer.did(),
           id: targetId,
-          type: "application/json",
           path: ["value"],
         },
         { auditedField: "seed" },
@@ -1230,7 +1200,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         {
           space: signer.did(),
           id: targetId,
-          type: "application/json",
           path: ["cfc"],
         },
         {
@@ -1255,7 +1224,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const targetLink = {
         space: signer.did(),
         id: targetId,
-        type: "application/json",
         path: ["auditedField"],
       } as const;
       expect(storedCfcMetadataAppliesToPath(tx, targetLink)).toBe(true);
@@ -1307,7 +1275,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: seededId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed" },
@@ -1368,7 +1335,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: seededId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed", pending: false },
@@ -1474,7 +1440,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(digestInput.potentialWrites).toContainEqual({
         space: signer.did(),
         id: seededId,
-        type: "application/json",
         path: ["secret"],
       });
       expect(digestInput.writes).toEqual([]);
@@ -1683,7 +1648,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const stored = verify.readOrThrow({
         space: signer.did(),
         id: target.getAsNormalizedFullLink().id,
-        type: "application/json",
         path: [],
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
@@ -1748,7 +1712,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const stored = verify.readOrThrow({
         space: signer.did(),
         id: target.getAsNormalizedFullLink().id,
-        type: "application/json",
         path: [],
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
@@ -1820,7 +1783,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const stored = verify.readOrThrow({
         space: signer.did(),
         id: target.getAsNormalizedFullLink().id,
-        type: "application/json",
         path: [],
       }) as {
         value?: { "/": { [LINK_V1_TAG]: { cfcLabelView?: unknown } } };
@@ -1894,7 +1856,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const stored = verify.readOrThrow({
         space: signer.did(),
         id: target.getAsNormalizedFullLink().id,
-        type: "application/json",
         path: [],
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
@@ -2089,7 +2050,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       targetSeed.writeOrThrow({
         space: signer.did(),
         id: targetLink.id,
-        type: "application/json",
         path: [],
       }, {
         value: { linked: null },
@@ -2105,7 +2065,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       targetSeed.writeOrThrow({
         space: signer.did(),
         id: `cid:${guardedSchema.hashString}`,
-        type: "application/json",
         path: [],
       }, {
         value: guardedSchema.schema,
@@ -2189,7 +2148,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       targetSeed.writeOrThrow({
         space: signer.did(),
         id: targetLink.id,
-        type: "application/json",
         path: [],
       }, {
         value: { items: [null] },
@@ -2205,7 +2163,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       targetSeed.writeOrThrow({
         space: signer.did(),
         id: `cid:${guardedSchema.hashString}`,
-        type: "application/json",
         path: [],
       }, {
         value: guardedSchema.schema,
@@ -2306,7 +2263,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const stored = verify.readOrThrow({
         space: signer.did(),
         id: target.getAsNormalizedFullLink().id,
-        type: "application/json",
         path: [],
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
@@ -2357,7 +2313,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.writeOrThrow({
         space: signer.did(),
         id: link.id,
-        type: "application/json",
         path: [],
       }, {
         value: { title: "parent" },
@@ -2392,7 +2347,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: "of:cfc-derived-label-source",
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed" },
@@ -2654,7 +2608,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       update.writeValueOrThrow({
         space: signer.did(),
         id: documentId,
-        type,
         path: ["internal", "stage"],
       }, "saved");
       update.recordCfcWritePolicyInput({
@@ -2662,7 +2615,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         target: {
           space: signer.did(),
           id: documentId,
-          type,
           path: ["internal", "stage"],
         },
         schemaHash: stageSchemaAndHash.hashString,
@@ -2903,7 +2855,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: seededId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed" },
@@ -2969,7 +2920,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: sourceId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed" },
@@ -3048,7 +2998,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: trustedSourceId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "trusted" },
@@ -3079,7 +3028,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: untrustedSourceId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "untrusted" },
@@ -3169,7 +3117,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: sourceId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed" },
@@ -3344,7 +3291,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         id: sourceId,
-        type: "application/json",
         path: [],
       }, {
         value: { secret: "seed" },
@@ -3445,7 +3391,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.writeValueOrThrow({
         space: signer.did(),
         id: "of:cfc-missing-schema-input",
-        type: "application/json",
         path: [],
       }, { secret: "value" });
 

@@ -42,7 +42,6 @@ describe("write stack trace", () => {
           {
             space,
             id: "doc:root",
-            type: "application/json",
             path: [],
           },
           { title: "Hello" },
@@ -84,7 +83,6 @@ describe("write stack trace", () => {
           {
             space,
             id: "doc:async",
-            type: "application/json",
             path: [],
           },
           { title: "Later" },
@@ -143,7 +141,6 @@ describe("write stack trace", () => {
           {
             space,
             id: "doc:first",
-            type: "application/json",
             path: [],
           },
           { title: "First" },
@@ -163,7 +160,6 @@ describe("write stack trace", () => {
             {
               space,
               id: "doc:second",
-              type: "application/json",
               path: [],
             },
             { title: "Second" },
@@ -236,7 +232,6 @@ describe("write stack trace", () => {
           {
             space,
             id: "doc:primary",
-            type: "application/json",
             path: [],
           },
           { title: "Primary" },
@@ -251,7 +246,6 @@ describe("write stack trace", () => {
           {
             space,
             id: "doc:secondary",
-            type: "application/json",
             path: [],
           },
           { title: "Secondary" },

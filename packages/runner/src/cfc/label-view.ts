@@ -1,8 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import type {
-  IExtendedStorageTransaction,
-  MediaType,
-} from "../storage/interface.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
@@ -45,7 +42,6 @@ const storedMetadataForCell = (
       {
         space: link.space,
         id: link.id,
-        type: link.type as MediaType,
       },
     );
   } catch {

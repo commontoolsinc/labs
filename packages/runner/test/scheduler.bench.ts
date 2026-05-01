@@ -688,7 +688,6 @@ Deno.bench(
         {
           space,
           id: `test:raw-write-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -715,7 +714,6 @@ function generateAddresses(
     addresses.push({
       space: space,
       id: `test:entity-${i % entitiesCount}`,
-      type: "application/json",
       path: ["field", `sub${i % 5}`, `deep${i % 3}`],
     });
   }
@@ -775,7 +773,6 @@ Deno.bench(
     const baseLink = {
       space,
       id: "test:entity" as const,
-      type: "application/json" as const,
       path: ["value"],
     };
 
@@ -811,7 +808,6 @@ Deno.bench(
     const sharedRead = {
       space,
       id: "test:shared-source" as const,
-      type: "application/json" as const,
       path: ["value"],
     };
 
@@ -826,7 +822,6 @@ Deno.bench(
           writes: [{
             space,
             id: `test:output-${i}` as const,
-            type: "application/json" as const,
             path: ["value"],
           }],
         },
@@ -853,7 +848,6 @@ Deno.bench(
       {
         space,
         id: "test:source",
-        type: "application/json",
         path: ["value"],
       },
     ];
@@ -861,7 +855,6 @@ Deno.bench(
       {
         space,
         id: "test:output",
-        type: "application/json",
         path: ["value"],
       },
     ];

@@ -38,7 +38,6 @@ Deno.bench(
       tx.writeValueOrThrow({
         space,
         id: "of:reactivity-log-bench",
-        type: "application/json",
         path: [],
       }, {
         count: 0,
@@ -50,31 +49,26 @@ Deno.bench(
         tx.readValueOrThrow({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["count"],
         });
         tx.read({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["nested", "value"],
         }, { nonRecursive: true });
         tx.read({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["nested"],
         }, { meta: ignoreReadForScheduling });
         tx.read({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["list"],
         }, { meta: markReadAsPotentialWrite });
         tx.writeValueOrThrow({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["count"],
         }, index);
       }
@@ -96,7 +90,6 @@ Deno.bench(
       tx.writeValueOrThrow({
         space,
         id: "of:reactivity-log-repeat",
-        type: "application/json",
         path: [],
       }, {
         count: 0,
@@ -107,13 +100,11 @@ Deno.bench(
         tx.readValueOrThrow({
           space,
           id: "of:reactivity-log-repeat",
-          type: "application/json",
           path: ["nested", "value"],
         });
         tx.writeValueOrThrow({
           space,
           id: "of:reactivity-log-repeat",
-          type: "application/json",
           path: ["count"],
         }, index);
       }

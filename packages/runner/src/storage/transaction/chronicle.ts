@@ -107,10 +107,11 @@ export class Chronicle {
    * such fact exists yet.
    */
   load(address: Omit<IMemoryAddress, "path">): State {
+    const type = address.type ?? "application/json";
     // If we have not read nor written into overlapping memory address,
     // we'll read it from the local replica.
     return this.#replica.get(address) ??
-      unclaimed({ of: address.id, the: address.type });
+      unclaimed({ of: address.id, the: type });
   }
 
   /**
@@ -295,11 +296,12 @@ export class Chronicle {
         const normalizedLoaded = fabricFromNativeValue(loaded.is);
 
         const alignedMerged = alignRootWriteWithLoadedShape(
-          changes.address.type,
+          changes.address.type ?? "application/json",
           normalizedLoaded,
           normalizedMerged,
           {
-            isV2JsonRoot: changes.address.type === "application/json" &&
+            isV2JsonRoot: (changes.address.type ?? "application/json") ===
+                "application/json" &&
               "getDocument" in replica &&
               typeof replica.getDocument === "function",
           },

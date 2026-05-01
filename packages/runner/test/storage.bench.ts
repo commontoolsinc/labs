@@ -57,7 +57,6 @@ const writeDocument = (
   tx.writeValueOrThrow({
     space,
     id: id as `test:${string}`,
-    type: "application/json",
     path: [],
   }, value);
 };
@@ -69,7 +68,6 @@ const readDocument = (
   tx.readValueOrThrow({
     space,
     id: id as `test:${string}`,
-    type: "application/json",
     path: [],
   });
 };
@@ -89,7 +87,6 @@ Deno.bench(
         {
           space,
           id: `test:raw-w-${i}`,
-          type: "application/json",
           path: ["value"],
         },
         i,
@@ -111,7 +108,6 @@ Deno.bench(
         {
           space,
           id: `test:throw-w-${i}`,
-          type: "application/json",
           path: ["value"],
         },
         i,
@@ -133,7 +129,6 @@ Deno.bench(
         {
           space,
           id: `test:value-w-${i}`,
-          type: "application/json",
           path: [],
         },
         i,
@@ -155,7 +150,6 @@ Deno.bench(
         {
           space,
           id: `test:root-write-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -177,7 +171,6 @@ Deno.bench(
         {
           space,
           id: `test:nested-loop-${i}`,
-          type: "application/json",
           path: ["profile", "name"],
         },
         `user-${i}`,
@@ -199,7 +192,6 @@ Deno.bench(
         address: {
           space,
           id: `test:nested-batch-${i}`,
-          type: "application/json" as const,
           path: ["profile", "name"],
         },
         value: `user-${i}`,
@@ -226,7 +218,6 @@ Deno.bench(
         {
           space,
           id: `test:read-raw-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -238,7 +229,6 @@ Deno.bench(
       tx.read({
         space,
         id: `test:read-raw-${i}`,
-        type: "application/json",
         path: ["value"],
       });
     }
@@ -259,7 +249,6 @@ Deno.bench(
         {
           space,
           id: `test:read-throw-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -271,7 +260,6 @@ Deno.bench(
       tx.readOrThrow({
         space,
         id: `test:read-throw-${i}`,
-        type: "application/json",
         path: ["value"],
       });
     }
@@ -292,7 +280,6 @@ Deno.bench(
         {
           space,
           id: `test:read-value-${i}`,
-          type: "application/json",
           path: [],
         },
         i,
@@ -304,7 +291,6 @@ Deno.bench(
       tx.readValueOrThrow({
         space,
         id: `test:read-value-${i}`,
-        type: "application/json",
         path: [],
       });
     }
@@ -325,7 +311,6 @@ Deno.bench(
         {
           space,
           id: `test:prewrite-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -337,7 +322,6 @@ Deno.bench(
       tx.read({
         space,
         id: `test:prewrite-${j % 100}`,
-        type: "application/json",
         path: ["value"],
       });
     }
@@ -362,7 +346,6 @@ Deno.bench(
         {
           space,
           id: `test:create-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -385,7 +368,6 @@ Deno.bench(
       {
         space,
         id: "test:same-entity-repeat",
-        type: "application/json",
         path: [],
       },
       { value: 0 },
@@ -397,7 +379,6 @@ Deno.bench(
         {
           space,
           id: "test:same-entity-repeat",
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -420,7 +401,6 @@ Deno.bench(
         {
           space,
           id: `test:existing-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: 0 },
@@ -433,7 +413,6 @@ Deno.bench(
         {
           space,
           id: `test:existing-${i}`,
-          type: "application/json",
           path: ["value"],
         },
         i,
@@ -461,7 +440,6 @@ Deno.bench(
         {
           space,
           id: `test:path-${i}`,
-          type: "application/json",
           path: [],
         },
         { a: { b: { c: { d: { e: { f: i } } } } } },
@@ -473,7 +451,6 @@ Deno.bench(
       tx.read({
         space,
         id: `test:path-${i}`,
-        type: "application/json",
         path: ["a"],
       });
     }
@@ -494,7 +471,6 @@ Deno.bench(
         {
           space,
           id: `test:deep-path-${i}`,
-          type: "application/json",
           path: [],
         },
         { a: { b: { c: { d: { e: { f: i } } } } } },
@@ -506,7 +482,6 @@ Deno.bench(
       tx.read({
         space,
         id: `test:deep-path-${i}`,
-        type: "application/json",
         path: ["a", "b", "c", "d", "e", "f"],
       });
     }
@@ -542,7 +517,6 @@ Deno.bench(
         {
           space,
           id: `test:commit-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -567,7 +541,6 @@ Deno.bench(
       const _addr = {
         space,
         id: `test:obj-${i}`,
-        type: "application/json",
         path: ["value", "nested"],
       };
     }
@@ -581,7 +554,6 @@ Deno.bench(
     const base = {
       space,
       id: "test:base",
-      type: "application/json",
       path: [] as string[],
     };
     for (let i = 0; i < 1000; i++) {
@@ -623,7 +595,6 @@ Deno.bench(
         read: {
           space,
           id: `test:activity-${i}`,
-          type: "application/json",
           path: ["value"],
           meta: {},
         },
@@ -648,7 +619,6 @@ Deno.bench(
         {
           space,
           id: `test:first-write-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -670,7 +640,6 @@ Deno.bench(
       {
         space,
         id: "test:single-entity",
-        type: "application/json",
         path: [],
       },
       { value: 0 },
@@ -682,7 +651,6 @@ Deno.bench(
         {
           space,
           id: "test:single-entity",
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -705,7 +673,6 @@ Deno.bench(
         {
           space,
           id: `test:ten-entities-${i % 10}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -728,7 +695,6 @@ Deno.bench(
         {
           space,
           id: `test:nested-${i}`,
-          type: "application/json",
           path: [],
         },
         { data: { nested: { value: 0 } } },
@@ -741,7 +707,6 @@ Deno.bench(
         {
           space,
           id: `test:nested-${i}`,
-          type: "application/json",
           path: ["data", "nested", "value"],
         },
         i,
@@ -855,7 +820,6 @@ Deno.bench(
         {
           space,
           id: `test:wvc-new-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -879,7 +843,6 @@ Deno.bench(
         {
           space,
           id: "test:wvc-same",
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -902,7 +865,6 @@ Deno.bench(
         {
           space,
           id: `test:wvc-commit-new-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -929,7 +891,6 @@ Deno.bench(
         {
           space,
           id: "test:wvc-commit-same",
-          type: "application/json",
           path: [],
         },
         { value: i },

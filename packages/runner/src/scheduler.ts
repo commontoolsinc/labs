@@ -125,13 +125,12 @@ function trustedEventWriteCandidatesFromTransaction(
     const candidate: NormalizedFullLink = {
       space: write.space,
       id: write.id,
-      type: write.type ?? "application/json",
       path: [...path],
       ...("schema" in write && write.schema !== undefined
         ? { schema: write.schema }
         : {}),
     };
-    const key = `${candidate.space}/${candidate.id}/${candidate.type}/${
+    const key = `${candidate.space}/${candidate.id}/${
       candidate.path.join("/")
     }`;
     const existingIndex = seen.get(key);
@@ -169,7 +168,6 @@ function trustedEventWriteCandidatesFromTransaction(
       addCandidate({
         space: input.target.space,
         id: input.target.id as URI,
-        type: input.target.type as MediaType,
         path: input.target.path,
         ...(input.schema !== undefined ? { schema: input.schema } : {}),
       });
@@ -1533,10 +1531,6 @@ export class Scheduler {
               change: change,
             });
 
-            if (change.address.type !== "application/json") {
-              continue;
-            }
-
             if (
               this.triggers.size === 0 &&
               this.nonRecursiveTriggers.size === 0
@@ -1822,7 +1816,6 @@ export class Scheduler {
       !previousSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
-        existing.type === write.type &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -1831,7 +1824,6 @@ export class Scheduler {
       !nextSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
-        existing.type === write.type &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -3785,7 +3777,7 @@ export class Scheduler {
           {
             space: read.space,
             id: read.id,
-            type: read.type ?? "application/json",
+            type: "application/json",
             path: [...read.path],
           },
           { meta: ignoreReadForScheduling },

@@ -41,11 +41,7 @@ export function sortAndCompactPaths(
   const sorted = unsorted.toSorted((a, b) =>
     a.space === b.space
       ? a.id === b.id
-        ? a.type === b.type
-          ? comparePaths(a.path, b.path)
-          : a.type < b.type
-          ? -1
-          : 1
+        ? comparePaths(a.path, b.path)
         : a.id < b.id
         ? -1
         : 1
@@ -59,7 +55,6 @@ export function sortAndCompactPaths(
     if (
       sorted[i].space === previous.space &&
       sorted[i].id === previous.id &&
-      sorted[i].type === previous.type &&
       // Is the previous path a prefix of the current path?
       previous.path.every((value, index) => value === sorted[i].path[index]) &&
       // If we compactifyChildren, or the paths are identical, skip this
@@ -84,7 +79,6 @@ export function addressesToPathByEntity(
 ): Map<SpaceAndURI, SortedAndCompactPaths> {
   const map = new Map<SpaceAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
-    if (address.type !== "application/json") continue;
     const key: SpaceAndURI = `${address.space}/${address.id}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);

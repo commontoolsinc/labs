@@ -331,10 +331,11 @@ export const claim = (
   { address, value: expected }: IAttestation,
   replica: ISpaceReplica,
 ): Result<State, IStorageTransactionInconsistent> => {
+  const type = address.type ?? "application/json";
   const state = replica.get(address) ??
-    unclaimed({ of: address.id, the: address.type });
+    unclaimed({ of: address.id, the: type });
   const source = attest(state);
-  const actual = address.type === "application/json" &&
+  const actual = type === "application/json" &&
       address.path.length === 0 &&
       "getDocument" in replica &&
       typeof replica.getDocument === "function"

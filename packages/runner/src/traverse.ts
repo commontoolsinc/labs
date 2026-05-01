@@ -710,11 +710,10 @@ function getNormalizedLink(
   if (address.path.length === 0 || address.path[0] !== "value") {
     throw new Error("Unable to create link to non-value address");
   }
-  const { space, id, path, type } = address;
+  const { space, id, path } = address;
   return {
     space,
     id,
-    type,
     path: path.slice(1),
     ...(schema !== undefined && { schema }),
   };
@@ -1030,7 +1029,7 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.id}/${link.type}`,
+      `${link.space}/${link.id}`,
       this.internCoverageSelector(targetSelector),
     );
   }
@@ -1782,7 +1781,7 @@ function loadLinkedPattern(
     address = {
       space: link.space,
       id: link.id!,
-      type: link.type! as MIME,
+      type: "application/json" as MIME,
       path: [],
     };
   } else if ("$TYPE" in value && isString(value["$TYPE"])) {

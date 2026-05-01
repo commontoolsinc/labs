@@ -1233,7 +1233,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     const next = result.ok as RootAttestation;
     const collapsedNext = {
       ...next,
-      value: collapseEmptyJsonDocumentEnvelope(address.type, next.value),
+      value: collapseEmptyJsonDocumentEnvelope(
+        address.type ?? "application/json",
+        next.value,
+      ),
     } as RootAttestation;
     if (
       collapsedNext.value === current.value &&
@@ -1343,7 +1346,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     const next = rootWrite.ok as RootAttestation;
     const collapsedNext = {
       ...next,
-      value: collapseEmptyJsonDocumentEnvelope(address.type, next.value),
+      value: collapseEmptyJsonDocumentEnvelope(
+        address.type ?? "application/json",
+        next.value,
+      ),
     } as RootAttestation;
     if (collapsedNext === doc.current) {
       return { ok: collapsedNext };
@@ -1440,7 +1446,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           doc.current = {
             ...doc.current,
             value: collapseEmptyJsonDocumentEnvelope(
-              writes[0]!.address.type,
+              writes[0]!.address.type ?? "application/json",
               nextRoot,
             ),
           };
@@ -1483,7 +1489,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     doc.current = {
       ...doc.current,
       value: collapseEmptyJsonDocumentEnvelope(
-        writes[0]!.address.type,
+        writes[0]!.address.type ?? "application/json",
         nextRoot,
       ),
     };
@@ -1811,7 +1817,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#lastDocument = {
       branch,
       id: address.id,
-      type: address.type,
+      type: address.type ?? "application/json",
       doc,
     };
     return {
@@ -1824,8 +1830,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type">,
   ): RootAttestation {
+    const type = address.type ?? "application/json";
     if (address.id.startsWith("data:")) {
-      const loaded = loadInline({ id: address.id, type: address.type });
+      const loaded = loadInline({ id: address.id, type });
       if (loaded.error) {
         throw loaded.error;
       }
@@ -1834,14 +1841,14 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const state = branch.replica.get({
       id: address.id,
-      type: address.type,
+      type,
     }) ?? unclaimed({
       of: address.id,
-      the: address.type,
+      the: type,
     });
 
     return {
-      address: { id: address.id, type: address.type, path: [] },
+      address: { id: address.id, type, path: [] },
       value: state.is,
     };
   }

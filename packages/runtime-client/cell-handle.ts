@@ -281,7 +281,6 @@ export class CellHandle<T = unknown> {
       id: this.#ref.id,
       space: this.#ref.space,
       path: [...this.#ref.path, key],
-      type: this.#ref.type,
       // Child schema is unknown, so we don't include it
       ...(this.#ref.cfcLabelView !== undefined && {
         cfcLabelView: rebaseCfcLabelView(this.#ref.cfcLabelView, [key]),
@@ -298,7 +297,6 @@ export class CellHandle<T = unknown> {
           id: this.#ref.id,
           space: this.#ref.space,
           path: this.#ref.path,
-          type: this.#ref.type,
           ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
           ...(this.#ref.overwrite !== undefined &&
             { overwrite: this.#ref.overwrite }),
@@ -518,7 +516,6 @@ function parseAsCellRef(
       id: linkData.id ?? from.id,
       space: linkData.space ?? from.space,
       path: (linkData.path ?? []).map((p) => p.toString()),
-      type: "application/json",
       ...(linkData.schema !== undefined && { schema: linkData.schema }),
       ...((linkData as { cfcLabelView?: CfcLabelView }).cfcLabelView !==
           undefined && {
@@ -542,7 +539,6 @@ function parseAsCellRef(
       id: entityId,
       space: from.space,
       path: aliasPath,
-      type: "application/json",
       ...(alias.schema !== undefined && { schema: alias.schema }),
     };
   }

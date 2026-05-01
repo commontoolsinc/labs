@@ -673,7 +673,6 @@ export class StorageManager implements IStorageManager {
       space,
       id: id as any,
       path: [],
-      type: DOCUMENT_MIME,
     };
     const promises: Promise<unknown>[] = [];
     this.collectLinkedCellSyncs(

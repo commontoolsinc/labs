@@ -19,10 +19,10 @@ export const logicalPathToPointer = (path: readonly string[]): string =>
   encodePointer(canonicalizeLogicalPath(path));
 
 const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
-  const leftKey = `${left.space}\u0000${left.id}\u0000${left.type}\u0000${
+  const leftKey = `${left.space}\u0000${left.id}\u0000${
     logicalPathToPointer(left.path)
   }`;
-  const rightKey = `${right.space}\u0000${right.id}\u0000${right.type}\u0000${
+  const rightKey = `${right.space}\u0000${right.id}\u0000${
     logicalPathToPointer(right.path)
   }`;
   return leftKey.localeCompare(rightKey);

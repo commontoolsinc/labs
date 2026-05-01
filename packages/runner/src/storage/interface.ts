@@ -899,10 +899,10 @@ export interface IMemoryAddress {
    */
   id: URI;
   /**
-   * Media type under which data is stored. It corresponds to `the` field in the
-   * memory protocol.
+   * Protocol fact type. Document addresses omit this; storage boundaries use
+   * application/json.
    */
-  type: MediaType;
+  type?: MediaType;
   /**
    * Intra-value path to the {@link FabricValue} being referenced by this
    * address. It is a path within the `is` field of the fact in memory protocol.

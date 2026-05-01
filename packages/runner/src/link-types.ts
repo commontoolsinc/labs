@@ -23,14 +23,13 @@ export type NormalizedLink = {
   id?: URI; // URI format with "of:" prefix
   path: readonly MemoryAddressPathComponent[];
   space?: MemorySpace;
-  type?: string; // Default is "application/json"
   schema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
 
 /**
- * Full normalized link from a complete link, i.e. with required id, space and
- * type. Gets created by parseLink if a base is provided.
+ * Full normalized link from a complete link, i.e. with required id and space.
+ * Gets created by parseLink if a base is provided.
  *
  * Normalized link paths are value-relative. Use `toMemorySpaceAddress` when a
  * document-root memory address is required.
@@ -38,7 +37,6 @@ export type NormalizedLink = {
 export type NormalizedFullLink = NormalizedLink & {
   id: URI;
   space: MemorySpace;
-  type: string; // just string, so we can't use it as an IMemorySpaceAddress
 };
 
 export type ValuePath = readonly ["value", ...string[]];
@@ -54,7 +52,7 @@ export function toMemorySpaceAddress(
   return {
     space: link.space,
     id: link.id,
-    type: (link.type ?? "application/json") as IMemorySpaceValueAddress["type"],
+    type: "application/json" as IMemorySpaceValueAddress["type"],
     path: ["value", ...link.path],
   };
 }
@@ -101,10 +99,9 @@ export function isPrimitiveCellLink(
 
 export function isNormalizedLink(value: any): value is NormalizedLink {
   if (!isRecord(value)) return false;
-  const { path, id, type, space } = value;
+  const { path, id, space } = value;
   return Array.isArray(path) &&
     (typeof id === "string" || id === undefined) &&
-    (typeof type === "string" || type === undefined) &&
     (typeof space === "string" || space === undefined);
 }
 
@@ -120,7 +117,6 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
-    typeof value.type === "string" &&
     Array.isArray(value.path)
   );
 }
@@ -180,7 +176,6 @@ export function parseLinkPrimitive(
       ...(id && { id }),
       path: path.map((p) => p.toString()),
       ...(resolvedSpace && { space: resolvedSpace }),
-      type: "application/json",
       ...(link.schema !== undefined && { schema: link.schema }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
@@ -206,7 +201,6 @@ export function parseLinkPrimitive(
         ? alias.path.map((p) => p.toString())
         : [],
       ...(base?.space && { space: base.space }),
-      type: "application/json",
       ...(alias.schema !== undefined && { schema: alias.schema }),
       overwrite: "redirect",
     };
@@ -222,14 +216,13 @@ export function areNormalizedLinksSame(
   link2: NormalizedLink,
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
-    arrayEqual(link1.path, link2.path) &&
-    (link1.type ?? "application/json") === (link2.type ?? "application/json");
+    arrayEqual(link1.path, link2.path);
 }
 
 /**
  * Serialize an address to a string key for use in Maps/Sets/memoization.
- * Includes space, id, type, and path — the same fields compared by
- * areNormalizedLinksSame.
+ * Includes space, id, and path — the same fields compared by
+ * areNormalizedLinksSame for document links.
  *
  * Because links are relative to "value", the IMemorySpaceAddress and
  * NormalizedFullLink version of the same address will return different
@@ -238,7 +231,7 @@ export function areNormalizedLinksSame(
 export function addressKey(
   addr: IMemorySpaceAddress | NormalizedFullLink,
 ): string {
-  return JSON.stringify([addr.space, addr.id, addr.type, addr.path]);
+  return JSON.stringify([addr.space, addr.id, addr.path]);
 }
 
 /**
@@ -343,7 +336,6 @@ export function parseLLMFriendlyLink(
     id: id as `${string}:${string}`,
     path,
     ...(space && { space }),
-    type: "application/json",
   };
 }
 

@@ -16,7 +16,6 @@ function makeSource(size: number): IAttestation {
   return {
     address: {
       id: docId,
-      type: "application/json" as const,
       path: [] as string[],
     },
     value,
@@ -34,7 +33,6 @@ function makeChanges(count: number, overlapPercent: number): ChangeSet {
       location: {
         id: docId,
         space,
-        type: "application/json",
         path: ["item" + i],
       },
       value: { a: 1, b: 2, c: 3 },
@@ -48,7 +46,6 @@ function makeChanges(count: number, overlapPercent: number): ChangeSet {
       location: {
         id: docId,
         space,
-        type: "application/json",
         path: ["item" + parentIdx, "a"],
       },
       value: 1,

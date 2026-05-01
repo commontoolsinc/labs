@@ -919,7 +919,6 @@ describe("scheduler", () => {
       {
         space: secretLink.space,
         id: secretLink.id,
-        type: secretLink.type as "application/json",
         path: ["cfc"],
       },
       {
@@ -981,7 +980,6 @@ describe("scheduler", () => {
       const cfcDocument = actionTx.readOrThrow({
         space: sourceLink.space,
         id: sourceLink.id,
-        type: sourceLink.type as "application/json",
         path: ["cfc"],
       }) as { version?: number } | undefined;
       lastVersion = cfcDocument?.version ?? 0;
@@ -1006,7 +1004,6 @@ describe("scheduler", () => {
       {
         space: sourceLink.space,
         id: sourceLink.id,
-        type: sourceLink.type as "application/json",
         path: ["cfc"],
       },
       {
@@ -1692,7 +1689,6 @@ describe("event handling", () => {
         tx.write({
           space,
           id: entityId,
-          type: "application/json",
           path: [],
         }, { version: 2 });
       };

@@ -821,7 +821,6 @@ Deno.test("DomApplicator - bindings", async (t) => {
               space: "did:key:test",
               id: "of:test",
               path: [],
-              type: "application/json",
             },
           }],
         });

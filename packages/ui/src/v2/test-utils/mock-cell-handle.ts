@@ -27,7 +27,6 @@ const DEFAULT_REF: CellRef = {
   id: "of:mock-cell" as CellRef["id"],
   space: "did:key:mock" as CellRef["space"],
   path: [],
-  type: "application/json" as CellRef["type"],
   schema: { type: "object" },
 };
 

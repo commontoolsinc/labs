@@ -376,7 +376,6 @@ describe("CFC trusted UI event enforcement", () => {
       target: {
         space,
         id: "of:cfc-ui-contract-nested-document",
-        type: "application/json",
         path: [],
       },
       schema: {
@@ -408,7 +407,6 @@ describe("CFC trusted UI event enforcement", () => {
       [{
         space,
         id: "of:cfc-ui-contract-nested-document",
-        type: "application/json",
         path: ["argument", "savedTitle"],
       }],
       rendererEvent({
@@ -432,7 +430,6 @@ describe("CFC trusted UI event enforcement", () => {
         input.kind === "trusted-event" &&
         input.target.space === space &&
         input.target.id === "of:cfc-ui-contract-nested-document" &&
-        input.target.type === "application/json" &&
         input.target.path.join("/") === "argument/savedTitle"
       ),
     ).toBe(true);
@@ -448,7 +445,6 @@ describe("CFC trusted UI event enforcement", () => {
       target: {
         space,
         id: "of:cfc-ui-contract-linked-event-document",
-        type: "application/json",
         path: [],
       },
       schema: {
@@ -507,7 +503,6 @@ describe("CFC trusted UI event enforcement", () => {
       [{
         space,
         id: "of:cfc-ui-contract-linked-event-document",
-        type: "application/json",
         path: ["argument", "savedTitle"],
       }],
       rendererEvent(eventEnvelopeLink),
@@ -587,7 +582,6 @@ describe("CFC trusted UI event enforcement", () => {
       [{
         space,
         id: "of:cfc-ui-contract-context-document",
-        type: "application/json",
         path: ["argument", "savedTitle"],
       }],
       rendererEvent(eventEnvelopeLink),
@@ -614,7 +608,6 @@ describe("CFC trusted UI event enforcement", () => {
       target: {
         space,
         id: "of:cfc-ui-contract-leaf-defs-document",
-        type: "application/json",
         path: ["argument", "savedTitle"],
       },
       schema: {
@@ -639,7 +632,6 @@ describe("CFC trusted UI event enforcement", () => {
       [{
         space,
         id: "of:cfc-ui-contract-leaf-defs-document",
-        type: "application/json",
         path: ["argument", "savedTitle"],
       }],
       rendererEvent({

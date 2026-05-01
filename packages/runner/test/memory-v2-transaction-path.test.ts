@@ -31,7 +31,6 @@ describe("memory v2 transaction path semantics", () => {
     tx.writeValueOrThrow({
       space,
       id: "of:path-write-repeat",
-      type: "application/json",
       path: [],
     }, {
       count: 0,
@@ -43,7 +42,6 @@ describe("memory v2 transaction path semantics", () => {
       tx.writeValueOrThrow({
         space,
         id: "of:path-write-repeat",
-        type: "application/json",
         path: ["count"],
       }, index);
     }
@@ -52,7 +50,6 @@ describe("memory v2 transaction path semantics", () => {
       tx.readValueOrThrow({
         space,
         id: "of:path-write-repeat",
-        type: "application/json",
         path: [],
       }),
     ).toEqual({
@@ -69,7 +66,6 @@ describe("memory v2 transaction path semantics", () => {
     tx.writeValueOrThrow({
       space,
       id: "of:path-read-missing",
-      type: "application/json",
       path: [],
     }, {
       nested: { value: 1 },
@@ -78,7 +74,6 @@ describe("memory v2 transaction path semantics", () => {
     const missingLeaf = tx.read({
       space,
       id: "of:path-read-missing",
-      type: "application/json",
       path: ["nested", "missing"],
     });
     expect(missingLeaf.ok?.value).toBeUndefined();
@@ -86,7 +81,6 @@ describe("memory v2 transaction path semantics", () => {
     const missingParent = tx.read({
       space,
       id: "of:path-read-missing",
-      type: "application/json",
       path: ["nested", "missing", "leaf"],
     });
     expect(missingParent.error?.name).toBe("NotFoundError");
@@ -99,7 +93,6 @@ describe("memory v2 transaction path semantics", () => {
     tx.writeValueOrThrow({
       space,
       id: "of:path-write-missing-parent",
-      type: "application/json",
       path: [],
     }, {
       count: 0,
@@ -109,7 +102,6 @@ describe("memory v2 transaction path semantics", () => {
     tx.writeValueOrThrow({
       space,
       id: "of:path-write-missing-parent",
-      type: "application/json",
       path: ["details", "profile", "name"],
     }, "Ada");
 
@@ -117,7 +109,6 @@ describe("memory v2 transaction path semantics", () => {
       tx.readValueOrThrow({
         space,
         id: "of:path-write-missing-parent",
-        type: "application/json",
         path: [],
       }),
     ).toEqual({
@@ -138,7 +129,6 @@ describe("memory v2 transaction path semantics", () => {
     tx.writeValueOrThrow({
       space,
       id: "of:path-write-mixed-branches",
-      type: "application/json",
       path: [],
     }, {
       profile: { name: "Ada" },
@@ -148,13 +138,11 @@ describe("memory v2 transaction path semantics", () => {
     tx.writeValueOrThrow({
       space,
       id: "of:path-write-mixed-branches",
-      type: "application/json",
       path: ["items", "1", "label"],
     }, "two");
     tx.writeValueOrThrow({
       space,
       id: "of:path-write-mixed-branches",
-      type: "application/json",
       path: ["details", "flags", "active"],
     }, true);
 
@@ -162,7 +150,6 @@ describe("memory v2 transaction path semantics", () => {
       tx.readValueOrThrow({
         space,
         id: "of:path-write-mixed-branches",
-        type: "application/json",
         path: [],
       }),
     ).toEqual({
