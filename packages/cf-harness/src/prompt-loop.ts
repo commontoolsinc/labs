@@ -11,6 +11,7 @@ import {
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
 import {
+  type OpenAIChatCompletionAttemptDiagnostic,
   type OpenAIChatCompletionMessage,
   type OpenAIChatCompletionRequest,
   type OpenAIChatCompletionResponse,
@@ -48,6 +49,7 @@ import {
 } from "./contracts/policy-trace.ts";
 import {
   createHarnessRunReport,
+  type HarnessGatewayAttempt,
   type HarnessRunTimelineEntryInput,
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
@@ -1245,6 +1247,7 @@ export class CfHarnessPromptLoop {
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
+    const gatewayAttempts: HarnessGatewayAttempt[] = [];
     const reportTimeline: HarnessRunTimelineEntryInput[] = [];
     let modelTurns = 0;
     const buildPolicyTrace = async () => {
@@ -1280,8 +1283,19 @@ export class CfHarnessPromptLoop {
           ...(finalAssistantText !== undefined ? { finalAssistantText } : {}),
           timeline: reportTimeline,
           toolActivity,
+          gatewayAttempts,
         }),
       );
+    };
+    const recordGatewayAttempt = (
+      attempt: OpenAIChatCompletionAttemptDiagnostic,
+    ): void => {
+      gatewayAttempts.push({
+        ...attempt,
+        runId: this.engine.getRunState().runId,
+        sequence: gatewayAttempts.length + 1,
+        modelTurn: modelTurns,
+      });
     };
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.setRunStatus("running");
@@ -1310,6 +1324,7 @@ export class CfHarnessPromptLoop {
         modelTurns += 1;
         const response = await this.gatewayClient.createChatCompletionJson(
           this.#buildChatCompletionRequest(model, transcript),
+          { onChatCompletionAttempt: recordGatewayAttempt },
         );
         const assistantMessage = createAssistantTranscriptMessage(response);
         transcript.push(assistantMessage);
