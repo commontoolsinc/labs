@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { fromFileUrl } from "@std/path";
 import type { CfcEnforcementMode, IFCLabel } from "@commonfabric/runner/cfc";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
@@ -27,6 +28,9 @@ const FABRIC_MOUNT = Deno.env.get("CF_HARNESS_INTEGRATION_FABRIC_MOUNT");
 const FABRIC_INTEGRATION = INTEGRATION &&
   FABRIC_MOUNT !== undefined &&
   FABRIC_MOUNT.trim() !== "";
+const CF_CLI_INTEGRATION = INTEGRATION &&
+  Deno.env.get("CF_HARNESS_INTEGRATION_CF_CLI") === "1";
+const LABS_ROOT_URL = new URL("../../..", import.meta.url);
 
 const defaultCfcPolicyFile = (): string => {
   const home = Deno.env.get("HOME");
@@ -55,6 +59,9 @@ const makeIntegrationTempDir = async (prefix: string): Promise<string> =>
     prefix,
     dir: await integrationTempRoot(),
   });
+
+const labsRootPath = (): Promise<string> =>
+  Deno.realPath(fromFileUrl(LABS_ROOT_URL));
 
 interface WithHarnessOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
@@ -210,6 +217,32 @@ Deno.test({
       },
       { cfcEnforcementMode: "observe" },
     );
+  },
+});
+
+Deno.test({
+  name: "cf-harness integration: local Labs deno task cf help runs in sandbox",
+  ignore: !CF_CLI_INTEGRATION,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    await assertRunscRuntimeAvailable();
+    const engine = new CfHarnessEngine({
+      runId: "integration-cf-cli-help",
+      cfcEnforcementMode: "observe",
+      sandbox: resolveDockerRunscSandboxConfig({
+        workspaceHostPath: await labsRootPath(),
+        runtimeName: DOCKER_RUNTIME,
+        image: DOCKER_IMAGE,
+      }),
+    });
+
+    const result = await engine.invokeBuiltinTool("bash", {
+      command: "deno task cf --help",
+      timeoutMs: 120_000,
+    });
+    assertEquals(result.output.exitCode, 0);
+    assertStringIncludes(result.output.stdout, "Usage:");
+    assertStringIncludes(result.output.stdout, "cf");
   },
 });
 

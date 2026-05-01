@@ -167,6 +167,7 @@ Deno.test("DockerRunscSandboxRuntime describe preserves custom CFC runtime alias
     resolveDockerRunscSandboxConfig({
       workspaceHostPath: "/host/project",
       runtimeName: "corp-runsc-prod",
+      image: "sandbox:deno2",
     }),
   );
   const description = runtime.describe();
@@ -176,6 +177,7 @@ Deno.test("DockerRunscSandboxRuntime describe preserves custom CFC runtime alias
 
   assertEquals(description.cfc.runtimeRequested, true);
   assertEquals(description.cfc.runtimeName, "corp-runsc-prod");
+  assertEquals(description.cfc.image, "sandbox:deno2");
 });
 
 Deno.test("resolveDockerRunscSandboxConfig normalizes a Fabric FUSE mount", () => {

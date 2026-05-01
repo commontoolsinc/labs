@@ -35,6 +35,7 @@ What works today:
 - default sandbox image aligned with the public CFC kitchen-sink image published
   from the sibling `gvisor` repo:
   - `us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest`
+  - override per run with `--sandbox-image` or `CF_HARNESS_SANDBOX_IMAGE`
 - built-in tools:
   - `bash`
   - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
@@ -166,6 +167,21 @@ deno task run -- \
   --prompt "Build this pattern."
 ```
 
+Sandbox image override:
+
+```bash
+deno task run -- \
+  --workspace /path/to/common-fabric-2 \
+  --cwd pattern-factory \
+  --gateway-auth-mode none \
+  --sandbox-image registry.example/cf-harness-sandbox:deno2 \
+  --prompt "Run deno task cf --help and report whether it works."
+```
+
+Use this for Deno 2 / Common Fabric CLI validation while keeping the mounted
+workspace as the source of truth for Labs, Pattern Factory, and Loom code. Run
+reports include the selected sandbox image in the capability snapshot.
+
 Loom-backed batch runs may also pass a retained manifest:
 
 ```bash
@@ -279,6 +295,21 @@ deno task test:integration
 The integration suite requires a working local Docker + `runsc-cfc` environment.
 By default it also uses the published kitchen-sink image above, unless you
 override `CF_HARNESS_INTEGRATION_IMAGE`.
+
+To opt into a local Labs CLI smoke inside the sandbox, use a Deno 2-compatible
+image and enable the CF CLI case:
+
+```bash
+cd packages/cf-harness
+CF_HARNESS_INTEGRATION_IMAGE=registry.example/cf-harness-sandbox:deno2 \
+CF_HARNESS_INTEGRATION_CF_CLI=1 \
+deno task test:integration
+```
+
+That case mounts the current Labs checkout as `/workspace` and runs
+`deno task cf --help` inside the `runsc-cfc` sandbox. It is skipped by default
+because the published kitchen-sink image may not have the required Deno version
+or cache state.
 
 To also exercise a real host Fabric FUSE mount bind-mounted into the sandbox at
 `/fabric`, start `cf fuse mount` separately and pass the mountpoint:
