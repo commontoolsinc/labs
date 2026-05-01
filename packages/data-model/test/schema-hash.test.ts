@@ -6,6 +6,7 @@ import {
   assertNotStrictEquals,
   assertStrictEquals,
 } from "@std/assert";
+import { expect } from "@std/expect";
 import {
   findInternedSchema,
   hashSchema,
@@ -291,8 +292,8 @@ describe("schema-hash dispatch", () => {
     it("defaults to `wantSchemaAndHash = false`", () => {
       const hash = internSchema({}, true).hash;
       const result = findInternedSchema(hash);
-      assert(result !== undefined);
-      assert(!(result instanceof SchemaAndHash));
+      expect(result).not.toBe(undefined);
+      expect(result).not.toBeInstanceOf(SchemaAndHash);
     });
 
     for (const wantSah of [false, true]) {
@@ -300,8 +301,9 @@ describe("schema-hash dispatch", () => {
         const result = findInternedSchema(hash, wantSah);
 
         if (wantSah && (result !== undefined)) {
-          assert(result instanceof SchemaAndHash);
-          assert(result.hash instanceof FabricHash);
+          const resultSah = result as SchemaAndHash;
+          expect(resultSah).toBeInstanceOf(SchemaAndHash);
+          expect(resultSah.hash).toBeInstanceOf(FabricHash);
         }
 
         return result;
