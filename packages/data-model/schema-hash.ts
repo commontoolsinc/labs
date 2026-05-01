@@ -15,21 +15,15 @@ import { hashOf, hashStringOf } from "./value-hash.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Compute a deterministic hash of a JSONSchema.
- * Structurally-equal schemas always produce the same hash.
- * Returns a string for use as a map key or cache key.
+ * Compute a deterministic hash of a JSONSchema. Structurally-equal schemas
+ * always produce the same hash. Returns a string for use as a map key or cache
+ * key.
+ *
+ * This function is a pass-through to `hashStringOf()`, just with a narrower
+ * argument type.
  */
 export function hashSchema(schema: JSONSchema): string {
   return hashStringOf(schema);
-}
-
-/**
- * Compute a deterministic hash of a schema-related item (e.g. a
- * path selector, a value descriptor, etc.). Structurally-equal items
- * always produce the same hash. Returns a string.
- */
-export function hashSchemaItem(item: FabricValue): string {
-  return hashStringOf(item);
 }
 
 // ---------------------------------------------------------------------------

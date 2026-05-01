@@ -10,7 +10,6 @@ import { expect } from "@std/expect";
 import {
   findInternedSchema,
   hashSchema,
-  hashSchemaItem,
   internSchema,
   internSchemaAsHashString,
   isInternedSchema,
@@ -55,25 +54,6 @@ describe("schema-hash dispatch", () => {
       const a = hashSchema({ type: "object", title: "A" } as JSONSchema);
       const b = hashSchema({ title: "A", type: "object" } as JSONSchema);
       assertStrictEquals(a, b);
-    });
-  });
-
-  describe("hashSchemaItem()", () => {
-    it("returns a string", () => {
-      const result = hashSchemaItem("hello");
-      assertStrictEquals(typeof result, "string");
-    });
-
-    it("is deterministic", () => {
-      const a = hashSchemaItem(42);
-      const b = hashSchemaItem(42);
-      assertStrictEquals(a, b);
-    });
-
-    it("produces different results for different values", () => {
-      const a = hashSchemaItem("foo");
-      const b = hashSchemaItem("bar");
-      assertNotEquals(a, b);
     });
   });
 
