@@ -10,7 +10,7 @@ import type { CellRef, RuntimeClient } from "@commonfabric/runtime-client";
 import { serializeEvent } from "./events.ts";
 import type { DomEventMessage } from "./events.ts";
 import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
-import { CellHandle } from "@commonfabric/runtime-client";
+import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -389,6 +389,14 @@ export class DomApplicator {
   private setBinding(nodeId: number, propName: string, cellRef: CellRef): void {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
+
+    const existing = (node as any)[propName];
+    if (
+      existing instanceof CellHandle &&
+      cellRefToKey(existing.ref()) === cellRefToKey(cellRef)
+    ) {
+      return;
+    }
 
     // Create a CellHandle from the CellRef
     const cellHandle = new CellHandle(this.runtimeClient, cellRef);

@@ -1445,28 +1445,24 @@ export class CellImpl<T extends FabricValue>
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
+    const sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
       { ...this.link, path: ["source"] } as IMemorySpaceAddress,
       {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
       },
-    ) as string | undefined;
+    );
     if (!sourceCellId) return undefined;
-    if (isRecord(sourceCellId)) {
-      sourceCellId = toURI(sourceCellId);
-    } else if (
-      typeof sourceCellId === "string" && sourceCellId.startsWith('{"/":')
-    ) {
-      sourceCellId = toURI(JSON.parse(sourceCellId));
+    if (!isRecord(sourceCellId)) {
+      throw new Error(
+        `Source cell ID expected to be a record link, got: ${typeof sourceCellId}`,
+      );
     }
+    const sourceCellIdString = toURI(sourceCellId);
 
-    if (typeof sourceCellId !== "string" || !sourceCellId.startsWith("of:")) {
-      throw new Error("Source cell ID must start with 'of:'");
-    }
     return createCell(this.runtime, {
       space: this.link.space,
       path: [],
-      id: toURI(sourceCellId),
+      id: sourceCellIdString,
       type: "application/json",
       schema: schema,
     }, this.tx) as Cell<any>;

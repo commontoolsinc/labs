@@ -195,6 +195,88 @@ describe("push-triggered filtering", () => {
     ]);
   });
 
+  it("should not broaden current-known writes to structural parent paths", async () => {
+    const root = runtime.getCell<Record<string, unknown>>(
+      space,
+      "mw-structural-parent-root",
+      undefined,
+      tx,
+    );
+    root.set({ internal: {} });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const child = root.key("internal").key("__#0");
+    const declaredWrite = child.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        child.withTx(actionTx).set({ result: "ready" });
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredWrite)],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
+  });
+
+  it("should keep dynamic collection parent writes for numeric children", async () => {
+    const root = runtime.getCell<{ list: Record<string, unknown> }>(
+      space,
+      "mw-dynamic-collection-root",
+      undefined,
+      tx,
+    );
+    root.set({ list: {} });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const list = root.key("list");
+    const declaredWrite = list.getAsNormalizedFullLink();
+    const firstChild = list.key("0").getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        list.withTx(actionTx).key("0").set({ label: "first" });
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredWrite)],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
+    expect(runtime.scheduler.getMightWrite(action)).not.toEqual([
+      toMemorySpaceAddress(firstChild),
+    ]);
+  });
+
   it("should track filter stats", async () => {
     runtime.scheduler.resetFilterStats();
 

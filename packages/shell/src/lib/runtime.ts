@@ -239,6 +239,7 @@ export class RuntimeInternals extends EventTarget {
       const spaceRoot = await this.getSpaceRootPattern();
       const addPiece = spaceRoot.cell().key("addPiece" as any);
       await (addPiece as any).send({ piece: cell });
+      await spaceRoot.cell().sync();
     } catch (e) {
       console.error(
         "[RuntimeInternals] Failed to register navigated piece:",

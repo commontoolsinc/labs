@@ -48,8 +48,7 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory/v2",
   "flags": {
     "richStorableValues": true,
-    "unifiedJsonEncoding": true,
-    "modernSchemaHash": false
+    "unifiedJsonEncoding": true
   }
 }
 ```
@@ -62,8 +61,7 @@ If the server accepts the protocol, it returns:
   "protocol": "memory/v2",
   "flags": {
     "richStorableValues": true,
-    "unifiedJsonEncoding": true,
-    "modernSchemaHash": false
+    "unifiedJsonEncoding": true
   }
 }
 ```
@@ -143,7 +141,6 @@ interface HelloMessage {
   flags: {
     richStorableValues: boolean;
     unifiedJsonEncoding: boolean;
-    modernSchemaHash: boolean;
   };
 }
 

@@ -20,6 +20,8 @@ import type {
 } from "@commonfabric/api";
 import { llmDialog } from "./llm-dialog.ts";
 
+const WISH_DEBOUNCE_MS = 50;
+
 /**
  * Register all built-in modules with a runtime's module registry
  */
@@ -60,5 +62,8 @@ export function registerBuiltins(runtime: Runtime) {
     "navigateTo",
     raw(navigateTo),
   );
-  moduleRegistry.addModuleByRef("wish", raw(wish));
+  moduleRegistry.addModuleByRef(
+    "wish",
+    raw(wish, { debounce: WISH_DEBOUNCE_MS }),
+  );
 }

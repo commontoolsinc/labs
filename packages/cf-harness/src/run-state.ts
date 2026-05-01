@@ -11,6 +11,7 @@ import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type {
   HarnessSkillActivations,
   HarnessSkillRegistry,
+  HarnessSkillResourceReads,
 } from "./contracts/skill.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
@@ -52,6 +53,8 @@ export interface HarnessRunState {
   skillRegistryPath?: string;
   skillActivations?: HarnessSkillActivations;
   skillActivationsPath?: string;
+  skillResourceReads?: HarnessSkillResourceReads;
+  skillResourceReadsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -85,6 +88,8 @@ export interface CreateHarnessRunStateOptions {
   skillRegistryPath?: string;
   skillActivations?: HarnessSkillActivations;
   skillActivationsPath?: string;
+  skillResourceReads?: HarnessSkillResourceReads;
+  skillResourceReadsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -140,6 +145,12 @@ export const createHarnessRunState = (
       : {}),
     ...(options.skillActivationsPath !== undefined
       ? { skillActivationsPath: options.skillActivationsPath }
+      : {}),
+    ...(options.skillResourceReads !== undefined
+      ? { skillResourceReads: options.skillResourceReads }
+      : {}),
+    ...(options.skillResourceReadsPath !== undefined
+      ? { skillResourceReadsPath: options.skillResourceReadsPath }
       : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
@@ -344,6 +355,18 @@ export const setHarnessSkillActivations = (
   ...state,
   skillActivations,
   ...(skillActivationsPath !== undefined ? { skillActivationsPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessSkillResourceReads = (
+  state: HarnessRunState,
+  skillResourceReads: HarnessSkillResourceReads,
+  skillResourceReadsPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  skillResourceReads,
+  ...(skillResourceReadsPath !== undefined ? { skillResourceReadsPath } : {}),
   updatedAt: now,
 });
 

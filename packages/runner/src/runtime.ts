@@ -22,10 +22,6 @@ import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
 } from "@commonfabric/data-model/json-encoding";
-import {
-  resetSchemaHashConfig,
-  setSchemaHashConfig,
-} from "@commonfabric/data-model/schema-hash";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import { getDefaultMemoryVersion } from "./storage/interface.ts";
@@ -158,8 +154,6 @@ export interface ExperimentalOptions {
   richStorableValues?: boolean | undefined;
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean | undefined;
-  /** Enable modern schema hashing, replacing stableStringify-based schema hashing. */
-  modernSchemaHash?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
 }
@@ -318,7 +312,6 @@ export class Runtime {
       modernDataModel: undefined,
       richStorableValues: undefined,
       unifiedJsonEncoding: undefined,
-      modernSchemaHash: undefined,
       schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
@@ -344,7 +337,6 @@ export class Runtime {
     // Propagate experimental flags to the memory layer's ambient config.
     setDataModelConfig(this.experimental.modernDataModel);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
-    setSchemaHashConfig(this.experimental.modernSchemaHash);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -518,7 +510,6 @@ export class Runtime {
     // Reset experimental fabric config to defaults
     resetDataModelConfig();
     resetJsonEncodingConfig();
-    resetSchemaHashConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

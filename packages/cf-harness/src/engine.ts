@@ -27,6 +27,7 @@ import {
   setHarnessRunStatus,
   setHarnessSkillActivations,
   setHarnessSkillRegistry,
+  setHarnessSkillResourceReads,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
 import {
@@ -59,6 +60,7 @@ import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type {
   HarnessSkillActivations,
   HarnessSkillRegistry,
+  HarnessSkillResourceRead,
 } from "./contracts/skill.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import {
@@ -98,6 +100,10 @@ import {
   type ReadFileToolOutput,
 } from "./tools/read-file.ts";
 import {
+  type ReadSkillResourceToolInput,
+  type ReadSkillResourceToolOutput,
+} from "./tools/read-skill-resource.ts";
+import {
   type WriteFileToolInput,
   type WriteFileToolOutput,
 } from "./tools/write-file.ts";
@@ -107,6 +113,7 @@ export interface BuiltinToolInputMap {
   bash: BashToolInput;
   "bash-no-sandbox": BashToolInput;
   read_file: ReadFileToolInput;
+  read_skill_resource: ReadSkillResourceToolInput;
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
 }
@@ -115,6 +122,7 @@ export interface BuiltinToolOutputMap {
   bash: BashToolOutput;
   "bash-no-sandbox": BashToolOutput;
   read_file: ReadFileToolOutput;
+  read_skill_resource: ReadSkillResourceToolOutput;
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
 }
@@ -449,6 +457,28 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return skillActivationsPath;
+  }
+
+  async recordSkillResourceRead(
+    read: HarnessSkillResourceRead,
+  ): Promise<string | undefined> {
+    const generatedAt = this.#now();
+    const skillResourceReads = {
+      type: "cf-harness.skill-resource-reads" as const,
+      version: 1 as const,
+      generatedAt,
+      reads: [...(this.#runState.skillResourceReads?.reads ?? []), read],
+    };
+    const skillResourceReadsPath = await this.artifactStore
+      ?.persistSkillResourceReads?.(skillResourceReads);
+    this.#runState = setHarnessSkillResourceReads(
+      this.#runState,
+      skillResourceReads,
+      skillResourceReadsPath,
+      generatedAt,
+    );
+    await this.persistRunState();
+    return skillResourceReadsPath;
   }
 
   nextToolOutputId(toolId: string): ToolOutputId {
@@ -836,6 +866,82 @@ export class CfHarnessEngine {
     return false;
   }
 
+  async #realHostPath(path: string): Promise<string | undefined> {
+    try {
+      return normalizeHostPath(await Deno.realPath(path));
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #nearestExistingRealHostPath(
+    path: string,
+  ): Promise<string | undefined> {
+    let candidate = normalizeHostPath(path);
+    while (true) {
+      const realPath = await this.#realHostPath(candidate);
+      if (realPath !== undefined) {
+        return realPath;
+      }
+      const parent = dirname(candidate);
+      if (parent === candidate) {
+        return undefined;
+      }
+      candidate = parent;
+    }
+  }
+
+  async #isHostPathWithinArtifactRoot(
+    path: string,
+    options: { allowMissing?: boolean } = {},
+  ): Promise<boolean> {
+    const root = this.artifactStore?.artifactRoot;
+    if (root === undefined) {
+      return false;
+    }
+    const normalizedRoot = normalizeHostPath(root);
+    const normalizedPath = normalizeHostPath(path);
+    if (isHostPathWithinRoot(normalizedRoot, normalizedPath)) {
+      return true;
+    }
+    const realRoot = await this.#realHostPath(normalizedRoot);
+    if (realRoot === undefined) {
+      return false;
+    }
+    const realPath = options.allowMissing === true
+      ? await this.#nearestExistingRealHostPath(normalizedPath)
+      : await this.#realHostPath(normalizedPath);
+    return realPath !== undefined && isHostPathWithinRoot(realRoot, realPath);
+  }
+
+  async #doesHostPathIntersectArtifactRoot(
+    path: string,
+    options: { allowMissing?: boolean } = {},
+  ): Promise<boolean> {
+    const root = this.artifactStore?.artifactRoot;
+    if (root === undefined) {
+      return false;
+    }
+    const normalizedRoot = normalizeHostPath(root);
+    const normalizedPath = normalizeHostPath(path);
+    if (
+      isHostPathWithinRoot(normalizedRoot, normalizedPath) ||
+      isHostPathWithinRoot(normalizedPath, normalizedRoot)
+    ) {
+      return true;
+    }
+    const realRoot = await this.#realHostPath(normalizedRoot);
+    if (realRoot === undefined) {
+      return false;
+    }
+    const realPath = options.allowMissing === true
+      ? await this.#nearestExistingRealHostPath(normalizedPath)
+      : await this.#realHostPath(normalizedPath);
+    return realPath !== undefined &&
+      (isHostPathWithinRoot(realRoot, realPath) ||
+        isHostPathWithinRoot(realPath, realRoot));
+  }
+
   async #createCfcInvocationContext(options: {
     toolId: string;
     toolOutputId?: ToolOutputId;
@@ -888,6 +994,7 @@ export class CfHarnessEngine {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
       currentDir: this.#runState.currentDir,
+      skillRegistry: this.#runState.skillRegistry,
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,
       resolvePath: (path: string) =>
@@ -899,6 +1006,14 @@ export class CfHarnessEngine {
         path: string,
         options?: { allowMissing?: boolean },
       ) => this.#isHostPathWithinWorkspace(path, options),
+      isHostPathWithinArtifactRoot: (
+        path: string,
+        options?: { allowMissing?: boolean },
+      ) => this.#isHostPathWithinArtifactRoot(path, options),
+      doesHostPathIntersectArtifactRoot: (
+        path: string,
+        options?: { allowMissing?: boolean },
+      ) => this.#doesHostPathIntersectArtifactRoot(path, options),
       setCurrentDir: (path: string) => {
         const resolved = this.sandbox.resolvePath(
           path,
@@ -912,6 +1027,10 @@ export class CfHarnessEngine {
       },
       nextOutputId: (toolId: string) => {
         return this.nextToolOutputId(toolId);
+      },
+      now: () => this.#now(),
+      recordSkillResourceRead: async (read: HarnessSkillResourceRead) => {
+        await this.recordSkillResourceRead(read);
       },
       createCfcInvocationContext: (options: {
         toolId: string;

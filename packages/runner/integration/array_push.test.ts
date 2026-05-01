@@ -67,7 +67,6 @@ function createRuntime(identity: Identity, base: URL): Runtime {
     }),
     experimental: {
       modernDataModel: readExperimentalFlag("EXPERIMENTAL_MODERN_DATA_MODEL"),
-      modernSchemaHash: readExperimentalFlag("EXPERIMENTAL_MODERN_SCHEMA_HASH"),
     },
   });
 }

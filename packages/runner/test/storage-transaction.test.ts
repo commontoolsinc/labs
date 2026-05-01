@@ -9,7 +9,6 @@ import type {
   IMemorySpaceAddress,
   INotFoundError,
 } from "../src/storage/interface.ts";
-import { getEntityId } from "../src/create-ref.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -329,49 +328,6 @@ describe("StorageTransaction", () => {
   });
 
   describe("source path behavior", () => {
-    it("should write and read the sourceCell via the 'source' path", () => {
-      const transaction = runtime.edit();
-      // Create two docs
-      const doc1Id = "of:doc1";
-      const doc2Id = "of:doc2";
-      // Write to root of both docs
-      expect(
-        transaction.write({
-          space,
-          id: doc1Id,
-          type: "application/json",
-          path: [],
-        }, { value: { foo: 1 } }).ok,
-      ).toBeDefined();
-      expect(
-        transaction.write({
-          space,
-          id: doc2Id,
-          type: "application/json",
-          path: [],
-        }, { value: { bar: 2 } }).ok,
-      ).toBeDefined();
-      // Set doc1's sourceCell to doc2
-      const setSource = transaction.write({
-        space,
-        id: doc1Id,
-        type: "application/json",
-        path: ["source"],
-      }, JSON.stringify(getEntityId(doc2Id)));
-      expect(setSource.ok).toBeDefined();
-      // Read back the sourceCell
-      const readSource = transaction.read({
-        space,
-        id: doc1Id,
-        type: "application/json",
-        path: ["source"],
-      });
-      expect(readSource.ok).toBeDefined();
-      expect(readSource.ok?.value).toEqual(
-        JSON.parse(JSON.stringify(getEntityId(doc2Id))),
-      );
-    });
-
     it("should error if path beyond 'source' is used", () => {
       const transaction = runtime.edit();
       const doc1Id = "of:doc1";

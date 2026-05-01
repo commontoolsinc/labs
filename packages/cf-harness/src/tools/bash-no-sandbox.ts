@@ -82,6 +82,7 @@ export const bashNoSandboxTool: HarnessToolDefinition<
       context,
       hostCwd,
       plan.workspacePathArgs,
+      plan.argv,
     );
     if (hostPathFailure !== undefined) {
       context.setCurrentDir(commandCwd);
@@ -131,11 +132,22 @@ const validateHostWorkspacePaths = async (
   context: HarnessToolContext,
   hostCwd: string,
   workspacePathArgs: readonly string[],
+  argv: readonly string[],
 ): Promise<string | undefined> => {
   if (!(await context.isHostPathWithinWorkspace(hostCwd))) {
     return `cwd ${hostCwd} must resolve within the workspace`;
   }
-  for (const pathArg of workspacePathArgs) {
+  if (
+    await context.isHostPathWithinArtifactRoot(hostCwd, { allowMissing: true })
+  ) {
+    return `cwd ${
+      context.hostPathToWorkspacePath(hostCwd) ?? hostCwd
+    } is reserved for cf-harness artifacts`;
+  }
+  const pathArgs = argv[0] === "ls" && workspacePathArgs.length === 0
+    ? ["."]
+    : workspacePathArgs;
+  for (const pathArg of pathArgs) {
     const hostPath = normalize(join(hostCwd, pathArg));
     if (
       !(await context.isHostPathWithinWorkspace(hostPath, {
@@ -143,6 +155,13 @@ const validateHostWorkspacePaths = async (
       }))
     ) {
       return `path ${pathArg} must resolve within or below the workspace`;
+    }
+    if (
+      await context.doesHostPathIntersectArtifactRoot(hostPath, {
+        allowMissing: true,
+      })
+    ) {
+      return `path ${pathArg} is reserved for cf-harness artifacts`;
     }
   }
   return undefined;
