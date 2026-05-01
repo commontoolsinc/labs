@@ -2,8 +2,8 @@ import { assertAlmostEquals, assertEquals } from "@std/assert";
 import {
   computeBaseline,
   extractMetrics,
+  fetchPRBody,
   type Job,
-  readPRBodyFromEventPayload,
   type Step,
   type WorkflowRun,
 } from "./perf-lib.ts";
@@ -103,25 +103,26 @@ Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 15 percent
   assertEquals(baseline?.threshold, 160);
 });
 
-Deno.test("readPRBodyFromEventPayload reads matching pull request bodies", async () => {
-  const eventPath = await Deno.makeTempFile();
+Deno.test("fetchPRBody reads the live pull request body from the GitHub API", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl: string | undefined;
   try {
-    await Deno.writeTextFile(
-      eventPath,
-      JSON.stringify({
-        pull_request: {
-          number: 3427,
-          body: "NEW_PERF_BASELINE: job: Test = 300s",
-        },
-      }),
-    );
+    globalThis.fetch = ((input, _init) => {
+      requestedUrl = input instanceof Request ? input.url : String(input);
+      return Promise.resolve(
+        new Response(JSON.stringify({ body: "LIVE PR BODY" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
 
+    assertEquals(await fetchPRBody(3427), "LIVE PR BODY");
     assertEquals(
-      await readPRBodyFromEventPayload(3427, eventPath),
-      "NEW_PERF_BASELINE: job: Test = 300s",
+      requestedUrl,
+      "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
     );
-    assertEquals(await readPRBodyFromEventPayload(1, eventPath), undefined);
   } finally {
-    await Deno.remove(eventPath);
+    globalThis.fetch = originalFetch;
   }
 });

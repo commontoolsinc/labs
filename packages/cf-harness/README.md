@@ -6,7 +6,8 @@ use case.
 
 The package is intentionally early and experimental. It already has a real
 execution core, a bounded prompt/tool loop, persistence, resumability, a thin
-operator CLI, and the first pass of CFC-aware deny/recovery shaping.
+operator CLI, explicit Agent Skills preload, and the first pass of CFC-aware
+deny/recovery shaping.
 
 ## Why This Exists
 
@@ -40,10 +41,15 @@ What works today:
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser child profiles, retained child run references, and a sanitized
   summary/state return channel
+- optional schema-validated subagent structured returns, with raw child return
+  artifacts retained in the child run and open-ended strings linkified before
+  the parent sees them
 - persisted run state, transcript, Loom run manifests, capability snapshots, and
-  tool outputs
+  tool outputs, plus explicit skill registry and activation artifacts
 - transcript-based resumability
 - package-local operator CLI
+- explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
+- runtime-generated supporting-resource indexes in `skill-registry.json`
 - CFC mode plumbing with:
   - `disabled`
   - `observe`
@@ -61,9 +67,12 @@ What works today:
 What is not done yet:
 
 - real runner-driven CFC feedback integration
-- richer opaque-handle/pass-through behavior
+- richer opaque-handle/pass-through behavior outside schema-validated subagent
+  returns
 - first-class browser operation policy on top of the provisional browser
   subagent profile
+- dynamic/model-driven Agent Skills activation and supporting-file resource
+  reads
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses
@@ -82,11 +91,15 @@ What is not done yet:
 - [src/artifacts.ts](src/artifacts.ts)
   - persisted run state, run manifest, transcript, capability snapshot, and tool
     output storage
+- [src/skills/](src/skills/)
+  - Agent Skills registry scanning, validation, and explicit preload context
 - [src/contracts/](src/contracts/)
-  - prompt-slot, run-manifest, observation, policy, run-report, subagent,
+  - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
     transcript, and tool-result contracts
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
+- [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
+  - staged Agent Skills support design
 
 ## Commands
 
@@ -120,6 +133,19 @@ deno task run -- \
   --print-transcript
 ```
 
+Explicit skill preload:
+
+```bash
+deno task run -- \
+  --workspace /path/to/common-fabric-2 \
+  --cwd pattern-factory \
+  --gateway-auth-mode none \
+  --skills-root labs/skills \
+  --skill pattern-dev \
+  --skill pattern-implement \
+  --prompt "Build this pattern."
+```
+
 Loom-backed batch runs may also pass a retained manifest:
 
 ```bash
@@ -145,17 +171,56 @@ deno task run -- \
 The provisional browser profile is the only CLI-supported path to
 `bash-no-sandbox`. It gives the child a host shell so it can invoke
 `agent-browser`, while the parent still receives only the normal sanitized
-subagent result. The host shell is policy-restricted to `agent-browser`,
-`agent-browser` discovery (`which agent-browser`, `command -v agent-browser`),
-`pwd`, `ls`, and bounded workspace-local `find` commands:
+subagent result. Browser/page output is treated as untrusted child-local data;
+with a `returnSchema`, parent-visible free-form strings are replaced by opaque
+links while raw observations stay in child artifacts. The browser child can read
+workspace files but does not receive `write_file`, so it should return findings
+through the structured return channel rather than by writing browser
+observations into the workspace. The host shell is policy-restricted to
+`agent-browser`, `agent-browser` discovery (`which agent-browser`,
+`command -v agent-browser`), `pwd`, `ls`, and bounded workspace-local `find`
+commands. `agent-browser eval` is not available in this profile; browser
+subagents should inspect pages with commands such as `snapshot`, `get`, `find`,
+locator actions, and normal browser interactions.
+
+For browser-profile runs, prefer a host artifact root outside the workspace. Raw
+child artifacts are retained for operator analysis, but they are not meant to
+become ordinary workspace inputs for the parent model.
 
 ```bash
+ROOT=/tmp/cf-harness-browser-demo
+mkdir -p "$ROOT/workspace" "$ROOT/artifacts"
+
 deno task run -- \
-  --workspace /path/to/workspace \
+  --workspace "$ROOT/workspace" \
+  --artifact-root "$ROOT/artifacts" \
   --gateway-auth-mode none \
   --allow-tool delegate_task \
   --allow-subagent-profile browser \
   --prompt "Delegate browser inspection of the local app and summarize the result."
+```
+
+Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
+object or boolean. In that mode the child is required to return a single JSON
+value. The harness validates it, stores the raw child return under the child
+artifact root, and exposes `subagent.structuredReturn.value` to the parent with
+free-form strings and objects with unmodeled keys replaced by opaque `@link`
+objects such as `opaque:<child-run-id>#/json/pointer`:
+
+```json
+{
+  "goal": "Assess the briefing and return only the decision facts.",
+  "returnSchema": {
+    "type": "object",
+    "properties": {
+      "approved": { "type": "boolean" },
+      "status": { "type": "string", "enum": ["approved", "not_approved"] },
+      "summary": { "type": "string" }
+    },
+    "required": ["approved", "status", "summary"],
+    "additionalProperties": false
+  }
+}
 ```
 
 Current caveat:
@@ -167,6 +232,10 @@ Current caveat:
   - Loom's `cf-harness` adapter defaults to `none`
 - confirm the intended gateway/auth mode for the environment you are testing
   against
+- skills support is explicit preload only for now:
+  - `--skill` requires `--skills-root`
+  - skill preload is not supported with `--resume-run`
+  - dynamic `load_skill` activation is still planned
 
 ## Testing
 

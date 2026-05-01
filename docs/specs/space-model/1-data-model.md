@@ -548,6 +548,23 @@ translation from "native types" to JSON. Other encodings like CBOR may represent
 types more directly — for example, using CBOR's native byte array rather than `{
 "/Bytes@1": "base64..." }`.
 
+> **Pointer to formal spec.** The mechanics summarized in this section —
+> tagged-key form, escapes, detection, and the `/`-key reservation rule — are
+> defined precisely in the formal spec at `space-model-formal-spec/3-json-encoding.md`.
+> The text below is a prose summary; the formal spec is authoritative on
+> conformance details.
+
+#### Encoding Prefix: `fvj1:`
+
+Every encoded fabric value carries a literal `fvj1:` prefix in front of the
+JSON itself. The prefix lets a recipient distinguish, at a glance, JSON that
+came from the fabric encoder from arbitrary JSON of unrelated origin.
+"`fvj1`" stands for "Fabric Value JSON, version 1"; the trailing version
+digit reserves space for future incompatible revisions of the wire format.
+
+For full details — including how decoders verify and strip the prefix —
+see Section 1.1 of the formal spec.
+
 #### Current State: Three Conventions
 
 The current system uses three different conventions for special object shapes:
@@ -596,13 +613,15 @@ whatever representation makes the most sense in their context.
 
 #### Detection
 
-A value is a special type if:
-1. It is a plain object
-2. It has exactly one key
-3. That key starts with `/`
+In the JSON wire format, **any plain object containing at least one key that
+starts with `/`** is a reserved form — either a tagged value, a built-in
+escape, or an encoding error. The common case is a single-key object whose
+sole key starts with `/` (a tagged value); multi-key objects with one or
+more `/`-prefixed keys are also reserved (see "Reservation Rule" below for
+how each form is interpreted).
 
-This simple rule is quick to check and provides maximum flexibility to evolve
-the key format.
+This rule provides maximum flexibility to evolve the key format while
+keeping the boundary between encoding signals and user data unambiguous.
 
 #### Stateless Types
 
@@ -655,6 +674,38 @@ Use cases for `/quote`:
 - `/object`: You have a plain object with a slash-prefixed key, but values should
   still be interpreted normally
 - `/quote`: You want the entire subtree treated as literal JSON data
+
+**Encoder dispatch (recommended best practice).** When the encoder must wrap
+a plain object with `/`-prefixed keys, both forms are valid wire output, but
+the recommended choice is `/quote` when the entire subtree is fully literal
+(no descendants need encoding) and `/object` otherwise. The wire form is
+unambiguous either way — a conforming encoder may emit `/object` in any
+case, and **a conforming decoder must accept both forms**. See Section 6 of
+the formal spec for the precise dispatch rule and motivation.
+
+#### Reservation Rule
+
+The `/` prefix is wholly owned by the encoding system in the wire format.
+That means a wire-format object containing any `/`-prefixed key is always
+either a tagged value, a built-in escape, or an encoding error — never a
+literal user-data key. User-data plain objects may carry `/`-prefixed keys
+at the data level, but a conforming encoder always wraps them via `/object`
+or `/quote` before they reach the wire (see Escaping above).
+
+Concretely:
+
+- A bare `"/"` key (i.e. the tag name is empty after stripping the leading
+  `/`) is always an encoding error. Decoders should produce a
+  `ProblematicValue` rather than treating it as a tagged form.
+- A single-key object whose sole key starts with `/` is a tagged value of
+  a known type, a built-in escape (`/object`, `/quote`), or an unrecognized
+  tag (preserved as `UnknownValue` for round-tripping).
+- A multi-key object containing one or more `/`-prefixed keys among its
+  keys is a structural encoding error — also `ProblematicValue`. It is not
+  a valid plain object.
+
+See Section 9 of the formal spec for the full rule and the
+`ProblematicValue` interpretation across the cases above.
 
 #### Unknown Type Handling
 

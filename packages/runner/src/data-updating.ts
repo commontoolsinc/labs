@@ -5,6 +5,7 @@ import {
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
@@ -282,7 +283,7 @@ export function diffAndUpdate(
   );
   diffLogger.debug(
     "diff",
-    () => `[diffAndUpdate] changes: ${JSON.stringify(changes)}`,
+    () => `[diffAndUpdate] changes: ${toCompactDebugString(changes)}`,
   );
   applyChangeSet(tx, changes);
   return changes.length > 0;
@@ -333,7 +334,7 @@ export function normalizeAndDiff(
     "diff",
     () =>
       `[DIFF_ENTER] path=${pathStr} type=${valueType} newValue=${
-        JSON.stringify(newValue as any)
+        toCompactDebugString(newValue)
       }`,
   );
 
@@ -547,7 +548,7 @@ export function normalizeAndDiff(
       "diff",
       () =>
         `[BRANCH_CELL_LINK] Processing cell link at path=${pathStr} link=${
-          JSON.stringify(newValue as any)
+          toCompactDebugString(newValue)
         }`,
     );
     const carriedCfcLabelView = cfcLabelViewForPrimitiveLink(newValue);

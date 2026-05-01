@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
 import type { BuiltinToolId } from "./tool-descriptor.ts";
 
@@ -16,7 +17,6 @@ export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
 export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash-no-sandbox",
   "read_file",
-  "write_file",
 ] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
@@ -102,6 +102,8 @@ export interface HarnessSubagentInputSummary {
   goalDigest: string;
   contextBytes?: number;
   contextDigest?: string;
+  returnSchemaBytes?: number;
+  returnSchemaDigest?: string;
 }
 
 export interface HarnessSubagentRunManifest {
@@ -155,6 +157,17 @@ export interface HarnessSubagentRunStateSummary {
   primaryFailure?: HarnessSubagentFailureSummary;
 }
 
+export interface HarnessSubagentStructuredReturn {
+  type: "cf-harness.subagent-structured-return";
+  status: "valid" | "invalid";
+  schemaDigest: string;
+  rawOutputId: string;
+  rawArtifactPath?: string;
+  value?: unknown;
+  linkedStringCount?: number;
+  validationError?: string;
+}
+
 export interface HarnessSubagentResult {
   type: "cf-harness.subagent-result";
   childRunId: string;
@@ -164,6 +177,7 @@ export interface HarnessSubagentResult {
   modelTurns: number;
   runState: HarnessSubagentRunStateSummary;
   manifest: HarnessSubagentRunManifest;
+  structuredReturn?: HarnessSubagentStructuredReturn;
 }
 
 export interface HarnessSubagentRunRef {
@@ -175,6 +189,7 @@ export interface HarnessSubagentRunRef {
   summary: string;
   manifest: HarnessSubagentRunManifest;
   runState: HarnessSubagentRunStateSummary;
+  structuredReturn?: HarnessSubagentStructuredReturn;
 }
 
 export interface DelegateTaskToolInput {
@@ -182,6 +197,7 @@ export interface DelegateTaskToolInput {
   profile: HarnessSubagentProfile;
   context?: string;
   maxModelTurns?: number;
+  returnSchema?: JSONSchema;
 }
 
 export interface DelegateTaskToolOutput {

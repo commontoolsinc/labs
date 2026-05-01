@@ -25,6 +25,8 @@ import {
   setHarnessRunManifestPath,
   setHarnessRunReportPath,
   setHarnessRunStatus,
+  setHarnessSkillActivations,
+  setHarnessSkillRegistry,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
 import {
@@ -54,6 +56,10 @@ import {
 } from "./contracts/policy-trace.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
+import type {
+  HarnessSkillActivations,
+  HarnessSkillRegistry,
+} from "./contracts/skill.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import {
   createToolResultRef,
@@ -77,7 +83,11 @@ import {
   DenoProcessRunner,
   type ProcessRunner,
 } from "./sandbox/process-runner.ts";
-import type { HarnessSandboxConfig, SandboxRuntime } from "./sandbox/types.ts";
+import type {
+  DockerRunscAdditionalMountConfig,
+  HarnessSandboxConfig,
+  SandboxRuntime,
+} from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
   type DelegateTaskToolInput,
@@ -118,6 +128,7 @@ export interface CreateHarnessEngineOptions
   runId?: string;
   runState?: HarnessRunState;
   workspaceHostPath?: string;
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
   processRunner?: ProcessRunner;
@@ -141,6 +152,7 @@ const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
 const resolveSandboxConfig = (
   config: HarnessConfig,
   workspaceHostPath?: string,
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[],
 ): HarnessSandboxConfig => {
   if (config.sandbox !== undefined) {
     return config.sandbox;
@@ -150,7 +162,12 @@ const resolveSandboxConfig = (
       "sandbox config is required when no workspaceHostPath default is provided",
     );
   }
-  return resolveDockerRunscSandboxConfig({ workspaceHostPath });
+  return resolveDockerRunscSandboxConfig({
+    workspaceHostPath,
+    ...(additionalMounts !== undefined && additionalMounts.length > 0
+      ? { additionalMounts }
+      : {}),
+  });
 };
 
 const createSandboxRuntime = (
@@ -230,7 +247,11 @@ export class CfHarnessEngine {
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
     const sandboxConfig = options.sandboxRuntime === undefined
-      ? resolveSandboxConfig(this.config, options.workspaceHostPath)
+      ? resolveSandboxConfig(
+        this.config,
+        options.workspaceHostPath,
+        options.additionalMounts,
+      )
       : this.config.sandbox;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
     this.sandbox = options.sandboxRuntime ??
@@ -398,6 +419,36 @@ export class CfHarnessEngine {
       await this.persistRunState();
     }
     return manifestPath ?? this.#runState.runManifestPath;
+  }
+
+  async persistSkillRegistry(
+    registry: HarnessSkillRegistry,
+  ): Promise<string | undefined> {
+    const skillRegistryPath = await this.artifactStore
+      ?.persistSkillRegistry?.(registry);
+    this.#runState = setHarnessSkillRegistry(
+      this.#runState,
+      registry,
+      skillRegistryPath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return skillRegistryPath;
+  }
+
+  async persistSkillActivations(
+    activations: HarnessSkillActivations,
+  ): Promise<string | undefined> {
+    const skillActivationsPath = await this.artifactStore
+      ?.persistSkillActivations?.(activations);
+    this.#runState = setHarnessSkillActivations(
+      this.#runState,
+      activations,
+      skillActivationsPath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return skillActivationsPath;
   }
 
   nextToolOutputId(toolId: string): ToolOutputId {

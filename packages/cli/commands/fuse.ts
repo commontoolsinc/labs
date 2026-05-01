@@ -250,6 +250,10 @@ export const fuse = new Command()
       );
     } else {
       // Foreground — inherit stdio, propagate exit code
+      const logFile = `/tmp/cf-fuse-${basename(absMountpoint)}.log`;
+      spawnArgs.push("--log-file", logFile);
+      console.error(`FUSE log: ${logFile}`);
+
       const cmd = new Deno.Command(spawnCmd, {
         args: spawnArgs,
         stdin: "inherit",
@@ -265,6 +269,7 @@ export const fuse = new Command()
           apiUrl,
           identity,
           startedAt: new Date().toISOString(),
+          logFile,
         });
       } catch (error) {
         try {

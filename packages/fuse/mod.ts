@@ -222,7 +222,9 @@ export async function main(argv: string[] = Deno.args) {
     },
   });
 
-  // Redirect console output to a log file when running as a background daemon.
+  // Redirect (or tee) console output to a log file.
+  // Background mounts: replace console entirely (no TTY).
+  // Foreground mounts: tee to both log file and original stderr (TTY present).
   const logFilePath = args["log-file"] as string;
   if (logFilePath) {
     const logFile = await Deno.open(logFilePath, {
@@ -230,16 +232,32 @@ export async function main(argv: string[] = Deno.args) {
       append: true,
     });
     const enc = new TextEncoder();
-    const write = (msg: string) => {
+    const writeLog = (msg: string) => {
       try {
         logFile.writeSync(enc.encode(msg + "\n"));
       } catch {
         // Ignore write errors (disk full, etc.)
       }
     };
-    console.log = (...a: unknown[]) => write(a.map(String).join(" "));
-    console.error = (...a: unknown[]) => write(a.map(String).join(" "));
-    console.warn = (...a: unknown[]) => write(a.map(String).join(" "));
+    const isTTY = Deno.stderr.isTerminal();
+    const origLog = console.log;
+    const origError = console.error;
+    const origWarn = console.warn;
+    console.log = (...a: unknown[]) => {
+      const msg = a.map(String).join(" ");
+      writeLog(msg);
+      if (isTTY) origLog.call(console, ...a);
+    };
+    console.error = (...a: unknown[]) => {
+      const msg = a.map(String).join(" ");
+      writeLog(msg);
+      if (isTTY) origError.call(console, ...a);
+    };
+    console.warn = (...a: unknown[]) => {
+      const msg = a.map(String).join(" ");
+      writeLog(msg);
+      if (isTTY) origWarn.call(console, ...a);
+    };
   }
 
   const debug = args.debug;
@@ -322,12 +340,23 @@ export async function main(argv: string[] = Deno.args) {
     ReturnType<typeof setTimeout>
   >();
 
+  const writeStats = {
+    opened: 0,
+    written: 0,
+    flushed: 0,
+    flushErrors: 0,
+    lastError: null as string | null,
+    lastErrorAt: null as string | null,
+  };
+
   // Populate tree
   const apiUrl = args["api-url"];
   if (apiUrl) {
     bridge = new CellBridge(tree, args["exec-cli"] || "", {
       cfcAnnotations: cfcAnnotationsEnabled,
       statusProvider: () => ({
+        writes: { ...writeStats },
+        logFile: logFilePath || null,
         cfc: {
           mode: cfcMode,
           annotations: cfcAnnotationsEnabled,
@@ -917,6 +946,14 @@ export async function main(argv: string[] = Deno.args) {
           initialBuffer,
           { writeTarget },
         );
+        if (isWriting) {
+          writeStats.opened++;
+          console.log(
+            `[write-trace] open ino=${inode} fh=${fh} target=${
+              writeTarget?.kind ?? "none"
+            }`,
+          );
+        }
         if (truncate) {
           handles.markTruncated(fh);
         }
@@ -964,6 +1001,14 @@ export async function main(argv: string[] = Deno.args) {
         truncate ? new Uint8Array(0) : content,
         { writeTarget, cfcAuthorizedOperations, cfcAuthorizationAnnotation },
       );
+      if (isWriting) {
+        writeStats.opened++;
+        console.log(
+          `[write-trace] open ino=${inode} fh=${fh} target=${
+            writeTarget?.kind ?? "none"
+          }`,
+        );
+      }
       if (truncate) {
         if (!handles.truncateByIno(inode, 0, { pendingFh: fh })) {
           handles.close(fh);
@@ -1243,6 +1288,8 @@ export async function main(argv: string[] = Deno.args) {
           handle.buffer = new Uint8Array(0); // fire-and-forget
           handle.bufferValid = false;
         }
+        writeStats.flushed++;
+        console.log(`[write-trace] flush-ok ino=${handle.ino} kind=handler`);
         return 0;
       }
 
@@ -1335,6 +1382,8 @@ export async function main(argv: string[] = Deno.args) {
             handle.dirty = false;
             handle.truncatePending = false;
           }
+          writeStats.flushed++;
+          console.log(`[write-trace] flush-ok ino=${handle.ino} kind=source`);
           return 0;
         } catch (e) {
           // Write compile error to error.log
@@ -1382,6 +1431,10 @@ export async function main(argv: string[] = Deno.args) {
         } catch {
           // Stale inode after subscription rebuild — ignore.
         }
+        writeStats.flushed++;
+        console.log(
+          `[write-trace] flush-ok ino=${handle.ino} kind=fsProjection`,
+        );
         return 0;
       }
 
@@ -1439,6 +1492,8 @@ export async function main(argv: string[] = Deno.args) {
         // rebuilt the tree with the correct data.
       }
 
+      writeStats.flushed++;
+      console.log(`[write-trace] flush-ok ino=${handle.ino} kind=value`);
       return 0;
     } catch (e) {
       const logPrefix = writeTarget?.kind === "handler" ||
@@ -1452,17 +1507,21 @@ export async function main(argv: string[] = Deno.args) {
       // disconnected so subsequent writes fail loudly (EACCES) instead
       // of silently succeeding in the optimistic local tree.
       const msg = e instanceof Error ? e.message : String(e);
+      writeStats.flushErrors++;
+      writeStats.lastError = msg;
+      writeStats.lastErrorAt = new Date().toISOString();
+      console.error(
+        `[write-trace] flush-err ino=${handle.ino} err=${
+          e instanceof Error ? e.stack ?? e.message : String(e)
+        }`,
+      );
       if (
         bridge && !bridge.disconnected &&
         (msg.includes("transport closed") ||
           msg.includes("ConnectionError") ||
           msg.includes("connection refused"))
       ) {
-        bridge.disconnected = true;
-        console.error(
-          "[FUSE] ⚠️  Backend connection lost — mount is now READ-ONLY. " +
-            "Remount to restore write access.",
-        );
+        bridge.markDisconnected(msg);
       }
 
       markExistingFailed(msg);
@@ -1559,7 +1618,16 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EIO);
         return;
       }
+      writeStats.written++;
+      console.log(`[write-trace] write fh=${fh} size=${sz} offset=${off}`);
       fuse.symbols.fuse_reply_write(req, BigInt(sz));
+
+      // Safety-net: schedule a deferred flush in case flush()/release() never
+      // arrive. Docker Desktop's VirtioFS on macOS doesn't forward these
+      // through FUSE-T/NFS mounts, leaving writes buffered forever. The timer
+      // is reset on each write, so rapid multi-write sequences coalesce
+      // naturally and only flush after the writes settle.
+      scheduleFlush(handle, 500);
     },
   );
   callbacks.push(writeCb);
@@ -1585,6 +1653,7 @@ export async function main(argv: string[] = Deno.args) {
       // must not run while a FUSE reply is still pending (it invalidates
       // inodes via notify_inval_entry which crashes FUSE-T mid-callback).
       fuse.symbols.fuse_reply_err(req, 0);
+      console.log(`[write-trace] flush-fire fh=${fh}`);
 
       // Fire-and-forget the actual write to the cell
       const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
@@ -1598,6 +1667,7 @@ export async function main(argv: string[] = Deno.args) {
         // empty/truncated buffer.
         scheduleFlush(handle, 25);
       } else {
+        clearScheduledFlush(handle);
         flushHandle(handle).catch((e) => {
           console.error(`[fuse] flush write error: ${e}`);
         });
@@ -1794,15 +1864,26 @@ export async function main(argv: string[] = Deno.args) {
       logOp("release", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
+      if (handle) {
+        console.log(
+          `[write-trace] release fh=${fh} dirty=${handle.dirty} flushing=${handle.flushing} pending=${
+            handleHasPendingChanges(handle)
+          }`,
+        );
+      }
 
-      // Reply immediately and close the handle.
-      // Fire-and-forget the write if dirty.
+      // Reply immediately. Fire-and-forget the write if dirty.
+      // Defer handles.close() until after the flush settles so
+      // flushHandle can still read handle state (writeTarget, buffer).
+      fuse.symbols.fuse_reply_err(req, 0);
+
       if (handle && handleHasPendingChanges(handle) && bridge) {
         const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+        let flushPromise: Promise<unknown> | undefined;
         if (
           handle.truncatePending && !handle.dirty && !handle.flushing
         ) {
-          flushHandle(handle).catch((e) => {
+          flushPromise = flushHandle(handle).catch((e) => {
             console.error(`[fuse] release flush error: ${e}`);
           });
         } else if (
@@ -1811,13 +1892,21 @@ export async function main(argv: string[] = Deno.args) {
         ) {
           scheduleFlush(handle, 0);
         } else if (!handle.flushing) {
-          flushHandle(handle).catch((e) => {
+          flushPromise = flushHandle(handle).catch((e) => {
             console.error(`[fuse] release flush error: ${e}`);
           });
         }
+        if (flushPromise) {
+          flushPromise.finally(() => handles.close(fh));
+        } else {
+          // scheduleFlush path — close after the scheduled timer fires.
+          // The handle stays alive until then; scheduleFlush already
+          // captures the handle reference.
+          queueMicrotask(() => handles.close(fh));
+        }
+      } else {
+        handles.close(fh);
       }
-      handles.close(fh);
-      fuse.symbols.fuse_reply_err(req, 0);
     },
   );
   callbacks.push(releaseCb);
