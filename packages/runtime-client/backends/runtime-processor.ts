@@ -768,6 +768,7 @@ export class RuntimeProcessor {
 
   setTelemetryEnabled(request: SetTelemetryEnabledRequest): void {
     this.#telemetryEnabled = request.enabled;
+    this.runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
   resetLoggerBaselines(_: any): void {

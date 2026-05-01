@@ -132,12 +132,12 @@ const addPiece = handler<
 
 // Handler: Track piece as recently used (add to front, maintain max)
 const trackRecent = handler<
-  { piece: MentionablePiece },
-  { recentPieces: Writable<MentionablePiece[]> }
+  { piece: unknown },
+  { recentPieces: Writable<unknown[]> }
 >(({ piece }, { recentPieces }) => {
   const current = recentPieces.get();
   // Remove if already present
-  const filtered = current.filter((c) => !equals(c, piece));
+  const filtered = current.filter((c) => !equals(c as any, piece as any));
   // Add to front and limit to max
   const updated = [piece, ...filtered].slice(0, MAX_RECENT_CHARMS);
   recentPieces.set(updated);

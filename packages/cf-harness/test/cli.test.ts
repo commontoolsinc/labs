@@ -345,6 +345,8 @@ Deno.test("parseCfHarnessCliArgs supports allowed tools and result json path", a
       "--allow-tool",
       "read_file",
       "--allow-tool",
+      "read_skill_resource",
+      "--allow-tool",
       "bash",
       "--result-json-path",
       "results/output.json",
@@ -358,7 +360,11 @@ Deno.test("parseCfHarnessCliArgs supports allowed tools and result json path", a
   if ("help" in parsed) {
     throw new Error("expected config result");
   }
-  assertEquals(parsed.allowedToolIds, ["read_file", "bash"]);
+  assertEquals(parsed.allowedToolIds, [
+    "read_file",
+    "read_skill_resource",
+    "bash",
+  ]);
   assertEquals(parsed.allowedSubagentProfiles, []);
   assertEquals(parsed.resultJsonPath, "/tmp/project/results/output.json");
 });
@@ -540,7 +546,7 @@ Deno.test("parseCfHarnessCliArgs rejects bash-no-sandbox as a parent allow-tool"
         },
       ),
     Error,
-    "allowed tools must be one or more of bash, read_file, write_file, delegate_task",
+    "allowed tools must be one or more of bash, read_file, read_skill_resource, write_file, delegate_task",
   );
 });
 
@@ -562,7 +568,7 @@ Deno.test("parseCfHarnessCliArgs rejects unknown allowed tools before resolving 
         },
       ),
     Error,
-    "allowed tools must be one or more of bash, read_file, write_file, delegate_task",
+    "allowed tools must be one or more of bash, read_file, read_skill_resource, write_file, delegate_task",
   );
 });
 

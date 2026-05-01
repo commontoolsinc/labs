@@ -247,12 +247,12 @@ Why:
   child artifacts for audit/debugging
 - local/browser examples should place `--artifact-root` outside `--workspace` so
   raw child artifacts do not become ordinary parent-readable workspace files
+- when artifacts are physically placed under a workspace, the artifact root is
+  reserved from `read_file`, `write_file`, and browser-profile host `ls`/`find`
+  discovery paths
 
 Still planned:
 
-- reserve artifact roots from `read_file`, `write_file`, and browser-profile
-  host discovery commands when a host physically places artifacts under a
-  workspace
 - stop treating raw host artifact paths as model-facing references; prefer
   opaque output IDs/handles for parent-visible results and keep paths in
   operator-facing run state/report data
@@ -275,13 +275,14 @@ Why:
 - explicit skill preload for batch/product runs
 - persisted skill registry and activation artifacts
 - runtime-generated supporting-resource indexes in skill registry artifacts
+- text-first `read_skill_resource` support for indexed resources
+- `skill-resource-reads.json` provenance artifacts
 - CFC classification of skill content as context, not direct-command authority
 - context message insertion before the final task prompt
 
 Still planned:
 
 - eventual dedicated `load_skill` tool for model-driven activation
-- supporting-file/resource reads from skill directories
 - script execution through a separately permissioned boundary
 - explicit subagent skill activation policy
 

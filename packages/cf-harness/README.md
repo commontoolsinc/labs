@@ -34,6 +34,7 @@ What works today:
   - `bash`
   - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
+  - `read_skill_resource`
   - `write_file`
   - `delegate_task`
 - whole-file replace/create plus append writes
@@ -44,12 +45,18 @@ What works today:
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
-- persisted run state, transcript, Loom run manifests, capability snapshots, and
-  tool outputs, plus explicit skill registry and activation artifacts
+- persisted run state, transcript, run reports, Loom run manifests, capability
+  snapshots, and tool outputs, plus explicit skill registry and activation
+  artifacts
+- run-report gateway attempt diagnostics with chat-completion request size,
+  timing, HTTP status, selected response headers/request IDs, and non-OK
+  response body excerpts
 - transcript-based resumability
 - package-local operator CLI
 - explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
 - runtime-generated supporting-resource indexes in `skill-registry.json`
+- text-first supporting-resource reads through `read_skill_resource`, recorded
+  in `skill-resource-reads.json`
 - CFC mode plumbing with:
   - `disabled`
   - `observe`
@@ -71,8 +78,8 @@ What is not done yet:
   returns
 - first-class browser operation policy on top of the provisional browser
   subagent profile
-- dynamic/model-driven Agent Skills activation and supporting-file resource
-  reads
+- dynamic/model-driven Agent Skills activation
+- skill script execution
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses
@@ -89,8 +96,8 @@ What is not done yet:
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
 - [src/artifacts.ts](src/artifacts.ts)
-  - persisted run state, run manifest, transcript, capability snapshot, and tool
-    output storage
+  - persisted run state, run manifest, transcript, run report, capability
+    snapshot, and tool output storage
 - [src/skills/](src/skills/)
   - Agent Skills registry scanning, validation, and explicit preload context
 - [src/contracts/](src/contracts/)
@@ -185,7 +192,10 @@ locator actions, and normal browser interactions.
 
 For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to
-become ordinary workspace inputs for the parent model.
+become ordinary workspace inputs for the parent model. If an artifact root is
+physically placed under the workspace, `read_file`, `write_file`, and
+browser-profile `ls`/`find` treat that artifact tree as reserved from
+model-facing file and discovery tools.
 
 ```bash
 ROOT=/tmp/cf-harness-browser-demo

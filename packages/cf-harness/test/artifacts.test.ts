@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import {
@@ -427,7 +427,13 @@ Deno.test({
       });
       assertEquals(persistedPolicySnapshot.parentTools, {
         allowance: "all-builtins",
-        allowedToolIds: ["bash", "read_file", "write_file", "delegate_task"],
+        allowedToolIds: [
+          "bash",
+          "read_file",
+          "read_skill_resource",
+          "write_file",
+          "delegate_task",
+        ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
         "default",
@@ -531,6 +537,51 @@ Deno.test({
         },
         resultRef: result.runState.toolOutputs[0],
       });
+      assertEquals(persistedReport.gatewayAttempts?.length, 2);
+      assertEquals(
+        persistedReport.gatewayAttempts?.map((attempt) => attempt.sequence),
+        [1, 2],
+      );
+      assertEquals(
+        persistedReport.gatewayAttempts?.map((attempt) => attempt.modelTurn),
+        [1, 2],
+      );
+      assertEquals(
+        persistedReport.gatewayAttempts?.map((attempt) => attempt.runId),
+        ["run-loop-persisted", "run-loop-persisted"],
+      );
+      assertEquals(
+        persistedReport.gatewayAttempts?.[0].outcome,
+        "http_response",
+      );
+      assertEquals(persistedReport.gatewayAttempts?.[0].httpStatus, 200);
+      assertEquals(
+        {
+          model: persistedReport.gatewayAttempts?.[0].request.model,
+          messageCount: persistedReport.gatewayAttempts?.[0].request
+            .messageCount,
+          toolCount: persistedReport.gatewayAttempts?.[0].request.toolCount,
+        },
+        {
+          model: "gpt-5.4",
+          messageCount: 1,
+          toolCount: 5,
+        },
+      );
+      assert(
+        (persistedReport.gatewayAttempts?.[0].request.serializedBytes ?? 0) >
+          0,
+      );
+      assertEquals(
+        persistedReport.gatewayAttempts?.[1].request.messageCount,
+        3,
+      );
+      assertEquals(
+        JSON.stringify(persistedReport.gatewayAttempts).includes(
+          "Summarize the todo file.",
+        ),
+        false,
+      );
       assertEquals(
         persistedReport.timeline.map((entry) => entry.kind),
         [

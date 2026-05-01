@@ -18,11 +18,15 @@ import type { IExtendedStorageTransaction } from "./storage/interface.ts";
  * - populateDependencies: Customizes what cells this action depends on for its initial run.
  *   If not provided, dependencies are automatically discovered from input bindings.
  *   Can be a ReactivityLog (static) or a PopulateDependencies function (dynamic).
+ * - debounce/throttle/noDebounce: Optional scheduler timing controls.
  */
 export interface RawBuiltinResult {
   action: Action;
   isEffect?: boolean;
   populateDependencies?: PopulateDependencies | ReactivityLog;
+  debounce?: number;
+  noDebounce?: boolean;
+  throttle?: number;
 }
 
 /**
@@ -92,6 +96,12 @@ function cloneModuleRecord(module: Module): Module {
 export interface RawModuleOptions {
   /** If true, this module is an effect (side-effectful) rather than a computation */
   isEffect?: boolean;
+  /** Optional scheduler debounce delay in milliseconds */
+  debounce?: number;
+  /** Opt out of scheduler auto-debounce */
+  noDebounce?: boolean;
+  /** Optional scheduler throttle period in milliseconds */
+  throttle?: number;
 }
 
 // This corresponds to the node factory factories in common-builder:module.ts.
@@ -112,5 +122,8 @@ export function raw<T, R>(
     type: "raw",
     implementation,
     isEffect: options?.isEffect,
+    debounce: options?.debounce,
+    noDebounce: options?.noDebounce,
+    throttle: options?.throttle,
   });
 }

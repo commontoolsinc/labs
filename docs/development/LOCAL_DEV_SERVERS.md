@@ -27,8 +27,8 @@
 **Experimental flags:** Pass env vars to the start/restart scripts to enable
 experiments on both servers:
 ```bash
-EXPERIMENTAL_MODERN_SCHEMA_HASH=true \
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
+EXPERIMENTAL_EXAMPLE_EXPERIMENT=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
 The same env vars must also be set when running `cf` CLI commands against the

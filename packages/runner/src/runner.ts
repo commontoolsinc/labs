@@ -105,6 +105,17 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   logCountEvery: 0,
 });
 
+const EAGER_RESULT_BUILTIN_REFS = new Set([
+  "fetchData",
+  "fetchProgram",
+  "generateObject",
+  "generateText",
+  "llm",
+  "llmDialog",
+  "navigateTo",
+  "streamData",
+]);
+
 type ProcessCellData<T> = {
   [TYPE]: string;
   spell?: SigilLink;
@@ -1165,6 +1176,7 @@ export class Runner {
     resultCell: Cell<T>,
     givenPattern?: Pattern,
     options: { doNotUpdateOnPatternChange?: boolean } = {},
+    pullOnceAfterStart: boolean = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
     tx.addCommitCallback((_committedTx, result) => {
@@ -1189,6 +1201,10 @@ export class Runner {
               "Error committing deferred start transaction",
               error,
             );
+            return;
+          }
+          if (pullOnceAfterStart) {
+            this.pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
           this.stop(committedResultCell);
@@ -1269,14 +1285,24 @@ export class Runner {
     );
 
     if (needsStart) {
+      const pullOnceAfterStart = this.patternNeedsOneShotPull(pattern);
       if (
         tx.tx.immediate === true &&
         (tx.tx as { deferRunnerStartUntilCommit?: boolean })
             .deferRunnerStartUntilCommit === true
       ) {
-        this.startAfterSuccessfulCommit(tx, resultCell, pattern, options);
+        this.startAfterSuccessfulCommit(
+          tx,
+          resultCell,
+          pattern,
+          options,
+          pullOnceAfterStart,
+        );
       } else {
         this.startWithTx(tx, resultCell, pattern, options);
+        if (pullOnceAfterStart) {
+          this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
+        }
       }
     }
 
@@ -1938,35 +1964,41 @@ export class Runner {
         ),
       );
 
-    const rawResult = tx.readValueOrThrow(
-      resultCell.getAsNormalizedFullLink(),
-      {
-        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-      },
-    );
-    const resultRedirects = findAllWriteRedirectCells(rawResult, processCell);
-    const readResultAction: Action = (tx) =>
-      resultRedirects.forEach((link) => tx.readValueOrThrow(link));
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+      const rawResult = tx.readValueOrThrow(
+        resultCell.getAsNormalizedFullLink(),
+        {
+          meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+        },
+      );
+      const resultRedirects = findAllWriteRedirectCells(rawResult, processCell);
+      const readResultAction: Action = (tx) =>
+        resultRedirects.forEach((link) => tx.readValueOrThrow(link));
 
-    if (name) {
-      setRunnableName(readResultAction, `readResult:${name}`, { setSrc: true });
-    }
+      if (name) {
+        setRunnableName(readResultAction, `readResult:${name}`, {
+          setSrc: true,
+        });
+      }
 
-    const cancel = this.runtime.scheduler.subscribe(
-      readResultAction,
-      readResultAction,
-      { isEffect: true },
-    );
-    tx.addCommitCallback((_committedTx, result) => {
-      if (result.error) {
+      const cancel = this.runtime.scheduler.subscribe(
+        readResultAction,
+        readResultAction,
+        { isEffect: true },
+      );
+      tx.addCommitCallback((_committedTx, result) => {
+        if (result.error) {
+          cancel();
+          this.stop(resultCell);
+        }
+      });
+      addCancel(() => {
         cancel();
         this.stop(resultCell);
-      }
-    });
-    addCancel(() => {
-      cancel();
-      this.stop(resultCell);
-    });
+      });
+    } else {
+      addCancel(() => this.stop(resultCell));
+    }
 
     return result;
   }
@@ -1996,9 +2028,56 @@ export class Runner {
       resultCell,
     );
     if (resultSetup.needsStart) {
-      this.startAfterSuccessfulCommit(tx, resultCell, resultSetup.pattern);
+      this.startAfterSuccessfulCommit(
+        tx,
+        resultCell,
+        resultSetup.pattern,
+        {},
+        this.patternNeedsOneShotPull(resultSetup.pattern),
+      );
     }
     return resultCell;
+  }
+
+  private patternNeedsOneShotPull(pattern?: Pattern): boolean {
+    if (!this.runtime.scheduler.isPullModeEnabled() || !pattern) {
+      return false;
+    }
+    return pattern.nodes.some(({ module }) => {
+      if (module.type !== "ref" || typeof module.implementation !== "string") {
+        return false;
+      }
+      return EAGER_RESULT_BUILTIN_REFS.has(module.implementation);
+    });
+  }
+
+  private pullCellOnceAfterSuccessfulCommit<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+  ): void {
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+      return;
+    }
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        return;
+      }
+      this.pullCellOnceInPullMode(this.runtime.getCellFromLink<T>(resultLink));
+    });
+  }
+
+  private pullCellOnceInPullMode<T = any>(cell: Cell<T>): void {
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+      return;
+    }
+    void cell.pull().catch((error) => {
+      logger.error(
+        "runner-start",
+        "Transient result pull failed after commit",
+        error,
+      );
+    });
   }
 
   private writeJavaScriptActionResult(
@@ -2144,15 +2223,22 @@ export class Runner {
           undefined,
           tx,
         );
-        const { argument, isValidArgument } = this.readJavaScriptArgument(
-          module,
-          inputsCell,
-          tx,
-          {
-            writableProxy:
-              (module as { writableProxy?: boolean }).writableProxy,
-          },
-        );
+        logger.timeStart("stream", "readInputs");
+        const { argument, isValidArgument } = (() => {
+          try {
+            return this.readJavaScriptArgument(
+              module,
+              inputsCell,
+              tx,
+              {
+                writableProxy:
+                  (module as { writableProxy?: boolean }).writableProxy,
+              },
+            );
+          } finally {
+            logger.timeEnd("stream", "readInputs");
+          }
+        })();
 
         this.updateInvalidInputFlag(
           name,
@@ -2181,14 +2267,28 @@ export class Runner {
           );
         }
 
-        const result = isValidArgument
-          ? this.invokeJavaScriptImplementation(
-            module,
-            fn,
-            argument,
-            verifiedLoadId,
-          )
-          : undefined;
+        let result: any = undefined;
+        if (isValidArgument) {
+          logger.timeStart("stream", "invokeJavaScriptImplementation");
+          try {
+            result = this.invokeJavaScriptImplementation(
+              module,
+              fn,
+              argument,
+              verifiedLoadId,
+            );
+            if (result instanceof Promise) {
+              result = result.finally(() =>
+                logger.timeEnd("stream", "invokeJavaScriptImplementation")
+              );
+            } else {
+              logger.timeEnd("stream", "invokeJavaScriptImplementation");
+            }
+          } catch (error) {
+            logger.timeEnd("stream", "invokeJavaScriptImplementation");
+            throw error;
+          }
+        }
         const postRun = (result: any) => {
           logger.timeStart("stream", "postRun");
           try {
@@ -2378,14 +2478,28 @@ export class Runner {
           previouslyInvalidArgument = !isValidArgument;
         }
 
-        const result = isValidArgument
-          ? this.invokeJavaScriptImplementation(
-            module,
-            fn,
-            argument,
-            verifiedLoadId,
-          )
-          : undefined;
+        let result: any = undefined;
+        if (isValidArgument) {
+          logger.timeStart("action", "invokeJavaScriptImplementation");
+          try {
+            result = this.invokeJavaScriptImplementation(
+              module,
+              fn,
+              argument,
+              verifiedLoadId,
+            );
+            if (result instanceof Promise) {
+              result = result.finally(() =>
+                logger.timeEnd("action", "invokeJavaScriptImplementation")
+              );
+            } else {
+              logger.timeEnd("action", "invokeJavaScriptImplementation");
+            }
+          } catch (error) {
+            logger.timeEnd("action", "invokeJavaScriptImplementation");
+            throw error;
+          }
+        }
         const postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
@@ -2667,7 +2781,7 @@ export class Runner {
     }
 
     // Handle both legacy (just Action) and new (RawBuiltinResult) return formats
-    const action = isRawBuiltinResult(builtinResult)
+    const builtinAction = isRawBuiltinResult(builtinResult)
       ? builtinResult.action
       : builtinResult;
     const builtinIsEffect = isRawBuiltinResult(builtinResult)
@@ -2675,6 +2789,15 @@ export class Runner {
       : undefined;
     const builtinPopulateDependencies = isRawBuiltinResult(builtinResult)
       ? builtinResult.populateDependencies
+      : undefined;
+    const builtinDebounce = isRawBuiltinResult(builtinResult)
+      ? builtinResult.debounce
+      : undefined;
+    const builtinNoDebounce = isRawBuiltinResult(builtinResult)
+      ? builtinResult.noDebounce
+      : undefined;
+    const builtinThrottle = isRawBuiltinResult(builtinResult)
+      ? builtinResult.throttle
       : undefined;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
@@ -2692,11 +2815,28 @@ export class Runner {
       sanitizeDebugLabel(impl.name) ??
       "anonymous";
     const rawName = `raw:${rawTargetName}`;
+
+    const action: Action = (tx: IExtendedStorageTransaction) => {
+      logger.timeStart("raw", "run", rawTargetName);
+      try {
+        const result = builtinAction(tx);
+        if (result instanceof Promise) {
+          return result.finally(() =>
+            logger.timeEnd("raw", "run", rawTargetName)
+          );
+        }
+        logger.timeEnd("raw", "run", rawTargetName);
+        return result;
+      } catch (error) {
+        logger.timeEnd("raw", "run", rawTargetName);
+        throw error;
+      }
+    };
     setRunnableName(action, rawName, { setSrc: true });
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
-    Object.assign(action, {
+    Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: outputCells,
       module,
@@ -2740,10 +2880,16 @@ export class Runner {
 
     // isEffect can come from module options or from the builtin result
     const isEffect = module.isEffect ?? builtinIsEffect;
+    const debounce = module.debounce ?? builtinDebounce;
+    const noDebounce = module.noDebounce ?? builtinNoDebounce;
+    const throttle = module.throttle ?? builtinThrottle;
 
     addCancel(
       this.runtime.scheduler.subscribe(action, populateDependencies, {
         isEffect,
+        debounce,
+        noDebounce,
+        throttle,
       }),
     );
   }

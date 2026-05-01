@@ -310,8 +310,8 @@ export function emptySchemaObject() {
  * internPathSelector(x)`.
  *
  * Exists so that callers who feed selectors into `MapSetStringToPathSelectors`
- * (or any other cache keyed on `hashSchemaItem` of a selector) can hand in an
- * already-interned, deep-frozen selector. That satisfies the `isDeepFrozen`
+ * (or any other cache keyed on `hashStringOf()` of a selector) can hand in an
+ * already-interned, deep-frozen selector. That satisfies the `isDeepFrozen()`
  * guard internal to `hashOf()` and lets its `WeakMap` cache retain its hash
  * across repeat calls.
  */
