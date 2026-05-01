@@ -1,6 +1,5 @@
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase(
   "bench subscription filter refresh",
@@ -76,7 +75,6 @@ const scopedSelector = {
 const setup = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const provider = storageManager.open(space) as unknown as TestProvider;
 
@@ -124,7 +122,6 @@ const buildScopedDoc = (label: string, targetId: string) => ({
 const setupScoped = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const provider = storageManager.open(space) as unknown as TestProvider;
 

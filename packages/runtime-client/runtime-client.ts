@@ -90,7 +90,6 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       spaceIdentity: options.spaceIdentity?.serialize(),
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
-      memoryVersion: options.memoryVersion,
       experimental: options.experimental,
       cfcEnforcementMode: options.cfcEnforcementMode,
       trustSnapshot: options.trustSnapshot,

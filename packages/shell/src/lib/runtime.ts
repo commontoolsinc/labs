@@ -16,7 +16,6 @@ import { AppView, navigate } from "../../shared/mod.ts";
 import {
   COMPILATION_CACHE_CLIENT,
   EXPERIMENTAL,
-  MEMORY_VERSION,
 } from "./env.ts";
 
 const logger = getLogger("shell.runtime", {
@@ -72,7 +71,6 @@ export function createRuntimeClientOptions({
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
     spaceName: session.spaceName,
-    memoryVersion: MEMORY_VERSION,
     experimental: EXPERIMENTAL,
     cfcEnforcementMode: "enforce-explicit" as const,
     trustSnapshot: {

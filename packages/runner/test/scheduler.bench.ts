@@ -10,7 +10,6 @@ import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 import {
   addressesToPathByEntity,
   sortAndCompactPaths,
@@ -24,12 +23,10 @@ const space = signer.did();
 function setup() {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   runtime.scheduler.disablePullMode();
   const tx = runtime.edit();

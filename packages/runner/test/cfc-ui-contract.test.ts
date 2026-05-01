@@ -221,12 +221,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("commits handler writes when trusted event markers match the schema uiContract", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -288,12 +286,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("rejects public stream payloads that forge trusted DOM provenance", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -674,12 +670,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("commits trusted event writes when the handler write annotation is untyped", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -743,12 +737,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("commits trusted event writes discovered from the handler transaction", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -810,12 +802,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("fails closed when trusted event markers are missing or mismatched", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -889,12 +879,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("does not let one same-path uiContract satisfy a different contract", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -966,12 +954,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("recovers after a mismatched trusted event is rejected", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 

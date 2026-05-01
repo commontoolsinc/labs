@@ -272,7 +272,6 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-own-replay"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const writerClient = await MemoryV2Client.connect({
@@ -358,7 +357,6 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-stacked-replay"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const writerClient = await MemoryV2Client.connect({
@@ -446,7 +444,6 @@ Deno.test("memory v2 runner restores watched graph state after reconnect and kee
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-watch-reconnect"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const writerClient = await MemoryV2Client.connect({
@@ -525,7 +522,6 @@ Deno.test("memory v2 runner restores watched graph state after reconnect and kee
 Deno.test("memory v2 runner can retry immediately after a conflict revert", async () => {
   const storageManager = CutoverStorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const notifications = new NotificationRecorder();
   const provider = storageManager.open(space) as TestProvider;
@@ -630,7 +626,6 @@ Deno.test("memory v2 runner keeps later independent pending commits after an ear
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-reject-then-succeed"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const provider = storageManager.open(space) as TestProvider;

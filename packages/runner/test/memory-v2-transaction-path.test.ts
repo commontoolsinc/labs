@@ -14,12 +14,10 @@ describe("memory v2 transaction path semantics", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       storageManager,
       apiUrl: new URL("http://localhost:8000"),
-      memoryVersion: "v2",
     });
   });
 

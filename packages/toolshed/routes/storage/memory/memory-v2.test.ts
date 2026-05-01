@@ -92,9 +92,7 @@ const createRuntime = (identity: Identity, base: URL) =>
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", base),
-      memoryVersion: "v2",
     }),
-    memoryVersion: "v2",
   });
 
 let routeTestQueue = Promise.resolve();
@@ -129,12 +127,10 @@ serialTest(
       as: session.as,
       address: new URL("/api/storage/memory", base),
       spaceIdentity: session.spaceIdentity,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: base,
       storageManager,
-      memoryVersion: "v2",
     });
 
     try {
@@ -183,12 +179,10 @@ serialTest(
       storageManager = StorageManager.open({
         as: identity,
         address,
-        memoryVersion: "v2",
       });
       runtime = new Runtime({
         apiUrl: new URL(`http://${server.addr.hostname}:${server.addr.port}`),
         storageManager,
-        memoryVersion: "v2",
       });
       const tx = runtime.edit();
       const cell = runtime.getCell(
@@ -241,9 +235,7 @@ serialTest(
         storageManager: StorageManager.open({
           as: identity,
           address,
-          memoryVersion: "v2",
         }),
-        memoryVersion: "v2",
       });
       const tx = runtime1.edit();
       const writer = runtime1.getCell(identity.did(), cause, undefined, tx);
@@ -259,9 +251,7 @@ serialTest(
         storageManager: StorageManager.open({
           as: identity,
           address,
-          memoryVersion: "v2",
         }),
-        memoryVersion: "v2",
       });
       const reader = runtime2.getCell(identity.did(), cause);
       await reader.sync();

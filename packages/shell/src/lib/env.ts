@@ -1,10 +1,7 @@
-import type { MemoryVersion } from "@commonfabric/memory/interface";
-
 declare global {
   var $ENVIRONMENT: string | undefined;
   var $API_URL: string | undefined;
   var $COMMIT_SHA: string | undefined;
-  var $MEMORY_VERSION: string | undefined;
   var $EXPERIMENTAL_MODERN_DATA_MODEL: string | undefined;
   var $EXPERIMENTAL_UNIFIED_JSON_ENCODING: string | undefined;
   var $COMPILATION_CACHE_CLIENT: string | undefined;
@@ -16,9 +13,6 @@ const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
 const API_URL_DEFINE = typeof $API_URL === "string" ? $API_URL : undefined;
 const COMMIT_SHA_DEFINE = typeof $COMMIT_SHA === "string"
   ? $COMMIT_SHA
-  : undefined;
-const MEMORY_VERSION_DEFINE = typeof $MEMORY_VERSION === "string"
-  ? $MEMORY_VERSION
   : undefined;
 const EXPERIMENTAL_MODERN_DATA_MODEL_DEFINE =
   typeof $EXPERIMENTAL_MODERN_DATA_MODEL === "string"
@@ -42,10 +36,6 @@ export const API_URL: URL = new URL(
 );
 
 export const COMMIT_SHA: string | undefined = COMMIT_SHA_DEFINE;
-export const MEMORY_VERSION: MemoryVersion | undefined =
-  MEMORY_VERSION_DEFINE === "v1" || MEMORY_VERSION_DEFINE === "v2"
-    ? MEMORY_VERSION_DEFINE
-    : undefined;
 
 /**
  * Results in `true` (on), `false` (off), or `undefined` (default).

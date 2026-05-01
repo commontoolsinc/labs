@@ -1,7 +1,6 @@
 {
   "name": "@commonfabric/memory",
   "tasks": {
-    "dev": "deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts",
     "check": "deno check .",
     "just-test": {
       "description": "Run unit tests",
@@ -14,13 +13,9 @@
         "just-test"
       ]
     },
-    "migrate": {
-      "description": "Performs database migration",
-      "command": "deno run -A ./migrate.ts"
-    },
     "bench": {
-      "description": "Run benchmarks for fact operations",
-      "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/memory_bench.ts"
+      "description": "Run memory benchmarks",
+      "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env"
     }
   },
   "test": {
@@ -31,7 +26,6 @@
   "exports": {
     ".": "./lib.ts",
     "./acl": "./acl.ts",
-    "./deno": "./deno.ts",
     "./interface": "./interface.ts",
     "./fact": "./fact.ts",
     "./changes": "./changes.ts",

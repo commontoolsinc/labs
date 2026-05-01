@@ -20,7 +20,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -35,12 +34,10 @@ const createBenchArrayItems = (length: number) =>
 function setup() {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
@@ -900,12 +897,10 @@ Deno.bench({
   async fn() {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: BENCH_MEMORY_VERSION,
     });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: BENCH_MEMORY_VERSION,
     });
 
     for (let i = 0; i < 100; i++) {

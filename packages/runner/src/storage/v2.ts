@@ -46,7 +46,6 @@ import type {
   IStorageProviderWithReplica,
   IStorageSubscription,
   IStorageTransaction,
-  MemoryVersion,
   NativeStorageCommit,
   PullError,
   PushError,
@@ -361,7 +360,6 @@ export interface Options {
   address: URL;
   id?: string;
   settings?: IRemoteStorageProviderSettings;
-  memoryVersion?: MemoryVersion;
   spaceIdentity?: Signer;
 }
 
@@ -491,7 +489,6 @@ const toCommitReadPath = (
 ): DocumentPath => toDocumentPath(path.map(String));
 
 export class StorageManager implements IStorageManager {
-  readonly memoryVersion: MemoryVersion = "v2";
   readonly id: string;
   readonly as: Signer;
 

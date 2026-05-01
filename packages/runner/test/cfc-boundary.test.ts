@@ -167,12 +167,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   const createRuntime = () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      memoryVersion: "v2",
     });
     return { runtime, storageManager };
   };
@@ -180,12 +178,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   it("allows setup to install alias-backed CFC result projections", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup",
@@ -265,12 +261,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   it("allows setup to install alias-backed CFC projections when the result cell is initially untyped", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup-untyped",
@@ -350,12 +344,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   it("rejects setup constants for writeAuthorizedBy CFC outputs", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup",
@@ -406,12 +398,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   it("rejects forged setup projection provenance for writeAuthorizedBy constants", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup-forged-projection",
@@ -476,12 +466,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   it("does not let setup projection provenance bypass uiContract requirements", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
     try {
@@ -2732,12 +2720,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   it("reloads stored schema envelopes after a fresh runtime restart", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      memoryVersion: "v2",
     });
     try {
       const firstTx = runtime1.edit();
@@ -2768,7 +2754,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const runtime2 = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        memoryVersion: "v2",
       });
       try {
         const secondTx = runtime2.edit();
@@ -2826,13 +2811,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       new SharedV2StorageManager({
         as: signer,
         address: new URL("memory://"),
-        memoryVersion: "v2",
       }, server);
     const storageManager1 = createStorageManager();
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager1,
-      memoryVersion: "v2",
     });
     const cellSchema = {
       type: "object",
@@ -2867,7 +2850,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime2 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager2,
-      memoryVersion: "v2",
     });
     try {
       const secondSchema = {

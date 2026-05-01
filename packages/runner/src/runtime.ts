@@ -24,7 +24,6 @@ import {
 } from "@commonfabric/data-model/json-encoding";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import { getDefaultMemoryVersion } from "./storage/interface.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -33,7 +32,6 @@ import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
-  MemoryVersion,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
@@ -161,7 +159,6 @@ export interface ExperimentalOptions {
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
-  memoryVersion?: MemoryVersion;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   patternEnvironment?: PatternEnvironment;
@@ -279,7 +276,6 @@ export class Runtime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
-  readonly memoryVersion: MemoryVersion;
   readonly telemetry: RuntimeTelemetry;
   readonly cachedCompiler?: CachedCompiler;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
@@ -292,22 +288,6 @@ export class Runtime {
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
 
   constructor(options: RuntimeOptions) {
-    const defaultMemoryVersion = getDefaultMemoryVersion();
-    this.memoryVersion = options.memoryVersion ?? defaultMemoryVersion;
-    const storageManagerMemoryVersion = (
-      options.storageManager as { memoryVersion?: MemoryVersion }
-    ).memoryVersion;
-
-    if (
-      storageManagerMemoryVersion !== undefined &&
-      storageManagerMemoryVersion !== this.memoryVersion
-    ) {
-      throw new Error(
-        "Runtime memoryVersion does not match storage manager memoryVersion: " +
-          `${this.memoryVersion} !== ${storageManagerMemoryVersion}`,
-      );
-    }
-
     this.experimental = {
       modernDataModel: undefined,
       richStorableValues: undefined,
@@ -399,7 +379,6 @@ export class Runtime {
     if (options.debug) {
       console.log("Runtime initialized with services:", {
         scheduler: !!this.scheduler,
-        memoryVersion: this.memoryVersion,
         storageManager: !!this.storageManager,
         patternManager: !!this.patternManager,
         moduleRegistry: !!this.moduleRegistry,

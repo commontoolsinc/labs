@@ -18,7 +18,6 @@ const type = "application/json" as const;
 const captureNativeDrafts = () => {
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const provider = storage.open(space);
   const replica = provider.replica as typeof provider.replica & {
@@ -85,7 +84,6 @@ Deno.test("memory v2 transactions use the native commit hook when available", as
 Deno.test("memory v2 native commits require explicit full-document roots", async () => {
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
 
   try {
@@ -435,7 +433,6 @@ Deno.test("memory v2 transactions elide transient nested patches from composed h
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
-    memoryVersion: "v2",
     errorHandlers: [(error) => runtimeErrors.push(error)],
   });
 

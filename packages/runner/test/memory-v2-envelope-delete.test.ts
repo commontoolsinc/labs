@@ -9,7 +9,6 @@ const space = signer.did();
 Deno.test("memory v2 chronicle retracts an empty JSON envelope", async () => {
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
 
   try {
@@ -48,7 +47,6 @@ Deno.test("memory v2 chronicle retracts an empty JSON envelope", async () => {
 Deno.test("memory v2 chronicle treats an explicit empty root envelope as deletion", async () => {
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
 
   try {

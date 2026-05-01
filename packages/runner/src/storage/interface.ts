@@ -7,16 +7,11 @@ import {
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
-  DEFAULT_MEMORY_VERSION,
   type DID,
   type FabricValue,
   type Fact,
-  getDefaultMemoryVersion,
-  getIntegrationMemoryVersionOverride,
-  INTEGRATION_MEMORY_VERSION_ENV,
   type Invariant as IClaim,
   type MemorySpace,
-  type MemoryVersion,
   type QueryError as IQueryError,
   type Result,
   type SchemaPathSelector,
@@ -49,7 +44,6 @@ export type {
   IClaim,
   MediaType,
   MemorySpace,
-  MemoryVersion,
   Result,
   SchemaPathSelector,
   Signer,
@@ -57,13 +51,6 @@ export type {
   Unit,
   URI,
 };
-export {
-  DEFAULT_MEMORY_VERSION,
-  getDefaultMemoryVersion,
-  getIntegrationMemoryVersionOverride,
-  INTEGRATION_MEMORY_VERSION_ENV,
-};
-
 export type ChangeGroup = unknown;
 
 /**
@@ -123,7 +110,6 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
-  readonly memoryVersion: MemoryVersion;
 
   /**
    * The signer used for authenticating storage operations.

@@ -4,10 +4,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { RuntimeProgram } from "../../runner/src/harness/types.ts";
 import { pieceId, PieceManager } from "../src/manager.ts";
 
-const BENCH_MEMORY_VERSION = Deno.env.get("BENCH_MEMORY_VERSION") === "v1"
-  ? "v1"
-  : "v2";
-
 const signer = await Identity.fromPassphrase("piece cold runtime bench");
 
 const defaultPatternProgram: RuntimeProgram = {
@@ -53,12 +49,10 @@ type Seed = {
 async function createSeed(): Promise<Seed> {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const session = await createSession({
     identity: signer,
@@ -105,7 +99,6 @@ async function withFreshManager<T>(
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: seed.storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const session = await createSession({
     identity: signer,
@@ -136,12 +129,10 @@ Deno.bench(
   async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: BENCH_MEMORY_VERSION,
     });
     const seedRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: BENCH_MEMORY_VERSION,
     });
     const seedSession = await createSession({
       identity: signer,
@@ -179,7 +170,6 @@ Deno.bench(
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        memoryVersion: BENCH_MEMORY_VERSION,
       });
       const session = await createSession({
         identity: signer,

@@ -5,7 +5,6 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { recursivelyAddIDIfNeeded } from "../src/cell.ts";
 import { diffAndUpdate, normalizeAndDiff } from "../src/data-updating.ts";
 import { resolveLink } from "../src/link-resolution.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -20,12 +19,10 @@ const makeArrayValue = (index: number) => ({
 function setup() {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const tx = runtime.edit();
   return { runtime, storageManager, tx };

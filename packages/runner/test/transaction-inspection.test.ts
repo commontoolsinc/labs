@@ -134,7 +134,6 @@ describe("transaction inspection", () => {
   it("uses the native v2 transaction reactivity log hook", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -186,7 +185,6 @@ describe("transaction inspection", () => {
   it("preserves full-document paths in native v2 reactivity logs", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -245,7 +243,6 @@ describe("transaction inspection", () => {
   it("forwards native v2 hooks through extended transaction wrappers", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -327,7 +324,6 @@ describe("transaction inspection", () => {
   it("uses the native v2 read activity hook without journal replay", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -356,7 +352,6 @@ describe("transaction inspection", () => {
   it("throws when native v2 code tries to replay journal activity", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -394,7 +389,6 @@ describe("transaction inspection", () => {
   it("preserves the original previousValue in native v2 write details", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -458,7 +452,6 @@ describe("transaction inspection", () => {
   it("records the rewritten parent path when a single native v2 batch write materializes missing parents", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -524,7 +517,6 @@ describe("transaction inspection", () => {
   it("records the rewritten parent path during native v2 batch materialization before later leaf writes", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -609,7 +601,6 @@ describe("transaction inspection", () => {
   it("derives precise array reactivity writes while keeping structural ancestors for length changes", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -665,7 +656,6 @@ describe("transaction inspection", () => {
   it("keeps same-length array element writes exact in native v2 reactivity logs", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
