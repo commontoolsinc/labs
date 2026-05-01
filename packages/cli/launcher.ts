@@ -1,6 +1,3 @@
-import { dirname, isAbsolute, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
 export interface CfLauncherOptions {
   denoPath: string;
   labsRoot: string;
@@ -33,11 +30,94 @@ const optionNamesWithValues = new Set([
   "--cwd",
 ]);
 
+const normalizeSeparators = (path: string): string =>
+  path.replaceAll("\\", "/");
+
+const isAbsolutePath = (path: string): boolean => {
+  const normalized = normalizeSeparators(path);
+  return normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized);
+};
+
+const normalizePath = (path: string): string => {
+  const normalized = normalizeSeparators(path);
+  const drivePrefix = normalized.match(/^[A-Za-z]:/)?.[0] ?? "";
+  const withoutDrive = drivePrefix === ""
+    ? normalized
+    : normalized.slice(drivePrefix.length);
+  const isAbsolute = withoutDrive.startsWith("/");
+  const parts: string[] = [];
+
+  for (const part of withoutDrive.split("/")) {
+    if (part === "" || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      if (parts.length > 0 && parts[parts.length - 1] !== "..") {
+        parts.pop();
+      } else if (!isAbsolute) {
+        parts.push(part);
+      }
+      continue;
+    }
+    parts.push(part);
+  }
+
+  const prefix = `${drivePrefix}${isAbsolute ? "/" : ""}`;
+  const suffix = parts.join("/");
+  if (suffix === "") {
+    return prefix === "" ? "." : prefix;
+  }
+  return `${prefix}${suffix}`;
+};
+
+const dirnamePath = (path: string): string => {
+  const normalized = normalizePath(path);
+  const trimmed = normalized.length > 1
+    ? normalized.replace(/\/+$/g, "")
+    : normalized;
+  const index = trimmed.lastIndexOf("/");
+  if (index < 0) {
+    return ".";
+  }
+  if (index === 0) {
+    return "/";
+  }
+  if (index === 2 && /^[A-Za-z]:/.test(trimmed)) {
+    return trimmed.slice(0, 3);
+  }
+  return trimmed.slice(0, index);
+};
+
+const resolvePathSegments = (...paths: readonly string[]): string => {
+  let resolved = "";
+  for (const path of paths) {
+    if (path === "") {
+      continue;
+    }
+    const normalized = normalizeSeparators(path);
+    if (resolved === "" || isAbsolutePath(normalized)) {
+      resolved = normalized;
+      continue;
+    }
+    resolved = `${resolved.replace(/\/+$/g, "")}/${normalized}`;
+  }
+  return normalizePath(resolved);
+};
+
 const resolvePath = (base: string, path: string): string =>
-  isAbsolute(path) ? path : resolve(base, path);
+  isAbsolutePath(path) ? normalizePath(path) : resolvePathSegments(base, path);
 
 export const defaultLabsRootFromModulePath = (modulePath: string): string =>
-  resolve(dirname(modulePath), "..", "..");
+  resolvePathSegments(dirnamePath(modulePath), "..", "..");
+
+const fileUrlToPath = (url: string): string => {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "file:") {
+    throw new Error(`expected file URL, received ${url}`);
+  }
+  const path = decodeURIComponent(parsed.pathname);
+  return /^\/[A-Za-z]:\//.test(path) ? path.slice(1) : path;
+};
 
 const readInitCwd = (): string | undefined => {
   try {
@@ -115,9 +195,10 @@ export const parseCfLauncherArgs = (
   return {
     denoPath,
     labsRoot: resolvedLabsRoot,
-    configPath: configPath ?? resolve(resolvedLabsRoot, "deno.json"),
+    configPath: configPath ??
+      resolvePathSegments(resolvedLabsRoot, "deno.json"),
     cliEntrypoint: cliEntrypoint ??
-      resolve(resolvedLabsRoot, "packages", "cli", "mod.ts"),
+      resolvePathSegments(resolvedLabsRoot, "packages", "cli", "mod.ts"),
     cwd,
     cfArgs,
   };
@@ -147,7 +228,7 @@ export const buildCfLauncherCommand = (
 });
 
 const run = async (): Promise<number> => {
-  const modulePath = fileURLToPath(import.meta.url);
+  const modulePath = fileUrlToPath(import.meta.url);
   const parsed = parseCfLauncherArgs({
     argv: Deno.args,
     cwd: Deno.cwd(),
