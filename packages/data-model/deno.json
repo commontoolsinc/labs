@@ -43,6 +43,6 @@
     "./array-utils": "./array-utils.ts",
     "./value-debug": "./value-debug.ts",
     "./value-hash": "./value-hash.ts",
-    "./schema-hash": "./schema-hash.ts",
+    "./schema-hash": "./schema-hash.ts"
   }
 }
