@@ -11,10 +11,11 @@ interface State {
 }
 
 // FIXTURE: computed-map-call-arg-conditional
-// Verifies: nested ternary inside a callback-local call argument within a
-//   computed-array .map() callback is lowered to ifElse().
+// Verifies: callback-local ordinary call roots within a computed-array .map()
+//   callback whole-wrap as callback-local derives rather than lowering only
+//   the nested ternary argument site.
 //   const label = identity(row.done ? "Done" : "Pending")
-//   → const label = identity(ifElse(row.done, "Done", "Pending"))
+//   → const label = derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))
 export default pattern<State>((state) => {
   const rows = computed(() => state.items);
 

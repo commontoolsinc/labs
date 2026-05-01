@@ -662,6 +662,7 @@ function formatCellValue(value: unknown): string {
     return value.map((v) => formatCellValue(v)).join(", ");
   }
   if (typeof value === "object") {
+    // Plain JSON: this fallback feeds user-visible UI cell content, not debug output
     return JSON.stringify(value);
   }
   return String(value);

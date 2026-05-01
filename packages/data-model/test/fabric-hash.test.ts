@@ -1,15 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import * as Reference from "merkle-reference";
 import { FabricHash } from "../fabric-hash.ts";
-import {
-  hashObjectFromJson,
-  hashObjectFromString,
-  hashOf,
-  isHashObject,
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "../value-hash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);
@@ -104,145 +95,35 @@ describe("FabricHash", () => {
 });
 
 // -----------------------------------------------------------------
-// Flag-conditional dispatch
+// Tests of things in `value-hash.ts` that end up in `FabricHash`
 // -----------------------------------------------------------------
 
-describe("FabricHash flag dispatch", () => {
-  it("hashObjectFromJson round-trips through FabricHash when canonical hashing is on", () => {
-    setModernHashConfig(true);
-    try {
-      const original = new FabricHash(SAMPLE_HASH, "fid1");
-      const json = original.toJSON();
-      const reconstructed = hashObjectFromJson(json);
+describe("stuff from value-hash.ts", () => {
+  it("FabricHash.fromJson() works on the result of instance method FabricHash.toJSON()", () => {
+    const original = new FabricHash(SAMPLE_HASH, "fid1");
+    const json = original.toJSON();
+    const reconstructed = FabricHash.fromJson(json);
 
-      expect(reconstructed).toBeInstanceOf(FabricHash);
-      const cid = reconstructed as unknown as FabricHash;
-      expect(cid.toString()).toBe(original.toString());
-      expect(cid.bytes).toEqual(original.bytes);
-    } finally {
-      resetModernHashConfig();
-    }
+    expect(reconstructed).toBeInstanceOf(FabricHash);
+    expect(reconstructed.toString()).toBe(original.toString());
+    expect(reconstructed.bytes).toEqual(original.bytes);
   });
 
-  it("hashObjectFromString round-trips through FabricHash when modern hashing is on", () => {
-    setModernHashConfig(true);
-    try {
-      // Use a non-fid1 tag to verify the parser doesn't hardcode it.
-      const original = new FabricHash(SAMPLE_HASH, "sha3");
-      const str = original.toString();
-      const reconstructed = hashObjectFromString(str);
+  it("FabricHash.fromString() works on the result of instance method FabricHash.toString()", () => {
+    // Use a non-fid1 tag to verify the parser doesn't hardcode it.
+    const original = new FabricHash(SAMPLE_HASH, "sha3");
+    const str = original.toString();
+    const reconstructed = FabricHash.fromString(str);
 
-      expect(reconstructed).toBeInstanceOf(FabricHash);
-      const cid = reconstructed as unknown as FabricHash;
-      expect(cid.toString()).toBe(original.toString());
-      expect(cid.bytes).toEqual(original.bytes);
-      expect(cid.tag).toBe("sha3");
-    } finally {
-      resetModernHashConfig();
-    }
+    expect(reconstructed).toBeInstanceOf(FabricHash);
+    expect(reconstructed.toString()).toBe(original.toString());
+    expect(reconstructed.bytes).toEqual(original.bytes);
+    expect(reconstructed.tag).toBe("sha3");
   });
 
-  it("hashObjectFromString throws on invalid format (no colon) when modern hashing is on", () => {
-    setModernHashConfig(true);
-    try {
-      expect(() => hashObjectFromString("nocolonhere")).toThrow(
-        "Invalid content hash string",
-      );
-    } finally {
-      resetModernHashConfig();
-    }
-  });
-
-  it("isHashObject returns true for FabricHash when modern hashing is on", () => {
-    setModernHashConfig(true);
-    try {
-      const cid = new FabricHash(SAMPLE_HASH, "fid1");
-      expect(isHashObject(cid)).toBe(true);
-    } finally {
-      resetModernHashConfig();
-    }
-  });
-
-  it("isHashObject returns false for FabricHash when modern hashing is off", () => {
-    setModernHashConfig(false);
-    try {
-      const cid = new FabricHash(SAMPLE_HASH, "fid1");
-      expect(isHashObject(cid)).toBe(false);
-    } finally {
-      resetModernHashConfig();
-    }
-  });
-
-  it("isHashObject returns true for Reference.View when legacy hashing is on", () => {
-    setModernHashConfig(false);
-    try {
-      const ref = hashOf({ hello: "world" });
-      expect(Reference.is(ref)).toBe(true);
-      expect(isHashObject(ref)).toBe(true);
-    } finally {
-      resetModernHashConfig();
-    }
-  });
-
-  it("isHashObject returns false for Reference.View when modern hashing is on", () => {
-    setModernHashConfig(true);
-    try {
-      // Create a legacy ref while legacy mode is temporarily active.
-      setModernHashConfig(false);
-      const ref = hashOf({ hello: "world" });
-      expect(Reference.is(ref)).toBe(true);
-
-      // Switch to modern mode — legacy refs should not be recognized.
-      setModernHashConfig(true);
-      expect(isHashObject(ref)).toBe(false);
-    } finally {
-      resetModernHashConfig();
-    }
-  });
-
-  it("hashOf() returns FabricHash when canonical hashing is on", () => {
-    setModernHashConfig(true);
-    try {
-      const result = hashOf({ hello: "world" });
-      expect(result).toBeInstanceOf(FabricHash);
-    } finally {
-      resetModernHashConfig();
-    }
-  });
-
-  it("nested hashOf() works when canonical hashing is on (no throw on FabricHash in value tree)", () => {
-    setModernHashConfig(true);
-    try {
-      // First hashOf produces a FabricHash.
-      const innerRef = hashOf({ the: "text/plain", of: "entity:123" });
-      expect(innerRef).toBeInstanceOf(FabricHash);
-
-      // Wrap it in a fact-like structure and hashOf again. hashOfModern
-      // handles FabricHash via TAG_CONTENT_ID, so this must not throw.
-      const outerSource = {
-        cause: innerRef,
-        the: "text/plain",
-        of: "entity:456",
-        is: { value: 42 },
-      };
-      const outerRef = hashOf(outerSource);
-      expect(outerRef).toBeInstanceOf(FabricHash);
-    } finally {
-      resetModernHashConfig();
-    }
-  });
-
-  it("hashOf() returns Reference.View when canonical hashing is off", () => {
-    // Explicitly pin canonical hashing off rather than relying on ambient
-    // default, so this step exercises the legacy path even if the default
-    // changes.
-    setModernHashConfig(false);
-    try {
-      const result = hashOf({ test: true });
-      expect(Reference.is(result)).toBe(true);
-      expect(result).not.toBeInstanceOf(FabricHash);
-    } finally {
-      resetModernHashConfig();
-    }
+  it("FabricHash.fromString() throws on invalid format (no colon)", () => {
+    expect(() => FabricHash.fromString("nocolonhere")).toThrow(
+      "Invalid content hash string",
+    );
   });
 });

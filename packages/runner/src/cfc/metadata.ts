@@ -1,7 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";
 import type { NormalizedFullLink } from "../link-utils.ts";
-import { ignoreReadForScheduling } from "../scheduler.ts";
 import type {
   IExtendedStorageTransaction,
   MediaType,
@@ -12,7 +11,6 @@ import { canonicalizeLogicalPath } from "./canonical.ts";
 import type { CfcMetadata } from "./types.ts";
 
 const INTERNAL_VERIFIER_META = {
-  ...ignoreReadForScheduling,
   ...internalVerifierRead,
 };
 
@@ -23,14 +21,9 @@ const isPrefix = (
   left.length <= right.length &&
   left.every((segment, index) => segment === right[index]);
 
-const hasLabelValues = (
-  label: {
-    confidentiality?: readonly unknown[];
-    integrity?: readonly unknown[];
-  },
-): boolean =>
-  (label.confidentiality?.length ?? 0) > 0 ||
-  (label.integrity?.length ?? 0) > 0;
+const isCfcMetadata = (value: unknown): value is CfcMetadata =>
+  isRecord(value) && value.version === 1 && isRecord(value.labelMap) &&
+  Array.isArray(value.labelMap.entries);
 
 export const readStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,
@@ -44,12 +37,15 @@ export const readStoredCfcMetadata = (
     space: target.space,
     id: target.id as URI,
     type: target.type as MediaType,
-    path: [],
+    path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  return isRecord(document) && isRecord(document.cfc)
-    ? document.cfc as CfcMetadata
+  if (isCfcMetadata(document)) {
+    return document;
+  }
+  return isRecord(document) && isCfcMetadata(document.cfc)
+    ? document.cfc
     : undefined;
 };
 
@@ -62,8 +58,14 @@ export const storedCfcMetadataAppliesToPath = (
     return false;
   }
   const logicalPath = canonicalizeLogicalPath(target.path);
+  // labelMap entries are persisted both for paths with confidentiality /
+  // integrity values AND for paths whose schema carried a policy claim
+  // (writeAuthorizedBy / uiContract / exactCopyOf — see
+  // `derivePersistedLabel` and the persistence guard in `prepare.ts`). The
+  // mere presence of an entry signals "policy applies on this path"; do NOT
+  // filter on `hasLabelValues` here, or claim-only entries get silently
+  // bypassed.
   return metadata.labelMap.entries.some((entry) =>
-    hasLabelValues(entry.label) &&
-    (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
+    isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path)
   );
 };

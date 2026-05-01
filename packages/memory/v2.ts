@@ -9,13 +9,11 @@ import {
 } from "@commonfabric/data-model/json-encoding";
 import { getSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import { getModernHashConfig } from "@commonfabric/data-model/value-hash";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
 import type { ReconstructionContext } from "@commonfabric/data-model/interface";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
-export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
 export const DEFAULT_BRANCH = "" as const;
 
 export type EntityId = string;
@@ -145,7 +143,6 @@ export interface SessionOpenResult {
 export interface MemoryV2Flags {
   richStorableValues: boolean;
   unifiedJsonEncoding: boolean;
-  canonicalHashing: boolean;
   modernSchemaHash: boolean;
 }
 
@@ -351,7 +348,6 @@ const memoryV2ReconstructionContext: ReconstructionContext = {
 export const getMemoryV2Flags = (): MemoryV2Flags => ({
   richStorableValues: getDataModelConfig(),
   unifiedJsonEncoding: getJsonEncodingConfig(),
-  canonicalHashing: getModernHashConfig(),
   modernSchemaHash: getSchemaHashConfig(),
 });
 
@@ -361,7 +357,6 @@ export const sameMemoryV2Flags = (
 ): boolean =>
   left.richStorableValues === right.richStorableValues &&
   left.unifiedJsonEncoding === right.unifiedJsonEncoding &&
-  left.canonicalHashing === right.canonicalHashing &&
   left.modernSchemaHash === right.modernSchemaHash;
 
 export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
@@ -371,7 +366,6 @@ export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
 
   return typeof value.richStorableValues === "boolean" &&
     typeof value.unifiedJsonEncoding === "boolean" &&
-    typeof value.canonicalHashing === "boolean" &&
     typeof value.modernSchemaHash === "boolean";
 };
 
@@ -407,8 +401,7 @@ export const toValuePath = (path: readonly string[]): ValuePath =>
  * schema path selector. The result is interned-and-frozen via
  * `internPathSelector`, so callers can feed it directly to
  * `MapSetStringToPathSelectors` (or any other `hashSchemaItem`-keyed
- * cache) and get the `hashOfModernInternal` WeakMap fast-path on
- * repeat hashes.
+ * cache) and get the `hashOf()` `WeakMap` fast-path on repeat hashes.
  */
 export const toDocumentSelector = (
   selector: Pick<SchemaPathSelector, "path" | "schema">,

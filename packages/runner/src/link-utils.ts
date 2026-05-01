@@ -1,4 +1,6 @@
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
+import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { type AnyCell, type JSONSchema } from "./builder/types.ts";
 import {
   type Cell,
@@ -129,7 +131,9 @@ export function parseLinkOrThrow(
 ): NormalizedLink {
   const result = parseLink(value, baseCell);
   if (!result) {
-    throw new Error(`Cannot parse value as link: ${JSON.stringify(value)}`);
+    throw new Error(
+      `Cannot parse value as link: ${toCompactDebugString(value)}`,
+    );
   }
   return result;
 }
@@ -241,9 +245,11 @@ export function createSigilLinkFromParsedLink(
     if (link.space !== options.baseSpace) reference.space = link.space;
   }
 
-  // Include schema if requested
+  // Include schema if requested. Empty `{}` and JSON Schema `true` are
+  // permissive and should not turn links into schema-bearing links.
   if (options.includeSchema && link.schema !== undefined) {
-    reference.schema = sanitizeSchemaForLinks(link.schema, options);
+    const schema = sanitizeSchemaForLinks(link.schema, options);
+    if (isNontrivialSchema(schema)) reference.schema = schema;
   }
 
   // Option overrides link value

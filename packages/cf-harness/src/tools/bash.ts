@@ -1,5 +1,11 @@
 import type { JSONSchema } from "@commonfabric/api";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import {
+  commandWithFinalWorkingDirectoryMarker,
+  cwdMarkerForOutput,
+  extractFinalWorkingDirectory,
+} from "./shell-cwd.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface BashToolInput {
@@ -14,24 +20,17 @@ export interface BashToolOutput {
   stderr: string;
   exitCode: number;
   cwd: string;
+  cfcResult?: CfcSandboxResult;
 }
 
-const cwdMarkerForOutput = (outputId: string): string =>
-  `__CF_HARNESS_CWD__${outputId}__`;
+const CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
 
-const extractFinalWorkingDirectory = (
-  stdout: string,
-  marker: string,
-): { stdout: string; cwd?: string } => {
-  const markerIndex = stdout.lastIndexOf(marker);
-  if (markerIndex === -1) {
-    return { stdout };
-  }
-  return {
-    stdout: stdout.slice(0, markerIndex),
-    cwd: stdout.slice(markerIndex + marker.length),
-  };
-};
+const observedCfcStdout = (
+  cfcResult: CfcSandboxResult | undefined,
+): string | undefined =>
+  cfcResult?.stdout.policy === "observed"
+    ? cfcResult.stdout.segments.map((segment) => segment.text).join("")
+    : undefined;
 
 export const bashToolDescriptor: HarnessToolDescriptor = {
   toolId: "bash",
@@ -57,6 +56,7 @@ export const bashToolDescriptor: HarnessToolDescriptor = {
       stderr: { type: "string" },
       exitCode: { type: "number" },
       cwd: { type: "string" },
+      cfcResult: { type: "object" },
     },
     required: ["outputId", "stdout", "stderr", "exitCode", "cwd"],
     additionalProperties: false,
@@ -71,28 +71,51 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
     const commandCwd = input.cwd !== undefined
       ? context.resolvePath(input.cwd)
       : context.currentDir;
-    const cwdMarker = cwdMarkerForOutput(outputId);
+    const cwdMarker = cwdMarkerForOutput(CWD_MARKER_PREFIX, outputId);
+    const command = commandWithFinalWorkingDirectoryMarker(
+      input.command,
+      cwdMarker,
+    );
     const result = await context.sandbox.runShell({
-      command: [
-        `__cf_harness_cwd_marker=${JSON.stringify(cwdMarker)}`,
-        'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
-        input.command,
-      ].join("\n"),
+      command,
       cwd: commandCwd,
       timeoutMs: input.timeoutMs,
+      cfcInvocationContext: await context.createCfcInvocationContext({
+        toolId: "bash",
+        toolOutputId: outputId,
+        operation: "shell",
+        cwd: commandCwd,
+        command,
+      }),
     });
-    const parsedResult = extractFinalWorkingDirectory(result.stdout, cwdMarker);
-    const nextCurrentDir = parsedResult.cwd !== undefined &&
-        context.sandbox.isPathWithinWorkspace(parsedResult.cwd)
-      ? parsedResult.cwd
+    const mayTrustCwdMarker = context.cfcEnforcementMode === "disabled" ||
+      context.cfcEnforcementMode === "observe";
+    const cwdSourceStdout = mayTrustCwdMarker
+      ? result.stdout
+      : observedCfcStdout(result.cfcResult);
+    const parsedCwd = cwdSourceStdout !== undefined
+      ? extractFinalWorkingDirectory(cwdSourceStdout, cwdMarker)
+      : undefined;
+    const outputStdout = mayTrustCwdMarker && parsedCwd !== undefined
+      ? parsedCwd.stdout
+      : result.stdout;
+    const isAllowedCurrentDir = parsedCwd?.cwd !== undefined &&
+      (context.sandbox.isPathWithinAllowedRoots?.(parsedCwd.cwd) ??
+        context.sandbox.isPathWithinWorkspace(parsedCwd.cwd));
+    const nextCurrentDir = parsedCwd?.cwd !== undefined &&
+        isAllowedCurrentDir
+      ? parsedCwd.cwd
       : commandCwd;
     context.setCurrentDir(nextCurrentDir);
     return {
       outputId,
-      stdout: parsedResult.stdout,
+      stdout: outputStdout,
       stderr: result.stderr,
       exitCode: result.exitCode,
       cwd: nextCurrentDir,
+      ...(result.cfcResult !== undefined
+        ? { cfcResult: result.cfcResult }
+        : {}),
     };
   },
 };

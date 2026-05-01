@@ -67,19 +67,23 @@ export default pattern<ListItemStoryInput, ListItemStoryOutput>(() => {
         </cf-heading>
         <cf-list-item label="Project Alpha" expandable>
           <span slot="icon">📦</span>
-          <cf-badge slot="action" variant="secondary">Active</cf-badge>
+          <cf-badge slot="action" color="neutral" variant="solid">
+            Active
+          </cf-badge>
           <div slot="detail" style={{ padding: "8px 8px 8px 36px" }}>
             <cf-vstack gap="1">
               <span style={{ fontSize: "0.75rem", color: "#71747a" }}>
                 Building UI · 29 tokens
               </span>
-              <cf-badge variant="default">In Progress</cf-badge>
+              <cf-badge color="primary" variant="solid">In Progress</cf-badge>
             </cf-vstack>
           </div>
         </cf-list-item>
         <cf-list-item label="Project Beta" expandable>
           <span slot="icon">📦</span>
-          <cf-badge slot="action" variant="destructive">Alert</cf-badge>
+          <cf-badge slot="action" color="danger" variant="solid">
+            Alert
+          </cf-badge>
           <div slot="detail" style={{ padding: "8px 8px 8px 36px" }}>
             <span style={{ fontSize: "0.75rem", color: "#71747a" }}>
               Requires attention

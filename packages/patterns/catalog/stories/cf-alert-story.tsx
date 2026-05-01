@@ -16,9 +16,7 @@ interface AlertStoryOutput {
 }
 
 export default pattern<AlertStoryInput, AlertStoryOutput>(() => {
-  const variant = Writable.of<
-    "default" | "destructive" | "warning" | "success" | "info"
-  >("default");
+  const status = Writable.of<"info" | "success" | "warning" | "error">("info");
   const dismissible = Writable.of(false);
   const icon = Writable.of("i");
   const showIcon = Writable.of(true);
@@ -32,7 +30,7 @@ export default pattern<AlertStoryInput, AlertStoryOutput>(() => {
       <div style={{ padding: "1rem" }}>
         <div style={{ padding: "2rem 0" }}>
           <cf-alert
-            variant={variant}
+            status={status}
             dismissible={dismissible}
           >
             {showIcon.get() ? <span slot="icon">{icon}</span> : null}
@@ -52,16 +50,15 @@ export default pattern<AlertStoryInput, AlertStoryOutput>(() => {
       <Controls>
         <>
           <SelectControl
-            label="variant"
-            description="Visual style variant"
-            defaultValue="default"
-            value={variant}
+            label="status"
+            description="Alert status"
+            defaultValue="info"
+            value={status}
             items={[
-              { label: "Default", value: "default" },
-              { label: "Destructive", value: "destructive" },
-              { label: "Warning", value: "warning" },
-              { label: "Success", value: "success" },
               { label: "Info", value: "info" },
+              { label: "Success", value: "success" },
+              { label: "Warning", value: "warning" },
+              { label: "Error", value: "error" },
             ]}
           />
           <SwitchControl

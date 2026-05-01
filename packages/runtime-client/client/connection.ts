@@ -57,10 +57,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   #initialized = false;
   #disposed = false;
   #transport: RuntimeTransport;
-  #subscribed = new Map<
-    `${string}:${string}:${string}`,
-    Set<CellHandle>
-  >();
+  #subscribed = new Map<string, Set<CellHandle>>();
 
   constructor(transport: RuntimeTransport) {
     super();

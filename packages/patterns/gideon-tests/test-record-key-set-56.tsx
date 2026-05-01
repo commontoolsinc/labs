@@ -8,7 +8,15 @@
  *
  * Error observed: "Value at path value/argument/corrections/0-Technical_Expertise is not an object"
  */
-import { Cell, Default, handler, NAME, pattern, UI } from "commonfabric";
+import {
+  Cell,
+  Default,
+  handler,
+  NAME,
+  pattern,
+  toCompactDebugString,
+  UI,
+} from "commonfabric";
 
 interface Item {
   value: string;
@@ -166,8 +174,8 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
         >
           <strong>Current State:</strong>
           <div style={{ fontSize: "0.8rem", fontFamily: "monospace" }}>
-            <div>emptyRecord: {JSON.stringify(emptyRecord)}</div>
-            <div>populatedRecord: {JSON.stringify(populatedRecord)}</div>
+            <div>emptyRecord: {toCompactDebugString(emptyRecord)}</div>
+            <div>populatedRecord: {toCompactDebugString(populatedRecord)}</div>
           </div>
         </div>
 

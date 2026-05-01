@@ -18,11 +18,15 @@ import {
   findAndInlineDataURILinks,
   isCellLink,
   isPrimitiveCellLink,
+  isSigilLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { isCellResultForDereferencing } from "./query-result-proxy.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
@@ -38,7 +42,13 @@ import {
   storedCfcMetadataAppliesToPath,
 } from "./cfc/metadata.ts";
 import { canonicalizeLogicalPath } from "./cfc/canonical.ts";
+import {
+  type CfcLabelView,
+  cloneCfcLabelView,
+  getCarriedCfcLabelView,
+} from "./cfc/label-view-state.ts";
 import type { CfcAddress } from "./cfc/types.ts";
+import { LINK_V1_TAG } from "./sigil-types.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -91,6 +101,9 @@ const labelHasValues = (
   (label.confidentiality?.length ?? 0) > 0 ||
   (label.integrity?.length ?? 0) > 0;
 
+const cfcLabelViewHasValues = (view: CfcLabelView | undefined): boolean =>
+  view?.entries.some((entry) => labelHasValues(entry.label)) ?? false;
+
 const schemaIfcOverlapsPath = (
   schema: JSONSchema | undefined,
   basePath: readonly string[],
@@ -128,7 +141,7 @@ const schemaIfcOverlapsPath = (
   return visit(schema, basePath);
 };
 
-const hasPendingSourcePolicyInput = (
+const hasPendingSchemaPolicyInput = (
   tx: IExtendedStorageTransaction,
   source: NormalizedFullLink,
 ): boolean => {
@@ -151,14 +164,19 @@ const recordLinkWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   target: NormalizedFullLink,
   source: NormalizedFullLink,
+  cfcLabelView?: CfcLabelView,
 ): void => {
   if (tx.getCfcState().enforcementMode === "disabled") {
     return;
   }
+  const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
   const sourceMetadata = readStoredCfcMetadata(tx, source);
-  const sourceRelevant = sourceMetadata !== undefined ||
-    hasPendingSourcePolicyInput(tx, source);
-  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target);
+  const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
+    sourceMetadata !== undefined ||
+    hasPendingSchemaPolicyInput(tx, source) ||
+    cfcLabelViewHasValues(carriedCfcLabelView);
+  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target) ||
+    hasPendingSchemaPolicyInput(tx, target);
   if (!sourceRelevant && !targetRelevant) {
     return;
   }
@@ -169,7 +187,58 @@ const recordLinkWritePolicyInput = (
     target: cfcAddressFromLink(target),
     source: cfcAddressFromLink(source),
     ...(source.schema !== undefined && { linkSchema: source.schema }),
+    ...(carriedCfcLabelView !== undefined && {
+      cfcLabelView: carriedCfcLabelView,
+    }),
   });
+};
+
+const cfcLabelViewForPrimitiveLink = (
+  value: unknown,
+): CfcLabelView | undefined => {
+  if (!isSigilLink(value)) {
+    return undefined;
+  }
+  return cloneCfcLabelView(
+    (value["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+      .cfcLabelView,
+  );
+};
+
+const attachCfcLabelViewToSigilLink = (
+  value: unknown,
+  cfcLabelView: CfcLabelView | undefined,
+): unknown => {
+  const clonedView = cloneCfcLabelView(cfcLabelView);
+  if (!clonedView || !isSigilLink(value)) {
+    return value;
+  }
+  return {
+    "/": {
+      [LINK_V1_TAG]: {
+        ...value["/"][LINK_V1_TAG],
+        cfcLabelView: clonedView,
+      },
+    },
+  };
+};
+
+const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
+  if (!isSigilLink(value)) {
+    return value;
+  }
+  const inner = value["/"][LINK_V1_TAG] as
+    & Record<string, unknown>
+    & { cfcLabelView?: CfcLabelView };
+  if (inner.cfcLabelView === undefined) {
+    return value;
+  }
+  const { cfcLabelView: _cfcLabelView, ...cleanInner } = inner;
+  return {
+    "/": {
+      [LINK_V1_TAG]: cleanInner,
+    },
+  };
 };
 
 /**
@@ -348,8 +417,14 @@ export function normalizeAndDiff(
 
   // Unwrap proxies and handle special types
   if (isCellResultForDereferencing(newValue)) {
+    const carriedCfcLabelView = getCarriedCfcLabelView(
+      getCellOrThrow(newValue),
+    );
     const parsedLink = parseLink(newValue);
-    const sigilLink = createSigilLinkFromParsedLink(parsedLink);
+    const sigilLink = attachCfcLabelViewToSigilLink(
+      createSigilLinkFromParsedLink(parsedLink),
+      carriedCfcLabelView,
+    );
     diffLogger.debug(
       "diff",
       () =>
@@ -370,7 +445,11 @@ export function normalizeAndDiff(
       () => `[BRANCH_CELL] Converting cell to link at path=${pathStr}`,
     );
     linkOriginFromCell = true;
-    newValue = newValue.getAsLink();
+    const carriedCfcLabelView = getCarriedCfcLabelView(newValue);
+    newValue = attachCfcLabelViewToSigilLink(
+      newValue.getAsLink(),
+      carriedCfcLabelView,
+    );
   }
 
   // Check for links that are data: URIs and inline them, by calling
@@ -406,6 +485,7 @@ export function normalizeAndDiff(
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {
+    const carriedCfcLabelView = cfcLabelViewForPrimitiveLink(newValue);
     const parsedLink = parseLink(newValue, link);
     if (
       isWriteRedirectLink(currentValue) &&
@@ -418,6 +498,9 @@ export function normalizeAndDiff(
         "diff",
         () => `[BRANCH_WRITE_REDIRECT] Same redirect, no-op at path=${pathStr}`,
       );
+      if (cfcLabelViewHasValues(carriedCfcLabelView)) {
+        recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
+      }
       return [];
     } else {
       diffLogger.debug(
@@ -425,8 +508,11 @@ export function normalizeAndDiff(
         () =>
           `[BRANCH_WRITE_REDIRECT] Different redirect, updating at path=${pathStr}`,
       );
-      recordLinkWritePolicyInput(tx, link, parsedLink);
-      changes.push({ location: link, value: newValue as FabricValue });
+      recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
+      changes.push({
+        location: link,
+        value: stripCfcLabelViewFromPrimitiveLink(newValue) as FabricValue,
+      });
       return changes;
     }
   }
@@ -464,6 +550,7 @@ export function normalizeAndDiff(
           JSON.stringify(newValue as any)
         }`,
     );
+    const carriedCfcLabelView = cfcLabelViewForPrimitiveLink(newValue);
     const parsedLink = parseLink(newValue, link);
 
     // Collapse same-document self/parent links created by query-result dereferencing.
@@ -502,6 +589,9 @@ export function normalizeAndDiff(
         "diff",
         () => `[BRANCH_CELL_LINK] Same cell link, no-op at path=${pathStr}`,
       );
+      if (cfcLabelViewHasValues(carriedCfcLabelView)) {
+        recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
+      }
       return [];
     } else {
       diffLogger.debug(
@@ -509,10 +599,13 @@ export function normalizeAndDiff(
         () =>
           `[BRANCH_CELL_LINK] Different cell link, updating at path=${pathStr}`,
       );
-      recordLinkWritePolicyInput(tx, link, parsedLink);
+      recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
       return [
         // TODO(seefeld): Normalize the link to a sigil link?
-        { location: link, value: newValue as FabricValue },
+        {
+          location: link,
+          value: stripCfcLabelViewFromPrimitiveLink(newValue) as FabricValue,
+        },
       ];
     }
   }

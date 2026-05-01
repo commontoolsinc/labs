@@ -1,6 +1,18 @@
 import type { JSONSchema } from "@commonfabric/api";
 
-export type BuiltinToolId = "bash" | "read_file" | "write_file";
+export type BuiltinToolId =
+  | "bash"
+  | "bash-no-sandbox"
+  | "read_file"
+  | "write_file"
+  | "delegate_task";
+
+export const DEFAULT_PARENT_TOOL_IDS = [
+  "bash",
+  "read_file",
+  "write_file",
+  "delegate_task",
+] as const satisfies readonly BuiltinToolId[];
 
 export type HarnessToolEffectClass = "read" | "write" | "side-effect";
 

@@ -15,10 +15,10 @@ This spec covers:
 - **Unknown types** (Section 3) -- forward-compatibility via `UnknownValue`
 - **Serialization contexts** (Section 4) -- boundary-crossing serialization
   strategy, the `serialize()`/`deserialize()` functions, and boundary inventory
-- **JSON encoding** (Section 5) -- the `/<Type>@<Version>` wire format for
-  special types, escaping, and detection rules
-- **Canonical hashing** (Section 6) -- content-based identity for fabric
-  values
+- **JSON encoding** -- the `fvj1:` encoding prefix, the `/<Type>@<Version>`
+  wire format for special types, escaping, detection rules, and the `/`-key
+  reservation rule
+- **Hashing** (Section 6) -- content-based identity for fabric values
 - **Implementation guidance** (Section 7) -- migration from legacy formats
 
 Out of scope: CRDT-based storage layer, network sync protocols, the reactive
@@ -26,5 +26,13 @@ system, schemas.
 
 ## Documents
 
-- [1-fabric-values.md](./1-fabric-values.md) -- The complete data model
-  specification. All topics above are covered in this single document.
+- [1-fabric-values.md](./1-fabric-values.md) -- Fabric value types, the
+  three-layer architecture, the fabric protocol, unknown types, serialization
+  contexts, hashing, implementation guidance, and conversion functions.
+  (Sections 1-4, 6-8.)
+- [2-hash-byte-format.md](./2-hash-byte-format.md) --
+  Byte-level encoding for the hash algorithm.
+- [3-json-encoding.md](./3-json-encoding.md) -- The JSON wire format for
+  fabric values: the `fvj1:` encoding prefix, `/<Type>@<Version>` tagged
+  objects, standard type encodings, detection, escaping, and the `/`-key
+  reservation rule.

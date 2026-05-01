@@ -47,7 +47,7 @@ export class CFTable extends BaseElement {
       border-collapse: collapse;
       caption-side: bottom;
       text-align: left;
-      font-size: 0.875rem;
+      font-size: var(--cf-font-body-size, 0.875rem);
       width: auto;
     }
 
@@ -57,7 +57,7 @@ export class CFTable extends BaseElement {
 
     /* Size variants */
     :host([size="sm"]) table {
-      font-size: 0.75rem;
+      font-size: var(--cf-font-caption-size, 0.75rem);
     }
 
     :host([size="sm"]) ::slotted(th),
@@ -71,7 +71,7 @@ export class CFTable extends BaseElement {
     }
 
     :host([size="lg"]) table {
-      font-size: 1rem;
+      font-size: var(--cf-font-body-large-size, 1rem);
     }
 
     :host([size="lg"]) ::slotted(th),
@@ -88,7 +88,7 @@ export class CFTable extends BaseElement {
     }
 
     ::slotted(th) {
-      font-weight: 600;
+      font-weight: var(--cf-font-weight-semibold, 600);
       color: var(--foreground, #0f172a);
       background-color: var(--muted, #f8fafc);
     }

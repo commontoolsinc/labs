@@ -2,6 +2,7 @@ import { assertAlmostEquals, assertEquals } from "@std/assert";
 import {
   computeBaseline,
   extractMetrics,
+  fetchPRBody,
   type Job,
   type Step,
   type WorkflowRun,
@@ -100,4 +101,28 @@ Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 15 percent
   assertEquals(baseline?.median, 100);
   assertAlmostEquals(baseline?.stddev ?? 0, 20, 1e-9);
   assertEquals(baseline?.threshold, 160);
+});
+
+Deno.test("fetchPRBody reads the live pull request body from the GitHub API", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl: string | undefined;
+  try {
+    globalThis.fetch = ((input, _init) => {
+      requestedUrl = input instanceof Request ? input.url : String(input);
+      return Promise.resolve(
+        new Response(JSON.stringify({ body: "LIVE PR BODY" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
+
+    assertEquals(await fetchPRBody(3427), "LIVE PR BODY");
+    assertEquals(
+      requestedUrl,
+      "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

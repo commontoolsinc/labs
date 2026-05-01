@@ -22,6 +22,9 @@ const LABEL_KEYS = [
   "integrity",
 ] as const satisfies readonly LabelKey[];
 
+const LABEL_RETRY_INTERVAL_MS = 100;
+const MAX_LABEL_RETRY_COUNT = 100;
+
 const hasLabelQuery = (value: unknown): value is CfcLabelQueryableValue =>
   typeof value === "object" && value !== null &&
   "getCfcLabel" in value &&
@@ -205,6 +208,8 @@ export class CFCFCLabel extends BaseElement {
   private _value: unknown = undefined;
   private _observedValue: unknown = undefined;
   private _unsubscribeValue: (() => void) | undefined;
+  private _labelRetryTimeout: ReturnType<typeof setTimeout> | undefined;
+  private _labelRetryCount = 0;
 
   constructor() {
     super();
@@ -230,6 +235,7 @@ export class CFCFCLabel extends BaseElement {
   }
 
   override disconnectedCallback() {
+    this.clearLabelRetry();
     this.clearValueSubscription();
     super.disconnectedCallback();
   }
@@ -249,9 +255,12 @@ export class CFCFCLabel extends BaseElement {
   }
 
   private refreshForCurrentValue(): void {
-    const hasSubscription = this.observeValue(this.value);
-    if (!hasSubscription) {
+    const isSameValue = Object.is(this.value, this._observedValue);
+    this.observeValue(this.value);
+    if (!isSameValue) {
       void this.refreshLabel();
+    } else if (this.cfcLabel !== undefined) {
+      this.requestUpdate("cfcLabel");
     }
   }
 
@@ -261,6 +270,8 @@ export class CFCFCLabel extends BaseElement {
     }
 
     this.clearValueSubscription();
+    this.clearLabelRetry();
+    this._labelRetryCount = 0;
     this._observedValue = value;
 
     if (!hasLabelSubscription(value)) {
@@ -279,9 +290,40 @@ export class CFCFCLabel extends BaseElement {
     this._observedValue = undefined;
   }
 
+  private clearLabelRetry(): void {
+    if (this._labelRetryTimeout === undefined) {
+      return;
+    }
+    clearTimeout(this._labelRetryTimeout);
+    this._labelRetryTimeout = undefined;
+  }
+
+  private scheduleLabelRetry(requestId: number): void {
+    if (
+      !this.isConnected ||
+      this._labelRetryCount >= MAX_LABEL_RETRY_COUNT
+    ) {
+      return;
+    }
+
+    this.clearLabelRetry();
+    this._labelRetryTimeout = setTimeout(() => {
+      this._labelRetryTimeout = undefined;
+      if (
+        requestId === this._labelRequestId &&
+        this.cfcLabel === undefined &&
+        hasLabelQuery(this.value)
+      ) {
+        this._labelRetryCount += 1;
+        void this.refreshLabel();
+      }
+    }, LABEL_RETRY_INTERVAL_MS);
+  }
+
   async refreshLabel(): Promise<void> {
     const requestId = ++this._labelRequestId;
     if (!hasLabelQuery(this.value)) {
+      this.clearLabelRetry();
       const previous = this.cfcLabel;
       this.cfcLabel = undefined;
       this.requestUpdate("cfcLabel", previous);
@@ -293,6 +335,12 @@ export class CFCFCLabel extends BaseElement {
       const previous = this.cfcLabel;
       this.cfcLabel = cfcLabel;
       this.requestUpdate("cfcLabel", previous);
+      if (cfcLabel === undefined) {
+        this.scheduleLabelRetry(requestId);
+      } else {
+        this.clearLabelRetry();
+        this._labelRetryCount = 0;
+      }
     }
   }
 

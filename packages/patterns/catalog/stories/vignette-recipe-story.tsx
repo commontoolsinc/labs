@@ -122,7 +122,7 @@ export default pattern<VignetteRecipeStoryInput, VignetteRecipeStoryOutput>(
                 {/* Category chips */}
                 <div style={{ padding: "0 28px 16px" }}>
                   <cf-hstack gap="2" wrap>
-                    <cf-chip variant="primary" interactive>All</cf-chip>
+                    <cf-chip color="primary" interactive>All</cf-chip>
                     <cf-chip interactive>Breakfast</cf-chip>
                     <cf-chip interactive>Lunch</cf-chip>
                     <cf-chip interactive>Dinner</cf-chip>
@@ -186,7 +186,7 @@ export default pattern<VignetteRecipeStoryInput, VignetteRecipeStoryOutput>(
                           </span>
                         </cf-hstack>
                         <div style={{ flex: "1" }} />
-                        <cf-button variant="default" size="sm">
+                        <cf-button color="neutral" variant="outline" size="sm">
                           View Recipe
                         </cf-button>
                       </cf-hstack>

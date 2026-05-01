@@ -85,16 +85,46 @@ wait_for_path() {
   error "Timed out waiting for path: $path"
 }
 
+fuse_encode_component() {
+  local value="$1"
+  value="${value//%/%25}"
+  value="${value//:/%3A}"
+  value="${value//\//%2F}"
+  if [[ "$value" == .* ]]; then
+    value="%2E${value:1}"
+  fi
+  printf '%s\n' "$value"
+}
+
 resolve_entity_dir() {
   local entities_dir="$1"
-  local bare_id="$2"
+  local entity_id="$2"
   local timeout_seconds="${3:-20}"
   local started_at
   started_at=$(date +%s)
+  local bare_id="${entity_id#of:}"
   local canonical_entity_dir="$entities_dir/of:$bare_id"
   local bare_entity_dir="$entities_dir/$bare_id"
+  local encoded_entity_dir="$entities_dir/$(fuse_encode_component "$entity_id")"
+  local encoded_canonical_entity_dir="$entities_dir/$(fuse_encode_component "of:$bare_id")"
+  local encoded_bare_entity_dir="$entities_dir/$(fuse_encode_component "$bare_id")"
 
   while true; do
+    if path_exists "$encoded_entity_dir" 1; then
+      printf '%s\n' "$encoded_entity_dir"
+      return 0
+    fi
+
+    if path_exists "$encoded_canonical_entity_dir" 1; then
+      printf '%s\n' "$encoded_canonical_entity_dir"
+      return 0
+    fi
+
+    if path_exists "$encoded_bare_entity_dir" 1; then
+      printf '%s\n' "$encoded_bare_entity_dir"
+      return 0
+    fi
+
     if path_exists "$canonical_entity_dir" 1; then
       printf '%s\n' "$canonical_entity_dir"
       return 0
@@ -210,7 +240,7 @@ PIECE_ID=$(cf piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC
 echo "Created piece: $PIECE_ID"
 cf piece step $SPACE_ARGS --piece "$PIECE_ID"
 echo "Stepped piece: $PIECE_ID"
-MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background)
+MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --space="$SPACE" --background)
 echo "$MOUNT_OUTPUT"
 
 MOUNT_PID="${MOUNT_OUTPUT#*PID }"
@@ -238,6 +268,8 @@ wait_for_path "$MOUNTPOINT/$SPACE/pieces"
 
 PIECE_NAME="Fuse-Exec-Fixture"
 PIECE_DIR="$MOUNTPOINT/$SPACE/pieces/$PIECE_NAME"
+INPUT_DIR="$PIECE_DIR/input"
+INPUT_LAST_MESSAGE="$INPUT_DIR/lastMessage"
 RESULT_DIR="$PIECE_DIR/result"
 RESULT_JSON="$PIECE_DIR/result.json"
 META_JSON="$PIECE_DIR/meta.json"
@@ -255,9 +287,9 @@ ENTITY_BARE_ID="${ENTITY_ID#of:}"
 ENTITY_DEEP_PROBE="${FUSE_DEEP_ENTITY_PROBE:-0}"
 ENTITIES_DIR="$MOUNTPOINT/$SPACE/entities"
 wait_for_path "$ENTITIES_DIR"
-ENTITY_DIR=$(resolve_entity_dir "$ENTITIES_DIR" "$ENTITY_BARE_ID" 20 || true)
+ENTITY_DIR=$(resolve_entity_dir "$ENTITIES_DIR" "$ENTITY_ID" 20 || true)
 if [ -z "$ENTITY_DIR" ]; then
-  error "Timed out waiting for entity directory entry for $ENTITY_BARE_ID."
+  error "Timed out waiting for entity directory entry for $ENTITY_ID."
 fi
 
 HANDLER_FILE="$RESULT_DIR/recordMessage.handler"
@@ -418,5 +450,18 @@ LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "legacyCount" "0")
 echo '{}' > "$LEGACY_HANDLER_FILE"
 wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE + 1))"
 success "Legacy handler write-through still works"
+
+wait_for_path "$INPUT_LAST_MESSAGE"
+exec 9<> "$INPUT_LAST_MESSAGE"
+printf 'open-stale' >&9
+: > "$INPUT_LAST_MESSAGE"
+exec 9>&-
+wait_for_piece_value "lastMessage" '""'
+sleep 0.5
+LAST_MESSAGE_AFTER_TRUNCATE=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "lastMessage" 2>/dev/null || true)
+if [ "$LAST_MESSAGE_AFTER_TRUNCATE" != '""' ]; then
+  error "Path truncate should not be undone by a stale open file handle. Got: $LAST_MESSAGE_AFTER_TRUNCATE"
+fi
+success "Path truncate clears stale open write handles"
 
 echo "FUSE exec integration passed."

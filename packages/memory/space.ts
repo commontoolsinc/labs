@@ -8,15 +8,11 @@ import {
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
-import {
-  type HashObject,
-  hashObjectFromString,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
-  Assertion,
   AsyncResult,
   AuthorizationError,
   CauseString,
@@ -71,27 +67,14 @@ export type {
   SelectSchemaStats,
 } from "./space-schema.ts";
 import { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "../utils/src/types.ts";
 import {
   jsonFromValue,
+  plainObjectFromJson,
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
-import type { ReconstructionContext } from "@commonfabric/data-model/fabric-value";
 export type * from "./interface.ts";
-
-/**
- * Minimal reconstruction context for decoding values at the storage boundary.
- * Step 0 only handles types that don't require runtime context (undefined,
- * bigint, sparse arrays, etc.), so `getCell` is unimplemented. Future steps
- * that add Cell serialization will need to supply a real context.
- */
-const storageReconstructionContext: ReconstructionContext = {
-  getCell() {
-    throw new globalThis.Error(
-      "getCell is not available at the storage boundary (step 0)",
-    );
-  },
-};
 
 export const PREPARE = `
 BEGIN TRANSACTION;
@@ -564,8 +547,8 @@ const recall = <Space extends MemorySpace>(
       the,
       of,
       cause: (row.cause
-        ? hashObjectFromString(row.cause)
-        : unclaimedRef({ the, of })) as HashObject<Assertion>,
+        ? FabricHash.fromString(row.cause)
+        : unclaimedRef({ the, of })) as FabricHash,
       since: row.since,
       fact: row.fact, // Include stored hash to avoid recomputing with hashOf()
     };
@@ -576,10 +559,7 @@ const recall = <Space extends MemorySpace>(
       // dispatch, `JSON.parse` returned `any` which silently satisfied the
       // type; `valueFromJson` returns `FabricValue`, so we need a cast.
       // deno-lint-ignore no-explicit-any
-      (revision as any).is = valueFromJson(
-        row.is,
-        storageReconstructionContext,
-      );
+      (revision as any).is = valueFromJson(row.is);
     }
 
     return revision;
@@ -653,17 +633,14 @@ const getFact = <Space extends MemorySpace>(
     of: row.of as URI,
     cause:
       (row.cause
-        ? hashObjectFromString(row.cause)
-        : unclaimedRef(row as FactAddress)) as HashObject<Assertion>,
+        ? FabricHash.fromString(row.cause)
+        : unclaimedRef(row as FactAddress)) as FabricHash,
     since: row.since,
   };
   if (row.is) {
     // See comment in `recall` for why this cast is needed.
     // deno-lint-ignore no-explicit-any
-    (revision as any).is = valueFromJson(
-      row.is,
-      storageReconstructionContext,
-    );
+    (revision as any).is = valueFromJson(row.is);
   }
   return revision;
 };
@@ -721,9 +698,7 @@ const toFact = function (row: StateRow): SelectedFact {
     cause: row.cause
       ? row.cause as CauseString
       : unclaimedRef(row as FactAddress).toString() as CauseString,
-    is: row.is
-      ? valueFromJson(row.is, storageReconstructionContext) as FabricValue
-      : undefined,
+    is: row.is ? valueFromJson(row.is) as FabricValue : undefined,
     since: row.since,
   };
 };
@@ -778,7 +753,7 @@ export const selectFact = function <Space extends MemorySpace>(
  * special `"undefined"` for which `datum` table will have row with `NULL`
  * source. If `datum` already contains row for matching `datum` insert is
  * ignored because existing record will parse to same `datum` since primary
- * key is merkle-reference for it or an "undefined" for the `undefined`.
+ * key is a hash for it or an "undefined" for the `undefined`.
  */
 const importDatum = <Space extends MemorySpace>(
   session: Session<Space>,
@@ -810,11 +785,11 @@ const iterateTransaction = function* (
       for (const [cause, change] of Object.entries(revisions)) {
         if (change == true) {
           yield {
-            claim: { the, of, fact: hashObjectFromString(cause) },
+            claim: { the, of, fact: FabricHash.fromString(cause) },
           } as Claim;
         } else if (change.is === undefined) {
           yield {
-            retract: { the, of, cause: hashObjectFromString(cause) },
+            retract: { the, of, cause: FabricHash.fromString(cause) },
           } as Retract;
         } else {
           yield {
@@ -822,7 +797,7 @@ const iterateTransaction = function* (
               the,
               of,
               is: change.is,
-              cause: hashObjectFromString(cause),
+              cause: FabricHash.fromString(cause),
             },
           } as Assert;
         }
@@ -851,7 +826,7 @@ const swap = <Space extends MemorySpace>(
     : [source.claim, source.claim.fact];
   const cause = expect.toString();
   const base = unclaimedRef({ the, of }).toString();
-  const expected = cause === base ? null : (expect as HashObject<Fact>);
+  const expected = cause === base ? null : (expect as FabricHash);
 
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
@@ -971,10 +946,10 @@ const commit = <Space extends MemorySpace>(
   const row = stmt.get({ the, of }) as StateRow | undefined;
   const [since, cause] = row
     ? [
-      (JSON.parse(row.is as string) as CommitData).since + 1,
-      hashObjectFromString(row.fact) as HashObject<Assertion>,
+      plainObjectFromJson<CommitData>(row.is as string).since + 1,
+      FabricHash.fromString(row.fact),
     ]
-    : [0, unclaimedRef({ the, of }) as HashObject as HashObject<Assertion>];
+    : [0, unclaimedRef({ the, of }) as FabricHash];
 
   const commit = createCommit({
     space: of,
@@ -1128,7 +1103,7 @@ export const querySchema = <Space extends MemorySpace>(
       span.setAttribute("querySchema.has_selector", true);
       span.setAttribute(
         "querySchema.selectSchema",
-        JSON.stringify(command.args.selectSchema),
+        toCompactDebugString(command.args.selectSchema),
       );
     }
     if (command.args?.since !== undefined) {

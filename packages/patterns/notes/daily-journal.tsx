@@ -244,8 +244,9 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
 
     // Gather last 7 days of note content for the system prompt
     const recentNotesContext = computed(() => {
-      const today = new Date(safeDateNow());
-      const sevenDaysAgo = new Date(safeDateNow());
+      const now = safeDateNow();
+      const today = new Date(now);
+      const sevenDaysAgo = new Date(now);
       sevenDaysAgo.setDate(today.getDate() - 7);
       const cutoff = toLocalISODate(sevenDaysAgo);
 
@@ -367,7 +368,8 @@ ${notesXml}
               <cf-vstack gap="4">
                 {/* Go to Today */}
                 <cf-button
-                  variant="primary"
+                  color="primary"
+                  variant="solid"
                   onClick={handleGoToToday({
                     entries,
                     template,
@@ -408,7 +410,11 @@ ${notesXml}
                     }}
                   >
                     <h3 style={{ margin: 0, fontSize: "16px" }}>Entries</h3>
-                    <cf-button variant="ghost" onClick={toggleSettings}>
+                    <cf-button
+                      color="neutral"
+                      variant="ghost"
+                      onClick={toggleSettings}
+                    >
                       Settings
                     </cf-button>
                   </div>
@@ -436,6 +442,7 @@ ${notesXml}
                         Weekly Rollup
                       </h3>
                       <cf-button
+                        color="neutral"
                         variant="ghost"
                         size="sm"
                         onClick={triggerRollup({
@@ -652,7 +659,7 @@ ${notesXml}
               wordWrap
               style={{ minHeight: "300px" }}
             />
-            <cf-button variant="primary" onClick={toggleSettings}>
+            <cf-button color="primary" variant="solid" onClick={toggleSettings}>
               Done
             </cf-button>
           </cf-vstack>

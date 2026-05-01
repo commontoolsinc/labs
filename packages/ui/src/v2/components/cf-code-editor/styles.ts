@@ -4,7 +4,10 @@ export const styles = css`
   :host {
     --cf-code-editor-border-color: var(--cf-theme-color-border, #e5e7eb);
     --cf-code-editor-border-radius: var(--cf-theme-border-radius, 0.375rem);
-    --cf-code-editor-font-size: var(--cf-theme-font-size, 0.875rem);
+    --cf-code-editor-font-size: var(
+      --cf-theme-font-size,
+      var(--cf-font-body-size, 0.875rem)
+    );
     --cf-code-editor-font-family-mono: var(
       --cf-theme-mono-font-family,
       monospace
@@ -20,7 +23,10 @@ export const styles = css`
         sans-serif
       )
     );
-    --cf-code-editor-prose-font-size: var(--cf-theme-font-size, 1rem);
+    --cf-code-editor-prose-font-size: var(
+      --cf-theme-font-size,
+      var(--cf-font-body-large-size, 1rem)
+    );
     --cf-code-editor-focus-ring: color-mix(
       in srgb,
       var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa)) 16%,
@@ -28,7 +34,7 @@ export const styles = css`
     );
     --cf-code-editor-transition-duration: var(
       --cf-theme-animation-duration,
-      150ms
+      var(--cf-transition-duration-fast, 150ms)
     );
     --cf-code-editor-transition-ease: var(--cf-transition-timing-ease, ease);
 

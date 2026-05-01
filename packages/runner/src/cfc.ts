@@ -6,6 +6,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { CellKind, JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
 import { decodeJsonPointer } from "./link-types.ts";
 export { CFC_ATOM_TYPE, CFC_RUNTIME_SUBJECT, cfcAtom } from "./cfc/atoms.ts";
@@ -382,7 +383,7 @@ export class ContextualFlowControl {
     if (resolved === undefined) {
       const ref = "$ref" in schemaObj
         ? schemaObj.$ref
-        : JSON.stringify(schemaObj);
+        : toCompactDebugString(schemaObj);
       throw new Error(
         `Failed to resolve $ref: ${ref}. ` +
           (typeof ref === "string" && ref.startsWith("http")
@@ -390,7 +391,7 @@ export class ContextualFlowControl {
               `If you added a new native type to NATIVE_TYPE_SCHEMAS in ` +
               `packages/schema-generator/src/formatters/native-type-formatter.ts, ` +
               `add its schema to embeddedSchemas as well.`
-            : `Schema: ${JSON.stringify(schemaObj)}`),
+            : `Schema: ${toCompactDebugString(schemaObj)}`),
       );
     }
     return resolved;

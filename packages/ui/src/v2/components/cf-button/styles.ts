@@ -80,10 +80,10 @@ export const styles = css`
     justify-content: center;
     white-space: nowrap;
     width: 100%;
-    height: var(--cf-size-md-height, 2rem);
+    min-height: var(--cf-size-md-height, 2rem);
     border-radius: var(--cf-size-md-radius, 8px);
     font-size: var(--cf-size-md-font-size, 0.75rem);
-    font-weight: 500;
+    font-weight: var(--cf-font-weight-medium, 500);
     font-family: var(--cf-button-font-family, inherit);
     line-height: var(--cf-size-md-line-height, 1rem);
     padding: var(--cf-size-md-padding-v, 8px) var(--cf-size-md-padding-h, 8px);
@@ -101,13 +101,13 @@ export const styles = css`
     text-decoration: none;
   }
 
-  .button:focus-visible {
+  :host(:focus-visible) .button {
     outline: 2px solid
       var(--cf-button-color-primary, var(--cf-colors-primary-500, #4979fa));
     outline-offset: 2px;
   }
 
-  .button:disabled {
+  :host([disabled]) .button {
     pointer-events: none;
     opacity: 0.5;
     cursor: not-allowed;
@@ -115,7 +115,7 @@ export const styles = css`
 
   /* Size variants — driven by :host([size="..."]) attribute selectors */
   :host([size="xs"]) .button {
-    height: var(--cf-size-xs-height, 16px);
+    min-height: var(--cf-size-xs-height, 16px);
     border-radius: var(--cf-size-xs-radius, 4px);
     padding: var(--cf-size-xs-padding-v, 2px) var(--cf-size-xs-padding-h, 4px);
     font-size: var(--cf-size-xs-font-size, 9px);
@@ -124,7 +124,7 @@ export const styles = css`
   }
 
   :host([size="sm"]) .button {
-    height: var(--cf-size-sm-height, 24px);
+    min-height: var(--cf-size-sm-height, 24px);
     border-radius: var(--cf-size-sm-radius, 5px);
     padding: var(--cf-size-sm-padding-v, 4px) var(--cf-size-sm-padding-h, 6px);
     font-size: var(--cf-size-sm-font-size, 11px);
@@ -135,7 +135,7 @@ export const styles = css`
   /* size="md" is the default — styles already in .button base rule */
 
   :host([size="lg"]) .button {
-    height: var(--cf-size-lg-height, 40px);
+    min-height: var(--cf-size-lg-height, 40px);
     border-radius: var(--cf-size-lg-radius, 9px);
     padding: var(--cf-size-lg-padding-v, 8px) var(--cf-size-lg-padding-h, 12px);
     font-size: var(--cf-size-lg-font-size, 16px);
@@ -144,7 +144,7 @@ export const styles = css`
   }
 
   :host([size="xl"]) .button {
-    height: var(--cf-size-xl-height, 48px);
+    min-height: var(--cf-size-xl-height, 48px);
     border-radius: var(--cf-size-xl-radius, 10px);
     padding: var(--cf-size-xl-padding-v, 12px)
       var(--cf-size-xl-padding-h, 16px);
@@ -154,113 +154,140 @@ export const styles = css`
   }
 
   :host([size="icon"]) .button {
+    min-height: auto;
     height: var(--cf-button-icon-size, var(--cf-size-md-height, 2rem));
     width: var(--cf-button-icon-size, var(--cf-size-md-height, 2rem));
     padding: 0;
   }
 
-  /* Variant styles */
-  .button.primary {
-    background-color: var(
-      --cf-button-color-primary,
-      var(--cf-colors-primary-500, #4979fa)
-    );
-    color: var(
-      --cf-button-color-primary-foreground,
-      #ffffff
-    );
-    border-color: var(
-      --cf-button-color-primary,
-      var(--cf-colors-primary-500, #4979fa)
-    );
+  /* ── Solid variant ─────────────────────────────────────────────────── */
+
+  .button.solid {
+    border-color: transparent;
   }
 
-  .button.primary:hover:not(:disabled) {
-    opacity: 0.9;
-    transform: translateY(-1px);
+  :host([color="neutral"]) .button.solid {
+    background-color: var(--cf-button-color-secondary);
+    color: var(--cf-button-color-secondary-foreground);
   }
 
-  .button.primary:active:not(:disabled) {
-    transform: translateY(0);
+  :host([color="neutral"]:not([disabled])) .button.solid:hover {
+    background-color: var(--cf-button-color-surface-hover);
   }
 
-  .button.destructive {
-    background-color: var(
-      --cf-button-color-error,
-      var(--cf-colors-error, #dc2626)
-    );
-    color: var(
-      --cf-button-color-error-foreground,
-      #ffffff
-    );
-    border-color: var(
-      --cf-button-color-error,
-      var(--cf-colors-error, #dc2626)
-    );
+  :host([color="primary"]) .button.solid {
+    background-color: var(--cf-theme-color-primary);
+    color: var(--cf-theme-color-primary-foreground, #fff);
+    border-color: var(--cf-theme-color-primary);
   }
 
-  .button.destructive:hover:not(:disabled) {
-    opacity: 0.9;
+  :host([color="primary"]:not([disabled])) .button.solid:hover {
+    background-color: var(--cf-theme-color-primary-pressed);
+    border-color: var(--cf-theme-color-primary-pressed);
   }
+
+  :host([color="accent"]) .button.solid {
+    background-color: var(--cf-theme-color-accent);
+    color: var(--cf-theme-color-accent-foreground, #fff);
+    border-color: var(--cf-theme-color-accent);
+  }
+
+  :host([color="accent"]:not([disabled])) .button.solid:hover {
+    background-color: var(--cf-theme-color-accent-pressed);
+    border-color: var(--cf-theme-color-accent-pressed);
+  }
+
+  :host([color="danger"]) .button.solid {
+    background-color: var(--cf-theme-color-error);
+    color: var(--cf-theme-color-error-foreground, #fff);
+    border-color: var(--cf-theme-color-error);
+  }
+
+  :host([color="danger"]:not([disabled])) .button.solid:hover {
+    background-color: var(--cf-theme-color-danger-pressed);
+    border-color: var(--cf-theme-color-danger-pressed);
+  }
+
+  /* ── Outline variant ────────────────────────────────────────────────── */
 
   .button.outline {
-    border-color: var(
-      --cf-button-color-border,
-      var(--cf-colors-gray-300, #d5d7dd)
-    );
     background-color: transparent;
-    color: var(--cf-button-color-text, var(--cf-colors-gray-900, #16181d));
+    border-color: var(--cf-button-color-border);
   }
 
-  .button.outline:hover:not(:disabled) {
-    background-color: var(
-      --cf-button-color-surface,
-      var(--cf-colors-gray-50, #ffffff)
-    );
+  :host([color="neutral"]) .button.outline {
+    color: var(--cf-button-color-text);
   }
 
-  .button.secondary {
-    background-color: var(
-      --cf-button-color-secondary,
-      var(--cf-colors-gray-100, #f2f3f6)
-    );
-    color: var(
-      --cf-button-color-secondary-foreground,
-      var(--cf-colors-gray-900, #16181d)
-    );
-    border-color: var(
-      --cf-button-color-secondary,
-      var(--cf-colors-gray-100, #f2f3f6)
-    );
+  :host([color="neutral"]:not([disabled])) .button.outline:hover {
+    background-color: var(--cf-button-color-surface);
   }
 
-  .button.secondary:hover:not(:disabled) {
-    background-color: var(
-      --cf-button-color-surface-hover,
-      var(--cf-colors-gray-200, #eceef1)
-    );
-    border-color: var(
-      --cf-button-color-surface-hover,
-      var(--cf-colors-gray-200, #eceef1)
-    );
+  :host([color="primary"]) .button.outline {
+    color: var(--cf-theme-color-primary);
+    border-color: var(--cf-theme-color-primary);
   }
+
+  :host([color="primary"]:not([disabled])) .button.outline:hover {
+    background-color: var(--cf-theme-color-primary-subtle);
+  }
+
+  :host([color="accent"]) .button.outline {
+    color: var(--cf-theme-color-accent);
+    border-color: var(--cf-theme-color-accent);
+  }
+
+  :host([color="accent"]:not([disabled])) .button.outline:hover {
+    background-color: var(--cf-theme-color-accent-subtle);
+  }
+
+  :host([color="danger"]) .button.outline {
+    color: var(--cf-theme-color-error);
+    border-color: var(--cf-theme-color-error);
+  }
+
+  :host([color="danger"]:not([disabled])) .button.outline:hover {
+    background-color: var(--cf-theme-color-danger-subtle);
+  }
+
+  /* ── Ghost variant ──────────────────────────────────────────────────── */
 
   .button.ghost {
-    color: var(
-      --cf-button-color-text-muted,
-      var(--cf-colors-gray-500, #94979e)
-    );
     background-color: transparent;
     border: none;
-    padding: 0;
   }
 
-  .button.ghost:hover:not(:disabled) {
-    color: var(--cf-button-color-text, var(--cf-colors-gray-700, #404349));
-    background-color: var(
-      --cf-button-color-surface-hover,
-      var(--cf-colors-gray-100, #f2f3f6)
-    );
+  :host([color="neutral"]) .button.ghost {
+    color: var(--cf-button-color-text-muted);
+  }
+
+  :host([color="neutral"]:not([disabled])) .button.ghost:hover {
+    color: var(--cf-button-color-text);
+    background-color: var(--cf-button-color-surface-hover);
+  }
+
+  :host([color="primary"]) .button.ghost {
+    color: var(--cf-theme-color-primary);
+  }
+
+  :host([color="primary"]:not([disabled])) .button.ghost:hover {
+    background-color: var(--cf-theme-color-primary-subtle);
+  }
+
+  :host([color="accent"]) .button.ghost {
+    color: var(--cf-theme-color-accent);
+  }
+
+  :host([color="accent"]:not([disabled])) .button.ghost:hover {
+    background-color: var(--cf-theme-color-accent-subtle);
+  }
+
+  :host([color="danger"]) .button.ghost {
+    color: var(--cf-theme-color-error);
+  }
+
+  :host([color="danger"]:not([disabled])) .button.ghost:hover {
+    background-color: var(--cf-theme-color-danger-subtle);
   }
 
   :host([size="icon"]) .button.ghost {
@@ -269,43 +296,6 @@ export const styles = css`
     border-radius: var(
       --cf-button-border-radius,
       var(--cf-border-radius-sm, 0.25rem)
-    );
-  }
-
-  .button.link {
-    color: var(
-      --cf-button-color-primary,
-      var(--cf-colors-primary-500, #4979fa)
-    );
-    text-underline-offset: 4px;
-  }
-
-  .button.link:hover:not(:disabled) {
-    text-decoration: underline;
-  }
-
-  .button.pill {
-    background: var(
-      --cf-button-color-surface,
-      var(--cf-colors-gray-100, #f2f3f6)
-    );
-    color: var(--cf-button-color-text, var(--cf-colors-gray-900, #16181d));
-    border: 1px solid
-      var(--cf-button-color-border, var(--cf-colors-gray-300, #d5d7dd));
-    border-radius: var(
-      --cf-button-border-radius-full,
-      var(--cf-radius-full, 9999px)
-    );
-    height: auto;
-    padding: 0.25rem 0.625rem;
-    font-size: 0.8125rem;
-    line-height: 1;
-  }
-
-  .button.pill:hover:not(:disabled) {
-    background: var(
-      --cf-button-color-surface-hover,
-      var(--cf-colors-gray-200, #eceef1)
     );
   }
 `;

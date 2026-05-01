@@ -129,6 +129,8 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {boolean} disabled - Whether the editor is disabled
  * @attr {boolean} readonly - Whether the editor is read-only
  * @attr {string} placeholder - Placeholder text when empty
+ * @attr {boolean} autofocus - Auto-focus the editor after initialization (default: false)
+ * @attr {"start"|"end"} cursorPosition - Initial cursor position (default: "start")
  * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 500)
  * @attr {CellHandle<MentionableArray>} mentionable - Cell of mentionable items for @/@[[ completion
@@ -188,6 +190,8 @@ export class CFCodeEditor extends BaseElement {
     tabIndent: { type: Boolean },
     theme: { type: String, reflect: true },
     mode: { type: String, reflect: true },
+    autofocus: { type: Boolean },
+    cursorPosition: { type: String },
   };
 
   declare value: CellHandle<string> | string;
@@ -210,6 +214,8 @@ export class CFCodeEditor extends BaseElement {
   declare tabIndent: boolean;
   declare theme: "light" | "dark";
   declare mode: "code" | "prose";
+  declare autofocus: boolean;
+  declare cursorPosition: "start" | "end";
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
@@ -275,6 +281,8 @@ export class CFCodeEditor extends BaseElement {
     this.tabIndent = true;
     this.theme = "light";
     this.mode = "code";
+    this.autofocus = false;
+    this.cursorPosition = "start";
     this.mentionable = null;
   }
 
@@ -1069,6 +1077,10 @@ export class CFCodeEditor extends BaseElement {
 
     // Set up subscriptions for bidirectional NAME sync
     this._setupPieceNameSubscriptions();
+
+    if (this.autofocus) {
+      this._editorView?.focus();
+    }
   }
 
   /**
@@ -1142,7 +1154,10 @@ export class CFCodeEditor extends BaseElement {
             "var(--cf-code-editor-font-family-prose, var(--cf-theme-font-family, var(--cf-font-family-sans)))",
           lineHeight: "1.6",
           padding: "8px 0",
-          ...(!hasCustomWidth && { maxWidth: "700px" }),
+          ...(!hasCustomWidth && {
+            maxWidth:
+              "var(--cf-code-editor-prose-max-width, var(--cf-layout-width-prose, 700px))",
+          }),
           margin: "0 auto",
         },
         ".cm-line": {
@@ -1320,9 +1335,11 @@ export class CFCodeEditor extends BaseElement {
     }
 
     // Create editor state
+    const doc = this.getValue() ?? "";
     const state = EditorState.create({
-      doc: this.getValue() ?? "",
+      doc,
       extensions,
+      selection: { anchor: this.cursorPosition === "end" ? doc.length : 0 },
     });
 
     // Create editor view

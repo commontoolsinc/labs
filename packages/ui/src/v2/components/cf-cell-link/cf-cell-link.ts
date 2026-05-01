@@ -329,7 +329,7 @@ export class CFCellLink extends BaseElement {
 
     return html`
       <cf-chip
-        variant="primary"
+        color="primary"
         interactive
         @pointerdown="${this._onPointerDown}"
         @click="${this._handleClick}"

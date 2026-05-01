@@ -1,6 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { compilePattern, PieceManager } from "@commonfabric/piece";
-import { Runtime } from "@commonfabric/runner";
+import { PieceManager } from "@commonfabric/piece";
+import { compileAndSavePattern, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type DID } from "@commonfabric/identity";
 import { createSession } from "@commonfabric/identity";
@@ -95,11 +95,10 @@ async function castPattern() {
     // Create charm manager for the specified space
     const charmManager = new PieceManager(session, runtime);
     await charmManager.ready;
-    const pattern = await compilePattern(
-      patternSrc,
-      "pattern",
+    const pattern = await compileAndSavePattern(
       runtime,
-      spaceId,
+      patternSrc,
+      { spec: "pattern", space: spaceId },
     );
     console.log("Pattern compiled successfully");
 

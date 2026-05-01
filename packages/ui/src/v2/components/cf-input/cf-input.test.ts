@@ -24,6 +24,20 @@ describe("CFInput", () => {
     expect(element).toBeInstanceOf(CFInput);
   });
 
+  if (typeof document !== "undefined") {
+    it("should be creatable via document.createElement", async () => {
+      const element = document.createElement("cf-input") as CFInput;
+      document.body.append(element);
+      await element.updateComplete;
+
+      expect(element).toBeInstanceOf(CFInput);
+      expect(element.getAttribute("role")).toBe("textbox");
+      expect(element.getAttribute("exportparts")).toBe("input");
+
+      element.remove();
+    });
+  }
+
   it("should have correct default properties", () => {
     const el = new CFInput();
     expect(el.type).toBe("text");
@@ -37,6 +51,88 @@ describe("CFInput", () => {
     expect(el.timingStrategy).toBe("debounce");
     expect(el.timingDelay).toBe(300);
     expect(el.showValidation).toBe(false);
+  });
+
+  it("should expose textbox semantics on the host", () => {
+    const el = new CFInput();
+    el.updated(new Map([["disabled", undefined]]));
+
+    expect(el.getAttribute("role")).toBe("textbox");
+    expect(el.getAttribute("aria-disabled")).toBe("false");
+    expect(el.getAttribute("aria-readonly")).toBe("false");
+    expect(el.getAttribute("aria-required")).toBe("false");
+    expect(el.getAttribute("aria-invalid")).toBe("false");
+    expect(el.getAttribute("exportparts")).toBe("input");
+    expect(el.tabIndex).toBe(0);
+  });
+
+  it("should expose control state on the host", () => {
+    const el = new CFInput();
+    el.disabled = true;
+    el.readonly = true;
+    el.required = true;
+    el.error = true;
+    el.updated(
+      new Map([["disabled", false], ["readonly", false], [
+        "required",
+        false,
+      ], ["error", false]]),
+    );
+
+    expect(el.getAttribute("aria-disabled")).toBe("true");
+    expect(el.getAttribute("aria-readonly")).toBe("true");
+    expect(el.getAttribute("aria-required")).toBe("true");
+    expect(el.getAttribute("aria-invalid")).toBe("true");
+    expect(el.tabIndex).toBe(-1);
+  });
+
+  it("should use placeholder as an accessible name fallback", () => {
+    const el = new CFInput();
+    el.placeholder = "Search notes";
+    el.updated(new Map([["placeholder", ""]]));
+
+    expect(el.getAttribute("aria-label")).toBe("Search notes");
+  });
+
+  it("should preserve author-provided accessible names", () => {
+    const el = new CFInput();
+    el.setAttribute("aria-label", "Custom name");
+    el.placeholder = "Search notes";
+    el.updated(new Map([["placeholder", ""]]));
+
+    expect(el.getAttribute("aria-label")).toBe("Custom name");
+  });
+
+  it("should use role=spinbutton for number inputs", () => {
+    const el = new CFInput();
+    el.type = "number";
+    el.updated(new Map([["type", "text"]]));
+
+    expect(el.getAttribute("role")).toBe("spinbutton");
+  });
+
+  it("should use role=slider for range inputs", () => {
+    const el = new CFInput();
+    el.type = "range";
+    el.updated(new Map([["type", "text"]]));
+
+    expect(el.getAttribute("role")).toBe("slider");
+  });
+
+  it("should not set a role for date inputs", () => {
+    const el = new CFInput();
+    el.type = "date";
+    el.updated(new Map([["type", "text"]]));
+
+    expect(el.hasAttribute("role")).toBe(false);
+  });
+
+  it("should be form-associated", () => {
+    expect(CFInput.formAssociated).toBe(true);
+  });
+
+  it("should delegate focus into the shadow input", () => {
+    expect(CFInput.shadowRootOptions.delegatesFocus).toBe(true);
   });
 
   it("should accept a CellHandle as value property", () => {

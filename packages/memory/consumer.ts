@@ -48,11 +48,9 @@ import type {
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import {
-  type HashObject,
-  hashObjectFromJson,
-  hashOf,
-} from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
@@ -118,10 +116,7 @@ export const open = ({
   const consumer = create({ as, clock, ttl });
   // The pipeTo() promise is captured as `consumer.closed` so that callers
   // (specifically StorageManagerEmulator.close()) can await full pipeline
-  // shutdown before resetting ambient state like the canonical hash config.
-  // Without this, Runtime.dispose() could reset the hash config while
-  // in-flight messages were still being delivered from consumer to provider,
-  // causing hash format mismatches in Access.claim().
+  // shutdown before tearing down ambient state.
   //
   // pipeTo() rejects when the TransformStream is terminated during teardown
   // (consumer.close() calls cancel() then controller.terminate()). That
@@ -157,7 +152,7 @@ class MemoryConsumerSession<
     >
     | undefined;
   invocations: Map<
-    InvocationURL<HashObject<Invocation>>,
+    InvocationURL<FabricHash>,
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
 
@@ -203,7 +198,7 @@ class MemoryConsumerSession<
           );
           logger.error(
             "stream-error",
-            () => ["Failed command:", JSON.stringify(command)],
+            () => ["Failed command:", toCompactDebugString(command)],
           );
           throw error;
         }
@@ -388,7 +383,7 @@ class MemoryConsumerSession<
 
   private executeAuthorized<
     Ability extends string,
-    Access extends HashObject[],
+    Access extends FabricHash[],
   >(
     authorizationResult: Result<Authorization<Access[number]>, Error>,
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
@@ -594,7 +589,7 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
 
   source: ConsumerInvocationFor<Ability, Protocol>;
 
-  #reference: HashObject<Invocation>;
+  #reference: FabricHash;
 
   static create<Ability extends string, Protocol extends Proto>(
     as: DID,
@@ -902,7 +897,7 @@ class QuerySubscriptionInvocation<
     // This is a bit strange, but the revisions in here aren't proper
     // They've lost their Reference methods, so recreate them
     commit.revisions.forEach((item) => {
-      item.cause = hashObjectFromJson(JSON.parse(JSON.stringify(item.cause)));
+      item.cause = FabricHash.fromJson(JSON.parse(JSON.stringify(item.cause)));
     });
 
     return { ok: {} };

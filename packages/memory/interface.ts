@@ -1,6 +1,6 @@
-import type { HashObject } from "@commonfabric/data-model/value-hash";
-import type { JSONValue } from "@commonfabric/api";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue, JSONValue } from "@commonfabric/api";
+import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
+
 import type { SchemaPathSelector } from "@commonfabric/api";
 export type { SchemaPathSelector };
 
@@ -58,7 +58,7 @@ export interface Principal<ID extends DID = DID> {
  */
 export interface Authority extends Principal {
   authorize<T extends FabricValue>(
-    access: Iterable<HashObject<T> | T>,
+    access: Iterable<FabricHash | T>,
   ): AwaitResult<Authorization<T>, AuthorizationError>;
 }
 
@@ -96,7 +96,7 @@ export type UCAN<Command extends Invocation> = {
  * Proof of authorization for a given access.
  */
 export interface Proof<Access extends FabricValue = FabricValue> {
-  [link: AsString<HashObject<Access>>]: Unit;
+  [link: AsString<FabricHash>]: Unit;
 }
 
 /**
@@ -435,18 +435,18 @@ export type Receipt<
 > =
   | {
     the: "task/return";
-    of: InvocationURL<HashObject<Command>>;
+    of: InvocationURL<FabricHash>;
     is: Awaited<Result>;
   }
   | (Effect extends never ? never
     : {
       the: "task/effect";
-      of: InvocationURL<HashObject<Command>>;
+      of: InvocationURL<FabricHash>;
       is: Effect;
     });
 
 export type Effect<Of extends NonNullable<unknown>, Command> = {
-  of: HashObject<Of>;
+  of: FabricHash;
   run: Command;
   is?: undefined;
 };
@@ -455,7 +455,7 @@ export type Return<
   Of extends NonNullable<unknown>,
   Result extends FabricValue,
 > = {
-  of: HashObject<Of>;
+  of: FabricHash;
   is: Result;
   run?: undefined;
 };
@@ -605,10 +605,7 @@ export interface Assertion<
   the: T;
   of: Of;
   is: Is;
-  cause:
-    | HashObject<Assertion<T, Of, Is>>
-    | HashObject<Retraction<T, Of, Is>>
-    | HashObject<Unclaimed<T, Of>>;
+  cause: FabricHash;
 }
 
 /**
@@ -623,7 +620,7 @@ export interface Retraction<
   the: T;
   of: Of;
   is?: undefined;
-  cause: HashObject<Assertion<T, Of, Is>>;
+  cause: FabricHash;
 }
 
 export interface Invariant<
@@ -633,7 +630,7 @@ export interface Invariant<
 > {
   the: T;
   of: Of;
-  fact: HashObject<Fact<T, Of, Is>>;
+  fact: FabricHash;
 
   is?: undefined;
   cause?: undefined;
@@ -779,10 +776,8 @@ export type ACL = {
 export type URI = `${string}:${string}`;
 // Mime type or Media Type -- often called 'the'
 export type MIME = `${string}/${string}`;
-// TODO(danfuzz): Clean up after canonical hashing flag graduates. The `fid1:`
-// branch was added for FabricHash; once the experiment is permanent,
-// the `b`-prefixed format can be removed.
-export type CauseString = `b${string}` | `fid1:${string}`;
+// Fact cause. Matches the content hash string format defined by `data-model`.
+export type CauseString = `fid1:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/transact",
@@ -814,7 +809,7 @@ export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query/unsubscribe",
   Space,
-  { source: InvocationURL<HashObject<Subscribe<Space>>> }
+  { source: InvocationURL<FabricHash> }
 >;
 
 export type SchemaQueryArgs = {
@@ -963,7 +958,7 @@ export type Conflict = {
   /**
    * Expected state in the replica.
    */
-  expected: HashObject<Fact> | null;
+  expected: FabricHash | null;
 
   /**
    * Actual memory state in the replica repository.

@@ -188,7 +188,12 @@ export default pattern<NoteMdInput, NoteMdOutput>(
               {computed(() => note?.title || "Untitled Note")}
             </cf-heading>
             {/* Edit button - navigates back to source note for editing */}
-            <cf-button variant="secondary" size="sm" onClick={goToEdit}>
+            <cf-button
+              color="neutral"
+              variant="outline"
+              size="sm"
+              onClick={goToEdit}
+            >
               Edit
             </cf-button>
           </cf-hstack>

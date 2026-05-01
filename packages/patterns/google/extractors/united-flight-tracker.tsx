@@ -16,7 +16,15 @@
  * 2. Deploy this pattern
  * 3. Link: cf piece link google-auth/auth united-flight-tracker/overrideAuth
  */
-import { computed, ifElse, JSONSchema, NAME, pattern, UI } from "commonfabric";
+import {
+  computed,
+  ifElse,
+  JSONSchema,
+  NAME,
+  pattern,
+  toIndentedDebugString,
+  UI,
+} from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
@@ -1676,11 +1684,10 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                                 {computed(() => debugResult?.summary || "N/A")}
                               </div>
                               <div style={{ marginTop: "4px" }}>
-                                <strong>Flights:</strong> {computed(() =>
-                                  JSON.stringify(
+                                <strong>Flights:</strong>{" "}
+                                {computed(() =>
+                                  toIndentedDebugString(
                                     debugResult?.flights || [],
-                                    null,
-                                    2,
                                   )
                                 )}
                               </div>

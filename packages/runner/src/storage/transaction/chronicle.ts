@@ -30,7 +30,7 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { refer } from "@commonfabric/memory/reference";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Edit from "./edit.ts";
 
 const isEmptyRecord = (
@@ -315,7 +315,7 @@ export class Chronicle {
           // Create an assertion referring to the loaded fact in a causal
           // reference.
           const factToRefer = loaded.cause ? normalizeFact(loaded) : loaded;
-          const causeRef = refer(factToRefer);
+          const causeRef = hashOf(factToRefer);
 
           edit.assert({
             ...loaded,

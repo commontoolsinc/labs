@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
   resetDataModelConfig,
@@ -11,10 +12,6 @@ import {
   resetSchemaHashConfig,
   setSchemaHashConfig,
 } from "@commonfabric/data-model/schema-hash";
-import {
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
 import {
   decodeMemoryV2Boundary,
   DEFAULT_BRANCH,
@@ -44,186 +41,187 @@ const toEntityDocument = (
   return document;
 };
 
-Deno.test("memory v2 exports the phase-1 protocol constants", () => {
-  assertEquals(MEMORY_V2_PROTOCOL, "memory/v2");
-  assertEquals(DEFAULT_BRANCH, "");
-});
+// ---------------------------------------------------------------------------
+// Flag-independent tests (run once, not per-flag-state)
+// ---------------------------------------------------------------------------
 
-Deno.test("memory v2 builds explicit in-memory documents", () => {
-  const source = toSourceLink("abc123");
-  assertEquals(
-    toEntityDocument({ hello: "world" }, source),
-    {
-      value: { hello: "world" },
-      source,
-    },
-  );
-});
-
-Deno.test("memory v2 document paths are explicit full-document paths", () => {
-  assertEquals([...toDocumentPath([])], []);
-  assertEquals(
-    [...toDocumentPath(["value", "items", "0", "title"])],
-    ["value", "items", "0", "title"],
-  );
-});
-
-Deno.test("memory v2 value-relative paths stay distinct from document paths", () => {
-  assertEquals([...toValuePath([])], []);
-  assertEquals(
-    toDocumentSelector({
-      path: toValuePath(["items", "0"]),
-      schema: false,
-    }),
-    {
-      path: toDocumentPath(["value", "items", "0"]),
-      schema: false,
-    },
-  );
-});
-
-Deno.test("memory v2 recognizes short source links", () => {
-  assert(isSourceLink({ "/": "abc123" }));
-  assertFalse(isSourceLink({ "/": { link: "abc123" } }));
-  assertFalse(isSourceLink({}));
-});
-
-Deno.test("memory v2 builds explicit logical documents", () => {
-  assertEquals(
-    toEntityDocument({
-      hello: "world",
-    }),
-    {
-      value: { hello: "world" },
-    },
-  );
-});
-
-Deno.test("memory v2 reflects the active runtime storage flags", () => {
-  resetDataModelConfig();
-  resetJsonEncodingConfig();
-  resetModernHashConfig();
-  resetSchemaHashConfig();
-
-  setDataModelConfig(false);
-  setJsonEncodingConfig(false);
-  setModernHashConfig(false);
-  setSchemaHashConfig(false);
-
-  assertEquals(getMemoryV2Flags(), {
-    richStorableValues: false,
-    unifiedJsonEncoding: false,
-    canonicalHashing: false,
-    modernSchemaHash: false,
+describe("memory v2 protocol constants", () => {
+  it("exports the phase-1 protocol constants", () => {
+    assertEquals(MEMORY_V2_PROTOCOL, "memory/v2");
+    assertEquals(DEFAULT_BRANCH, "");
   });
-
-  setDataModelConfig(true);
-  setJsonEncodingConfig(true);
-  setModernHashConfig(true);
-  setSchemaHashConfig(true);
-
-  assertEquals(getMemoryV2Flags(), {
-    richStorableValues: true,
-    unifiedJsonEncoding: true,
-    canonicalHashing: true,
-    modernSchemaHash: true,
-  });
-
-  resetDataModelConfig();
-  resetJsonEncodingConfig();
-  resetModernHashConfig();
-  resetSchemaHashConfig();
 });
 
-Deno.test("memory v2 boundary encoding follows unified JSON dispatch", () => {
-  const document = {
-    value: {
-      present: 1,
-      missing: undefined,
-    },
-  };
-
-  resetJsonEncodingConfig();
-  const legacyEncoded = encodeMemoryV2Boundary(document);
-  assertEquals(legacyEncoded, JSON.stringify({ value: { present: 1 } }));
-  assertEquals(decodeMemoryV2Boundary(legacyEncoded), {
-    value: { present: 1 },
-  });
-
-  setJsonEncodingConfig(true);
-  const unifiedEncoded = encodeMemoryV2Boundary(document);
-  assertEquals(
-    decodeMemoryV2Boundary(unifiedEncoded),
-    document,
-  );
-
-  resetJsonEncodingConfig();
-});
-
-Deno.test("memory v2 legacy boundary decode returns mutable plain JSON trees", () => {
-  resetDataModelConfig();
-  resetJsonEncodingConfig();
-
-  const decoded = decodeMemoryV2Boundary<{
-    value: {
-      nested: {
-        count: number;
-      };
-    };
-  }>('{"value":{"nested":{"count":1}}}');
-
-  assertEquals(decoded, {
-    value: {
-      nested: {
-        count: 1,
+describe("memory v2 documents", () => {
+  it("builds explicit in-memory documents", () => {
+    const source = toSourceLink("abc123");
+    assertEquals(
+      toEntityDocument({ hello: "world" }, source),
+      {
+        value: { hello: "world" },
+        source,
       },
-    },
+    );
   });
-  assertFalse(Object.isFrozen(decoded));
-  assertFalse(Object.isFrozen(decoded.value));
-  assertFalse(Object.isFrozen(decoded.value.nested));
 
-  decoded.value.nested.count = 2;
-  assertEquals(decoded.value.nested.count, 2);
+  it("builds explicit logical documents", () => {
+    assertEquals(
+      toEntityDocument({
+        hello: "world",
+      }),
+      {
+        value: { hello: "world" },
+      },
+    );
+  });
 });
 
-Deno.test("memory v2 unified boundary decode still returns mutable results", () => {
-  resetDataModelConfig();
-  resetJsonEncodingConfig();
+describe("memory v2 paths", () => {
+  it("document paths are explicit full-document paths", () => {
+    assertEquals([...toDocumentPath([])], []);
+    assertEquals(
+      [...toDocumentPath(["value", "items", "0", "title"])],
+      ["value", "items", "0", "title"],
+    );
+  });
 
-  setDataModelConfig(true);
-  setJsonEncodingConfig(true);
+  it("value-relative paths stay distinct from document paths", () => {
+    assertEquals([...toValuePath([])], []);
+    assertEquals(
+      toDocumentSelector({
+        path: toValuePath(["items", "0"]),
+        schema: false,
+      }),
+      {
+        path: toDocumentPath(["value", "items", "0"]),
+        schema: false,
+      },
+    );
+  });
+});
 
-  const decoded = decodeMemoryV2Boundary<{
-    value: {
-      nested: {
-        count: number;
-      };
-    };
-  }>(
-    encodeMemoryV2Boundary({
+describe("memory v2 source links", () => {
+  it("recognizes short source links", () => {
+    assert(isSourceLink({ "/": "abc123" }));
+    assertFalse(isSourceLink({ "/": { link: "abc123" } }));
+    assertFalse(isSourceLink({}));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Flag-mechanism test (explicitly tests both OFF and ON in one test)
+// ---------------------------------------------------------------------------
+
+describe("memory v2 flags", () => {
+  it("reflects the active runtime storage flags", () => {
+    resetDataModelConfig();
+    resetJsonEncodingConfig();
+    resetSchemaHashConfig();
+
+    setDataModelConfig(false);
+    setJsonEncodingConfig(false);
+    setSchemaHashConfig(false);
+
+    assertEquals(getMemoryV2Flags(), {
+      richStorableValues: false,
+      unifiedJsonEncoding: false,
+      modernSchemaHash: false,
+    });
+
+    setDataModelConfig(true);
+    setJsonEncodingConfig(true);
+    setSchemaHashConfig(true);
+
+    assertEquals(getMemoryV2Flags(), {
+      richStorableValues: true,
+      unifiedJsonEncoding: true,
+      modernSchemaHash: true,
+    });
+
+    resetDataModelConfig();
+    resetJsonEncodingConfig();
+    resetSchemaHashConfig();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Boundary encode/decode dispatch test (explicitly tests OFF and ON paths)
+// ---------------------------------------------------------------------------
+
+describe("memory v2 boundary encoding dispatch", () => {
+  it("follows unified JSON dispatch", () => {
+    const document = {
       value: {
-        nested: {
-          count: 1,
-        },
+        present: 1,
+        missing: undefined,
       },
-    }),
-  );
+    };
 
-  assertEquals(decoded, {
-    value: {
-      nested: {
-        count: 1,
-      },
-    },
+    setJsonEncodingConfig(false);
+    const legacyEncoded = encodeMemoryV2Boundary(document);
+    assertEquals(legacyEncoded, JSON.stringify({ value: { present: 1 } }));
+    assertEquals(decodeMemoryV2Boundary(legacyEncoded), {
+      value: { present: 1 },
+    });
+
+    setJsonEncodingConfig(true);
+    const unifiedEncoded = encodeMemoryV2Boundary(document);
+    assertEquals(
+      decodeMemoryV2Boundary(unifiedEncoded),
+      document,
+    );
+
+    resetJsonEncodingConfig();
   });
-  assertFalse(Object.isFrozen(decoded));
-  assertFalse(Object.isFrozen(decoded.value));
-  assertFalse(Object.isFrozen(decoded.value.nested));
+});
 
-  decoded.value.nested.count = 2;
-  assertEquals(decoded.value.nested.count, 2);
+// ---------------------------------------------------------------------------
+// Per-flag-state tests — run for both flag=false and flag=true
+// ---------------------------------------------------------------------------
 
-  resetDataModelConfig();
-  resetJsonEncodingConfig();
+describe("memory v2 boundary decode", () => {
+  afterEach(() => {
+    resetDataModelConfig();
+    resetJsonEncodingConfig();
+  });
+
+  for (const unifiedJsonEncoding of [false, true]) {
+    describe(`with \`unifiedJsonEncoding = ${unifiedJsonEncoding}\``, () => {
+      beforeEach(() => {
+        setJsonEncodingConfig(unifiedJsonEncoding);
+      });
+
+      it("returns mutable plain JSON trees", () => {
+        const decoded = decodeMemoryV2Boundary<{
+          value: {
+            nested: {
+              count: number;
+            };
+          };
+        }>(
+          encodeMemoryV2Boundary({
+            value: {
+              nested: {
+                count: 1,
+              },
+            },
+          }),
+        );
+
+        assertEquals(decoded, {
+          value: {
+            nested: {
+              count: 1,
+            },
+          },
+        });
+        assertFalse(Object.isFrozen(decoded));
+        assertFalse(Object.isFrozen(decoded.value));
+        assertFalse(Object.isFrozen(decoded.value.nested));
+
+        decoded.value.nested.count = 2;
+        assertEquals(decoded.value.nested.count, 2);
+      });
+    });
+  }
 });

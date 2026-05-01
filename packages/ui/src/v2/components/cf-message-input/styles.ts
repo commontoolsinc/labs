@@ -10,28 +10,25 @@ export const messageInputStyles = `
     display: block;
     width: 100%;
     --cf-message-input-gap: var(--cf-spacing-2, 0.5rem);
-    --cf-message-input-height: 2.5rem;
   }
 
   .container {
     display: grid;
     grid-template-columns: 1fr auto;
     gap: var(--cf-message-input-gap);
-    align-items: center;
+    align-items: stretch;
   }
 
   /* Input styling */
   .container ::slotted(input),
   .container ::slotted(cf-input) {
     width: 100%;
-    height: var(--cf-message-input-height);
   }
 
   /* Button styling */
   .container ::slotted(button),
   .container ::slotted(cf-button) {
     white-space: nowrap;
-    height: var(--cf-message-input-height);
   }
 
   /* Disabled state */

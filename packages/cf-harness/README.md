@@ -6,7 +6,8 @@ use case.
 
 The package is intentionally early and experimental. It already has a real
 execution core, a bounded prompt/tool loop, persistence, resumability, a thin
-operator CLI, and the first pass of CFC-aware deny/recovery shaping.
+operator CLI, explicit Agent Skills preload, and the first pass of CFC-aware
+deny/recovery shaping.
 
 ## Why This Exists
 
@@ -31,18 +32,32 @@ What works today:
   - `us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest`
 - built-in tools:
   - `bash`
+  - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
   - `write_file`
+  - `delegate_task`
 - whole-file replace/create plus append writes
 - bounded OpenAI-compatible prompt/tool loop
-- persisted run state, transcript, and tool outputs
+- single-child subagent delegation with fresh child prompt context, explicit
+  default/browser child profiles, retained child run references, and a sanitized
+  summary/state return channel
+- optional schema-validated subagent structured returns, with raw child return
+  artifacts retained in the child run and open-ended strings linkified before
+  the parent sees them
+- persisted run state, transcript, Loom run manifests, capability snapshots, and
+  tool outputs, plus explicit skill registry and activation artifacts
 - transcript-based resumability
 - package-local operator CLI
+- explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
 - CFC mode plumbing with:
   - `disabled`
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
+- default CFC mode aligned with the runner's permissive-if-absent
+  `enforce-explicit` rollout behavior
+- spec-aligned `PromptSlotBound` prompt-slot evidence
+- Loom run manifest intake through `--run-manifest`
 - first-pass policy events and deny/recovery behavior
 - configurable gateway auth mode:
   - `bearer`
@@ -51,8 +66,13 @@ What works today:
 What is not done yet:
 
 - real runner-driven CFC feedback integration
-- richer opaque-handle/pass-through behavior
-- subagents and parallel job orchestration
+- richer opaque-handle/pass-through behavior outside schema-validated subagent
+  returns
+- first-class browser operation policy on top of the provisional browser
+  subagent profile
+- dynamic/model-driven Agent Skills activation and supporting-file resource
+  loading
+- parallel child orchestration
 - app UI event provenance
 - streaming model responses
 - richer mid-turn resumability
@@ -68,11 +88,17 @@ What is not done yet:
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
 - [src/artifacts.ts](src/artifacts.ts)
-  - persisted run state, transcript, and tool output storage
+  - persisted run state, run manifest, transcript, capability snapshot, and tool
+    output storage
+- [src/skills/](src/skills/)
+  - Agent Skills registry scanning, validation, and explicit preload context
 - [src/contracts/](src/contracts/)
-  - prompt-slot, observation, policy, transcript, and tool-result contracts
+  - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
+    transcript, and tool-result contracts
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
+- [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
+  - staged Agent Skills support design
 
 ## Commands
 
@@ -106,6 +132,85 @@ deno task run -- \
   --print-transcript
 ```
 
+Explicit skill preload:
+
+```bash
+deno task run -- \
+  --workspace /path/to/common-fabric-2 \
+  --cwd pattern-factory \
+  --gateway-auth-mode none \
+  --skills-root labs/skills \
+  --skill pattern-dev \
+  --skill pattern-implement \
+  --prompt "Build this pattern."
+```
+
+Loom-backed batch runs may also pass a retained manifest:
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --run-manifest /path/to/loom-run-manifest.json \
+  --prompt "Handle this Loom wish."
+```
+
+When constraining the parent tool surface to `delegate_task`, authorize the
+child profile separately so the delegation policy transition is explicit:
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --allow-tool delegate_task \
+  --allow-subagent-profile default \
+  --prompt "Delegate a focused inspection and summarize the result."
+```
+
+The provisional browser profile is the only CLI-supported path to
+`bash-no-sandbox`. It gives the child a host shell so it can invoke
+`agent-browser`, while the parent still receives only the normal sanitized
+subagent result. Browser/page output is treated as untrusted child-local data;
+with a `returnSchema`, parent-visible free-form strings are replaced by opaque
+links while raw observations stay in child artifacts. The host shell is
+policy-restricted to `agent-browser`, `agent-browser` discovery
+(`which agent-browser`, `command -v agent-browser`), `pwd`, `ls`, and bounded
+workspace-local `find` commands. `agent-browser eval` is not available in this
+profile; browser subagents should inspect pages with commands such as
+`snapshot`, `get`, `find`, locator actions, and normal browser interactions.
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --allow-tool delegate_task \
+  --allow-subagent-profile browser \
+  --prompt "Delegate browser inspection of the local app and summarize the result."
+```
+
+Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
+object or boolean. In that mode the child is required to return a single JSON
+value. The harness validates it, stores the raw child return under the child
+artifact root, and exposes `subagent.structuredReturn.value` to the parent with
+free-form strings and objects with unmodeled keys replaced by opaque `@link`
+objects such as `opaque:<child-run-id>#/json/pointer`:
+
+```json
+{
+  "goal": "Assess the briefing and return only the decision facts.",
+  "returnSchema": {
+    "type": "object",
+    "properties": {
+      "approved": { "type": "boolean" },
+      "status": { "type": "string", "enum": ["approved", "not_approved"] },
+      "summary": { "type": "string" }
+    },
+    "required": ["approved", "status", "summary"],
+    "additionalProperties": false
+  }
+}
+```
+
 Current caveat:
 
 - the default gateway target is still the stage endpoint at
@@ -115,6 +220,10 @@ Current caveat:
   - Loom's `cf-harness` adapter defaults to `none`
 - confirm the intended gateway/auth mode for the environment you are testing
   against
+- skills support is explicit preload only for now:
+  - `--skill` requires `--skills-root`
+  - skill preload is not supported with `--resume-run`
+  - dynamic `load_skill` activation is still planned
 
 ## Testing
 
@@ -135,6 +244,47 @@ deno task test:integration
 The integration suite requires a working local Docker + `runsc-cfc` environment.
 By default it also uses the published kitchen-sink image above, unless you
 override `CF_HARNESS_INTEGRATION_IMAGE`.
+
+To also exercise a real host Fabric FUSE mount bind-mounted into the sandbox at
+`/fabric`, start `cf fuse mount` separately and pass the mountpoint:
+
+```bash
+cd packages/cf-harness
+CF_HARNESS_INTEGRATION_FABRIC_MOUNT=/tmp/cf deno task test:integration
+```
+
+That opt-in case verifies that cf-harness can navigate `/fabric` through
+`runsc-cfc` and read the FUSE `.status` file. Without
+`CF_HARNESS_INTEGRATION_FABRIC_MOUNT`, the Fabric mount case is skipped.
+
+On Linux, Docker/runsc runs default to the host UID/GID. On macOS, the default
+omits `--user` because Docker Desktop bind mounts may expose host files as
+`root:root`, which prevents non-root container users from writing mounted Loom
+workspaces. An explicit `containerUser` still overrides the platform default.
+
+CFC sandbox result mediation requires the installed `runsc-cfc` runtime to use
+the same host result directory that `cf-harness` reads. Configure runsc with
+`--cfc-result-dir=/path/to/results`, then set
+`CF_HARNESS_RUNSC_CFC_RESULT_DIR=/path/to/results` or pass `cfcResultDir` in the
+explicit sandbox config.
+
+CFC invocation context transport is similarly coordinated through a host sidecar
+directory. Configure runsc with
+`--cfc-invocation-context-dir=/path/to/invocations`, then set
+`CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR=/path/to/invocations` or pass
+`cfcInvocationContextDir` in the explicit sandbox config. `cf-harness` writes
+`<containerID>.json` after `docker create` and before `docker start`; the
+current payload is an audit/provenance context, not yet an argv/stdin/cwd/env
+label enforcement contract.
+
+On Docker Desktop for macOS, use the host path for `cf-harness` and the
+`/host_mnt/...` projection for Docker's runtime args. The gVisor
+`docker-desktop-cfc-setup` helper defaults to:
+
+```bash
+export CF_HARNESS_RUNSC_CFC_RESULT_DIR="$HOME/.local/share/runsc-cfc/cfc-results"
+export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc/cfc-invocations"
+```
 
 ## Related Docs
 

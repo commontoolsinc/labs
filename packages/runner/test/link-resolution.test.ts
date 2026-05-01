@@ -519,7 +519,7 @@ describe("link-resolution", () => {
       expect(resolved.schema).toEqual(destinationSchema);
     });
 
-    it("should handle empty schema objects", () => {
+    it("should treat empty schema objects as permissive links", () => {
       const emptySchema = {} as const;
 
       const targetCell = runtime.getCell<any>(
@@ -546,8 +546,9 @@ describe("link-resolution", () => {
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
 
-      // Empty schema should be preserved
-      expect(resolved.schema).toEqual(emptySchema);
+      // Empty schema is equivalent to JSON Schema `true`; it should not make a
+      // link schema-bearing.
+      expect(resolved.schema).toBeUndefined();
     });
 
     it("should handle complex nested schemas with multiple levels", () => {

@@ -8,7 +8,8 @@
  * @element cf-modal
  *
  * @attr {boolean} open - Whether the modal is visible (reflected)
- * @attr {boolean} dismissable - Allow dismiss via backdrop/Escape/X button
+ * @attr {boolean} dismissible - Allow dismiss via backdrop/Escape/X button
+ * @attr {boolean} dismissable - Deprecated alias for dismissible
  * @attr {"sm"|"md"|"lg"|"full"} size - Modal width preset
  * @attr {boolean} prevent-scroll - Prevent body scroll when open
  * @attr {string} label - Accessible aria-label
@@ -17,6 +18,7 @@
  *
  * @fires cf-modal-open - Modal is opening
  * @fires cf-modal-close - Modal requests close (detail: { reason })
+ * @fires cf-dismiss - Modal requests dismiss (detail: { reason })
  * @fires cf-modal-opened - Open animation completed
  * @fires cf-modal-closed - Close animation completed
  *
@@ -70,9 +72,13 @@ export class CFModal extends BaseElement {
   @property({ attribute: false })
   accessor open: CellHandle<boolean> | boolean = false;
 
-  /** Allow dismiss via backdrop click, Escape key, and X button */
+  /** Deprecated alias for dismissible. */
   @property({ type: Boolean, reflect: true })
   accessor dismissable = true;
+
+  /** Allow dismiss via backdrop click, Escape key, and X button */
+  @property({ type: Boolean, reflect: true })
+  accessor dismissible = true;
 
   /** Modal width preset */
   @property({ type: String, reflect: true })
@@ -132,6 +138,7 @@ export class CFModal extends BaseElement {
     super();
     this.open = false;
     this.dismissable = true;
+    this.dismissible = true;
     this.size = "md";
     this.preventScroll = true;
     this.presentation = "dialog";
@@ -174,7 +181,19 @@ export class CFModal extends BaseElement {
     }
   }
 
-  override updated(_changedProperties: PropertyValues) {
+  override updated(changedProperties: PropertyValues) {
+    if (
+      changedProperties.has("dismissible") &&
+      this.dismissable !== this.dismissible
+    ) {
+      this.dismissable = this.dismissible;
+    } else if (
+      changedProperties.has("dismissable") &&
+      this.dismissible !== this.dismissable
+    ) {
+      this.dismissible = this.dismissable;
+    }
+
     const isOpen = this._getOpenValue();
 
     // Update open attribute for CSS styling
@@ -204,7 +223,7 @@ export class CFModal extends BaseElement {
 
     // Register with modal manager if available
     if (this._manager) {
-      this._registration = this._manager.register(this, this.dismissable);
+      this._registration = this._manager.register(this, this._isDismissible());
       this._applyZIndex(this._registration.zIndex);
     } else {
       // Fallback z-index when no manager
@@ -297,7 +316,7 @@ export class CFModal extends BaseElement {
    */
   private _handleContainerClick = (e: MouseEvent) => {
     // Only dismiss if clicking directly on container (the backdrop area), not the dialog
-    if (e.target === e.currentTarget && this.dismissable) {
+    if (e.target === e.currentTarget && this._isDismissible()) {
       this._requestClose("backdrop");
     }
   };
@@ -318,6 +337,7 @@ export class CFModal extends BaseElement {
 
     // Always emit event so parent can run cleanup logic
     this.emit("cf-modal-close", { reason });
+    this.emit("cf-dismiss", { reason });
   }
 
   /**
@@ -334,7 +354,7 @@ export class CFModal extends BaseElement {
     // Handle Escape (only if we're the top modal or no manager)
     // Note: When using cf-modal-provider, Escape is handled globally there
     // This is fallback for standalone usage
-    if (e.key === "Escape" && this.dismissable && !this._manager) {
+    if (e.key === "Escape" && this._isDismissible() && !this._manager) {
       e.preventDefault();
       this._requestClose("escape");
     }
@@ -363,6 +383,10 @@ export class CFModal extends BaseElement {
         first.focus();
       }
     }
+  }
+
+  private _isDismissible(): boolean {
+    return this.dismissible && this.dismissable;
   }
 
   /**

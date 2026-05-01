@@ -33,8 +33,8 @@ export function createRef(
   const seen = new Set<any>();
 
   // Unwrap query result proxies, replace docs with their ids and remove
-  // functions and undefined values, since `merkle-reference` doesn't support
-  // them.
+  // functions and undefined values, since our data model doesn't support them.
+  // TODO(danfuzz): Revisit this when `undefined` is fully supported.
   function traverse(obj: any): any {
     // Avoid cycles — only track objects/arrays/functions (not primitives).
     // Primitives use value equality in Set, so repeated strings like

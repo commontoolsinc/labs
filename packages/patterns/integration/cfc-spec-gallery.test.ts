@@ -143,7 +143,7 @@ async function waitForCfcLabelText(page: Page, expected: string[]) {
       return expected.every((label) =>
         labels.some((rendered) => rendered.includes(label))
       );
-    }, { timeout: 15_000 });
+    });
   } catch (cause) {
     throw new Error(
       `Timed out waiting for CFC labels. Last probe: ${

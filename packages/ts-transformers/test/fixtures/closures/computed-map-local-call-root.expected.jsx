@@ -1,0 +1,156 @@
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const identity = __cfHardenFn((value: string) => value);
+interface Item {
+    done: boolean;
+}
+interface State {
+    items: Item[];
+}
+// FIXTURE: computed-map-local-call-root
+// Verifies: callback-local ordinary call roots in a computed-array .map()
+//   callback whole-wrap as callback-local derives even when introduced through
+//   a local variable initializer in non-JSX output code.
+//   const label = identity(row.done ? "Done" : "Pending")
+//   → const label = derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))
+export default pattern((state) => {
+    const rows = __cfHelpers.derive({
+        type: "object",
+        properties: {
+            state: {
+                type: "object",
+                properties: {
+                    items: {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Item"
+                        }
+                    }
+                },
+                required: ["items"]
+            }
+        },
+        required: ["state"],
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    done: {
+                        type: "boolean"
+                    }
+                },
+                required: ["done"]
+            }
+        }
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            $ref: "#/$defs/Item"
+        },
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    done: {
+                        type: "boolean"
+                    }
+                },
+                required: ["done"]
+            }
+        }
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
+            items: state.key("items")
+        } }, ({ state }) => state.items).for("rows", true);
+    const labels = rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const row = __cf_pattern_input.key("element");
+        const label = __cfHelpers.derive({
+            type: "object",
+            properties: {
+                row: {
+                    type: "object",
+                    properties: {
+                        done: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["done"]
+                }
+            },
+            required: ["row"]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, { row: {
+                done: row.key("done")
+            } }, ({ row }) => identity(row.done ? "Done" : "Pending")).for("label", true);
+        return label;
+    }, {
+        type: "object",
+        properties: {
+            element: {
+                $ref: "#/$defs/Item"
+            }
+        },
+        required: ["element"],
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    done: {
+                        type: "boolean"
+                    }
+                },
+                required: ["done"]
+            }
+        }
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema), {}).for("labels", true);
+    return { labels };
+}, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            }
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        labels: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        }
+    },
+    required: ["labels"]
+} as const satisfies __cfHelpers.JSONSchema);
+// @ts-ignore: Internals
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

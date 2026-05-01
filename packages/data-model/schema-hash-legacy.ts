@@ -6,8 +6,7 @@
  * representation of a value with sorted object keys and per-identity
  * WeakMap caching.
  *
- * Used by `schema-hash.ts` as the legacy dispatch target; will be
- * replaced by canonical hashing (via `hashOfModern`) behind a flag.
+ * Used by `schema-hash.ts` as the legacy dispatch target.
  */
 
 import type { JSONSchema } from "@commonfabric/api";

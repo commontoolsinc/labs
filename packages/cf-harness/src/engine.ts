@@ -8,15 +8,25 @@ import {
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
+  appendHarnessCfcInvocationContext,
   appendHarnessFailureRecord,
+  appendHarnessPolicyDecision,
   appendHarnessPolicyEvent,
+  appendHarnessSubagentRun,
   appendHarnessToolOutput,
   createHarnessRunState,
   type HarnessRunState,
   type HarnessRunTerminalReason,
   setHarnessCapabilitySnapshot,
+  setHarnessCfcPolicySnapshot,
+  setHarnessPolicyTrace,
+  setHarnessPromptSlotBinding,
   setHarnessRunCurrentDir,
+  setHarnessRunManifestPath,
+  setHarnessRunReportPath,
   setHarnessRunStatus,
+  setHarnessSkillActivations,
+  setHarnessSkillRegistry,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
 import {
@@ -25,12 +35,32 @@ import {
   classifyHarnessRunError,
   type ClassifyHarnessRunErrorOptions,
   collectHarnessCapabilitySnapshot,
+  createHarnessFailureRecord,
   type HarnessFailureRecord,
 } from "./diagnostics.ts";
 import {
   createHarnessPolicyEvent,
   type HarnessPolicyEvent,
 } from "./contracts/policy.ts";
+import {
+  createHarnessCfcInvocationContext,
+  type HarnessCfcInvocationContext,
+  type HarnessCfcInvocationOperation,
+  summarizeCfcInvocationRunManifest,
+} from "./contracts/cfc-invocation-context.ts";
+import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
+import {
+  createHarnessPolicyDecisionRecord,
+  type HarnessPolicyDecisionRecord,
+  type HarnessPolicyTrace,
+} from "./contracts/policy-trace.ts";
+import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import type { HarnessRunReport } from "./contracts/run-report.ts";
+import type {
+  HarnessSkillActivations,
+  HarnessSkillRegistry,
+} from "./contracts/skill.ts";
+import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import {
   createToolResultRef,
   type ToolOutputId,
@@ -42,10 +72,27 @@ import {
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
 } from "./sandbox/docker-runsc.ts";
-import { dirname } from "@std/path";
-import type { ProcessRunner } from "./sandbox/process-runner.ts";
-import type { HarnessSandboxConfig, SandboxRuntime } from "./sandbox/types.ts";
+import {
+  dirname,
+  join as joinHostPath,
+  normalize as normalizeHostPath,
+  relative as relativeHostPath,
+} from "@std/path";
+import { normalize as normalizeSandboxPath } from "@std/path/posix";
+import {
+  DenoProcessRunner,
+  type ProcessRunner,
+} from "./sandbox/process-runner.ts";
+import type {
+  DockerRunscAdditionalMountConfig,
+  HarnessSandboxConfig,
+  SandboxRuntime,
+} from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
+import {
+  type DelegateTaskToolInput,
+  type DelegateTaskToolOutput,
+} from "./contracts/subagent.ts";
 import {
   type ReadFileToolInput,
   type ReadFileToolOutput,
@@ -58,14 +105,18 @@ import { getBuiltinTool } from "./tools/registry.ts";
 
 export interface BuiltinToolInputMap {
   bash: BashToolInput;
+  "bash-no-sandbox": BashToolInput;
   read_file: ReadFileToolInput;
   write_file: WriteFileToolInput;
+  delegate_task: DelegateTaskToolInput;
 }
 
 export interface BuiltinToolOutputMap {
   bash: BashToolOutput;
+  "bash-no-sandbox": BashToolOutput;
   read_file: ReadFileToolOutput;
   write_file: WriteFileToolOutput;
+  delegate_task: DelegateTaskToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -77,6 +128,7 @@ export interface CreateHarnessEngineOptions
   runId?: string;
   runState?: HarnessRunState;
   workspaceHostPath?: string;
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
   processRunner?: ProcessRunner;
@@ -100,6 +152,7 @@ const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
 const resolveSandboxConfig = (
   config: HarnessConfig,
   workspaceHostPath?: string,
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[],
 ): HarnessSandboxConfig => {
   if (config.sandbox !== undefined) {
     return config.sandbox;
@@ -109,7 +162,12 @@ const resolveSandboxConfig = (
       "sandbox config is required when no workspaceHostPath default is provided",
     );
   }
-  return resolveDockerRunscSandboxConfig({ workspaceHostPath });
+  return resolveDockerRunscSandboxConfig({
+    workspaceHostPath,
+    ...(additionalMounts !== undefined && additionalMounts.length > 0
+      ? { additionalMounts }
+      : {}),
+  });
 };
 
 const createSandboxRuntime = (
@@ -141,25 +199,89 @@ const resolveInitialCurrentDir = (
   return sandbox.defaultWorkingDirectory();
 };
 
+const normalizeSandboxRoot = (path: string): string => {
+  const normalized = normalizeSandboxPath(path);
+  return normalized.length > 1 && normalized.endsWith("/")
+    ? normalized.slice(0, -1)
+    : normalized;
+};
+
+const isHostPathWithinRoot = (root: string, path: string): boolean => {
+  const relativePath = relativeHostPath(
+    normalizeHostPath(root),
+    normalizeHostPath(path),
+  );
+  return relativePath === "" ||
+    (!relativePath.startsWith("..") && !relativePath.startsWith("/"));
+};
+
+const isSandboxPathWithinRoot = (root: string, path: string): boolean => {
+  const normalizedRoot = normalizeSandboxRoot(root);
+  const normalizedPath = normalizeSandboxRoot(path);
+  return normalizedPath === normalizedRoot ||
+    normalizedPath.startsWith(`${normalizedRoot}/`);
+};
+
+type HostSandboxMount = {
+  kind: string;
+  hostPath: string;
+  sandboxPath: string;
+};
+
 export class CfHarnessEngine {
   readonly config: HarnessConfig;
   readonly sandbox: SandboxRuntime;
   readonly artifactStore?: HarnessArtifactStore;
+  readonly hostProcessRunner: ProcessRunner;
+  readonly workspaceHostPath?: string;
+  readonly workspaceMountPath: string;
 
   #runState: HarnessRunState;
   #outputSequence: number;
   readonly #now: () => string;
+  readonly #hostMounts: readonly HostSandboxMount[];
 
   constructor(options: CreateHarnessEngineOptions = {}) {
     this.#now = options.now ?? (() => new Date().toISOString());
     this.config = resolveHarnessConfig(options);
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
+    const sandboxConfig = options.sandboxRuntime === undefined
+      ? resolveSandboxConfig(
+        this.config,
+        options.workspaceHostPath,
+        options.additionalMounts,
+      )
+      : this.config.sandbox;
+    this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
     this.sandbox = options.sandboxRuntime ??
-      createSandboxRuntime(
-        resolveSandboxConfig(this.config, options.workspaceHostPath),
-        options.processRunner,
-      );
+      createSandboxRuntime(sandboxConfig!, options.processRunner);
+    this.workspaceHostPath = sandboxConfig?.workspaceHostPath ??
+      options.workspaceHostPath;
+    this.workspaceMountPath = normalizeSandboxRoot(
+      sandboxConfig?.workspaceMountPath ??
+        this.sandbox.defaultWorkingDirectory(),
+    );
+    this.#hostMounts = sandboxConfig !== undefined
+      ? [
+        {
+          kind: "workspace",
+          hostPath: sandboxConfig.workspaceHostPath,
+          sandboxPath: sandboxConfig.workspaceMountPath,
+        },
+        ...sandboxConfig.additionalMounts.map((mount) => ({
+          kind: mount.kind,
+          hostPath: mount.hostPath,
+          sandboxPath: mount.sandboxPath,
+        })),
+      ]
+      : this.workspaceHostPath !== undefined
+      ? [{
+        kind: "workspace",
+        hostPath: this.workspaceHostPath,
+        sandboxPath: this.workspaceMountPath,
+      }]
+      : [];
     this.artifactStore = options.artifactStore ??
       ((this.config.artifactRoot ?? options.runState?.artifactRoot) !==
           undefined
@@ -181,6 +303,8 @@ export class CfHarnessEngine {
         currentDir,
         model: this.config.model,
         artifactRoot: this.artifactStore?.runRoot,
+        runManifest: this.config.runManifest,
+        runManifestPath: this.config.runManifestPath,
         now: this.#now(),
       });
     this.#outputSequence = this.#runState.toolOutputs.length;
@@ -224,6 +348,17 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  setPromptSlotBinding(
+    promptSlotBinding: PromptSlotBinding,
+  ): HarnessRunState {
+    this.#runState = setHarnessPromptSlotBinding(
+      this.#runState,
+      promptSlotBinding,
+      this.#now(),
+    );
+    return this.getRunState();
+  }
+
   async recordPolicyEvent(
     event: Omit<HarnessPolicyEvent, "type" | "at">,
   ): Promise<HarnessRunState> {
@@ -242,8 +377,127 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  async recordPolicyDecision(
+    decision: Omit<
+      HarnessPolicyDecisionRecord,
+      "type" | "sequence" | "runId" | "at"
+    >,
+  ): Promise<HarnessRunState> {
+    const now = this.#now();
+    const policyDecision = createHarnessPolicyDecisionRecord({
+      ...decision,
+      runId: this.#runState.runId,
+      sequence: (this.#runState.policyDecisions ?? []).length + 1,
+      at: now,
+    });
+    this.#runState = appendHarnessPolicyDecision(
+      this.#runState,
+      policyDecision,
+      now,
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
   async persistRunState(): Promise<string | undefined> {
     return await this.artifactStore?.persistRunState(this.#runState);
+  }
+
+  async ensureRunManifestPersisted(): Promise<string | undefined> {
+    if (this.#runState.runManifest === undefined) {
+      return this.#runState.runManifestPath;
+    }
+    const manifestPath = await this.artifactStore?.persistRunManifest?.(
+      this.#runState.runManifest,
+    );
+    if (manifestPath !== undefined) {
+      this.#runState = setHarnessRunManifestPath(
+        this.#runState,
+        manifestPath,
+        this.#now(),
+      );
+      await this.persistRunState();
+    }
+    return manifestPath ?? this.#runState.runManifestPath;
+  }
+
+  async persistSkillRegistry(
+    registry: HarnessSkillRegistry,
+  ): Promise<string | undefined> {
+    const skillRegistryPath = await this.artifactStore
+      ?.persistSkillRegistry?.(registry);
+    this.#runState = setHarnessSkillRegistry(
+      this.#runState,
+      registry,
+      skillRegistryPath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return skillRegistryPath;
+  }
+
+  async persistSkillActivations(
+    activations: HarnessSkillActivations,
+  ): Promise<string | undefined> {
+    const skillActivationsPath = await this.artifactStore
+      ?.persistSkillActivations?.(activations);
+    this.#runState = setHarnessSkillActivations(
+      this.#runState,
+      activations,
+      skillActivationsPath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return skillActivationsPath;
+  }
+
+  nextToolOutputId(toolId: string): ToolOutputId {
+    this.#outputSequence += 1;
+    return `${this.#runState.runId}:${toolId}:${this.#outputSequence}` as ToolOutputId;
+  }
+
+  async recordSubagentRun(
+    subagentRun: HarnessSubagentRunRef,
+  ): Promise<HarnessRunState> {
+    this.#runState = appendHarnessSubagentRun(
+      this.#runState,
+      subagentRun,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  async terminalizeInterruptedRun(
+    signalName: string,
+  ): Promise<HarnessRunState> {
+    const currentState = this.#runState;
+    if (
+      currentState.status === "failed" ||
+      currentState.terminalReason === "assistant_completed"
+    ) {
+      return this.getRunState();
+    }
+    const now = this.#now();
+    this.#runState = appendHarnessFailureRecord(
+      this.#runState,
+      createHarnessFailureRecord({
+        kind: "harness_error",
+        source: "run_error",
+        detail:
+          `process received ${signalName} before the prompt loop completed`,
+        at: now,
+      }),
+      now,
+    );
+    this.#runState = setHarnessRunStatus(
+      this.#runState,
+      "failed",
+      now,
+      "process_interrupted",
+    );
+    await this.persistRunState();
+    return this.getRunState();
   }
 
   async persistTranscript(
@@ -263,16 +517,94 @@ export class CfHarnessEngine {
     return transcriptPath;
   }
 
+  async persistRunReport(
+    report: HarnessRunReport,
+  ): Promise<string | undefined> {
+    const runReportPath = await this.artifactStore?.persistRunReport(report);
+    if (runReportPath !== undefined) {
+      this.#runState = setHarnessRunReportPath(
+        this.#runState,
+        runReportPath,
+        this.#now(),
+      );
+      await this.persistRunState();
+    }
+    return runReportPath;
+  }
+
+  async persistCfcPolicySnapshot(
+    snapshot: HarnessCfcPolicySnapshot,
+  ): Promise<string | undefined> {
+    let cfcPolicySnapshotPath: string | undefined;
+    try {
+      cfcPolicySnapshotPath = await this.artifactStore
+        ?.persistCfcPolicySnapshot(
+          snapshot,
+        );
+    } catch (error) {
+      const now = this.#now();
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        classifyHarnessRunError(error, {
+          at: now,
+          source: "policy_snapshot",
+        }),
+        now,
+      );
+    }
+    this.#runState = setHarnessCfcPolicySnapshot(
+      this.#runState,
+      snapshot,
+      cfcPolicySnapshotPath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return cfcPolicySnapshotPath;
+  }
+
+  async persistPolicyTrace(
+    trace: HarnessPolicyTrace,
+  ): Promise<string | undefined> {
+    let policyTracePath: string | undefined;
+    try {
+      policyTracePath = await this.artifactStore?.persistPolicyTrace?.(trace);
+    } catch (error) {
+      const now = this.#now();
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        classifyHarnessRunError(error, {
+          at: now,
+          source: "policy_trace",
+        }),
+        now,
+      );
+    }
+    this.#runState = setHarnessPolicyTrace(
+      this.#runState,
+      trace,
+      policyTracePath,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return policyTracePath;
+  }
+
   async ensureDiagnosticsInitialized(): Promise<HarnessRunState> {
     if (this.#runState.capabilitySnapshot !== undefined) {
       return this.getRunState();
     }
+    await this.ensureRunManifestPersisted();
     const now = this.#now();
     try {
       const capabilitySnapshot = await collectHarnessCapabilitySnapshot(
         this.sandbox,
         this.#runState.currentDir,
         now,
+        {
+          cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+          runManifest: this.#runState.runManifest,
+          runManifestPath: this.#runState.runManifestPath,
+        },
       );
       let capabilitiesPath: string | undefined;
       try {
@@ -327,51 +659,7 @@ export class CfHarnessEngine {
         this.#createToolContext(),
         input,
       ) as BuiltinToolOutputMap[TToolId];
-      if (!isToolOutputWithId(output)) {
-        throw new Error(`builtin tool did not return an outputId: ${toolId}`);
-      }
-      const artifactPath = await this.artifactStore?.persistToolOutput(
-        toolId,
-        output.outputId as ToolOutputId,
-        output,
-      );
-      const resultRef = createToolResultRef(
-        output.outputId as ToolOutputId,
-        toolId,
-        this.#runState.runId,
-        artifactPath,
-      );
-      const completionTime = this.#now();
-      this.#runState = appendHarnessToolOutput(
-        setHarnessRunStatus(
-          this.#runState,
-          "completed",
-          completionTime,
-          "tool_completed",
-        ),
-        resultRef,
-        completionTime,
-      );
-      const failure = classifyBuiltinToolFailure(
-        toolId,
-        input,
-        output,
-        completionTime,
-        this.#runState.capabilitySnapshot,
-      );
-      if (failure !== undefined) {
-        this.#runState = appendHarnessFailureRecord(
-          this.#runState,
-          failure,
-          completionTime,
-        );
-      }
-      await this.persistRunState();
-      return {
-        output,
-        resultRef,
-        runState: this.getRunState(),
-      };
+      return await this.recordBuiltinToolOutput(toolId, input, output);
     } catch (error) {
       const failureTime = this.#now();
       this.#runState = setHarnessRunStatus(
@@ -394,14 +682,223 @@ export class CfHarnessEngine {
     }
   }
 
+  async recordBuiltinToolOutput<TToolId extends BuiltinToolId>(
+    toolId: TToolId,
+    input: BuiltinToolInputMap[TToolId],
+    output: BuiltinToolOutputMap[TToolId],
+  ): Promise<BuiltinToolInvocationResult<TToolId>> {
+    if (!isToolOutputWithId(output)) {
+      throw new Error(`builtin tool did not return an outputId: ${toolId}`);
+    }
+    const artifactPath = await this.artifactStore?.persistToolOutput(
+      toolId,
+      output.outputId as ToolOutputId,
+      output,
+    );
+    const resultRef = createToolResultRef(
+      output.outputId as ToolOutputId,
+      toolId,
+      this.#runState.runId,
+      artifactPath,
+    );
+    const completionTime = this.#now();
+    this.#runState = appendHarnessToolOutput(
+      setHarnessRunStatus(
+        this.#runState,
+        "completed",
+        completionTime,
+        "tool_completed",
+      ),
+      resultRef,
+      completionTime,
+    );
+    const failure = classifyBuiltinToolFailure(
+      toolId,
+      input,
+      output,
+      completionTime,
+      this.#runState.capabilitySnapshot,
+    );
+    if (failure !== undefined) {
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        failure,
+        completionTime,
+      );
+    }
+    await this.persistRunState();
+    return {
+      output,
+      resultRef,
+      runState: this.getRunState(),
+    };
+  }
+
+  #resolveHostPath(path: string): string {
+    if (this.#hostMounts.length === 0) {
+      throw new Error(
+        "bash-no-sandbox requires a host mount path to map sandbox paths",
+      );
+    }
+    const sandboxPath = this.sandbox.resolvePath(
+      path,
+      this.#runState.currentDir,
+    );
+    const mount = this.#hostMounts.find((candidate) =>
+      isSandboxPathWithinRoot(candidate.sandboxPath, sandboxPath)
+    );
+    if (mount === undefined) {
+      throw new Error(`path escapes host-backed sandbox roots: ${path}`);
+    }
+    const sandboxRoot = normalizeSandboxRoot(mount.sandboxPath);
+    if (sandboxPath === sandboxRoot) {
+      return normalizeHostPath(mount.hostPath);
+    }
+    return normalizeHostPath(
+      joinHostPath(
+        mount.hostPath,
+        sandboxPath.slice(sandboxRoot.length + 1),
+      ),
+    );
+  }
+
+  #hostPathToWorkspacePath(path: string): string | undefined {
+    const hostPath = normalizeHostPath(path);
+    for (const mount of this.#hostMounts) {
+      const hostRoot = normalizeHostPath(mount.hostPath);
+      if (!isHostPathWithinRoot(hostRoot, hostPath)) {
+        continue;
+      }
+      const relativePath = relativeHostPath(hostRoot, hostPath);
+      if (relativePath === "") {
+        return normalizeSandboxRoot(mount.sandboxPath);
+      }
+      return normalizeSandboxPath(
+        `${normalizeSandboxRoot(mount.sandboxPath)}/${
+          relativePath.replaceAll("\\", "/")
+        }`,
+      );
+    }
+    return undefined;
+  }
+
+  async #isHostPathWithinWorkspace(
+    path: string,
+    options: { allowMissing?: boolean } = {},
+  ): Promise<boolean> {
+    if (this.workspaceHostPath === undefined) {
+      return false;
+    }
+    const normalizedPath = normalizeHostPath(path);
+    try {
+      const hostRoot = await Deno.realPath(this.workspaceHostPath);
+      const hostPath = await Deno.realPath(normalizedPath);
+      return isHostPathWithinRoot(hostRoot, hostPath);
+    } catch (error) {
+      if (!options.allowMissing || !(error instanceof Deno.errors.NotFound)) {
+        return false;
+      }
+      return await this.#missingHostPathCanResolveWithinWorkspace(
+        normalizedPath,
+      );
+    }
+  }
+
+  async #missingHostPathCanResolveWithinWorkspace(path: string): Promise<
+    boolean
+  > {
+    if (this.workspaceHostPath === undefined) {
+      return false;
+    }
+    const lexicalRoot = normalizeHostPath(this.workspaceHostPath);
+    let realRoot: string;
+    try {
+      realRoot = await Deno.realPath(this.workspaceHostPath);
+    } catch {
+      return false;
+    }
+    let candidate = normalizeHostPath(path);
+    while (isHostPathWithinRoot(lexicalRoot, candidate)) {
+      try {
+        const realCandidate = await Deno.realPath(candidate);
+        return isHostPathWithinRoot(realRoot, realCandidate);
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) {
+          return false;
+        }
+      }
+      const parent = dirname(candidate);
+      if (parent === candidate) {
+        return false;
+      }
+      candidate = parent;
+    }
+    return false;
+  }
+
+  async #createCfcInvocationContext(options: {
+    toolId: string;
+    toolOutputId?: ToolOutputId;
+    operation: HarnessCfcInvocationOperation;
+    cwd: string;
+    command?: string;
+    argv?: readonly string[];
+    args?: readonly string[];
+    stdinText?: string;
+    env?: Record<string, string>;
+  }): Promise<HarnessCfcInvocationContext> {
+    const now = this.#now();
+    const invocation = await createHarnessCfcInvocationContext({
+      sequence: (this.#runState.cfcInvocationContexts ?? []).length + 1,
+      runId: this.#runState.runId,
+      createdAt: now,
+      toolId: options.toolId,
+      ...(options.toolOutputId !== undefined
+        ? { toolOutputId: options.toolOutputId }
+        : {}),
+      operation: options.operation,
+      cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+      cwd: options.cwd,
+      ...(this.#runState.promptSlotBinding !== undefined
+        ? { promptSlot: this.#runState.promptSlotBinding }
+        : {}),
+      runManifest: summarizeCfcInvocationRunManifest(
+        this.#runState.runManifest,
+        this.#runState.runManifestPath,
+      ),
+      ...(options.command !== undefined ? { command: options.command } : {}),
+      ...(options.argv !== undefined ? { argv: options.argv } : {}),
+      ...(options.args !== undefined ? { args: options.args } : {}),
+      ...(options.stdinText !== undefined
+        ? { stdinText: options.stdinText }
+        : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
+    });
+    this.#runState = appendHarnessCfcInvocationContext(
+      this.#runState,
+      invocation,
+      now,
+    );
+    await this.persistRunState();
+    return invocation;
+  }
+
   #createToolContext() {
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
       currentDir: this.#runState.currentDir,
       sandbox: this.sandbox,
+      hostProcessRunner: this.hostProcessRunner,
       resolvePath: (path: string) =>
         this.sandbox.resolvePath(path, this.#runState.currentDir),
+      resolveHostPath: (path: string) => this.#resolveHostPath(path),
+      hostPathToWorkspacePath: (path: string) =>
+        this.#hostPathToWorkspacePath(path),
+      isHostPathWithinWorkspace: (
+        path: string,
+        options?: { allowMissing?: boolean },
+      ) => this.#isHostPathWithinWorkspace(path, options),
       setCurrentDir: (path: string) => {
         const resolved = this.sandbox.resolvePath(
           path,
@@ -414,9 +911,19 @@ export class CfHarnessEngine {
         );
       },
       nextOutputId: (toolId: string) => {
-        this.#outputSequence += 1;
-        return `${this.#runState.runId}:${toolId}:${this.#outputSequence}` as ToolOutputId;
+        return this.nextToolOutputId(toolId);
       },
+      createCfcInvocationContext: (options: {
+        toolId: string;
+        toolOutputId?: ToolOutputId;
+        operation: HarnessCfcInvocationOperation;
+        cwd: string;
+        command?: string;
+        argv?: readonly string[];
+        args?: readonly string[];
+        stdinText?: string;
+        env?: Record<string, string>;
+      }) => this.#createCfcInvocationContext(options),
     };
   }
 }

@@ -197,7 +197,8 @@ export class CFWebhook extends BaseElement {
       return html`
         <div class="webhook-setup">
           <cf-button
-            variant="secondary"
+            color="neutral"
+            variant="outline"
             @click="${this._handleCreate}"
             ?disabled="${this._isLoading}"
           >

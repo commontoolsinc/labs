@@ -100,6 +100,10 @@ export class CFPromptInput extends BaseElement {
         );
         --cf-prompt-input-min-height: var(--cf-size-lg-height, 40px);
         --cf-prompt-input-max-height: 12rem;
+        --cf-prompt-input-action-gap: var(
+          --cf-theme-spacing-tight,
+          var(--cf-spacing-1, 0.25rem)
+        );
       }
 
       .container {
@@ -116,10 +120,7 @@ export class CFPromptInput extends BaseElement {
         }
 
         .container:focus-within {
-          border-color: var(
-            --cf-theme-color-primary,
-            #3b82f6
-          );
+          border-color: var(--cf-theme-color-primary, #3b82f6);
           box-shadow: 0 0 0 0.5px
             var(--cf-theme-color-primary, rgba(59, 130, 246, 0.1));
           }
@@ -128,12 +129,13 @@ export class CFPromptInput extends BaseElement {
             position: relative;
             display: flex;
             align-items: flex-end;
+            gap: var(--cf-prompt-input-action-gap);
           }
 
           .textarea-wrapper {
             flex: 1;
             position: relative;
-            padding-right: 5rem; /* Space for overlayed button */
+            min-width: 0;
           }
 
           textarea {
@@ -160,13 +162,11 @@ export class CFPromptInput extends BaseElement {
           }
 
           .send-button-wrapper {
-            position: absolute;
-            right: 0;
-            bottom: 0;
             display: flex;
             align-items: flex-end;
             gap: var(--cf-theme-spacing-tight, var(--cf-spacing-1, 0.25rem));
             padding-bottom: 0.125rem;
+            flex: 0 0 auto;
           }
 
           .controls-row {
@@ -178,12 +178,7 @@ export class CFPromptInput extends BaseElement {
           cf-button {
             white-space: nowrap;
             min-width: auto;
-            height: var(--cf-size-md-height, 32px);
-            padding: 0 0.75rem;
           }
-
-          /* Pending state - allow editing, just block submit */
-          :host([pending]) textarea {}
 
           /* Disabled state */
           :host([disabled]) .container {
@@ -245,10 +240,7 @@ export class CFPromptInput extends BaseElement {
           }
 
           .upload-button:hover {
-            background: var(
-              --cf-theme-color-surface,
-              #f3f4f6
-            );
+            background: var(--cf-theme-color-surface, #f3f4f6);
             color: var(--cf-theme-color-text, #111827);
           }
 
@@ -262,14 +254,8 @@ export class CFPromptInput extends BaseElement {
             align-items: center;
             gap: 0.25rem;
             padding: 0.25rem 0.625rem;
-            background: var(
-              --cf-theme-color-surface,
-              #f5f5f5
-            );
-            color: var(
-              --cf-theme-color-text,
-              #212121
-            );
+            background: var(--cf-theme-color-surface, #f5f5f5);
+            color: var(--cf-theme-color-text, #212121);
             border: 1px solid var(--cf-theme-color-border, #e0e0e0);
             border-radius: var(
               --cf-theme-border-radius,
@@ -292,10 +278,7 @@ export class CFPromptInput extends BaseElement {
           }
 
           .model-select:hover {
-            background: var(
-              --cf-theme-color-surface-hover,
-              #eeeeee
-            );
+            background: var(--cf-theme-color-surface-hover, #eeeeee);
           }
 
           .model-select:focus {
@@ -701,7 +684,8 @@ export class CFPromptInput extends BaseElement {
                         ? html`
                           <cf-button
                             id="cf-prompt-input-stop-button"
-                            variant="secondary"
+                            color="neutral"
+                            variant="outline"
                             size="${this.size === "sm"
                               ? "sm"
                               : this.size === "lg"
@@ -717,7 +701,8 @@ export class CFPromptInput extends BaseElement {
                         : html`
                           <cf-button
                             id="cf-prompt-input-send-button"
-                            variant="primary"
+                            color="primary"
+                            variant="solid"
                             size="${this.size === "sm"
                               ? "sm"
                               : this.size === "lg"

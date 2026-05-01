@@ -159,14 +159,16 @@ const tabContent: Record<string, TabContent> = {
   },
 };
 
-function chipStyle(tone: "blue" | "coral" | "graphite"): string {
+function chipColor(
+  tone: "blue" | "coral" | "graphite",
+): "primary" | "accent" | "neutral" {
   if (tone === "blue") {
-    return "--cf-chip-background: linear-gradient(135deg, #5f89ff, #4d77fb); --cf-chip-color: white; --cf-chip-border-color: transparent;";
+    return "primary";
   }
   if (tone === "coral") {
-    return "--cf-chip-background: linear-gradient(135deg, #ff7f5f, #ff6846); --cf-chip-color: white; --cf-chip-border-color: transparent;";
+    return "accent";
   }
-  return "--cf-chip-background: linear-gradient(135deg, #5b6274, #444d61); --cf-chip-color: white; --cf-chip-border-color: transparent;";
+  return "neutral";
 }
 
 export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
@@ -205,9 +207,9 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                       >
                         {home.heading}
                       </cf-heading>
-                      <cf-label style="font-size: 1.1rem; color: var(--cf-theme-color-text-muted, #71747a); letter-spacing: -0.02em;">
+                      <cf-text variant="body-large" tone="muted">
                         {home.subtitle}
-                      </cf-label>
+                      </cf-text>
                     </div>
 
                     {/* Task sections */}
@@ -215,13 +217,13 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                       section: "Needs action" | "Knock something out",
                     ) => (
                       <cf-vstack gap="2">
-                        <cf-hstack align="center" style="padding-bottom: 6px;">
-                          <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #71747a); letter-spacing: 0.01em;">
+                        <cf-hstack align="center" justify="between">
+                          <cf-text variant="caption" tone="muted">
                             {section}
-                          </span>
-                          <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #71747a);">
+                          </cf-text>
+                          <cf-text variant="body" tone="muted">
                             ›
-                          </span>
+                          </cf-text>
                         </cf-hstack>
                         <cf-separator />
                         <cf-vstack gap="2">
@@ -234,17 +236,17 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                                     gap="1"
                                     style="flex: 1; min-width: 0;"
                                   >
-                                    <span style="font-weight: 600; font-size: 0.9rem; line-height: 1.35; letter-spacing: -0.015em;">
+                                    <cf-text variant="body-compact" block>
                                       {task.title}
-                                    </span>
-                                    <cf-label style="font-size: 0.75rem; color: var(--cf-theme-color-text-muted, #71747a);">
+                                    </cf-text>
+                                    <cf-text variant="caption" tone="muted">
                                       {task.detail}
-                                    </cf-label>
+                                    </cf-text>
                                   </cf-vstack>
                                   <cf-chip
                                     label={task.actionLabel}
                                     size="sm"
-                                    style={chipStyle(task.actionTone)}
+                                    color={chipColor(task.actionTone)}
                                   />
                                 </cf-hstack>
                               </cf-card>
@@ -255,13 +257,13 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
 
                     {/* Shortcuts */}
                     <cf-vstack gap="2">
-                      <cf-hstack align="center" style="padding-bottom: 6px;">
-                        <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #71747a); letter-spacing: 0.01em;">
+                      <cf-hstack align="center" justify="between">
+                        <cf-text variant="caption" tone="muted">
                           Shortcuts
-                        </span>
-                        <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #71747a);">
+                        </cf-text>
+                        <cf-text variant="body" tone="muted">
                           ›
-                        </span>
+                        </cf-text>
                       </cf-hstack>
                       <cf-separator />
                       <cf-hscroll fadeEdges>
@@ -273,15 +275,15 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                                 align="center"
                                 style="padding: 4px 0; text-align: center;"
                               >
-                                <span style="font-size: 1.15rem; color: var(--cf-theme-color-text-muted, #71747a);">
+                                <cf-text variant="body-large" tone="muted">
                                   {sc.icon}
-                                </span>
-                                <span style="font-size: 0.76rem; font-weight: 600; color: var(--cf-theme-color-text, #34373c); line-height: 1.15;">
+                                </cf-text>
+                                <cf-text variant="caption">
                                   {sc.title}
-                                </span>
-                                <span style="font-size: 0.72rem; color: var(--cf-theme-color-text-muted, #71747a); line-height: 1.15;">
+                                </cf-text>
+                                <cf-text variant="caption" tone="muted">
                                   {sc.subtitle}
-                                </span>
+                                </cf-text>
                               </cf-vstack>
                             </cf-card>
                           ))}
@@ -291,13 +293,13 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
 
                     {/* Artifacts */}
                     <cf-vstack gap="2">
-                      <cf-hstack align="center" style="padding-bottom: 6px;">
-                        <span style="flex: 1; font-size: 0.78rem; font-weight: 700; color: var(--cf-theme-color-text-muted, #71747a); letter-spacing: 0.01em;">
+                      <cf-hstack align="center" justify="between">
+                        <cf-text variant="caption" tone="muted">
                           Recent artifacts
-                        </span>
-                        <span style="font-size: 0.9rem; color: var(--cf-theme-color-text-muted, #71747a);">
+                        </cf-text>
+                        <cf-text variant="body" tone="muted">
                           ›
-                        </span>
+                        </cf-text>
                       </cf-hstack>
                       <cf-separator />
                       <cf-grid columns="2" gap="3">
@@ -307,9 +309,9 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                           <div
                             style={`background: linear-gradient(145deg, var(--cf-theme-color-surface), ${artifact.tint}); height: 120px; border-radius: var(--cf-theme-border-radius, 0.5rem); border: 1px solid var(--cf-theme-color-border, rgba(67,75,97,0.10)); display: flex; align-items: flex-end; padding: 12px;`}
                           >
-                            <cf-label style="font-size: 0.72rem; font-weight: 600; color: var(--cf-theme-color-text-muted); letter-spacing: -0.01em;">
+                            <cf-text variant="caption" tone="muted">
                               {artifact.title}
-                            </cf-label>
+                            </cf-text>
                           </div>
                         ))}
                       </cf-grid>
@@ -332,14 +334,14 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
                   ) => (
                     <cf-card>
                       <cf-vstack gap="1">
-                        <span style="font-weight: 600;">{item.title}</span>
+                        <cf-text variant="body-compact">{item.title}</cf-text>
                         <cf-hstack justify="between">
-                          <cf-label style="color: var(--cf-theme-color-text-muted, #71747a);">
+                          <cf-text variant="caption" tone="muted">
                             {item.detail}
-                          </cf-label>
-                          <cf-label style="color: var(--cf-theme-color-text-muted, #71747a);">
+                          </cf-text>
+                          <cf-text variant="caption" tone="muted">
                             {item.meta}
-                          </cf-label>
+                          </cf-text>
                         </cf-hstack>
                       </cf-vstack>
                     </cf-card>
@@ -364,9 +366,10 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
             </cf-tab-bar-item>
             <cf-button
               slot="action"
-              variant="primary"
+              color="primary"
+              variant="solid"
+              size="icon"
               onClick={openSheet}
-              style="border-radius: var(--cf-border-radius-xl, 0.75rem); width: 3.5rem; height: 100%; padding: 0; flex-shrink: 0;"
             >
               &#65291;
             </cf-button>
@@ -390,10 +393,18 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
             </cf-vstack>
             <div slot="footer">
               <cf-hstack gap="2" justify="end" style="width: 100%;">
-                <cf-button variant="secondary" onClick={closeSheet}>
+                <cf-button
+                  color="neutral"
+                  variant="outline"
+                  onClick={closeSheet}
+                >
                   Cancel
                 </cf-button>
-                <cf-button variant="primary" onClick={handleCreate}>
+                <cf-button
+                  color="primary"
+                  variant="solid"
+                  onClick={handleCreate}
+                >
                   Create
                 </cf-button>
               </cf-hstack>
@@ -403,15 +414,16 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
           <cf-toast-provider position="bottom">
             <cf-toast
               open={toastOpen}
-              variant="success"
+              status="success"
               duration={4000}
               oncf-toast-dismiss={dismissToast}
             >
               Task created.
               <cf-button
                 slot="action"
+                color="neutral"
                 variant="ghost"
-                style="padding: 2px 8px; font-size: 13px;"
+                size="sm"
               >
                 View
               </cf-button>

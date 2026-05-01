@@ -5,7 +5,7 @@
  */
 
 import { Database } from "@db/sqlite";
-import { refer } from "merkle-reference";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import type { JSONValue } from "../interface.ts";
 import * as Space from "../space.ts";
 import * as Fact from "../fact.ts";
@@ -18,7 +18,7 @@ const the = "application/json";
 
 // Helper to create unique document IDs
 let docCounter = 0;
-const createDoc = () => `of:${refer({ id: docCounter++ })}` as const;
+const createDoc = () => `of:${hashOf({ id: docCounter++ })}` as const;
 
 // Helper to create realistic ~16KB payload (typical fact size)
 function createTypicalPayload(): JSONValue {
@@ -832,97 +832,97 @@ Deno.bench({
 });
 
 // --------------------------------------------------------------------------
-// Isolation: Merkle reference (refer) cost
+// Isolation: hashOf() cost
 // --------------------------------------------------------------------------
 
 Deno.bench({
-  name: "refer() on 4KB payload",
-  group: "refer-scaling",
+  name: "hashOf() on 4KB payload",
+  group: "hashOf-scaling",
   fn(b) {
     const payload = createPayload(4 * 1024);
 
     b.start();
-    refer(payload);
+    hashOf(payload);
     b.end();
   },
 });
 
 Deno.bench({
-  name: "refer() on 16KB payload",
-  group: "refer-scaling",
+  name: "hashOf() on 16KB payload",
+  group: "hashOf-scaling",
   baseline: true,
   fn(b) {
     const payload = createPayload(16 * 1024);
 
     b.start();
-    refer(payload);
+    hashOf(payload);
     b.end();
   },
 });
 
 Deno.bench({
-  name: "refer() on 64KB payload",
-  group: "refer-scaling",
+  name: "hashOf() on 64KB payload",
+  group: "hashOf-scaling",
   fn(b) {
     const payload = createPayload(64 * 1024);
 
     b.start();
-    refer(payload);
+    hashOf(payload);
     b.end();
   },
 });
 
 Deno.bench({
-  name: "refer() on 256KB payload",
-  group: "refer-scaling",
+  name: "hashOf() on 256KB payload",
+  group: "hashOf-scaling",
   fn(b) {
     const payload = createPayload(256 * 1024);
 
     b.start();
-    refer(payload);
+    hashOf(payload);
     b.end();
   },
 });
 
 Deno.bench({
-  name: "refer() on 16KB payload (isolation)",
+  name: "hashOf() on 16KB payload (isolation)",
   group: "isolation",
   fn(b) {
     const payload = createTypicalPayload();
 
     b.start();
-    refer(payload);
+    hashOf(payload);
     b.end();
   },
 });
 
 Deno.bench({
-  name: "refer() on small object {the, of}",
+  name: "hashOf() on small object {the, of}",
   group: "isolation",
   fn(b) {
     const doc = createDoc();
 
     b.start();
-    refer({ the: "application/json", of: doc });
+    hashOf({ the: "application/json", of: doc });
     b.end();
   },
 });
 
 Deno.bench({
-  name: "refer() on assertion (16KB is + metadata)",
+  name: "hashOf() on assertion (16KB is + metadata)",
   group: "isolation",
   fn(b) {
     const doc = createDoc();
     const payload = createTypicalPayload();
 
     b.start();
-    refer({ the: "application/json", of: doc, is: payload });
+    hashOf({ the: "application/json", of: doc, is: payload });
     b.end();
   },
 });
 
 // --------------------------------------------------------------------------
-// Isolation: Fact.assert cost (creates merkle refs internally)
+// Isolation: Fact.assert cost (creates hashes internally)
 // --------------------------------------------------------------------------
 
 Deno.bench({
@@ -969,11 +969,11 @@ Deno.bench({
 });
 
 // --------------------------------------------------------------------------
-// Combined: Multiple refer() calls as done in a real transaction
+// Combined: Multiple hashOf() calls as done in a real transaction
 // --------------------------------------------------------------------------
 
 Deno.bench({
-  name: "3x refer() calls (simulating transaction)",
+  name: "3x hashOf() calls (simulating transaction)",
   group: "isolation",
   fn(b) {
     const doc = createDoc();
@@ -981,36 +981,35 @@ Deno.bench({
 
     b.start();
     // Simulates what happens in a transaction:
-    // 1. refer(datum) for the payload
-    refer(payload);
-    // 2. refer(unclaimed) for the base
-    refer({ the: "application/json", of: doc });
-    // 3. refer(assertion) for the fact
-    refer({ the: "application/json", of: doc, is: payload });
+    // 1. hashOf(datum) for the payload
+    hashOf(payload);
+    // 2. hashOf(unclaimed) for the base
+    hashOf({ the: "application/json", of: doc });
+    // 3. hashOf(assertion) for the fact
+    hashOf({ the: "application/json", of: doc, is: payload });
     b.end();
   },
 });
 
-// Test memoization benefit: same content referenced multiple times
-import { hashOf as memoizedRefer } from "@commonfabric/data-model/value-hash";
+// Test memoization benefit: same content hashed multiple times
 import { unclaimedRef } from "../fact.ts";
 
 Deno.bench({
-  name: "memoized: 3x refer() same payload (cache hits)",
+  name: "memoized: 3x hashOf() same payload (cache hits)",
   group: "isolation",
   fn(b) {
     const doc = createDoc();
     const payload = createTypicalPayload();
 
     // First call populates cache
-    memoizedRefer(payload);
-    memoizedRefer({ the: "application/json", of: doc });
+    hashOf(payload);
+    hashOf({ the: "application/json", of: doc });
 
     b.start();
     // These should be cache hits
-    memoizedRefer(payload);
-    memoizedRefer({ the: "application/json", of: doc });
-    memoizedRefer(payload);
+    hashOf(payload);
+    hashOf({ the: "application/json", of: doc });
+    hashOf(payload);
     b.end();
   },
 });

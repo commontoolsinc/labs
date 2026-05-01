@@ -78,6 +78,13 @@ const increment = action(() => {
 Use `safeDateNow()` rather than `Date.now()` when authored pattern code needs a
 timestamp snapshot.
 
+`cf-button` exposes `role="button"` and `aria-disabled` on the host. Agents and
+tests should find it by role and visible text:
+
+```bash
+agent-browser find role button click --name "Increment"
+```
+
 Useful styling hooks include:
 
 - `--cf-button-color-primary`
@@ -104,6 +111,20 @@ Useful styling hooks include:
   }}
 />
 ```
+
+`cf-input` exposes `role="textbox"` plus `aria-disabled`, `aria-readonly`,
+`aria-required`, and `aria-invalid` on the host. Give inputs an accessible name
+with a label, `aria-label`, or placeholder, then find them semantically:
+
+```bash
+# Use type with a ref — not bare type after click
+agent-browser snapshot -i              # → textbox "Title" [ref=e4]
+agent-browser type @e4 "Quarterly plan"
+```
+
+> **Note:** Playwright's `fill()` does not work on `cf-input` hosts (they are
+> custom elements, not native inputs). Use `type @ref "text"` in agent-browser,
+> or `locator.pressSequentially()` in Playwright tests.
 
 Useful styling hooks include:
 
@@ -339,13 +360,13 @@ const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
 
 ```tsx
 // Centered dialog (default)
-<cf-modal $open={dialogOpen} presentation="dialog" size="md" dismissable>
+<cf-modal $open={dialogOpen} presentation="dialog" size="md" dismissible>
   <span slot="header">Confirm</span>
   <p>Are you sure?</p>
 </cf-modal>
 
 // Bottom sheet
-<cf-modal $open={sheetOpen} presentation="sheet" grabber detent="half" dismissable>
+<cf-modal $open={sheetOpen} presentation="sheet" grabber detent="half" dismissible>
   <span slot="header">Options</span>
   <p>Sheet content slides up from bottom.</p>
 </cf-modal>
@@ -393,7 +414,7 @@ const activeTab = Writable.of("home");
 ```tsx
 <cf-tab-bar $value={activeTab} variant="inset">
   {/* ... tab items ... */}
-  <cf-button slot="action" variant="primary" onClick={openSheet}
+  <cf-button slot="action" color="primary" variant="solid" onClick={openSheet}
     style="border-radius: var(--cf-border-radius-xl); width: 3.5rem; height: 100%; padding: 0;">
     ＋
   </cf-button>
@@ -418,16 +439,36 @@ const mainContent = computed(() => {
 
 ---
 
+## cf-text
+
+Generic text primitive for captions, helper copy, metadata, descriptions, and
+other display text that does not label a specific control. Use `cf-label` for
+form/control labels.
+
+```tsx
+<cf-vstack gap="2">
+  <cf-text variant="caption" tone="muted">Updated just now</cf-text>
+  <cf-text>Default body copy.</cf-text>
+  <cf-text variant="body-large" tone="primary">Prominent supporting text.</cf-text>
+</cf-vstack>
+```
+
+- `variant` — `"caption"`, `"body-compact"`, `"body"`, `"body-large"`, `"heading-sm"`, `"heading-md"`, `"heading-lg"`
+- `tone` — `"default"`, `"muted"`, `"tertiary"`, `"disabled"`, `"primary"`, `"success"`, `"warning"`, `"error"`
+- `block` — render as block text instead of inline text
+
+---
+
 ## cf-toast
 
 Floating ephemeral notifications. Place a `cf-toast-provider` at the app root and `cf-toast` elements inside it.
 
 ```tsx
 <cf-toast-provider position="bottom">
-  <cf-toast open={saved} variant="success" duration={4000}
+  <cf-toast open={saved} status="success" duration={4000}
     oncf-toast-dismiss={action(() => saved.set(false))}>
     Changes saved.
-    <cf-button slot="action" variant="ghost" style="padding: 2px 8px; font-size: 13px;">
+    <cf-button slot="action" color="neutral" variant="ghost" style="padding: 2px 8px; font-size: 13px;">
       View
     </cf-button>
   </cf-toast>
@@ -441,12 +482,12 @@ Floating ephemeral notifications. Place a `cf-toast-provider` at the app root an
 
 ### cf-toast
 
-- `variant` — `"default"`, `"success"`, `"error"`, `"warning"`
+- `status` — `"info"`, `"success"`, `"warning"`, `"error"`
 - `duration` — auto-dismiss in ms (default 5000, `0` for persistent)
-- `dismissable` — show X button
+- `dismissible` — show X button (`dismissable` is a deprecated alias)
 - `open` — visibility
 - Slots: default (message), `action`, `icon`
-- Events: `cf-toast-dismiss` with `{ reason: "timeout" | "user" }`, `cf-toast-action`
+- Events: `cf-toast-dismiss` and `cf-dismiss` with `{ reason: "timeout" | "user" }`, `cf-toast-action`
 - ARIA: error variant uses `role="alert"` + `aria-live="assertive"`, others use `role="status"` + `aria-live="polite"`
 
 ---

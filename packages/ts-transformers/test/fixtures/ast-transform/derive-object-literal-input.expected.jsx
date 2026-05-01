@@ -69,10 +69,10 @@ const _summary = __cfHelpers.__cf_data(derive({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, {
-    stage: normalizedStage.for(["_summary", 2, "stage"], true),
-    attempts: attempts.for(["_summary", 2, "attempts"], true),
-    accepted: accepted.for(["_summary", 2, "accepted"], true),
-    rejected: rejected.for(["_summary", 2, "rejected"], true)
+    stage: normalizedStage,
+    attempts: attempts,
+    accepted: accepted,
+    rejected: rejected,
 }, (snapshot) => `stage:${snapshot.stage} attempts:${snapshot.attempts}` +
     ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`).for("_summary", true));
 // @ts-ignore: Internals

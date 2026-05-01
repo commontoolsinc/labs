@@ -10,6 +10,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @attr {string} buttonText - Text for the send button (default: "Send")
  * @attr {boolean} disabled - Whether the input and button are disabled
  * @attr {string} value - Current input value
+ * @attr {string} size - Coordinated control size: "xs" | "sm" | "md" | "lg" | "xl" (default: "lg")
  *
  * @fires cf-send - Fired when send button is clicked or Enter is pressed. detail: { message: string }
  *
@@ -32,8 +33,8 @@ export class CFMessageInput extends BaseElement {
       .container {
         display: grid;
         grid-template-columns: 1fr auto;
-        gap: var(--cf-spacing-2, 0.5rem);
-        align-items: center;
+        gap: var(--cf-message-input-gap, var(--cf-spacing-2, 0.5rem));
+        align-items: stretch;
       }
 
       cf-input {
@@ -43,19 +44,6 @@ export class CFMessageInput extends BaseElement {
       cf-button {
         white-space: nowrap;
       }
-
-      /* Allow customization via CSS variables */
-      .container {
-        --input-height: var(--cf-message-input-height, 2.5rem);
-      }
-
-      cf-input::part(input) {
-        height: var(--input-height);
-      }
-
-      cf-button {
-        height: var(--input-height);
-      }
     `,
   ];
 
@@ -64,12 +52,14 @@ export class CFMessageInput extends BaseElement {
     buttonText: { type: String, attribute: "button-text" },
     disabled: { type: Boolean, reflect: true },
     value: { type: String },
+    size: { type: String, reflect: true },
   };
 
   declare placeholder: string;
   declare buttonText: string;
   declare disabled: boolean;
   declare value: string;
+  declare size: "xs" | "sm" | "md" | "lg" | "xl";
 
   private _inputElement?: HTMLElement;
 
@@ -79,6 +69,7 @@ export class CFMessageInput extends BaseElement {
     this.buttonText = "Send";
     this.disabled = false;
     this.value = "";
+    this.size = "lg";
   }
 
   override firstUpdated() {
@@ -122,6 +113,7 @@ export class CFMessageInput extends BaseElement {
       <div class="container">
         <cf-input
           type="text"
+          size="${this.size}"
           .placeholder="${this.placeholder}"
           .value="${this.value}"
           ?disabled="${this.disabled}"
@@ -132,6 +124,7 @@ export class CFMessageInput extends BaseElement {
         ></cf-input>
         <cf-button
           id="cf-message-input-send-button"
+          size="${this.size}"
           ?disabled="${this.disabled}"
           @click="${this._handleSend}"
           part="button"

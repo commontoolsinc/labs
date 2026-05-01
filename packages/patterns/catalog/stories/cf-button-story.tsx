@@ -16,12 +16,13 @@ interface ButtonStoryOutput {
 }
 
 export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
-  const variant = Writable.of<
-    "primary" | "secondary" | "destructive" | "ghost"
-  >("primary");
+  const variant = Writable.of<"solid" | "outline" | "ghost">("solid");
+  const color = Writable.of<"neutral" | "primary" | "accent" | "danger">(
+    "primary",
+  );
   const disabled = Writable.of(false);
   const label = Writable.of("Click me");
-  const size = Writable.of<"default" | "sm" | "lg" | "icon">("default");
+  const size = Writable.of<"xs" | "sm" | "md" | "lg" | "xl" | "icon">("md");
   const clickCount = Writable.of(0);
 
   const handleClick = action(() => {
@@ -43,6 +44,7 @@ export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
         >
           <cf-button
             variant={variant}
+            color={color}
             disabled={disabled}
             size={size}
             onClick={handleClick}
@@ -59,26 +61,39 @@ export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
       <Controls>
         <>
           <SelectControl
+            label="color"
+            description="Color intent of the button"
+            defaultValue="primary"
+            value={color}
+            items={[
+              { label: "Neutral", value: "neutral" },
+              { label: "Primary", value: "primary" },
+              { label: "Accent", value: "accent" },
+              { label: "Danger", value: "danger" },
+            ]}
+          />
+          <SelectControl
             label="variant"
             description="Visual style of the button"
-            defaultValue="primary"
+            defaultValue="solid"
             value={variant}
             items={[
-              { label: "Primary", value: "primary" },
-              { label: "Secondary", value: "secondary" },
-              { label: "Destructive", value: "destructive" },
+              { label: "Solid", value: "solid" },
+              { label: "Outline", value: "outline" },
               { label: "Ghost", value: "ghost" },
             ]}
           />
           <SelectControl
             label="size"
             description="Size of the button"
-            defaultValue="default"
+            defaultValue="md"
             value={size}
             items={[
-              { label: "Default", value: "default" },
+              { label: "Extra Small", value: "xs" },
               { label: "Small", value: "sm" },
+              { label: "Medium", value: "md" },
               { label: "Large", value: "lg" },
+              { label: "Extra Large", value: "xl" },
               { label: "Icon", value: "icon" },
             ]}
           />

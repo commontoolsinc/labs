@@ -125,6 +125,46 @@ export const variablesCSS = `
   --cf-line-height-loose: 2;
 
   /*
+   * Typography roles
+   * Use these semantic roles in components instead of hardcoded font-size,
+   * font-weight, line-height, or letter-spacing declarations.
+   */
+  --cf-font-caption-size: 0.75rem;
+  --cf-font-caption-line-height: 1rem;
+  --cf-font-caption-weight: 500;
+  --cf-font-caption-letter-spacing: 0;
+
+  --cf-font-body-compact-size: 0.8125rem;
+  --cf-font-body-compact-line-height: 1.25rem;
+  --cf-font-body-compact-weight: 500;
+  --cf-font-body-compact-letter-spacing: 0;
+
+  --cf-font-body-size: 0.875rem;
+  --cf-font-body-line-height: 1.25rem;
+  --cf-font-body-weight: 400;
+  --cf-font-body-letter-spacing: 0;
+
+  --cf-font-body-large-size: 1rem;
+  --cf-font-body-large-line-height: 1.5rem;
+  --cf-font-body-large-weight: 400;
+  --cf-font-body-large-letter-spacing: 0;
+
+  --cf-font-heading-sm-size: 1.125rem;
+  --cf-font-heading-sm-line-height: 1.5rem;
+  --cf-font-heading-sm-weight: 600;
+  --cf-font-heading-sm-letter-spacing: 0;
+
+  --cf-font-heading-md-size: 1.25rem;
+  --cf-font-heading-md-line-height: 1.75rem;
+  --cf-font-heading-md-weight: 600;
+  --cf-font-heading-md-letter-spacing: 0;
+
+  --cf-font-heading-lg-size: 1.5rem;
+  --cf-font-heading-lg-line-height: 2rem;
+  --cf-font-heading-lg-weight: 600;
+  --cf-font-heading-lg-letter-spacing: -0.025em;
+
+  /*
    * Spacing
    * Layout utility props like gap="4" and padding="2" map directly to
    * this shared spacing namespace.
@@ -215,6 +255,50 @@ export const variablesCSS = `
   --cf-size-xl-font-size: 18px;
   --cf-size-xl-line-height: 24px;
 
+  /*
+   * Shared pill geometry
+   * Badge, chip, and button[variant="pill"] keep separate semantics and
+   * colors, but they should share the same compact rounded size contract.
+   */
+  --cf-pill-border-radius: var(
+    --cf-theme-border-radius-full,
+    var(--cf-border-radius-full, 9999px)
+  );
+  --cf-pill-xs-min-height: var(--cf-size-xs-height);
+  --cf-pill-xs-padding-h: 6px;
+  --cf-pill-xs-padding-v: 1px;
+  --cf-pill-xs-gap: var(--cf-size-xs-spacing);
+  --cf-pill-xs-font-size: var(--cf-size-xs-font-size);
+  --cf-pill-xs-line-height: var(--cf-size-xs-line-height);
+
+  --cf-pill-sm-min-height: var(--cf-size-sm-height);
+  --cf-pill-sm-padding-h: 10px;
+  --cf-pill-sm-padding-v: 2px;
+  --cf-pill-sm-gap: var(--cf-size-sm-spacing);
+  --cf-pill-sm-font-size: var(--cf-size-sm-font-size);
+  --cf-pill-sm-line-height: var(--cf-size-sm-line-height);
+
+  --cf-pill-md-min-height: var(--cf-size-md-height);
+  --cf-pill-md-padding-h: 12px;
+  --cf-pill-md-padding-v: 4px;
+  --cf-pill-md-gap: var(--cf-size-md-spacing);
+  --cf-pill-md-font-size: var(--cf-size-md-font-size);
+  --cf-pill-md-line-height: var(--cf-size-md-line-height);
+
+  --cf-pill-lg-min-height: var(--cf-size-lg-height);
+  --cf-pill-lg-padding-h: 14px;
+  --cf-pill-lg-padding-v: 6px;
+  --cf-pill-lg-gap: var(--cf-size-lg-spacing);
+  --cf-pill-lg-font-size: var(--cf-size-lg-font-size);
+  --cf-pill-lg-line-height: var(--cf-size-lg-line-height);
+
+  --cf-pill-xl-min-height: var(--cf-size-xl-height);
+  --cf-pill-xl-padding-h: 18px;
+  --cf-pill-xl-padding-v: 8px;
+  --cf-pill-xl-gap: var(--cf-size-xl-spacing);
+  --cf-pill-xl-font-size: var(--cf-size-xl-font-size);
+  --cf-pill-xl-line-height: var(--cf-size-xl-line-height);
+
   /* Shadows */
   --cf-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --cf-shadow-base: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
@@ -233,6 +317,23 @@ export const variablesCSS = `
   --cf-transition-timing-ease-in: cubic-bezier(0.4, 0, 1, 1);
   --cf-transition-timing-ease-out: cubic-bezier(0, 0, 0.2, 1);
   --cf-transition-timing-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --cf-transition-timing-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --cf-transition-timing-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /*
+   * Shared structural dimensions. Components may expose component-specific
+   * aliases, but these provide a common default vocabulary for overlays,
+   * transient surfaces, prose, and container-aware layouts.
+   */
+  --cf-layout-breakpoint-sm: 640px;
+  --cf-layout-breakpoint-md: 768px;
+  --cf-layout-breakpoint-lg: 1024px;
+  --cf-layout-width-sm: 320px;
+  --cf-layout-width-md: 500px;
+  --cf-layout-width-lg: 700px;
+  --cf-layout-width-transient-min: 240px;
+  --cf-layout-width-transient-max: 420px;
+  --cf-layout-width-prose: 700px;
 
   /* Z-index */
   --cf-z-index-auto: auto;

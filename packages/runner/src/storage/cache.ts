@@ -1,5 +1,9 @@
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { hashObjectFromString } from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import type {
   CauseString,
@@ -313,8 +317,10 @@ class RevisionCodec {
     return cause == null
       ? { the, of, since }
       : is === undefined
-      ? { the, of, since, cause: hashObjectFromString(cause) } as Revision<Fact>
-      : { the, of, is, since, cause: hashObjectFromString(cause) } as Revision<
+      ? { the, of, since, cause: FabricHash.fromString(cause) } as Revision<
+        Fact
+      >
+      : { the, of, is, since, cause: FabricHash.fromString(cause) } as Revision<
         Fact
       >;
   }
@@ -916,19 +922,10 @@ export class Replica {
 
               // Log actual content for each document
               for (const [contentType, data] of Object.entries(facts)) {
-                try {
-                  const dataStr = JSON.stringify(data);
-                  const preview = dataStr.length > 1000
-                    ? dataStr.substring(0, 1000) + "..."
-                    : dataStr;
-                  logs.push(
-                    `  └─ doc: ${docId}, type: ${contentType}, data: ${preview}`,
-                  );
-                } catch (_e) {
-                  logs.push(
-                    `  └─ doc: ${docId}, type: ${contentType}, data: <unable to stringify>`,
-                  );
-                }
+                const dataStr = toCompactDebugString(data, 1000);
+                logs.push(
+                  `  └─ doc: ${docId}, type: ${contentType}, data: ${dataStr}`,
+                );
               }
             }
             return logs;
@@ -1203,24 +1200,24 @@ export class Replica {
           () => [
             "Transaction failed (aready exists)",
             "\nError:",
-            JSON.stringify(result.error, null, 2),
+            toIndentedDebugString(result.error),
             "\nConflict details:",
-            JSON.stringify((result.error as any).conflict, null, 2),
+            toIndentedDebugString((result.error as any).conflict),
             "\nTransaction:",
-            JSON.stringify((result.error as any).transaction, null, 2),
+            toIndentedDebugString((result.error as any).transaction),
           ],
         );
       } else {
         logger.warn("push-error", () => [
           "Transaction failed",
           "\nError:",
-          JSON.stringify(result.error, null, 2),
+          toIndentedDebugString(result.error),
           result.error.name === "ConflictError"
             ? [
               "\nConflict details:",
-              JSON.stringify((result.error as any).conflict, null, 2),
+              toIndentedDebugString((result.error as any).conflict),
               "\nTransaction:",
-              JSON.stringify((result.error as any).transaction, null, 2),
+              toIndentedDebugString((result.error as any).transaction),
             ]
             : [],
         ]);

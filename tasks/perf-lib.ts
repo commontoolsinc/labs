@@ -765,6 +765,30 @@ export function formatMetricValue(name: string, value: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Event helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads and parses the GHA event. Returns `undefined` if it can't be done.
+ */
+export async function readAndParseEvent(
+  eventPath?: string,
+): Promise<object | undefined> {
+  eventPath ??= Deno.env.get("GITHUB_EVENT_PATH");
+
+  if (!eventPath) {
+    return undefined;
+  }
+
+  try {
+    const result = JSON.parse(await Deno.readTextFile(eventPath));
+    return (typeof result === "object") ? result : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // PR helpers
 // ---------------------------------------------------------------------------
 

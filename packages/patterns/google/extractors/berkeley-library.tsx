@@ -29,6 +29,7 @@ import {
   NAME,
   pattern,
   Stream,
+  toIndentedDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -1785,10 +1786,8 @@ export default pattern<PatternInput, PatternOutput>(
                                   }}
                                 >
                                 {computed(() =>
-                                  JSON.stringify(
+                                  toIndentedDebugString(
                                     debugResult?.items || [],
-                                    null,
-                                    2,
                                   )
                                 )}
                                 </pre>

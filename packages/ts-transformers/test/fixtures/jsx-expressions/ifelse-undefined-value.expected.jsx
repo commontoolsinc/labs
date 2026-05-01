@@ -101,7 +101,7 @@ export default pattern(() => {
         required: ["result"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { result: result }, ({ result }) => !!result).for(["output2", 4], true), { data: result.for(["output2", 5, "data"], true) }, undefined).for("output2", true);
+    } as const satisfies __cfHelpers.JSONSchema, { result: result }, ({ result }) => !!result).for(["output2", 4], true), { data: result }, undefined).for("output2", true);
     return {
         [UI]: (<div>
         <span>{output1}</span>

@@ -1,5 +1,14 @@
 export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
-export { cfcLabelViewForCell, cfcLabelViewFromMetadata } from "./label-view.ts";
+export {
+  cfcLabelViewForCell,
+  cfcLabelViewForDereference,
+  cfcLabelViewForDereferenceTraces,
+  cfcLabelViewFromMetadata,
+  cloneCfcLabelView,
+  getCarriedCfcLabelView,
+  mergeCfcLabelViews,
+  rebaseCfcLabelView,
+} from "./label-view.ts";
 export type {
   AttemptedWrite,
   CfcAddress,
@@ -7,6 +16,14 @@ export type {
   CfcEnforcementMode,
   CfcMetadata,
   CfcPrepareState,
+  CfcSandboxDiagnostic,
+  CfcSandboxExitCodeObservation,
+  CfcSandboxJsonValue,
+  CfcSandboxOutputPolicy,
+  CfcSandboxResult,
+  CfcStreamChannel,
+  CfcStreamObservation,
+  CfcStreamSegment,
   CfcTxState,
   ConsumedRead,
   EntityDocumentWithCfc,
@@ -17,7 +34,11 @@ export type {
   TrustSnapshot,
   WritePolicyInput,
 } from "./types.ts";
-export { DEFAULT_CFC_ENFORCEMENT_MODE } from "./types.ts";
+export {
+  CFC_ENFORCEMENT_MODES,
+  DEFAULT_CFC_ENFORCEMENT_MODE,
+  isCfcEnforcementMode,
+} from "./types.ts";
 export {
   canonicalizeCfcMetadata,
   canonicalizeDereferenceTrace,
@@ -46,3 +67,7 @@ export {
   isInitialSinkInventoryName,
 } from "./sink-inventory.ts";
 export { markRendererTrustedEvent } from "./ui-contract.ts";
+export {
+  resolveSchemaForValidation,
+  validateAgainstSchema,
+} from "./schema-sanitization.ts";

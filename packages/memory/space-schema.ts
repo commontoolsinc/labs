@@ -5,6 +5,7 @@ import {
 } from "@commonfabric/runner";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
@@ -274,7 +275,7 @@ export const selectSchema = <Space extends MemorySpace>(
           `sqliteReads=${manager.sqliteReads}`,
           `sqliteMs=${manager.sqliteTotalMs.toFixed(1)}`,
           `sqliteCacheHits=${manager.sqliteCacheHits}`,
-          `schemaPath=${JSON.stringify(selectorEntry.value.path)}`,
+          `schemaPath=${toCompactDebugString(selectorEntry.value.path)}`,
         ]);
       }
 
@@ -368,7 +369,7 @@ export const selectSchema = <Space extends MemorySpace>(
       `sqliteMs=${manager.sqliteTotalMs.toFixed(1)}`,
       `sqliteCacheHits=${manager.sqliteCacheHits}`,
       `sharedMemo=${sharedMemo.size}`,
-      `selectors=${JSON.stringify(selectSchema)}`,
+      `selectors=${toCompactDebugString(selectSchema)}`,
     ]);
   }
 

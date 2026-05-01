@@ -65,6 +65,9 @@ export default pattern(() => {
                     type: "object",
                     properties: {},
                     additionalProperties: false
+                },
+                useResultSchemaForObservation: {
+                    type: "boolean"
                 }
             },
             required: ["pattern", "extraParams"]

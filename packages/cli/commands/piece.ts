@@ -29,7 +29,7 @@ import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commonfabric/utils/encoding";
 import { cliText } from "../lib/cli-name.ts";
 import { absPath } from "../lib/utils.ts";
-import { parsePath } from "@commonfabric/piece/ops";
+import { parseCellPath } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
 
@@ -633,7 +633,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   .arguments("[path:string]")
   .action(async (options, pathString) => {
     const pieceConfig = parsePieceOptions(options);
-    const pathSegments = pathString ? parsePath(pathString) : [];
+    const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
       const value = await getCellValue(pieceConfig, pathSegments, {
         input: options.input,
@@ -675,7 +675,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    const pathSegments = parsePath(pathString);
+    const pathSegments = parseCellPath(pathString);
     const value = await drainStdin();
     await setCellValue(pieceConfig, pathSegments, value, {
       input: options.input,
@@ -988,7 +988,7 @@ export function parseLink(
     return { pieceId };
   }
 
-  const path = parsePath(parts.slice(1).join("/"));
+  const path = parseCellPath(parts.slice(1).join("/"));
   return { pieceId, path };
 }
 
