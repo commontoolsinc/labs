@@ -1454,10 +1454,6 @@ export class CellImpl<T extends FabricValue>
     if (!sourceCellId) return undefined;
     if (isRecord(sourceCellId)) {
       sourceCellId = toURI(sourceCellId);
-    } else if (
-      typeof sourceCellId === "string" && sourceCellId.startsWith('{"/":')
-    ) {
-      sourceCellId = toURI(JSON.parse(sourceCellId));
     }
 
     if (typeof sourceCellId !== "string" || !sourceCellId.startsWith("of:")) {
