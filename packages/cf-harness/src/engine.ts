@@ -836,6 +836,82 @@ export class CfHarnessEngine {
     return false;
   }
 
+  async #realHostPath(path: string): Promise<string | undefined> {
+    try {
+      return normalizeHostPath(await Deno.realPath(path));
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #nearestExistingRealHostPath(
+    path: string,
+  ): Promise<string | undefined> {
+    let candidate = normalizeHostPath(path);
+    while (true) {
+      const realPath = await this.#realHostPath(candidate);
+      if (realPath !== undefined) {
+        return realPath;
+      }
+      const parent = dirname(candidate);
+      if (parent === candidate) {
+        return undefined;
+      }
+      candidate = parent;
+    }
+  }
+
+  async #isHostPathWithinArtifactRoot(
+    path: string,
+    options: { allowMissing?: boolean } = {},
+  ): Promise<boolean> {
+    const root = this.artifactStore?.artifactRoot;
+    if (root === undefined) {
+      return false;
+    }
+    const normalizedRoot = normalizeHostPath(root);
+    const normalizedPath = normalizeHostPath(path);
+    if (isHostPathWithinRoot(normalizedRoot, normalizedPath)) {
+      return true;
+    }
+    const realRoot = await this.#realHostPath(normalizedRoot);
+    if (realRoot === undefined) {
+      return false;
+    }
+    const realPath = options.allowMissing === true
+      ? await this.#nearestExistingRealHostPath(normalizedPath)
+      : await this.#realHostPath(normalizedPath);
+    return realPath !== undefined && isHostPathWithinRoot(realRoot, realPath);
+  }
+
+  async #doesHostPathIntersectArtifactRoot(
+    path: string,
+    options: { allowMissing?: boolean } = {},
+  ): Promise<boolean> {
+    const root = this.artifactStore?.artifactRoot;
+    if (root === undefined) {
+      return false;
+    }
+    const normalizedRoot = normalizeHostPath(root);
+    const normalizedPath = normalizeHostPath(path);
+    if (
+      isHostPathWithinRoot(normalizedRoot, normalizedPath) ||
+      isHostPathWithinRoot(normalizedPath, normalizedRoot)
+    ) {
+      return true;
+    }
+    const realRoot = await this.#realHostPath(normalizedRoot);
+    if (realRoot === undefined) {
+      return false;
+    }
+    const realPath = options.allowMissing === true
+      ? await this.#nearestExistingRealHostPath(normalizedPath)
+      : await this.#realHostPath(normalizedPath);
+    return realPath !== undefined &&
+      (isHostPathWithinRoot(realRoot, realPath) ||
+        isHostPathWithinRoot(realPath, realRoot));
+  }
+
   async #createCfcInvocationContext(options: {
     toolId: string;
     toolOutputId?: ToolOutputId;
@@ -899,6 +975,14 @@ export class CfHarnessEngine {
         path: string,
         options?: { allowMissing?: boolean },
       ) => this.#isHostPathWithinWorkspace(path, options),
+      isHostPathWithinArtifactRoot: (
+        path: string,
+        options?: { allowMissing?: boolean },
+      ) => this.#isHostPathWithinArtifactRoot(path, options),
+      doesHostPathIntersectArtifactRoot: (
+        path: string,
+        options?: { allowMissing?: boolean },
+      ) => this.#doesHostPathIntersectArtifactRoot(path, options),
       setCurrentDir: (path: string) => {
         const resolved = this.sandbox.resolvePath(
           path,

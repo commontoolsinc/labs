@@ -21,6 +21,14 @@ export interface HarnessToolContext {
     path: string,
     options?: { allowMissing?: boolean },
   ): Promise<boolean>;
+  isHostPathWithinArtifactRoot(
+    path: string,
+    options?: { allowMissing?: boolean },
+  ): Promise<boolean>;
+  doesHostPathIntersectArtifactRoot(
+    path: string,
+    options?: { allowMissing?: boolean },
+  ): Promise<boolean>;
   setCurrentDir(path: string): void;
   nextOutputId(toolId: string): ToolOutputId;
   createCfcInvocationContext(options: {

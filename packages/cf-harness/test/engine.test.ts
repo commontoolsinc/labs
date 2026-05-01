@@ -8,6 +8,7 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
+import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -183,6 +184,86 @@ Deno.test("CfHarnessEngine denies bash-no-sandbox missing paths below escaping s
     exitCode: 126,
     cwd: "/workspace",
   });
+});
+
+Deno.test("CfHarnessEngine reserves artifact roots through host realpath mapping", async () => {
+  const workspaceHostPath = await Deno.makeTempDir({
+    prefix: "cf-harness-engine-artifacts-",
+  });
+  try {
+    const artifactRoot = `${workspaceHostPath}/.cf-harness-artifacts`;
+    const artifactLink = `${workspaceHostPath}/artifact-link`;
+    await Deno.mkdir(artifactRoot, { recursive: true });
+    await Deno.symlink(artifactRoot, artifactLink, { type: "dir" });
+    const sandbox = new FakeSandboxRuntime();
+    const hostRunner = new FakeProcessRunner();
+    const engine = new CfHarnessEngine({
+      runId: "run-artifact-reserved",
+      workspaceHostPath,
+      artifactRoot,
+      sandboxRuntime: sandbox,
+      processRunner: hostRunner,
+      cfcEnforcementMode: "observe",
+      now: (() => {
+        const timestamps = [
+          "2026-05-01T17:55:00.000Z",
+          "2026-05-01T17:55:01.000Z",
+          "2026-05-01T17:55:02.000Z",
+          "2026-05-01T17:55:03.000Z",
+          "2026-05-01T17:55:04.000Z",
+          "2026-05-01T17:55:05.000Z",
+          "2026-05-01T17:55:06.000Z",
+        ];
+        return () => timestamps.shift() ?? "2026-05-01T17:55:07.000Z";
+      })(),
+    });
+
+    const readResult = await engine.invokeBuiltinTool("read_file", {
+      path: "artifact-link/run-state.json",
+    });
+    const lsResult = await engine.invokeBuiltinTool("bash-no-sandbox", {
+      command: "ls artifact-link",
+    });
+
+    assertEquals(readResult.output, {
+      outputId: createToolOutputId(
+        "run-artifact-reserved",
+        "read_file",
+        1,
+      ),
+      path: "/workspace/artifact-link/run-state.json",
+      ok: false,
+      error: {
+        type: "cf-harness.structured-file-tool-error",
+        code: "permission_denied",
+        message: "permission denied: /workspace/artifact-link/run-state.json",
+        path: "/workspace/artifact-link/run-state.json",
+        detail: RESERVED_ARTIFACT_PATH_DETAIL,
+      },
+    });
+    assertEquals(lsResult.output, {
+      outputId: createToolOutputId(
+        "run-artifact-reserved",
+        "bash-no-sandbox",
+        2,
+      ),
+      stdout: "",
+      stderr:
+        "bash-no-sandbox command denied: path artifact-link is reserved for cf-harness artifacts",
+      exitCode: 126,
+      cwd: "/workspace",
+    });
+    assertEquals(hostRunner.calls, []);
+    assertEquals(sandbox.shellRequests.length, 1);
+    assertEquals(
+      sandbox.shellRequests.every((request) =>
+        request.command.includes(CAPABILITY_PROBE_SENTINEL)
+      ),
+      true,
+    );
+  } finally {
+    await Deno.remove(workspaceHostPath, { recursive: true });
+  }
 });
 
 Deno.test("CfHarnessEngine records tool outputs into run state on success", async () => {

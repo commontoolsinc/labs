@@ -6,6 +6,7 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
+import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
 import { writeFileTool } from "../src/tools/write-file.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
 import type {
@@ -104,6 +105,7 @@ const createContext = (
   initialCurrentDir = "/workspace",
   hostProcessRunner: ProcessRunner = new FakeProcessRunner(),
   cfcEnforcementMode: HarnessToolContext["cfcEnforcementMode"] = "observe",
+  artifactRootHostPath?: string,
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
@@ -130,6 +132,21 @@ const createContext = (
       return Promise.resolve(
         path === workspaceHostPath ||
           path.startsWith(`${workspaceHostPath}/`),
+      );
+    },
+    isHostPathWithinArtifactRoot(path: string) {
+      return Promise.resolve(
+        artifactRootHostPath !== undefined &&
+          (path === artifactRootHostPath ||
+            path.startsWith(`${artifactRootHostPath}/`)),
+      );
+    },
+    doesHostPathIntersectArtifactRoot(path: string) {
+      return Promise.resolve(
+        artifactRootHostPath !== undefined &&
+          (path === artifactRootHostPath ||
+            path.startsWith(`${artifactRootHostPath}/`) ||
+            artifactRootHostPath.startsWith(`${path}/`)),
       );
     },
     hostPathToWorkspacePath(path: string) {
@@ -468,6 +485,44 @@ Deno.test("bash-no-sandbox denies ls and find paths that realpath outside the wo
   });
 });
 
+Deno.test("bash-no-sandbox denies ls and find paths that intersect artifact roots", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const artifactRootHostPath =
+    "/tmp/cf-harness-workspace/.cf-harness-artifacts";
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace",
+    hostRunner,
+    "observe",
+    artifactRootHostPath,
+  );
+
+  const lsOutput = await bashNoSandboxTool.invoke(context, {
+    command: "ls .cf-harness-artifacts",
+  });
+  const findOutput = await bashNoSandboxTool.invoke(context, {
+    command: "find . -maxdepth 2 -type f -print",
+  });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(lsOutput, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr:
+      "bash-no-sandbox command denied: path .cf-harness-artifacts is reserved for cf-harness artifacts",
+    exitCode: 126,
+    cwd: "/workspace",
+  });
+  assertEquals(findOutput, {
+    outputId: "run-1:bash-no-sandbox:2",
+    stdout: "",
+    stderr:
+      "bash-no-sandbox command denied: path . is reserved for cf-harness artifacts",
+    exitCode: 126,
+    cwd: "/workspace",
+  });
+});
+
 Deno.test("bash-no-sandbox denies host commands outside the browser policy", async () => {
   const hostRunner = new FakeProcessRunner();
   const context = createContext(
@@ -632,6 +687,51 @@ Deno.test("read_file tool returns a recoverable path_outside_workspace result", 
       message: "path outside workspace: ../outside.txt",
       path: "../outside.txt",
       detail: "path escapes workspace root: /outside.txt",
+    },
+  });
+  assertEquals(sandbox.calls, []);
+});
+
+Deno.test("read_file tool denies reserved artifact paths before shelling out", async () => {
+  const sandbox = new FakeSandboxRuntime();
+  const context = createContext(
+    sandbox,
+    "/workspace",
+    new FakeProcessRunner(),
+    "observe",
+    "/tmp/cf-harness-workspace/.cf-harness-artifacts",
+  );
+
+  const rootOutput = await readFileTool.invoke(context, {
+    path: ".cf-harness-artifacts",
+  });
+  const childOutput = await readFileTool.invoke(context, {
+    path: ".cf-harness-artifacts/run-1/transcript.json",
+  });
+
+  assertEquals(rootOutput, {
+    outputId: "run-1:read_file:1",
+    path: "/workspace/.cf-harness-artifacts",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "permission_denied",
+      message: "permission denied: /workspace/.cf-harness-artifacts",
+      path: "/workspace/.cf-harness-artifacts",
+      detail: RESERVED_ARTIFACT_PATH_DETAIL,
+    },
+  });
+  assertEquals(childOutput, {
+    outputId: "run-1:read_file:2",
+    path: "/workspace/.cf-harness-artifacts/run-1/transcript.json",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "permission_denied",
+      message:
+        "permission denied: /workspace/.cf-harness-artifacts/run-1/transcript.json",
+      path: "/workspace/.cf-harness-artifacts/run-1/transcript.json",
+      detail: RESERVED_ARTIFACT_PATH_DETAIL,
     },
   });
   assertEquals(sandbox.calls, []);
@@ -807,6 +907,39 @@ Deno.test("write_file tool returns a recoverable path_outside_workspace result",
       message: "path outside workspace: ../outside.txt",
       path: "../outside.txt",
       detail: "path escapes workspace root: /outside.txt",
+    },
+  });
+  assertEquals(sandbox.calls, []);
+});
+
+Deno.test("write_file tool denies reserved artifact paths before shelling out", async () => {
+  const sandbox = new FakeSandboxRuntime();
+  const output = await writeFileTool.invoke(
+    createContext(
+      sandbox,
+      "/workspace",
+      new FakeProcessRunner(),
+      "observe",
+      "/tmp/cf-harness-workspace/.cf-harness-artifacts",
+    ),
+    {
+      path: ".cf-harness-artifacts/run-1/tool-output.json",
+      content: "tainted",
+      createParents: true,
+    },
+  );
+
+  assertEquals(output, {
+    outputId: "run-1:write_file:1",
+    path: "/workspace/.cf-harness-artifacts/run-1/tool-output.json",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "permission_denied",
+      message:
+        "permission denied: /workspace/.cf-harness-artifacts/run-1/tool-output.json",
+      path: "/workspace/.cf-harness-artifacts/run-1/tool-output.json",
+      detail: RESERVED_ARTIFACT_PATH_DETAIL,
     },
   });
   assertEquals(sandbox.calls, []);

@@ -185,7 +185,10 @@ locator actions, and normal browser interactions.
 
 For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to
-become ordinary workspace inputs for the parent model.
+become ordinary workspace inputs for the parent model. If an artifact root is
+physically placed under the workspace, `read_file`, `write_file`, and
+browser-profile `ls`/`find` treat that artifact tree as reserved from
+model-facing file and discovery tools.
 
 ```bash
 ROOT=/tmp/cf-harness-browser-demo
