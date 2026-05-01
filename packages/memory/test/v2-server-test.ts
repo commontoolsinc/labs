@@ -457,7 +457,6 @@ Deno.test("memory v2 server rejects handshakes when flags disagree", async () =>
       flags: {
         richStorableValues: !HELLO_FLAGS.richStorableValues,
         unifiedJsonEncoding: HELLO_FLAGS.unifiedJsonEncoding,
-        modernSchemaHash: HELLO_FLAGS.modernSchemaHash,
       },
     }));
 
@@ -470,7 +469,6 @@ Deno.test("memory v2 server rejects handshakes when flags disagree", async () =>
           JSON.stringify({
             richStorableValues: !HELLO_FLAGS.richStorableValues,
             unifiedJsonEncoding: HELLO_FLAGS.unifiedJsonEncoding,
-            modernSchemaHash: HELLO_FLAGS.modernSchemaHash,
           })
         } server=${JSON.stringify(HELLO_FLAGS)}`,
       },

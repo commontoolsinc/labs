@@ -125,7 +125,6 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryV2Flags(), {
       richStorableValues: false,
       unifiedJsonEncoding: false,
-      modernSchemaHash: false,
     });
 
     setDataModelConfig(true);
@@ -135,7 +134,6 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryV2Flags(), {
       richStorableValues: true,
       unifiedJsonEncoding: true,
-      modernSchemaHash: true,
     });
 
     resetDataModelConfig();

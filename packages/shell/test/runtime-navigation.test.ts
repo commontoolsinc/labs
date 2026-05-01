@@ -59,7 +59,6 @@ describe("RuntimeInternals navigation", () => {
       $MEMORY_VERSION?: string;
       $EXPERIMENTAL_MODERN_DATA_MODEL?: string;
       $EXPERIMENTAL_UNIFIED_JSON_ENCODING?: string;
-      $EXPERIMENTAL_MODERN_SCHEMA_HASH?: string;
       $COMPILATION_CACHE_CLIENT?: string;
     };
     const originalEnv = {
@@ -70,7 +69,6 @@ describe("RuntimeInternals navigation", () => {
       $EXPERIMENTAL_MODERN_DATA_MODEL: env.$EXPERIMENTAL_MODERN_DATA_MODEL,
       $EXPERIMENTAL_UNIFIED_JSON_ENCODING:
         env.$EXPERIMENTAL_UNIFIED_JSON_ENCODING,
-      $EXPERIMENTAL_MODERN_SCHEMA_HASH: env.$EXPERIMENTAL_MODERN_SCHEMA_HASH,
       $COMPILATION_CACHE_CLIENT: env.$COMPILATION_CACHE_CLIENT,
     };
     env.$API_URL = "http://shell.test/";
@@ -79,7 +77,6 @@ describe("RuntimeInternals navigation", () => {
     env.$MEMORY_VERSION = undefined;
     env.$EXPERIMENTAL_MODERN_DATA_MODEL = undefined;
     env.$EXPERIMENTAL_UNIFIED_JSON_ENCODING = undefined;
-    env.$EXPERIMENTAL_MODERN_SCHEMA_HASH = undefined;
     env.$COMPILATION_CACHE_CLIENT = undefined;
 
     const { RuntimeInternals } = await import("../src/lib/runtime.ts");
@@ -143,8 +140,6 @@ describe("RuntimeInternals navigation", () => {
         originalEnv.$EXPERIMENTAL_MODERN_DATA_MODEL;
       env.$EXPERIMENTAL_UNIFIED_JSON_ENCODING =
         originalEnv.$EXPERIMENTAL_UNIFIED_JSON_ENCODING;
-      env.$EXPERIMENTAL_MODERN_SCHEMA_HASH =
-        originalEnv.$EXPERIMENTAL_MODERN_SCHEMA_HASH;
       env.$COMPILATION_CACHE_CLIENT = originalEnv.$COMPILATION_CACHE_CLIENT;
       await runtime.dispose();
     }
@@ -158,7 +153,6 @@ describe("RuntimeInternals navigation", () => {
       $MEMORY_VERSION?: string;
       $EXPERIMENTAL_MODERN_DATA_MODEL?: string;
       $EXPERIMENTAL_UNIFIED_JSON_ENCODING?: string;
-      $EXPERIMENTAL_MODERN_SCHEMA_HASH?: string;
       $COMPILATION_CACHE_CLIENT?: string;
     };
     const originalEnv = {
@@ -169,7 +163,6 @@ describe("RuntimeInternals navigation", () => {
       $EXPERIMENTAL_MODERN_DATA_MODEL: env.$EXPERIMENTAL_MODERN_DATA_MODEL,
       $EXPERIMENTAL_UNIFIED_JSON_ENCODING:
         env.$EXPERIMENTAL_UNIFIED_JSON_ENCODING,
-      $EXPERIMENTAL_MODERN_SCHEMA_HASH: env.$EXPERIMENTAL_MODERN_SCHEMA_HASH,
       $COMPILATION_CACHE_CLIENT: env.$COMPILATION_CACHE_CLIENT,
     };
     env.$API_URL = "http://shell.test/";
@@ -178,7 +171,6 @@ describe("RuntimeInternals navigation", () => {
     env.$MEMORY_VERSION = undefined;
     env.$EXPERIMENTAL_MODERN_DATA_MODEL = undefined;
     env.$EXPERIMENTAL_UNIFIED_JSON_ENCODING = undefined;
-    env.$EXPERIMENTAL_MODERN_SCHEMA_HASH = undefined;
     env.$COMPILATION_CACHE_CLIENT = undefined;
 
     const { RuntimeInternals } = await import("../src/lib/runtime.ts");
@@ -227,8 +219,6 @@ describe("RuntimeInternals navigation", () => {
         originalEnv.$EXPERIMENTAL_MODERN_DATA_MODEL;
       env.$EXPERIMENTAL_UNIFIED_JSON_ENCODING =
         originalEnv.$EXPERIMENTAL_UNIFIED_JSON_ENCODING;
-      env.$EXPERIMENTAL_MODERN_SCHEMA_HASH =
-        originalEnv.$EXPERIMENTAL_MODERN_SCHEMA_HASH;
       env.$COMPILATION_CACHE_CLIENT = originalEnv.$COMPILATION_CACHE_CLIENT;
       await runtime.dispose();
     }

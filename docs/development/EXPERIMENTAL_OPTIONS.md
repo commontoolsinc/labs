@@ -12,10 +12,11 @@ affecting users who haven't opted in.
 | `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
 | `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all fabric values. |
 
-| `modernSchemaHash` | `EXPERIMENTAL_MODERN_SCHEMA_HASH` | Enables modern schema hashing, replacing stableStringify-based schema hashing. |
-
-All flags default to `false`. Setting any flag to `true` activates the
-corresponding experimental behavior.
+All flags default to `undefined` which means they take on the default value
+defined for the flag. The default is generally `false` unless the flag is in the
+process of being "graduated." Setting any flag to `true` activates the
+corresponding experimental behavior, and setting it to `false` suppresses the
+experimental behavior (if it happened to be on by default).
 
 ## Enabling Flags Locally
 
@@ -96,9 +97,9 @@ Browser Web Worker
               +-- setDataModelConfig(true)
               |    +-- modernDataModelEnabled = true
               |         +-- fabricFromNativeValue() checks modernDataModelEnabled
-              +-- setSchemaHashConfig(...)
-                   +-- modernSchemaHashEnabled = true
-                        +-- schemaHashOf() dispatches to modern path
+              +-- setUnifiedJsonEncoding(...)
+                   +-- unifiedJsonEncoding = true
+                        +-- jsonFromValue() (etc.) dispatches to modern path
 ```
 
 Key points:
@@ -137,7 +138,7 @@ When any experimental flags are enabled, the `Runtime` constructor logs them on
 startup. Look for a line like:
 
 ```
-Experimental flags enabled: modernDataModel, unifiedJsonEncoding, modernSchemaHash
+Experimental flags enabled: modernDataModel, unifiedJsonEncoding
 ```
 
 - **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.
@@ -170,8 +171,8 @@ with defaults (all `false`) and stores the resolved result as
 The memory layer uses module-level ambient config variables:
 `modernDataModelEnabled` in `packages/data-model/fabric-value.ts` (set by
 `setDataModelConfig()`), and
-`modernSchemaHashEnabled` in `packages/data-model/schema-hash.ts` (set by
-`setSchemaHashConfig()`). This means:
+`unifiedJsonEncoding` in `packages/data-model/json-encoding.ts` (set by
+`setJsonEncodingConfig()`). This means:
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are

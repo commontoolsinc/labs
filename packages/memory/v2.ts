@@ -7,7 +7,6 @@ import {
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
-import { getSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
 import type { ReconstructionContext } from "@commonfabric/data-model/interface";
@@ -143,7 +142,6 @@ export interface SessionOpenResult {
 export interface MemoryV2Flags {
   richStorableValues: boolean;
   unifiedJsonEncoding: boolean;
-  modernSchemaHash: boolean;
 }
 
 export interface HelloMessage {
@@ -348,7 +346,6 @@ const memoryV2ReconstructionContext: ReconstructionContext = {
 export const getMemoryV2Flags = (): MemoryV2Flags => ({
   richStorableValues: getDataModelConfig(),
   unifiedJsonEncoding: getJsonEncodingConfig(),
-  modernSchemaHash: getSchemaHashConfig(),
 });
 
 export const sameMemoryV2Flags = (
@@ -356,8 +353,7 @@ export const sameMemoryV2Flags = (
   right: MemoryV2Flags,
 ): boolean =>
   left.richStorableValues === right.richStorableValues &&
-  left.unifiedJsonEncoding === right.unifiedJsonEncoding &&
-  left.modernSchemaHash === right.modernSchemaHash;
+  left.unifiedJsonEncoding === right.unifiedJsonEncoding;
 
 export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
   if (!isRecord(value) || Array.isArray(value)) {
@@ -365,8 +361,7 @@ export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
   }
 
   return typeof value.richStorableValues === "boolean" &&
-    typeof value.unifiedJsonEncoding === "boolean" &&
-    typeof value.modernSchemaHash === "boolean";
+    typeof value.unifiedJsonEncoding === "boolean";
 };
 
 export const encodeMemoryV2Boundary = (value: unknown): string =>
