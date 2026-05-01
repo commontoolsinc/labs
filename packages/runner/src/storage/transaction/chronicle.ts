@@ -43,16 +43,12 @@ const isEmptyRecord = (
   Object.keys(value).length === 0;
 
 const alignRootWriteWithLoadedShape = (
-  type: string,
   _loaded: FabricValue | undefined,
   merged: FabricValue | undefined,
   options: {
     isV2JsonRoot: boolean;
   },
 ): FabricValue | undefined => {
-  if (type !== "application/json") {
-    return merged;
-  }
   if (options.isV2JsonRoot) {
     return isEmptyRecord(merged) ? undefined : merged;
   }
@@ -296,13 +292,10 @@ export class Chronicle {
         const normalizedLoaded = fabricFromNativeValue(loaded.is);
 
         const alignedMerged = alignRootWriteWithLoadedShape(
-          changes.address.type ?? "application/json",
           normalizedLoaded,
           normalizedMerged,
           {
-            isV2JsonRoot: (changes.address.type ?? "application/json") ===
-                "application/json" &&
-              "getDocument" in replica &&
+            isV2JsonRoot: "getDocument" in replica &&
               typeof replica.getDocument === "function",
           },
         );
@@ -420,7 +413,7 @@ class Novelty {
   }
 
   edit(address: IMemoryAddress) {
-    const key = `${address.id}/${address.type}`;
+    const key = address.id;
     const changes = this.#model.get(key);
     if (changes) {
       return changes;
@@ -502,7 +495,7 @@ class Novelty {
    * Returns changes for the fact at the provided address.
    */
   select(address: IMemoryAddress) {
-    return this.#model.get(`${address.id}/${address.type}`);
+    return this.#model.get(address.id);
   }
 }
 

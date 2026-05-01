@@ -218,11 +218,9 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
-  type: MediaType,
   value: FabricValue | undefined,
 ): FabricValue | undefined => {
   if (
-    type !== "application/json" ||
     value === undefined ||
     !isRecord(value) ||
     Array.isArray(value) ||
@@ -1178,8 +1176,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
 
     for (const write of writes) {
-      const key =
-        `${write.address.space}|${write.address.id}|${write.address.type}`;
+    const key =
+        `${write.address.space}|${write.address.id}`;
       if (runKey === undefined || key === runKey) {
         run.push(write);
         runKey = key;
@@ -1234,7 +1232,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     const collapsedNext = {
       ...next,
       value: collapseEmptyJsonDocumentEnvelope(
-        address.type ?? "application/json",
         next.value,
       ),
     } as RootAttestation;
@@ -1347,7 +1344,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     const collapsedNext = {
       ...next,
       value: collapseEmptyJsonDocumentEnvelope(
-        address.type ?? "application/json",
         next.value,
       ),
     } as RootAttestation;
@@ -1446,7 +1442,6 @@ export class V2StorageTransaction implements IStorageTransaction {
           doc.current = {
             ...doc.current,
             value: collapseEmptyJsonDocumentEnvelope(
-              writes[0]!.address.type ?? "application/json",
               nextRoot,
             ),
           };
@@ -1489,7 +1484,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     doc.current = {
       ...doc.current,
       value: collapseEmptyJsonDocumentEnvelope(
-        writes[0]!.address.type ?? "application/json",
         nextRoot,
       ),
     };
@@ -1790,7 +1784,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (
       this.#lastDocument?.branch === branch &&
       this.#lastDocument.id === address.id &&
-      this.#lastDocument.type === address.type
+      this.#lastDocument.type === (address.type ?? "application/json")
     ) {
       return {
         doc: this.#lastDocument.doc,
@@ -1883,7 +1877,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   private docKey(address: Pick<IMemoryAddress, "id" | "type">): string {
-    return `${address.id}|${address.type}`;
+    return address.id;
   }
 
   private parseDocKey(key: string): { id: URI; type: MediaType } {

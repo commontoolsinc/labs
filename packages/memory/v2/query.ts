@@ -213,10 +213,8 @@ const snapshotForDocKey = (
   if (!key.startsWith(`${space}/`)) {
     return null;
   }
-  const { id, type } = fromDocKey(key);
-  if (type !== "application/json") {
-    return null;
-  }
+  const { id } = fromDocKey(key);
+  const type = "application/json";
   const detail = manager.detail({ id, type });
   const state = detail === undefined ? manager.readState(id) : null;
   return {
@@ -363,9 +361,7 @@ export const extendTrackedGraph = (
     if (previouslyLoaded.has(key)) {
       continue;
     }
-    if (address.type === "application/json") {
-      touched.add(toDocKey(space, address.id, address.type));
-    }
+    touched.add(toDocKey(space, address.id, "application/json"));
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
@@ -473,9 +469,7 @@ export const refreshTrackedGraph = (
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const address of manager.loadedAddresses()) {
-    if (address.type === "application/json") {
-      touched.add(toDocKey(space, address.id, address.type));
-    }
+    touched.add(toDocKey(space, address.id, "application/json"));
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
