@@ -1,5 +1,4 @@
 import { FrozenMap, FrozenSet } from "@commonfabric/data-model/frozen-builtins";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 // Resolve `entries`/`values` from the prototype chain so own-property shadows
 // on Map/Set instances cannot interfere, while still working correctly for
@@ -98,6 +97,9 @@ function validateModuleSafeValue(
   }
   visited.add(objectValue);
 
+  // TODO(danfuzz): This part of the code will probably have to gain the
+  // ability to reason specifically about `FabricSpecialObject`s in order
+  // to fully support the modern data model.
   try {
     if (Array.isArray(objectValue)) {
       validateOwnProperties(objectValue, path, visited, { skipLength: true });
@@ -488,7 +490,7 @@ function pathForIndex(path: string, index: number): string {
 function pathForProperty(path: string, name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)
     ? `${path}.${name}`
-    : `${path}[${toCompactDebugString(name)}]`;
+    : `${path}[${JSON.stringify(name)}]`;
 }
 
 function validationError(
