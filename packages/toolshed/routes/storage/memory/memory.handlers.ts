@@ -1,8 +1,8 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
-import { encodeMemoryV2Boundary } from "@commonfabric/memory/v2";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import * as MemoryServer from "@commonfabric/memory/v2/server";
 import type * as Routes from "./memory.routes.ts";
-import { memoryV2Server } from "../memory.ts";
+import { memoryServer } from "../memory.ts";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 
 type NegotiatedSocketHandlers = {
@@ -133,12 +133,12 @@ export const bufferTextMessagesUntilNegotiated = (
   };
 };
 
-const attachV2SocketPipeline = (
+const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
 ): boolean => {
-  if (MemoryV2Server.parseClientMessage(firstMessage) === null) {
+  if (MemoryServer.parseClientMessage(firstMessage) === null) {
     return false;
   }
 
@@ -155,11 +155,11 @@ const attachV2SocketPipeline = (
       // Ignore close races with the peer.
     }
   };
-  const connection = memoryV2Server.connect((message) => {
+  const connection = memoryServer.connect((message) => {
     if (socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    socket.send(encodeMemoryV2Boundary(message));
+    socket.send(encodeMemoryBoundary(message));
   });
   const closeConnection = () => {
     connection.close();
@@ -211,15 +211,15 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
           return;
         }
 
-        if (attachV2SocketPipeline(socket, negotiation, firstMessage)) {
-          setupSpan.setAttribute("socket.setup", "memory-v2");
+        if (attachMemorySocketPipeline(socket, negotiation, firstMessage)) {
+          setupSpan.setAttribute("socket.setup", "memory");
           return;
         }
 
         negotiation.dispose();
         setupSpan.setAttribute("socket.setup", "unsupported-protocol");
         if (socket.readyState === WebSocket.OPEN) {
-          socket.close(1002, "Memory websocket expects memory/v2 protocol");
+          socket.close(1002, "Memory websocket expects memory protocol");
         }
       }).catch(() => {
         if (socket.readyState === WebSocket.OPEN) {

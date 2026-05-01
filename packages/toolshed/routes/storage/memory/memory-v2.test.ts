@@ -1,10 +1,10 @@
 import { assert, assertEquals } from "@std/assert";
 import app from "../../../app.ts";
 import {
-  decodeMemoryV2Boundary,
-  encodeMemoryV2Boundary,
-  getMemoryV2Flags,
-  MEMORY_V2_PROTOCOL,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
 } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -13,8 +13,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 const HELLO = {
   type: "hello",
-  protocol: MEMORY_V2_PROTOCOL,
-  flags: getMemoryV2Flags(),
+  protocol: MEMORY_PROTOCOL,
+  flags: getMemoryProtocolFlags(),
 } as const;
 
 const openSocket = async (url: URL): Promise<WebSocket> => {
@@ -36,7 +36,7 @@ const createSessionOpenAuth = async (
     cmd: "session.open",
     sub: space,
     args: {
-      protocol: MEMORY_V2_PROTOCOL,
+      protocol: MEMORY_PROTOCOL,
       session,
     },
   };
@@ -70,7 +70,7 @@ const readJsonMessage = async <Message>(
     );
   });
 
-  return decodeMemoryV2Boundary<Message>(payload);
+  return decodeMemoryBoundary<Message>(payload);
 };
 
 const waitFor = async (
@@ -276,20 +276,20 @@ serialTest("memory websocket negotiates a v2 session", async () => {
 
   try {
     const socket = await openSocket(address);
-    socket.send(encodeMemoryV2Boundary(HELLO));
+    socket.send(encodeMemoryBoundary(HELLO));
 
     const message = await readJsonMessage<{
       type: "hello.ok";
       protocol: string;
-      flags: ReturnType<typeof getMemoryV2Flags>;
+      flags: ReturnType<typeof getMemoryProtocolFlags>;
     }>(socket);
 
     assertEquals(message.type, "hello.ok");
-    assertEquals(message.protocol, MEMORY_V2_PROTOCOL);
-    assertEquals(message.flags, getMemoryV2Flags());
+    assertEquals(message.protocol, MEMORY_PROTOCOL);
+    assertEquals(message.flags, getMemoryProtocolFlags());
 
     const auth = await createSessionOpenAuth(identity, space);
-    socket.send(encodeMemoryV2Boundary({
+    socket.send(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -324,10 +324,10 @@ serialTest("memory websocket rejects an unsigned v2 session open", async () => {
 
   try {
     socket = await openSocket(address);
-    socket.send(encodeMemoryV2Boundary(HELLO));
+    socket.send(encodeMemoryBoundary(HELLO));
     await readJsonMessage(socket);
 
-    socket.send(encodeMemoryV2Boundary({
+    socket.send(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space: identity.did(),
@@ -359,7 +359,7 @@ serialTest("memory websocket resumes a requested v2 session id", async () => {
 
   try {
     const socket = await openSocket(address);
-    socket.send(encodeMemoryV2Boundary(HELLO));
+    socket.send(encodeMemoryBoundary(HELLO));
 
     await readJsonMessage(socket);
 
@@ -367,7 +367,7 @@ serialTest("memory websocket resumes a requested v2 session id", async () => {
       sessionId: "session:test-resume",
       seenSeq: 7,
     });
-    socket.send(encodeMemoryV2Boundary({
+    socket.send(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -405,7 +405,7 @@ serialTest(
 
     try {
       const socket = await openSocket(address);
-      socket.send(encodeMemoryV2Boundary({
+      socket.send(encodeMemoryBoundary({
         type: "session.open",
         requestId: "open-without-hello",
         space: "did:key:z6Mk-toolshed-no-hello",

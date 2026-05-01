@@ -1,7 +1,7 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import { MEMORY_V2_PROTOCOL } from "@commonfabric/memory/v2";
+import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
 
 export interface SessionFactory {
   create(space: MemorySpace, signer?: Signer): Promise<{
@@ -85,7 +85,7 @@ class WebSocketTransport implements MemoryV2Client.Transport {
         this.#closeReceiver(
           event instanceof ErrorEvent && event.error instanceof Error
             ? event.error
-            : new Error("memory/v2 websocket transport error"),
+            : new Error("memory websocket transport error"),
         );
         reject(event);
       }, { once: true });
@@ -110,7 +110,7 @@ export class RemoteSessionFactory implements SessionFactory {
       cmd: "session.open",
       sub: space,
       args: {
-        protocol: MEMORY_V2_PROTOCOL,
+        protocol: MEMORY_PROTOCOL,
         session,
       },
     };

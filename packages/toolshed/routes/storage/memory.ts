@@ -1,5 +1,5 @@
-import { MEMORY_V2_PROTOCOL } from "@commonfabric/memory/v2";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
+import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
@@ -69,7 +69,7 @@ const authorizeSessionOpen = async (
     !isRecord(message.authorization) ||
     signature === null
   ) {
-    throw authorizationError("memory/v2 session.open requires authorization");
+    throw authorizationError("memory session.open requires authorization");
   }
 
   const invocation = message.invocation;
@@ -79,11 +79,11 @@ const authorizeSessionOpen = async (
     invocation.cmd !== "session.open" ||
     invocation.sub !== message.space ||
     !isRecord(invocation.args) ||
-    invocation.args.protocol !== MEMORY_V2_PROTOCOL ||
+    invocation.args.protocol !== MEMORY_PROTOCOL ||
     !isRecord(invocation.args.session) ||
     !sameSessionDescriptor(invocation.args.session, message.session)
   ) {
-    throw authorizationError("memory/v2 session.open authorization mismatch");
+    throw authorizationError("memory session.open authorization mismatch");
   }
 
   const issuer = await fromDID(invocation.iss);
@@ -120,13 +120,13 @@ const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
 });
 await FS.ensureDir(memoryEngineStoreUrl);
 
-export const memoryV2Server = new MemoryV2Server.Server({
+export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,
   authorizeSessionOpen,
 });
 export const memory = {
   async close(): Promise<{ ok: {} } | { error: unknown }> {
-    await memoryV2Server.close();
+    await memoryServer.close();
     return { ok: {} };
   },
 };

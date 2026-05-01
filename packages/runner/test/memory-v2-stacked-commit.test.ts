@@ -19,7 +19,7 @@ import { Identity } from "@commonfabric/identity";
 import type { FabricValue, MIME, URI } from "@commonfabric/memory/interface";
 import {
   type EntityDocument,
-  getMemoryV2Flags,
+  getMemoryProtocolFlags,
   type PatchOp,
 } from "@commonfabric/memory/v2";
 import type { ReconstructionContext } from "@commonfabric/data-model/interface";
@@ -52,8 +52,8 @@ const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
 const helloOk = () => ({
   type: "hello.ok",
-  protocol: "memory/v2",
-  flags: getMemoryV2Flags(),
+  protocol: "memory",
+  flags: getMemoryProtocolFlags(),
 } as const);
 const testReconstructionContext: ReconstructionContext = {
   getCell() {

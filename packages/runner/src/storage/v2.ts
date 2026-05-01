@@ -1172,7 +1172,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#queuedWatchRefreshScheduled = false;
     if (this.#queuedWatchRefresh !== null) {
       this.#queuedWatchRefresh.pending.resolve({
-        error: toConnectionError(new Error("memory/v2 replica closed")),
+        error: toConnectionError(new Error("memory replica closed")),
       });
       this.#queuedWatchRefresh = null;
     }

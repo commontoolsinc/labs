@@ -4,13 +4,13 @@ import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
   type ClientCommit,
   type ClientMessage,
-  decodeMemoryV2Boundary,
-  encodeMemoryV2Boundary,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
-  isMemoryV2Flags,
+  isMemoryProtocolFlags,
   type ResponseMessage,
   type ServerMessage,
   type SessionAckRequest,
@@ -202,7 +202,7 @@ class Connection {
         requestId: "invalid",
         error: toError(
           "InvalidMessageError",
-          "Unable to parse memory/v2 message",
+          "Unable to parse memory message",
         ),
       });
       return;
@@ -213,7 +213,7 @@ class Connection {
         this.send({
           type: "response",
           requestId: "handshake",
-          error: toError("ProtocolError", "memory/v2 hello is required first"),
+          error: toError("ProtocolError", "memory hello is required first"),
         });
         return;
       }
@@ -1068,7 +1068,7 @@ export class Server {
   respond(payload: string): Promise<string | null> {
     const parsed = parseClientMessage(payload);
     if (parsed?.type === "hello") {
-      return Promise.resolve(encodeMemoryV2Boundary(respondToHello(parsed)));
+      return Promise.resolve(encodeMemoryBoundary(respondToHello(parsed)));
     }
     return Promise.resolve(null);
   }
@@ -1106,7 +1106,7 @@ export const parseClientMessage = (
 ): ClientMessage | null => {
   let parsed: unknown;
   try {
-    parsed = decodeMemoryV2Boundary(payload);
+    parsed = decodeMemoryBoundary(payload);
   } catch {
     return null;
   }
@@ -1118,7 +1118,7 @@ export const parseClientMessage = (
   if (
     parsed.type === "hello" &&
     typeof parsed.protocol === "string" &&
-    isMemoryV2Flags(parsed.flags)
+    isMemoryProtocolFlags(parsed.flags)
   ) {
     return {
       type: "hello",

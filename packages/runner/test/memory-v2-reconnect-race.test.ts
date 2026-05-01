@@ -2,10 +2,10 @@ import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
-  decodeMemoryV2Boundary,
-  encodeMemoryV2Boundary,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
   type EntityDocument,
-  getMemoryV2Flags,
+  getMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -26,8 +26,8 @@ const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
 const HELLO_OK = {
   type: "hello.ok",
-  protocol: "memory/v2",
-  flags: getMemoryV2Flags(),
+  protocol: "memory",
+  flags: getMemoryProtocolFlags(),
 } as const;
 
 type TestProvider = IStorageProviderWithReplica & {
@@ -69,7 +69,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   }
 
   async send(payload: string): Promise<void> {
-    const message = decodeMemoryV2Boundary(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type?: string;
       commit?: { localSeq?: number };
     };
@@ -112,7 +112,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
       this.connectionCount++;
       this.#connection = this.server.connect((message) => {
         if (!this.#dropResponses) {
-          this.#receiver(encodeMemoryV2Boundary(message));
+          this.#receiver(encodeMemoryBoundary(message));
         }
       });
     }
@@ -133,7 +133,7 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
   }
 
   async send(payload: string): Promise<void> {
-    const message = decodeMemoryV2Boundary(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -221,7 +221,7 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(encodeMemoryV2Boundary(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 

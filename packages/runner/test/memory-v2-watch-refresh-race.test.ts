@@ -4,10 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
-  decodeMemoryV2Boundary,
-  encodeMemoryV2Boundary,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
   type EntityDocument,
-  getMemoryV2Flags,
+  getMemoryProtocolFlags,
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
@@ -21,8 +21,8 @@ const signer = await Identity.fromPassphrase("memory-v2-watch-refresh-race");
 const space = signer.did();
 const HELLO_OK = {
   type: "hello.ok",
-  protocol: "memory/v2",
-  flags: getMemoryV2Flags(),
+  protocol: "memory",
+  flags: getMemoryProtocolFlags(),
 } as const;
 
 type TestProvider = IStorageProviderWithReplica & {
@@ -49,7 +49,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = decodeMemoryV2Boundary(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -120,7 +120,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(encodeMemoryV2Boundary(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -143,7 +143,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = decodeMemoryV2Boundary(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -223,7 +223,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(encodeMemoryV2Boundary(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -246,7 +246,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = decodeMemoryV2Boundary(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -315,7 +315,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(encodeMemoryV2Boundary(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
