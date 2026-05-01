@@ -1344,7 +1344,7 @@ class SpaceReplica implements ISpaceReplica {
     for (const read of reads) {
       if (
         read.space !== this.#space ||
-        read.type !== DOCUMENT_MIME ||
+        (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
         read.id.startsWith("data:")
       ) {
         continue;

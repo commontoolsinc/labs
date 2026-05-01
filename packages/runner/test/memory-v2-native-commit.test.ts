@@ -555,7 +555,6 @@ Deno.test("memory v2 transactions preserve the original previousValue across rep
       address: {
         space,
         id: "of:memory-v2-primitive-rewrite",
-        type,
         path: ["value", "count"],
       },
       value: 2,
@@ -589,7 +588,6 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
         address: {
           space,
           id: "of:memory-v2-batched-patch",
-          type,
           path: ["value", "profile", "name"],
         },
         value: "Grace",
@@ -598,7 +596,6 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
         address: {
           space,
           id: "of:memory-v2-batched-patch",
-          type,
           path: ["value", "profile", "title"],
         },
         value: "Prof",
@@ -619,7 +616,6 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
         address: {
           space,
           id: "of:memory-v2-batched-patch",
-          type,
           path: ["value", "profile", "name"],
         },
         value: "Grace",
@@ -629,7 +625,6 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
         address: {
           space,
           id: "of:memory-v2-batched-patch",
-          type,
           path: ["value", "profile", "title"],
         },
         value: "Professor",
