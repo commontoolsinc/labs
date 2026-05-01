@@ -9,6 +9,7 @@ export * from "./favorites-manager.ts";
 export * from "./client/emitter.ts";
 export * from "./client/transport.ts";
 export * from "./client/connection.ts";
+export { cellRefToKey } from "./shared/utils.ts";
 export * from "./protocol/mod.ts";
 export * from "./vnode-types.ts";
 export * from "@commonfabric/runner/shared";

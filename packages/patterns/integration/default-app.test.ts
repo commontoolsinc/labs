@@ -2,7 +2,7 @@ import { env, Page, waitFor } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -29,6 +29,22 @@ type BrowserActionRunTraceAddress = {
 };
 
 const { FRONTEND_URL, SPACE_NAME } = env;
+
+export function parseCaptureSeriesCount(raw: string | undefined): number {
+  if (!raw) return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.floor(value);
+}
+
+Deno.test("parseCaptureSeriesCount clamps invalid capture env values", () => {
+  assertEquals(parseCaptureSeriesCount(undefined), 0);
+  assertEquals(parseCaptureSeriesCount(""), 0);
+  assertEquals(parseCaptureSeriesCount("foo"), 0);
+  assertEquals(parseCaptureSeriesCount("-1"), 0);
+  assertEquals(parseCaptureSeriesCount("2.8"), 2);
+});
+
 const CAPTURE_TRIGGER_TRACE = (() => {
   try {
     return Deno.env.get("CF_CAPTURE_TRIGGER_TRACE") === "1";
@@ -57,13 +73,6 @@ const CAPTURE_RUNNER_TRIGGER_COUNTS = (() => {
     return false;
   }
 })();
-const CAPTURE_WISH_FLOW_LOG = (() => {
-  try {
-    return Deno.env.get("CF_CAPTURE_WISH_FLOW_LOG") === "1";
-  } catch {
-    return false;
-  }
-})();
 const CAPTURE_WISH_FLOW_COUNTS = (() => {
   try {
     return Deno.env.get("CF_CAPTURE_WISH_FLOW_COUNTS") === "1";
@@ -80,35 +89,56 @@ const CAPTURE_SOURCE_LOCATION_LOG = (() => {
 })();
 const CAPTURE_ACTION_RUN_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_CAPTURE_ACTION_RUN_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_CAPTURE_ACTION_RUN_SERIES"),
+    );
   } catch {
     return 0;
   }
 })();
 const CAPTURE_HOME_LOAD_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_CAPTURE_HOME_LOAD_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(Deno.env.get("CF_CAPTURE_HOME_LOAD_SERIES"));
   } catch {
     return 0;
   }
 })();
 const NOTE_CREATE_TIMING_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_NOTE_CREATE_TIMING_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_NOTE_CREATE_TIMING_SERIES"),
+    );
   } catch {
     return 0;
   }
 })();
 const CAPTURE_NOTE_CREATE_PROFILE_SERIES = (() => {
   try {
-    const raw = Deno.env.get("CF_CAPTURE_NOTE_CREATE_PROFILE_SERIES");
-    return raw ? Number(raw) : 0;
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_CAPTURE_NOTE_CREATE_PROFILE_SERIES"),
+    );
   } catch {
     return 0;
   }
+})();
+const CAPTURE_EVENT_INVOCATION_SERIES = (() => {
+  try {
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_CAPTURE_EVENT_INVOCATION_SERIES"),
+    );
+  } catch {
+    return 0;
+  }
+})();
+const SCHEDULER_PULL_MODE = (() => {
+  try {
+    const raw = Deno.env.get("CF_SCHEDULER_PULL_MODE");
+    if (raw === "1" || raw === "true" || raw === "pull") return true;
+    if (raw === "0" || raw === "false" || raw === "push") return false;
+  } catch {
+    // Ignore unavailable env in browser-like runners.
+  }
+  return undefined;
 })();
 
 type NoteCreateTimingEntry = {
@@ -177,6 +207,15 @@ describe("default-app flow test", () => {
       identity,
     });
 
+    if (SCHEDULER_PULL_MODE !== undefined) {
+      console.log(
+        `Set scheduler mode: ${SCHEDULER_PULL_MODE ? "pull" : "push"}...`,
+      );
+      await waitFor(async () => {
+        return await setSchedulerPullMode(page, SCHEDULER_PULL_MODE);
+      });
+    }
+
     if (CAPTURE_TRIGGER_TRACE) {
       console.log("Enable trigger trace...");
       await waitFor(async () => {
@@ -205,13 +244,6 @@ describe("default-app flow test", () => {
       });
     }
 
-    if (CAPTURE_WISH_FLOW_LOG) {
-      console.log("Enable wish-flow logger...");
-      await waitFor(async () => {
-        return await armWishFlowLogger(page);
-      });
-    }
-
     if (CAPTURE_WISH_FLOW_COUNTS && !CAPTURE_RUNNER_TRIGGER_COUNTS) {
       console.log("Reset logger baselines...");
       await waitFor(async () => {
@@ -230,11 +262,13 @@ describe("default-app flow test", () => {
     const homeLoadSeries: unknown[] = [];
     const noteCreateTimings: NoteCreateTimingEntry[] = [];
     const noteCreateProfiles: NoteCreateProfileEntry[] = [];
+    const eventInvocationSeries: unknown[] = [];
     const noteIterations = Math.max(
       CAPTURE_ACTION_RUN_SERIES > 0 ? CAPTURE_ACTION_RUN_SERIES : 1,
       CAPTURE_HOME_LOAD_SERIES,
       NOTE_CREATE_TIMING_SERIES,
       CAPTURE_NOTE_CREATE_PROFILE_SERIES,
+      CAPTURE_EVENT_INVOCATION_SERIES,
     );
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
@@ -277,6 +311,13 @@ describe("default-app flow test", () => {
         console.log(`Enable action run trace for note ${noteIndex}...`);
         await waitFor(async () => {
           return await armActionRunTrace(page);
+        });
+      }
+
+      if (noteIndex <= CAPTURE_EVENT_INVOCATION_SERIES) {
+        console.log(`Reset event invocation trace (note ${noteIndex})...`);
+        await waitFor(async () => {
+          return await resetEventInvocationTrace(page);
         });
       }
 
@@ -364,18 +405,6 @@ describe("default-app flow test", () => {
         );
       }
 
-      if (noteIndex === 1 && CAPTURE_WISH_FLOW_LOG) {
-        const wishLogs = await collectCapturedConsoleLogs(page, "[WISH");
-        assert(
-          Array.isArray(wishLogs) && wishLogs.length > 0,
-          "Expected runner wish-flow logs to be available",
-        );
-        console.log(
-          "Runner wish-flow logs (create note):",
-          JSON.stringify(wishLogs, null, 2),
-        );
-      }
-
       if (noteIndex === 1 && CAPTURE_WISH_FLOW_COUNTS) {
         const wishCounts = await collectWishFlowCounts(page);
         assert(wishCounts, "Expected runner wish-flow counts to be available");
@@ -451,6 +480,24 @@ describe("default-app flow test", () => {
         });
       }
 
+      if (noteIndex <= CAPTURE_EVENT_INVOCATION_SERIES) {
+        const eventInvocationSummary = await collectEventInvocationSummary(
+          page,
+        );
+        assert(
+          eventInvocationSummary,
+          `Expected event invocation summary for note ${noteIndex}`,
+        );
+        eventInvocationSeries.push({
+          noteIndex,
+          ...(eventInvocationSummary as Record<string, unknown>),
+        });
+        console.log(
+          `Event invocation summary (note ${noteIndex}):`,
+          JSON.stringify(eventInvocationSummary, null, 2),
+        );
+      }
+
       if (noteIndex <= CAPTURE_HOME_LOAD_SERIES) {
         console.log(
           `Open fresh home page for load summary (${noteIndex} notes)...`,
@@ -512,6 +559,13 @@ describe("default-app flow test", () => {
       );
     }
 
+    if (eventInvocationSeries.length > 0) {
+      console.log(
+        "Event invocation series:",
+        JSON.stringify(eventInvocationSeries, null, 2),
+      );
+    }
+
     if (CAPTURE_TRIGGER_TRACE) {
       const triggerSummary = await collectTriggerTraceSummary(page);
       assert(triggerSummary, "Expected trigger trace summary to be available");
@@ -531,6 +585,22 @@ async function armTriggerTrace(page: Page): Promise<boolean> {
     await rt.setTriggerTraceEnabled(true);
     return true;
   });
+}
+
+async function setSchedulerPullMode(
+  page: Page,
+  pullMode: boolean,
+): Promise<boolean> {
+  return await page.evaluate<Promise<boolean>, [boolean]>(
+    async (pullMode) => {
+      const rt = globalThis.commonfabric?.rt;
+      if (!rt?.setPullMode || !rt?.idle) return false;
+      await rt.setPullMode(pullMode);
+      await rt.idle();
+      return true;
+    },
+    { args: [pullMode] },
+  );
 }
 
 async function armWriteTrace(page: Page): Promise<boolean> {
@@ -563,18 +633,6 @@ async function armRunnerTriggerLogger(page: Page): Promise<boolean> {
 
     await api.setLoggerEnabled(true, "runner.trigger-flow");
     await api.setLoggerLevel("debug", "runner.trigger-flow");
-    return true;
-  });
-}
-
-async function armWishFlowLogger(page: Page): Promise<boolean> {
-  await ensureCapturedConsole(page);
-  return await page.evaluate(async () => {
-    const api = globalThis.commonfabric?.rt;
-    if (!api) return false;
-
-    await api.setLoggerEnabled(true, "runner.wish-flow");
-    await api.setLoggerLevel("debug", "runner.wish-flow");
     return true;
   });
 }
@@ -613,12 +671,405 @@ async function resetNoteCreateProfiling(page: Page): Promise<boolean> {
   });
 }
 
+async function resetEventInvocationTrace(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric as {
+      rt?: {
+        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
+        on?: (event: string, handler: (marker: unknown) => void) => void;
+        off?: (event: string, handler: (marker: unknown) => void) => void;
+        idle?: () => Promise<void>;
+      };
+      __eventInvocationTrace?: unknown[];
+      __eventInvocationTraceHandler?: (marker: unknown) => void;
+    } | undefined;
+    const rt = api?.rt;
+    if (!api || !rt?.setTelemetryEnabled || !rt.on || !rt.off) return false;
+
+    if (api.__eventInvocationTraceHandler) {
+      rt.off("telemetry", api.__eventInvocationTraceHandler);
+    }
+
+    api.__eventInvocationTrace = [];
+    api.__eventInvocationTraceHandler = (marker: unknown) => {
+      const type = marker && typeof marker === "object"
+        ? (marker as { type?: unknown }).type
+        : undefined;
+      if (
+        type === "scheduler.invocation" ||
+        type === "scheduler.event.preflight"
+      ) {
+        api.__eventInvocationTrace?.push(marker);
+      }
+    };
+    rt.on("telemetry", api.__eventInvocationTraceHandler);
+    await rt.setTelemetryEnabled(true);
+    await rt.idle?.();
+    return true;
+  });
+}
+
+async function collectEventInvocationSummary(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric as {
+      rt?: {
+        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
+        off?: (event: string, handler: (marker: unknown) => void) => void;
+        idle?: () => Promise<void>;
+      };
+      __eventInvocationTrace?: unknown[];
+      __eventInvocationTraceHandler?: (marker: unknown) => void;
+    } | undefined;
+    const rt = api?.rt;
+    if (!api || !rt?.setTelemetryEnabled) return null;
+
+    await rt.idle?.();
+    await rt.setTelemetryEnabled(false);
+    if (api.__eventInvocationTraceHandler && rt.off) {
+      rt.off("telemetry", api.__eventInvocationTraceHandler);
+    }
+
+    type Marker = {
+      type: string;
+      handlerId?: string;
+      handlerInfo?: {
+        patternName?: string;
+        moduleName?: string;
+        reads?: string[];
+        writes?: string[];
+      };
+    };
+    type PreflightMarker = Marker & {
+      readCount?: number;
+      shallowReadCount?: number;
+      dirtySizeBefore?: number;
+      pendingSizeBefore?: number;
+      dirtyDependencyCount?: number;
+      hasDirtyDependencies?: boolean;
+      skipped?: boolean;
+      populateMs?: number;
+      txToLogMs?: number;
+      depCommitMs?: number;
+      collectMs?: number;
+      scheduleMs?: number;
+      stats?: {
+        hotActions?: PreflightActionSummary[];
+        hotFanoutActions?: PreflightActionSummary[];
+        rootDirectWriters?: PreflightActionSummary[];
+        visitCount?: number;
+        memoHitCount?: number;
+        cycleHitCount?: number;
+        dirtyInputCount?: number;
+        resultTrueCount?: number;
+        workSetAddCount?: number;
+        reverseDependencyActionCount?: number;
+        reverseDependencyEdgeCount?: number;
+        logFallbackCount?: number;
+        logReadCount?: number;
+        logShallowReadCount?: number;
+        writerCandidateCount?: number;
+        writerOverlapCount?: number;
+        directWriterCount?: number;
+        maxDepth?: number;
+      };
+    };
+    type PreflightActionSummary = {
+      actionId: string;
+      actionType?: string;
+      visitCount?: number;
+      memoHitCount?: number;
+      dirtyInputCount?: number;
+      resultTrueCount?: number;
+      reverseDependencyEdgeCount?: number;
+      maxDirectWriterCount?: number;
+      dirty?: boolean;
+      pending?: boolean;
+      readCount?: number;
+      shallowReadCount?: number;
+      writeCount?: number;
+    };
+    const markers = (api.__eventInvocationTrace ?? []) as Marker[];
+    const rows = new Map<string, {
+      handlerId: string;
+      count: number;
+      patternName?: string;
+      moduleName?: string;
+      reads?: string[];
+      writes?: string[];
+    }>();
+
+    for (const marker of markers) {
+      if (marker.type !== "scheduler.invocation") continue;
+      const handlerId = marker.handlerId ?? "unknown";
+      const row = rows.get(handlerId) ?? {
+        handlerId,
+        count: 0,
+        patternName: marker.handlerInfo?.patternName,
+        moduleName: marker.handlerInfo?.moduleName,
+        reads: marker.handlerInfo?.reads,
+        writes: marker.handlerInfo?.writes,
+      };
+      row.count++;
+      rows.set(handlerId, row);
+    }
+
+    const preflightRows = new Map<string, {
+      handlerId: string;
+      count: number;
+      skipped: number;
+      withDirtyDependencies: number;
+      readCountMax: number;
+      shallowReadCountMax: number;
+      dirtyDependencyCountMax: number;
+      dirtySizeBeforeMax: number;
+      pendingSizeBeforeMax: number;
+      totalPopulateMs: number;
+      totalCollectMs: number;
+      totalScheduleMs: number;
+      totalVisitCount: number;
+      totalMemoHitCount: number;
+      totalDirtyInputCount: number;
+      totalResultTrueCount: number;
+      totalWorkSetAddCount: number;
+      totalReverseDependencyEdges: number;
+      totalWriterCandidates: number;
+      totalWriterOverlaps: number;
+      totalDirectWriters: number;
+      maxVisitCount: number;
+      maxDepth: number;
+      patternName?: string;
+      moduleName?: string;
+      reads?: string[];
+      writes?: string[];
+    }>();
+    const hotActionsByHandler = new Map<
+      string,
+      Map<string, PreflightActionSummary>
+    >();
+    const hotFanoutActionsByHandler = new Map<
+      string,
+      Map<string, PreflightActionSummary>
+    >();
+    const rootDirectWritersByHandler = new Map<
+      string,
+      Map<string, PreflightActionSummary>
+    >();
+
+    const mergeActionSummaries = (
+      store: Map<string, Map<string, PreflightActionSummary>>,
+      handlerId: string,
+      actions: PreflightActionSummary[] | undefined,
+    ) => {
+      if (!actions?.length) return;
+      let byAction = store.get(handlerId);
+      if (!byAction) {
+        byAction = new Map();
+        store.set(handlerId, byAction);
+      }
+      for (const action of actions) {
+        const existing = byAction.get(action.actionId) ?? {
+          actionId: action.actionId,
+          actionType: action.actionType,
+          visitCount: 0,
+          memoHitCount: 0,
+          dirtyInputCount: 0,
+          resultTrueCount: 0,
+          reverseDependencyEdgeCount: 0,
+          maxDirectWriterCount: 0,
+          dirty: false,
+          pending: false,
+          readCount: 0,
+          shallowReadCount: 0,
+          writeCount: 0,
+        };
+        existing.visitCount = (existing.visitCount ?? 0) +
+          (action.visitCount ?? 0);
+        existing.memoHitCount = (existing.memoHitCount ?? 0) +
+          (action.memoHitCount ?? 0);
+        existing.dirtyInputCount = (existing.dirtyInputCount ?? 0) +
+          (action.dirtyInputCount ?? 0);
+        existing.resultTrueCount = (existing.resultTrueCount ?? 0) +
+          (action.resultTrueCount ?? 0);
+        existing.reverseDependencyEdgeCount =
+          (existing.reverseDependencyEdgeCount ?? 0) +
+          (action.reverseDependencyEdgeCount ?? 0);
+        existing.maxDirectWriterCount = Math.max(
+          existing.maxDirectWriterCount ?? 0,
+          action.maxDirectWriterCount ?? 0,
+        );
+        existing.dirty = Boolean(existing.dirty || action.dirty);
+        existing.pending = Boolean(existing.pending || action.pending);
+        existing.readCount = Math.max(
+          existing.readCount ?? 0,
+          action.readCount ?? 0,
+        );
+        existing.shallowReadCount = Math.max(
+          existing.shallowReadCount ?? 0,
+          action.shallowReadCount ?? 0,
+        );
+        existing.writeCount = Math.max(
+          existing.writeCount ?? 0,
+          action.writeCount ?? 0,
+        );
+        byAction.set(action.actionId, existing);
+      }
+    };
+
+    for (const marker of markers as PreflightMarker[]) {
+      if (marker.type !== "scheduler.event.preflight") continue;
+      const handlerId = marker.handlerId ?? "unknown";
+      const row = preflightRows.get(handlerId) ?? {
+        handlerId,
+        count: 0,
+        skipped: 0,
+        withDirtyDependencies: 0,
+        readCountMax: 0,
+        shallowReadCountMax: 0,
+        dirtyDependencyCountMax: 0,
+        dirtySizeBeforeMax: 0,
+        pendingSizeBeforeMax: 0,
+        totalPopulateMs: 0,
+        totalCollectMs: 0,
+        totalScheduleMs: 0,
+        totalVisitCount: 0,
+        totalMemoHitCount: 0,
+        totalDirtyInputCount: 0,
+        totalResultTrueCount: 0,
+        totalWorkSetAddCount: 0,
+        totalReverseDependencyEdges: 0,
+        totalWriterCandidates: 0,
+        totalWriterOverlaps: 0,
+        totalDirectWriters: 0,
+        maxVisitCount: 0,
+        maxDepth: 0,
+        patternName: marker.handlerInfo?.patternName,
+        moduleName: marker.handlerInfo?.moduleName,
+        reads: marker.handlerInfo?.reads,
+        writes: marker.handlerInfo?.writes,
+      };
+      row.count++;
+      if (marker.skipped) row.skipped++;
+      if (marker.hasDirtyDependencies) row.withDirtyDependencies++;
+      row.readCountMax = Math.max(row.readCountMax, marker.readCount ?? 0);
+      row.shallowReadCountMax = Math.max(
+        row.shallowReadCountMax,
+        marker.shallowReadCount ?? 0,
+      );
+      row.dirtyDependencyCountMax = Math.max(
+        row.dirtyDependencyCountMax,
+        marker.dirtyDependencyCount ?? 0,
+      );
+      row.dirtySizeBeforeMax = Math.max(
+        row.dirtySizeBeforeMax,
+        marker.dirtySizeBefore ?? 0,
+      );
+      row.pendingSizeBeforeMax = Math.max(
+        row.pendingSizeBeforeMax,
+        marker.pendingSizeBefore ?? 0,
+      );
+      row.totalPopulateMs += marker.populateMs ?? 0;
+      row.totalCollectMs += marker.collectMs ?? 0;
+      row.totalScheduleMs += marker.scheduleMs ?? 0;
+      row.totalVisitCount += marker.stats?.visitCount ?? 0;
+      row.totalMemoHitCount += marker.stats?.memoHitCount ?? 0;
+      row.totalDirtyInputCount += marker.stats?.dirtyInputCount ?? 0;
+      row.totalResultTrueCount += marker.stats?.resultTrueCount ?? 0;
+      row.totalWorkSetAddCount += marker.stats?.workSetAddCount ?? 0;
+      row.totalReverseDependencyEdges +=
+        marker.stats?.reverseDependencyEdgeCount ?? 0;
+      row.totalWriterCandidates += marker.stats?.writerCandidateCount ?? 0;
+      row.totalWriterOverlaps += marker.stats?.writerOverlapCount ?? 0;
+      row.totalDirectWriters += marker.stats?.directWriterCount ?? 0;
+      row.maxVisitCount = Math.max(
+        row.maxVisitCount,
+        marker.stats?.visitCount ?? 0,
+      );
+      row.maxDepth = Math.max(row.maxDepth, marker.stats?.maxDepth ?? 0);
+      preflightRows.set(handlerId, row);
+      mergeActionSummaries(
+        hotActionsByHandler,
+        handlerId,
+        marker.stats?.hotActions,
+      );
+      mergeActionSummaries(
+        hotFanoutActionsByHandler,
+        handlerId,
+        marker.stats?.hotFanoutActions,
+      );
+      mergeActionSummaries(
+        rootDirectWritersByHandler,
+        handlerId,
+        marker.stats?.rootDirectWriters,
+      );
+    }
+
+    const handlers = [...rows.values()].sort((a, b) =>
+      b.count - a.count || a.handlerId.localeCompare(b.handlerId)
+    );
+    const total = handlers.reduce((sum, row) => sum + row.count, 0);
+    const topActionSummaries = (
+      store: Map<string, Map<string, PreflightActionSummary>>,
+      handlerId: string,
+      key: "visitCount" | "reverseDependencyEdgeCount",
+    ) =>
+      [...(store.get(handlerId)?.values() ?? [])]
+        .sort((a, b) =>
+          (b[key] ?? 0) - (a[key] ?? 0) ||
+          (b.visitCount ?? 0) - (a.visitCount ?? 0) ||
+          a.actionId.localeCompare(b.actionId)
+        )
+        .slice(0, 8);
+    const preflightHandlers = [...preflightRows.values()]
+      .map((row) => ({
+        ...row,
+        totalPopulateMs: Number(row.totalPopulateMs.toFixed(3)),
+        totalCollectMs: Number(row.totalCollectMs.toFixed(3)),
+        totalScheduleMs: Number(row.totalScheduleMs.toFixed(3)),
+        hotActions: topActionSummaries(
+          hotActionsByHandler,
+          row.handlerId,
+          "visitCount",
+        ),
+        hotFanoutActions: topActionSummaries(
+          hotFanoutActionsByHandler,
+          row.handlerId,
+          "reverseDependencyEdgeCount",
+        ),
+        rootDirectWriters: topActionSummaries(
+          rootDirectWritersByHandler,
+          row.handlerId,
+          "visitCount",
+        ),
+      }))
+      .sort((a, b) =>
+        b.totalCollectMs - a.totalCollectMs ||
+        b.totalVisitCount - a.totalVisitCount ||
+        a.handlerId.localeCompare(b.handlerId)
+      );
+    return {
+      total,
+      uniqueHandlers: handlers.length,
+      handlers,
+      preflights: {
+        total: preflightHandlers.reduce((sum, row) => sum + row.count, 0),
+        skipped: preflightHandlers.reduce((sum, row) => sum + row.skipped, 0),
+        withDirtyDependencies: preflightHandlers.reduce(
+          (sum, row) => sum + row.withDirtyDependencies,
+          0,
+        ),
+        handlers: preflightHandlers,
+      },
+    };
+  });
+}
+
 async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
     const rt = globalThis.commonfabric?.rt;
     if (!rt) return null;
 
     const trace = await rt.getTriggerTrace();
+    const graph = rt.getGraphSnapshot ? await rt.getGraphSnapshot() : undefined;
     type TriggerSample = {
       writerActionId?: string;
       change: string;
@@ -628,6 +1079,15 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
 
     const counts = new Map<string, number>();
     const samples = new Map<string, TriggerSample[]>();
+    const rootSinkChangeCounts = new Map<string, {
+      count: number;
+      actionIds: Set<string>;
+      decisions: Set<string>;
+      writerActionIds: Set<string>;
+    }>();
+
+    const isRootSink = (actionId: string) =>
+      actionId.startsWith("sink:") && /\/of:[^/]+\/$/.test(actionId);
 
     const pushSample = (actionId: string, sample: TriggerSample) => {
       counts.set(actionId, (counts.get(actionId) ?? 0) + 1);
@@ -636,6 +1096,21 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
         existing.push(sample);
       }
       samples.set(actionId, existing);
+      if (isRootSink(actionId)) {
+        const changeRow = rootSinkChangeCounts.get(sample.change) ?? {
+          count: 0,
+          actionIds: new Set<string>(),
+          decisions: new Set<string>(),
+          writerActionIds: new Set<string>(),
+        };
+        changeRow.count += 1;
+        changeRow.actionIds.add(actionId);
+        changeRow.decisions.add(sample.decision);
+        if (sample.writerActionId) {
+          changeRow.writerActionIds.add(sample.writerActionId);
+        }
+        rootSinkChangeCounts.set(sample.change, changeRow);
+      }
     };
 
     for (const entry of trace) {
@@ -662,6 +1137,48 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
 
     return {
       entryCount: trace.length,
+      rootSinkActions: [...counts.entries()]
+        .filter(([actionId]) => isRootSink(actionId))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20)
+        .map(([actionId, count]) => ({
+          actionId,
+          count,
+          samples: samples.get(actionId) ?? [],
+        })),
+      rootSinkChanges: [...rootSinkChangeCounts.entries()]
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 20)
+        .map(([change, row]) => ({
+          change,
+          count: row.count,
+          actionIds: [...row.actionIds].slice(0, 5),
+          decisions: [...row.decisions],
+          writerActionIds: [...row.writerActionIds].slice(0, 5),
+        })),
+      rootSinkGraphNodes: graph?.nodes
+        ?.filter((node: {
+          id: string;
+          type: string;
+        }) => node.type === "effect" && isRootSink(node.id))
+        .slice(0, 20)
+        .map((node: {
+          id: string;
+          parentId?: string;
+          reads?: string[];
+          shallowReads?: string[];
+          writes?: string[];
+          isDirty: boolean;
+          isPending: boolean;
+        }) => ({
+          id: node.id,
+          parentId: node.parentId,
+          reads: node.reads ?? [],
+          shallowReads: node.shallowReads ?? [],
+          writes: node.writes ?? [],
+          isDirty: node.isDirty,
+          isPending: node.isPending,
+        })),
       repeatedActions: [...counts.entries()]
         .filter(([, count]) => count > 1)
         .sort((a, b) => b[1] - a[1])
@@ -1400,14 +1917,59 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
     const focusKeys = [
       ["scheduler", "scheduler/execute"],
       ["scheduler", "scheduler/execute/settle"],
+      ["scheduler", "scheduler/execute/depCollect"],
       ["scheduler", "scheduler/execute/event"],
+      ["scheduler", "scheduler/execute/event/pullPopulateDependencies"],
+      ["scheduler", "scheduler/execute/event/pullTxToReactivityLog"],
+      ["scheduler", "scheduler/execute/event/pullDepCommitStart"],
+      ["scheduler", "scheduler/execute/event/pullCollectDirtyDependencies"],
+      ["scheduler", "scheduler/execute/event/pullScheduleDirtyDependencies"],
+      ["scheduler", "scheduler/execute/event/handlerAction"],
+      ["scheduler", "scheduler/execute/buildPullWorkSet"],
+      ["scheduler", "scheduler/execute/collectDirtyDependencies"],
+      ["scheduler", "scheduler/execute/collectDirtyDependencies/writerLookup"],
+      ["scheduler", "scheduler/execute/topologicalSort"],
+      ["scheduler", "scheduler/scheduleAffectedEffects"],
       ["scheduler", "scheduler/run"],
       ["scheduler", "scheduler/run/action"],
       ["scheduler", "scheduler/run/commit"],
       ["traverse", "traverse"],
+      ["runner", "stream/readInputs"],
+      ["runner", "stream/invokeJavaScriptImplementation"],
+      ["runner", "stream/postRun"],
       ["runner", "action/readInputs"],
+      ["runner", "action/invokeJavaScriptImplementation"],
       ["runner", "action/postRun"],
       ["runner", "action/populateDependencies"],
+      ["runner", "raw/run/wish"],
+      ["runner.wish-flow", "wish/phase/action-total"],
+      ["runner.wish-flow", "wish/phase/input-get"],
+      ["runner.wish-flow", "wish/phase/parse-target"],
+      ["runner.wish-flow", "wish/phase/resolve-base"],
+      ["runner.wish-flow", "wish/phase/resolve-paths"],
+      ["runner.wish-flow", "wish/phase/dedupe-results"],
+      ["runner.wish-flow", "wish/phase/candidates-cell"],
+      ["runner.wish-flow", "wish/phase/result-ui-get"],
+      ["runner.wish-flow", "wish/phase/send-fast"],
+      ["runner.wish-flow", "wish/phase/send-pending"],
+      ["runner.wish-flow", "wish/phase/send-error"],
+      ["runner.wish-flow", "wish/phase/favorites-cell"],
+      ["runner.wish-flow", "wish/phase/favorites-get"],
+      ["runner.wish-flow", "wish/phase/favorites-filter"],
+      ["runner.wish-flow", "wish/phase/favorites-result-map"],
+      ["runner.wish-flow", "wish/phase/mentionable-cell"],
+      ["runner.wish-flow", "wish/phase/mentionable-get"],
+      ["runner.wish-flow", "wish/phase/mentionable-filter"],
+      ["runner.wish-flow", "wish/phase/mentionable-piece-get"],
+      ["runner.wish-flow", "wish/phase/mentionable-name-check"],
+      ["runner.wish-flow", "wish/phase/mentionable-schema"],
+      ["runner.wish-flow", "wish/phase/mentionable-schema-stringify"],
+      ["runner.wish-flow", "wish/phase/mentionable-tag-match"],
+      ["runner.wish-flow", "wish/phase/mentionable-result-map"],
+      ["runner", "raw/run/map"],
+      ["runner", "raw/run/ifElse"],
+      ["runner", "raw/run/when"],
+      ["runner", "raw/populateDependencies"],
     ] as const;
 
     const focusTiming = focusKeys
@@ -1435,6 +1997,9 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
           "storage.cache",
           "worker-reconciler",
           "runner",
+          "stream",
+          "raw",
+          "runner.wish-flow",
         ].includes(loggerName)
       )
       .flatMap(([loggerName, rows]) =>
@@ -1714,31 +2279,7 @@ async function collectWishFlowCounts(page: Page): Promise<unknown> {
     const api = globalThis.commonfabric?.rt;
     if (!api) return null;
 
-    const { counts, timing } = await api.getLoggerCounts();
-    const loggerCounts = counts["runner.wish-flow"];
-    if (!loggerCounts) return null;
-    type CountRow = {
-      total: number;
-      debug: number;
-      info: number;
-      warn: number;
-      error: number;
-    };
-    const keyedCounts = loggerCounts as Record<string, CountRow>;
-
-    const toRows = (prefix: string) =>
-      Object.entries(keyedCounts)
-        .filter(([key]) => key.startsWith(prefix))
-        .sort((a, b) => (b[1].total ?? 0) - (a[1].total ?? 0))
-        .slice(0, 16)
-        .map(([key, value]) => ({
-          key,
-          total: value.total ?? 0,
-          debug: value.debug ?? 0,
-          info: value.info ?? 0,
-          warn: value.warn ?? 0,
-          error: value.error ?? 0,
-        }));
+    const { timing } = await api.getLoggerCounts();
 
     type TimingRow = {
       count: number;
@@ -1752,6 +2293,8 @@ async function collectWishFlowCounts(page: Page): Promise<unknown> {
       string,
       TimingRow
     >;
+    if (Object.keys(timingRows).length === 0) return null;
+
     const toTimingRows = (prefix: string) =>
       Object.entries(timingRows)
         .filter(([key]) => key.startsWith(prefix))
@@ -1768,26 +2311,10 @@ async function collectWishFlowCounts(page: Page): Promise<unknown> {
         }));
 
     return {
-      start: toRows("wish/start/"),
-      startSource: toRows("wish/start-source/"),
-      resolve: toRows("wish/resolve/"),
-      resolveSource: toRows("wish/resolve-source/"),
-      resolveMs: toRows("wish/resolve-ms/"),
-      searchHashtag: toRows("wish/search-hashtag/"),
-      sync: toRows("wish/sync/"),
-      syncSource: toRows("wish/sync-source/"),
-      syncMs: toRows("wish/sync-ms/"),
-      sendFast: toRows("wish/send-fast/"),
-      sendFastSource: toRows("wish/send-fast-source/"),
-      launchSuggestion: toRows("wish/launch-suggestion/"),
-      runSuggestion: toRows("wish/run-suggestion/"),
-      runSuggestionSource: toRows("wish/run-suggestion-source/"),
-      errors: toRows("wish/error/"),
-      freeform: toRows("wish/freeform/"),
+      phaseTiming: toTimingRows("wish/phase/"),
+      phaseQueryTiming: toTimingRows("wish/phase-query/"),
       resolveTiming: toTimingRows("wish/resolve/"),
-      resolveSourceTiming: toTimingRows("wish/resolve-source/"),
       syncTiming: toTimingRows("wish/sync/"),
-      syncSourceTiming: toTimingRows("wish/sync-source/"),
     };
   });
 }

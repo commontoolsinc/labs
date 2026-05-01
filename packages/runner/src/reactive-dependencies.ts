@@ -241,6 +241,14 @@ export function arraysOverlap(
     : a.every((value, index) => value === b[index]);
 }
 
+export function nonRecursiveReadMayOverlapWrite(
+  readPath: readonly MemoryAddressPathComponent[],
+  writePath: readonly MemoryAddressPathComponent[],
+): boolean {
+  return writePath.length <= readPath.length + 1 &&
+    arraysOverlap(writePath, readPath);
+}
+
 function commonPrefixLength(
   a: readonly MemoryAddressPathComponent[],
   b: readonly MemoryAddressPathComponent[],

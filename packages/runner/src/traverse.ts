@@ -2663,11 +2663,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
         },
         value: item,
       };
-      this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       let curSelector: SchemaPathSelector = {
         path: curDoc.address.path,
         schema: itemSchema,
       };
+      this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       // Sparse array holes are densified to `null` at the storage boundary in
       // legacy JSON mode. When the item schema expects cells/streams, or the
       // schema rejects both `null` and `undefined`, treat that committed `null`
