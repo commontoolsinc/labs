@@ -44,7 +44,5 @@
     "./value-debug": "./value-debug.ts",
     "./value-hash": "./value-hash.ts",
     "./schema-hash": "./schema-hash.ts",
-    "./schema-hash-legacy": "./schema-hash-legacy.ts",
-    "./schema-hash-modern": "./schema-hash-modern.ts"
   }
 }

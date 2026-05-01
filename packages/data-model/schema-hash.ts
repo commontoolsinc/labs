@@ -7,15 +7,11 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 import { SchemaAndHash } from "./schema-and-hash.ts";
-import {
-  hashSchemaItemModern,
-  hashSchemaItemModernAsString,
-  hashSchemaModernAsString,
-} from "./schema-hash-modern.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
+import { hashOf, hashStringOf } from "./value-hash.ts";
 
 // ---------------------------------------------------------------------------
-// Hash computation
+// Hash computation: Passes through to `value-hash.ts`.
 // ---------------------------------------------------------------------------
 
 /**
@@ -24,7 +20,7 @@ import { toDeepFrozenSchema } from "./schema-utils.ts";
  * Returns a string for use as a map key or cache key.
  */
 export function hashSchema(schema: JSONSchema): string {
-  return hashSchemaModernAsString(schema);
+  return hashStringOf(schema);
 }
 
 /**
@@ -33,12 +29,12 @@ export function hashSchema(schema: JSONSchema): string {
  * always produce the same hash. Returns a string.
  */
 export function hashSchemaItem(item: FabricValue): string {
-  return hashSchemaItemModernAsString(item);
+  return hashStringOf(item);
 }
 
 /** Hash a schema-related item as a FabricHash (for intern cache). */
 export function hashSchemaItemAsFabricHash(item: FabricValue): FabricHash {
-  return hashSchemaItemModern(item);
+  return hashOf(item);
 }
 
 // ---------------------------------------------------------------------------
