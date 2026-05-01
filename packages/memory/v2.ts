@@ -392,11 +392,9 @@ export const toValuePath = (path: readonly string[]): ValuePath =>
   path as ValuePath;
 
 /**
- * Builds a document-level selector (path rooted under `"value"`) from a
- * schema path selector. The result is interned-and-frozen via
- * `internPathSelector`, so callers can feed it directly to
- * `MapSetStringToPathSelectors` (or any other `hashSchemaItem`-keyed
- * cache) and get the `hashOf()` `WeakMap` fast-path on repeat hashes.
+ * Builds a document-level selector (path rooted under `"value"`) from a schema
+ * path selector. The result is interned-and-frozen via `internPathSelector()`,
+ * to get the benefits of hash caching.
  */
 export const toDocumentSelector = (
   selector: Pick<SchemaPathSelector, "path" | "schema">,

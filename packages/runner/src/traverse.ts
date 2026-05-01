@@ -1,8 +1,7 @@
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
-  hashSchemaItem,
   internSchema,
   internSchemaAsHashString,
 } from "@commonfabric/data-model/schema-hash";
@@ -310,8 +309,7 @@ export class MapSet<K, V> {
 /**
  * Convenience subclass of `MapSet` specialized for `string` keys and
  * `SchemaPathSelector` values — the common case throughout traverse/query
- * code. When `hashValues` is `true`, uses `hashSchemaItem` from the
- * schema-hash dispatch layer as the hash function.
+ * code. When `hashValues` is `true`, uses `hashStringOf()`.
  *
  * **Contract:** Callers must hand in selectors that have already been
  * interned via `internPathSelector` (from `@commonfabric/data-model/schema-utils`).
@@ -328,7 +326,7 @@ export class MapSetStringToPathSelectors extends MapSet<
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? (v) => hashSchemaItem(v) : undefined);
+    super(hashValues ? (v) => hashStringOf(v) : undefined);
   }
 }
 
@@ -377,7 +375,7 @@ export class CycleTracker<K> {
  * is keyed on `internSchemaAsHashString(extraKey ?? true)`, so repeat
  * calls with a structurally-equal schema re-lookup the same entry in
  * O(1) without re-hashing — the intern cache's WeakMap returns the
- * canonical hash string without invoking `hashSchemaItem` on
+ * canonical hash string without invoking `hashStringOf()` on
  * already-interned inputs.
  *
  * An `undefined` `extraKey` is normalized to `true` (JSON Schema's
