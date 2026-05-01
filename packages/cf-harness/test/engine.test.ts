@@ -4,6 +4,7 @@ import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { createHarnessCfcPolicySnapshot } from "../src/contracts/cfc-policy-snapshot.ts";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
+import type { HarnessSkillResourceReads } from "../src/contracts/skill.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -430,6 +431,90 @@ Deno.test("CfHarnessEngine stamps policy snapshot state changes with mutation ti
     persistedStates.at(-1)?.updatedAt,
     "2026-04-17T20:30:02.000Z",
   );
+});
+
+Deno.test("CfHarnessEngine persists skill resource read artifacts", async () => {
+  const persistedStates: HarnessRunState[] = [];
+  const persistedReads: HarnessSkillResourceReads[] = [];
+  const runRoot = "/tmp/cf-harness-artifacts/run-skill-resource-read";
+  const artifactStore: HarnessArtifactStore = {
+    artifactRoot: "/tmp/cf-harness-artifacts",
+    runRoot,
+    persistRunState(state) {
+      persistedStates.push(structuredClone(state));
+      return Promise.resolve(`${runRoot}/run-state.json`);
+    },
+    persistTranscript() {
+      return Promise.resolve(`${runRoot}/transcript.json`);
+    },
+    persistCapabilitySnapshot() {
+      return Promise.resolve(`${runRoot}/capabilities.json`);
+    },
+    persistCfcPolicySnapshot() {
+      return Promise.resolve(`${runRoot}/policy-snapshot.json`);
+    },
+    persistPolicyTrace() {
+      return Promise.resolve(`${runRoot}/policy-trace.json`);
+    },
+    persistRunReport() {
+      return Promise.resolve(`${runRoot}/run-report.json`);
+    },
+    persistSkillResourceReads(reads) {
+      persistedReads.push(structuredClone(reads));
+      return Promise.resolve(`${runRoot}/skill-resource-reads.json`);
+    },
+    persistToolOutput() {
+      return Promise.resolve(`${runRoot}/tool-output.json`);
+    },
+  };
+  const engine = new CfHarnessEngine({
+    artifactStore,
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: "run-skill-resource-read",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-05-01T17:00:00.000Z",
+        "2026-05-01T17:00:01.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-05-01T17:00:02.000Z";
+    })(),
+  });
+
+  const path = await engine.recordSkillResourceRead({
+    type: "cf-harness.skill-resource-read",
+    outputId: "run-skill-resource-read:read_skill_resource:1",
+    runId: "run-skill-resource-read",
+    skillName: "pattern-dev",
+    path: "references/guide.md",
+    status: "read",
+    readAt: "2026-05-01T17:00:01.000Z",
+    cfcPromptRole: "context",
+    diagnostics: [],
+  });
+
+  assertEquals(path, `${runRoot}/skill-resource-reads.json`);
+  assertEquals(persistedReads, [{
+    type: "cf-harness.skill-resource-reads",
+    version: 1,
+    generatedAt: "2026-05-01T17:00:01.000Z",
+    reads: [{
+      type: "cf-harness.skill-resource-read",
+      outputId: "run-skill-resource-read:read_skill_resource:1",
+      runId: "run-skill-resource-read",
+      skillName: "pattern-dev",
+      path: "references/guide.md",
+      status: "read",
+      readAt: "2026-05-01T17:00:01.000Z",
+      cfcPromptRole: "context",
+      diagnostics: [],
+    }],
+  }]);
+  assertEquals(
+    engine.getRunState().skillResourceReadsPath,
+    `${runRoot}/skill-resource-reads.json`,
+  );
+  assertEquals(persistedStates.at(-1)?.skillResourceReadsPath, path);
 });
 
 Deno.test("CfHarnessEngine timestamps CFC invocation contexts with mutation time", async () => {

@@ -15,15 +15,17 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "bash",
     "bash-no-sandbox",
     "read_file",
+    "read_skill_resource",
     "write_file",
     "delegate_task",
   ]);
-  assertEquals(BUILTIN_TOOL_REGISTRY.size, 5);
+  assertEquals(BUILTIN_TOOL_REGISTRY.size, 6);
   assertEquals(
     [...DEFAULT_PARENT_TOOL_IDS],
     [
       "bash",
       "read_file",
+      "read_skill_resource",
       "write_file",
       "delegate_task",
     ] satisfies BuiltinToolId[],

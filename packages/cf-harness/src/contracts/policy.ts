@@ -22,6 +22,14 @@ export interface HarnessReadFileToolInputSummary {
   maxBytes?: number;
 }
 
+export interface HarnessReadSkillResourceToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "read_skill_resource";
+  skill?: string;
+  path?: string;
+  maxBytes?: number;
+}
+
 export interface HarnessWriteFileToolInputSummary {
   type: "cf-harness.tool-input-summary";
   toolId: "write_file";
@@ -48,6 +56,7 @@ export interface HarnessDelegateTaskToolInputSummary {
 export type HarnessToolInputSummary =
   | HarnessBashToolInputSummary
   | HarnessReadFileToolInputSummary
+  | HarnessReadSkillResourceToolInputSummary
   | HarnessWriteFileToolInputSummary
   | HarnessDelegateTaskToolInputSummary
   | {

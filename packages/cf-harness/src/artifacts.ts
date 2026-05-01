@@ -16,6 +16,7 @@ import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type {
   HarnessSkillActivations,
   HarnessSkillRegistry,
+  HarnessSkillResourceReads,
 } from "./contracts/skill.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
@@ -86,6 +87,9 @@ export interface HarnessArtifactStore {
   ): Promise<string>;
   persistSkillActivations?(
     activations: HarnessSkillActivations,
+  ): Promise<string>;
+  persistSkillResourceReads?(
+    reads: HarnessSkillResourceReads,
   ): Promise<string>;
   persistToolOutput(
     toolId: string,
@@ -182,6 +186,15 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     await ensureDir(this.runRoot);
     const path = join(this.runRoot, "skill-activations.json");
     await writeJsonFile(path, activations);
+    return path;
+  }
+
+  async persistSkillResourceReads(
+    reads: HarnessSkillResourceReads,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "skill-resource-reads.json");
+    await writeJsonFile(path, reads);
     return path;
   }
 

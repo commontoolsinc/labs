@@ -3,6 +3,10 @@ import type {
   HarnessCfcInvocationContext,
   HarnessCfcInvocationOperation,
 } from "../contracts/cfc-invocation-context.ts";
+import type {
+  HarnessSkillRegistry,
+  HarnessSkillResourceRead,
+} from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -11,6 +15,7 @@ import type { SandboxRuntime } from "../sandbox/types.ts";
 export interface HarnessToolContext {
   runId: string;
   cfcEnforcementMode: CfcEnforcementMode;
+  skillRegistry?: HarnessSkillRegistry;
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;
@@ -31,6 +36,8 @@ export interface HarnessToolContext {
   ): Promise<boolean>;
   setCurrentDir(path: string): void;
   nextOutputId(toolId: string): ToolOutputId;
+  now(): string;
+  recordSkillResourceRead(read: HarnessSkillResourceRead): Promise<void>;
   createCfcInvocationContext(options: {
     toolId: string;
     toolOutputId?: ToolOutputId;

@@ -1,12 +1,19 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { createHarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
+import type {
+  HarnessSkillRegistry,
+  HarnessSkillResourceRead,
+} from "../src/contracts/skill.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { discoverHarnessSkills } from "../src/skills/registry.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
+import { readSkillResourceTool } from "../src/tools/read-skill-resource.ts";
 import { writeFileTool } from "../src/tools/write-file.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
 import type {
@@ -106,6 +113,8 @@ const createContext = (
   hostProcessRunner: ProcessRunner = new FakeProcessRunner(),
   cfcEnforcementMode: HarnessToolContext["cfcEnforcementMode"] = "observe",
   artifactRootHostPath?: string,
+  skillRegistry?: HarnessSkillRegistry,
+  skillResourceReads: HarnessSkillResourceRead[] = [],
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
@@ -114,6 +123,7 @@ const createContext = (
   return {
     runId: "run-1",
     cfcEnforcementMode,
+    skillRegistry,
     get currentDir() {
       return currentDir;
     },
@@ -162,6 +172,13 @@ const createContext = (
     nextOutputId(toolId) {
       sequence += 1;
       return createToolOutputId("run-1", toolId, sequence);
+    },
+    now() {
+      return "2026-05-01T17:54:00.000Z";
+    },
+    recordSkillResourceRead(read) {
+      skillResourceReads.push(read);
+      return Promise.resolve();
     },
     createCfcInvocationContext(options) {
       cfcInvocationSequence += 1;
@@ -735,6 +752,246 @@ Deno.test("read_file tool denies reserved artifact paths before shelling out", a
     },
   });
   assertEquals(sandbox.calls, []);
+});
+
+Deno.test({
+  name:
+    "read_skill_resource reads indexed text resources and records provenance",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-skill-resource-",
+    });
+    try {
+      await Deno.mkdir(join(root, "pattern-dev", "references"), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(
+        join(root, "pattern-dev", "SKILL.md"),
+        [
+          "---",
+          "name: pattern-dev",
+          "description: Build Common Fabric patterns",
+          "---",
+          "",
+          "# Pattern Dev",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(root, "pattern-dev", "references", "guide.md"),
+        "# Guide\nUse Cells carefully.\n",
+      );
+      const registry = await discoverHarnessSkills({
+        skillsRoot: root,
+        sandboxSkillsRoot: "/workspace/labs/skills",
+      });
+      const reads: HarnessSkillResourceRead[] = [];
+
+      const output = await readSkillResourceTool.invoke(
+        createContext(
+          new FakeSandboxRuntime(),
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          reads,
+        ),
+        {
+          skill: "pattern-dev",
+          path: "references/guide.md",
+          maxBytes: 7,
+        },
+      );
+
+      assertEquals(output.status, "read");
+      assertEquals(output.skill, "pattern-dev");
+      assertEquals(output.path, "references/guide.md");
+      assertEquals(output.kind, "reference");
+      assertEquals(output.content, "# Guide");
+      assertEquals(output.contentKind, "text");
+      assertEquals(output.maxBytes, 7);
+      assertEquals(output.truncated, true);
+      assertEquals(output.cfcPromptRole, "context");
+      assertEquals(output.digestMatchesRegistry, true);
+      assertEquals(
+        output.sandboxResourcePath?.endsWith(
+          "/pattern-dev/references/guide.md",
+        ),
+        true,
+      );
+      assertEquals(reads.length, 1);
+      assertEquals(reads[0].status, "read");
+      assertEquals(reads[0].path, "references/guide.md");
+      assertEquals(reads[0].observedDigest, output.observedDigest);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "read_skill_resource returns metadata only for binary resources",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-skill-resource-",
+    });
+    try {
+      await Deno.mkdir(join(root, "pattern-dev", "assets"), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(
+        join(root, "pattern-dev", "SKILL.md"),
+        [
+          "---",
+          "name: pattern-dev",
+          "description: Build Common Fabric patterns",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeFile(
+        join(root, "pattern-dev", "assets", "logo.bin"),
+        new Uint8Array([0, 1, 2, 3]),
+      );
+      const registry = await discoverHarnessSkills({ skillsRoot: root });
+      const reads: HarnessSkillResourceRead[] = [];
+
+      const output = await readSkillResourceTool.invoke(
+        createContext(
+          new FakeSandboxRuntime(),
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          reads,
+        ),
+        { skill: "pattern-dev", path: "assets/logo.bin" },
+      );
+
+      assertEquals(output.status, "binary");
+      assertEquals(output.content, undefined);
+      assertEquals(output.contentKind, "binary");
+      assertEquals(output.kind, "asset");
+      assertEquals(output.truncated, false);
+      assertEquals(output.digestMatchesRegistry, true);
+      assertEquals(reads[0].status, "binary");
+      assertEquals(reads[0].contentKind, "binary");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "read_skill_resource rejects unindexed resources and invalid traversal paths",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-skill-resource-",
+    });
+    try {
+      await Deno.mkdir(join(root, "pattern-dev"), { recursive: true });
+      await Deno.writeTextFile(
+        join(root, "pattern-dev", "SKILL.md"),
+        [
+          "---",
+          "name: pattern-dev",
+          "description: Build Common Fabric patterns",
+          "---",
+        ].join("\n"),
+      );
+      const registry = await discoverHarnessSkills({ skillsRoot: root });
+      const reads: HarnessSkillResourceRead[] = [];
+      const context = createContext(
+        new FakeSandboxRuntime(),
+        "/workspace",
+        new FakeProcessRunner(),
+        "observe",
+        undefined,
+        registry,
+        reads,
+      );
+
+      const traversal = await readSkillResourceTool.invoke(context, {
+        skill: "pattern-dev",
+        path: "../outside.md",
+      });
+      const missing = await readSkillResourceTool.invoke(context, {
+        skill: "pattern-dev",
+        path: "references/missing.md",
+      });
+
+      assertEquals(traversal.status, "error");
+      assertEquals(traversal.error?.code, "resource_path_invalid");
+      assertEquals(missing.status, "error");
+      assertEquals(missing.error?.code, "resource_not_indexed");
+      assertEquals(reads.map((read) => read.status), ["error", "error"]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "read_skill_resource reports digest mismatches while returning call-time content",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-skill-resource-",
+    });
+    try {
+      const guidePath = join(root, "pattern-dev", "references", "guide.md");
+      await Deno.mkdir(join(root, "pattern-dev", "references"), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(
+        join(root, "pattern-dev", "SKILL.md"),
+        [
+          "---",
+          "name: pattern-dev",
+          "description: Build Common Fabric patterns",
+          "---",
+        ].join("\n"),
+      );
+      const registryContent = "old guidance\n";
+      const callTimeContent = "new guidance with extra bytes\n";
+      await Deno.writeTextFile(guidePath, registryContent);
+      const registry = await discoverHarnessSkills({ skillsRoot: root });
+      await Deno.writeTextFile(guidePath, callTimeContent);
+      const reads: HarnessSkillResourceRead[] = [];
+
+      const output = await readSkillResourceTool.invoke(
+        createContext(
+          new FakeSandboxRuntime(),
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          reads,
+        ),
+        { skill: "pattern-dev", path: "references/guide.md" },
+      );
+
+      assertEquals(output.status, "read");
+      assertEquals(output.content, callTimeContent);
+      assertEquals(output.digestMatchesRegistry, false);
+      assertEquals(output.registrySizeBytes, registryContent.length);
+      assertEquals(output.observedSizeBytes, callTimeContent.length);
+      assertEquals(
+        output.diagnostics.map((diagnostic) => diagnostic.code),
+        ["skill-resource-snapshot-mismatch"],
+      );
+      assertEquals(reads[0].digestMatchesRegistry, false);
+      assertEquals(reads[0].observedSizeBytes, callTimeContent.length);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
 });
 
 Deno.test("write_file tool supports append mode and passes content over stdin", async () => {
