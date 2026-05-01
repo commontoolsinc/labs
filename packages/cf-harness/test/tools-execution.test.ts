@@ -319,9 +319,10 @@ Deno.test("bash tool allows curl to localhost through the sandbox shell runtime"
 
 Deno.test("bash tool denies curl to non-localhost targets before sandbox execution", async () => {
   const sandbox = new FakeSandboxRuntime();
-  const context = createContext(sandbox);
+  const context = createContext(sandbox, "/workspace/old");
   const output = await bashTool.invoke(context, {
     command: "curl https://example.com",
+    cwd: "/workspace/new",
   });
 
   assertEquals(output, {
@@ -330,9 +331,10 @@ Deno.test("bash tool denies curl to non-localhost targets before sandbox executi
     stderr:
       "bash command denied: curl host example.com is not allowed from cf-harness bash; use localhost or host.docker.internal",
     exitCode: 126,
-    cwd: "/workspace",
+    cwd: "/workspace/new",
   });
   assertEquals(sandbox.calls, []);
+  assertEquals(context.currentDir, "/workspace/new");
 });
 
 Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout", async () => {

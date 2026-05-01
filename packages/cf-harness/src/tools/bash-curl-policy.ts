@@ -184,9 +184,13 @@ const validateCurlArgs = (args: readonly string[]): BashCurlPolicyResult => {
     sawTarget = true;
   }
 
-  return sawTarget || args.length === 0 || args.some(isCurlInfoFlag)
-    ? { allowed: true }
-    : { allowed: true };
+  if (sawTarget || args.length === 0 || args.some(isCurlInfoFlag)) {
+    return { allowed: true };
+  }
+  return {
+    allowed: false,
+    reason: "curl commands must include a localhost URL target",
+  };
 };
 
 const validateLocalhostCurlTarget = (target: string): BashCurlPolicyResult => {
@@ -254,10 +258,6 @@ const splitLongFlagValue = (arg: string): [string, string | undefined] => {
 
 const containsCurlWord = (command: string): boolean =>
   /(^|[^A-Za-z0-9_.-])curl([^A-Za-z0-9_.-]|$)/.test(command);
-
-const isCurlToken = (token: string): boolean => {
-  return shellBasename(token) === CURL_COMMAND_NAME;
-};
 
 const shellBasename = (token: string): string =>
   token.split("/").pop() ?? token;

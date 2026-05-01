@@ -78,6 +78,7 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
       : context.currentDir;
     const curlPolicy = validateBashCurlCommand(input.command);
     if (!curlPolicy.allowed) {
+      context.setCurrentDir(commandCwd);
       return {
         outputId,
         stdout: "",

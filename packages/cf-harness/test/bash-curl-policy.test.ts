@@ -28,6 +28,8 @@ Deno.test("validateBashCurlCommand denies external curl targets", () => {
   assertDenied("curl example.com");
   assertDenied("curl --url=https://example.com");
   assertDenied("curl -fsS https://commontools.org | head");
+  assertDenied("curl -fsS");
+  assertDenied("curl --request GET");
 });
 
 Deno.test("validateBashCurlCommand denies curl routing overrides", () => {
