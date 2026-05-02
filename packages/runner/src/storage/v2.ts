@@ -26,8 +26,8 @@ import { isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import { stableHash } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
   isPrimitiveCellLink,
@@ -637,7 +637,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
   ): Promise<Cell<T>> {
     const pathStr = JSON.stringify(cell.path);
-    const schemaStr = schema ? stableHash(schema) : "";
+    const schemaStr = schema ? hashStringOf(schema) : "";
     const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}`;
     const existing = dataURISyncCache.get(cacheKey);
     if (existing) {
@@ -978,7 +978,7 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const normalizedEntries = normalizeSyncEntries(entries);
-    const key = stableHash(normalizedEntries.map(([address, selector]) => ({
+    const key = hashStringOf(normalizedEntries.map(([address, selector]) => ({
       id: address.id,
       selector,
     })));

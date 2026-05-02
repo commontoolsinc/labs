@@ -1,6 +1,5 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { encodePointer } from "../../../memory/v2/path.ts";
-import { stableHash } from "../traverse.ts";
 import type {
   AttemptedWrite,
   CfcAddress,
@@ -25,7 +24,48 @@ const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
   const rightKey = `${right.space}\u0000${right.id}\u0000${
     logicalPathToPointer(right.path)
   }`;
-  return leftKey.localeCompare(rightKey);
+  return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+};
+
+const compareWritePolicyInput = (
+  left: WritePolicyInput,
+  right: WritePolicyInput,
+): number => {
+  if (left.kind < right.kind) return -1;
+  if (left.kind > right.kind) return 1;
+
+  // Same kind on both sides. Use a structurally meaningful sub-key
+  // so canonical order is readable in debug output; fall back to the
+  // canonical hash to give a total order on otherwise-distinct records.
+  let primary = 0;
+  switch (left.kind) {
+    case "schema":
+    case "structural-provenance":
+    case "trusted-event":
+    case "link-write": {
+      const r = right as typeof left;
+      primary = compareAddress(left.target, r.target);
+      break;
+    }
+    case "custom": {
+      const r = right as typeof left;
+      primary = left.name < r.name ? -1 : left.name > r.name ? 1 : 0;
+      break;
+    }
+    case "sink-request": {
+      const r = right as typeof left;
+      primary = left.effectId < r.effectId
+        ? -1
+        : left.effectId > r.effectId
+        ? 1
+        : 0;
+      break;
+    }
+  }
+  if (primary !== 0) return primary;
+  const leftHash = hashStringOf(left);
+  const rightHash = hashStringOf(right);
+  return leftHash < rightHash ? -1 : leftHash > rightHash ? 1 : 0;
 };
 
 export const canonicalizeConsumedRead = (
@@ -94,11 +134,11 @@ export const canonicalizeCfcMetadata = (
     entries: [...metadata.labelMap.entries].map((entry) => ({
       path: canonicalizeLogicalPath(entry.path),
       label: entry.label,
-    })).sort((left, right) =>
-      logicalPathToPointer(left.path).localeCompare(
-        logicalPathToPointer(right.path),
-      )
-    ),
+    })).sort((left, right) => {
+      const leftKey = logicalPathToPointer(left.path);
+      const rightKey = logicalPathToPointer(right.path);
+      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    }),
   },
 });
 
@@ -121,13 +161,12 @@ export const canonicalizePreparedDigestInput = (
       return sourceCompare;
     }
     const targetCompare = compareAddress(left.target, right.target);
-    return targetCompare !== 0
-      ? targetCompare
-      : left.kind.localeCompare(right.kind);
+    if (targetCompare !== 0) return targetCompare;
+    return left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0;
   }),
   writePolicyInputs: [...input.writePolicyInputs].map(
     canonicalizeWritePolicyInput,
-  ).sort((left, right) => stableHash(left).localeCompare(stableHash(right))),
+  ).sort(compareWritePolicyInput),
   implementationIdentity: input.implementationIdentity,
   trustSnapshot: input.trustSnapshot,
 });
