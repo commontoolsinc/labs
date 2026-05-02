@@ -74,6 +74,42 @@ const reconnectDelayMs = (attempt: number): number => {
 
 const watchKey = (branch: string, id: string): string => `${branch}\0${id}`;
 
+const compareEntitySnapshot = (
+  left: EntitySnapshot,
+  right: EntitySnapshot,
+): number =>
+  left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id);
+
+const mergeOrderedEntities = (
+  left: EntitySnapshot[],
+  right: EntitySnapshot[],
+): EntitySnapshot[] => {
+  const merged: EntitySnapshot[] = [];
+  let leftIndex = 0;
+  let rightIndex = 0;
+
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftEntity = left[leftIndex]!;
+    const rightEntity = right[rightIndex]!;
+    if (compareEntitySnapshot(leftEntity, rightEntity) <= 0) {
+      merged.push(leftEntity);
+      leftIndex += 1;
+    } else {
+      merged.push(rightEntity);
+      rightIndex += 1;
+    }
+  }
+
+  if (leftIndex < left.length) {
+    merged.push(...left.slice(leftIndex));
+  }
+  if (rightIndex < right.length) {
+    merged.push(...right.slice(rightIndex));
+  }
+
+  return merged;
+};
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
@@ -874,17 +910,61 @@ export class WatchView {
   }
 
   applySync(sync: SessionSync, emit: boolean): void {
+    const upserts = new Map<string, EntitySnapshot>();
     for (const upsert of sync.upserts) {
-      this.upsertEntity({
+      upserts.set(watchKey(upsert.branch, upsert.id), {
         branch: upsert.branch,
         id: upsert.id,
         seq: upsert.seq,
         document: upsert.doc ?? null,
       });
     }
+
+    const removeKeys = new Set<string>();
+    let hasRemovedExistingEntity = false;
     for (const remove of sync.removes) {
-      this.removeEntity(remove.branch, remove.id);
+      const key = watchKey(remove.branch, remove.id);
+      removeKeys.add(key);
+      hasRemovedExistingEntity ||= this.#entityPositions.has(key);
     }
+
+    const newEntities: EntitySnapshot[] = [];
+    for (const [key, entity] of upserts) {
+      const existingIndex = this.#entityPositions.get(key);
+      if (existingIndex !== undefined) {
+        this.#orderedEntities[existingIndex] = entity;
+      } else if (!removeKeys.has(key)) {
+        newEntities.push(entity);
+      }
+    }
+
+    if (hasRemovedExistingEntity || newEntities.length > 0) {
+      newEntities.sort(compareEntitySnapshot);
+
+      const retainedEntities = hasRemovedExistingEntity
+        ? this.#orderedEntities.filter((entity) =>
+          !removeKeys.has(watchKey(entity.branch, entity.id))
+        )
+        : this.#orderedEntities;
+
+      const lastRetained = retainedEntities.at(-1);
+      if (
+        newEntities.length > 0 &&
+        lastRetained !== undefined &&
+        compareEntitySnapshot(lastRetained, newEntities[0]!) < 0
+      ) {
+        this.#orderedEntities = [...retainedEntities, ...newEntities];
+      } else if (newEntities.length > 0) {
+        this.#orderedEntities = mergeOrderedEntities(
+          retainedEntities,
+          newEntities,
+        );
+      } else {
+        this.#orderedEntities = retainedEntities;
+      }
+      this.rebuildEntityPositions();
+    }
+
     this.#serverSeq = Math.max(this.#serverSeq, sync.toSeq);
     if (emit) {
       this.emit(sync);
@@ -972,53 +1052,9 @@ export class WatchView {
     this.#syncQueue = [];
   }
 
-  private upsertEntity(entity: EntitySnapshot): void {
-    const key = watchKey(entity.branch, entity.id);
-    const existingIndex = this.#entityPositions.get(key);
-    if (existingIndex !== undefined) {
-      this.#orderedEntities[existingIndex] = entity;
-      return;
-    }
-
-    const insertIndex = this.findInsertIndex(entity.branch, entity.id);
-    this.#orderedEntities.splice(insertIndex, 0, entity);
-    this.#entityPositions.set(key, insertIndex);
-    this.reindexFrom(insertIndex + 1);
-  }
-
-  private removeEntity(branch: string, id: string): void {
-    const key = watchKey(branch, id);
-    const existingIndex = this.#entityPositions.get(key);
-    if (existingIndex === undefined) {
-      return;
-    }
-
-    this.#orderedEntities.splice(existingIndex, 1);
-    this.#entityPositions.delete(key);
-    this.reindexFrom(existingIndex);
-  }
-
-  private findInsertIndex(branch: string, id: string): number {
-    let low = 0;
-    let high = this.#orderedEntities.length;
-
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      const current = this.#orderedEntities[mid]!;
-      const compared = current.branch.localeCompare(branch) ||
-        current.id.localeCompare(id);
-      if (compared < 0) {
-        low = mid + 1;
-      } else {
-        high = mid;
-      }
-    }
-
-    return low;
-  }
-
-  private reindexFrom(start: number): void {
-    for (let index = start; index < this.#orderedEntities.length; index += 1) {
+  private rebuildEntityPositions(): void {
+    this.#entityPositions.clear();
+    for (let index = 0; index < this.#orderedEntities.length; index += 1) {
       const entity = this.#orderedEntities[index]!;
       this.#entityPositions.set(watchKey(entity.branch, entity.id), index);
     }
