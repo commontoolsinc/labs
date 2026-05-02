@@ -15,6 +15,7 @@
 import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";
 import { canonicalizePreparedDigestInput } from "../src/cfc/canonical.ts";
 import { watchIdForEntry } from "../src/storage/v2-watch.ts";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { WritePolicyInput } from "../src/cfc/types.ts";
@@ -29,6 +30,16 @@ const makeAddress = (idSuffix: string, ...path: (string | number)[]) => ({
   type: "application/json",
   path: ["value", ...path.map(String)],
 });
+
+// Pre-freeze each `WritePolicyInput`, mirroring what the production chokepoint
+// (`recordCfcWritePolicyInput`) does on entry. Bench fixtures otherwise come
+// out mutable and don't reflect the production cache-eligibility shape.
+const freezePolicies = (
+  policies: WritePolicyInput[],
+): WritePolicyInput[] => {
+  for (const p of policies) deepFreeze(p);
+  return policies;
+};
 
 // A small `PreparedDigestInput` that approximates a typical pattern-tick
 // boundary: a handful of reads and writes, one or two policy inputs, no
@@ -45,13 +56,13 @@ const SMALL_INPUT: PreparedDigestInput = {
     makeAddress("a", "items", 0),
   ],
   dereferenceTraces: [],
-  writePolicyInputs: [
+  writePolicyInputs: freezePolicies([
     {
       kind: "schema",
       target: makeAddress("a", "items", 0),
       schemaHash: "schemaHash-1",
     },
-  ],
+  ]),
   implementationIdentity: { kind: "builtin", builtinId: "test-builtin" },
   trustSnapshot: undefined,
 };
@@ -74,7 +85,7 @@ const LARGE_INPUT: PreparedDigestInput = {
     target: makeAddress(`d${i}`, "dst"),
     kind: i % 2 === 0 ? "value" as const : "write-redirect" as const,
   })),
-  writePolicyInputs: [
+  writePolicyInputs: freezePolicies([
     {
       kind: "schema",
       target: makeAddress("w0", "out", 0),
@@ -105,7 +116,30 @@ const LARGE_INPUT: PreparedDigestInput = {
       name: "policy-a",
       value: { allow: false },
     } satisfies WritePolicyInput,
-  ],
+  ]),
+  implementationIdentity: { kind: "builtin", builtinId: "test-builtin" },
+  trustSnapshot: undefined,
+};
+
+// A tiebreak-heavy fixture: many `custom` policies that share `kind` AND
+// `name`, forcing every pairwise sort comparison through the
+// `hashStringOf()` tiebreaker. With the chokepoint freeze in place each
+// frozen input is cache-eligible, so the within-sort cache fires from
+// iteration two onward; without it, every comparator call rehashes from
+// scratch. Synthetic worst case, included so the regression detector flags
+// any future regression in the cache-eligibility pathway.
+const TIEBREAK_HEAVY_INPUT: PreparedDigestInput = {
+  consumedReads: [],
+  potentialWrites: [],
+  writes: [],
+  dereferenceTraces: [],
+  writePolicyInputs: freezePolicies(
+    Array.from({ length: 8 }, (_, i) => ({
+      kind: "custom" as const,
+      name: "shared-name",
+      value: { discriminator: i, payload: `value-${i}` },
+    } satisfies WritePolicyInput)),
+  ),
   implementationIdentity: { kind: "builtin", builtinId: "test-builtin" },
   trustSnapshot: undefined,
 };
@@ -131,6 +165,14 @@ Deno.bench(
   { group: "preparedDigestFor" },
   () => {
     canonicalizePreparedDigestInput(LARGE_INPUT);
+  },
+);
+
+Deno.bench(
+  "preparedDigestFor — tiebreak-heavy (8 custom policies sharing kind+name)",
+  { group: "preparedDigestFor" },
+  () => {
+    preparedDigestFor(TIEBREAK_HEAVY_INPUT);
   },
 );
 
