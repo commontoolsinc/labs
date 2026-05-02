@@ -340,6 +340,46 @@ export class MapSetStringToStrings extends MapSet<string, string> {
   }
 }
 
+const pathStartsWith = (
+  path: readonly string[],
+  prefix: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((part, index) => path[index] === part);
+
+export const schemaTrackerCoversSelector = (
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+  key: string,
+  selector: SchemaPathSelector,
+): boolean => {
+  const internedSelector = selector.schema !== undefined &&
+      Object.isFrozen(selector) && Object.isFrozen(selector.path)
+    ? selector
+    : internPathSelector({
+      path: [...selector.path],
+      schema: selector.schema ?? false,
+    });
+  if (schemaTracker.hasValue(key, internedSelector)) {
+    return true;
+  }
+
+  const existingSelectors = schemaTracker.get(key);
+  if (existingSelectors === undefined) {
+    return false;
+  }
+
+  for (const existing of existingSelectors) {
+    if (
+      existing.schema !== undefined &&
+      ContextualFlowControl.isTrueSchema(existing.schema) &&
+      pathStartsWith(internedSelector.path, existing.path)
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export class CycleTracker<K> {
   private partial: Set<K>;
   private expectCycles: boolean;
@@ -698,6 +738,7 @@ export abstract class BaseObjectTraverser {
     protected traverseCells = true,
   ) {}
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
+  private coverageSelectorCache = new Map<string, SchemaPathSelector>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
@@ -819,21 +860,13 @@ export abstract class BaseObjectTraverser {
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isPrimitiveCellLink(doc.value)) {
-        // Check if target doc is already tracked BEFORE calling getAtPath,
-        // since getAtPath/followPointer will add it to schemaTracker
-        let alreadyTracked = false;
-        // If the link didn't have a space/type, make sure we add one
+        // Check coverage before getAtPath/followPointer adds this link target
+        // to schemaTracker.
+        const alreadyTracked = this.isLinkedDocumentCovered(
+          doc,
+          DEFAULT_SELECTOR,
+        );
         const link = parseLink(doc.value, doc.address);
-        if (link.id !== undefined) {
-          const targetKey = `${link.space}/${link.id}/${link.type}`;
-          alreadyTracked = this.schemaTracker.hasValue(
-            targetKey,
-            internPathSelector({
-              path: ["value", ...link.path],
-              schema: true,
-            }),
-          );
-        }
         const [redirDoc, _redirSelector] = this.getDocAtPath(
           doc,
           [],
@@ -973,6 +1006,54 @@ export abstract class BaseObjectTraverser {
     } else {
       return [doc, selector];
     }
+  }
+
+  protected isLinkedDocumentCovered(
+    doc: IMemorySpaceValueAttestation,
+    selector: SchemaPathSelector,
+  ): boolean {
+    const link = parseLink(doc.value, doc.address);
+    if (link?.id === undefined) {
+      return false;
+    }
+
+    const targetSelector = narrowSchema(
+      doc.address.path,
+      selector,
+      ["value", ...(link.path as readonly string[])],
+      this.cfc,
+    );
+    targetSelector.schema = combineOptionalSchema(
+      targetSelector.schema,
+      link.schema,
+    );
+
+    return schemaTrackerCoversSelector(
+      this.schemaTracker,
+      `${link.space}/${link.id}/${link.type}`,
+      this.internCoverageSelector(targetSelector),
+    );
+  }
+
+  private internCoverageSelector(
+    selector: SchemaPathSelector,
+  ): SchemaPathSelector {
+    const schema = selector.schema ?? false;
+    const schemaKey = typeof schema === "boolean"
+      ? String(schema)
+      : hashSchema(schema);
+    const cacheKey = `${selector.path.join("\0")}\0${schemaKey}`;
+    const cached = this.coverageSelectorCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const interned = internPathSelector({
+      path: [...selector.path],
+      schema,
+    });
+    this.coverageSelectorCache.set(cacheKey, interned);
+    return interned;
   }
 
   /**
@@ -2700,6 +2781,18 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isPrimitiveCellLink(item)) {
+        const alreadyTracked = this.isLinkedDocumentCovered(
+          curDoc,
+          curSelector,
+        );
+        const link = parseLink(item, curDoc.address);
+        if (
+          this.traverseCells && alreadyTracked && link?.id !== doc.address.id
+        ) {
+          this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+          arrayObj[index] = null;
+          return true;
+        }
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const [redirDoc, selector] = this.getDocAtPath(
           curDoc,
@@ -2996,6 +3089,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): TraverseResult<Immutable<FabricValue>> {
     this.traversePointerCalls++;
     const selector = { path: doc.address.path, schema };
+    const alreadyTracked = this.isLinkedDocumentCovered(doc, selector);
 
     // In the case of an opaque cell, we want to skip any deeper reads
     // This means we don't follow any redirects
@@ -3003,6 +3097,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (asCellValues.at(0) === "opaque") {
       const cellLink = getNextCellLink(doc, schema);
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
+    }
+
+    const pointerLink = parseLink(doc.value, doc.address);
+    if (
+      this.traverseCells && alreadyTracked &&
+      pointerLink?.id !== doc.address.id
+    ) {
+      return { ok: null };
     }
 
     const [redirDoc, redirSelector] = this.getDocAtPath(
@@ -3046,6 +3148,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           : fail(TRAVERSE_FAILURES.undefinedLink);
       }
     }
+
     // For the runtime, where we don't traverse cells, we just want
     // to create a cell object and don't walk into the object beyond
     // what we need to resolve the pointers.

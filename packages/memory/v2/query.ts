@@ -10,6 +10,7 @@ import {
   type ObjectStorageManager,
   SchemaObjectTraverser,
   type SchemaPathSelector,
+  schemaTrackerCoversSelector,
 } from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
@@ -456,7 +457,7 @@ const loadFactsForDoc = (
 
   const docKey = toDocKey(space, fact.address.id, fact.address.type);
   const internedSelector = internPathSelector(selector);
-  if (schemaTracker.hasValue(docKey, internedSelector)) {
+  if (schemaTrackerCoversSelector(schemaTracker, docKey, internedSelector)) {
     return;
   }
   schemaTracker.add(docKey, internedSelector);

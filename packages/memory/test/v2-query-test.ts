@@ -365,6 +365,136 @@ Deno.test("memory v2 query reuses a persistent manager cache for shared source g
   }
 });
 
+Deno.test("memory v2 query refresh skips already-covered stable linked docs", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-refresh-covered-links";
+  const fixture = createGraphFixture(space);
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: fixture.docs.map((doc) => ({
+          op: "set" as const,
+          id: doc.id,
+          value: { value: doc.value },
+        })),
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+    });
+
+    const rootDoc = fixture.docs.find((doc) => doc.id === fixture.rootId);
+    assertExists(rootDoc);
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: fixture.rootId,
+          value: {
+            value: {
+              ...rootDoc.value,
+              metadata: { tag: "updated-root" },
+            },
+          },
+        }],
+      },
+    });
+
+    const refreshed = refreshTrackedGraph(
+      space,
+      engine,
+      tracked.state,
+      new Set([fixture.rootId]),
+    );
+    assertExists(refreshed);
+    assertEquals(
+      [...refreshed.updates.values()].map((entity) => entity.id).sort(),
+      [fixture.rootId],
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 query treats schema true as covering narrower selectors", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-true-covers-narrower";
+  const rootId = "of:true-covers-narrower-root";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: rootId,
+          value: {
+            value: {
+              child: { label: "already covered" },
+            },
+          },
+        }],
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: rootId,
+        selector: {
+          path: [],
+          schema: true,
+        },
+      }],
+    });
+    const rootKey = `${space}/${rootId}/application/json`;
+    assertEquals(tracked.state.tracker.get(rootKey)?.size, 1);
+
+    extendTrackedGraph(space, engine, tracked.state, {
+      roots: [{
+        id: rootId,
+        selector: {
+          path: ["child"],
+          schema: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+            },
+            required: ["label"],
+          },
+        },
+      }],
+    });
+
+    assertEquals(tracked.state.tracker.get(rootKey)?.size, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 query uses a fresh memo for write-triggered refreshes", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-refresh";
@@ -426,7 +556,12 @@ Deno.test("memory v2 query uses a fresh memo for write-triggered refreshes", asy
 
     assertEquals(
       [...refreshed.updates.values()].map((entity) => entity.id).sort(),
-      fixture.expandedReachableIds,
+      [
+        fixture.rootId,
+        ...fixture.expandedReachableIds.filter((id) =>
+          !fixture.initialReachableIds.includes(id)
+        ),
+      ],
     );
   } finally {
     close(engine);
