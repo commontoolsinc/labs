@@ -349,6 +349,81 @@ Deno.test("memory v2 watch view keeps emitted snapshots incrementally ordered", 
   );
 });
 
+Deno.test("memory v2 watch view batches structural syncs deterministically", () => {
+  const view = WatchView.fromSync({
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:doc:d",
+      seq: 1,
+      doc: { value: { label: "d" } },
+    }, {
+      branch: "",
+      id: "of:doc:a",
+      seq: 1,
+      doc: { value: { label: "a" } },
+    }, {
+      branch: "",
+      id: "of:doc:c",
+      seq: 1,
+      doc: { value: { label: "c" } },
+    }],
+    removes: [],
+  });
+
+  view.applySync({
+    type: "sync",
+    fromSeq: 1,
+    toSeq: 2,
+    upserts: [{
+      branch: "",
+      id: "of:doc:c",
+      seq: 2,
+      doc: { value: { label: "c2" } },
+    }, {
+      branch: "",
+      id: "of:doc:b",
+      seq: 2,
+      doc: { value: { label: "b-old" } },
+    }, {
+      branch: "",
+      id: "of:doc:b",
+      seq: 3,
+      doc: { value: { label: "b-new" } },
+    }, {
+      branch: "",
+      id: "of:doc:f",
+      seq: 2,
+      doc: { value: { label: "removed" } },
+    }],
+    removes: [{
+      branch: "",
+      id: "of:doc:d",
+    }, {
+      branch: "",
+      id: "of:doc:f",
+    }, {
+      branch: "",
+      id: "of:doc:missing",
+    }],
+  }, false);
+
+  assertEquals(
+    view.entities.map((entity) => entity.id),
+    ["of:doc:a", "of:doc:b", "of:doc:c"],
+  );
+  assertEquals(
+    view.entities.find((entity) => entity.id === "of:doc:b")?.document,
+    { value: { label: "b-new" } },
+  );
+  assertEquals(
+    view.entities.find((entity) => entity.id === "of:doc:c")?.document,
+    { value: { label: "c2" } },
+  );
+});
+
 Deno.test("memory v2 client close settles a pending ack flush", async () => {
   const time = new FakeTime();
   const transport = new HangingAckTransport();
