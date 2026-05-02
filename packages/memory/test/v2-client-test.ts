@@ -424,6 +424,46 @@ Deno.test("memory v2 watch view batches structural syncs deterministically", () 
   );
 });
 
+Deno.test("memory v2 watch view return clears pending snapshot waiters", async () => {
+  const view = WatchView.fromSync({
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [],
+    removes: [],
+  });
+
+  const canceled = view.subscribe();
+  const canceledNext = canceled.next();
+  await canceled.return?.();
+  assertEquals(await canceledNext, {
+    done: true,
+    value: undefined,
+  });
+
+  const active = view.subscribe();
+  const activeNext = active.next();
+  view.applySync({
+    type: "sync",
+    fromSeq: 1,
+    toSeq: 2,
+    upserts: [{
+      branch: "",
+      id: "of:doc:active",
+      seq: 2,
+      doc: { value: { label: "active" } },
+    }],
+    removes: [],
+  }, true);
+
+  const snapshot = await activeNext;
+  assertEquals(snapshot.done, false);
+  assertEquals(
+    snapshot.value.entities.map((entity: EntitySnapshot) => entity.id),
+    ["of:doc:active"],
+  );
+});
+
 Deno.test("memory v2 client close settles a pending ack flush", async () => {
   const time = new FakeTime();
   const transport = new HangingAckTransport();

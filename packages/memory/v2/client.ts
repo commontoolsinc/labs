@@ -861,6 +861,9 @@ export class WatchView {
   subscribe(): AsyncIterator<GraphQueryResult> {
     this.#subscribers += 1;
     let active = true;
+    const iteratorPending = new Set<
+      PromiseWithResolvers<IteratorResult<GraphQueryResult>>
+    >();
     return {
       next: async () => {
         if (this.#closed || !active) {
@@ -877,13 +880,26 @@ export class WatchView {
           IteratorResult<GraphQueryResult>
         >();
         this.#pending.add(pending);
-        return await pending.promise;
+        iteratorPending.add(pending);
+        try {
+          return await pending.promise;
+        } finally {
+          iteratorPending.delete(pending);
+        }
       },
       return: () => {
         if (active) {
           active = false;
           this.#subscribers = Math.max(0, this.#subscribers - 1);
         }
+        for (const pending of iteratorPending) {
+          this.#pending.delete(pending);
+          pending.resolve({
+            done: true,
+            value: undefined as never,
+          });
+        }
+        iteratorPending.clear();
         return Promise.resolve({
           done: true,
           value: undefined as never,
