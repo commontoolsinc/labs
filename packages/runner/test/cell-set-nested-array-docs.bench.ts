@@ -48,7 +48,7 @@ const DOCUMENT_COUNT = countArrayObjects(DEPTH, WIDTH);
 const SET_DOCUMENT_COUNT = DOCUMENT_COUNT * RUNS;
 const UPDATE_COUNT = Math.min(
   DOCUMENT_COUNT,
-  Math.max(1, Math.floor(DOCUMENT_COUNT * (UPDATE_PERCENT / 100))),
+  Math.floor(DOCUMENT_COUNT * (UPDATE_PERCENT / 100)),
 );
 
 type NestedArrayDocValue = {
@@ -255,12 +255,15 @@ Deno.bench({
       undefined,
       tx,
     );
+    const values = Array.from(
+      { length: RUNS },
+      (_, run) => makeNodes(run, 0, DEPTH, ""),
+    );
 
     try {
       b.start();
       for (let run = 0; run < RUNS; run++) {
-        const value = makeNodes(run, 0, DEPTH, "");
-        cell.set(value);
+        cell.set(values[run]!);
       }
       await tx.commit();
       b.end();
