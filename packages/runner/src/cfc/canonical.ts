@@ -18,13 +18,13 @@ export const logicalPathToPointer = (path: readonly string[]): string =>
   encodePointer(canonicalizeLogicalPath(path));
 
 const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
-  const leftKey = `${left.space}\u0000${left.id}\u0000${
-    logicalPathToPointer(left.path)
-  }`;
-  const rightKey = `${right.space}\u0000${right.id}\u0000${
-    logicalPathToPointer(right.path)
-  }`;
-  return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  if (left.space !== right.space) {
+    return left.space < right.space ? -1 : 1;
+  }
+  if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+  const leftPointer = logicalPathToPointer(left.path);
+  const rightPointer = logicalPathToPointer(right.path);
+  return leftPointer < rightPointer ? -1 : leftPointer > rightPointer ? 1 : 0;
 };
 
 const compareWritePolicyInput = (
