@@ -629,9 +629,15 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * for accidental mutation and to make it eligible for the
    * `hashStringOf()` WeakMap cache. Today, only
    * `recordCfcWritePolicyInput()` does this, but the contract applies
-   * uniformly to every method in this group; callers who construct a
-   * record purely to pass it to one of these methods need not (and
-   * generally should not) freeze it themselves.
+   * uniformly to every method in this group.
+   *
+   * Callers do not need to freeze the record themselves — the CFC
+   * implementation will, where it's useful. Freezing on the caller side
+   * is equally welcome though, and is often a reasonable choice when
+   * the same record (or sub-objects) is also handed to other consumers
+   * with similar contracts; `deepFreeze()` short-circuits on input
+   * that's already deeply frozen, so a redundant freeze costs almost
+   * nothing.
    */
 
   /**
