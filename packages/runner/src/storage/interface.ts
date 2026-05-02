@@ -610,13 +610,65 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
+
+  /**
+   * CFC recording / ownership-transfer API.
+   *
+   * The methods below all hand a caller-constructed record into the CFC
+   * subsystem's transaction-scoped state. Each one establishes an
+   * ownership transfer at the call boundary: from the moment the call
+   * returns, the supplied record is owned by the transaction. Callers
+   * MUST NOT subsequently mutate it (or any object reachable from it),
+   * and MUST NOT retain it for use anywhere else that depends on it
+   * remaining mutable.
+   *
+   * The CFC subsystem treats these records as identity-stable structural
+   * fingerprints — they participate in canonicalization, sorting, and
+   * `hashStringOf()`-based equality. The CFC implementation is therefore
+   * permitted to `deepFreeze()` the record on entry, both as a tripwire
+   * for accidental mutation and to make it eligible for the
+   * `hashStringOf()` WeakMap cache. Today, only
+   * `recordCfcWritePolicyInput()` does this, but the contract applies
+   * uniformly to every method in this group; callers who construct a
+   * record purely to pass it to one of these methods need not (and
+   * generally should not) freeze it themselves.
+   */
+
+  /**
+   * Records a CFC dereference trace produced by following a write
+   * redirect or value reference. See ownership note above.
+   */
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
+
   prepareCfc(input?: PreparedDigestInput): string;
+
+  /**
+   * Sets (or clears) the CFC trust snapshot for this transaction. See
+   * ownership note above.
+   */
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void;
+
+  /**
+   * Sets (or clears) the implementation identity that will be folded
+   * into the CFC digest for this transaction. See ownership note above.
+   */
   setCfcImplementationIdentity(
     identity: ImplementationIdentity | undefined,
   ): void;
+
+  /**
+   * Records a write-policy input that will participate in the CFC
+   * commit-boundary digest. See ownership note above; this is currently
+   * the method that actively `deepFreeze()`s its argument on entry, in
+   * order to enable the within-sort tiebreaker cache in
+   * `compareWritePolicyInput`.
+   */
   recordCfcWritePolicyInput(input: WritePolicyInput): void;
+
+  /**
+   * Enqueues a side effect to run from the CFC outbox after a successful
+   * commit. See ownership note above.
+   */
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void;
 
   /**
