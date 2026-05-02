@@ -80,36 +80,6 @@ const compareEntitySnapshot = (
 ): number =>
   left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id);
 
-const mergeOrderedEntities = (
-  left: EntitySnapshot[],
-  right: EntitySnapshot[],
-): EntitySnapshot[] => {
-  const merged: EntitySnapshot[] = [];
-  let leftIndex = 0;
-  let rightIndex = 0;
-
-  while (leftIndex < left.length && rightIndex < right.length) {
-    const leftEntity = left[leftIndex]!;
-    const rightEntity = right[rightIndex]!;
-    if (compareEntitySnapshot(leftEntity, rightEntity) <= 0) {
-      merged.push(leftEntity);
-      leftIndex += 1;
-    } else {
-      merged.push(rightEntity);
-      rightIndex += 1;
-    }
-  }
-
-  if (leftIndex < left.length) {
-    merged.push(...left.slice(leftIndex));
-  }
-  if (rightIndex < right.length) {
-    merged.push(...right.slice(rightIndex));
-  }
-
-  return merged;
-};
-
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
@@ -866,10 +836,11 @@ export class SpaceSession {
 export class WatchView {
   #queue: GraphQueryResult[] = [];
   #pending = new Set<PromiseWithResolvers<IteratorResult<GraphQueryResult>>>();
+  #subscribers = 0;
   #syncQueue: SessionSync[] = [];
   #syncPending = new Set<PromiseWithResolvers<IteratorResult<SessionSync>>>();
-  #entityPositions = new Map<string, number>();
-  #orderedEntities: EntitySnapshot[] = [];
+  #entities = new Map<string, EntitySnapshot>();
+  #orderedEntities: EntitySnapshot[] | null = null;
   #closed = false;
   #serverSeq = 0;
 
@@ -880,7 +851,7 @@ export class WatchView {
   }
 
   get entities(): EntitySnapshot[] {
-    return [...this.#orderedEntities];
+    return [...this.orderedEntities()];
   }
 
   get serverSeq(): number {
@@ -888,9 +859,11 @@ export class WatchView {
   }
 
   subscribe(): AsyncIterator<GraphQueryResult> {
+    this.#subscribers += 1;
+    let active = true;
     return {
       next: async () => {
-        if (this.#closed) {
+        if (this.#closed || !active) {
           return {
             done: true,
             value: undefined as never,
@@ -905,6 +878,16 @@ export class WatchView {
         >();
         this.#pending.add(pending);
         return await pending.promise;
+      },
+      return: () => {
+        if (active) {
+          active = false;
+          this.#subscribers = Math.max(0, this.#subscribers - 1);
+        }
+        return Promise.resolve({
+          done: true,
+          value: undefined as never,
+        });
       },
     };
   }
@@ -921,48 +904,25 @@ export class WatchView {
     }
 
     const removeKeys = new Set<string>();
-    let hasRemovedExistingEntity = false;
     for (const remove of sync.removes) {
       const key = watchKey(remove.branch, remove.id);
       removeKeys.add(key);
-      hasRemovedExistingEntity ||= this.#entityPositions.has(key);
     }
 
-    const newEntities: EntitySnapshot[] = [];
+    let changedEntities = false;
     for (const [key, entity] of upserts) {
-      const existingIndex = this.#entityPositions.get(key);
-      if (existingIndex !== undefined) {
-        this.#orderedEntities[existingIndex] = entity;
-      } else if (!removeKeys.has(key)) {
-        newEntities.push(entity);
+      if (!removeKeys.has(key)) {
+        this.#entities.set(key, entity);
+        changedEntities = true;
       }
     }
 
-    if (hasRemovedExistingEntity || newEntities.length > 0) {
-      newEntities.sort(compareEntitySnapshot);
+    for (const key of removeKeys) {
+      changedEntities = this.#entities.delete(key) || changedEntities;
+    }
 
-      const retainedEntities = hasRemovedExistingEntity
-        ? this.#orderedEntities.filter((entity) =>
-          !removeKeys.has(watchKey(entity.branch, entity.id))
-        )
-        : this.#orderedEntities;
-
-      const lastRetained = retainedEntities.at(-1);
-      if (
-        newEntities.length > 0 &&
-        lastRetained !== undefined &&
-        compareEntitySnapshot(lastRetained, newEntities[0]!) < 0
-      ) {
-        this.#orderedEntities = [...retainedEntities, ...newEntities];
-      } else if (newEntities.length > 0) {
-        this.#orderedEntities = mergeOrderedEntities(
-          retainedEntities,
-          newEntities,
-        );
-      } else {
-        this.#orderedEntities = retainedEntities;
-      }
-      this.rebuildEntityPositions();
+    if (changedEntities) {
+      this.#orderedEntities = null;
     }
 
     this.#serverSeq = Math.max(this.#serverSeq, sync.toSeq);
@@ -973,13 +933,17 @@ export class WatchView {
 
   emit(sync: SessionSync): void {
     this.pushSync(sync);
-    this.push(this.snapshot());
+    if (
+      this.#subscribers > 0 || this.#pending.size > 0 || this.#queue.length > 0
+    ) {
+      this.push(this.snapshot());
+    }
   }
 
   snapshot(): GraphQueryResult {
     return {
       serverSeq: this.#serverSeq,
-      entities: [...this.#orderedEntities],
+      entities: [...this.orderedEntities()],
     };
   }
 
@@ -1041,6 +1005,7 @@ export class WatchView {
       });
     }
     this.#pending.clear();
+    this.#subscribers = 0;
     for (const pending of this.#syncPending) {
       pending.resolve({
         done: true,
@@ -1052,12 +1017,12 @@ export class WatchView {
     this.#syncQueue = [];
   }
 
-  private rebuildEntityPositions(): void {
-    this.#entityPositions.clear();
-    for (let index = 0; index < this.#orderedEntities.length; index += 1) {
-      const entity = this.#orderedEntities[index]!;
-      this.#entityPositions.set(watchKey(entity.branch, entity.id), index);
+  private orderedEntities(): EntitySnapshot[] {
+    if (this.#orderedEntities === null) {
+      this.#orderedEntities = [...this.#entities.values()]
+        .sort(compareEntitySnapshot);
     }
+    return this.#orderedEntities;
   }
 }
 
