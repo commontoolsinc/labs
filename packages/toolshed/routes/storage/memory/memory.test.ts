@@ -114,12 +114,12 @@ const serialTest = (
   });
 
 serialTest(
-  "memory websocket authorizes v2 session opens with a workspace spaceIdentity",
+  "memory websocket authorizes session opens with a workspace spaceIdentity",
   async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
       identity,
-      spaceName: `memory-v2-space-identity-${Date.now()}`,
+      spaceName: `memory-space-identity-${Date.now()}`,
     });
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
@@ -137,7 +137,7 @@ serialTest(
       const tx = runtime.edit();
       const cell = runtime.getCell(
         session.space,
-        `memory-v2-space-identity-cell-${Date.now()}`,
+        `memory-space-identity-cell-${Date.now()}`,
         undefined,
         tx,
       );
@@ -163,9 +163,9 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket supports a runtime using the v2 cutover path",
+  "memory websocket supports a runtime using the memory path",
   async () => {
-    const identity = await Identity.fromPassphrase("memory-v2-route-traffic");
+    const identity = await Identity.fromPassphrase("memory-route-traffic");
     const server = Deno.serve({ port: 0 }, app.fetch);
     const address = new URL(
       `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
@@ -187,7 +187,7 @@ serialTest(
       const tx = runtime.edit();
       const cell = runtime.getCell(
         identity.did(),
-        `memory-v2-toolshed-${Date.now()}`,
+        `memory-toolshed-${Date.now()}`,
         undefined,
         tx,
       );
@@ -219,13 +219,13 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket persists v2 runtime data across fresh runtimes",
+  "memory websocket persists memory runtime data across fresh runtimes",
   async () => {
-    const identity = await Identity.fromPassphrase("memory-v2-route-persist");
+    const identity = await Identity.fromPassphrase("memory-route-persist");
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
     const address = new URL("/api/storage/memory", base);
-    const cause = `memory-v2-toolshed-persist-${Date.now()}`;
+    const cause = `memory-toolshed-persist-${Date.now()}`;
     let runtime1: Runtime | undefined;
     let runtime2: Runtime | undefined;
 
@@ -266,8 +266,8 @@ serialTest(
   },
 );
 
-serialTest("memory websocket negotiates a v2 session", async () => {
-  const identity = await Identity.fromPassphrase("memory-v2-route-open-auth");
+serialTest("memory websocket negotiates a session", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-open-auth");
   const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
     `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
@@ -314,8 +314,8 @@ serialTest("memory websocket negotiates a v2 session", async () => {
   }
 });
 
-serialTest("memory websocket rejects an unsigned v2 session open", async () => {
-  const identity = await Identity.fromPassphrase("memory-v2-route-open-reject");
+serialTest("memory websocket rejects an unsigned session open", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-open-reject");
   const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
     `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
@@ -349,8 +349,8 @@ serialTest("memory websocket rejects an unsigned v2 session open", async () => {
   }
 });
 
-serialTest("memory websocket resumes a requested v2 session id", async () => {
-  const identity = await Identity.fromPassphrase("memory-v2-route-resume-auth");
+serialTest("memory websocket resumes a requested session id", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-resume-auth");
   const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
     `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
@@ -396,7 +396,7 @@ serialTest("memory websocket resumes a requested v2 session id", async () => {
 });
 
 serialTest(
-  "memory websocket requires hello before opening a v2 session",
+  "memory websocket requires hello before opening a session",
   async () => {
     const server = Deno.serve({ port: 0 }, app.fetch);
     const address = new URL(
@@ -430,10 +430,10 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket discovers newly linked documents for a subscribed v2 runtime",
+  "memory websocket discovers newly linked documents for a subscribed memory runtime",
   async () => {
     const identity = await Identity.fromPassphrase(
-      `memory-v2-new-link-${Date.now()}`,
+      `memory-new-link-${Date.now()}`,
     );
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
@@ -461,7 +461,7 @@ serialTest(
       let tx = runtime1.edit();
       const addressCell = runtime1.getCell(
         space,
-        "v2-link-address",
+        "memory-link-address",
         addressSchema,
         tx,
       );
@@ -471,7 +471,7 @@ serialTest(
       tx = runtime1.edit();
       const personCell = runtime1.getCell(
         space,
-        "v2-link-person",
+        "memory-link-person",
         personSchema,
         tx,
       );
@@ -484,7 +484,7 @@ serialTest(
       const runtime2 = createRuntime(identity, base);
       const personCell2 = runtime2.getCell(
         space,
-        "v2-link-person",
+        "memory-link-person",
         personSchema,
       );
       await personCell2.sync();
@@ -501,7 +501,7 @@ serialTest(
       const runtime3 = createRuntime(identity, base);
       const personCell3 = runtime3.getCell(
         space,
-        "v2-link-person",
+        "memory-link-person",
         personSchema,
       );
       await personCell3.sync();
@@ -528,10 +528,10 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket propagates linked document changes to a subscribed v2 runtime",
+  "memory websocket propagates linked document changes to a subscribed memory runtime",
   async () => {
     const identity = await Identity.fromPassphrase(
-      `memory-v2-linked-update-${Date.now()}`,
+      `memory-linked-update-${Date.now()}`,
     );
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
@@ -559,7 +559,7 @@ serialTest(
       let tx = runtime1.edit();
       const addressCell = runtime1.getCell(
         space,
-        "v2-linked-address",
+        "memory-linked-address",
         addressSchema,
         tx,
       );
@@ -572,7 +572,7 @@ serialTest(
       tx = runtime1.edit();
       const personCell = runtime1.getCell(
         space,
-        "v2-linked-person",
+        "memory-linked-person",
         personSchema,
         tx,
       );
@@ -587,7 +587,7 @@ serialTest(
       const runtime2 = createRuntime(identity, base);
       const personCell2 = runtime2.getCell(
         space,
-        "v2-linked-person",
+        "memory-linked-person",
         personSchema,
       );
       await personCell2.sync();
@@ -607,7 +607,7 @@ serialTest(
       const runtime3 = createRuntime(identity, base);
       const addressCell3 = runtime3.getCell(
         space,
-        "v2-linked-address",
+        "memory-linked-address",
         addressSchema,
       );
       await addressCell3.sync();
@@ -631,10 +631,10 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket keeps deep linked chains live for a subscribed v2 runtime",
+  "memory websocket keeps deep linked chains live for a subscribed memory runtime",
   async () => {
     const identity = await Identity.fromPassphrase(
-      `memory-v2-deep-link-${Date.now()}`,
+      `memory-deep-link-${Date.now()}`,
     );
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
@@ -670,7 +670,12 @@ serialTest(
     try {
       const runtime1 = createRuntime(identity, base);
       let tx = runtime1.edit();
-      const cityCell = runtime1.getCell(space, "v2-deep-city", citySchema, tx);
+      const cityCell = runtime1.getCell(
+        space,
+        "memory-deep-city",
+        citySchema,
+        tx,
+      );
       cityCell.set({ name: "Seattle", population: 750000 });
       await tx.commit();
       await cityCell.sync();
@@ -680,7 +685,7 @@ serialTest(
       tx = runtime1.edit();
       const addressCell = runtime1.getCell(
         space,
-        "v2-deep-address",
+        "memory-deep-address",
         addressSchema,
         tx,
       );
@@ -696,7 +701,7 @@ serialTest(
       tx = runtime1.edit();
       const personCell = runtime1.getCell(
         space,
-        "v2-deep-person",
+        "memory-deep-person",
         personSchema,
         tx,
       );
@@ -711,7 +716,7 @@ serialTest(
       const runtime2 = createRuntime(identity, base);
       const personCell2 = runtime2.getCell(
         space,
-        "v2-deep-person",
+        "memory-deep-person",
         personSchema,
       );
       await personCell2.sync();
@@ -732,7 +737,7 @@ serialTest(
       });
 
       const runtime3 = createRuntime(identity, base);
-      const cityCell3 = runtime3.getCell(space, "v2-deep-city", citySchema);
+      const cityCell3 = runtime3.getCell(space, "memory-deep-city", citySchema);
       await cityCell3.sync();
       tx = runtime3.edit();
       cityCell3.withTx(tx).set({ name: "Seattle", population: 800000 });
@@ -757,10 +762,10 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket re-establishes subscribed v2 runtimes after server restart",
+  "memory websocket re-establishes subscribed memory runtimes after server restart",
   async () => {
     const identity = await Identity.fromPassphrase(
-      `memory-v2-reconnect-runtime-${Date.now()}`,
+      `memory-reconnect-runtime-${Date.now()}`,
     );
     let server = Deno.serve({ port: 0 }, app.fetch);
     const port = server.addr.port;
@@ -780,7 +785,7 @@ serialTest(
       let tx = runtime1.edit();
       const writer = runtime1.getCell(
         space,
-        "v2-reconnect-counter",
+        "memory-reconnect-counter",
         counterSchema,
         tx,
       );
@@ -792,7 +797,7 @@ serialTest(
       const subscriberRuntime = createRuntime(identity, base);
       const counterCell = subscriberRuntime.getCell(
         space,
-        "v2-reconnect-counter",
+        "memory-reconnect-counter",
         counterSchema,
       );
       await counterCell.sync();
@@ -813,7 +818,7 @@ serialTest(
       const runtime2 = createRuntime(identity, base);
       const counterWriter = runtime2.getCell(
         space,
-        "v2-reconnect-counter",
+        "memory-reconnect-counter",
         counterSchema,
       );
       await counterWriter.sync();
@@ -834,10 +839,10 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket round-trips alias schema metadata through synced v2 runtimes",
+  "memory websocket round-trips alias schema metadata through synced memory runtimes",
   async () => {
     const identity = await Identity.fromPassphrase(
-      `memory-v2-alias-schema-${Date.now()}`,
+      `memory-alias-schema-${Date.now()}`,
     );
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
@@ -856,7 +861,7 @@ serialTest(
       const tx = runtime1.edit();
       const targetCell = runtime1.getCell(
         space,
-        "v2-alias-schema-target",
+        "memory-alias-schema-target",
         undefined,
         tx,
       );
@@ -864,7 +869,7 @@ serialTest(
 
       const aliasCell = runtime1.getCell(
         space,
-        "v2-alias-schema-source",
+        "memory-alias-schema-source",
         undefined,
         tx,
       );
@@ -880,7 +885,7 @@ serialTest(
       const runtime2 = createRuntime(identity, base);
       const aliasCell2 = runtime2.getCell<{ count: number; label: string }>(
         space,
-        "v2-alias-schema-source",
+        "memory-alias-schema-source",
       );
       await aliasCell2.sync();
       await runtime2.storageManager.synced();
@@ -896,10 +901,10 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket preserves alias-derived schemas after v2 reconnect",
+  "memory websocket preserves alias-derived schemas after reconnect",
   async () => {
     const identity = await Identity.fromPassphrase(
-      `memory-v2-alias-reconnect-${Date.now()}`,
+      `memory-alias-reconnect-${Date.now()}`,
     );
     let server = Deno.serve({ port: 0 }, app.fetch);
     const port = server.addr.port;
@@ -919,14 +924,14 @@ serialTest(
       let tx = runtime1.edit();
       const targetCell = runtime1.getCell(
         space,
-        "v2-alias-reconnect-target",
+        "memory-alias-reconnect-target",
         undefined,
         tx,
       );
       targetCell.set({ count: 1, label: "start" });
       const aliasCell = runtime1.getCell(
         space,
-        "v2-alias-reconnect-source",
+        "memory-alias-reconnect-source",
         undefined,
         tx,
       );
@@ -944,7 +949,7 @@ serialTest(
         { count: number; label: string }
       >(
         space,
-        "v2-alias-reconnect-source",
+        "memory-alias-reconnect-source",
       );
       await aliasCell2.sync();
       await subscriberRuntime.storageManager.synced();
@@ -963,7 +968,10 @@ serialTest(
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       const runtime2 = createRuntime(identity, base);
-      const targetCell2 = runtime2.getCell(space, "v2-alias-reconnect-target");
+      const targetCell2 = runtime2.getCell(
+        space,
+        "memory-alias-reconnect-target",
+      );
       await targetCell2.sync();
       tx = runtime2.edit();
       targetCell2.withTx(tx).set({ count: 2, label: "after-restart" });
@@ -984,10 +992,10 @@ serialTest(
 );
 
 serialTest(
-  "memory websocket keeps retargeted aliases live for subscribed v2 runtimes",
+  "memory websocket keeps retargeted aliases live for subscribed memory runtimes",
   async () => {
     const identity = await Identity.fromPassphrase(
-      `memory-v2-alias-retarget-${Date.now()}`,
+      `memory-alias-retarget-${Date.now()}`,
     );
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
@@ -1006,21 +1014,21 @@ serialTest(
       let tx = runtime1.edit();
       const firstTarget = runtime1.getCell(
         space,
-        "v2-alias-retarget-first",
+        "memory-alias-retarget-first",
         undefined,
         tx,
       );
       firstTarget.set({ count: 1, label: "first" });
       const secondTarget = runtime1.getCell(
         space,
-        "v2-alias-retarget-second",
+        "memory-alias-retarget-second",
         undefined,
         tx,
       );
       secondTarget.set({ count: 2, label: "second" });
       const aliasCell = runtime1.getCell(
         space,
-        "v2-alias-retarget-source",
+        "memory-alias-retarget-source",
         undefined,
         tx,
       );
@@ -1037,7 +1045,7 @@ serialTest(
         { count: number; label: string }
       >(
         space,
-        "v2-alias-retarget-source",
+        "memory-alias-retarget-source",
       );
       await aliasCell2.sync();
       await subscriberRuntime.storageManager.synced();
