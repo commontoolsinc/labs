@@ -5,6 +5,7 @@ import type { GraphQuery } from "../v2.ts";
 import { applyCommit, close, type Engine, open } from "../v2/engine.ts";
 import {
   extendTrackedGraph,
+  type QueryTraversalStats,
   refreshTrackedGraph,
   type TrackedGraphState,
   trackGraph,
@@ -17,6 +18,7 @@ const DIRTY_COUNT = Math.max(
   Math.min(DOC_COUNT - 1, Math.floor(DOC_COUNT * (DIRTY_PERCENT / 100))),
 );
 const HIDDEN_COUNT = DIRTY_COUNT;
+const INCLUDE_STATS = readBoolEnv("V2_QUERY_COVERAGE_STATS", true);
 
 const space = "did:key:z6Mk-memory-v2-query-coverage";
 const rootId = "of:v2-query-coverage-root" as URI;
@@ -89,6 +91,16 @@ function readNumberEnv(
   }
 
   return value;
+}
+
+function readBoolEnv(name: string, defaultValue: boolean): boolean {
+  const raw = Deno.env.get(name);
+  if (raw === undefined || raw === "") return defaultValue;
+  if (raw === "1" || raw === "true") return true;
+  if (raw === "0" || raw === "false") return false;
+  throw new Error(
+    `${name} must be one of 1, true, 0, false; got ${JSON.stringify(raw)}`,
+  );
 }
 
 const invocationFor = (localSeq: number) => ({
@@ -243,8 +255,128 @@ async function cleanup(engine: Engine, path: string): Promise<void> {
   await Deno.remove(path);
 }
 
+type DiagnosticCase =
+  | "track-cold"
+  | "extend-covered"
+  | "extend-overlap"
+  | "refresh-leaves"
+  | "refresh-root-stable"
+  | "refresh-root-retargeted";
+
+type Diagnostics = Partial<Record<DiagnosticCase, QueryTraversalStats>>;
+
+async function collectDiagnostics(): Promise<Diagnostics> {
+  if (!INCLUDE_STATS) {
+    return {};
+  }
+
+  const diagnostics: Diagnostics = {};
+
+  {
+    const { engine, path } = await setupSeededEngine();
+    try {
+      diagnostics["track-cold"] = trackGraph(
+        space,
+        engine,
+        graphQuery(),
+      ).stats;
+    } finally {
+      await cleanup(engine, path);
+    }
+  }
+
+  {
+    const { engine, path, tracked } = await setupTrackedEngine();
+    try {
+      diagnostics["extend-covered"] = extendTrackedGraph(
+        space,
+        engine,
+        tracked,
+        graphQuery(baseChildId(0)),
+      ).stats;
+    } finally {
+      await cleanup(engine, path);
+    }
+  }
+
+  {
+    const { engine, path, tracked } = await setupTrackedEngine();
+    try {
+      diagnostics["extend-overlap"] = extendTrackedGraph(
+        space,
+        engine,
+        tracked,
+        graphQuery(overlapRootId),
+      ).stats;
+    } finally {
+      await cleanup(engine, path);
+    }
+  }
+
+  {
+    const { engine, path, tracked } = await setupTrackedEngine();
+    const dirtyIds = baseChildIds().slice(0, DIRTY_COUNT);
+    updateLeaves(engine, dirtyIds, 1);
+    try {
+      diagnostics["refresh-leaves"] = refreshTrackedGraph(
+        space,
+        engine,
+        tracked,
+        new Set(dirtyIds),
+      )?.stats;
+    } finally {
+      await cleanup(engine, path);
+    }
+  }
+
+  {
+    const { engine, path, tracked } = await setupTrackedEngine();
+    updateRoot(engine, rootValue(1), 1);
+    try {
+      diagnostics["refresh-root-stable"] = refreshTrackedGraph(
+        space,
+        engine,
+        tracked,
+        new Set([rootId]),
+      )?.stats;
+    } finally {
+      await cleanup(engine, path);
+    }
+  }
+
+  {
+    const { engine, path, tracked } = await setupTrackedEngine();
+    updateRoot(engine, retargetedRootValue(), 1);
+    try {
+      diagnostics["refresh-root-retargeted"] = refreshTrackedGraph(
+        space,
+        engine,
+        tracked,
+        new Set([rootId]),
+      )?.stats;
+    } finally {
+      await cleanup(engine, path);
+    }
+  }
+
+  return diagnostics;
+}
+
+const diagnostics = await collectDiagnostics();
+
+function withStats(name: string, key: DiagnosticCase): string {
+  const stats = diagnostics[key];
+  if (stats === undefined) {
+    return name;
+  }
+  return `${name}, reads=${stats.managerReads}, traversals=${stats.schemaTraversals}, skips=${stats.coveredSelectorSkips}, memoHits=${stats.schemaMemoHits}`;
+}
+
 Deno.bench({
-  name: `trackGraph cold linked graph - docs=${DOC_COUNT}`,
+  name: withStats(
+    `trackGraph cold linked graph - docs=${DOC_COUNT}`,
+    "track-cold",
+  ),
   group: "v2-query-coverage",
   baseline: true,
   async fn(b) {
@@ -260,8 +392,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name:
+  name: withStats(
     `extendTrackedGraph already-covered descendant root - docs=${DOC_COUNT}`,
+    "extend-covered",
+  ),
   group: "v2-query-coverage",
   async fn(b) {
     const { engine, path, tracked } = await setupTrackedEngine();
@@ -276,8 +410,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name:
+  name: withStats(
     `extendTrackedGraph overlapping root - docs=${DOC_COUNT}, new=${HIDDEN_COUNT}`,
+    "extend-overlap",
+  ),
   group: "v2-query-coverage",
   async fn(b) {
     const { engine, path, tracked } = await setupTrackedEngine();
@@ -292,8 +428,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name:
+  name: withStats(
     `refreshTrackedGraph dirty leaves - docs=${DOC_COUNT}, dirty=${DIRTY_COUNT}`,
+    "refresh-leaves",
+  ),
   group: "v2-query-coverage",
   async fn(b) {
     const { engine, path, tracked } = await setupTrackedEngine();
@@ -310,7 +448,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: `refreshTrackedGraph dirty root stable links - docs=${DOC_COUNT}`,
+  name: withStats(
+    `refreshTrackedGraph dirty root stable links - docs=${DOC_COUNT}`,
+    "refresh-root-stable",
+  ),
   group: "v2-query-coverage",
   async fn(b) {
     const { engine, path, tracked } = await setupTrackedEngine();
@@ -326,8 +467,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name:
+  name: withStats(
     `refreshTrackedGraph dirty root retargeted links - docs=${DOC_COUNT}, new=${HIDDEN_COUNT}`,
+    "refresh-root-retargeted",
+  ),
   group: "v2-query-coverage",
   async fn(b) {
     const { engine, path, tracked } = await setupTrackedEngine();

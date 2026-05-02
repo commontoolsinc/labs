@@ -100,6 +100,63 @@ Deno.test("memory v2 query retains a persistent memo for incremental watch growt
   }
 });
 
+Deno.test("memory v2 query reports read and traversal stats", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-stats";
+  const fixture = createGraphFixture(space);
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: fixture.docs.map((doc) => ({
+          op: "set" as const,
+          id: doc.id,
+          value: { value: doc.value },
+        })),
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+    });
+
+    assertEquals(
+      tracked.stats.managerReads,
+      fixture.initialReachableIds.length,
+    );
+    assert(tracked.stats.schemaTraversals > 0);
+    assertEquals(tracked.stats.coveredSelectorSkips, 0);
+
+    const extended = extendTrackedGraph(space, engine, tracked.state, {
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+    });
+
+    assertEquals(extended.stats.managerReads, 0);
+    assertEquals(extended.stats.schemaTraversals, 0);
+    assertEquals(extended.stats.coveredSelectorSkips, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 query does not include linked opaque cells in graph entities", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-opaque-link";
