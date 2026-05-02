@@ -10,6 +10,7 @@ import {
   type ObjectStorageManager,
   SchemaObjectTraverser,
   type SchemaPathSelector,
+  schemaTrackerCoversSelector,
 } from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
@@ -33,6 +34,43 @@ export interface TrackedGraphState {
   memo: ReturnType<typeof createSchemaMemo>;
   manager: EngineObjectManager;
 }
+
+export interface QueryTraversalStats {
+  managerReads: number;
+  coveredSelectorSkips: number;
+  schemaTraversals: number;
+  pointerTraversals: number;
+  arrayTraversals: number;
+  objectTraversals: number;
+  dagTraversals: number;
+  getDocAtPathCalls: number;
+  schemaMemoHits: number;
+}
+
+const createQueryTraversalStats = (): QueryTraversalStats => ({
+  managerReads: 0,
+  coveredSelectorSkips: 0,
+  schemaTraversals: 0,
+  pointerTraversals: 0,
+  arrayTraversals: 0,
+  objectTraversals: 0,
+  dagTraversals: 0,
+  getDocAtPathCalls: 0,
+  schemaMemoHits: 0,
+});
+
+const addTraverserStats = (
+  stats: QueryTraversalStats,
+  traverser: SchemaObjectTraverser<FabricValue>,
+): void => {
+  stats.schemaTraversals += traverser.traverseWithSchemaCalls;
+  stats.pointerTraversals += traverser.traversePointerCalls;
+  stats.arrayTraversals += traverser.traverseArrayCalls;
+  stats.objectTraversals += traverser.traverseObjectCalls;
+  stats.dagTraversals += traverser.traverseDAGCalls;
+  stats.getDocAtPathCalls += traverser.getDocAtPathCalls;
+  stats.schemaMemoHits += traverser.schemaMemoHits;
+};
 
 export class EngineObjectManager implements ObjectStorageManager {
   #attestations = new Map<string, IAttestation>();
@@ -222,6 +260,7 @@ export const trackGraph = (
 ): {
   serverSeq: number;
   state: TrackedGraphState;
+  stats: QueryTraversalStats;
 } => {
   const branch = query.branch ?? "";
   const managerKey = options.readSeq === undefined
@@ -239,6 +278,8 @@ export const trackGraph = (
   const schemaTracker = new MapSetStringToPathSelectors(true);
   const cfc = new ContextualFlowControl();
   const sharedMemo = createSchemaMemo();
+  const stats = createQueryTraversalStats();
+  const readCountBefore = manager.readCount;
 
   for (const root of query.roots) {
     const selector = toDocumentSelector(root.selector);
@@ -253,6 +294,7 @@ export const trackGraph = (
         space,
         schemaTracker,
         sharedMemo,
+        stats,
       );
     } else {
       schemaTracker.add(
@@ -261,6 +303,8 @@ export const trackGraph = (
       );
     }
   }
+
+  stats.managerReads = manager.readCount - readCountBefore;
 
   return {
     serverSeq: Engine.serverSeq(engine),
@@ -276,6 +320,7 @@ export const trackGraph = (
       memo: sharedMemo,
       manager,
     },
+    stats,
   };
 };
 
@@ -287,8 +332,11 @@ export const extendTrackedGraph = (
 ): {
   serverSeq: number;
   updates: Map<QueryDocKey, EntitySnapshot>;
+  stats: QueryTraversalStats;
 } => {
   const manager = state.manager;
+  const stats = createQueryTraversalStats();
+  const readCountBefore = manager.readCount;
   const previouslyLoaded = new Set(
     manager.loadedAddresses().map((address) => `${address.id}/${address.type}`),
   );
@@ -305,6 +353,7 @@ export const extendTrackedGraph = (
       selector,
       state.tracker,
       state.memo,
+      stats,
     );
   }
 
@@ -336,11 +385,25 @@ export const extendTrackedGraph = (
     updates.set(key, snapshot);
   }
 
+  stats.managerReads = manager.readCount - readCountBefore;
+
   return {
     serverSeq: Engine.serverSeq(engine),
     updates,
+    stats,
   };
 };
+
+export const isGraphQueryCoveredByState = (
+  space: string,
+  state: TrackedGraphState,
+  query: GraphQuery,
+): boolean =>
+  query.roots.every((root) => {
+    const selector = toDocumentSelector(root.selector);
+    const rootKey = toDocKey(space, root.id, "application/json");
+    return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
+  });
 
 export const queryGraph = (
   space: string,
@@ -369,6 +432,7 @@ export const refreshTrackedGraph = (
 ): {
   serverSeq: number;
   updates: Map<QueryDocKey, EntitySnapshot>;
+  stats: QueryTraversalStats;
 } | null => {
   const affectedDocs = new Map<QueryDocKey, Set<SchemaPathSelector>>();
   for (const dirtyId of dirtyIds) {
@@ -384,6 +448,8 @@ export const refreshTrackedGraph = (
 
   const manager = new EngineObjectManager(engine, state.branch);
   const sharedMemo = createSchemaMemo();
+  const stats = createQueryTraversalStats();
+  const readCountBefore = manager.readCount;
 
   for (const key of affectedDocs.keys()) {
     state.tracker.delete(key);
@@ -399,6 +465,7 @@ export const refreshTrackedGraph = (
         selector,
         state.tracker,
         sharedMemo,
+        stats,
       );
     }
   }
@@ -431,9 +498,12 @@ export const refreshTrackedGraph = (
   state.manager.invalidateIds(dirtyIds);
   state.manager.mergeFrom(manager);
 
+  stats.managerReads = manager.readCount - readCountBefore;
+
   return {
     serverSeq: Engine.serverSeq(engine),
     updates,
+    stats,
   };
 };
 
@@ -449,6 +519,7 @@ const loadFactsForDoc = (
   space: string,
   schemaTracker: MapSetStringToPathSelectors,
   sharedMemo: ReturnType<typeof createSchemaMemo>,
+  stats: QueryTraversalStats,
 ) => {
   if (selector.schema === undefined) {
     selector = { ...selector, schema: false };
@@ -456,7 +527,8 @@ const loadFactsForDoc = (
 
   const docKey = toDocKey(space, fact.address.id, fact.address.type);
   const internedSelector = internPathSelector(selector);
-  if (schemaTracker.hasValue(docKey, internedSelector)) {
+  if (schemaTrackerCoversSelector(schemaTracker, docKey, internedSelector)) {
+    stats.coveredSelectorSkips++;
     return;
   }
   schemaTracker.add(docKey, internedSelector);
@@ -502,6 +574,7 @@ const loadFactsForDoc = (
       sharedMemo,
     );
     traverser.traverse(nextDoc);
+    addTraverserStats(stats, traverser);
   }
 
   loadSource(
@@ -522,6 +595,7 @@ const evaluateTrackedDocument = (
   selector: SchemaPathSelector,
   schemaTracker: MapSetStringToPathSelectors,
   sharedMemo: ReturnType<typeof createSchemaMemo>,
+  stats: QueryTraversalStats,
 ) => {
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
@@ -545,6 +619,7 @@ const evaluateTrackedDocument = (
     space,
     schemaTracker,
     sharedMemo,
+    stats,
   );
 };
 

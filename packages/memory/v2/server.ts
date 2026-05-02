@@ -32,6 +32,7 @@ import * as Engine from "./engine.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
+  isGraphQueryCoveredByState,
   queryGraph,
   type QueryGraphReuseContext,
   refreshTrackedGraph,
@@ -681,6 +682,10 @@ export class Server {
             const entry = toCacheEntry(entity);
             updates.set(cacheKeyForEntity(entry.branch, entry.id), entry);
           }
+          continue;
+        }
+
+        if (isGraphQueryCoveredByState(message.space, existing, query)) {
           continue;
         }
 
