@@ -14,6 +14,7 @@ import {
 } from "../v2/engine.ts";
 import {
   extendTrackedGraph,
+  isGraphQueryCoveredByState,
   queryGraph,
   refreshTrackedGraph,
   trackGraph,
@@ -546,6 +547,84 @@ Deno.test("memory v2 query treats schema true as covering narrower selectors", a
     });
 
     assertEquals(tracked.state.tracker.get(rootKey)?.size, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 query detects graph queries covered by tracked state", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-covered-graph";
+  const rootId = "of:covered-graph-root";
+  const otherId = "of:covered-graph-other";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: rootId,
+          value: {
+            value: {
+              child: { label: "already covered" },
+            },
+          },
+        }, {
+          op: "set",
+          id: otherId,
+          value: {
+            value: {
+              child: { label: "not covered" },
+            },
+          },
+        }],
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: rootId,
+        selector: {
+          path: [],
+          schema: true,
+        },
+      }],
+    });
+
+    assert(isGraphQueryCoveredByState(space, tracked.state, {
+      roots: [{
+        id: rootId,
+        selector: {
+          path: ["child"],
+          schema: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+            },
+            required: ["label"],
+          },
+        },
+      }],
+    }));
+
+    assertEquals(
+      isGraphQueryCoveredByState(space, tracked.state, {
+        roots: [{
+          id: otherId,
+          selector: {
+            path: [],
+            schema: true,
+          },
+        }],
+      }),
+      false,
+    );
   } finally {
     close(engine);
     await Deno.remove(path);

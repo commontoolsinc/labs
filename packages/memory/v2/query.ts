@@ -394,6 +394,17 @@ export const extendTrackedGraph = (
   };
 };
 
+export const isGraphQueryCoveredByState = (
+  space: string,
+  state: TrackedGraphState,
+  query: GraphQuery,
+): boolean =>
+  query.roots.every((root) => {
+    const selector = toDocumentSelector(root.selector);
+    const rootKey = toDocKey(space, root.id, "application/json");
+    return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
+  });
+
 export const queryGraph = (
   space: string,
   engine: Engine.Engine,
