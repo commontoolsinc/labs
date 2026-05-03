@@ -3777,7 +3777,6 @@ export class Scheduler {
           {
             space: read.space,
             id: read.id,
-            type: "application/json",
             path: [...read.path],
           },
           { meta: ignoreReadForScheduling },

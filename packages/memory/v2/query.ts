@@ -471,7 +471,13 @@ export const refreshTrackedGraph = (
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const address of manager.loadedAddresses()) {
-    touched.add(toDocKey(space, address.id, "application/json"));
+    const key = toDocKey(space, address.id, "application/json");
+    const previous = state.entities.get(key);
+    const detail = manager.detail({ id: address.id });
+    if (previous !== undefined && detail?.seq === previous.seq) {
+      continue;
+    }
+    touched.add(key);
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();

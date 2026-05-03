@@ -52,7 +52,6 @@ export function toMemorySpaceAddress(
   return {
     space: link.space,
     id: link.id,
-    type: "application/json" as IMemorySpaceValueAddress["type"],
     path: ["value", ...link.path],
   };
 }
