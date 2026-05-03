@@ -20,16 +20,17 @@ export const resolveSpaceStoreUrl = (
   subject: MemorySpace,
 ): URL => {
   assertSafeStoreSubject(subject);
+  const filename = `${encodeURIComponent(String(subject))}.sqlite`;
   const storePath = store.protocol === "file:"
     ? Path.fromFileUrl(store)
     : store.pathname;
   const isFile = Path.extname(storePath) !== "";
 
   if (!isFile) {
-    return new URL(`./engine-v3/${subject}.sqlite`, store);
+    return new URL(`./engine-v3/${filename}`, store);
   }
 
   const ext = Path.extname(storePath);
   const stem = ext === "" ? storePath : storePath.slice(0, -ext.length);
-  return Path.toFileUrl(Path.join(`${stem}.engine-v3`, `${subject}.sqlite`));
+  return Path.toFileUrl(Path.join(`${stem}.engine-v3`, filename));
 };

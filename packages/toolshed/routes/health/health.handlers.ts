@@ -9,6 +9,7 @@ import type {
   StatsRoute,
 } from "./health.routes.ts";
 import { checkLLMHealth } from "./llm-health.service.ts";
+import { getSlowQueries } from "@commonfabric/memory/v2/server";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -53,7 +54,7 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
     serverStart: serverStartTimestamp,
     logCounts: getLoggerCountsBreakdown(),
     timingStats: getTimingStatsBreakdown(),
-    slowQueries: [],
+    slowQueries: [...getSlowQueries()],
   }, HttpStatusCodes.OK);
 };
 

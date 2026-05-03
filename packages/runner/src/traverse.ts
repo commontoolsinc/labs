@@ -1029,7 +1029,7 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.id}`,
+      `${link.space}/${link.id}/application/json`,
       this.internCoverageSelector(targetSelector),
     );
   }

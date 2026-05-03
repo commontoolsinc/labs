@@ -58,6 +58,49 @@ export { SessionRegistry } from "./session-registry.ts";
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
+const SLOW_QUERY_THRESHOLD_MS = 100;
+const SLOW_QUERY_BUFFER_SIZE = 100;
+
+export interface SlowQuery {
+  timestamp: number;
+  elapsed: number;
+  operation: string;
+  space: string;
+  roots?: number;
+  watches?: number;
+}
+
+const slowQueries: SlowQuery[] = [];
+
+const recordSlowQuery = (entry: SlowQuery): void => {
+  slowQueries.push(entry);
+  if (slowQueries.length > SLOW_QUERY_BUFFER_SIZE) {
+    slowQueries.shift();
+  }
+};
+
+const recordSlowQueryDuration = (
+  operation: string,
+  space: string,
+  startedAt: number,
+  details: Omit<SlowQuery, "timestamp" | "elapsed" | "operation" | "space"> =
+    {},
+): void => {
+  const elapsed = performance.now() - startedAt;
+  if (elapsed <= SLOW_QUERY_THRESHOLD_MS) {
+    return;
+  }
+  recordSlowQuery({
+    timestamp: Date.now(),
+    elapsed,
+    operation,
+    space,
+    ...details,
+  });
+};
+
+/** Returns the last N slow query/watch operations (>100ms). */
+export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -624,6 +667,7 @@ export class Server {
     }
 
     try {
+      const startedAt = performance.now();
       const engine = await this.openEngine(message.space);
       const existingById = new Map(
         session.watches.map((watch) => [watch.id, watch] as const),
@@ -716,6 +760,12 @@ export class Server {
       session.graphs = graphs;
       session.watches = nextWatches;
       session.lastSyncedSeq = serverSeq;
+      recordSlowQueryDuration(
+        "session.watch.add",
+        message.space,
+        startedAt,
+        { watches: message.watches.length },
+      );
       return {
         type: "response",
         requestId: message.requestId,
@@ -750,12 +800,17 @@ export class Server {
     engine?: Engine.Engine,
     reuse?: QueryGraphReuseContext,
   ): Promise<GraphQueryResult> {
-    return queryGraph(
+    const startedAt = performance.now();
+    const result = queryGraph(
       space,
       engine ?? await this.openEngine(space),
       query,
       reuse,
     );
+    recordSlowQueryDuration("graph.query", space, startedAt, {
+      roots: query.roots.length,
+    });
+    return result;
   }
 
   async evaluateWatchSet(
@@ -767,6 +822,7 @@ export class Server {
     graphs: Map<string, TrackedGraphState>;
     entities: Map<string, SessionCacheEntry>;
   }> {
+    const startedAt = performance.now();
     const resolvedEngine = engine ?? await this.openEngine(space);
     const reuse: QueryGraphReuseContext = {
       managers: new Map(),
@@ -798,6 +854,9 @@ export class Server {
       }
     }
 
+    recordSlowQueryDuration("session.watch.set", space, startedAt, {
+      watches: watches.length,
+    });
     return {
       serverSeq,
       graphs,
@@ -815,6 +874,7 @@ export class Server {
       return null;
     }
     if (dirtyIds !== undefined) {
+      const startedAt = performance.now();
       let touched = false;
       for (const dirtyId of dirtyIds) {
         if (session.trackedIds.has(dirtyId)) {
@@ -864,6 +924,9 @@ export class Server {
       if (upserts.length === 0) {
         return null;
       }
+      recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
+        watches: session.watches.length,
+      });
       return {
         type: "session/effect",
         space,
