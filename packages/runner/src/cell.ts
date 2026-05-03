@@ -94,7 +94,6 @@ import {
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
-  IMemorySpaceAddress,
   IReadOptions,
 } from "./storage/interface.ts";
 import {

@@ -4,7 +4,6 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
-import { identity } from "@/lib/identity.ts";
 import { resolveMemoryEngineStoreRootUrl } from "./memory-path.ts";
 import { fromDID } from "../../../memory/util.ts";
 
@@ -125,7 +124,9 @@ export const memoryServer = new MemoryServer.Server({
   authorizeSessionOpen,
 });
 export const memory = {
-  async close(): Promise<{ ok: {} } | { error: unknown }> {
+  async close(): Promise<
+    { ok: Record<PropertyKey, never> } | { error: unknown }
+  > {
     await memoryServer.close();
     return { ok: {} };
   },
