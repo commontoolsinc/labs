@@ -1,7 +1,7 @@
 import * as Path from "@std/path";
 import type { MemorySpace } from "../interface.ts";
 
-const assertSafeStoreSubject = (subject: MemorySpace): void => {
+const encodeStoreSubject = (subject: MemorySpace): string => {
   const value = String(subject);
   if (
     value.length === 0 ||
@@ -13,14 +13,19 @@ const assertSafeStoreSubject = (subject: MemorySpace): void => {
   ) {
     throw new Error(`Invalid memory space identifier for store path: ${value}`);
   }
+
+  try {
+    return encodeURIComponent(value);
+  } catch {
+    throw new Error(`Invalid memory space identifier for store path: ${value}`);
+  }
 };
 
 export const resolveSpaceStoreUrl = (
   store: URL,
   subject: MemorySpace,
 ): URL => {
-  assertSafeStoreSubject(subject);
-  const filename = `${encodeURIComponent(String(subject))}.sqlite`;
+  const filename = `${encodeStoreSubject(subject)}.sqlite`;
   const storePath = store.protocol === "file:"
     ? Path.fromFileUrl(store)
     : store.pathname;

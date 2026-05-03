@@ -44,3 +44,13 @@ Deno.test("resolveSpaceStoreUrl rejects traversal-like subjects", () => {
     "Invalid memory space identifier for store path",
   );
 });
+
+Deno.test("resolveSpaceStoreUrl rejects malformed unicode subjects with validation error", () => {
+  const root = new URL("file:///tmp/cf-memory/");
+
+  assertThrows(
+    () => resolveSpaceStoreUrl(root, "\uD800" as any),
+    Error,
+    "Invalid memory space identifier for store path",
+  );
+});
