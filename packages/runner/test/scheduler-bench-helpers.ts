@@ -9,7 +9,6 @@ import {
 } from "@commonfabric/utils/logger";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 setGlobalLogFloor("error");
 
@@ -92,12 +91,10 @@ let blackhole = 0;
 export function createSchedulerBenchEnv(pullMode = true): SchedulerBenchEnv {
   const storageManager = StorageManager.emulate({
     as: benchSigner,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
 
   if (pullMode) {
