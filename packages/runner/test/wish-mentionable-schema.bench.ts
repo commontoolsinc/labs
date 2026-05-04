@@ -4,7 +4,6 @@ import type { Cell } from "../src/cell.ts";
 import { type JSONSchema, NAME } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("wish mentionable schema bench");
 const space = signer.did();
@@ -78,12 +77,10 @@ async function setupMentionableWishBench(
 ): Promise<BenchEnv> {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   runtime.scheduler.enablePullMode();
 

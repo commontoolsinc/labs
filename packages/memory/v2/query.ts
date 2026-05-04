@@ -16,7 +16,7 @@ import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
 import { type Immutable, isObject } from "@commonfabric/utils/types";
-import type { FabricValue, MemorySpace, URI } from "../interface.ts";
+import type { FabricValue, MemorySpace, MIME, URI } from "../interface.ts";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   type EntitySnapshot,
@@ -95,15 +95,16 @@ export class EngineObjectManager implements ObjectStorageManager {
     });
   }
 
-  load(address: { id: string; type: string }): IAttestation | null {
-    const key = `${address.id}/${address.type}`;
+  load(address: { id: string; type?: string }): IAttestation | null {
+    const type = address.type ?? "application/json";
+    const key = `${address.id}/${type}`;
     if (this.#attestations.has(key)) {
       return this.#attestations.get(key)!;
     }
     if (this.#missing.has(key)) {
       return null;
     }
-    if (address.type !== "application/json") {
+    if (type !== "application/json") {
       this.#missing.add(key);
       return null;
     }
@@ -118,7 +119,7 @@ export class EngineObjectManager implements ObjectStorageManager {
     const attestation: IAttestation = {
       address: {
         id: address.id as URI,
-        type: address.type,
+        type: type as MIME,
         path: [],
       },
       value: state.document as unknown as Immutable<FabricValue>,
@@ -131,8 +132,10 @@ export class EngineObjectManager implements ObjectStorageManager {
     return attestation;
   }
 
-  detail(address: { id: string; type: string }) {
-    return this.#details.get(`${address.id}/${address.type}`);
+  detail(address: { id: string; type?: string }) {
+    return this.#details.get(
+      `${address.id}/${address.type ?? "application/json"}`,
+    );
   }
 
   get readCount(): number {
@@ -142,7 +145,7 @@ export class EngineObjectManager implements ObjectStorageManager {
   loadedAddresses(): Array<{ id: string; type: string }> {
     return [...this.#attestations.values()].map((attestation) => ({
       id: attestation.address.id,
-      type: attestation.address.type,
+      type: attestation.address.type ?? "application/json",
     }));
   }
 
@@ -212,10 +215,8 @@ const snapshotForDocKey = (
   if (!key.startsWith(`${space}/`)) {
     return null;
   }
-  const { id, type } = fromDocKey(key);
-  if (type !== "application/json") {
-    return null;
-  }
+  const { id } = fromDocKey(key);
+  const type = "application/json";
   const detail = manager.detail({ id, type });
   const state = detail === undefined ? manager.readState(id) : null;
   return {
@@ -338,7 +339,7 @@ export const extendTrackedGraph = (
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
   const previouslyLoaded = new Set(
-    manager.loadedAddresses().map((address) => `${address.id}/${address.type}`),
+    manager.loadedAddresses().map((address) => address.id),
   );
   const touched = new Set<QueryDocKey>();
 
@@ -358,13 +359,11 @@ export const extendTrackedGraph = (
   }
 
   for (const address of manager.loadedAddresses()) {
-    const key = `${address.id}/${address.type}`;
+    const key = address.id;
     if (previouslyLoaded.has(key)) {
       continue;
     }
-    if (address.type === "application/json") {
-      touched.add(toDocKey(space, address.id, address.type));
-    }
+    touched.add(toDocKey(space, address.id, "application/json"));
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
@@ -472,9 +471,13 @@ export const refreshTrackedGraph = (
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const address of manager.loadedAddresses()) {
-    if (address.type === "application/json") {
-      touched.add(toDocKey(space, address.id, address.type));
+    const key = toDocKey(space, address.id, "application/json");
+    const previous = state.entities.get(key);
+    const detail = manager.detail({ id: address.id });
+    if (previous !== undefined && detail?.seq === previous.seq) {
+      continue;
     }
+    touched.add(key);
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
@@ -525,7 +528,11 @@ const loadFactsForDoc = (
     selector = { ...selector, schema: false };
   }
 
-  const docKey = toDocKey(space, fact.address.id, fact.address.type);
+  const docKey = toDocKey(
+    space,
+    fact.address.id,
+    fact.address.type ?? "application/json",
+  );
   const internedSelector = internPathSelector(selector);
   if (schemaTrackerCoversSelector(schemaTracker, docKey, internedSelector)) {
     stats.coveredSelectorSkips++;
@@ -600,7 +607,7 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     schemaTracker.add(
-      toDocKey(space, address.id, address.type),
+      toDocKey(space, address.id, "application/json"),
       internPathSelector(selector),
     );
     return;

@@ -1,9 +1,8 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
-import { encodeMemoryV2Boundary } from "@commonfabric/memory/v2";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import * as MemoryServer from "@commonfabric/memory/v2/server";
 import type * as Routes from "./memory.routes.ts";
-import { Memory, memory, memoryV2Server } from "../memory.ts";
-import * as Codec from "@commonfabric/memory/codec";
+import { memoryServer } from "../memory.ts";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 
 type NegotiatedSocketHandlers = {
@@ -134,33 +133,12 @@ export const bufferTextMessagesUntilNegotiated = (
   };
 };
 
-const attachSocketPipeline = (
-  channel: TransformStream<string, string>,
-  session: Memory.ProviderSession<Memory.Protocol>,
-) => {
-  channel.readable
-    .pipeThrough(Codec.UCAN.fromStringStream())
-    .pipeThrough(session)
-    .pipeThrough(Codec.Receipt.toStringStream())
-    .pipeTo(channel.writable);
-};
-
-const attachV1SocketPipeline = (
-  socket: WebSocket,
-  negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
-  firstMessage: string,
-) =>
-  attachSocketPipeline(
-    createTextSocketChannel(socket, negotiation, [firstMessage]),
-    memory.session(),
-  );
-
-const attachV2SocketPipeline = (
+const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
 ): boolean => {
-  if (MemoryV2Server.parseClientMessage(firstMessage) === null) {
+  if (MemoryServer.parseClientMessage(firstMessage) === null) {
     return false;
   }
 
@@ -177,11 +155,11 @@ const attachV2SocketPipeline = (
       // Ignore close races with the peer.
     }
   };
-  const connection = memoryV2Server.connect((message) => {
+  const connection = memoryServer.connect((message) => {
     if (socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    socket.send(encodeMemoryV2Boundary(message));
+    socket.send(encodeMemoryBoundary(message));
   });
   const closeConnection = () => {
     connection.close();
@@ -216,155 +194,6 @@ const attachV2SocketPipeline = (
   return true;
 };
 
-const waitForSocketOpen = async (socket: WebSocket): Promise<void> => {
-  if (socket.readyState === WebSocket.OPEN) {
-    return;
-  }
-  await new Promise<void>((resolve, reject) => {
-    socket.addEventListener("open", () => resolve(), { once: true });
-    socket.addEventListener(
-      "error",
-      () => reject(new Error("Memory websocket failed to open")),
-      { once: true },
-    );
-  });
-};
-
-const createTextSocketChannel = (
-  socket: WebSocket,
-  negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
-  prefix: readonly string[],
-): TransformStream<string, string> => ({
-  readable: new ReadableStream({
-    start(controller) {
-      for (const item of prefix) {
-        controller.enqueue(item);
-      }
-      negotiation.handoff({
-        onMessage(message) {
-          controller.enqueue(message);
-        },
-        onClose() {
-          controller.close();
-        },
-        onError(error) {
-          controller.error(error);
-        },
-      });
-    },
-    cancel() {
-      try {
-        socket.close();
-      } catch {
-        // Ignore close races with the peer.
-      }
-    },
-  }),
-  writable: new WritableStream({
-    async write(data) {
-      await waitForSocketOpen(socket);
-      socket.send(data);
-    },
-    close() {
-      try {
-        socket.close();
-      } catch {
-        // Ignore close races with the peer.
-      }
-    },
-    abort() {
-      try {
-        socket.close();
-      } catch {
-        // Ignore close races with the peer.
-      }
-    },
-  }),
-});
-
-export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
-  return await createSpan("memory.transact", async (span) => {
-    try {
-      const ucan = (await c.req.valid("json")) as Memory.UCAN<
-        Memory.ConsumerInvocationFor<"/memory/transact", Memory.Protocol>
-      >;
-
-      span.setAttribute("memory.operation", "transact");
-
-      const result = await createSpan("memory.invoke", async (invokeSpan) => {
-        invokeSpan.setAttribute("memory.operation_type", "transact");
-        return await memory.invoke(ucan);
-      });
-
-      if (result.ok) {
-        span.setAttribute("memory.status", "success");
-        return c.json(result, 200);
-      } else {
-        // This is ugly but without this TS inference is failing to infer that
-        // types are correct
-        const { error } = result;
-        span.setAttribute("memory.status", "error");
-        span.setAttribute("memory.error_type", error.name);
-        if (error.name === "ConflictError") {
-          return c.json({ error }, 409);
-        } else if (error.name === "AuthorizationError") {
-          return c.json({ error }, 401);
-        } else {
-          return c.json({ error }, 503);
-        }
-      }
-    } catch (cause) {
-      const { message, name } = (cause ?? new Error()) as Error;
-      span.setAttribute("memory.status", "exception");
-      span.setAttribute("error.message", message);
-      span.setAttribute("error.type", name);
-      return c.json(
-        Memory.Provider.jsonErrorBody(cause, "Transaction failed"),
-        500,
-      );
-    }
-  });
-};
-
-export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
-  return await createSpan("memory.query", async (span) => {
-    try {
-      const ucan = (await c.req.valid("json")) as Memory.UCAN<
-        Memory.ConsumerInvocationFor<"/memory/query", Memory.Protocol>
-      >;
-
-      span.setAttribute("memory.operation", "query");
-
-      const result = await createSpan("memory.invoke", async (invokeSpan) => {
-        invokeSpan.setAttribute("memory.operation_type", "query");
-        return await memory.invoke(ucan);
-      });
-
-      if (result.ok) {
-        span.setAttribute("memory.status", "success");
-        return c.json({ ok: result.ok }, 200);
-      } else {
-        span.setAttribute("memory.status", "error");
-        span.setAttribute("memory.error_type", result.error.name);
-        if (result.error.name === "AuthorizationError") {
-          return c.json({ error: result.error }, 401);
-        } else {
-          return c.json({ error: result.error }, 503);
-        }
-      }
-    } catch (cause) {
-      const { message, name } = (cause ?? new Error()) as Error;
-      span.setAttribute("memory.status", "exception");
-      span.setAttribute("error.message", message);
-      span.setAttribute("error.type", name);
-      return c.json(
-        Memory.Provider.jsonErrorBody(cause, "Query failed"),
-        500,
-      );
-    }
-  });
-};
-
 export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   return createSpan("memory.subscribe", (span) => {
     try {
@@ -382,13 +211,16 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
           return;
         }
 
-        if (attachV2SocketPipeline(socket, negotiation, firstMessage)) {
-          setupSpan.setAttribute("socket.setup", "memory-v2");
+        if (attachMemorySocketPipeline(socket, negotiation, firstMessage)) {
+          setupSpan.setAttribute("socket.setup", "memory");
           return;
         }
 
-        attachV1SocketPipeline(socket, negotiation, firstMessage);
-        setupSpan.setAttribute("socket.setup", "memory-v1");
+        negotiation.dispose();
+        setupSpan.setAttribute("socket.setup", "unsupported-protocol");
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.close(1002, "Memory websocket expects memory protocol");
+        }
       }).catch(() => {
         if (socket.readyState === WebSocket.OPEN) {
           try {

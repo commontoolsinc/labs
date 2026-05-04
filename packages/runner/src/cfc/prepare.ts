@@ -250,7 +250,6 @@ const structuralProvenanceForPath = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
   path: readonly string[],
   claim: string,
@@ -263,7 +262,6 @@ const structuralProvenanceForPath = (
     input.claim === claim &&
     input.target.space === target.space &&
     input.target.id === target.id &&
-    input.target.type === target.type &&
     arraysEqual(canonicalizeLogicalPath(input.target.path), logicalPath)
   );
 };
@@ -273,7 +271,6 @@ const setupProjectionSourceMatchesValue = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
   path: readonly string[],
 ): boolean => {
@@ -298,7 +295,6 @@ const setupProjectionSourceMatchesValue = (
   return projection.sources.some((source) =>
     (projected.space === undefined || projected.space === source.space) &&
     (projected.id === undefined || projected.id === source.id) &&
-    (projected.type === undefined || projected.type === source.type) &&
     arraysEqual(projectedPath, source.path)
   );
 };
@@ -334,8 +330,7 @@ const candidateSchemasByTarget = (
     if (input.kind !== "schema" || input.schema === undefined) {
       continue;
     }
-    const key =
-      `${input.target.space}\u0000${input.target.id}\u0000${input.target.type}`;
+    const key = targetKey(input.target);
     const schema = rebindWriteAuthorizedByClaims(
       input.schema,
       implementationIdentity,
@@ -358,8 +353,7 @@ const candidateSchemasByTarget = (
 const targetKey = (target: {
   space: MemorySpace;
   id: string;
-  type: string;
-}): string => `${target.space}\u0000${target.id}\u0000${target.type}`;
+}): string => `${target.space}\u0000${target.id}`;
 
 const linkWritesByTarget = (
   inputs: readonly WritePolicyInput[],
@@ -527,7 +521,7 @@ const valueWriteTargets = (
         result.set(key, {
           space: write.address.space,
           id: write.address.id as URI,
-          type: write.address.type as MediaType,
+          type: (write.address.type ?? "application/json") as MediaType,
           paths: [writePath],
         });
       }
@@ -634,7 +628,6 @@ const writeValueForTarget = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
     path: readonly string[];
   },
 ): FabricValue => {
@@ -643,7 +636,7 @@ const writeValueForTarget = (
     | {
       address: {
         id: URI;
-        type: MediaType;
+        type?: MediaType;
         path: readonly string[];
       };
       value?: FabricValue;
@@ -651,9 +644,7 @@ const writeValueForTarget = (
     | undefined;
   let matchingWritePath: string[] | undefined;
   for (const write of writeDetails) {
-    if (write.address.id !== target.id || write.address.type !== target.type) {
-      continue;
-    }
+    if (write.address.id !== target.id) continue;
     if (write.address.path[0] !== "value") {
       continue;
     }
@@ -691,7 +682,6 @@ const verifyInputRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
@@ -700,7 +690,12 @@ const verifyInputRequirements = (
     ...read,
     path: canonicalizeLogicalPath(read.path),
     label: labelAtPath(
-      storedMetadataFor(tx, read.space, read.id, read.type),
+      storedMetadataFor(
+        tx,
+        read.space,
+        read.id,
+        read.type ?? "application/json",
+      ),
       canonicalizeLogicalPath(read.path),
     ),
   })).filter((read) => read.label !== undefined);
@@ -761,7 +756,6 @@ const verifyTrustedEventRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
   schema: JSONSchema,
 ): string | undefined => {
@@ -773,7 +767,6 @@ const verifyTrustedEventRequirements = (
       input.kind === "trusted-event" &&
       input.target.space === target.space &&
       input.target.id === target.id &&
-      input.target.type === target.type &&
       arraysEqual(input.target.path, entry.path) &&
       recordedTrustedEventProvenanceMatchesUiContract(
         input.provenance,
@@ -794,7 +787,6 @@ const verifyExactCopyRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
   schema: JSONSchema,
 ): string | undefined => {
@@ -885,13 +877,11 @@ const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
   source: {
     space: input.source.space,
     id: input.source.id,
-    type: input.source.type,
     path: canonicalizeLogicalPath(input.source.path),
   },
   target: {
     space: input.target.space,
     id: input.target.id,
-    type: input.target.type,
     path: canonicalizeLogicalPath(input.target.path),
   },
 });
@@ -913,7 +903,7 @@ const derivePersistedLinkLabel = (
     tx,
     input.source.space,
     input.source.id as URI,
-    input.source.type as MediaType,
+    "application/json",
   );
   const pendingSourceLabel = candidateSchemas.get(targetKey(input.source)) !==
       undefined
@@ -1083,14 +1073,13 @@ export const prepareBoundaryCommit = (
     const candidateSchema = candidates.get(key);
     const schema = candidateSchema ?? emptySchemaObject();
     const undefinedCandidate = candidateSchema === undefined;
-    const [space, id, type] = key.split("\u0000") as [
+    const [space, id] = key.split("\u0000") as [
       MemorySpace,
       URI,
-      MediaType,
     ];
 
-    const target = { space, id, type };
-    const existing = storedMetadataFor(tx, space, id, type);
+    const target = { space, id };
+    const existing = storedMetadataFor(tx, space, id, "application/json");
     let storedSchema: JSONSchema | undefined;
     let mergedSchema = schema;
     if (existing !== undefined && undefinedCandidate) {
@@ -1247,7 +1236,7 @@ export const prepareBoundaryCommit = (
     tx.writeOrThrow({
       space,
       id,
-      type,
+      type: "application/json",
       path: ["cfc"],
       // System-owned embedded metadata write. Boundary evaluation is driven by
       // user-surface reads/writes plus explicit policy inputs, not by recursive

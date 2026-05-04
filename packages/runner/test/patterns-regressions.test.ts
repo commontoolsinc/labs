@@ -138,12 +138,10 @@ describe("Pattern Runner - Regressions", () => {
     await storageManager.close();
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
     tx = runtime.edit();
     bindBuilder();
@@ -226,12 +224,10 @@ describe("Pattern Runner - Regressions", () => {
 
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
     tx = runtime.edit();
     bindBuilder();
@@ -273,12 +269,10 @@ describe("Pattern Runner - Regressions", () => {
 
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
     tx = runtime.edit();
     bindBuilder();

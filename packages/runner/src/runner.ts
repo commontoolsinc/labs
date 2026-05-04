@@ -169,7 +169,6 @@ const recordOutputSchemaPolicyInputs = (
         target: {
           space: targetLink.space,
           id: targetLink.id,
-          type: targetLink.type,
           path: [...targetLink.path],
         },
         schema,
@@ -219,7 +218,6 @@ const recordSchemaPolicyInputForLink = (
     target: {
       space: link.space,
       id: link.id,
-      type: link.type,
       path: [...link.path],
     },
     schema,
@@ -349,14 +347,12 @@ const recordSetupProjectionPolicyInputs = (
       target: {
         space: target.space,
         id: target.id,
-        type: target.type,
         path: [...target.path, ...schemaPath],
       },
       claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
       sources: [{
         space: source.space,
         id: source.id,
-        type: source.type,
         path: [...source.path],
       }],
     });
@@ -452,9 +448,7 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
-            if (change.address.type === "application/json") {
-              this.resultPatternCache.delete(`${space}/${change.address.id}`);
-            }
+            this.resultPatternCache.delete(`${space}/${change.address.id}`);
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating

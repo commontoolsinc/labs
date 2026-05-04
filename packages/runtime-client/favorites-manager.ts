@@ -174,7 +174,6 @@ export class FavoritesManager {
       id: `of:${pieceId}`,
       space: this.#currentSpaceDID,
       path: [],
-      type: "application/json",
     };
   }
 }

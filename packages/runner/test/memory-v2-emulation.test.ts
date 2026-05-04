@@ -35,12 +35,10 @@ describe("Memory v2 emulation", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
     tx = runtime.edit();
     cell = runtime.getCell(space, "memory-v2-emulation-cell", undefined, tx);

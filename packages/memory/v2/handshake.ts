@@ -1,8 +1,8 @@
 import {
-  getMemoryV2Flags,
+  getMemoryProtocolFlags,
   type HelloMessage,
-  MEMORY_V2_PROTOCOL,
-  sameMemoryV2Flags,
+  MEMORY_PROTOCOL,
+  sameMemoryProtocolFlags,
   type ServerMessage,
 } from "../v2.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -18,8 +18,8 @@ const toError = (name: string, message: string): TypedError => ({
 });
 
 export const respondToHello = (message: HelloMessage): ServerMessage => {
-  const expectedFlags = getMemoryV2Flags();
-  if (message.protocol !== MEMORY_V2_PROTOCOL) {
+  const expectedFlags = getMemoryProtocolFlags();
+  if (message.protocol !== MEMORY_PROTOCOL) {
     return {
       type: "response",
       requestId: "handshake",
@@ -29,13 +29,13 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
       ),
     };
   }
-  if (!sameMemoryV2Flags(message.flags, expectedFlags)) {
+  if (!sameMemoryProtocolFlags(message.flags, expectedFlags)) {
     return {
       type: "response",
       requestId: "handshake",
       error: toError(
         "ProtocolError",
-        `memory/v2 flag mismatch: client=${
+        `memory flag mismatch: client=${
           toCompactDebugString(message.flags)
         } server=${toCompactDebugString(expectedFlags)}`,
       ),
@@ -43,7 +43,7 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
   }
   return {
     type: "hello.ok",
-    protocol: MEMORY_V2_PROTOCOL,
+    protocol: MEMORY_PROTOCOL,
     flags: expectedFlags,
   };
 };

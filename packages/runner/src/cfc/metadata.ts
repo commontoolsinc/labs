@@ -3,7 +3,6 @@ import type { URI } from "@commonfabric/memory/interface";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type {
   IExtendedStorageTransaction,
-  MediaType,
   MemorySpace,
 } from "../storage/interface.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";
@@ -30,13 +29,12 @@ export const readStoredCfcMetadata = (
   target: {
     space: MemorySpace;
     id: string;
-    type: string;
   },
 ): CfcMetadata | undefined => {
   const document = tx.readOrThrow({
     space: target.space,
     id: target.id as URI,
-    type: target.type as MediaType,
+    type: "application/json",
     path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
@@ -51,7 +49,7 @@ export const readStoredCfcMetadata = (
 
 export const storedCfcMetadataAppliesToPath = (
   tx: IExtendedStorageTransaction,
-  target: Pick<NormalizedFullLink, "space" | "id" | "type" | "path">,
+  target: Pick<NormalizedFullLink, "space" | "id" | "path">,
 ): boolean => {
   const metadata = readStoredCfcMetadata(tx, target);
   if (metadata === undefined) {

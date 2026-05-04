@@ -16,7 +16,7 @@ import {
   read,
 } from "../v2/engine.ts";
 import {
-  decodeMemoryV2Boundary,
+  decodeMemoryBoundary,
   DEFAULT_BRANCH,
   type EntityDocument,
   toDocumentPath,
@@ -59,7 +59,7 @@ const authorization = {
 };
 
 const decodeStored = <Value>(source: string | null | undefined): Value =>
-  decodeMemoryV2Boundary<Value>(source ?? "null");
+  decodeMemoryBoundary<Value>(source ?? "null");
 
 const toSourceLink = (id: string) => ({ "/": id } as const);
 

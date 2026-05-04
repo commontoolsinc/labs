@@ -57,7 +57,6 @@ const logger = getLogger("validateAndTransform", {
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
   id: link.id,
-  type: link.type,
   path: [...link.path],
 });
 
@@ -85,7 +84,6 @@ const labelViewForLink = (
   if (
     baseLink.space === link.space &&
     baseLink.id === link.id &&
-    baseLink.type === link.type &&
     isPrefix(baseLink.path, link.path)
   ) {
     return rebaseCfcLabelView(baseView, link.path.slice(baseLink.path.length));

@@ -70,7 +70,6 @@ describe("$defs propagation in array item schema extraction", () => {
       space: signer.did(),
       id: "of:test-doc" as any,
       path: [],
-      type: "application/json",
     };
     const promises: Promise<any>[] = [];
     const cfc = new ContextualFlowControl();
@@ -123,7 +122,6 @@ describe("$defs propagation in array item schema extraction", () => {
       space: signer.did(),
       id: "of:test-doc" as any,
       path: [],
-      type: "application/json",
     };
     const capturedSchemas: unknown[] = [];
     const collectLinkedCellSyncs =

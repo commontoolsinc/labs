@@ -1,15 +1,15 @@
 import {
   type ClientCommit,
-  decodeMemoryV2Boundary,
-  encodeMemoryV2Boundary,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
   type EntitySnapshot,
-  getMemoryV2Flags,
+  getMemoryProtocolFlags,
   type GraphQuery,
   type GraphQueryResult,
-  isMemoryV2Flags,
-  MEMORY_V2_PROTOCOL,
+  isMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
   type ResponseMessage,
-  sameMemoryV2Flags,
+  sameMemoryProtocolFlags,
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenResult,
@@ -103,7 +103,7 @@ export class Client {
   async close(): Promise<void> {
     this.#closed = true;
     this.#connected = false;
-    this.rejectPending(new Error("memory/v2 client closed"));
+    this.rejectPending(new Error("memory client closed"));
     await Promise.all([...this.#spaces].map((space) => space.close()));
     this.#spaces.clear();
     await this.transport.close();
@@ -138,7 +138,7 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryV2Boundary(message));
+    await this.transport.send(encodeMemoryBoundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -173,10 +173,10 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    await this.transport.send(encodeMemoryV2Boundary({
+    await this.transport.send(encodeMemoryBoundary({
       type: "hello",
-      protocol: MEMORY_V2_PROTOCOL,
-      flags: getMemoryV2Flags(),
+      protocol: MEMORY_PROTOCOL,
+      flags: getMemoryProtocolFlags(),
     }));
     try {
       await ack.promise;
@@ -189,9 +189,9 @@ export class Client {
   private onMessage(payload: string): void {
     let message: unknown;
     try {
-      message = decodeMemoryV2Boundary(payload);
+      message = decodeMemoryBoundary(payload);
     } catch (cause) {
-      const error = new Error("Unable to parse memory/v2 server message", {
+      const error = new Error("Unable to parse memory server message", {
         cause,
       });
       error.name = "InvalidMessageError";
@@ -205,10 +205,10 @@ export class Client {
 
     if (this.#helloPending !== null) {
       if (isHelloOk(message)) {
-        const expectedFlags = getMemoryV2Flags();
-        if (!sameMemoryV2Flags(message.flags, expectedFlags)) {
+        const expectedFlags = getMemoryProtocolFlags();
+        if (!sameMemoryProtocolFlags(message.flags, expectedFlags)) {
           const error = new Error(
-            `memory/v2 flag mismatch: client=${
+            `memory flag mismatch: client=${
               toCompactDebugString(expectedFlags)
             } server=${toCompactDebugString(message.flags)}`,
           );
@@ -226,14 +226,14 @@ export class Client {
           error.name = message.error.name;
           this.#helloPending.reject(error);
         } else {
-          const error = new Error("memory/v2 handshake failed");
+          const error = new Error("memory handshake failed");
           error.name = "ProtocolError";
           this.#helloPending.reject(error);
         }
         return;
       }
 
-      const error = new Error("memory/v2 handshake expected hello.ok");
+      const error = new Error("memory handshake expected hello.ok");
       error.name = "ProtocolError";
       this.#helloPending.reject(error);
       return;
@@ -276,7 +276,7 @@ export class Client {
 
   private async ensureConnected(): Promise<void> {
     if (this.#closed) {
-      throw new Error("memory/v2 client is closed");
+      throw new Error("memory client is closed");
     }
     if (this.#connected) {
       return;
@@ -298,7 +298,7 @@ export class Client {
 
   private async reconnect(): Promise<void> {
     if (this.#closed) {
-      throw new Error("memory/v2 client is closed");
+      throw new Error("memory client is closed");
     }
     if (this.#reconnecting) {
       return await this.#reconnecting;
@@ -399,7 +399,7 @@ export class SpaceSession {
 
   #assertOpen(): void {
     if (this.#closed) {
-      throw this.#closeError ?? new Error("memory/v2 session closed");
+      throw this.#closeError ?? new Error("memory session closed");
     }
   }
 
@@ -616,14 +616,14 @@ export class SpaceSession {
       return;
     }
     this.#closed = true;
-    this.#closeError = new Error("memory/v2 session closed");
+    this.#closeError = new Error("memory session closed");
     this.#readyOnConnection = false;
     this.client.forgetSession(this);
     const background = [...this.#background];
     this.#background.clear();
     await Promise.allSettled(background);
     for (const pending of this.#outstandingCommits.values()) {
-      pending.pending.reject(new Error("memory/v2 session closed"));
+      pending.pending.reject(new Error("memory session closed"));
     }
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
@@ -635,7 +635,7 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
-    const error = new Error(`memory/v2 session revoked: ${reason}`);
+    const error = new Error(`memory session revoked: ${reason}`);
     error.name = "SessionRevokedError";
     this.#closed = true;
     this.#closeError = error;
@@ -1047,7 +1047,7 @@ export const connect = Client.connect;
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
   const connection = server.connect((message) => {
-    receiver(encodeMemoryV2Boundary(message));
+    receiver(encodeMemoryBoundary(message));
   });
   return {
     async send(payload: string) {
@@ -1066,7 +1066,7 @@ export const loopback = (server: Server): Transport => {
 
 const toConnectionError = (error?: Error): Error => {
   const connectionError = new Error(
-    error?.message ?? "memory/v2 transport closed",
+    error?.message ?? "memory transport closed",
     error ? { cause: error } : undefined,
   );
   connectionError.name = "ConnectionError";
@@ -1084,8 +1084,8 @@ const isHelloOk = (
 ): message is Extract<ServerMessage, { type: "hello.ok" }> => {
   return typeof message === "object" && message !== null &&
     (message as { type?: string }).type === "hello.ok" &&
-    (message as { protocol?: string }).protocol === MEMORY_V2_PROTOCOL &&
-    isMemoryV2Flags((message as { flags?: unknown }).flags);
+    (message as { protocol?: string }).protocol === MEMORY_PROTOCOL &&
+    isMemoryProtocolFlags((message as { flags?: unknown }).flags);
 };
 
 const isSessionEffect = (

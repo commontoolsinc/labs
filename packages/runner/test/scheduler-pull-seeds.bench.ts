@@ -2,7 +2,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
@@ -21,12 +20,10 @@ type SchedulerInternals = {
 async function setupSharedSeedGraph(effectCount: number) {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   runtime.scheduler.enablePullMode();
 

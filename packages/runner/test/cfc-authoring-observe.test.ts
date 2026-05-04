@@ -17,12 +17,10 @@ describe("CFC authoring surface trust-sensitive claims", () => {
   const createRuntime = () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      memoryVersion: "v2",
     });
     return { runtime, storageManager };
   };
@@ -103,12 +101,10 @@ describe("CFC authoring surface trust-sensitive claims", () => {
     const { runtime, storageManager } = (() => {
       const storageManager = StorageManager.emulate({
         as: signer,
-        memoryVersion: "v2",
       });
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        memoryVersion: "v2",
         cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "trust-snapshot-1",

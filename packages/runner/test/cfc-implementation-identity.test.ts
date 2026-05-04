@@ -26,12 +26,10 @@ describe("CFC builtin implementation identity", () => {
   it("stamps registered raw builtins with a stable builtin identity", () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "observe",
     });
 
@@ -68,12 +66,10 @@ describe("CFC builtin implementation identity", () => {
   it("threads builtin implementation identity through the active execution frame", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "observe",
     });
 
@@ -111,12 +107,10 @@ describe("CFC builtin implementation identity", () => {
   it("leaves unregistered raw modules without a builtin identity", () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "observe",
     });
 
@@ -142,12 +136,10 @@ describe("CFC builtin implementation identity", () => {
   it("leaves unsafe-host helpers untrusted for policy-facing identity", () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "observe",
     });
 

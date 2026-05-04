@@ -58,7 +58,6 @@ const proxyCacheKey = (
     writable,
     link.space,
     link.id,
-    link.type,
     link.path,
     cfcLabelView ?? null,
   ]);
@@ -401,7 +400,6 @@ export function createQueryResultProxy<T>(
                 id: toURI(hashOf(cause)),
                 space: link.space,
                 path: [],
-                type: "application/json",
               };
 
               diffAndUpdate(runtime, tx, resultLink, result, cause);

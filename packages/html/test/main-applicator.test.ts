@@ -566,7 +566,6 @@ Deno.test("DomApplicator - cell bindings", async (t) => {
     id: "of:test-cell" as CellRef["id"],
     space: "did:key:test-space" as CellRef["space"],
     path: ["value"],
-    type: "application/json" as CellRef["type"],
     schema: { type: "string" },
   };
 
@@ -821,7 +820,6 @@ Deno.test("DomApplicator - bindings", async (t) => {
               space: "did:key:test",
               id: "of:test",
               path: [],
-              type: "application/json",
             },
           }],
         });

@@ -15,7 +15,6 @@ const type = "application/json" as const;
 Deno.test("commitNative rejection is caught and surfaced as Result error", async () => {
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
 
   try {

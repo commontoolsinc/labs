@@ -65,7 +65,6 @@ describe("CFC sink request policy", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
     const tx = runtime.edit();
 

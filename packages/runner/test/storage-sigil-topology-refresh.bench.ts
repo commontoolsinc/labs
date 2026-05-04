@@ -1,7 +1,6 @@
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench sigil topology refresh");
 const space = signer.did();
@@ -106,7 +105,6 @@ const buildDoc = (index: number, version: number) => {
 const setup = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const provider = storageManager.open(space) as unknown as TestProvider;
 

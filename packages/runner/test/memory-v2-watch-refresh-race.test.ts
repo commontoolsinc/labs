@@ -4,10 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
-  decodeMemoryV2Boundary,
-  encodeMemoryV2Boundary,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
   type EntityDocument,
-  getMemoryV2Flags,
+  getMemoryProtocolFlags,
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
@@ -21,8 +21,8 @@ const signer = await Identity.fromPassphrase("memory-v2-watch-refresh-race");
 const space = signer.did();
 const HELLO_OK = {
   type: "hello.ok",
-  protocol: "memory/v2",
-  flags: getMemoryV2Flags(),
+  protocol: "memory",
+  flags: getMemoryProtocolFlags(),
 } as const;
 
 type TestProvider = IStorageProviderWithReplica & {
@@ -49,7 +49,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = decodeMemoryV2Boundary(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -120,7 +120,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(encodeMemoryV2Boundary(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -143,7 +143,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = decodeMemoryV2Boundary(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -223,7 +223,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(encodeMemoryV2Boundary(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -246,7 +246,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = decodeMemoryV2Boundary(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       watches?: Array<{
@@ -315,7 +315,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(encodeMemoryV2Boundary(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -360,7 +360,6 @@ Deno.test("memory v2 runner batches concurrent watch refreshes", async () => {
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-watch-refresh-batch"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -389,7 +388,6 @@ Deno.test("memory v2 runner compacts redundant selectors for the same doc", asyn
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-watch-refresh-compact"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -431,7 +429,6 @@ Deno.test("memory v2 runner deduplicates semantically identical selectors with r
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-watch-refresh-order"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -476,7 +473,6 @@ Deno.test("memory v2 runner incrementally adds later watches after the initial s
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-watch-add"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -502,7 +498,6 @@ Deno.test("memory v2 runner does not resend prior pending watches in later batch
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-watch-add-delta"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -530,7 +525,6 @@ Deno.test("memory v2 runner resolves synced on a microtask when idle", async () 
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-synced-microtask"),
-    memoryVersion: "v2",
   }, sessionFactory);
   using time = new FakeTime();
 
@@ -556,7 +550,6 @@ Deno.test(
     const storageManager = TestStorageManager.create({
       as: signer,
       address: new URL("memory://runner-v2-synced-cross-space"),
-      memoryVersion: "v2",
     }, sessionFactory);
     using time = new FakeTime();
 
@@ -605,7 +598,6 @@ Deno.test("memory v2 runner integrates watch deltas without re-diffing cold watc
   const storageManager = TestStorageManager.create({
     as: signer,
     address: new URL("memory://runner-v2-watch-delta"),
-    memoryVersion: "v2",
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 

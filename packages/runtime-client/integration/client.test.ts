@@ -22,10 +22,6 @@ import { MockDoc } from "@commonfabric/html/mock-doc";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 
 const { API_URL } = env;
-const INTEGRATION_MEMORY_VERSION = (() => {
-  const value = Deno.env.get("CF_INTEGRATION_MEMORY_VERSION");
-  return value === "v1" || value === "v2" ? value : undefined;
-})();
 
 // Use a deserializable key implementation in Deno,
 // as we cannot currently transfer WebCrypto implementation keys
@@ -1063,7 +1059,6 @@ async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
     spaceName: session.spaceName,
-    memoryVersion: INTEGRATION_MEMORY_VERSION,
   });
 
   await worker.synced();
