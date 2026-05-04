@@ -35,13 +35,11 @@ import {
 
 // ===== Types =====
 
-// FileData matches cf-file-input's event shape (not exported from commonfabric)
 interface FileData {
   id: string;
   name: string;
   url: string;
-  data: string;
-  timestamp: number;
+  data?: string;
   size: number;
   type: string;
 }
@@ -92,17 +90,16 @@ If no text is visible, return an empty string.`;
 // ===== Handlers (defined OUTSIDE pattern function) =====
 
 /**
- * Decode base64 data URL to UTF-8 text
+ * Decode a base64 data URL to UTF-8 text
  * Uses TextDecoder for proper multi-byte character handling
  */
 function decodeBase64ToText(dataUrl: string): string {
-  const base64Match = dataUrl.match(/base64,(.+)/);
-  if (!base64Match) {
-    throw new Error("Invalid data URL format");
-  }
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex === -1) return dataUrl;
+  const base64Data = dataUrl.slice(commaIndex + 1);
 
   // Use TextDecoder for proper UTF-8 handling (same as uri-utils.ts)
-  const binaryString = atob(base64Match[1]);
+  const binaryString = atob(base64Data);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
     bytes[i] = binaryString.charCodeAt(i);
@@ -163,7 +160,12 @@ const handleFileUpload = handler<
       return;
     }
 
-    // Decode base64 data URL to text (UTF-8 safe)
+    if (!file.data) {
+      fileError.set(`Failed to read file: ${file.name}`);
+      return;
+    }
+
+    // Decode data URL to text (UTF-8 safe)
     try {
       const textContent = decodeBase64ToText(file.data);
       previewText.set(textContent);
@@ -258,28 +260,29 @@ const handleCancelPreview = handler<
 
 /**
  * Handle image change from cf-image-input
- * NOTE: The $images binding handles actual data flow to the imageArray Cell.
- * This handler only sets UI state flags for the preview section.
- * The image data arrives via the binding, triggering the computed() for OCR.
+ * Stores uploaded image links in the image array and updates preview state.
  */
 const handleImageChange = handler<
-  { detail: { images: ImageData[] } },
   {
+    detail: {
+      images?: ImageData[];
+      files?: ImageData[];
+    };
+  },
+  {
+    uploadedImage: Writable<ImageData[]>;
     previewText: Writable<string | null>;
     fileError: Writable<string | null>;
   }
->(({ detail }, { previewText, fileError }) => {
-  // NOTE: The $images binding handles data flow - this handler only clears state
-  // The handler fires before file processing completes, so we can't rely on
-  // detail.images to detect uploads. derivedPreviewSource handles that reactively.
-  const images = detail?.images;
+>(({ detail }, { uploadedImage, previewText, fileError }) => {
+  const images = detail?.images ?? detail?.files ?? [];
   if (!images || images.length === 0) {
-    // Image was removed - clear file errors
+    uploadedImage.set([]);
     fileError.set(null);
     return;
   }
 
-  // Image added - clear file preview state (image preview is derived from imageArray)
+  uploadedImage.set(images);
   previewText.set(null);
   fileError.set(null);
 });
@@ -317,25 +320,25 @@ export const SmartTextInput = pattern<
   // File error state (for user feedback)
   const fileError = Writable.of<string | null>(null);
 
-  // Image array for cf-image-input binding
+  // Image array for uploaded image links
   const imageArray = Writable.of<ImageData[]>([]);
 
   // ===== OCR Processing =====
 
   // Build OCR prompt directly using computed() - this ensures reactivity
-  // when the $images binding updates the imageArray Cell.
+  // when image upload events update the imageArray Cell.
   // Pattern: Match image-analysis.tsx which uses computed() to build content parts
   const ocrPrompt = computed(() => {
     const images = imageArray.get();
     const image = images.length > 0 ? images[0] : null;
 
-    if (!image || !image.data) {
+    if (!image || !image.url) {
       // Return undefined when no image - generateText will early-exit gracefully
       return undefined;
     }
 
     return [
-      { type: "image" as const, image: image.data },
+      { type: "image" as const, image: image.url },
       {
         type: "text" as const,
         text: "Extract all text from this image exactly as written.",
@@ -448,6 +451,7 @@ export const SmartTextInput = pattern<
       {/* File Upload Button */}
       <cf-file-input
         accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+        includeData
         buttonText="📄 Upload Text File"
         showPreview={false}
         variant="ghost"
@@ -462,11 +466,7 @@ export const SmartTextInput = pattern<
         })}
       />
 
-      {/* Image Upload Button */}
-      {/* Using $images binding like image-analysis.tsx - this handles data flow */}
-      {/* Handler only sets preview state flags, doesn't store image */}
       <cf-image-input
-        $images={imageArray}
         maxImages={1}
         showPreview={false}
         maxSizeBytes={maxImageSizeBytes}
@@ -474,6 +474,7 @@ export const SmartTextInput = pattern<
         variant="ghost"
         size="sm"
         oncf-change={handleImageChange({
+          uploadedImage: imageArray,
           previewText,
           fileError,
         })}

@@ -444,7 +444,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
           RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
             type: RequestType.UploadBlob,
             contentType: "image/png",
-            body: new Uint8Array([1, 2, 3]),
+            body: [1, 2, 3],
             suffix: "png",
           }),
         ).resolves.toEqual({

@@ -350,7 +350,7 @@ export interface SetBreakpointsRequest extends BaseRequest {
 export interface UploadBlobRequest extends BaseRequest {
   type: RequestType.UploadBlob;
   contentType: string;
-  body: Uint8Array;
+  body: number[];
   suffix?: string;
 }
 

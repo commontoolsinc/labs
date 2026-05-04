@@ -1,6 +1,7 @@
 import {
   computed,
   generateText,
+  handler,
   ifElse,
   ImageData,
   NAME,
@@ -27,6 +28,25 @@ type ImageChatOutput = {
   ui: VNode;
 };
 
+type ImageUploadEvent = {
+  detail?: {
+    images?: ImageData[];
+    files?: ImageData[];
+  };
+};
+
+const appendUploadedImages = handler<
+  ImageUploadEvent,
+  { images: Writable<ImageData[]> }
+>(({ detail }, { images }) => {
+  const uploaded = detail?.images ?? detail?.files ?? [];
+  if (uploaded.length === 0) return;
+  images.set([
+    ...(images.get() ?? []),
+    ...uploaded,
+  ]);
+});
+
 export default pattern<ImageChatInput, ImageChatOutput>(
   ({ systemPrompt, model }) => {
     const images = Writable.of<ImageData[]>([]);
@@ -43,7 +63,9 @@ export default pattern<ImageChatInput, ImageChatOutput>(
       }
 
       for (const img of images.get() || []) {
-        parts.push({ type: "image", image: img.data });
+        if (img.url) {
+          parts.push({ type: "image", image: img.url });
+        }
       }
 
       return parts;
@@ -78,7 +100,7 @@ export default pattern<ImageChatInput, ImageChatOutput>(
                     showPreview
                     previewSize="md"
                     removable
-                    $images={images}
+                    oncf-change={appendUploadedImages({ images })}
                   />
                 </cf-vstack>
               </cf-card>

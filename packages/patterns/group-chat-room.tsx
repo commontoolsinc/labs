@@ -154,6 +154,22 @@ const cancelAvatar = handler<
   avatarImages.set([]);
 });
 
+type ImageUploadEvent = {
+  detail?: {
+    images?: ImageData[];
+    files?: ImageData[];
+  };
+};
+
+const setUploadedImage = handler<
+  ImageUploadEvent,
+  { images: Writable<ImageData[]> }
+>(({ detail }, { images }) => {
+  const uploaded = detail?.images ?? detail?.files ?? [];
+  const first = uploaded[0];
+  images.set(first ? [first] : []);
+});
+
 // Handler to toggle emoji picker for a message
 const toggleEmojiPicker = handler<
   unknown,
@@ -231,7 +247,7 @@ export default pattern<RoomInput, RoomOutput>(
       if (!imgs || imgs.length === 0) {
         return "";
       }
-      return imgs[0].url || imgs[0].data || "";
+      return imgs[0].url || "";
     });
 
     const hasPendingChatImage = computed(
@@ -242,7 +258,7 @@ export default pattern<RoomInput, RoomOutput>(
       if (!imgs || imgs.length === 0) {
         return "";
       }
-      return imgs[0].url || imgs[0].data || "";
+      return imgs[0].url || "";
     });
 
     const isSessionValid = computed(() => {
@@ -775,13 +791,15 @@ export default pattern<RoomInput, RoomOutput>(
                       )}
                       {/* Hidden cf-image-input overlaid on avatar */}
                       <cf-image-input
-                        $images={avatarImages}
                         maxImages={1}
                         showPreview={false}
                         buttonText=""
                         variant="ghost"
                         size="sm"
                         style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;"
+                        oncf-change={setUploadedImage({
+                          images: avatarImages,
+                        })}
                       />
                     </div>
 
@@ -800,12 +818,12 @@ export default pattern<RoomInput, RoomOutput>(
 
                     {/* Attachment button for sending images to chat */}
                     <cf-image-input
-                      $images={chatImages}
                       maxImages={1}
                       showPreview={false}
                       buttonText="📎"
                       variant="ghost"
                       size="sm"
+                      oncf-change={setUploadedImage({ images: chatImages })}
                     />
 
                     {/* Pending avatar preview */}

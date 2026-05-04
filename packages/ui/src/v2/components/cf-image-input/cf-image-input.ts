@@ -1,7 +1,8 @@
 import { html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
-import { CFFileInput, type FileData } from "../cf-file-input/cf-file-input.ts";
+import { CFFileInput } from "../cf-file-input/cf-file-input.ts";
+import type { StoredFile } from "../../utils/file-cell-storage.ts";
 import {
   compressImage,
   formatFileSize,
@@ -44,7 +45,7 @@ export interface ExifData {
 /**
  * Image data structure (extends FileData with image-specific fields)
  */
-export interface ImageData extends FileData {
+export interface ImageData extends StoredFile {
   width?: number;
   height?: number;
   exif?: ExifData;
@@ -70,7 +71,7 @@ export interface ImageData extends FileData {
  * @attr {boolean} removable - Allow removing images (default: true)
  * @attr {boolean} disabled - Disable the input
  *
- * @fires cf-change - Fired when image(s) are added. detail: { images: ImageData[] }
+ * @fires cf-change - Fired when image(s) are added. detail: { images: ImageData[], allImages: ImageData[] }
  * @fires cf-remove - Fired when an image is removed. detail: { id: string, images: ImageData[] }
  * @fires cf-error - Fired when an error occurs. detail: { error: Error, message: string }
  *
@@ -96,14 +97,6 @@ export class CFImageInput extends CFFileInput {
 
   @property({ type: Boolean })
   accessor extractExif = false;
-
-  // Provide backward-compatible property alias
-  get images(): ImageData[] | any {
-    return this.files;
-  }
-  set images(value: ImageData[] | any) {
-    this.files = value;
-  }
 
   // Alias maxImages to maxFiles for backward compatibility
   get maxImages(): number | undefined {
@@ -148,28 +141,8 @@ export class CFImageInput extends CFFileInput {
 
   // Override: Extract image dimensions and EXIF
   protected override async processFile(file: File): Promise<ImageData> {
-    // Get base file data
-    const baseData = await super.processFile(file);
-
-    // Load image to get dimensions
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-
-      img.onload = () => {
-        const imageData: ImageData = {
-          ...baseData,
-          width: img.width,
-          height: img.height,
-        };
-
-        // TODO(#exif): Add EXIF extraction if this.extractExif is true
-
-        resolve(imageData);
-      };
-
-      img.onerror = () => reject(new Error("Failed to load image"));
-      img.src = baseData.url;
-    });
+    const dimensions = await readImageDimensions(file);
+    return await this.storeFile(file, dimensions) as ImageData;
   }
 
   // Override: Always use <img> for images (we know they're images)
@@ -214,27 +187,48 @@ export class CFImageInput extends CFFileInput {
     super._handleFileChange(event);
   };
 
-  // Override emit to add backward-compatible event details
+  // Override emit to add image-specific event details
   protected override emit<T = any>(
     eventName: string,
     detail?: T,
     options?: EventInit,
   ): boolean {
-    if (eventName === "cf-change" && (detail as any)?.files) {
-      // Add 'images' property for backward compatibility
+    if (
+      (eventName === "cf-change" || eventName === "cf-remove") &&
+      (detail as any)?.files
+    ) {
       return super.emit(eventName, {
         ...detail,
         images: (detail as any).files,
+        allImages: (detail as any).allFiles,
       } as T, options);
-    } else if (eventName === "cf-remove" && (detail as any)?.files) {
-      // Add 'images' property for backward compatibility
-      return super.emit(eventName, {
-        ...detail,
-        images: (detail as any).files,
-      } as T, options);
-    } else {
-      return super.emit(eventName, detail, options);
     }
+    return super.emit(eventName, detail, options);
+  }
+}
+
+function readImageDimensions(
+  file: File,
+): Promise<Pick<ImageData, "width" | "height">> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve({ width: img.width, height: img.height });
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Failed to load image"));
+      };
+      img.src = objectUrl;
+    });
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
   }
 }
 

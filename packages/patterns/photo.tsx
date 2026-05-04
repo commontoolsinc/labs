@@ -61,6 +61,22 @@ const clearPhoto = handler<
   images.set([]);
 });
 
+type ImageUploadEvent = {
+  detail?: {
+    images?: ImageData[];
+    files?: ImageData[];
+  };
+};
+
+const setUploadedPhoto = handler<
+  ImageUploadEvent,
+  { images: Writable<ImageData[]> }
+>(({ detail }, { images }) => {
+  const uploaded = detail?.images ?? detail?.files ?? [];
+  const first = uploaded[0];
+  images.set(first ? [first] : []);
+});
+
 // ===== The Pattern =====
 export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
@@ -172,10 +188,10 @@ export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
             </cf-vstack>,
             // No photo yet - show upload input
             <cf-image-input
-              $images={images}
               maxImages={1}
               showPreview={false}
               style={{ width: "100%" }}
+              oncf-change={setUploadedPhoto({ images })}
             />,
           )}
         </cf-vstack>

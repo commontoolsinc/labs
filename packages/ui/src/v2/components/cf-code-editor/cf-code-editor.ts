@@ -1,4 +1,5 @@
 import { html, PropertyValues } from "lit";
+import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import {
@@ -62,10 +63,14 @@ import {
   type CellHandle,
   isCellHandle,
   NAME,
+  type RuntimeClient,
 } from "@commonfabric/runtime-client";
 import { stringSchema } from "@commonfabric/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
+import { consume } from "@lit/context";
+import { runtimeContext } from "../../runtime-context.ts";
+import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
 import {
   Mentionable,
   MentionableArray,
@@ -216,6 +221,10 @@ export class CFCodeEditor extends BaseElement {
   declare mode: "code" | "prose";
   declare autofocus: boolean;
   declare cursorPosition: "start" | "end";
+
+  @consume({ context: runtimeContext, subscribe: true })
+  @property({ attribute: false })
+  accessor runtime: RuntimeClient | undefined = undefined;
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
@@ -1354,6 +1363,16 @@ export class CFCodeEditor extends BaseElement {
           this.emit("cf-blur");
           return false;
         },
+        paste: (event, view) => {
+          if (this.readonly || this.disabled) return false;
+          const files = Array.from(event.clipboardData?.files ?? [])
+            .filter((file) => file.type.startsWith("image/"));
+          if (files.length === 0) return false;
+
+          event.preventDefault();
+          this._handleImagePaste(files, view);
+          return true;
+        },
       }),
       // Add backlink click handler for Cmd/Ctrl+Click
       this.createBacklinkClickHandler(),
@@ -1479,6 +1498,50 @@ export class CFCodeEditor extends BaseElement {
    */
   get editorView(): EditorView | undefined {
     return this._editorView;
+  }
+
+  private async _handleImagePaste(
+    files: File[],
+    view: EditorView,
+  ): Promise<void> {
+    const runtime = isCellHandle(this.value)
+      ? this.value.runtime()
+      : this.runtime;
+
+    if (!runtime) {
+      this.emit("cf-error", {
+        error: new Error("Runtime is not available for pasted image storage"),
+        message: "Runtime is not available for pasted image storage",
+      });
+      return;
+    }
+
+    try {
+      const storedFiles: StoredFile[] = [];
+      for (const file of files) {
+        storedFiles.push(await uploadFile({ file, runtime }));
+      }
+
+      const markdown = storedFiles
+        .map((file) => `![${file.name}](${file.url})`)
+        .join("\n");
+      const selection = view.state.selection.main;
+      view.dispatch({
+        changes: {
+          from: selection.from,
+          to: selection.to,
+          insert: markdown,
+        },
+        selection: { anchor: selection.from + markdown.length },
+      });
+
+      this.emit("cf-file-paste", { files: storedFiles });
+    } catch (error) {
+      this.emit("cf-error", {
+        error: error as Error,
+        message: "Failed to store pasted image",
+      });
+    }
   }
 
   /**
