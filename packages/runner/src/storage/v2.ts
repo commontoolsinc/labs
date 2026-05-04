@@ -374,9 +374,10 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
   }
   const limit = Math.min(left.length, right.length);
   for (let index = 0; index < limit; index++) {
-    const compared = left[index].localeCompare(right[index]);
-    if (compared !== 0) {
-      return compared;
+    const a = left[index];
+    const b = right[index];
+    if (a !== b) {
+      return a < b ? -1 : 1;
     }
   }
   return 0;
@@ -389,9 +390,8 @@ const compactCommitReads = <
   reads: Read[],
 ): Read[] => {
   const sorted = [...reads].sort((left, right) => {
-    const idCompared = left.id.localeCompare(right.id);
-    if (idCompared !== 0) {
-      return idCompared;
+    if (left.id !== right.id) {
+      return left.id < right.id ? -1 : 1;
     }
 
     if ("seq" in left && "seq" in right && left.seq !== right.seq) {
@@ -460,9 +460,8 @@ const compactCommitReads = <
   }
 
   return compacted.toSorted((left, right) => {
-    const idCompared = left.id.localeCompare(right.id);
-    if (idCompared !== 0) {
-      return idCompared;
+    if (left.id !== right.id) {
+      return left.id < right.id ? -1 : 1;
     }
 
     if ("seq" in left && "seq" in right && left.seq !== right.seq) {
