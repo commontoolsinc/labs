@@ -1,3 +1,5 @@
+import { encodePointer } from "../../../memory/v2/path.ts";
+
 export type IFCLabel = {
   confidentiality?: unknown[];
   integrity?: unknown[];
@@ -22,14 +24,8 @@ export const canonicalizeCfcLogicalPath = (
   path: readonly string[],
 ): string[] => path[0] === "value" ? [...path.slice(1)] : [...path];
 
-export const cfcLabelViewPathKey = (path: readonly string[]): string => {
-  const logicalPath = canonicalizeCfcLogicalPath(path);
-  return logicalPath.length === 0 ? "" : `/${
-    logicalPath
-      .map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
-      .join("/")
-  }`;
-};
+export const cfcLabelViewPathKey = (path: readonly string[]): string =>
+  encodePointer(canonicalizeCfcLogicalPath(path));
 
 export const cfcLabelPathPrefixMatches = (
   prefix: readonly string[],
