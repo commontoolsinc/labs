@@ -987,9 +987,11 @@ const coalesceLabelEntries = (
       label: mergeLabels(existing?.label, cloneLabel(entry.label)),
     });
   }
-  return [...byPath.values()].sort((left, right) =>
-    pathKey(left.path).localeCompare(pathKey(right.path))
-  );
+  return [...byPath.values()].sort((left, right) => {
+    const leftKey = pathKey(left.path);
+    const rightKey = pathKey(right.path);
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
 };
 
 const ensureSchemaDocument = (

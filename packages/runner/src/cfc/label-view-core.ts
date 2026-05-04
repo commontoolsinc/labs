@@ -58,11 +58,11 @@ export const hasCfcLabelValues = (label: IFCLabel): boolean =>
   LABEL_KEYS.some((key) => Array.isArray(label[key]) && label[key]!.length > 0);
 
 const sortEntries = (entries: CfcLabelViewEntry[]): CfcLabelViewEntry[] =>
-  entries.sort((left, right) =>
-    cfcLabelViewPathKey(left.path).localeCompare(
-      cfcLabelViewPathKey(right.path),
-    )
-  );
+  entries.sort((left, right) => {
+    const leftKey = cfcLabelViewPathKey(left.path);
+    const rightKey = cfcLabelViewPathKey(right.path);
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
 
 const mergeLabel = (
   left: IFCLabel | undefined,
