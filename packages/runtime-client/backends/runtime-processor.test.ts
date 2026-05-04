@@ -423,20 +423,22 @@ describe("RuntimeProcessor blob upload IPC", () => {
     const originalFetch = globalThis.fetch;
     let requestedUrl: string | undefined;
     let requestedPayload: unknown;
-    globalThis.fetch = async (input, init) => {
+    globalThis.fetch = (input, init) => {
       requestedUrl = input.toString();
       requestedPayload = withUnifiedEncoding(() =>
         decodeMemoryBoundary(init?.body as string)
       );
-      return new Response(
-        JSON.stringify({
-          id: "fid1:test",
-          url: "blobs/test.png",
-        }),
-        {
-          status: 201,
-          headers: { "Content-Type": "application/json" },
-        },
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "fid1:test",
+            url: "blobs/test.png",
+          }),
+          {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
     };
     const processor = {
