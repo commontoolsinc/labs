@@ -21,7 +21,7 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
 import { LRUCache } from "@commonfabric/utils/cache";
-import { utf8Compare } from "@commonfabric/utils/utf8";
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 // ---------------------------------------------------------------------------
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -346,7 +346,7 @@ function feedPlainObject(
   // those other languages don't necessarily have the same encoding bias as JS,
   // and (c) we want to make the specification for hashing straightforward
   // anyway (and are willing to pay a performance cost because of it).
-  const keys = Object.keys(value).sort(utf8Compare);
+  const keys = utf8SortedKeysOf(value);
 
   hasher.update(TAG_OBJECT_BYTES);
   for (const key of keys) {
