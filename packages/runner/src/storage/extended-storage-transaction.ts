@@ -6,6 +6,7 @@ import {
   type FabricValue,
   isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
   IAttestation,
@@ -169,7 +170,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   recordCfcWritePolicyInput(input: WritePolicyInput): void {
-    this.cfcState.writePolicyInputs.push(input);
+    // Freeze on entry: from this point on the record is owned by the tx and
+    // identity-stable, which lets `hashStringOf()` cache its hash on the
+    // existing WeakMap. The within-sort tiebreaker in
+    // `compareWritePolicyInput` then re-hashes each element via the cache.
+    this.cfcState.writePolicyInputs.push(deepFreeze(input));
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
     }
