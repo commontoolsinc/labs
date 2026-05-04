@@ -2,6 +2,7 @@ import { assertEquals, assertThrows } from "@std/assert";
 import {
   buildCfLauncherCommand,
   defaultLabsRootFromModulePath,
+  fileUrlToPath,
   formatCfLauncherUsage,
   parseCfLauncherArgs,
 } from "../launcher.ts";
@@ -10,6 +11,26 @@ Deno.test("defaultLabsRootFromModulePath resolves from packages/cli", () => {
   assertEquals(
     defaultLabsRootFromModulePath("/workspace/labs/packages/cli/launcher.ts"),
     "/workspace/labs",
+  );
+});
+
+Deno.test("defaultLabsRootFromModulePath preserves UNC roots", () => {
+  assertEquals(
+    defaultLabsRootFromModulePath(
+      "//server/share/labs/packages/cli/launcher.ts",
+    ),
+    "//server/share/labs",
+  );
+});
+
+Deno.test("fileUrlToPath converts drive and UNC file URLs", () => {
+  assertEquals(
+    fileUrlToPath("file:///C:/workspace/labs/packages/cli/launcher.ts"),
+    "C:/workspace/labs/packages/cli/launcher.ts",
+  );
+  assertEquals(
+    fileUrlToPath("file://server/share/labs/packages/cli/launcher.ts"),
+    "//server/share/labs/packages/cli/launcher.ts",
   );
 });
 
@@ -60,6 +81,32 @@ Deno.test("parseCfLauncherArgs supports explicit consumer config", () => {
     cwd: "/workspace/loom",
     cfArgs: ["piece", "apply", "--config", "piece-config.json"],
   });
+});
+
+Deno.test("parseCfLauncherArgs forwards cf args after separator", () => {
+  const parsed = parseCfLauncherArgs({
+    argv: [
+      "--labs-root",
+      "../..",
+      "--config",
+      "../../deno.json",
+      "--cli-entrypoint",
+      "./mod.ts",
+      "--",
+      "--config",
+      "piece-config.json",
+    ],
+    cwd: "/workspace/labs/packages/cli",
+    denoPath: "/usr/local/bin/deno",
+    modulePath: "/workspace/labs/packages/cli/launcher.ts",
+  });
+
+  assertEquals("help" in parsed, false);
+  if ("help" in parsed) {
+    throw new Error("unexpected help result");
+  }
+  assertEquals(parsed.configPath, "/workspace/labs/deno.json");
+  assertEquals(parsed.cfArgs, ["--config", "piece-config.json"]);
 });
 
 Deno.test("parseCfLauncherArgs treats the first non-launcher arg as cf args", () => {

@@ -41,13 +41,17 @@ const isAbsolutePath = (path: string): boolean => {
 const normalizePath = (path: string): string => {
   const normalized = normalizeSeparators(path);
   const drivePrefix = normalized.match(/^[A-Za-z]:/)?.[0] ?? "";
-  const withoutDrive = drivePrefix === ""
-    ? normalized
-    : normalized.slice(drivePrefix.length);
-  const isAbsolute = withoutDrive.startsWith("/");
+  const hasUncPrefix = drivePrefix === "" && normalized.startsWith("//") &&
+    !normalized.startsWith("///");
+  const withoutPrefix = drivePrefix !== ""
+    ? normalized.slice(drivePrefix.length)
+    : hasUncPrefix
+    ? normalized.slice(2)
+    : normalized;
+  const isAbsolute = hasUncPrefix || withoutPrefix.startsWith("/");
   const parts: string[] = [];
 
-  for (const part of withoutDrive.split("/")) {
+  for (const part of withoutPrefix.split("/")) {
     if (part === "" || part === ".") {
       continue;
     }
@@ -62,7 +66,13 @@ const normalizePath = (path: string): string => {
     parts.push(part);
   }
 
-  const prefix = `${drivePrefix}${isAbsolute ? "/" : ""}`;
+  const prefix = drivePrefix !== ""
+    ? `${drivePrefix}${isAbsolute ? "/" : ""}`
+    : hasUncPrefix
+    ? "//"
+    : isAbsolute
+    ? "/"
+    : "";
   const suffix = parts.join("/");
   if (suffix === "") {
     return prefix === "" ? "." : prefix;
@@ -75,6 +85,11 @@ const dirnamePath = (path: string): string => {
   const trimmed = normalized.length > 1
     ? normalized.replace(/\/+$/g, "")
     : normalized;
+  if (trimmed.startsWith("//")) {
+    const withoutUncPrefix = trimmed.slice(2);
+    const uncIndex = withoutUncPrefix.lastIndexOf("/");
+    return uncIndex < 0 ? trimmed : `//${withoutUncPrefix.slice(0, uncIndex)}`;
+  }
   const index = trimmed.lastIndexOf("/");
   if (index < 0) {
     return ".";
@@ -110,12 +125,15 @@ const resolvePath = (base: string, path: string): string =>
 export const defaultLabsRootFromModulePath = (modulePath: string): string =>
   resolvePathSegments(dirnamePath(modulePath), "..", "..");
 
-const fileUrlToPath = (url: string): string => {
+export const fileUrlToPath = (url: string): string => {
   const parsed = new URL(url);
   if (parsed.protocol !== "file:") {
     throw new Error(`expected file URL, received ${url}`);
   }
   const path = decodeURIComponent(parsed.pathname);
+  if (parsed.hostname !== "" && parsed.hostname !== "localhost") {
+    return normalizePath(`//${decodeURIComponent(parsed.hostname)}${path}`);
+  }
   return /^\/[A-Za-z]:\//.test(path) ? path.slice(1) : path;
 };
 
