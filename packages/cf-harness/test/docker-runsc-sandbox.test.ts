@@ -71,7 +71,7 @@ Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   );
   assertEquals(config.workspaceMountPath, "/workspace");
   assertEquals(config.shellPath, "/bin/sh");
-  assertEquals(config.dockerNetworkMode, "none");
+  assertEquals(config.dockerNetworkMode, "bridge");
   assertEquals(config.additionalMounts, []);
   assertEquals(config.extraDockerArgs, []);
   assertEquals(config.cfcResultDir, undefined);
@@ -88,6 +88,15 @@ Deno.test("resolveDefaultContainerUser keeps host UID/GID default on Linux", () 
   }
 
   assertMatch(resolveDefaultContainerUser("linux") ?? "", /^\d+:\d+$/);
+});
+
+Deno.test("resolveDockerRunscSandboxConfig accepts explicit docker network mode", () => {
+  const config = resolveDockerRunscSandboxConfig({
+    workspaceHostPath: "/host/project",
+    dockerNetworkMode: "bridge",
+  });
+
+  assertEquals(config.dockerNetworkMode, "bridge");
 });
 
 Deno.test("DockerRunscSandboxRuntime builds a docker create/start/wait/rm invocation", async () => {
@@ -119,7 +128,7 @@ Deno.test("DockerRunscSandboxRuntime builds a docker create/start/wait/rm invoca
       "--runtime",
       "runsc-cfc",
       "--network",
-      "none",
+      "bridge",
       ...(config.containerUser !== undefined
         ? ["--user", config.containerUser]
         : []),
@@ -249,7 +258,7 @@ Deno.test("DockerRunscSandboxRuntime runShell honors an explicit container user 
       "--runtime",
       "runsc-cfc",
       "--network",
-      "none",
+      "bridge",
       "--user",
       "1234:2345",
       "--mount",
@@ -537,7 +546,7 @@ Deno.test("DockerRunscSandboxRuntime mounts Fabric separately and accepts Fabric
     "--runtime",
     "runsc-cfc",
     "--network",
-    "none",
+    "bridge",
     ...(runtime.config.containerUser !== undefined
       ? ["--user", runtime.config.containerUser]
       : []),
